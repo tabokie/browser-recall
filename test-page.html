@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal Extension Test Page</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #4285f4;
+        }
+        .section {
+            background: #f8f9fa;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        .highlight {
+            background: #fff3cd;
+            padding: 2px 4px;
+        }
+        code {
+            background: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        .test-list {
+            list-style: none;
+            padding: 0;
+        }
+        .test-list li {
+            padding: 10px;
+            margin: 5px 0;
+            background: white;
+            border-left: 4px solid #4285f4;
+        }
+    </style>
+</head>
+<body>
+    <h1>Portal Extension Test Page</h1>
+
+    <p>This page is designed to test the Portal Chrome extension. The extension should automatically capture your visit to this page.</p>
+
+    <div class="section">
+        <h2>What Should Happen</h2>
+        <ul class="test-list">
+            <li>✓ Page visit is automatically recorded</li>
+            <li>✓ Page title and URL are captured</li>
+            <li>✓ Timestamp is recorded</li>
+            <li>✓ Content is extracted (this text)</li>
+            <li>✓ Scroll depth is tracked as you scroll</li>
+            <li>✓ Text highlights are recorded when you select text</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>Testing Instructions</h2>
+        <ol>
+            <li>Stay on this page for at least 10 seconds</li>
+            <li>Scroll down to the bottom</li>
+            <li>Highlight some text with your cursor (like <span class="highlight">this highlighted section</span>)</li>
+            <li>Click the Portal extension icon</li>
+            <li>You should see this page in your recent interactions</li>
+            <li>Search for "Portal Extension Test" - this page should appear</li>
+        </ol>
+    </div>
+
+    <div class="section">
+        <h2>Debug Check</h2>
+        <p>Open your browser console (F12 or Cmd+Opt+I) and check:</p>
+        <ul>
+            <li><code>Portal content script loaded on: ...</code> - Content script is active</li>
+            <li>Any error messages - Problems to investigate</li>
+        </ul>
+
+        <p>Then check the extension's service worker:</p>
+        <ol>
+            <li>Go to <code>chrome://extensions/</code></li>
+            <li>Find Portal extension</li>
+            <li>Click "Inspect views: service worker"</li>
+            <li>Look for: <code>✓ Stored interaction #1: Portal Extension Test Page</code></li>
+        </ol>
+    </div>
+
+    <div class="section">
+        <h2>Sample Content</h2>
+        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+
+        <p>This is a <span class="highlight">test page for the Portal extension</span>. The extension should capture this content and allow you to search for it later.</p>
+
+        <p>Try selecting and highlighting different parts of this text. Each selection should be recorded as part of your attention pattern.</p>
+
+        <h3>Keywords to Search For Later</h3>
+        <ul>
+            <li>Portal extension testing</li>
+            <li>Knowledge management system</li>
+            <li>Interaction tracking</li>
+            <li>WebAssembly Rust implementation</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>More Content for Scrolling</h2>
+        <p>Scroll down to test scroll depth tracking...</p>
+        <p style="margin: 50px 0;">Keep scrolling...</p>
+        <p style="margin: 50px 0;">Almost there...</p>
+        <p style="margin: 50px 0;">You've reached the bottom! The extension should record your scroll depth.</p>
+    </div>
+
+    <script>
+        // Log page load
+        console.log('%c[Portal Test Page] Loaded successfully', 'color: #4285f4; font-weight: bold');
+        console.log('Current URL:', window.location.href);
+        console.log('Page title:', document.title);
+
+        // Track time on page
+        const startTime = Date.now();
+        window.addEventListener('beforeunload', () => {
+            const timeOnPage = ((Date.now() - startTime) / 1000).toFixed(1);
+            console.log(`Time on page: ${timeOnPage} seconds`);
+        });
+    </script>
+</body>
+</html>

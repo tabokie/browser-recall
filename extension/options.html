@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Portal Settings</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 32px;
+      background: #f8f9fa;
+    }
+
+    h1 {
+      font-size: 28px;
+      margin-bottom: 8px;
+      color: #333;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 32px;
+    }
+
+    .section {
+      background: white;
+      padding: 24px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .section h2 {
+      font-size: 18px;
+      margin: 0 0 16px 0;
+      color: #333;
+    }
+
+    .option {
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    input[type="checkbox"] {
+      margin-right: 8px;
+      cursor: pointer;
+    }
+
+    select {
+      margin-left: 8px;
+      padding: 4px 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 24px;
+    }
+
+    button {
+      padding: 10px 20px;
+      background: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    button:hover {
+      background: #357ae8;
+    }
+
+    button.secondary {
+      background: #f1f3f4;
+      color: #333;
+    }
+
+    button.secondary:hover {
+      background: #e8eaed;
+    }
+
+    .status {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 4px;
+      display: none;
+    }
+
+    .status.success {
+      background: #e6f4ea;
+      color: #137333;
+      display: block;
+    }
+
+    .status.error {
+      background: #fce8e6;
+      color: #c5221f;
+      display: block;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .stat-card {
+      padding: 16px;
+      background: #f8f9fa;
+      border-radius: 4px;
+    }
+
+    .stat-number {
+      font-size: 32px;
+      font-weight: bold;
+      color: #4285f4;
+      margin-bottom: 4px;
+    }
+
+    .stat-label {
+      font-size: 14px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>Portal Settings</h1>
+  <p class="subtitle">Configure how Portal tracks and archives your interactions</p>
+
+  <div class="section">
+    <h2>Statistics</h2>
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-number" id="totalInteractions">0</div>
+        <div class="stat-label">Total Interactions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="todayInteractions">0</div>
+        <div class="stat-label">Today</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number" id="storageUsed">0 KB</div>
+        <div class="stat-label">Storage Used</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Capture Settings</h2>
+
+    <div class="option">
+      <label>
+        <input type="checkbox" id="captureContent">
+        Capture page content
+      </label>
+    </div>
+
+    <div class="option">
+      <label>
+        <input type="checkbox" id="captureAttention">
+        Track attention patterns (scroll, highlights, time on page)
+      </label>
+    </div>
+
+    <div class="option">
+      <label>
+        Archive quality:
+        <select id="archiveQuality">
+          <option value="low">Low (intent only)</option>
+          <option value="medium">Medium (intent + metadata)</option>
+          <option value="high">High (full content)</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Data Management</h2>
+
+    <div class="button-group">
+      <button id="exportBtn">Export Data</button>
+      <button id="clearBtn" class="secondary">Clear All Data</button>
+    </div>
+
+    <div id="status" class="status"></div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
