@@ -4,6 +4,8 @@ import init, { Interaction, SearchEngine } from './pkg/portal_extension.js';
 let currentAlgorithm = 0;
 let wasmInitialized = false;
 let searchEngine = null;
+let allInteractions = [];
+let contentMap = {};
 
 // Initialize WASM
 async function initWasm() {
@@ -12,11 +14,73 @@ async function initWasm() {
       await init();
       searchEngine = new SearchEngine();
       wasmInitialized = true;
-      console.log('✓ WASM initialized in popup');
+      console.log('WASM initialized in popup');
     } catch (error) {
-      console.error('✗ WASM init failed:', error);
+      console.error('WASM init failed:', error);
     }
   }
+}
+
+// Load interactions from filesystem (primary) and buffer (pending writes)
+async function loadInteractions() {
+  try {
+    // Request interactions from offscreen document (metadata only)
+    const response = await chrome.runtime.sendMessage({ action: 'loadInteractions' });
+
+    if (response && response.success) {
+      allInteractions = response.interactions || [];
+      console.log(`Loaded ${allInteractions.length} interactions from filesystem`);
+    } else {
+      console.log('Could not load from filesystem, checking buffer...');
+      allInteractions = [];
+    }
+  } catch (error) {
+    console.log('Filesystem not available:', error.message);
+    allInteractions = [];
+  }
+
+  // Load content from pages/ directory
+  try {
+    const contentResponse = await chrome.runtime.sendMessage({ action: 'loadAllContent' });
+    if (contentResponse && contentResponse.success) {
+      contentMap = contentResponse.contentMap || {};
+      console.log(`Loaded content for ${Object.keys(contentMap).length} pages`);
+    }
+  } catch (error) {
+    console.log('Could not load content:', error.message);
+    contentMap = {};
+  }
+
+  // Merge with write buffer (pending writes)
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['writeBuffer'], (result) => {
+      const buffer = result.writeBuffer || [];
+
+      if (buffer.length > 0) {
+        console.log(`Merging ${buffer.length} pending writes from buffer`);
+
+        const existingIds = new Set(allInteractions.map(i => i.id));
+
+        for (const entry of buffer) {
+          // Support both new format {interaction, markdown, html} and old format
+          const interaction = entry.interaction || entry;
+          if (!existingIds.has(interaction.id)) {
+            allInteractions.push(interaction);
+            existingIds.add(interaction.id);
+          }
+          // Also merge buffer content into contentMap
+          if (entry.markdown && interaction.slug) {
+            contentMap[interaction.slug] = entry.markdown;
+          }
+        }
+
+        allInteractions.sort((a, b) => a.timestamp - b.timestamp);
+      }
+
+      console.log(`Total interactions: ${allInteractions.length}`);
+      resolve(allInteractions);
+    });
+  });
 }
 
 // Handle ranking button clicks
@@ -57,32 +121,34 @@ async function performSearch(query) {
     // Initialize WASM if not already done
     await initWasm();
 
-    // Get interactions from storage
-    chrome.storage.local.get(['interactions'], async (result) => {
-      const interactions = result.interactions || [];
+    // Reload interactions (in case new ones were added)
+    const interactions = await loadInteractions();
 
-      if (interactions.length === 0) {
-        displayNoResults('No interactions recorded yet. Browse some pages first!');
-        return;
-      }
+    if (interactions.length === 0) {
+      displayNoResults('No interactions recorded yet. Browse some pages first!');
+      return;
+    }
 
-      // Load interactions into WASM search engine
-      const engine = new SearchEngine();
-      interactions.forEach(data => {
-        const interaction = new Interaction(data.url, data.title);
-        interaction.id = data.id;
-        interaction.timestamp = data.timestamp;
-        interaction.setIntent(data.intent || '');
-        interaction.setContent(data.content || '');
-        interaction.setAttention(data.attention || '');
-        engine.addInteraction(interaction);
-      });
+    // Load interactions into WASM search engine
+    const engine = new SearchEngine();
+    interactions.forEach(data => {
+      const interaction = new Interaction(data.url, data.title);
+      interaction.id = data.id;
+      interaction.timestamp = data.timestamp;
+      interaction.setIntent(data.intent || '');
 
-      // Perform search
-      const results = await engine.search(query, currentAlgorithm);
-      console.log('Search results:', results);
-      displayResults(results);
+      // Load content: from contentMap by slug, or fall back to inline content (old format)
+      const content = (data.slug && contentMap[data.slug]) || data.content || '';
+      interaction.setContent(content);
+
+      interaction.setAttention(data.attention || '');
+      engine.addInteraction(interaction);
     });
+
+    // Perform search
+    const results = await engine.search(query, currentAlgorithm);
+    console.log('Search results:', results);
+    displayResults(results);
   } catch (error) {
     console.error('Search error:', error);
     displayNoResults('Error performing search: ' + error.message);
@@ -146,15 +212,12 @@ function escapeHtml(text) {
 (async () => {
   await initWasm();
 
-  chrome.storage.local.get(['interactions'], (result) => {
-    const interactions = result.interactions || [];
-    console.log('Loaded interactions:', interactions.length);
+  const interactions = await loadInteractions();
 
-    if (interactions.length > 0) {
-      const recent = interactions.slice(-10).reverse();
-      displayResults(recent);
-    } else {
-      displayNoResults('No interactions yet. Visit some webpages to get started!');
-    }
-  });
+  if (interactions.length > 0) {
+    const recent = interactions.slice(-10).reverse();
+    displayResults(recent);
+  } else {
+    displayNoResults('No interactions yet. Visit some webpages to get started!');
+  }
 })();

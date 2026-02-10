@@ -37,6 +37,13 @@
       color: #333;
     }
 
+    .section p {
+      color: #666;
+      font-size: 14px;
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+
     .option {
       margin-bottom: 16px;
     }
@@ -64,7 +71,7 @@
     .button-group {
       display: flex;
       gap: 8px;
-      margin-top: 24px;
+      margin-top: 16px;
     }
 
     button {
@@ -75,10 +82,16 @@
       border-radius: 4px;
       cursor: pointer;
       font-size: 14px;
+      font-weight: 500;
     }
 
     button:hover {
       background: #357ae8;
+    }
+
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
     }
 
     button.secondary {
@@ -90,11 +103,21 @@
       background: #e8eaed;
     }
 
+    button.danger {
+      background: #ea4335;
+      color: white;
+    }
+
+    button.danger:hover {
+      background: #d33828;
+    }
+
     .status {
       margin-top: 16px;
       padding: 12px;
       border-radius: 4px;
       display: none;
+      font-size: 14px;
     }
 
     .status.success {
@@ -106,6 +129,12 @@
     .status.error {
       background: #fce8e6;
       color: #c5221f;
+      display: block;
+    }
+
+    .status.warning {
+      background: #fef7e0;
+      color: #b06000;
       display: block;
     }
 
@@ -133,6 +162,55 @@
       font-size: 14px;
       color: #666;
     }
+
+    .storage-location {
+      padding: 16px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      border-left: 4px solid #4285f4;
+    }
+
+    .storage-location.not-configured {
+      border-left-color: #ea4335;
+      background: #fce8e6;
+    }
+
+    .storage-location strong {
+      display: block;
+      margin-bottom: 8px;
+      color: #333;
+    }
+
+    .storage-location .path {
+      font-family: 'Monaco', 'Menlo', monospace;
+      color: #1967d2;
+      word-break: break-all;
+    }
+
+    .info-box {
+      padding: 12px;
+      background: #e8f0fe;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #1967d2;
+      margin-top: 16px;
+      line-height: 1.5;
+    }
+
+    .info-box strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    code {
+      background: #f1f3f4;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
@@ -140,7 +218,31 @@
   <p class="subtitle">Configure how Portal tracks and archives your interactions</p>
 
   <div class="section">
-    <h2>Statistics</h2>
+    <h2>📁 Storage Location</h2>
+    <p>All your interaction history is stored in a directory on your computer in human-readable JSON format.</p>
+
+    <div id="storageLocation" class="storage-location not-configured">
+      <strong>Status:</strong> <span id="storageStatus">Not configured</span><br>
+      <span id="storagePathContainer" style="display: none;">
+        <strong>Location:</strong> <span class="path" id="storagePath"></span>
+      </span>
+    </div>
+
+    <div class="button-group">
+      <button id="selectDirBtn">Select Directory</button>
+      <button id="changeDirBtn" class="secondary" style="display: none;">Change Directory</button>
+    </div>
+
+    <div class="info-box">
+      <strong>💡 About Storage</strong>
+      Your data is stored locally in JSONL format (one JSON object per line).<br>
+      Files are organized by date: <code>2026-02-09.jsonl</code><br>
+      You can open these files with any text editor or process them with tools like <code>jq</code>.
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>📊 Statistics</h2>
     <div class="stats">
       <div class="stat-card">
         <div class="stat-number" id="totalInteractions">0</div>
@@ -151,14 +253,14 @@
         <div class="stat-label">Today</div>
       </div>
       <div class="stat-card">
-        <div class="stat-number" id="storageUsed">0 KB</div>
-        <div class="stat-label">Storage Used</div>
+        <div class="stat-number" id="bufferSize">0</div>
+        <div class="stat-label">Pending Writes</div>
       </div>
     </div>
   </div>
 
   <div class="section">
-    <h2>Capture Settings</h2>
+    <h2>⚙️ Capture Settings</h2>
 
     <div class="option">
       <label>
@@ -187,16 +289,17 @@
   </div>
 
   <div class="section">
-    <h2>Data Management</h2>
+    <h2>🗑️ Data Management</h2>
+    <p>Clear all stored data. This will delete all files in your storage directory!</p>
 
     <div class="button-group">
-      <button id="exportBtn">Export Data</button>
-      <button id="clearBtn" class="secondary">Clear All Data</button>
+      <button id="clearBtn" class="danger">Clear All Data</button>
     </div>
 
     <div id="status" class="status"></div>
   </div>
 
+  <script src="filesystem-storage.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

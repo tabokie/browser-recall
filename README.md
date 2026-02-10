@@ -1,15 +1,33 @@
 # Portal Extension
 
-A Chrome extension for tracking and searching your interaction history with external data sources (webpages, documents, etc.). Built with Rust (compiled to WebAssembly) for performance-critical operations and JavaScript for Chrome extension APIs.
+A Chrome extension for tracking and searching your interaction history with external data sources (webpages, documents, etc.). Built with **file-system-first architecture** - your data is always stored in human-readable files on your local machine.
+
+## 🌟 Key Features
+
+- **📁 File System Storage**: Human-readable JSONL files, no export needed
+- **🔍 Smart Search**: WASM-powered search with multiple ranking algorithms
+- **👁️ Attention Tracking**: Scroll, time, highlights, clicks
+- **🎯 Intent Capture**: Search queries, navigation patterns
+- **🔒 Privacy-First**: All data stays on your machine
 
 ## Architecture
 
+**Storage**: File system as primary storage, IndexedDB as fast write buffer
+
 - **Rust/WASM Core** (`src/lib.rs`): Search engine, ranking algorithms, data structures
 - **Chrome Extension** (`extension/`): UI, browser integration, data capture
-  - `background.js`: Service worker managing interactions and storage
+  - `background.js`: Service worker managing interactions and write buffer
+  - `offscreen.js`: Filesystem I/O handler (flush buffer to files)
   - `content.js`: Captures user intent, attention, and page content
-  - `popup.html/js`: Search interface
-  - `options.html/js`: Settings and data management
+  - `popup.html/js`: Search interface (reads from filesystem)
+  - `options.html/js`: Settings and storage configuration
+  - `filesystem-storage.js`: File System Access API wrapper
+
+**Data Flow**:
+1. Content script captures → Background worker buffers → Offscreen flushes to files
+2. Popup/Search reads from files + merges with buffer
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed documentation.
 
 ## Features
 
@@ -79,6 +97,12 @@ A Chrome extension for tracking and searching your interaction history with exte
    - Click "Load unpacked"
    - Select the `extension` directory
 
+3. **Configure storage location:**
+   - Extension will open options page automatically
+   - Click "Select Directory"
+   - Choose where to store your data (e.g., `~/Documents/PortalHistory/`)
+   - Grant permission
+
 ### Development
 
 Watch mode for automatic rebuilds:
@@ -93,17 +117,64 @@ npm run watch
 
 ## Usage
 
+### Capturing Interactions
+
 1. **Browse normally**: The extension automatically tracks your page visits
+2. **Data is written immediately** to your selected directory as JSONL files
+3. **No export needed**: Files are always up-to-date
 
-2. **Search your history**:
-   - Click the extension icon
-   - Enter a search query
-   - Select a ranking algorithm (Content, Context, Lineage, Attention, Hybrid)
-   - Click on results to revisit pages
+### Searching
 
-3. **Review patterns**: Open the options page to see statistics and manage data
+1. Click the extension icon
+2. Enter a search query
+3. Select a ranking algorithm (Content, Context, Lineage, Attention, Hybrid)
+4. Click on results to revisit pages
 
-4. **Export data**: Use the options page to export your interaction history as JSON
+### File Format
+
+Your data is stored in daily JSONL files:
+
+```
+PortalHistory/
+├── README.md              # Auto-generated documentation
+├── 2026-02-08.jsonl      # Previous day
+├── 2026-02-09.jsonl      # Today
+└── 2026-02-10.jsonl      # Tomorrow
+```
+
+Each line is a complete JSON object:
+```json
+{"id":"...","timestamp":1707523200000,"url":"https://example.com","title":"Example","intent":"","content":"...","attention":"..."}
+```
+
+### Working with Your Data
+
+**Command line**:
+```bash
+# Count interactions
+wc -l *.jsonl
+
+# Search for specific URL
+grep "github.com" *.jsonl
+
+# Extract all URLs
+jq -r '.url' 2026-02-09.jsonl
+
+# Analyze attention patterns
+jq '.attention | fromjson | .scrollDepth' 2026-02-09.jsonl
+```
+
+**Python**:
+```python
+import json
+
+with open('2026-02-09.jsonl', 'r') as f:
+    interactions = [json.loads(line) for line in f]
+
+# Your analysis here
+```
+
+See [FILESYSTEM_STORAGE.md](./FILESYSTEM_STORAGE.md) for more examples.
 
 ## Project Structure
 
@@ -128,7 +199,17 @@ npm run watch
 - **Rust**: Core logic, search algorithms, data structures
 - **WebAssembly**: Compile Rust to run in browser
 - **Chrome Extension API**: Browser integration, storage, tabs
+- **File System Access API**: Direct filesystem access for data storage
+- **Offscreen Documents**: Background filesystem I/O in MV3
 - **Vanilla JavaScript**: UI and extension logic (no frameworks for minimal size)
+
+## Browser Support
+
+**File System Access API required**:
+- ✅ Chrome 86+
+- ✅ Edge 86+
+- ❌ Firefox (not yet supported)
+- ❌ Safari (not yet supported)
 
 ## Design Philosophy
 
