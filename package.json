@@ -1,12 +1,15 @@
 {
   "name": "portal-extension",
   "version": "0.1.0",
+  "type": "module",
   "description": "Chrome extension for tracking and searching interaction history",
   "scripts": {
     "build:wasm": "wasm-pack build --target web --out-dir extension/pkg",
     "build": "npm run build:wasm",
     "watch": "wasm-pack build --target web --out-dir extension/pkg --dev",
-    "dev": "npm run watch"
+    "dev": "npm run watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "chrome-extension",
@@ -16,5 +19,7 @@
   ],
   "author": "",
   "license": "MIT",
-  "devDependencies": {}
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
 }

@@ -1,14 +1,6 @@
 // File System Storage using File System Access API
 // Manages writing interactions to a user-selected directory
-
-function generateSlug(timestamp, title) {
-  const sanitized = (title || 'untitled')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '');
-  const slug = `${timestamp}-${sanitized || 'untitled'}`;
-  return slug.substring(0, 80);
-}
+import { generateSlugFromUrl } from './utils.js';
 
 class FileSystemStorage {
   constructor() {
@@ -189,7 +181,7 @@ class FileSystemStorage {
       // Convert old-format interactions: generate slug, extract inline content
       const metadata = { ...interaction };
       if (!metadata.slug) {
-        metadata.slug = generateSlug(metadata.timestamp, metadata.title);
+        metadata.slug = metadata.url ? generateSlugFromUrl(metadata.url) : 'untitled';
       }
 
       // If interaction has inline content but no entry in contentMap, migrate it
@@ -284,7 +276,7 @@ class FileSystemStorage {
       throw new Error('No permission to read directory');
     }
 
-    const interactionsById = new Map();
+    const interactionsByUrl = new Map();
 
     // Read all .jsonl files
     for await (const entry of this.directoryHandle.values()) {
@@ -297,8 +289,10 @@ class FileSystemStorage {
         for (const line of lines) {
           try {
             const interaction = JSON.parse(line);
-            // Deduplicate by ID — last write wins
-            interactionsById.set(interaction.id, interaction);
+            // Deduplicate by URL — last write wins
+            // This also migrates old timestamp-based entries: if two entries
+            // share the same url, only the latest is kept.
+            interactionsByUrl.set(interaction.url, interaction);
           } catch (error) {
             console.error(`Error parsing line in ${entry.name}:`, error);
           }
@@ -307,7 +301,7 @@ class FileSystemStorage {
     }
 
     // Convert to array and sort by timestamp
-    const interactions = Array.from(interactionsById.values());
+    const interactions = Array.from(interactionsByUrl.values());
     interactions.sort((a, b) => a.timestamp - b.timestamp);
 
     return interactions;
@@ -404,7 +398,4 @@ class FileSystemStorage {
   }
 }
 
-// Export for use in other scripts
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { FileSystemStorage, generateSlug };
-}
+export { FileSystemStorage };

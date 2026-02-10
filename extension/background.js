@@ -1,16 +1,8 @@
 // Background service worker for Portal extension
 // Uses filesystem as primary storage with IndexedDB as write buffer
-console.log('Background script loading...');
+import { generateSlugFromUrl } from './utils.js';
 
-// Generate slug for content file naming (same logic as filesystem-storage.js)
-function generateSlug(timestamp, title) {
-  const sanitized = (title || 'untitled')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '');
-  const slug = `${timestamp}-${sanitized || 'untitled'}`;
-  return slug.substring(0, 80);
-}
+console.log('Background script loading...');
 
 // Create offscreen document for filesystem operations
 async function setupOffscreenDocument() {
@@ -79,11 +71,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       console.log(`Processing page: ${tab.url}`);
 
       const timestamp = Date.now();
-      const slug = generateSlug(timestamp, tab.title || 'Untitled');
+      const slug = generateSlugFromUrl(tab.url);
 
       // Create interaction record (metadata only, no content)
+      // URL is the identity — revisiting the same URL updates the entry
       const interaction = {
-        id: `${timestamp}-${tab.url}`,
+        id: tab.url,
         timestamp: timestamp,
         url: tab.url,
         title: tab.title || 'Untitled',
@@ -101,13 +94,19 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       });
 
       // Add to write buffer: metadata + content placeholders
+      // Dedup by URL — on revisit, update existing buffer entry
       const result = await chrome.storage.local.get(['writeBuffer']);
       const buffer = result.writeBuffer || [];
-      buffer.push({
-        interaction: interaction,
-        markdown: '',
-        html: ''
-      });
+      const existingIndex = buffer.findIndex(entry => entry.interaction.url === tab.url);
+      if (existingIndex !== -1) {
+        buffer[existingIndex].interaction = interaction;
+      } else {
+        buffer.push({
+          interaction: interaction,
+          markdown: '',
+          html: ''
+        });
+      }
       await chrome.storage.local.set({ writeBuffer: buffer });
 
       console.log(`Added to buffer (${buffer.length} pending)`);
@@ -138,40 +137,41 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 // Handle messages from content scripts and offscreen document
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Only handle messages this script is responsible for.
+  // Other messages (loadInteractions, loadAllContent, etc.) are handled by
+  // the offscreen document — we must not respond to them here, or we'll
+  // race with and shadow the offscreen document's response.
+  if (request.action !== 'updateInteraction') {
+    return false;
+  }
+
   (async () => {
-    switch (request.action) {
-      case 'updateInteraction':
-        // Update interaction in buffer with captured content
-        const result = await chrome.storage.local.get(['writeBuffer']);
-        const buffer = result.writeBuffer || [];
-        const index = buffer.findIndex(entry => entry.interaction.id === request.interactionId);
+    // Update interaction in buffer with captured content
+    const result = await chrome.storage.local.get(['writeBuffer']);
+    const buffer = result.writeBuffer || [];
+    const index = buffer.findIndex(entry => entry.interaction.id === request.interactionId);
 
-        if (index !== -1) {
-          const entry = buffer[index];
-          if (request.intent) entry.interaction.intent = request.intent;
-          if (request.attention) entry.interaction.attention = JSON.stringify(request.attention);
-          if (request.markdown) entry.markdown = request.markdown;
-          if (request.html) entry.html = request.html;
+    if (index !== -1) {
+      const entry = buffer[index];
+      if (request.intent) entry.interaction.intent = request.intent;
+      if (request.attention) entry.interaction.attention = JSON.stringify(request.attention);
+      if (request.markdown) entry.markdown = request.markdown;
+      if (request.html) entry.html = request.html;
 
-          await chrome.storage.local.set({ writeBuffer: buffer });
+      await chrome.storage.local.set({ writeBuffer: buffer });
 
-          // Write updated data to filesystem
-          await setupOffscreenDocument();
-          chrome.runtime.sendMessage({
-            action: 'writeInteraction',
-            interaction: entry.interaction,
-            markdown: entry.markdown,
-            html: entry.html
-          }).catch(() => {});
+      // Write updated data to filesystem
+      await setupOffscreenDocument();
+      chrome.runtime.sendMessage({
+        action: 'writeInteraction',
+        interaction: entry.interaction,
+        markdown: entry.markdown,
+        html: entry.html
+      }).catch(() => {});
 
-          console.log('Updated interaction with captured data');
-        }
-        sendResponse({ success: true });
-        break;
-
-      default:
-        sendResponse({ error: 'Unknown action' });
+      console.log('Updated interaction with captured data');
     }
+    sendResponse({ success: true });
   })();
 
   return true;

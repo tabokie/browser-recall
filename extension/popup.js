@@ -1,5 +1,6 @@
 // Import WASM module (works in popup, unlike service worker)
 import init, { Interaction, SearchEngine } from './pkg/portal_extension.js';
+import { mergeBufferIntoInteractions, buildInteractionsForEngine } from './search-helpers.js';
 
 let currentAlgorithm = 0;
 let wasmInitialized = false;
@@ -58,23 +59,8 @@ async function loadInteractions() {
 
       if (buffer.length > 0) {
         console.log(`Merging ${buffer.length} pending writes from buffer`);
-
-        const existingIds = new Set(allInteractions.map(i => i.id));
-
-        for (const entry of buffer) {
-          // Support both new format {interaction, markdown, html} and old format
-          const interaction = entry.interaction || entry;
-          if (!existingIds.has(interaction.id)) {
-            allInteractions.push(interaction);
-            existingIds.add(interaction.id);
-          }
-          // Also merge buffer content into contentMap
-          if (entry.markdown && interaction.slug) {
-            contentMap[interaction.slug] = entry.markdown;
-          }
-        }
-
-        allInteractions.sort((a, b) => a.timestamp - b.timestamp);
+        ({ interactions: allInteractions, contentMap } =
+          mergeBufferIntoInteractions(allInteractions, buffer, contentMap));
       }
 
       console.log(`Total interactions: ${allInteractions.length}`);
@@ -131,19 +117,7 @@ async function performSearch(query) {
 
     // Load interactions into WASM search engine
     const engine = new SearchEngine();
-    interactions.forEach(data => {
-      const interaction = new Interaction(data.url, data.title);
-      interaction.id = data.id;
-      interaction.timestamp = data.timestamp;
-      interaction.setIntent(data.intent || '');
-
-      // Load content: from contentMap by slug, or fall back to inline content (old format)
-      const content = (data.slug && contentMap[data.slug]) || data.content || '';
-      interaction.setContent(content);
-
-      interaction.setAttention(data.attention || '');
-      engine.addInteraction(interaction);
-    });
+    buildInteractionsForEngine(Interaction, engine, interactions, contentMap);
 
     // Perform search
     const results = await engine.search(query, currentAlgorithm);
@@ -215,7 +189,7 @@ function escapeHtml(text) {
   const interactions = await loadInteractions();
 
   if (interactions.length > 0) {
-    const recent = interactions.slice(-10).reverse();
+    const recent = interactions.slice(-250).reverse();
     displayResults(recent);
   } else {
     displayNoResults('No interactions yet. Visit some webpages to get started!');

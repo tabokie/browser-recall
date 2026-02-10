@@ -1,5 +1,6 @@
 // Offscreen document for handling filesystem operations
 // Runs persistently in the background to manage file I/O
+import { FileSystemStorage } from './filesystem-storage.js';
 
 console.log('Offscreen document loaded');
 
