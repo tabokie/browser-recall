@@ -82,6 +82,20 @@ async function flushBuffer() {
 
 // Handle messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Only handle filesystem actions — return false for others so background's
+  // response is not shadowed (both listeners returning true causes a race).
+  const handledActions = [
+    'initializeFilesystem', 'writeInteraction', 'flushBuffer',
+    'loadInteractions', 'loadContent', 'loadAllContent',
+    'getDirectoryInfo', 'changeDirectory', 'migrateData',
+    'listSnapshots', 'captureSnapshot', 'deleteSnapshot',
+    'loadHighlights', 'saveHighlights', 'loadInteractionByUrl',
+    'loadTopicPins', 'saveTopicPins'
+  ];
+  if (!handledActions.includes(request.action)) {
+    return false;
+  }
+
   (async () => {
     try {
       switch (request.action) {
@@ -146,8 +160,54 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse(migrateResult);
           break;
 
-        default:
-          sendResponse({ success: false, error: 'Unknown action' });
+        case 'listSnapshots': {
+          const snapshots = await fsStorage.listSnapshots(request.slug);
+          sendResponse({ success: true, snapshots });
+          break;
+        }
+
+        case 'captureSnapshot': {
+          await fsStorage.captureSnapshot(request.slug, request.timestamp, request.markdown || '', request.html || '');
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'deleteSnapshot': {
+          await fsStorage.deleteSnapshot(request.slug, request.timestamp);
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'loadHighlights': {
+          const highlights = await fsStorage.loadHighlights(request.slug);
+          sendResponse({ success: true, highlights });
+          break;
+        }
+
+        case 'saveHighlights': {
+          await fsStorage.saveHighlights(request.slug, request.highlights);
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'loadInteractionByUrl': {
+          const interaction = await fsStorage.loadInteractionByUrl(request.url);
+          sendResponse({ success: true, interaction });
+          break;
+        }
+
+        case 'loadTopicPins': {
+          const allPins = await fsStorage.loadTopicPins();
+          sendResponse({ success: true, pins: allPins });
+          break;
+        }
+
+        case 'saveTopicPins': {
+          await fsStorage.saveTopicPins(request.pins);
+          sendResponse({ success: true });
+          break;
+        }
+
       }
     } catch (error) {
       console.error('Error handling message:', error);

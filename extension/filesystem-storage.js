@@ -133,23 +133,9 @@ class FileSystemStorage {
       await writable.write(line);
       await writable.close();
 
-      // Write content files if slug and content are provided
+      // Write content files using versioned snapshot directory structure
       if (metadata.slug && (markdown || html)) {
-        const pagesDir = await this.getOrCreatePagesDirectory();
-
-        if (markdown) {
-          const mdHandle = await pagesDir.getFileHandle(`${metadata.slug}.md`, { create: true });
-          const mdWritable = await mdHandle.createWritable();
-          await mdWritable.write(markdown);
-          await mdWritable.close();
-        }
-
-        if (html) {
-          const htmlHandle = await pagesDir.getFileHandle(`${metadata.slug}.html`, { create: true });
-          const htmlWritable = await htmlHandle.createWritable();
-          await htmlWritable.write(html);
-          await htmlWritable.close();
-        }
+        await this.captureSnapshot(metadata.slug, metadata.timestamp, markdown, html);
       }
 
       return { success: true };
@@ -207,13 +193,11 @@ class FileSystemStorage {
       await writable.close();
     }
 
-    // Write content files from contentMap
+    // Write content files using versioned snapshot structure
     for (const [slug, markdownText] of Object.entries(contentMap)) {
       if (markdownText) {
-        const mdHandle = await pagesDir.getFileHandle(`${slug}.md`, { create: true });
-        const mdWritable = await mdHandle.createWritable();
-        await mdWritable.write(markdownText);
-        await mdWritable.close();
+        // Use a fixed migration timestamp for migrated content
+        await this.captureSnapshot(slug, Date.now(), markdownText, '');
       }
     }
 
@@ -233,8 +217,9 @@ class FileSystemStorage {
     content += `Total interactions: ${interactions.length}\n\n`;
     content += '## Files\n\n';
     content += '- `YYYY-MM-DD.jsonl` - Daily interaction logs in JSON Lines format (metadata only)\n';
-    content += '- `pages/{slug}.md` - Markdown extract of page content\n';
-    content += '- `pages/{slug}.html` - HTML snapshot of page content\n\n';
+    content += '- `pages/{slug}/{timestamp}.md` - Markdown extract of page content (versioned)\n';
+    content += '- `pages/{slug}/{timestamp}.html` - HTML snapshot of page content (versioned)\n';
+    content += '- `pages/{slug}/highlights.json` - User highlights and notes\n\n';
     content += '## Metadata Format\n\n';
     content += '```json\n';
     content += JSON.stringify({
@@ -308,6 +293,7 @@ class FileSystemStorage {
   }
 
   // Load markdown content for a single interaction by slug
+  // Checks new directory format first, falls back to old flat format
   async loadContentForInteraction(slug) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
@@ -315,6 +301,28 @@ class FileSystemStorage {
 
     try {
       const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
+
+      // Try new directory format: pages/{slug}/{timestamp}.md — return latest
+      try {
+        const slugDir = await pagesDir.getDirectoryHandle(slug);
+        let latestTs = 0;
+        let latestContent = '';
+        for await (const entry of slugDir.values()) {
+          if (entry.kind === 'file' && entry.name.endsWith('.md')) {
+            const ts = parseInt(entry.name.replace('.md', ''), 10);
+            if (ts > latestTs) {
+              latestTs = ts;
+              const file = await entry.getFile();
+              latestContent = await file.text();
+            }
+          }
+        }
+        if (latestContent) return latestContent;
+      } catch (e) {
+        // slug directory doesn't exist, try flat format
+      }
+
+      // Fall back to old flat format: pages/{slug}.md
       const fileHandle = await pagesDir.getFileHandle(`${slug}.md`);
       const file = await fileHandle.getFile();
       return await file.text();
@@ -324,6 +332,7 @@ class FileSystemStorage {
   }
 
   // Load all markdown content from pages/ directory
+  // Handles both new directory format and old flat format
   async loadAllContent() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
@@ -336,9 +345,24 @@ class FileSystemStorage {
 
       for await (const entry of pagesDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.md')) {
+          // Old flat format: pages/{slug}.md
           const slug = entry.name.replace(/\.md$/, '');
           const file = await entry.getFile();
           contentMap[slug] = await file.text();
+        } else if (entry.kind === 'directory') {
+          // New directory format: pages/{slug}/{timestamp}.md — use latest
+          const slug = entry.name;
+          let latestTs = 0;
+          for await (const subEntry of entry.values()) {
+            if (subEntry.kind === 'file' && subEntry.name.endsWith('.md')) {
+              const ts = parseInt(subEntry.name.replace('.md', ''), 10);
+              if (ts > latestTs) {
+                latestTs = ts;
+                const file = await subEntry.getFile();
+                contentMap[slug] = await file.text();
+              }
+            }
+          }
         }
       }
     } catch (error) {
@@ -347,6 +371,197 @@ class FileSystemStorage {
     }
 
     return contentMap;
+  }
+
+  // Capture a versioned snapshot: pages/{slug}/{timestamp}.md and .html
+  async captureSnapshot(slug, timestamp, markdown, html) {
+    const pagesDir = await this.getOrCreatePagesDirectory();
+    const slugDir = await pagesDir.getDirectoryHandle(slug, { create: true });
+
+    if (markdown) {
+      const mdHandle = await slugDir.getFileHandle(`${timestamp}.md`, { create: true });
+      const mdWritable = await mdHandle.createWritable();
+      await mdWritable.write(markdown);
+      await mdWritable.close();
+    }
+
+    if (html) {
+      const htmlHandle = await slugDir.getFileHandle(`${timestamp}.html`, { create: true });
+      const htmlWritable = await htmlHandle.createWritable();
+      await htmlWritable.write(html);
+      await htmlWritable.close();
+    }
+  }
+
+  // List all snapshots for a slug, checking both old flat format and new directory format
+  async listSnapshots(slug) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+
+    const snapshots = [];
+
+    try {
+      const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
+
+      // Check new directory format: pages/{slug}/
+      try {
+        const slugDir = await pagesDir.getDirectoryHandle(slug);
+        const tsSet = new Map(); // timestamp -> {hasMd, hasHtml}
+
+        for await (const entry of slugDir.values()) {
+          if (entry.kind !== 'file') continue;
+          if (entry.name === 'highlights.json') continue;
+
+          const match = entry.name.match(/^(\d+)\.(md|html)$/);
+          if (!match) continue;
+
+          const ts = parseInt(match[1], 10);
+          const ext = match[2];
+
+          if (!tsSet.has(ts)) {
+            tsSet.set(ts, { timestamp: ts, hasMd: false, hasHtml: false });
+          }
+          tsSet.get(ts)[ext === 'md' ? 'hasMd' : 'hasHtml'] = true;
+        }
+
+        for (const snap of tsSet.values()) {
+          snapshots.push(snap);
+        }
+      } catch (e) {
+        // slug directory doesn't exist
+      }
+
+      // Check old flat format: pages/{slug}.md / pages/{slug}.html
+      let hasOldMd = false;
+      let hasOldHtml = false;
+      try {
+        await pagesDir.getFileHandle(`${slug}.md`);
+        hasOldMd = true;
+      } catch (e) {}
+      try {
+        await pagesDir.getFileHandle(`${slug}.html`);
+        hasOldHtml = true;
+      } catch (e) {}
+
+      if (hasOldMd || hasOldHtml) {
+        // Use 0 as sentinel timestamp for legacy flat files
+        snapshots.push({ timestamp: 0, hasMd: hasOldMd, hasHtml: hasOldHtml, legacy: true });
+      }
+    } catch (error) {
+      // pages/ directory may not exist
+    }
+
+    // Sort by timestamp descending (newest first)
+    snapshots.sort((a, b) => b.timestamp - a.timestamp);
+    return snapshots;
+  }
+
+  // Delete a specific snapshot by slug and timestamp
+  async deleteSnapshot(slug, timestamp) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to delete');
+    }
+
+    const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
+
+    if (timestamp === 0) {
+      // Delete legacy flat files
+      try { await pagesDir.removeEntry(`${slug}.md`); } catch (e) {}
+      try { await pagesDir.removeEntry(`${slug}.html`); } catch (e) {}
+    } else {
+      // Delete versioned files from slug directory
+      const slugDir = await pagesDir.getDirectoryHandle(slug);
+      try { await slugDir.removeEntry(`${timestamp}.md`); } catch (e) {}
+      try { await slugDir.removeEntry(`${timestamp}.html`); } catch (e) {}
+    }
+  }
+
+  // Load highlights for a slug from pages/{slug}/highlights.json
+  async loadHighlights(slug) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+
+    try {
+      const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
+      const slugDir = await pagesDir.getDirectoryHandle(slug);
+      const fileHandle = await slugDir.getFileHandle('highlights.json');
+      const file = await fileHandle.getFile();
+      return JSON.parse(await file.text());
+    } catch (error) {
+      return [];
+    }
+  }
+
+  // Save highlights for a slug to pages/{slug}/highlights.json
+  async saveHighlights(slug, highlights) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to write');
+    }
+
+    const pagesDir = await this.getOrCreatePagesDirectory();
+    const slugDir = await pagesDir.getDirectoryHandle(slug, { create: true });
+    const fileHandle = await slugDir.getFileHandle('highlights.json', { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(highlights, null, 2));
+    await writable.close();
+  }
+
+  // Load a single interaction metadata by URL from JSONL files
+  async loadInteractionByUrl(url) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+
+    let match = null;
+
+    for await (const entry of this.directoryHandle.values()) {
+      if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
+        const file = await entry.getFile();
+        const text = await file.text();
+        const lines = text.split('\n').filter(line => line.trim());
+
+        for (const line of lines) {
+          try {
+            const interaction = JSON.parse(line);
+            if (interaction.url === url) {
+              // Last write wins (same dedup logic as loadAllInteractions)
+              match = interaction;
+            }
+          } catch (error) {}
+        }
+      }
+    }
+
+    return match;
+  }
+
+  // Load all topic pins from topics.json
+  async loadTopicPins() {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+
+    try {
+      const fileHandle = await this.directoryHandle.getFileHandle('topics.json');
+      const file = await fileHandle.getFile();
+      return JSON.parse(await file.text());
+    } catch (error) {
+      return {};
+    }
+  }
+
+  // Save topic pins to topics.json
+  async saveTopicPins(allPins) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to write');
+    }
+
+    const fileHandle = await this.directoryHandle.getFileHandle('topics.json', { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(allPins, null, 2));
+    await writable.close();
   }
 
   // Delete old interactions (for data retention policy)

@@ -2,304 +2,849 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Portal Settings</title>
+  <title>Portal</title>
   <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 32px;
+      height: 100vh;
+      display: flex;
+      background: #fff;
+      color: #202124;
+      font-size: 13px;
+    }
+
+    /* ── Left sidebar ── */
+    .sidebar {
+      width: 256px;
+      min-width: 256px;
+      height: 100vh;
       background: #f8f9fa;
+      border-right: 1px solid #dadce0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
 
-    h1 {
-      font-size: 28px;
-      margin-bottom: 8px;
-      color: #333;
-    }
-
-    .subtitle {
-      color: #666;
-      margin-bottom: 32px;
-    }
-
-    .section {
-      background: white;
-      padding: 24px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-
-    .section h2 {
-      font-size: 18px;
-      margin: 0 0 16px 0;
-      color: #333;
-    }
-
-    .section p {
-      color: #666;
-      font-size: 14px;
-      line-height: 1.5;
-      margin-bottom: 16px;
-    }
-
-    .option {
-      margin-bottom: 16px;
-    }
-
-    label {
+    .sidebar-header {
+      padding: 16px 16px 12px;
       display: flex;
       align-items: center;
-      cursor: pointer;
-      font-size: 14px;
+      justify-content: space-between;
     }
 
-    input[type="checkbox"] {
-      margin-right: 8px;
-      cursor: pointer;
-    }
-
-    select {
-      margin-left: 8px;
-      padding: 4px 8px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      font-size: 14px;
-    }
-
-    .button-group {
-      display: flex;
-      gap: 8px;
-      margin-top: 16px;
-    }
-
-    button {
-      padding: 10px 20px;
-      background: #4285f4;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
+    .sidebar-header h1 {
+      font-size: 18px;
       font-weight: 500;
+      color: #202124;
     }
 
-    button:hover {
-      background: #357ae8;
+    .settings-btn {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: none;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #5f6368;
     }
 
-    button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
-
-    button.secondary {
-      background: #f1f3f4;
-      color: #333;
-    }
-
-    button.secondary:hover {
+    .settings-btn:hover {
       background: #e8eaed;
     }
 
-    button.danger {
-      background: #ea4335;
-      color: white;
+    .settings-btn svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
     }
 
-    button.danger:hover {
-      background: #d33828;
+    .sidebar-search {
+      padding: 0 16px 12px;
     }
 
-    .status {
-      margin-top: 16px;
-      padding: 12px;
-      border-radius: 4px;
+    .sidebar-search input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      font-size: 13px;
+      background: #fff;
+      outline: none;
+    }
+
+    .sidebar-search input:focus {
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 1px #1a73e8;
+    }
+
+    .sidebar-content {
+      flex: 1;
+      overflow-y: auto;
+      padding-bottom: 12px;
+    }
+
+    .sidebar-section-label {
+      padding: 12px 16px 4px;
+      font-size: 11px;
+      font-weight: 500;
+      color: #5f6368;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 16px 6px 20px;
+      cursor: pointer;
+      color: #202124;
+      font-size: 13px;
+      border-radius: 0 20px 20px 0;
+      margin-right: 8px;
+      user-select: none;
+    }
+
+    .sidebar-item:hover {
+      background: #e8eaed;
+    }
+
+    .sidebar-item.active {
+      background: #d3e3fd;
+      color: #1a73e8;
+      font-weight: 500;
+    }
+
+    .sidebar-item .icon {
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: #5f6368;
+    }
+
+    .sidebar-item.active .icon {
+      color: #1a73e8;
+    }
+
+    .sidebar-item .icon svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
+    .sidebar-item .label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    .sidebar-item .remove-topic {
       display: none;
-      font-size: 14px;
+      width: 20px;
+      height: 20px;
+      border: none;
+      background: none;
+      border-radius: 50%;
+      cursor: pointer;
+      color: #5f6368;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 16px;
+      line-height: 1;
     }
 
-    .status.success {
-      background: #e6f4ea;
-      color: #137333;
+    .sidebar-item:hover .remove-topic {
+      display: flex;
+    }
+
+    .sidebar-item .remove-topic:hover {
+      background: #dadce0;
+      color: #d93025;
+    }
+
+    .topics-empty {
+      padding: 8px 20px;
+      font-size: 12px;
+      color: #9aa0a6;
+      font-style: italic;
+    }
+
+    /* ── Main panel ── */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .main-header {
+      padding: 12px 24px;
+      border-bottom: 1px solid #dadce0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .main-title {
+      font-size: 15px;
+      font-weight: 500;
+      color: #202124;
+      margin-right: auto;
+    }
+
+    .ranking-options {
+      display: flex;
+      gap: 4px;
+    }
+
+    .ranking-btn {
+      padding: 4px 12px;
+      background: #f1f3f4;
+      color: #5f6368;
+      border: 1px solid transparent;
+      border-radius: 16px;
+      cursor: pointer;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .ranking-btn:hover {
+      background: #e8eaed;
+    }
+
+    .ranking-btn.active {
+      background: #d3e3fd;
+      border-color: #1a73e8;
+      color: #1a73e8;
+    }
+
+    .pin-search-btn {
+      padding: 4px 12px;
+      background: none;
+      color: #5f6368;
+      border: 1px solid #dadce0;
+      border-radius: 16px;
+      cursor: pointer;
+      font-size: 12px;
+      display: none;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .pin-search-btn:hover {
+      background: #f1f3f4;
+    }
+
+    .pin-search-btn svg {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+    }
+
+    /* ── Attention chart ── */
+    .attention-chart {
+      display: none;
+      padding: 12px 24px;
+      border-bottom: 1px solid #dadce0;
+      position: relative;
+    }
+
+    .attention-chart.visible {
       display: block;
     }
 
-    .status.error {
-      background: #fce8e6;
-      color: #c5221f;
-      display: block;
+    .chart-label {
+      font-size: 11px;
+      color: #5f6368;
+      margin-bottom: 6px;
     }
 
-    .status.warning {
-      background: #fef7e0;
-      color: #b06000;
-      display: block;
+    .chart-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 48px;
     }
 
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
-      margin-top: 16px;
+    .chart-bar-group {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100%;
+      justify-content: flex-end;
     }
 
-    .stat-card {
-      padding: 16px;
-      background: #f8f9fa;
+    .chart-bar {
+      width: 100%;
+      max-width: 24px;
+      min-height: 2px;
+      background: #a8c7fa;
+      border-radius: 2px 2px 0 0;
+      transition: background 0.15s;
+    }
+
+    .chart-bar:hover {
+      background: #1a73e8;
+    }
+
+    .chart-date {
+      font-size: 9px;
+      color: #9aa0a6;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+      text-align: center;
+    }
+
+    .chart-tooltip {
+      position: absolute;
+      background: #202124;
+      color: #fff;
+      padding: 4px 8px;
       border-radius: 4px;
+      font-size: 11px;
+      pointer-events: none;
+      white-space: nowrap;
+      z-index: 50;
+      display: none;
     }
 
-    .stat-number {
-      font-size: 32px;
-      font-weight: bold;
-      color: #4285f4;
-      margin-bottom: 4px;
+    /* ── Results list ── */
+    .results-container {
+      flex: 1;
+      overflow-y: auto;
     }
 
-    .stat-label {
+    .result-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 24px;
+      cursor: pointer;
+      border-bottom: 1px solid #f1f3f4;
+    }
+
+    .result-row:hover {
+      background: #f8f9fa;
+    }
+
+    .result-favicon {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      border-radius: 2px;
+    }
+
+    .result-favicon-placeholder {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      background: #e8eaed;
+      border-radius: 2px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #9aa0a6;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .result-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .result-title {
+      font-size: 13px;
+      color: #202124;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .result-url {
+      font-size: 12px;
+      color: #5f6368;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .result-time {
+      font-size: 12px;
+      color: #9aa0a6;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .result-pin {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: none;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: #dadce0;
+      opacity: 0;
+      transition: opacity 0.1s;
+    }
+
+    .result-row:hover .result-pin,
+    .result-pin.pinned {
+      opacity: 1;
+    }
+
+    .result-pin:hover {
+      background: #f1f3f4;
+      color: #5f6368;
+    }
+
+    .result-pin.pinned {
+      color: #1a73e8;
+    }
+
+    .result-pin.pinned:hover {
+      color: #d93025;
+    }
+
+    .result-pin svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
+    .pinned-divider {
+      padding: 6px 24px;
+      font-size: 11px;
+      font-weight: 500;
+      color: #5f6368;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e8eaed;
+    }
+
+    .no-results {
+      text-align: center;
+      color: #9aa0a6;
+      padding: 48px 24px;
       font-size: 14px;
-      color: #666;
+    }
+
+    .loading {
+      text-align: center;
+      color: #9aa0a6;
+      padding: 48px 24px;
+      font-size: 14px;
+    }
+
+    /* ── Settings modal ── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.open {
+      display: flex;
+    }
+
+    .modal {
+      background: #fff;
+      border-radius: 12px;
+      width: 520px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 24px 12px;
+      position: sticky;
+      top: 0;
+      background: #fff;
+      border-radius: 12px 12px 0 0;
+    }
+
+    .modal-header h2 {
+      font-size: 18px;
+      font-weight: 500;
+      color: #202124;
+    }
+
+    .modal-close {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: none;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 20px;
+      color: #5f6368;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-close:hover {
+      background: #e8eaed;
+    }
+
+    .modal-body {
+      padding: 8px 24px 24px;
+    }
+
+    .modal-section {
+      margin-bottom: 20px;
+    }
+
+    .modal-section h3 {
+      font-size: 14px;
+      font-weight: 500;
+      color: #202124;
+      margin-bottom: 8px;
+    }
+
+    .modal-section p {
+      font-size: 13px;
+      color: #5f6368;
+      line-height: 1.5;
+      margin-bottom: 8px;
     }
 
     .storage-location {
-      padding: 16px;
+      padding: 12px;
       background: #f8f9fa;
-      border-radius: 4px;
-      margin-bottom: 16px;
-      font-size: 14px;
-      border-left: 4px solid #4285f4;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      border-left: 3px solid #1a73e8;
     }
 
     .storage-location.not-configured {
-      border-left-color: #ea4335;
+      border-left-color: #d93025;
       background: #fce8e6;
     }
 
     .storage-location strong {
       display: block;
-      margin-bottom: 8px;
-      color: #333;
+      margin-bottom: 4px;
+      color: #202124;
     }
 
     .storage-location .path {
       font-family: 'Monaco', 'Menlo', monospace;
-      color: #1967d2;
+      color: #1a73e8;
       word-break: break-all;
+      font-size: 12px;
+    }
+
+    .modal-btn-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .btn-primary {
+      background: #1a73e8;
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: #1557b0;
+    }
+
+    .btn-primary:disabled {
+      background: #dadce0;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: #f1f3f4;
+      color: #202124;
+    }
+
+    .btn-secondary:hover {
+      background: #e8eaed;
+    }
+
+    .btn-danger {
+      background: #d93025;
+      color: #fff;
+    }
+
+    .btn-danger:hover {
+      background: #b3261e;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .stat-card {
+      padding: 12px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .stat-number {
+      font-size: 24px;
+      font-weight: 600;
+      color: #1a73e8;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #5f6368;
+      margin-top: 2px;
+    }
+
+    .option {
+      margin-bottom: 8px;
+    }
+
+    .option label {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      font-size: 13px;
+      gap: 8px;
+    }
+
+    .option select {
+      margin-left: 4px;
+      padding: 4px 8px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 13px;
     }
 
     .info-box {
-      padding: 12px;
+      padding: 10px 12px;
       background: #e8f0fe;
-      border-radius: 4px;
-      font-size: 13px;
+      border-radius: 6px;
+      font-size: 12px;
       color: #1967d2;
-      margin-top: 16px;
       line-height: 1.5;
     }
 
     .info-box strong {
       display: block;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
     }
 
     code {
       background: #f1f3f4;
-      padding: 2px 6px;
+      padding: 1px 4px;
       border-radius: 3px;
       font-family: 'Monaco', 'Menlo', monospace;
-      font-size: 12px;
+      font-size: 11px;
     }
+
+    .status {
+      margin-top: 8px;
+      padding: 8px 12px;
+      border-radius: 4px;
+      display: none;
+      font-size: 13px;
+    }
+
+    .status.success { background: #e6f4ea; color: #137333; display: block; }
+    .status.error { background: #fce8e6; color: #c5221f; display: block; }
+    .status.warning { background: #fef7e0; color: #b06000; display: block; }
   </style>
 </head>
 <body>
-  <h1>Portal Settings</h1>
-  <p class="subtitle">Configure how Portal tracks and archives your interactions</p>
-
-  <div class="section">
-    <h2>📁 Storage Location</h2>
-    <p>All your interaction history is stored in a directory on your computer in human-readable JSON format.</p>
-
-    <div id="storageLocation" class="storage-location not-configured">
-      <strong>Status:</strong> <span id="storageStatus">Not configured</span><br>
-      <span id="storagePathContainer" style="display: none;">
-        <strong>Location:</strong> <span class="path" id="storagePath"></span>
-      </span>
+  <!-- Left sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h1>Portal</h1>
+      <button class="settings-btn" id="settingsBtn" title="Settings">
+        <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.26.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
+      </button>
     </div>
 
-    <div class="button-group">
-      <button id="selectDirBtn">Select Directory</button>
-      <button id="changeDirBtn" class="secondary" style="display: none;">Change Directory</button>
+    <div class="sidebar-search">
+      <input type="text" id="searchInput" placeholder="Search...">
     </div>
 
-    <div class="info-box">
-      <strong>💡 About Storage</strong>
-      Your data is stored locally in JSONL format (one JSON object per line).<br>
-      Files are organized by date: <code>2026-02-09.jsonl</code><br>
-      You can open these files with any text editor or process them with tools like <code>jq</code>.
-    </div>
-  </div>
-
-  <div class="section">
-    <h2>📊 Statistics</h2>
-    <div class="stats">
-      <div class="stat-card">
-        <div class="stat-number" id="totalInteractions">0</div>
-        <div class="stat-label">Total Interactions</div>
+    <div class="sidebar-content">
+      <div class="sidebar-section-label">Topics</div>
+      <div id="topicsList">
+        <div class="topics-empty" id="topicsEmpty">Pin a search to create a topic</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-number" id="todayInteractions">0</div>
-        <div class="stat-label">Today</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-number" id="bufferSize">0</div>
-        <div class="stat-label">Pending Writes</div>
+
+      <div class="sidebar-section-label">Categories</div>
+      <div id="categoriesList">
+        <div class="sidebar-item active" data-category="all">
+          <span class="icon"><svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg></span>
+          <span class="label">All</span>
+        </div>
+        <div class="sidebar-item" data-category="today">
+          <span class="icon"><svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"/></svg></span>
+          <span class="label">Today</span>
+        </div>
+        <div class="sidebar-item" data-category="week">
+          <span class="icon"><svg viewBox="0 0 24 24"><path d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v9z"/></svg></span>
+          <span class="label">This Week</span>
+        </div>
+        <div class="sidebar-item" data-category="highlighted">
+          <span class="icon"><svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></span>
+          <span class="label">Highlighted</span>
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="section">
-    <h2>⚙️ Capture Settings</h2>
-
-    <div class="option">
-      <label>
-        <input type="checkbox" id="captureContent">
-        Capture page content
-      </label>
+  <!-- Main panel -->
+  <div class="main">
+    <div class="main-header">
+      <span class="main-title" id="mainTitle">All</span>
+      <button class="pin-search-btn" id="pinSearchBtn" title="Pin this search as a topic">
+        <svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>
+        Pin
+      </button>
+      <div class="ranking-options">
+        <button class="ranking-btn active" data-algorithm="0">Content</button>
+        <button class="ranking-btn" data-algorithm="1">Context</button>
+        <button class="ranking-btn" data-algorithm="2">Lineage</button>
+        <button class="ranking-btn" data-algorithm="3">Attention</button>
+        <button class="ranking-btn" data-algorithm="4">Hybrid</button>
+      </div>
     </div>
 
-    <div class="option">
-      <label>
-        <input type="checkbox" id="captureAttention">
-        Track attention patterns (scroll, highlights, time on page)
-      </label>
+    <div class="attention-chart" id="attentionChart">
+      <div class="chart-label">Attention over time</div>
+      <div class="chart-bars" id="chartBars"></div>
+      <div class="chart-tooltip" id="chartTooltip"></div>
     </div>
 
-    <div class="option">
-      <label>
-        Archive quality:
-        <select id="archiveQuality">
-          <option value="low">Low (intent only)</option>
-          <option value="medium">Medium (intent + metadata)</option>
-          <option value="high">High (full content)</option>
-        </select>
-      </label>
+    <div class="results-container" id="results">
+      <div class="loading">Loading interactions...</div>
     </div>
   </div>
 
-  <div class="section">
-    <h2>🗑️ Data Management</h2>
-    <p>Clear all stored data. This will delete all files in your storage directory!</p>
+  <!-- Settings modal -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button class="modal-close" id="settingsClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Storage -->
+        <div class="modal-section">
+          <h3>Storage Location</h3>
+          <p>All interaction history is stored locally in human-readable JSONL format.</p>
+          <div id="storageLocation" class="storage-location not-configured">
+            <strong>Status:</strong> <span id="storageStatus">Not configured</span><br>
+            <span id="storagePathContainer" style="display: none;">
+              <strong>Location:</strong> <span class="path" id="storagePath"></span>
+            </span>
+          </div>
+          <div class="modal-btn-group">
+            <button id="selectDirBtn" class="btn btn-primary">Select Directory</button>
+            <button id="changeDirBtn" class="btn btn-secondary" style="display: none;">Change Directory</button>
+          </div>
+          <div class="info-box" style="margin-top: 12px;">
+            <strong>About Storage</strong>
+            Files organized by date: <code>2026-02-09.jsonl</code><br>
+            Open with any text editor or process with <code>jq</code>.
+          </div>
+        </div>
 
-    <div class="button-group">
-      <button id="clearBtn" class="danger">Clear All Data</button>
+        <!-- Statistics -->
+        <div class="modal-section">
+          <h3>Statistics</h3>
+          <div class="stats">
+            <div class="stat-card">
+              <div class="stat-number" id="totalInteractions">0</div>
+              <div class="stat-label">Total</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-number" id="todayInteractions">0</div>
+              <div class="stat-label">Today</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-number" id="bufferSize">0</div>
+              <div class="stat-label">Pending</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Capture settings -->
+        <div class="modal-section">
+          <h3>Capture Settings</h3>
+          <div class="option">
+            <label><input type="checkbox" id="captureContent"> Capture page content</label>
+          </div>
+          <div class="option">
+            <label><input type="checkbox" id="captureAttention"> Track attention patterns</label>
+          </div>
+          <div class="option">
+            <label>
+              Archive quality:
+              <select id="archiveQuality">
+                <option value="low">Low (intent only)</option>
+                <option value="medium">Medium (intent + metadata)</option>
+                <option value="high">High (full content)</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <!-- Data management -->
+        <div class="modal-section">
+          <h3>Data Management</h3>
+          <p>Clear all stored data. This will delete all files in your storage directory.</p>
+          <div class="modal-btn-group">
+            <button id="clearBtn" class="btn btn-danger">Clear All Data</button>
+          </div>
+          <div id="status" class="status"></div>
+        </div>
+      </div>
     </div>
-
-    <div id="status" class="status"></div>
   </div>
 
-  <script src="filesystem-storage.js"></script>
-  <script src="options.js"></script>
+  <script type="module" src="options.js"></script>
 </body>
 </html>

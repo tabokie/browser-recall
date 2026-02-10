@@ -135,43 +135,153 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 });
 
+// Handle keyboard shortcuts
+chrome.commands.onCommand.addListener(async (command) => {
+  console.log(`[background] Command received: ${command}`);
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+    console.log('[background] Command ignored: no suitable tab');
+    return;
+  }
+
+  if (command === 'capture-snapshot') {
+    // Ask content script to extract page content
+    try {
+      const response = await chrome.tabs.sendMessage(tab.id, { action: 'captureCurrentPage' });
+      if (response && response.success) {
+        const slug = generateSlugFromUrl(tab.url);
+        const timestamp = Date.now();
+        await setupOffscreenDocument();
+        await chrome.runtime.sendMessage({
+          action: 'captureSnapshot',
+          slug,
+          timestamp,
+          markdown: response.markdown || '',
+          html: response.html || ''
+        });
+        console.log(`Snapshot captured for ${tab.url}`);
+      }
+    } catch (error) {
+      console.warn('Could not capture snapshot:', error.message);
+    }
+  } else if (command === 'highlight-selection') {
+    try {
+      console.log(`[background] Sending highlightSelection to tab ${tab.id}`);
+      const resp = await chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
+      console.log('[background] highlightSelection response:', resp);
+    } catch (error) {
+      console.warn('[background] Could not highlight selection:', error.message);
+    }
+  }
+});
+
 // Handle messages from content scripts and offscreen document
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  // Only handle messages this script is responsible for.
-  // Other messages (loadInteractions, loadAllContent, etc.) are handled by
-  // the offscreen document — we must not respond to them here, or we'll
-  // race with and shadow the offscreen document's response.
-  if (request.action !== 'updateInteraction') {
+  const handledActions = ['updateInteraction', 'getPageInfo', 'captureCurrentPageFromPopup', 'saveHighlight'];
+  if (!handledActions.includes(request.action)) {
     return false;
   }
 
   (async () => {
-    // Update interaction in buffer with captured content
-    const result = await chrome.storage.local.get(['writeBuffer']);
-    const buffer = result.writeBuffer || [];
-    const index = buffer.findIndex(entry => entry.interaction.id === request.interactionId);
+    if (request.action === 'updateInteraction') {
+      // Update interaction in buffer with captured content
+      const result = await chrome.storage.local.get(['writeBuffer']);
+      const buffer = result.writeBuffer || [];
+      const index = buffer.findIndex(entry => entry.interaction.id === request.interactionId);
 
-    if (index !== -1) {
-      const entry = buffer[index];
-      if (request.intent) entry.interaction.intent = request.intent;
-      if (request.attention) entry.interaction.attention = JSON.stringify(request.attention);
-      if (request.markdown) entry.markdown = request.markdown;
-      if (request.html) entry.html = request.html;
+      if (index !== -1) {
+        const entry = buffer[index];
+        if (request.intent) entry.interaction.intent = request.intent;
+        if (request.attention) entry.interaction.attention = JSON.stringify(request.attention);
+        if (request.markdown) entry.markdown = request.markdown;
+        if (request.html) entry.html = request.html;
 
-      await chrome.storage.local.set({ writeBuffer: buffer });
+        await chrome.storage.local.set({ writeBuffer: buffer });
 
-      // Write updated data to filesystem
+        // Write updated data to filesystem
+        await setupOffscreenDocument();
+        chrome.runtime.sendMessage({
+          action: 'writeInteraction',
+          interaction: entry.interaction,
+          markdown: entry.markdown,
+          html: entry.html
+        }).catch(() => {});
+
+        console.log('Updated interaction with captured data');
+      }
+      sendResponse({ success: true });
+
+    } else if (request.action === 'getPageInfo') {
+      // Popup requests bundled page info for a URL
       await setupOffscreenDocument();
-      chrome.runtime.sendMessage({
-        action: 'writeInteraction',
-        interaction: entry.interaction,
-        markdown: entry.markdown,
-        html: entry.html
-      }).catch(() => {});
+      const slug = generateSlugFromUrl(request.url);
 
-      console.log('Updated interaction with captured data');
+      const [interactionResp, snapshotsResp, highlightsResp] = await Promise.all([
+        chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: request.url }),
+        chrome.runtime.sendMessage({ action: 'listSnapshots', slug }),
+        chrome.runtime.sendMessage({ action: 'loadHighlights', slug })
+      ]);
+
+      sendResponse({
+        success: true,
+        slug,
+        interaction: interactionResp?.interaction || null,
+        snapshots: snapshotsResp?.snapshots || [],
+        highlights: highlightsResp?.highlights || []
+      });
+
+    } else if (request.action === 'captureCurrentPageFromPopup') {
+      // Popup requests a snapshot capture of the active tab
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab) { sendResponse({ success: false, error: 'No active tab' }); return; }
+
+        const response = await chrome.tabs.sendMessage(tab.id, { action: 'captureCurrentPage' });
+        if (response && response.success) {
+          const slug = generateSlugFromUrl(tab.url);
+          const timestamp = Date.now();
+          await setupOffscreenDocument();
+          await chrome.runtime.sendMessage({
+            action: 'captureSnapshot',
+            slug,
+            timestamp,
+            markdown: response.markdown || '',
+            html: response.html || ''
+          });
+          sendResponse({ success: true, timestamp });
+        } else {
+          sendResponse({ success: false, error: 'Content script capture failed' });
+        }
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+
+    } else if (request.action === 'saveHighlight') {
+      // Content script or popup saves a highlight
+      console.log(`[background] saveHighlight: slug=${request.slug}`);
+      await setupOffscreenDocument();
+      const slug = request.slug;
+
+      // Load existing highlights, upsert global note or append highlight
+      const loadResp = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
+      console.log(`[background] Loaded ${loadResp?.highlights?.length || 0} existing highlights`);
+      const highlights = loadResp?.highlights || [];
+
+      if (request.highlight.isGlobalNote) {
+        const idx = highlights.findIndex(h => h.isGlobalNote);
+        if (idx >= 0) {
+          highlights[idx] = request.highlight;
+        } else {
+          highlights.unshift(request.highlight);
+        }
+      } else {
+        highlights.push(request.highlight);
+      }
+
+      await chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
+      console.log(`[background] Saved ${highlights.length} highlights for slug=${slug}`);
+      sendResponse({ success: true, highlights });
     }
-    sendResponse({ success: true });
   })();
 
   return true;

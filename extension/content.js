@@ -437,34 +437,443 @@ function extractMarkdown() {
     .substring(0, maxLength);
 }
 
+// Generate slug from the current page URL (inline version of utils.js generateSlugFromUrl)
+function getSlugForCurrentPage() {
+  const url = window.location.href;
+  try {
+    const parsed = new URL(url);
+    const base = (parsed.hostname + parsed.pathname)
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
+      .replace(/^-+|-+$/g, '');
+    let hash = 0;
+    for (let i = 0; i < url.length; i++) {
+      hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0;
+    }
+    return `${base}-${Math.abs(hash).toString(36)}`.substring(0, 80);
+  } catch (e) {
+    return 'untitled';
+  }
+}
+
+// Generate a CSS selector path for an element (for re-applying highlights)
+function getCssPath(el) {
+  const parts = [];
+  while (el && el !== document.body) {
+    let selector = el.tagName.toLowerCase();
+    if (el.id) {
+      selector += '#' + el.id;
+      parts.unshift(selector);
+      break;
+    }
+    const parent = el.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children).filter(c => c.tagName === el.tagName);
+      if (siblings.length > 1) {
+        const idx = siblings.indexOf(el) + 1;
+        selector += `:nth-of-type(${idx})`;
+      }
+    }
+    parts.unshift(selector);
+    el = parent;
+  }
+  return 'body > ' + parts.join(' > ');
+}
+
+// Create highlight overlay with Shadow DOM for style isolation
+function showHighlightOverlay(selectedText, anchorRect) {
+  // Remove any existing overlay
+  const existing = document.getElementById('portal-highlight-overlay');
+  if (existing) existing.remove();
+
+  const host = document.createElement('div');
+  host.id = 'portal-highlight-overlay';
+  host.style.cssText = 'position: absolute; z-index: 2147483647;';
+  host.style.left = (anchorRect.left + window.scrollX) + 'px';
+  host.style.top = (anchorRect.bottom + window.scrollY + 4) + 'px';
+
+  const shadow = host.attachShadow({ mode: 'closed' });
+  shadow.innerHTML = `
+    <style>
+      .overlay {
+        width: 300px;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 13px;
+        padding: 12px;
+      }
+      .text-preview {
+        font-style: italic;
+        color: #555;
+        margin-bottom: 8px;
+        max-height: 48px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        line-height: 1.4;
+      }
+      textarea {
+        width: 100%;
+        min-height: 48px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 6px 8px;
+        font-family: inherit;
+        font-size: 12px;
+        resize: vertical;
+        box-sizing: border-box;
+      }
+      textarea:focus { outline: none; border-color: #4285f4; }
+      .buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      button {
+        padding: 4px 12px;
+        border-radius: 4px;
+        border: none;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      .save-btn { background: #4285f4; color: white; }
+      .save-btn:hover { background: #357ae8; }
+      .cancel-btn { background: #f1f3f4; color: #333; }
+      .cancel-btn:hover { background: #e8eaed; }
+    </style>
+    <div class="overlay">
+      <div class="text-preview">"${selectedText.substring(0, 200)}"</div>
+      <textarea placeholder="Add a note (Ctrl+Enter to save)..."></textarea>
+      <div class="buttons">
+        <button class="cancel-btn">Cancel</button>
+        <button class="save-btn">Save</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(host);
+
+  const textarea = shadow.querySelector('textarea');
+  const saveBtn = shadow.querySelector('.save-btn');
+  const cancelBtn = shadow.querySelector('.cancel-btn');
+
+  textarea.focus();
+
+  function close() { host.remove(); }
+
+  function save() {
+    const note = textarea.value;
+    const selection = window.getSelection();
+    let cssPath = '';
+
+    // Try to get CSS path for re-application
+    if (selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      const container = range.startContainer;
+      const element = container.nodeType === 3 ? container.parentElement : container;
+      cssPath = getCssPath(element);
+    }
+
+    const slug = getSlugForCurrentPage();
+
+    // Wrap selection in <mark>
+    wrapSelectionInMark(selectedText);
+
+    // Send to background to persist
+    console.log(`[content] Saving highlight: slug=${slug}, text="${selectedText.substring(0, 50)}"`);
+    chrome.runtime.sendMessage({
+      action: 'saveHighlight',
+      slug,
+      highlight: {
+        text: selectedText,
+        note: note,
+        timestamp: Date.now(),
+        cssPath: cssPath
+      }
+    }).then(resp => {
+      console.log('[content] saveHighlight response:', resp);
+    }).catch(err => {
+      console.error('[content] saveHighlight error:', err);
+    });
+
+    close();
+  }
+
+  saveBtn.addEventListener('click', save);
+  cancelBtn.addEventListener('click', close);
+
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      save();
+    }
+    if (e.key === 'Escape') {
+      close();
+    }
+  });
+
+  // Close on click outside
+  const handleOutsideClick = (e) => {
+    if (!host.contains(e.target)) {
+      close();
+      document.removeEventListener('mousedown', handleOutsideClick);
+    }
+  };
+  setTimeout(() => document.addEventListener('mousedown', handleOutsideClick), 100);
+}
+
+// Show overlay for global page note (no text selection required)
+function showGlobalNoteOverlay(existingNote) {
+  const existing = document.getElementById('portal-highlight-overlay');
+  if (existing) existing.remove();
+
+  const host = document.createElement('div');
+  host.id = 'portal-highlight-overlay';
+  host.style.cssText = 'position: fixed; z-index: 2147483647; top: 20px; right: 20px;';
+
+  const shadow = host.attachShadow({ mode: 'closed' });
+  shadow.innerHTML = `
+    <style>
+      .overlay {
+        width: 320px;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 13px;
+        padding: 12px;
+      }
+      .title {
+        font-weight: 600;
+        color: #666;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+      }
+      textarea {
+        width: 100%;
+        min-height: 80px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 6px 8px;
+        font-family: inherit;
+        font-size: 12px;
+        resize: vertical;
+        box-sizing: border-box;
+      }
+      textarea:focus { outline: none; border-color: #4285f4; }
+      .buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      button {
+        padding: 4px 12px;
+        border-radius: 4px;
+        border: none;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      .save-btn { background: #4285f4; color: white; }
+      .save-btn:hover { background: #357ae8; }
+      .cancel-btn { background: #f1f3f4; color: #333; }
+      .cancel-btn:hover { background: #e8eaed; }
+    </style>
+    <div class="overlay">
+      <div class="title">Page Note</div>
+      <textarea placeholder="Add a note about this page (Ctrl+Enter to save)..."></textarea>
+      <div class="buttons">
+        <button class="cancel-btn">Cancel</button>
+        <button class="save-btn">Save</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(host);
+
+  const textarea = shadow.querySelector('textarea');
+  const saveBtn = shadow.querySelector('.save-btn');
+  const cancelBtn = shadow.querySelector('.cancel-btn');
+
+  if (existingNote) textarea.value = existingNote;
+  textarea.focus();
+
+  function close() { host.remove(); }
+
+  function save() {
+    const slug = getSlugForCurrentPage();
+    const note = textarea.value;
+    console.log(`[content] Saving global note: slug=${slug}`);
+    chrome.runtime.sendMessage({
+      action: 'saveHighlight',
+      slug,
+      highlight: {
+        text: '',
+        note: note,
+        timestamp: Date.now(),
+        isGlobalNote: true
+      }
+    }).then(resp => {
+      console.log('[content] saveHighlight (global note) response:', resp);
+    }).catch(err => {
+      console.error('[content] saveHighlight (global note) error:', err);
+    });
+    close();
+  }
+
+  saveBtn.addEventListener('click', save);
+  cancelBtn.addEventListener('click', close);
+
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      save();
+    }
+    if (e.key === 'Escape') {
+      close();
+    }
+  });
+
+  const handleOutsideClick = (e) => {
+    if (!host.contains(e.target)) {
+      close();
+      document.removeEventListener('mousedown', handleOutsideClick);
+    }
+  };
+  setTimeout(() => document.addEventListener('mousedown', handleOutsideClick), 100);
+}
+
+// Wrap the current selection in a <mark> element
+function wrapSelectionInMark(text) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return;
+
+  try {
+    const range = selection.getRangeAt(0);
+    const mark = document.createElement('mark');
+    mark.className = 'portal-highlight';
+    mark.style.cssText = 'background: #fff3b0; border-bottom: 2px solid #f0c000;';
+    range.surroundContents(mark);
+    selection.removeAllRanges();
+  } catch (e) {
+    // surroundContents can fail if selection spans multiple elements
+    console.log('Could not wrap selection in mark:', e.message);
+  }
+}
+
+// Re-apply saved highlights on page load
+async function reapplyHighlights() {
+  const slug = getSlugForCurrentPage();
+  if (slug === 'untitled') return;
+
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
+    if (!response || !response.success || !response.highlights) return;
+
+    for (const highlight of response.highlights) {
+      if (!highlight.text) continue;
+
+      // Use TreeWalker to find text nodes containing the highlight text
+      const walker = document.createTreeWalker(
+        document.body,
+        NodeFilter.SHOW_TEXT,
+        null
+      );
+
+      let node;
+      while ((node = walker.nextNode())) {
+        const idx = node.textContent.indexOf(highlight.text);
+        if (idx === -1) continue;
+
+        // Found a match — wrap it
+        const range = document.createRange();
+        range.setStart(node, idx);
+        range.setEnd(node, idx + highlight.text.length);
+
+        const mark = document.createElement('mark');
+        mark.className = 'portal-highlight';
+        mark.style.cssText = 'background: #fff3b0; border-bottom: 2px solid #f0c000;';
+
+        try {
+          range.surroundContents(mark);
+        } catch (e) {
+          // May fail if text spans nodes
+        }
+        break; // Only first occurrence
+      }
+    }
+  } catch (e) {
+    // Extension context may not be ready yet
+  }
+}
+
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'captureInteraction') {
-    (async () => {
-      currentInteractionId = request.interactionId;
-      attentionData.timeOnPage = Date.now() - startTime;
+    // Only record metadata (intent + attention). Page content snapshots are
+    // captured explicitly via Alt+S or the popup capture button.
+    currentInteractionId = request.interactionId;
+    attentionData.timeOnPage = Date.now() - startTime;
 
-      const intent = extractIntent();
+    const intent = extractIntent();
+    console.log('[content] captureInteraction: intent only (no snapshot)');
+
+    chrome.runtime.sendMessage({
+      action: 'updateInteraction',
+      interactionId: currentInteractionId,
+      intent: JSON.stringify(intent),
+      attention: attentionData
+    });
+
+    sendResponse({ success: true });
+  } else if (request.action === 'captureCurrentPage') {
+    // Capture page content for snapshot (triggered by Alt+S or popup capture button)
+    (async () => {
       const markdown = extractMarkdown();
       const html = await extractHTML();
-
-      console.log('Captured data - Markdown:', markdown.length, 'HTML:', html.length);
-
-      chrome.runtime.sendMessage({
-        action: 'updateInteraction',
-        interactionId: currentInteractionId,
-        intent: JSON.stringify(intent),
-        markdown: markdown,
-        html: html,
-        attention: attentionData
-      });
-
-      sendResponse({ success: true });
+      sendResponse({ success: true, markdown, html });
     })();
+  } else if (request.action === 'highlightSelection') {
+    // Highlight selected text or open global note (triggered by Alt+H)
+    const selection = window.getSelection();
+    const selectedText = selection.toString().trim();
+    console.log(`[content] highlightSelection: selectedText="${selectedText.substring(0, 50)}" (${selectedText.length} chars)`);
+
+    if (selectedText.length > 0 && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      console.log('[content] Showing highlight overlay at', rect.left, rect.top);
+      showHighlightOverlay(selectedText, rect);
+      sendResponse({ success: true });
+    } else {
+      // No selection — open global page note
+      console.log('[content] No text selected, opening global note');
+      const slug = getSlugForCurrentPage();
+      chrome.runtime.sendMessage({ action: 'loadHighlights', slug }).then(resp => {
+        const highlights = resp?.highlights || [];
+        const globalNote = highlights.find(h => h.isGlobalNote);
+        showGlobalNoteOverlay(globalNote?.note || '');
+      }).catch(() => {
+        showGlobalNoteOverlay('');
+      });
+      sendResponse({ success: true });
+    }
   }
 
   return true; // Keep channel open for async sendResponse
 });
+
+// Re-apply highlights on page load
+reapplyHighlights();
 
 // Before unload, send final attention data
 window.addEventListener('beforeunload', () => {
