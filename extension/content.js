@@ -635,13 +635,13 @@ function showGlobalNoteOverlay(existingNote) {
 
   const host = document.createElement('div');
   host.id = 'portal-highlight-overlay';
-  host.style.cssText = 'position: fixed; z-index: 2147483647; top: 20px; right: 20px;';
+  host.style.cssText = 'position: fixed; z-index: 2147483647; top: 50%; left: 50%; transform: translate(-50%, -50%);';
 
   const shadow = host.attachShadow({ mode: 'closed' });
   shadow.innerHTML = `
     <style>
       .overlay {
-        width: 320px;
+        width: 360px;
         background: white;
         border: 1px solid #ddd;
         border-radius: 8px;
@@ -670,6 +670,54 @@ function showGlobalNoteOverlay(existingNote) {
         box-sizing: border-box;
       }
       textarea:focus { outline: none; border-color: #4285f4; }
+      .topic-section {
+        margin-top: 10px;
+      }
+      .topic-label {
+        font-weight: 600;
+        color: #666;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 6px;
+      }
+      .topic-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .topic-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 3px 8px;
+        border: 1px solid #ddd;
+        border-radius: 12px;
+        font-size: 11px;
+        cursor: pointer;
+        background: #fff;
+        color: #555;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .topic-chip:hover { border-color: #aaa; }
+      .topic-chip.selected {
+        background: #e8f0fe;
+        border-color: #1967d2;
+        color: #1967d2;
+      }
+      .topic-chip-check { font-size: 10px; }
+      .topic-new-input {
+        width: 80px;
+        font-size: 11px;
+        padding: 3px 6px;
+        border: 1px dashed #ccc;
+        border-radius: 12px;
+        outline: none;
+        font-family: inherit;
+        box-sizing: border-box;
+      }
+      .topic-new-input:focus { border-color: #4285f4; border-style: solid; }
+      .topic-new-input::placeholder { color: #bbb; }
       .buttons {
         display: flex;
         justify-content: flex-end;
@@ -691,6 +739,10 @@ function showGlobalNoteOverlay(existingNote) {
     <div class="overlay">
       <div class="title">Page Note</div>
       <textarea placeholder="Add a note about this page (Ctrl+Enter to save)..."></textarea>
+      <div class="topic-section">
+        <div class="topic-label">Topics</div>
+        <div class="topic-chips"></div>
+      </div>
       <div class="buttons">
         <button class="cancel-btn">Cancel</button>
         <button class="save-btn">Save</button>
@@ -703,9 +755,93 @@ function showGlobalNoteOverlay(existingNote) {
   const textarea = shadow.querySelector('textarea');
   const saveBtn = shadow.querySelector('.save-btn');
   const cancelBtn = shadow.querySelector('.cancel-btn');
+  const topicChipsContainer = shadow.querySelector('.topic-chips');
 
   if (existingNote) textarea.value = existingNote;
   textarea.focus();
+
+  const pageUrl = window.location.href;
+  const pageTitle = document.title || 'Untitled';
+
+  // Load and render topic chips
+  async function renderTopicChips() {
+    const [topicsResult, pinsResp] = await Promise.all([
+      chrome.storage.local.get(['pinnedTopics']),
+      chrome.runtime.sendMessage({ action: 'loadTopicPins' })
+    ]);
+    const topics = topicsResult.pinnedTopics || [];
+    const allPins = (pinsResp && pinsResp.success) ? (pinsResp.pins || {}) : {};
+
+    topicChipsContainer.innerHTML = '';
+
+    topics.forEach(function(topic) {
+      const pins = allPins[topic.id] || [];
+      const pinned = pins.some(function(p) { return p.url === pageUrl; });
+
+      const chip = document.createElement('span');
+      chip.className = 'topic-chip' + (pinned ? ' selected' : '');
+      chip.innerHTML = '<span class="topic-chip-check">' + (pinned ? '&#10003;' : '') + '</span> ';
+      chip.appendChild(document.createTextNode(topic.query));
+
+      chip.addEventListener('click', async function() {
+        const freshResp = await chrome.runtime.sendMessage({ action: 'loadTopicPins' });
+        const freshPins = (freshResp && freshResp.success) ? (freshResp.pins || {}) : {};
+        if (!freshPins[topic.id]) freshPins[topic.id] = [];
+        const topicPins = freshPins[topic.id];
+        const idx = topicPins.findIndex(function(p) { return p.url === pageUrl; });
+
+        if (idx !== -1) {
+          topicPins.splice(idx, 1);
+        } else {
+          topicPins.push({ url: pageUrl, title: pageTitle, pinnedAt: Date.now() });
+        }
+
+        await chrome.runtime.sendMessage({ action: 'saveTopicPins', pins: freshPins });
+        renderTopicChips();
+      });
+
+      topicChipsContainer.appendChild(chip);
+    });
+
+    // "+ New topic" input
+    const newInput = document.createElement('input');
+    newInput.className = 'topic-new-input';
+    newInput.placeholder = '+ New topic';
+    newInput.addEventListener('keydown', async function(e) {
+      if (e.key === 'Enter') {
+        e.stopPropagation();
+        const query = newInput.value.trim();
+        if (!query) return;
+
+        const result = await chrome.storage.local.get(['pinnedTopics']);
+        const topics = result.pinnedTopics || [];
+        if (topics.some(function(t) { return t.query === query; })) {
+          newInput.value = '';
+          return;
+        }
+
+        const topicId = Date.now().toString();
+        topics.push({ id: topicId, query: query });
+        await chrome.storage.local.set({ pinnedTopics: topics });
+
+        // Pin current page to the new topic
+        const pinsResp = await chrome.runtime.sendMessage({ action: 'loadTopicPins' });
+        const allPins = (pinsResp && pinsResp.success) ? (pinsResp.pins || {}) : {};
+        allPins[topicId] = [{ url: pageUrl, title: pageTitle, pinnedAt: Date.now() }];
+        await chrome.runtime.sendMessage({ action: 'saveTopicPins', pins: allPins });
+
+        renderTopicChips();
+      } else if (e.key === 'Escape') {
+        newInput.value = '';
+        textarea.focus();
+      }
+    });
+    topicChipsContainer.appendChild(newInput);
+  }
+
+  renderTopicChips().catch(function(err) {
+    console.warn('[content] Could not load topics:', err);
+  });
 
   function close() { host.remove(); }
 

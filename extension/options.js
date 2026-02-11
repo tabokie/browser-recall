@@ -111,9 +111,21 @@ function filterByCategory(interactions, category) {
     }
     case 'highlighted':
       return interactions.filter(i => i.attention && i.attention.length > 0);
+    case 'gateways':
+      return interactions.filter(i => isGatewayUrl(i.url));
     case 'all':
     default:
       return interactions;
+  }
+}
+
+function isGatewayUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname;
+    return path === '/' || path === '' || path === '/index.html' || path === '/index.htm';
+  } catch {
+    return false;
   }
 }
 
@@ -299,28 +311,46 @@ function displayTopicResults(topicId, results) {
   const pinnedUrls = new Set(pins.map(p => p.url));
   const resultUrls = new Set((results || []).map(r => r.url));
 
-  // Pinned results that appear in search results
-  const pinnedInResults = (results || []).filter(r => pinnedUrls.has(r.url));
-  // Pinned results NOT in search results (persisted pins from filesystem)
-  const pinnedOnly = pins.filter(p => !resultUrls.has(p.url));
-  // Unpinned search results
-  const unpinned = (results || []).filter(r => !pinnedUrls.has(r.url));
+  const data = cachedData || { interactions: [] };
+  const byUrl = groupInteractionsByUrl(data.interactions);
 
-  if (pinnedInResults.length === 0 && pinnedOnly.length === 0 && unpinned.length === 0) {
+  function enrichResult(r) {
+    const group = byUrl.get(r.url) || [];
+    const agg = aggregateAttention(group);
+    const highlights = group.flatMap(i => {
+      const att = parseAttention(i);
+      return (att && att.highlights) || [];
+    });
+    const timestamps = group.map(i => i.timestamp);
+    if (timestamps.length === 0) timestamps.push(r.timestamp || r.pinnedAt || Date.now());
+    return { ...r, attScore: agg.score, attDetail: agg.detail, highlights, timestamps };
+  }
+
+  // Pinned results that appear in search results
+  const pinnedInResults = (results || []).filter(r => pinnedUrls.has(r.url)).map(enrichResult);
+  // Pinned results NOT in search results (persisted pins from filesystem)
+  const pinnedOnly = pins.filter(p => !resultUrls.has(p.url)).map(enrichResult);
+  // Unpinned search results
+  const unpinned = (results || []).filter(r => !pinnedUrls.has(r.url)).map(enrichResult);
+
+  const allEnriched = [...pinnedInResults, ...pinnedOnly, ...unpinned];
+  if (allEnriched.length === 0) {
     displayMessage('No results found');
     return;
   }
 
+  const maxAtt = Math.max(...allEnriched.map(r => r.attScore), 0.1);
+
   let html = '';
   if (pinnedInResults.length > 0 || pinnedOnly.length > 0) {
     html += '<div class="pinned-divider">Pinned</div>';
-    html += pinnedInResults.map(r => resultRowHtml(r.title, r.url, r.timestamp, true)).join('');
-    html += pinnedOnly.map(p => resultRowHtml(p.title, p.url, p.pinnedAt, true)).join('');
+    html += pinnedInResults.map(r => resultRowHtml(r.title, r.url, { pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps })).join('');
+    html += pinnedOnly.map(r => resultRowHtml(r.title, r.url, { pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps })).join('');
     if (unpinned.length > 0) {
       html += '<div class="pinned-divider">Results</div>';
     }
   }
-  html += unpinned.map(r => resultRowHtml(r.title, r.url, r.timestamp, false)).join('');
+  html += unpinned.map(r => resultRowHtml(r.title, r.url, { pinned: false, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps })).join('');
 
   container.innerHTML = html;
   bindResultClicks(container);
@@ -334,7 +364,27 @@ function displaySearchResults(results) {
     return;
   }
 
-  container.innerHTML = results.map(r => resultRowHtml(r.title, r.url, r.timestamp)).join('');
+  const data = cachedData || { interactions: [] };
+  const byUrl = groupInteractionsByUrl(data.interactions);
+
+  // Compute attention for each result
+  const resultData = results.map(r => {
+    const group = byUrl.get(r.url) || [];
+    const agg = aggregateAttention(group);
+    const highlights = group.flatMap(i => {
+      const att = parseAttention(i);
+      return (att && att.highlights) || [];
+    });
+    const timestamps = group.map(i => i.timestamp);
+    if (timestamps.length === 0) timestamps.push(r.timestamp);
+    return { ...r, attScore: agg.score, attDetail: agg.detail, highlights, timestamps };
+  });
+
+  const maxAtt = Math.max(...resultData.map(r => r.attScore), 0.1);
+
+  container.innerHTML = resultData.map(r =>
+    resultRowHtml(r.title, r.url, { attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps })
+  ).join('');
   bindResultClicks(container);
 }
 
@@ -345,47 +395,169 @@ function displayInteractionRows(interactions) {
     return;
   }
 
-  // Show most recent first
-  const sorted = [...interactions].sort((a, b) => b.timestamp - a.timestamp);
-  container.innerHTML = sorted.map(i => resultRowHtml(i.title, i.url, i.timestamp)).join('');
+  const byUrl = groupInteractionsByUrl(interactions);
+  // Aggregate per URL, show most recent first
+  const entries = [...byUrl.entries()].map(([url, group]) => {
+    const latest = group.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+    const agg = aggregateAttention(group);
+    const highlights = group.flatMap(i => {
+      const att = parseAttention(i);
+      return (att && att.highlights) || [];
+    });
+    const timestamps = group.map(i => i.timestamp);
+    return { url, title: latest.title, attScore: agg.score, attDetail: agg.detail, highlights, timestamps, latestTs: latest.timestamp };
+  }).sort((a, b) => b.latestTs - a.latestTs);
+
+  const maxAtt = Math.max(...entries.map(e => e.attScore), 0.1);
+
+  container.innerHTML = entries.map(e =>
+    resultRowHtml(e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, highlights: e.highlights, timestamps: e.timestamps })
+  ).join('');
   bindResultClicks(container);
 }
 
 const PIN_SVG = '<svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>';
+const EYE_SVG = '<svg class="attention-eye" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>';
 
-function resultRowHtml(title, url, timestamp, pinned) {
+// Blue (low) → Red (high) color scale
+function attentionColor(normalizedScore) {
+  // 0 = blue (#4285f4), 0.5 = yellow (#fbbc04), 1 = red (#ea4335)
+  const t = Math.max(0, Math.min(1, normalizedScore));
+  if (t <= 0.5) {
+    const s = t * 2; // 0→1
+    const r = Math.round(66 + (251 - 66) * s);
+    const g = Math.round(133 + (188 - 133) * s);
+    const b = Math.round(244 + (4 - 244) * s);
+    return `rgb(${r},${g},${b})`;
+  } else {
+    const s = (t - 0.5) * 2; // 0→1
+    const r = Math.round(251 + (234 - 251) * s);
+    const g = Math.round(188 + (67 - 188) * s);
+    const b = Math.round(4 + (53 - 4) * s);
+    return `rgb(${r},${g},${b})`;
+  }
+}
+
+// Group interactions by URL, return Map<url, interaction[]>
+function groupInteractionsByUrl(interactions) {
+  const map = new Map();
+  for (const i of interactions) {
+    if (!map.has(i.url)) map.set(i.url, []);
+    map.get(i.url).push(i);
+  }
+  return map;
+}
+
+// Compute aggregate attention for a group of interactions
+function aggregateAttention(interactions) {
+  let total = 0;
+  let att = null;
+  for (const i of interactions) {
+    const a = parseAttention(i);
+    if (a) {
+      total += attentionStrength(a);
+      att = a; // keep last one for details
+    }
+  }
+  return { score: total, detail: att };
+}
+
+function formatTimeRange(timestamps) {
+  if (timestamps.length === 0) return '';
+  const sorted = [...timestamps].sort((a, b) => a - b);
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  if (sorted.length === 1 || last - first < 86400000) {
+    return formatTime(last);
+  }
+  const fmt = (ts) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `${fmt(first)} – ${fmt(last)}`;
+}
+
+function buildDetailHtml(url, attDetail, highlights) {
+  let html = `<div class="detail-url"><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a></div>`;
+
+  if (attDetail) {
+    html += '<div class="detail-metrics">';
+    if (attDetail.timeOnPage) {
+      const mins = Math.round(attDetail.timeOnPage / 60000);
+      html += `<span class="detail-metric"><strong>${mins}m</strong> on page</span>`;
+    }
+    if (attDetail.scrollDepth) {
+      html += `<span class="detail-metric"><strong>${Math.round(attDetail.scrollDepth)}%</strong> scrolled</span>`;
+    }
+    if (attDetail.clicks) {
+      html += `<span class="detail-metric"><strong>${attDetail.clicks}</strong> clicks</span>`;
+    }
+    html += '</div>';
+  }
+
+  if (highlights && highlights.length > 0) {
+    html += '<div class="detail-highlights">';
+    for (const h of highlights.slice(0, 5)) {
+      const text = typeof h === 'string' ? h : (h.text || '');
+      if (text) html += `<div class="detail-highlight-item">${escapeHtml(text)}</div>`;
+    }
+    html += '</div>';
+  }
+
+  return html;
+}
+
+// opts: { pinned, attScore, maxAtt, attDetail, highlights, timestamps }
+function resultRowHtml(title, url, opts = {}) {
   const safeTitle = escapeHtml(title || 'Untitled');
   const safeUrl = escapeHtml(url || '');
-  const time = formatTime(timestamp);
-  let favicon;
-  try {
-    const origin = new URL(url).origin;
-    favicon = `<img class="result-favicon" src="${escapeHtml(origin)}/favicon.ico" onerror="this.outerHTML='<span class=\\'result-favicon-placeholder\\'>${escapeHtml(safeTitle.charAt(0).toUpperCase())}</span>'">`;
-  } catch {
-    favicon = `<span class="result-favicon-placeholder">${escapeHtml(safeTitle.charAt(0).toUpperCase())}</span>`;
-  }
+  const { pinned, attScore = 0, maxAtt = 1, attDetail = null, highlights = [], timestamps = [] } = opts;
+
+  const time = timestamps.length > 0 ? formatTimeRange(timestamps) : '';
+  const normalized = maxAtt > 0 ? attScore / maxAtt : 0;
+  const dotColor = attentionColor(normalized);
 
   const pinBtn = pinned !== undefined
     ? `<button class="result-pin${pinned ? ' pinned' : ''}" data-pin-url="${safeUrl}" data-pin-title="${safeTitle}" title="${pinned ? 'Unpin' : 'Pin'}">${PIN_SVG}</button>`
     : '';
 
-  return `<div class="result-row" data-url="${safeUrl}">
-    ${favicon}
-    <div class="result-info">
+  const detailHtml = buildDetailHtml(url, attDetail, highlights);
+
+  return `<div class="result-item">
+    <div class="result-row" data-url="${safeUrl}" data-title="${safeTitle}" draggable="true">
       <div class="result-title">${safeTitle}</div>
-      <div class="result-url">${safeUrl}</div>
+      <div class="result-time">${escapeHtml(time)}</div>
+      <div class="attention-dot-wrap" title="Attention: ${(normalized * 100).toFixed(0)}%">
+        <div class="attention-dot" style="background: ${dotColor}"></div>
+        ${EYE_SVG}
+      </div>
+      ${pinBtn}
     </div>
-    <div class="result-time">${escapeHtml(time)}</div>
-    ${pinBtn}
+    <div class="result-detail">${detailHtml}</div>
   </div>`;
 }
 
 function bindResultClicks(container) {
   container.querySelectorAll('.result-row').forEach(row => {
     row.addEventListener('click', (e) => {
-      // Don't navigate when clicking pin button
       if (e.target.closest('.result-pin')) return;
+      if (e.target.closest('.attention-dot-wrap')) return;
       chrome.tabs.create({ url: row.dataset.url });
+    });
+    row.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        url: row.dataset.url,
+        title: row.dataset.title
+      }));
+      e.dataTransfer.effectAllowed = 'copy';
+    });
+  });
+  // Eye toggle for inline detail
+  container.querySelectorAll('.attention-dot-wrap').forEach(dot => {
+    dot.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = dot.closest('.result-item');
+      if (item) {
+        const detail = item.querySelector('.result-detail');
+        if (detail) detail.classList.toggle('open');
+      }
     });
   });
 }
@@ -411,7 +583,7 @@ function displayMessage(msg) {
 }
 
 function categoryLabel(category) {
-  const labels = { all: 'All', today: 'Today', week: 'This Week', highlighted: 'Highlighted' };
+  const labels = { all: 'All', today: 'Today', week: 'This Week', highlighted: 'Highlighted', gateways: 'Gateways' };
   return labels[category] || category;
 }
 
@@ -483,6 +655,42 @@ async function renderTopics() {
       renderTopics();
       if (activeView.type === 'topic' && activeView.id === topic.id) {
         showCategory('all');
+      }
+    });
+
+    // Drag-and-drop: topic as drop target (counter prevents child-triggered dragleave)
+    let dragCounter = 0;
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+    item.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      dragCounter++;
+      item.classList.add('drag-over');
+    });
+    item.addEventListener('dragleave', () => {
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        item.classList.remove('drag-over');
+      }
+    });
+    item.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      dragCounter = 0;
+      item.classList.remove('drag-over');
+      try {
+        const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+        if (data.url && !isResultPinned(topic.id, data.url)) {
+          await toggleResultPin(topic.id, data.url, data.title);
+          // If we're viewing this topic, refresh
+          if (activeView.type === 'topic' && activeView.id === topic.id) {
+            showTopic(topic);
+          }
+        }
+      } catch (err) {
+        console.error('Drop error:', err);
       }
     });
 
@@ -575,6 +783,8 @@ document.getElementById('settingsBtn').addEventListener('click', () => {
   document.getElementById('settingsModal').classList.add('open');
   updateStorageStatus();
   updateStatistics();
+  renderBlacklist();
+  renderTrimRules();
 });
 
 document.getElementById('settingsClose').addEventListener('click', () => {
@@ -789,6 +999,128 @@ function showStatus(message, type) {
   setTimeout(() => { status.className = 'status'; }, 5000);
 }
 
+// --- URL Blacklist ---
+async function loadBlacklist() {
+  const result = await chrome.storage.local.get(['urlBlacklist']);
+  return result.urlBlacklist || [];
+}
+
+async function saveBlacklist(list) {
+  await chrome.storage.local.set({ urlBlacklist: list });
+}
+
+async function renderBlacklist() {
+  const list = await loadBlacklist();
+  const container = document.getElementById('blacklistEntries');
+
+  if (list.length === 0) {
+    container.innerHTML = '<div class="blacklist-empty">No blocked URL prefixes</div>';
+    return;
+  }
+
+  container.innerHTML = list.map((prefix, idx) =>
+    `<div class="blacklist-entry">
+      <span>${escapeHtml(prefix)}</span>
+      <button class="blacklist-remove" data-index="${idx}" title="Remove">&times;</button>
+    </div>`
+  ).join('');
+
+  container.querySelectorAll('.blacklist-remove').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const current = await loadBlacklist();
+      current.splice(parseInt(btn.dataset.index), 1);
+      await saveBlacklist(current);
+      renderBlacklist();
+    });
+  });
+}
+
+document.getElementById('blacklistAddBtn').addEventListener('click', async () => {
+  const input = document.getElementById('blacklistInput');
+  const prefix = input.value.trim();
+  if (!prefix) return;
+
+  const list = await loadBlacklist();
+  if (list.includes(prefix)) {
+    input.value = '';
+    return;
+  }
+
+  list.push(prefix);
+  await saveBlacklist(list);
+  input.value = '';
+  renderBlacklist();
+});
+
+document.getElementById('blacklistInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') document.getElementById('blacklistAddBtn').click();
+});
+
+// --- Title Trimming Rules ---
+const TRIM_ACTION_LABELS = {
+  remove_after_pipe: 'Remove after |',
+  remove_brackets: 'Remove [brackets]'
+};
+
+async function loadTrimRules() {
+  const result = await chrome.storage.local.get(['titleTrimRules']);
+  return result.titleTrimRules || [];
+}
+
+async function saveTrimRules(rules) {
+  await chrome.storage.local.set({ titleTrimRules: rules });
+}
+
+async function renderTrimRules() {
+  const rules = await loadTrimRules();
+  const container = document.getElementById('trimEntries');
+
+  if (rules.length === 0) {
+    container.innerHTML = '<div class="blacklist-empty">No trimming rules</div>';
+    return;
+  }
+
+  container.innerHTML = rules.map((rule, idx) =>
+    `<div class="blacklist-entry">
+      <span>${escapeHtml(rule.urlPrefix)}</span>
+      <span class="trim-action-label">${escapeHtml(TRIM_ACTION_LABELS[rule.action] || rule.action)}</span>
+      <button class="blacklist-remove" data-index="${idx}" title="Remove">&times;</button>
+    </div>`
+  ).join('');
+
+  container.querySelectorAll('.blacklist-remove').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const current = await loadTrimRules();
+      current.splice(parseInt(btn.dataset.index), 1);
+      await saveTrimRules(current);
+      renderTrimRules();
+    });
+  });
+}
+
+document.getElementById('trimAddBtn').addEventListener('click', async () => {
+  const urlInput = document.getElementById('trimUrlInput');
+  const actionSelect = document.getElementById('trimActionSelect');
+  const prefix = urlInput.value.trim();
+  if (!prefix) return;
+
+  const rules = await loadTrimRules();
+  // Don't add duplicate prefix+action
+  if (rules.some(r => r.urlPrefix === prefix && r.action === actionSelect.value)) {
+    urlInput.value = '';
+    return;
+  }
+
+  rules.push({ urlPrefix: prefix, action: actionSelect.value });
+  await saveTrimRules(rules);
+  urlInput.value = '';
+  renderTrimRules();
+});
+
+document.getElementById('trimUrlInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') document.getElementById('trimAddBtn').click();
+});
+
 // --- Initialize ---
 async function initialize() {
   // Load settings
@@ -803,6 +1135,8 @@ async function initialize() {
   await loadData();
   await loadAllTopicPins();
   await renderTopics();
+  renderBlacklist();
+  renderTrimRules();
   showCategory('all');
 }
 

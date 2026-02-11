@@ -26,6 +26,22 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .page-title:hover {
+      color: #1967d2;
+    }
+
+    .page-title-input {
+      font-size: 15px;
+      font-weight: 600;
+      width: 100%;
+      border: 1px solid #4285f4;
+      border-radius: 3px;
+      padding: 1px 4px;
+      font-family: inherit;
+      outline: none;
     }
 
     .page-url {
@@ -186,6 +202,196 @@
       text-align: center;
     }
 
+    .topic-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .topic-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      font-size: 11px;
+      cursor: pointer;
+      background: #fff;
+      color: #555;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .topic-chip:hover {
+      border-color: #aaa;
+    }
+
+    .topic-chip.selected {
+      background: #e8f0fe;
+      border-color: #1967d2;
+      color: #1967d2;
+    }
+
+    .topic-chip-check {
+      font-size: 10px;
+    }
+
+    .topic-new {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .topic-new-input {
+      width: 80px;
+      font-size: 11px;
+      padding: 3px 6px;
+      border: 1px dashed #ccc;
+      border-radius: 12px;
+      outline: none;
+      font-family: inherit;
+    }
+
+    .topic-new-input:focus {
+      border-color: #4285f4;
+      border-style: solid;
+    }
+
+    .topic-new-input::placeholder {
+      color: #bbb;
+    }
+
+    .workspace-bar {
+      padding: 8px 16px;
+      border-bottom: 1px solid #e0e0e0;
+      background: #fafafa;
+    }
+
+    .workspace-bar.active {
+      background: #e8f0fe;
+      border-bottom: 2px solid #1967d2;
+    }
+
+    .workspace-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .workspace-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #666;
+    }
+
+    .workspace-bar.active .workspace-label {
+      color: #1967d2;
+    }
+
+    .workspace-toggle {
+      position: relative;
+      display: inline-block;
+      width: 32px;
+      height: 18px;
+    }
+
+    .workspace-toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #ccc;
+      border-radius: 9px;
+      transition: background 0.2s;
+    }
+
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      height: 14px;
+      width: 14px;
+      left: 2px;
+      bottom: 2px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+
+    .workspace-toggle input:checked + .toggle-slider {
+      background: #1967d2;
+    }
+
+    .workspace-toggle input:checked + .toggle-slider::before {
+      transform: translateX(14px);
+    }
+
+    .workspace-config {
+      margin-top: 8px;
+    }
+
+    .workspace-topic-label {
+      font-size: 10px;
+      color: #888;
+      margin-bottom: 4px;
+    }
+
+    .workspace-topics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-bottom: 6px;
+    }
+
+    .ws-topic-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 7px;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      font-size: 11px;
+      cursor: pointer;
+      background: #fff;
+      color: #555;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .ws-topic-chip:hover {
+      border-color: #aaa;
+    }
+
+    .ws-topic-chip.selected {
+      background: #1967d2;
+      border-color: #1967d2;
+      color: #fff;
+    }
+
+    .workspace-auto-snapshot {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #555;
+      cursor: pointer;
+    }
+
+    .workspace-auto-snapshot input {
+      margin: 0;
+    }
+
+    .workspace-empty {
+      font-size: 11px;
+      color: #999;
+      font-style: italic;
+    }
+
     .shortcut-hint {
       font-size: 10px;
       color: #aaa;
@@ -197,12 +403,100 @@
       padding: 32px;
       color: #999;
     }
+
+    .blacklisted {
+      text-align: center;
+      padding: 32px 24px;
+      color: #666;
+    }
+
+    .blacklisted-icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+      color: #c5221f;
+    }
+
+    .blacklisted-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #c5221f;
+      margin-bottom: 4px;
+    }
+
+    .blacklisted-url {
+      font-size: 11px;
+      color: #999;
+      word-break: break-all;
+      margin-bottom: 12px;
+    }
+
+    .capture-once-btn {
+      padding: 6px 16px;
+      border: 1px solid #1967d2;
+      border-radius: 4px;
+      background: #1967d2;
+      color: #fff;
+      font-size: 12px;
+      cursor: pointer;
+      margin-bottom: 12px;
+    }
+
+    .capture-once-btn:hover {
+      background: #1558b0;
+    }
+
+    .capture-once-btn:disabled {
+      background: #aaa;
+      border-color: #aaa;
+      cursor: default;
+    }
+
+    .blacklisted-hint {
+      font-size: 11px;
+      color: #888;
+    }
+
+    .blacklisted-hint a {
+      color: #1967d2;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    .blacklisted-hint a:hover {
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>
   <div id="loading" class="loading">Loading...</div>
 
+  <div id="blacklisted" class="blacklisted" style="display: none;">
+    <div class="blacklisted-icon">&#x26D4;</div>
+    <div class="blacklisted-title">Blacklisted</div>
+    <div class="blacklisted-url" id="blacklistedUrl"></div>
+    <button class="capture-once-btn" id="captureOnceBtn">Capture Once</button>
+    <div class="blacklisted-hint">This site is on your blocklist. <a id="blacklistSettingsLink">Manage in Settings</a></div>
+  </div>
+
   <div id="dashboard" style="display: none;">
+    <div class="workspace-bar" id="workspaceBar">
+      <div class="workspace-header">
+        <span class="workspace-label">Workspace</span>
+        <label class="workspace-toggle">
+          <input type="checkbox" id="workspaceToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="workspace-config" id="workspaceConfig" style="display: none;">
+        <div class="workspace-topic-label">Tag pages with:</div>
+        <div class="workspace-topics" id="workspaceTopics"></div>
+        <label class="workspace-auto-snapshot">
+          <input type="checkbox" id="workspaceAutoSnapshot">
+          <span>Auto-snapshot visited pages</span>
+        </label>
+      </div>
+    </div>
+
     <div class="header">
       <div class="page-title" id="pageTitle">—</div>
       <div class="page-url" id="pageUrl">—</div>
@@ -235,6 +529,7 @@
         <span class="section-title">Notes &amp; Highlights</span>
         <span class="shortcut-hint">Alt+H</span>
       </div>
+      <div class="topic-chips" id="topicChips"></div>
       <div class="highlight-list" id="highlightList">
         <div class="empty-state">No highlights</div>
       </div>

@@ -148,7 +148,8 @@
     }
 
     .sidebar-item .remove-topic {
-      display: none;
+      display: flex;
+      visibility: hidden;
       width: 20px;
       height: 20px;
       border: none;
@@ -164,7 +165,7 @@
     }
 
     .sidebar-item:hover .remove-topic {
-      display: flex;
+      visibility: visible;
     }
 
     .sidebar-item .remove-topic:hover {
@@ -331,59 +332,31 @@
       overflow-y: auto;
     }
 
+    .result-item {
+      border-bottom: 1px solid #f1f3f4;
+    }
+
     .result-row {
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 8px 24px;
+      padding: 6px 24px;
       cursor: pointer;
-      border-bottom: 1px solid #f1f3f4;
+      height: 36px;
     }
 
     .result-row:hover {
       background: #f8f9fa;
     }
 
-    .result-favicon {
-      width: 16px;
-      height: 16px;
-      flex-shrink: 0;
-      border-radius: 2px;
-    }
-
-    .result-favicon-placeholder {
-      width: 16px;
-      height: 16px;
-      flex-shrink: 0;
-      background: #e8eaed;
-      border-radius: 2px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #9aa0a6;
-      font-size: 10px;
-      font-weight: 600;
-    }
-
-    .result-info {
-      flex: 1;
-      min-width: 0;
-    }
-
     .result-title {
+      flex: 1;
       font-size: 13px;
       color: #202124;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-    }
-
-    .result-url {
-      font-size: 12px;
-      color: #5f6368;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      min-width: 0;
     }
 
     .result-time {
@@ -391,6 +364,43 @@
       color: #9aa0a6;
       white-space: nowrap;
       flex-shrink: 0;
+    }
+
+    .attention-dot-wrap {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border-radius: 50%;
+    }
+
+    .attention-dot-wrap:hover {
+      background: #f1f3f4;
+    }
+
+    .attention-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      transition: opacity 0.15s;
+    }
+
+    .attention-dot-wrap:hover .attention-dot {
+      display: none;
+    }
+
+    .attention-eye {
+      display: none;
+      width: 16px;
+      height: 16px;
+      fill: #5f6368;
+    }
+
+    .attention-dot-wrap:hover .attention-eye {
+      display: block;
     }
 
     .result-pin {
@@ -431,6 +441,65 @@
       width: 16px;
       height: 16px;
       fill: currentColor;
+    }
+
+    /* ── Inline detail ── */
+    .result-detail {
+      display: none;
+      padding: 8px 24px 12px 44px;
+      background: #f8f9fa;
+      font-size: 12px;
+      color: #5f6368;
+      line-height: 1.6;
+    }
+
+    .result-detail.open {
+      display: block;
+    }
+
+    .result-detail .detail-url {
+      color: #1a73e8;
+      word-break: break-all;
+      margin-bottom: 6px;
+    }
+
+    .result-detail .detail-url a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .result-detail .detail-url a:hover {
+      text-decoration: underline;
+    }
+
+    .detail-metrics {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+
+    .detail-metric {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .detail-metric strong {
+      color: #202124;
+    }
+
+    .detail-highlights {
+      margin-top: 6px;
+    }
+
+    .detail-highlight-item {
+      padding: 4px 8px;
+      background: #fff3cd;
+      border-radius: 3px;
+      margin-bottom: 4px;
+      font-size: 12px;
+      color: #202124;
     }
 
     .pinned-divider {
@@ -691,6 +760,112 @@
     .status.success { background: #e6f4ea; color: #137333; display: block; }
     .status.error { background: #fce8e6; color: #c5221f; display: block; }
     .status.warning { background: #fef7e0; color: #b06000; display: block; }
+
+    .blacklist-input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .blacklist-input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      outline: none;
+    }
+
+    .blacklist-input:focus {
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 1px #1a73e8;
+    }
+
+    .blacklist-entries {
+      max-height: 160px;
+      overflow-y: auto;
+    }
+
+    .blacklist-entry {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      margin-bottom: 4px;
+      font-size: 12px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      color: #202124;
+      word-break: break-all;
+    }
+
+    .blacklist-entry .blacklist-remove {
+      width: 22px;
+      height: 22px;
+      border: none;
+      background: none;
+      border-radius: 50%;
+      cursor: pointer;
+      color: #5f6368;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 16px;
+      margin-left: 8px;
+    }
+
+    .blacklist-entry .blacklist-remove:hover {
+      background: #dadce0;
+      color: #d93025;
+    }
+
+    .blacklist-empty {
+      font-size: 12px;
+      color: #9aa0a6;
+      font-style: italic;
+      padding: 4px 0;
+    }
+
+    .trim-input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .trim-action-select {
+      padding: 8px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 12px;
+      background: #fff;
+      flex-shrink: 0;
+    }
+
+    .trim-action-label {
+      font-size: 11px;
+      color: #1a73e8;
+      background: #e8f0fe;
+      padding: 2px 6px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-item.drag-over {
+      background: #d3e3fd;
+      outline: 2px solid #1a73e8;
+      outline-offset: -2px;
+    }
+
+    .result-row[draggable="true"] {
+      cursor: grab;
+    }
+
+    .result-row[draggable="true"]:active {
+      cursor: grabbing;
+    }
   </style>
 </head>
 <body>
@@ -730,6 +905,10 @@
         <div class="sidebar-item" data-category="highlighted">
           <span class="icon"><svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></span>
           <span class="label">Highlighted</span>
+        </div>
+        <div class="sidebar-item" data-category="gateways">
+          <span class="icon"><svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.92 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2s.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.987 7.987 0 0 1 5.08 16zm2.95-8H5.08a7.987 7.987 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2s.07-1.35.16-2h4.68c.09.65.16 1.32.16 2s-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2s-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z"/></svg></span>
+          <span class="label">Gateways</span>
         </div>
       </div>
     </div>
@@ -830,6 +1009,32 @@
               </select>
             </label>
           </div>
+        </div>
+
+        <!-- URL Blacklist -->
+        <div class="modal-section">
+          <h3>URL Blacklist</h3>
+          <p>Pages matching these URL prefixes will not be recorded.</p>
+          <div class="blacklist-input-row">
+            <input type="text" id="blacklistInput" placeholder="https://example.com/private/" class="blacklist-input">
+            <button id="blacklistAddBtn" class="btn btn-primary">Add</button>
+          </div>
+          <div id="blacklistEntries" class="blacklist-entries"></div>
+        </div>
+
+        <!-- Title Trimming -->
+        <div class="modal-section">
+          <h3>Title Trimming</h3>
+          <p>Clean up page titles for specific sites when recording.</p>
+          <div class="trim-input-row">
+            <input type="text" id="trimUrlInput" placeholder="https://github.com" class="blacklist-input" style="flex: 2;">
+            <select id="trimActionSelect" class="trim-action-select">
+              <option value="remove_after_pipe">Remove after |</option>
+              <option value="remove_brackets">Remove [brackets]</option>
+            </select>
+            <button id="trimAddBtn" class="btn btn-primary">Add</button>
+          </div>
+          <div id="trimEntries" class="blacklist-entries"></div>
         </div>
 
         <!-- Data management -->

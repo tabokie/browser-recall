@@ -67,11 +67,36 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       return;
     }
 
+    // Skip blacklisted URL prefixes, unless the page was previously captured
+    const { urlBlacklist = [] } = await chrome.storage.local.get(['urlBlacklist']);
+    if (urlBlacklist.some(prefix => tab.url.startsWith(prefix))) {
+      const existing = await chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url });
+      if (!existing || !existing.interaction) {
+        console.log(`Skipping blacklisted URL (not in database): ${tab.url}`);
+        return;
+      }
+      console.log(`Blacklisted URL but already in database, continuing: ${tab.url}`);
+    }
+
     try {
       console.log(`Processing page: ${tab.url}`);
 
       const timestamp = Date.now();
       const slug = generateSlugFromUrl(tab.url);
+
+      // Apply title trimming rules
+      let title = tab.title || 'Untitled';
+      const { titleTrimRules = [] } = await chrome.storage.local.get(['titleTrimRules']);
+      for (const rule of titleTrimRules) {
+        if (tab.url.startsWith(rule.urlPrefix)) {
+          if (rule.action === 'remove_after_pipe') {
+            const pipeIdx = title.indexOf('|');
+            if (pipeIdx > 0) title = title.substring(0, pipeIdx).trim();
+          } else if (rule.action === 'remove_brackets') {
+            title = title.replace(/\s*[\[\(][^\]\)]*[\]\)]\s*/g, ' ').trim();
+          }
+        }
+      }
 
       // Create interaction record (metadata only, no content)
       // URL is the identity — revisiting the same URL updates the entry
@@ -79,7 +104,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         id: tab.url,
         timestamp: timestamp,
         url: tab.url,
-        title: tab.title || 'Untitled',
+        title: title,
         intent: '',
         attention: '',
         slug: slug
@@ -127,6 +152,50 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         console.log('Buffer full, triggering flush...');
         chrome.runtime.sendMessage({ action: 'flushBuffer' })
           .catch(error => console.warn('Flush failed:', error.message));
+      }
+
+      // Workspace mode: auto-pin to workspace topics and optionally snapshot
+      const { workspace } = await chrome.storage.local.get(['workspace']);
+      if (workspace && workspace.enabled && workspace.topicIds && workspace.topicIds.length > 0) {
+        try {
+          const pinsResp = await chrome.runtime.sendMessage({ action: 'loadTopicPins' });
+          const allPins = (pinsResp && pinsResp.pins) ? pinsResp.pins : {};
+          let changed = false;
+
+          for (const topicId of workspace.topicIds) {
+            if (!allPins[topicId]) allPins[topicId] = [];
+            const already = allPins[topicId].some(p => p.url === tab.url);
+            if (!already) {
+              allPins[topicId].push({ url: tab.url, title: tab.title || 'Untitled', pinnedAt: timestamp });
+              changed = true;
+            }
+          }
+
+          if (changed) {
+            await chrome.runtime.sendMessage({ action: 'saveTopicPins', pins: allPins });
+            console.log(`Workspace: auto-pinned ${tab.url} to topics ${workspace.topicIds.join(', ')}`);
+          }
+
+          if (workspace.autoSnapshot) {
+            chrome.tabs.sendMessage(tabId, { action: 'captureCurrentPage' }).then(async (response) => {
+              if (response && response.success) {
+                await setupOffscreenDocument();
+                await chrome.runtime.sendMessage({
+                  action: 'captureSnapshot',
+                  slug,
+                  timestamp,
+                  markdown: response.markdown || '',
+                  html: response.html || ''
+                });
+                console.log(`Workspace: auto-snapshot captured for ${tab.url}`);
+              }
+            }).catch(err => {
+              console.warn('Workspace: auto-snapshot failed:', err.message);
+            });
+          }
+        } catch (err) {
+          console.warn('Workspace: auto-pin/snapshot error:', err.message);
+        }
       }
 
     } catch (error) {
