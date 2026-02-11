@@ -13,6 +13,11 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+function autoResizeTextarea(textarea) {
+  textarea.style.height = '0';
+  textarea.style.height = textarea.scrollHeight + 'px';
+}
+
 function formatTimestamp(ts) {
   if (ts === 0) return 'Legacy';
   const d = new Date(ts);
@@ -104,30 +109,64 @@ function renderHighlights(highlights) {
   const container = document.getElementById('highlightList');
   currentHighlights = highlights || [];
 
-  if (currentHighlights.length === 0) {
+  // Populate the dedicated page-note input from global note entry
+  const pageNoteEl = document.getElementById('pageNote');
+  const globalNote = currentHighlights.find(h => h.isGlobalNote);
+  pageNoteEl.value = globalNote?.note || '';
+
+  // Only show non-global highlights in the list
+  const textHighlights = currentHighlights.filter(h => !h.isGlobalNote);
+
+  if (textHighlights.length === 0) {
     container.innerHTML = '<div class="empty-state">No highlights</div>';
     return;
   }
 
-  container.innerHTML = currentHighlights.map((h, i) => {
-    if (h.isGlobalNote) {
-      return `
-        <div class="highlight-item global-note" data-index="${i}">
-          <div class="highlight-label">Page Note</div>
-          <textarea class="highlight-note" rows="2" placeholder="Add a page note..." data-index="${i}">${escapeHtml(h.note || '')}</textarea>
-        </div>`;
-    }
+  container.innerHTML = textHighlights.map(h => {
+    const i = currentHighlights.indexOf(h);
     return `
       <div class="highlight-item" data-index="${i}">
-        <div class="highlight-text">"${escapeHtml(h.text)}"</div>
-        <textarea class="highlight-note" rows="1" placeholder="Add a note..." data-index="${i}">${escapeHtml(h.note || '')}</textarea>
+        <div class="highlight-header">
+          <div class="highlight-text">"${escapeHtml(h.text)}"</div>
+          <button class="highlight-delete" data-index="${i}" title="Delete">&times;</button>
+        </div>
+        <textarea class="highlight-note" placeholder="Add a note..." data-index="${i}">${escapeHtml(h.note || '')}</textarea>
       </div>`;
   }).join('');
+
+  // Delete highlight
+  container.querySelectorAll('.highlight-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.index, 10);
+      const h = currentHighlights[idx];
+      if (!h) return;
+
+      try {
+        await chrome.runtime.sendMessage({
+          action: 'deleteHighlight',
+          slug: currentSlug,
+          text: h.text || '',
+          timestamp: h.timestamp || 0
+        });
+        // Tell content script to remove the visual mark
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id && h.text) {
+          chrome.tabs.sendMessage(tab.id, { action: 'removeHighlightMark', text: h.text }).catch(() => {});
+        }
+      } catch (e) {
+        console.error('[popup] Delete highlight error:', e);
+      }
+
+      currentHighlights.splice(idx, 1);
+      renderHighlights(currentHighlights);
+    });
+  });
 
   // Save notes on change (debounced)
   let saveTimeout = null;
   container.querySelectorAll('.highlight-note').forEach(textarea => {
     textarea.addEventListener('input', () => {
+      autoResizeTextarea(textarea);
       const idx = parseInt(textarea.dataset.index, 10);
       currentHighlights[idx].note = textarea.value;
 
@@ -152,6 +191,31 @@ function renderHighlights(highlights) {
     });
   });
 }
+
+// Page-note auto-save (debounced)
+let pageNoteSaveTimeout = null;
+document.getElementById('pageNote').addEventListener('input', (e) => {
+  autoResizeTextarea(e.target);
+  clearTimeout(pageNoteSaveTimeout);
+  pageNoteSaveTimeout = setTimeout(async () => {
+    const note = document.getElementById('pageNote').value;
+    const globalIdx = currentHighlights.findIndex(h => h.isGlobalNote);
+    if (globalIdx !== -1) {
+      currentHighlights[globalIdx].note = note;
+    } else {
+      currentHighlights.push({ text: '', note, timestamp: Date.now(), isGlobalNote: true });
+    }
+    try {
+      await chrome.runtime.sendMessage({
+        action: 'saveHighlights',
+        slug: currentSlug,
+        highlights: currentHighlights
+      });
+    } catch (error) {
+      console.error('[popup] Page note save error:', error);
+    }
+  }, 500);
+});
 
 // Topics — pin current page to topics
 async function loadTopics() {
@@ -460,6 +524,12 @@ document.getElementById('captureBtn').addEventListener('click', async () => {
     document.getElementById('blacklisted').style.display = 'none';
     document.getElementById('dashboard').style.display = 'block';
 
+    // Auto-resize note textareas now that the dashboard is visible
+    requestAnimationFrame(() => {
+      autoResizeTextarea(document.getElementById('pageNote'));
+      document.querySelectorAll('.highlight-note').forEach(ta => autoResizeTextarea(ta));
+    });
+
     // Re-check tab title after 1s — some sites set a generic title initially
     const initialTitle = tab.title || 'Untitled';
     setTimeout(async () => {
@@ -505,9 +575,22 @@ document.getElementById('captureBtn').addEventListener('click', async () => {
     }, 1000);
   }
 
-  // Check blacklist
-  const { urlBlacklist = [] } = await chrome.storage.local.get(['urlBlacklist']);
-  if (urlBlacklist.some(prefix => tab.url.startsWith(prefix))) {
+  // Skip blacklist if the page has visit history (previously captured and not deleted)
+  let hasVisitHistory = false;
+  try {
+    const [resp, binData] = await Promise.all([
+      chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url }),
+      chrome.storage.local.get(['recycleBin', 'permanentDeletes'])
+    ]);
+    const recycled = (binData.recycleBin || []).some(item => item.url === tab.url);
+    const permDeleted = (binData.permanentDeletes || []).includes(tab.url);
+    hasVisitHistory = !!(resp && resp.interaction) && !recycled && !permDeleted;
+  } catch {}
+
+  // Check blacklist only for pages with no visit history
+  const { urlBlacklist } = await chrome.storage.local.get(['urlBlacklist']);
+  const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
+  if (!hasVisitHistory && blacklist.some(prefix => tab.url.startsWith(prefix))) {
     document.getElementById('loading').style.display = 'none';
     document.getElementById('blacklistedUrl').textContent = tab.url;
     document.getElementById('blacklisted').style.display = 'block';
@@ -515,7 +598,7 @@ document.getElementById('captureBtn').addEventListener('click', async () => {
       chrome.runtime.openOptionsPage();
     });
 
-    // "Capture Once" — write interaction + snapshot, then show dashboard
+    // "Capture It" — write interaction + snapshot, then show dashboard (visit history will bypass blacklist next time)
     document.getElementById('captureOnceBtn').addEventListener('click', async () => {
       const btn = document.getElementById('captureOnceBtn');
       btn.disabled = true;

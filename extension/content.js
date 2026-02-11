@@ -480,154 +480,6 @@ function getCssPath(el) {
   return 'body > ' + parts.join(' > ');
 }
 
-// Create highlight overlay with Shadow DOM for style isolation
-function showHighlightOverlay(selectedText, anchorRect) {
-  // Remove any existing overlay
-  const existing = document.getElementById('portal-highlight-overlay');
-  if (existing) existing.remove();
-
-  const host = document.createElement('div');
-  host.id = 'portal-highlight-overlay';
-  host.style.cssText = 'position: absolute; z-index: 2147483647;';
-  host.style.left = (anchorRect.left + window.scrollX) + 'px';
-  host.style.top = (anchorRect.bottom + window.scrollY + 4) + 'px';
-
-  const shadow = host.attachShadow({ mode: 'closed' });
-  shadow.innerHTML = `
-    <style>
-      .overlay {
-        width: 300px;
-        background: white;
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        font-size: 13px;
-        padding: 12px;
-      }
-      .text-preview {
-        font-style: italic;
-        color: #555;
-        margin-bottom: 8px;
-        max-height: 48px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        line-height: 1.4;
-      }
-      textarea {
-        width: 100%;
-        min-height: 48px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        padding: 6px 8px;
-        font-family: inherit;
-        font-size: 12px;
-        resize: vertical;
-        box-sizing: border-box;
-      }
-      textarea:focus { outline: none; border-color: #4285f4; }
-      .buttons {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-        margin-top: 8px;
-      }
-      button {
-        padding: 4px 12px;
-        border-radius: 4px;
-        border: none;
-        cursor: pointer;
-        font-size: 12px;
-      }
-      .save-btn { background: #4285f4; color: white; }
-      .save-btn:hover { background: #357ae8; }
-      .cancel-btn { background: #f1f3f4; color: #333; }
-      .cancel-btn:hover { background: #e8eaed; }
-    </style>
-    <div class="overlay">
-      <div class="text-preview">"${selectedText.substring(0, 200)}"</div>
-      <textarea placeholder="Add a note (Ctrl+Enter to save)..."></textarea>
-      <div class="buttons">
-        <button class="cancel-btn">Cancel</button>
-        <button class="save-btn">Save</button>
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(host);
-
-  const textarea = shadow.querySelector('textarea');
-  const saveBtn = shadow.querySelector('.save-btn');
-  const cancelBtn = shadow.querySelector('.cancel-btn');
-
-  textarea.focus();
-
-  function close() { host.remove(); }
-
-  function save() {
-    const note = textarea.value;
-    const selection = window.getSelection();
-    let cssPath = '';
-
-    // Try to get CSS path for re-application
-    if (selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      const container = range.startContainer;
-      const element = container.nodeType === 3 ? container.parentElement : container;
-      cssPath = getCssPath(element);
-    }
-
-    const slug = getSlugForCurrentPage();
-
-    // Wrap selection in <mark>
-    wrapSelectionInMark(selectedText);
-
-    // Send to background to persist
-    console.log(`[content] Saving highlight: slug=${slug}, text="${selectedText.substring(0, 50)}"`);
-    chrome.runtime.sendMessage({
-      action: 'saveHighlight',
-      slug,
-      highlight: {
-        text: selectedText,
-        note: note,
-        timestamp: Date.now(),
-        cssPath: cssPath
-      }
-    }).then(resp => {
-      console.log('[content] saveHighlight response:', resp);
-    }).catch(err => {
-      console.error('[content] saveHighlight error:', err);
-    });
-
-    close();
-  }
-
-  saveBtn.addEventListener('click', save);
-  cancelBtn.addEventListener('click', close);
-
-  textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      save();
-    }
-    if (e.key === 'Escape') {
-      close();
-    }
-  });
-
-  // Close on click outside
-  const handleOutsideClick = (e) => {
-    if (!host.contains(e.target)) {
-      close();
-      document.removeEventListener('mousedown', handleOutsideClick);
-    }
-  };
-  setTimeout(() => document.addEventListener('mousedown', handleOutsideClick), 100);
-}
-
 // Show overlay for global page note (no text selection required)
 function showGlobalNoteOverlay(existingNote) {
   const existing = document.getElementById('portal-highlight-overlay');
@@ -641,239 +493,101 @@ function showGlobalNoteOverlay(existingNote) {
   shadow.innerHTML = `
     <style>
       .overlay {
-        width: 360px;
+        width: 280px;
         background: white;
         border: 1px solid #ddd;
         border-radius: 8px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        font-size: 13px;
-        padding: 12px;
-      }
-      .title {
-        font-weight: 600;
-        color: #666;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 8px;
+        padding: 8px;
       }
       textarea {
         width: 100%;
-        min-height: 80px;
+        min-height: 28px;
+        height: 28px;
         border: 1px solid #ddd;
         border-radius: 4px;
-        padding: 6px 8px;
+        padding: 4px 8px;
         font-family: inherit;
         font-size: 12px;
-        resize: vertical;
+        resize: none;
         box-sizing: border-box;
+        line-height: 18px;
+        overflow: hidden;
       }
       textarea:focus { outline: none; border-color: #4285f4; }
-      .topic-section {
-        margin-top: 10px;
-      }
-      .topic-label {
-        font-weight: 600;
-        color: #666;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 6px;
-      }
-      .topic-chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-      }
-      .topic-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        padding: 3px 8px;
-        border: 1px solid #ddd;
-        border-radius: 12px;
-        font-size: 11px;
-        cursor: pointer;
-        background: #fff;
-        color: #555;
-        transition: background 0.15s, border-color 0.15s;
-      }
-      .topic-chip:hover { border-color: #aaa; }
-      .topic-chip.selected {
-        background: #e8f0fe;
-        border-color: #1967d2;
-        color: #1967d2;
-      }
-      .topic-chip-check { font-size: 10px; }
-      .topic-new-input {
-        width: 80px;
-        font-size: 11px;
-        padding: 3px 6px;
-        border: 1px dashed #ccc;
-        border-radius: 12px;
-        outline: none;
-        font-family: inherit;
-        box-sizing: border-box;
-      }
-      .topic-new-input:focus { border-color: #4285f4; border-style: solid; }
-      .topic-new-input::placeholder { color: #bbb; }
-      .buttons {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-        margin-top: 8px;
-      }
-      button {
-        padding: 4px 12px;
-        border-radius: 4px;
-        border: none;
-        cursor: pointer;
-        font-size: 12px;
-      }
-      .save-btn { background: #4285f4; color: white; }
-      .save-btn:hover { background: #357ae8; }
-      .cancel-btn { background: #f1f3f4; color: #333; }
-      .cancel-btn:hover { background: #e8eaed; }
     </style>
     <div class="overlay">
-      <div class="title">Page Note</div>
-      <textarea placeholder="Add a note about this page (Ctrl+Enter to save)..."></textarea>
-      <div class="topic-section">
-        <div class="topic-label">Topics</div>
-        <div class="topic-chips"></div>
-      </div>
-      <div class="buttons">
-        <button class="cancel-btn">Cancel</button>
-        <button class="save-btn">Save</button>
-      </div>
+      <textarea placeholder="Add a page note... Esc to save."></textarea>
     </div>
   `;
 
   document.body.appendChild(host);
 
   const textarea = shadow.querySelector('textarea');
-  const saveBtn = shadow.querySelector('.save-btn');
-  const cancelBtn = shadow.querySelector('.cancel-btn');
-  const topicChipsContainer = shadow.querySelector('.topic-chips');
+  textarea.value = existingNote || '';
 
-  if (existingNote) textarea.value = existingNote;
+  // Auto-resize textarea based on content
+  function autoResize() {
+    textarea.style.height = '0';
+    textarea.style.height = Math.max(28, textarea.scrollHeight) + 'px';
+  }
+  if (existingNote) autoResize();
+
   textarea.focus();
 
-  const pageUrl = window.location.href;
-  const pageTitle = document.title || 'Untitled';
+  const slug = getSlugForCurrentPage();
 
-  // Load and render topic chips
-  async function renderTopicChips() {
-    const [topicsResult, pinsResp] = await Promise.all([
-      chrome.storage.local.get(['pinnedTopics']),
-      chrome.runtime.sendMessage({ action: 'loadTopicPins' })
-    ]);
-    const topics = topicsResult.pinnedTopics || [];
-    const allPins = (pinsResp && pinsResp.success) ? (pinsResp.pins || {}) : {};
-
-    topicChipsContainer.innerHTML = '';
-
-    topics.forEach(function(topic) {
-      const pins = allPins[topic.id] || [];
-      const pinned = pins.some(function(p) { return p.url === pageUrl; });
-
-      const chip = document.createElement('span');
-      chip.className = 'topic-chip' + (pinned ? ' selected' : '');
-      chip.innerHTML = '<span class="topic-chip-check">' + (pinned ? '&#10003;' : '') + '</span> ';
-      chip.appendChild(document.createTextNode(topic.query));
-
-      chip.addEventListener('click', async function() {
-        const freshResp = await chrome.runtime.sendMessage({ action: 'loadTopicPins' });
-        const freshPins = (freshResp && freshResp.success) ? (freshResp.pins || {}) : {};
-        if (!freshPins[topic.id]) freshPins[topic.id] = [];
-        const topicPins = freshPins[topic.id];
-        const idx = topicPins.findIndex(function(p) { return p.url === pageUrl; });
-
-        if (idx !== -1) {
-          topicPins.splice(idx, 1);
+  // Save note on change (debounced)
+  let saveTimeout = null;
+  textarea.addEventListener('input', () => {
+    autoResize();
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(async () => {
+      try {
+        const resp = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
+        const highlights = resp?.highlights || [];
+        const h = highlights.find(h => h.isGlobalNote);
+        if (h) {
+          h.note = textarea.value;
+          await chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
         } else {
-          topicPins.push({ url: pageUrl, title: pageTitle, pinnedAt: Date.now() });
+          await chrome.runtime.sendMessage({
+            action: 'saveHighlight',
+            slug,
+            highlight: { text: '', note: textarea.value, timestamp: Date.now(), isGlobalNote: true }
+          });
         }
-
-        await chrome.runtime.sendMessage({ action: 'saveTopicPins', pins: freshPins });
-        renderTopicChips();
-      });
-
-      topicChipsContainer.appendChild(chip);
-    });
-
-    // "+ New topic" input
-    const newInput = document.createElement('input');
-    newInput.className = 'topic-new-input';
-    newInput.placeholder = '+ New topic';
-    newInput.addEventListener('keydown', async function(e) {
-      if (e.key === 'Enter') {
-        e.stopPropagation();
-        const query = newInput.value.trim();
-        if (!query) return;
-
-        const result = await chrome.storage.local.get(['pinnedTopics']);
-        const topics = result.pinnedTopics || [];
-        if (topics.some(function(t) { return t.query === query; })) {
-          newInput.value = '';
-          return;
-        }
-
-        const topicId = Date.now().toString();
-        topics.push({ id: topicId, query: query });
-        await chrome.storage.local.set({ pinnedTopics: topics });
-
-        // Pin current page to the new topic
-        const pinsResp = await chrome.runtime.sendMessage({ action: 'loadTopicPins' });
-        const allPins = (pinsResp && pinsResp.success) ? (pinsResp.pins || {}) : {};
-        allPins[topicId] = [{ url: pageUrl, title: pageTitle, pinnedAt: Date.now() }];
-        await chrome.runtime.sendMessage({ action: 'saveTopicPins', pins: allPins });
-
-        renderTopicChips();
-      } else if (e.key === 'Escape') {
-        newInput.value = '';
-        textarea.focus();
+      } catch (err) {
+        console.error('[content] Failed to save page note:', err);
       }
-    });
-    topicChipsContainer.appendChild(newInput);
-  }
-
-  renderTopicChips().catch(function(err) {
-    console.warn('[content] Could not load topics:', err);
+    }, 500);
   });
 
-  function close() { host.remove(); }
-
-  function save() {
-    const slug = getSlugForCurrentPage();
+  function close() {
+    // Save immediately on close if there are pending changes
+    clearTimeout(saveTimeout);
     const note = textarea.value;
-    console.log(`[content] Saving global note: slug=${slug}`);
-    chrome.runtime.sendMessage({
-      action: 'saveHighlight',
-      slug,
-      highlight: {
-        text: '',
-        note: note,
-        timestamp: Date.now(),
-        isGlobalNote: true
-      }
-    }).then(resp => {
-      console.log('[content] saveHighlight (global note) response:', resp);
-    }).catch(err => {
-      console.error('[content] saveHighlight (global note) error:', err);
-    });
-    close();
+    if (note !== (existingNote || '')) {
+      chrome.runtime.sendMessage({ action: 'loadHighlights', slug }).then(resp => {
+        const highlights = resp?.highlights || [];
+        const h = highlights.find(h => h.isGlobalNote);
+        if (h) {
+          h.note = note;
+          chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
+        } else {
+          chrome.runtime.sendMessage({
+            action: 'saveHighlight',
+            slug,
+            highlight: { text: '', note, timestamp: Date.now(), isGlobalNote: true }
+          });
+        }
+      }).catch(() => {});
+    }
+    host.remove();
   }
 
-  saveBtn.addEventListener('click', save);
-  cancelBtn.addEventListener('click', close);
-
   textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      save();
-    }
     if (e.key === 'Escape') {
       close();
     }
@@ -888,22 +602,51 @@ function showGlobalNoteOverlay(existingNote) {
   setTimeout(() => document.addEventListener('mousedown', handleOutsideClick), 100);
 }
 
-// Wrap the current selection in a <mark> element
-function wrapSelectionInMark(text) {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) return;
+// Find text in the page and wrap the first match in a <mark> element.
+// Returns the created <mark> element, or null if the text was not found.
+function highlightTextInPage(text) {
+  if (!text) return null;
+  console.log(`[content] highlightTextInPage: searching for "${text.substring(0, 50)}" (${text.length} chars)`);
 
-  try {
-    const range = selection.getRangeAt(0);
-    const mark = document.createElement('mark');
-    mark.className = 'portal-highlight';
-    mark.style.cssText = 'background: #fff3b0; border-bottom: 2px solid #f0c000;';
-    range.surroundContents(mark);
-    selection.removeAllRanges();
-  } catch (e) {
-    // surroundContents can fail if selection spans multiple elements
-    console.log('Could not wrap selection in mark:', e.message);
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: (node) => {
+        // Skip nodes inside our overlay
+        if (node.parentElement && node.parentElement.closest('#portal-highlight-overlay')) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    }
+  );
+
+  let node;
+  while ((node = walker.nextNode())) {
+    const idx = node.textContent.indexOf(text);
+    if (idx === -1) continue;
+
+    try {
+      const range = document.createRange();
+      range.setStart(node, idx);
+      range.setEnd(node, idx + text.length);
+
+      const mark = document.createElement('mark');
+      mark.className = 'portal-highlight';
+      mark.style.cssText = 'background: #fff3b0; border-bottom: 2px solid #f0c000; cursor: pointer;';
+      mark.dataset.highlightText = text;
+      range.surroundContents(mark);
+      console.log('[content] highlightTextInPage: successfully wrapped text');
+      return mark;
+    } catch (e) {
+      console.log('[content] highlightTextInPage: surroundContents failed:', e.message);
+    }
+    break;
   }
+
+  console.log('[content] highlightTextInPage: text not found in any single text node');
+  return null;
 }
 
 // Re-apply saved highlights on page load
@@ -918,7 +661,6 @@ async function reapplyHighlights() {
     for (const highlight of response.highlights) {
       if (!highlight.text) continue;
 
-      // Use TreeWalker to find text nodes containing the highlight text
       const walker = document.createTreeWalker(
         document.body,
         NodeFilter.SHOW_TEXT,
@@ -930,27 +672,206 @@ async function reapplyHighlights() {
         const idx = node.textContent.indexOf(highlight.text);
         if (idx === -1) continue;
 
-        // Found a match — wrap it
         const range = document.createRange();
         range.setStart(node, idx);
         range.setEnd(node, idx + highlight.text.length);
 
         const mark = document.createElement('mark');
         mark.className = 'portal-highlight';
-        mark.style.cssText = 'background: #fff3b0; border-bottom: 2px solid #f0c000;';
+        mark.style.cssText = 'background: #fff3b0; border-bottom: 2px solid #f0c000; cursor: pointer;';
+        mark.dataset.highlightText = highlight.text;
+        mark.dataset.highlightTimestamp = highlight.timestamp || '';
 
         try {
           range.surroundContents(mark);
         } catch (e) {
           // May fail if text spans nodes
         }
-        break; // Only first occurrence
+        break;
       }
     }
   } catch (e) {
     // Extension context may not be ready yet
   }
 }
+
+// Show note-edit overlay when an existing highlight is clicked
+function initHighlightClickHandler() {
+  document.addEventListener('click', (e) => {
+    const mark = e.target.closest('mark.portal-highlight');
+    if (!mark) return;
+
+    // Remove any existing overlay
+    const existingOverlay = document.getElementById('portal-highlight-overlay');
+    if (existingOverlay) existingOverlay.remove();
+
+    const text = mark.dataset.highlightText || mark.textContent;
+    const timestamp = mark.dataset.highlightTimestamp ? parseInt(mark.dataset.highlightTimestamp) : 0;
+    const slug = getSlugForCurrentPage();
+
+    // Load existing note for this highlight, then show overlay
+    chrome.runtime.sendMessage({ action: 'loadHighlights', slug }).then(resp => {
+      const highlights = resp?.highlights || [];
+      const match = highlights.find(h => h.text === text);
+      showHighlightEditOverlay(mark, text, timestamp, match?.note || '', slug);
+    }).catch(() => {
+      showHighlightEditOverlay(mark, text, timestamp, '', slug);
+    });
+  });
+}
+
+function showHighlightEditOverlay(mark, text, timestamp, existingNote, slug) {
+  const existing = document.getElementById('portal-highlight-overlay');
+  if (existing) existing.remove();
+
+  const rect = mark.getBoundingClientRect();
+
+  const host = document.createElement('div');
+  host.id = 'portal-highlight-overlay';
+  host.style.cssText = 'position: absolute; z-index: 2147483647;';
+  host.style.left = (rect.left + window.scrollX) + 'px';
+  host.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+
+  const shadow = host.attachShadow({ mode: 'closed' });
+  shadow.innerHTML = `
+    <style>
+      .overlay {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        width: 280px;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        padding: 8px;
+      }
+      .delete-btn {
+        flex-shrink: 0;
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        cursor: pointer;
+        color: #888;
+        padding: 0;
+      }
+      .delete-btn:hover {
+        background: #fce8e6;
+        border-color: #c5221f;
+        color: #c5221f;
+      }
+      .delete-btn svg {
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
+      }
+      textarea {
+        width: 100%;
+        min-height: 28px;
+        height: 28px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-family: inherit;
+        font-size: 12px;
+        resize: none;
+        box-sizing: border-box;
+        line-height: 18px;
+        overflow: hidden;
+      }
+      textarea:focus { outline: none; border-color: #4285f4; }
+    </style>
+    <div class="overlay">
+      <button class="delete-btn" title="Delete highlight">
+        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+      </button>
+      <div style="flex:1;min-width:0">
+        <textarea placeholder="Add a note... Esc to save."></textarea>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(host);
+
+  const textarea = shadow.querySelector('textarea');
+  const deleteBtn = shadow.querySelector('.delete-btn');
+
+  textarea.value = existingNote;
+
+  // Auto-resize textarea based on content
+  function autoResize() {
+    textarea.style.height = '28px';
+    if (textarea.scrollHeight > 28) {
+      textarea.style.height = textarea.scrollHeight + 'px';
+    }
+  }
+  if (existingNote) autoResize();
+
+  textarea.focus();
+
+  // Save note on change (debounced)
+  let saveTimeout = null;
+  textarea.addEventListener('input', () => {
+    autoResize();
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(async () => {
+      try {
+        const resp = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
+        const highlights = resp?.highlights || [];
+        const h = highlights.find(h => h.text === text);
+        if (h) {
+          h.note = textarea.value;
+          await chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
+        }
+      } catch (err) {
+        console.error('[content] Failed to save highlight note:', err);
+      }
+    }, 500);
+  });
+
+  // Delete highlight
+  deleteBtn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    unwrapHighlightMark(mark);
+    chrome.runtime.sendMessage({ action: 'deleteHighlight', slug, text, timestamp });
+    host.remove();
+  });
+
+  // Close on Escape
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      host.remove();
+    }
+  });
+
+  // Close on click outside
+  const handleOutsideClick = (e) => {
+    if (!host.contains(e.target)) {
+      host.remove();
+      document.removeEventListener('mousedown', handleOutsideClick);
+    }
+  };
+  setTimeout(() => document.addEventListener('mousedown', handleOutsideClick), 100);
+}
+
+// Unwrap a <mark> element, restoring the original text node
+function unwrapHighlightMark(mark) {
+  const parent = mark.parentNode;
+  if (!parent) return;
+  while (mark.firstChild) {
+    parent.insertBefore(mark.firstChild, mark);
+  }
+  parent.removeChild(mark);
+  parent.normalize();
+}
+
+initHighlightClickHandler();
 
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -986,9 +907,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (selectedText.length > 0 && selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      console.log('[content] Showing highlight overlay at', rect.left, rect.top);
-      showHighlightOverlay(selectedText, rect);
+      const container = range.startContainer;
+      const element = container.nodeType === 3 ? container.parentElement : container;
+      const cssPath = getCssPath(element);
+      const slug = getSlugForCurrentPage();
+      const timestamp = Date.now();
+
+      // Immediately save the highlight
+      console.log(`[content] Saving highlight immediately: slug=${slug}, text="${selectedText.substring(0, 50)}"`);
+      chrome.runtime.sendMessage({
+        action: 'saveHighlight',
+        slug,
+        highlight: { text: selectedText, note: '', timestamp, cssPath }
+      });
+
+      // Visually highlight the text and show edit overlay
+      const mark = highlightTextInPage(selectedText);
+      if (mark) {
+        mark.dataset.highlightTimestamp = String(timestamp);
+        showHighlightEditOverlay(mark, selectedText, timestamp, '', slug);
+      }
       sendResponse({ success: true });
     } else {
       // No selection — open global page note
@@ -1003,6 +941,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       sendResponse({ success: true });
     }
+  } else if (request.action === 'removeHighlightMark') {
+    // Remove a visual highlight mark by matching text
+    const marks = document.querySelectorAll('mark.portal-highlight');
+    for (const mark of marks) {
+      const markText = mark.dataset.highlightText || mark.textContent;
+      if (markText === request.text) {
+        unwrapHighlightMark(mark);
+        break;
+      }
+    }
+    sendResponse({ success: true });
   }
 
   return true; // Keep channel open for async sendResponse

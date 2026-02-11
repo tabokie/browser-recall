@@ -146,21 +146,32 @@
       color: #333;
     }
 
-    .highlight-list {
-      max-height: 150px;
+    .notes-scroll {
+      max-height: 200px;
       overflow-y: auto;
+    }
+
+    .highlight-list {
     }
 
     .highlight-item {
       padding: 6px 0;
       border-bottom: 1px solid #f0f0f0;
+      position: relative;
     }
 
     .highlight-item:last-child {
       border-bottom: none;
     }
 
+    .highlight-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 4px;
+    }
+
     .highlight-text {
+      flex: 1;
       font-size: 12px;
       color: #333;
       font-style: italic;
@@ -171,17 +182,63 @@
       overflow: hidden;
     }
 
+    .highlight-delete {
+      width: 20px;
+      height: 20px;
+      border: none;
+      background: none;
+      border-radius: 50%;
+      cursor: pointer;
+      color: #bbb;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0;
+    }
+
+    .highlight-delete:hover {
+      background: #fce8e6;
+      color: #c5221f;
+    }
+
     .highlight-note {
       width: 100%;
       font-size: 11px;
+      line-height: 1.4;
       padding: 3px 6px;
       border: 1px solid #ddd;
       border-radius: 3px;
       resize: none;
+      overflow: hidden;
       font-family: inherit;
+      box-sizing: border-box;
+      min-height: 1.4em;
     }
 
     .highlight-note:focus {
+      outline: none;
+      border-color: #4285f4;
+    }
+
+    .page-note {
+      width: 100%;
+      font-size: 12px;
+      line-height: 1.4;
+      padding: 4px 6px;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      resize: none;
+      overflow: hidden;
+      font-family: inherit;
+      box-sizing: border-box;
+      min-height: 1.4em;
+      margin-bottom: 8px;
+    }
+
+    .page-note:focus {
       outline: none;
       border-color: #4285f4;
     }
@@ -474,7 +531,7 @@
     <div class="blacklisted-icon">&#x26D4;</div>
     <div class="blacklisted-title">Blacklisted</div>
     <div class="blacklisted-url" id="blacklistedUrl"></div>
-    <button class="capture-once-btn" id="captureOnceBtn">Capture Once</button>
+    <button class="capture-once-btn" id="captureOnceBtn">Capture It</button>
     <div class="blacklisted-hint">This site is on your blocklist. <a id="blacklistSettingsLink">Manage in Settings</a></div>
   </div>
 
@@ -504,6 +561,26 @@
 
     <div class="section">
       <div class="section-header">
+        <span class="section-title">Notes &amp; Highlights</span>
+        <span class="shortcut-hint">Alt+H</span>
+      </div>
+      <div class="notes-scroll">
+        <textarea class="page-note" id="pageNote" placeholder="Add a page note..."></textarea>
+        <div class="highlight-list" id="highlightList">
+          <div class="empty-state">No highlights</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Topics</span>
+      </div>
+      <div class="topic-chips" id="topicChips"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
         <span class="section-title">Snapshots</span>
         <span>
           <span class="shortcut-hint">Alt+S</span>
@@ -521,17 +598,6 @@
       </div>
       <div class="attention-grid" id="attentionGrid">
         <div class="empty-state">No data</div>
-      </div>
-    </div>
-
-    <div class="section">
-      <div class="section-header">
-        <span class="section-title">Notes &amp; Highlights</span>
-        <span class="shortcut-hint">Alt+H</span>
-      </div>
-      <div class="topic-chips" id="topicChips"></div>
-      <div class="highlight-list" id="highlightList">
-        <div class="empty-state">No highlights</div>
       </div>
     </div>
   </div>

@@ -68,8 +68,9 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     }
 
     // Skip blacklisted URL prefixes, unless the page was previously captured
-    const { urlBlacklist = [] } = await chrome.storage.local.get(['urlBlacklist']);
-    if (urlBlacklist.some(prefix => tab.url.startsWith(prefix))) {
+    const { urlBlacklist } = await chrome.storage.local.get(['urlBlacklist']);
+    const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
+    if (blacklist.some(prefix => tab.url.startsWith(prefix))) {
       const existing = await chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url });
       if (!existing || !existing.interaction) {
         console.log(`Skipping blacklisted URL (not in database): ${tab.url}`);
@@ -93,7 +94,9 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
             const pipeIdx = title.indexOf('|');
             if (pipeIdx > 0) title = title.substring(0, pipeIdx).trim();
           } else if (rule.action === 'remove_brackets') {
-            title = title.replace(/\s*[\[\(][^\]\)]*[\]\)]\s*/g, ' ').trim();
+            title = title.replace(/\s*\[[^\]]*\]\s*/g, ' ').trim();
+          } else if (rule.action === 'remove_parens') {
+            title = title.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
           }
         }
       }
@@ -246,7 +249,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 // Handle messages from content scripts and offscreen document
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  const handledActions = ['updateInteraction', 'getPageInfo', 'captureCurrentPageFromPopup', 'saveHighlight'];
+  const handledActions = ['updateInteraction', 'getPageInfo', 'captureCurrentPageFromPopup', 'saveHighlight', 'deleteHighlight'];
   if (!handledActions.includes(request.action)) {
     return false;
   }
@@ -349,6 +352,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       await chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
       console.log(`[background] Saved ${highlights.length} highlights for slug=${slug}`);
+      sendResponse({ success: true, highlights });
+
+    } else if (request.action === 'deleteHighlight') {
+      console.log(`[background] deleteHighlight: slug=${request.slug}, text="${request.text?.substring(0, 50)}"`);
+      await setupOffscreenDocument();
+      const slug = request.slug;
+
+      const loadResp = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
+      let highlights = loadResp?.highlights || [];
+
+      // Remove by matching text and timestamp
+      const before = highlights.length;
+      highlights = highlights.filter(h =>
+        !(h.text === request.text && h.timestamp === request.timestamp)
+      );
+      // Fallback: match by text only if timestamp didn't match
+      if (highlights.length === before && request.text) {
+        const idx = highlights.findIndex(h => h.text === request.text);
+        if (idx >= 0) highlights.splice(idx, 1);
+      }
+
+      await chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
+      console.log(`[background] Deleted highlight, ${highlights.length} remaining`);
       sendResponse({ success: true, highlights });
     }
   })();

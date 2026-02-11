@@ -208,6 +208,8 @@
     .ranking-options {
       display: flex;
       gap: 4px;
+      padding: 8px 24px;
+      border-bottom: 1px solid #dadce0;
     }
 
     .ranking-btn {
@@ -327,9 +329,45 @@
     }
 
     /* ── Results list ── */
-    .results-container {
+    .results-wrapper {
       flex: 1;
       overflow-y: auto;
+      position: relative;
+    }
+
+    .results-inner {
+      display: flex;
+      min-height: 100%;
+    }
+
+    .select-gutter {
+      width: 14px;
+      min-width: 14px;
+      flex-shrink: 0;
+      background: #f1f3f4;
+      border-right: 1px solid #e8eaed;
+      cursor: crosshair;
+      user-select: none;
+    }
+
+    .select-gutter:hover {
+      background: #e2e5e8;
+    }
+
+    .select-band {
+      position: absolute;
+      left: 0;
+      width: 100%;
+      background: rgba(26, 115, 232, 0.1);
+      border-left: 3px solid #1a73e8;
+      pointer-events: none;
+      z-index: 5;
+      display: none;
+    }
+
+    .results-container {
+      flex: 1;
+      min-width: 0;
     }
 
     .result-item {
@@ -340,13 +378,43 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 6px 24px;
+      padding: 6px 24px 6px 8px;
       cursor: pointer;
       height: 36px;
     }
 
     .result-row:hover {
       background: #f8f9fa;
+    }
+
+    .result-row.selected {
+      background: #e8f0fe;
+    }
+
+    .result-expand {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      background: none;
+      cursor: pointer;
+      color: #9aa0a6;
+      font-size: 12px;
+      padding: 0;
+      border-radius: 4px;
+      transition: transform 0.15s;
+    }
+
+    .result-expand:hover {
+      color: #5f6368;
+      background: #e8eaed;
+    }
+
+    .result-expand.open {
+      transform: rotate(90deg);
     }
 
     .result-title {
@@ -377,30 +445,10 @@
       border-radius: 50%;
     }
 
-    .attention-dot-wrap:hover {
-      background: #f1f3f4;
-    }
-
     .attention-dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      transition: opacity 0.15s;
-    }
-
-    .attention-dot-wrap:hover .attention-dot {
-      display: none;
-    }
-
-    .attention-eye {
-      display: none;
-      width: 16px;
-      height: 16px;
-      fill: #5f6368;
-    }
-
-    .attention-dot-wrap:hover .attention-eye {
-      display: block;
     }
 
     .result-pin {
@@ -500,6 +548,108 @@
       margin-bottom: 4px;
       font-size: 12px;
       color: #202124;
+    }
+
+    .detail-highlight-entry {
+      display: flex;
+      align-items: flex-start;
+      gap: 4px;
+      padding: 4px 8px;
+      background: #fff3cd;
+      border-radius: 3px;
+      margin: 4px 0;
+      font-size: 12px;
+      color: #202124;
+    }
+
+    .detail-highlight-content {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .detail-highlight-delete {
+      width: 20px;
+      height: 20px;
+      border: none;
+      background: none;
+      border-radius: 50%;
+      cursor: pointer;
+      color: #b8860b;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0;
+    }
+
+    .detail-highlight-delete:hover {
+      background: rgba(0,0,0,0.1);
+      color: #c5221f;
+    }
+
+    .detail-extra {
+      margin-top: 8px;
+      border-top: 1px solid #e8eaed;
+      padding-top: 8px;
+    }
+
+    .detail-section {
+      margin-bottom: 6px;
+    }
+
+    .detail-section-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: #5f6368;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .detail-topic-tag {
+      display: inline-block;
+      padding: 1px 8px;
+      background: #e8f0fe;
+      color: #1a73e8;
+      border-radius: 10px;
+      font-size: 11px;
+      margin: 2px 2px 2px 0;
+    }
+
+    .detail-note-item {
+      padding: 4px 8px;
+      background: #e8f5e9;
+      border-radius: 3px;
+      margin: 4px 0;
+      font-size: 12px;
+    }
+
+    .detail-note-context {
+      color: #5f6368;
+      font-style: italic;
+    }
+
+    .detail-note-text {
+      color: #202124;
+    }
+
+    .detail-snapshots {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 4px;
+    }
+
+    .detail-snapshot-item {
+      display: inline-block;
+      padding: 2px 8px;
+      background: #f1f3f4;
+      border-radius: 3px;
+      font-size: 11px;
+      color: #5f6368;
     }
 
     .pinned-divider {
@@ -860,11 +1010,266 @@
     }
 
     .result-row[draggable="true"] {
-      cursor: grab;
+      cursor: pointer;
     }
 
-    .result-row[draggable="true"]:active {
-      cursor: grabbing;
+    /* ── Recycle bin ── */
+    .local-recycle-btn {
+      position: relative;
+      padding: 4px 12px;
+      background: none;
+      color: #5f6368;
+      border: 1px solid #dadce0;
+      border-radius: 16px;
+      cursor: pointer;
+      font-size: 12px;
+      display: none;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .local-recycle-btn:hover {
+      background: #f1f3f4;
+    }
+
+    .local-recycle-btn svg {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+    }
+
+    .local-recycle-btn .badge {
+      background: #d93025;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 8px;
+      min-width: 16px;
+      text-align: center;
+    }
+
+    .local-recycle-btn .badge:empty {
+      display: none;
+    }
+
+    .main-header {
+      position: relative;
+    }
+
+    .local-recycle-panel {
+      display: none;
+      position: absolute;
+      top: 100%;
+      right: 0;
+      width: 400px;
+      max-height: 480px;
+      background: #fff;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+      z-index: 50;
+      overflow: hidden;
+    }
+
+    .local-recycle-panel.open {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .local-recycle-panel-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid #e8eaed;
+      font-size: 14px;
+      font-weight: 500;
+      color: #202124;
+    }
+
+    .local-recycle-panel-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+
+    .local-recycle-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      font-size: 13px;
+      color: #202124;
+      border-bottom: 1px solid #f1f3f4;
+    }
+
+    .local-recycle-item:last-child {
+      border-bottom: none;
+    }
+
+    .local-recycle-item-title {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .local-recycle-item-actions button {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: none;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #5f6368;
+    }
+
+    .local-recycle-item-actions button svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
+    .local-recycle-item-actions button:hover {
+      background: #e6f4ea;
+      color: #137333;
+    }
+
+    .local-recycle-empty {
+      text-align: center;
+      padding: 24px;
+      color: #9aa0a6;
+      font-size: 13px;
+    }
+
+    .recycle-count {
+      font-size: 11px;
+      color: #9aa0a6;
+      flex-shrink: 0;
+    }
+
+    .recycle-count:empty {
+      display: none;
+    }
+
+    .result-delete {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: none;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: #dadce0;
+      opacity: 0;
+      transition: opacity 0.1s;
+    }
+
+    .result-row:hover .result-delete {
+      opacity: 1;
+    }
+
+    .result-delete:hover {
+      background: #fce8e6;
+      color: #d93025;
+    }
+
+    .result-delete svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
+    .result-restore {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: none;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: #dadce0;
+      opacity: 0;
+      transition: opacity 0.1s;
+    }
+
+    .result-row:hover .result-restore {
+      opacity: 1;
+    }
+
+    .result-restore:hover {
+      background: #e6f4ea;
+      color: #137333;
+    }
+
+    .result-restore svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
+    .ranking-separator {
+      width: 1px;
+      height: 20px;
+      background: #dadce0;
+      margin: 0 4px;
+      align-self: center;
+    }
+
+    .sort-btn {
+      padding: 4px 12px;
+      background: #f1f3f4;
+      color: #5f6368;
+      border: 1px solid transparent;
+      border-radius: 16px;
+      cursor: pointer;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .sort-btn:hover {
+      background: #e8eaed;
+    }
+
+    .sort-btn.active {
+      background: #e6f4ea;
+      border-color: #137333;
+      color: #137333;
+    }
+
+    /* ── Topic layout ── */
+    .topic-layout {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .topic-layout.visible {
+      display: flex;
+    }
+
+    .section-header {
+      padding: 6px 24px;
+      font-size: 11px;
+      font-weight: 500;
+      color: #5f6368;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e8eaed;
+    }
+
+    .section-results-wrapper {
+      position: relative;
     }
   </style>
 </head>
@@ -883,6 +1288,16 @@
     </div>
 
     <div class="sidebar-content">
+      <div class="sidebar-item active" data-category="all">
+        <span class="icon"><svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg></span>
+        <span class="label">All</span>
+      </div>
+      <div class="sidebar-item" data-category="recycleBin">
+        <span class="icon"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></span>
+        <span class="label">Recycle Bin</span>
+        <span class="recycle-count" id="recycleSidebarCount"></span>
+      </div>
+
       <div class="sidebar-section-label">Topics</div>
       <div id="topicsList">
         <div class="topics-empty" id="topicsEmpty">Pin a search to create a topic</div>
@@ -890,10 +1305,6 @@
 
       <div class="sidebar-section-label">Categories</div>
       <div id="categoriesList">
-        <div class="sidebar-item active" data-category="all">
-          <span class="icon"><svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg></span>
-          <span class="label">All</span>
-        </div>
         <div class="sidebar-item" data-category="today">
           <span class="icon"><svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"/></svg></span>
           <span class="label">Today</span>
@@ -922,13 +1333,25 @@
         <svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>
         Pin
       </button>
-      <div class="ranking-options">
-        <button class="ranking-btn active" data-algorithm="0">Content</button>
-        <button class="ranking-btn" data-algorithm="1">Context</button>
-        <button class="ranking-btn" data-algorithm="2">Lineage</button>
-        <button class="ranking-btn" data-algorithm="3">Attention</button>
-        <button class="ranking-btn" data-algorithm="4">Hybrid</button>
+      <button class="local-recycle-btn" id="localRecycleBtn" title="Hidden items">
+        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        <span class="badge" id="localRecycleBadge"></span>
+      </button>
+      <div class="local-recycle-panel" id="localRecyclePanel">
+        <div class="local-recycle-panel-header">Hidden in this category</div>
+        <div class="local-recycle-panel-list" id="localRecyclePanelList"></div>
       </div>
+    </div>
+
+    <div class="ranking-options" id="globalRanking">
+      <button class="ranking-btn active" data-algorithm="0">Content</button>
+      <button class="ranking-btn" data-algorithm="1">Context</button>
+      <button class="ranking-btn" data-algorithm="2">Lineage</button>
+      <button class="ranking-btn" data-algorithm="3">Attention</button>
+      <button class="ranking-btn" data-algorithm="4">Hybrid</button>
+      <span class="ranking-separator"></span>
+      <button class="sort-btn active" data-sort="lastVisit">Last Visit</button>
+      <button class="sort-btn" data-sort="firstVisit">First Visit</button>
     </div>
 
     <div class="attention-chart" id="attentionChart">
@@ -937,8 +1360,72 @@
       <div class="chart-tooltip" id="chartTooltip"></div>
     </div>
 
-    <div class="results-container" id="results">
-      <div class="loading">Loading interactions...</div>
+    <div class="attention-chart" id="attentionChartSecondary">
+      <div class="chart-label">Other results</div>
+      <div class="chart-bars" id="chartBarsSecondary"></div>
+      <div class="chart-tooltip" id="chartTooltipSecondary"></div>
+    </div>
+
+    <div class="results-wrapper" id="resultsWrapper">
+      <div class="results-inner">
+        <div class="select-gutter" id="selectGutter"></div>
+        <div class="results-container" id="results">
+          <div class="loading">Loading interactions...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Topic-specific two-section layout -->
+    <div class="topic-layout" id="topicLayout">
+      <div class="topic-section" data-section="pinned">
+        <div class="section-header">Pinned</div>
+        <div class="ranking-options section-ranking" data-section="pinned">
+          <button class="ranking-btn active" data-algorithm="0">Content</button>
+          <button class="ranking-btn" data-algorithm="1">Context</button>
+          <button class="ranking-btn" data-algorithm="2">Lineage</button>
+          <button class="ranking-btn" data-algorithm="3">Attention</button>
+          <button class="ranking-btn" data-algorithm="4">Hybrid</button>
+          <span class="ranking-separator"></span>
+          <button class="sort-btn active" data-sort="lastVisit">Last Visit</button>
+          <button class="sort-btn" data-sort="firstVisit">First Visit</button>
+          <button class="sort-btn" data-sort="pinTime">Pin Time</button>
+        </div>
+        <div class="attention-chart" id="pinnedChart">
+          <div class="chart-label">Pinned pages</div>
+          <div class="chart-bars" id="pinnedChartBars"></div>
+          <div class="chart-tooltip" id="pinnedChartTooltip"></div>
+        </div>
+        <div class="section-results-wrapper" id="pinnedResultsWrapper">
+          <div class="results-inner">
+            <div class="select-gutter" id="pinnedGutter"></div>
+            <div class="results-container" id="pinnedResults"></div>
+          </div>
+        </div>
+      </div>
+      <div class="topic-section" data-section="related">
+        <div class="section-header">Related</div>
+        <div class="ranking-options section-ranking" data-section="related">
+          <button class="ranking-btn active" data-algorithm="0">Content</button>
+          <button class="ranking-btn" data-algorithm="1">Context</button>
+          <button class="ranking-btn" data-algorithm="2">Lineage</button>
+          <button class="ranking-btn" data-algorithm="3">Attention</button>
+          <button class="ranking-btn" data-algorithm="4">Hybrid</button>
+          <span class="ranking-separator"></span>
+          <button class="sort-btn active" data-sort="lastVisit">Last Visit</button>
+          <button class="sort-btn" data-sort="firstVisit">First Visit</button>
+        </div>
+        <div class="attention-chart" id="relatedChart">
+          <div class="chart-label">Related pages</div>
+          <div class="chart-bars" id="relatedChartBars"></div>
+          <div class="chart-tooltip" id="relatedChartTooltip"></div>
+        </div>
+        <div class="section-results-wrapper" id="relatedResultsWrapper">
+          <div class="results-inner">
+            <div class="select-gutter" id="relatedGutter"></div>
+            <div class="results-container" id="relatedResults"></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1031,6 +1518,7 @@
             <select id="trimActionSelect" class="trim-action-select">
               <option value="remove_after_pipe">Remove after |</option>
               <option value="remove_brackets">Remove [brackets]</option>
+              <option value="remove_parens">Remove (parens)</option>
             </select>
             <button id="trimAddBtn" class="btn btn-primary">Add</button>
           </div>
