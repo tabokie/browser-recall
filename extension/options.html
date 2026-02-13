@@ -4,6 +4,23 @@
   <meta charset="UTF-8">
   <title>Portal</title>
   <style>
+    :root {
+      /* Results layout */
+      --results-padding: 12px;
+      --results-gap: 10px;
+      --col-gap: 8px;
+
+      /* Column widths (shared between header and result rows) */
+      --col-expand: 20px;
+      --col-time: 76px;
+      --col-relevance: 44px;
+      --col-attention: 20px;
+      --col-action: 28px;
+
+      /* Card appearance */
+      --card-radius: 6px;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
@@ -204,7 +221,7 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
-      overflow: hidden;
+      overflow-y: auto;
     }
 
     .main-header {
@@ -221,6 +238,39 @@
       font-weight: 500;
       color: #202124;
       margin-right: auto;
+    }
+
+    .main-title-input {
+      font-size: 15px;
+      font-weight: 500;
+      color: #202124;
+      border: none;
+      border-bottom: 2px solid #1a73e8;
+      outline: none;
+      background: transparent;
+      padding: 0 0 2px;
+      margin-right: auto;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .confirm-title-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: #1a73e8;
+      color: #fff;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .confirm-title-btn:hover {
+      background: #1557b0;
     }
 
 
@@ -321,55 +371,47 @@
 
     /* ── Results list ── */
     .results-wrapper {
-      flex: 1;
-      overflow-y: auto;
       position: relative;
-    }
-
-    .results-inner {
-      display: flex;
-      min-height: 100%;
-    }
-
-    .select-gutter {
-      width: 14px;
-      min-width: 14px;
-      flex-shrink: 0;
-      background: #f1f3f4;
-      border-right: 1px solid #e8eaed;
+      background: #e8eaed;
       cursor: crosshair;
       user-select: none;
-    }
-
-    .select-gutter:hover {
-      background: #e2e5e8;
+      flex: 1;
     }
 
     .select-band {
       position: absolute;
-      left: 0;
-      width: 100%;
-      background: rgba(26, 115, 232, 0.1);
-      border-left: 3px solid #1a73e8;
+      background: rgba(26, 115, 232, 0.12);
+      border: 1px solid rgba(26, 115, 232, 0.4);
       pointer-events: none;
       z-index: 5;
       display: none;
     }
 
     .results-container {
-      flex: 1;
+      position: relative;
+      z-index: 1;
       min-width: 0;
+      padding: 0 var(--results-padding) var(--results-gap);
     }
 
     .result-item {
-      border-bottom: 1px solid #f1f3f4;
+      background: #fff;
+      border: 1px solid #dadce0;
+      border-radius: var(--card-radius);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+      overflow: hidden;
+    }
+
+    .result-item:first-child,
+    .column-header-row + .result-item {
+      margin-top: var(--results-gap);
     }
 
     .result-row {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 6px 24px 6px 8px;
+      gap: var(--col-gap);
+      padding: 6px var(--results-padding);
       cursor: pointer;
       height: 36px;
     }
@@ -383,8 +425,8 @@
     }
 
     .result-expand {
-      width: 20px;
-      height: 20px;
+      width: var(--col-expand);
+      height: var(--col-expand);
       flex-shrink: 0;
       display: flex;
       align-items: center;
@@ -423,13 +465,13 @@
       color: #9aa0a6;
       white-space: nowrap;
       flex-shrink: 0;
-      width: 76px;
+      width: var(--col-time);
       text-align: right;
     }
 
     .attention-dot-wrap {
-      width: 20px;
-      height: 20px;
+      width: var(--col-attention);
+      height: var(--col-attention);
       flex-shrink: 0;
       display: flex;
       align-items: center;
@@ -445,8 +487,8 @@
     }
 
     .result-pin {
-      width: 28px;
-      height: 28px;
+      width: var(--col-action);
+      height: var(--col-action);
       border: none;
       background: none;
       border-radius: 50%;
@@ -487,11 +529,13 @@
     /* ── Inline detail ── */
     .result-detail {
       display: none;
-      padding: 8px 24px 12px 44px;
+      padding: 8px var(--results-padding) 12px calc(var(--results-padding) + var(--col-expand) + var(--col-gap));
       background: #f8f9fa;
       font-size: 12px;
       color: #5f6368;
       line-height: 1.6;
+      cursor: default;
+      user-select: text;
     }
 
     .result-detail.open {
@@ -1021,8 +1065,8 @@
     }
 
     .result-delete {
-      width: 28px;
-      height: 28px;
+      width: var(--col-action);
+      height: var(--col-action);
       border: none;
       background: none;
       border-radius: 50%;
@@ -1052,8 +1096,8 @@
     }
 
     .result-restore {
-      width: 28px;
-      height: 28px;
+      width: var(--col-action);
+      height: var(--col-action);
       border: none;
       background: none;
       border-radius: 50%;
@@ -1085,14 +1129,22 @@
 
     /* ── Collection layout ── */
     .collection-layout {
-      flex: 1;
       display: none;
       flex-direction: column;
-      overflow-y: auto;
+      flex: 1;
     }
 
     .collection-layout.visible {
       display: flex;
+    }
+
+    .collection-section {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .collection-section:last-child {
+      flex: 1;
     }
 
     .section-header {
@@ -1104,10 +1156,62 @@
       letter-spacing: 0.5px;
       background: #f8f9fa;
       border-bottom: 1px solid #e8eaed;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .section-header:hover {
+      background: #e8eaed;
+    }
+
+    .section-chevron {
+      font-size: 8px;
+      display: inline-block;
+      transition: transform 0.15s;
+      transform: rotate(90deg);
+      color: #9aa0a6;
+    }
+
+    .section-header.collapsed .section-chevron {
+      transform: rotate(0deg);
+    }
+
+    .section-header.collapsed + .section-body {
+      display: none !important;
+    }
+
+    .collection-section .section-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .related-gap {
+      height: 12px;
+      background: #e8eaed;
+    }
+
+    .result-item.related-result {
+      opacity: 0.65;
+    }
+
+    .result-item.related-result:hover {
+      opacity: 0.85;
+    }
+
+    .collection-qb {
+      border-top: none;
     }
 
     .section-results-wrapper {
       position: relative;
+      background: #e8eaed;
+      cursor: crosshair;
+      user-select: none;
+      flex: 1;
     }
 
     .detail-lineage {
@@ -1223,6 +1327,9 @@
 
     .qb-body {
       min-height: 28px;
+    }
+
+    .qb-body.qb-mode-pro {
       overflow-x: auto;
     }
 
@@ -1235,7 +1342,6 @@
     }
 
     .qb-type-select,
-    .qb-field-select,
     .qb-filter-select,
     .qb-range-field-select {
       padding: 4px 6px;
@@ -1248,10 +1354,75 @@
     }
 
     .qb-type-select:focus,
-    .qb-field-select:focus,
     .qb-filter-select:focus,
     .qb-range-field-select:focus {
       border-color: #1a73e8;
+    }
+
+    .qb-field-multi {
+    }
+
+    .qb-field-toggle {
+      padding: 4px 6px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 12px;
+      background: #fff;
+      color: #202124;
+      cursor: pointer;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .qb-field-toggle:hover {
+      border-color: #bdc1c6;
+    }
+
+    .qb-field-toggle::after {
+      content: '';
+      border-left: 3px solid transparent;
+      border-right: 3px solid transparent;
+      border-top: 4px solid #5f6368;
+    }
+
+    .qb-field-dropdown {
+      display: none;
+      position: fixed;
+      background: #fff;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      z-index: 100;
+      min-width: 120px;
+    }
+
+    .qb-field-dropdown.open {
+      display: block;
+    }
+
+    .qb-field-option {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      font-size: 12px;
+      color: #202124;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .qb-field-option:hover {
+      background: #f1f3f4;
+    }
+
+    .qb-field-option input {
+      margin: 0;
+    }
+
+    .qb-field-option.all-option {
+      border-bottom: 1px solid #e8eaed;
     }
 
     .qb-value-input {
@@ -1531,22 +1702,17 @@
     .column-header-row {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 4px 24px 4px 8px;
+      gap: var(--col-gap);
+      padding: 4px calc(var(--results-padding) * 2);
+      margin: 0 calc(-1 * var(--results-padding));
       background: #f8f9fa;
       border-bottom: 1px solid #e8eaed;
-      position: sticky;
-      top: 0;
-      z-index: 10;
       user-select: none;
-    }
-
-    .collection-layout .column-header-row {
-      position: static;
+      cursor: default;
     }
 
     .col-spacer {
-      width: 20px;
+      width: var(--col-expand);
       flex-shrink: 0;
     }
 
@@ -1575,19 +1741,19 @@
     }
 
     .col-time {
-      width: 76px;
+      width: var(--col-time);
       flex-shrink: 0;
       text-align: right;
     }
 
     .col-rel {
-      width: 44px;
+      width: var(--col-relevance);
       flex-shrink: 0;
       text-align: right;
     }
 
     .result-rel {
-      width: 44px;
+      width: var(--col-relevance);
       flex-shrink: 0;
       text-align: right;
       font-size: 12px;
@@ -1596,13 +1762,13 @@
     }
 
     .col-att {
-      width: 20px;
+      width: var(--col-attention);
       flex-shrink: 0;
       text-align: center;
     }
 
     .col-action-spacer {
-      width: 28px;
+      width: var(--col-action);
       flex-shrink: 0;
     }
 
@@ -1612,25 +1778,24 @@
     }
 
     .col-add-btn {
-      width: 24px;
-      height: 24px;
-      border: 1px solid #dadce0;
-      background: #fff;
-      border-radius: 50%;
+      width: var(--col-action);
+      height: var(--col-action);
+      margin-right: calc(-1 * var(--col-action) - var(--col-gap));
+      border: none;
+      background: none;
       cursor: pointer;
       font-size: 14px;
-      color: #5f6368;
+      color: #9aa0a6;
       display: flex;
       align-items: center;
       justify-content: center;
-      flex-shrink: 0;
       padding: 0;
       line-height: 1;
+      z-index: 11;
+      flex-shrink: 0;
     }
 
     .col-add-btn:hover {
-      background: #f1f3f4;
-      border-color: #1a73e8;
       color: #1a73e8;
     }
 
@@ -1699,6 +1864,8 @@
   <div class="main">
     <div class="main-header">
       <span class="main-title" id="mainTitle">All</span>
+      <input class="main-title-input" id="mainTitleInput" type="text" style="display:none">
+      <button class="confirm-title-btn" id="confirmTitleBtn" style="display:none">&#x2713;</button>
       <button class="pin-search-btn" id="pinSearchBtn" title="Pin this search as a collection">
         <svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>
         Pin
@@ -1732,40 +1899,45 @@
     </div>
 
     <div class="results-wrapper" id="resultsWrapper">
-      <div class="results-inner">
-        <div class="select-gutter" id="selectGutter"></div>
-        <div class="results-container" id="results">
-          <div class="loading">Loading interactions...</div>
-        </div>
+      <div class="results-container" id="results">
+        <div class="loading">Loading interactions...</div>
       </div>
     </div>
 
-    <!-- Collection-specific two-section layout -->
+    <!-- Collection layout: merged pinned+related, then Explore section -->
     <div class="collection-layout" id="collectionLayout">
       <div class="collection-section" data-section="pinned">
-        <div class="section-header">Pinned</div>
-        <div class="attention-chart" id="pinnedChart">
-          <div class="chart-label">Pinned pages</div>
-          <div class="chart-bars" id="pinnedChartBars"></div>
-          <div class="chart-tooltip" id="pinnedChartTooltip"></div>
-        </div>
-        <div class="section-results-wrapper" id="pinnedResultsWrapper">
-          <div class="results-inner">
-            <div class="select-gutter" id="pinnedGutter"></div>
+        <div class="section-header" data-collapse="pinned"><span class="section-chevron">&#9654;</span> Pinned</div>
+        <div class="section-body">
+          <div class="attention-chart" id="pinnedChart">
+            <div class="chart-label">Collection pages</div>
+            <div class="chart-bars" id="pinnedChartBars"></div>
+            <div class="chart-tooltip" id="pinnedChartTooltip"></div>
+          </div>
+          <div class="section-results-wrapper" id="pinnedResultsWrapper">
             <div class="results-container" id="pinnedResults"></div>
           </div>
         </div>
       </div>
-      <div class="collection-section" data-section="related">
-        <div class="section-header">Related</div>
-        <div class="attention-chart" id="relatedChart">
-          <div class="chart-label">Related pages</div>
-          <div class="chart-bars" id="relatedChartBars"></div>
-          <div class="chart-tooltip" id="relatedChartTooltip"></div>
-        </div>
-        <div class="section-results-wrapper" id="relatedResultsWrapper">
-          <div class="results-inner">
-            <div class="select-gutter" id="relatedGutter"></div>
+      <div class="collection-section" data-section="explore">
+        <div class="section-header" data-collapse="explore"><span class="section-chevron">&#9654;</span> Explore</div>
+        <div class="section-body">
+          <div class="query-builder collection-qb" id="collectionQueryBuilder" style="display:none">
+            <div class="qb-header">
+              <span class="qb-title">Query</span>
+              <div class="qb-mode-toggle">
+                <button class="qb-mode-btn active" data-mode="normal">Normal</button>
+                <button class="qb-mode-btn" data-mode="professional">Pro</button>
+              </div>
+            </div>
+            <div class="qb-body" id="collectionQbBody"></div>
+          </div>
+          <div class="attention-chart" id="relatedChart">
+            <div class="chart-label">Explore results</div>
+            <div class="chart-bars" id="relatedChartBars"></div>
+            <div class="chart-tooltip" id="relatedChartTooltip"></div>
+          </div>
+          <div class="section-results-wrapper" id="relatedResultsWrapper">
             <div class="results-container" id="relatedResults"></div>
           </div>
         </div>
