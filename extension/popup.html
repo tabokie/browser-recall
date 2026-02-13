@@ -8,7 +8,6 @@
 
     body {
       width: 400px;
-      min-height: 200px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 13px;
       color: #333;
@@ -259,14 +258,14 @@
       text-align: center;
     }
 
-    .topic-chips {
+    .collection-chips {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
       margin-bottom: 8px;
     }
 
-    .topic-chip {
+    .collection-chip {
       display: inline-flex;
       align-items: center;
       gap: 4px;
@@ -280,26 +279,26 @@
       transition: background 0.15s, border-color 0.15s;
     }
 
-    .topic-chip:hover {
+    .collection-chip:hover {
       border-color: #aaa;
     }
 
-    .topic-chip.selected {
+    .collection-chip.selected {
       background: #e8f0fe;
       border-color: #1967d2;
       color: #1967d2;
     }
 
-    .topic-chip-check {
+    .collection-chip-check {
       font-size: 10px;
     }
 
-    .topic-new {
+    .collection-new {
       display: inline-flex;
       align-items: center;
     }
 
-    .topic-new-input {
+    .collection-new-input {
       width: 80px;
       font-size: 11px;
       padding: 3px 6px;
@@ -309,12 +308,12 @@
       font-family: inherit;
     }
 
-    .topic-new-input:focus {
+    .collection-new-input:focus {
       border-color: #4285f4;
       border-style: solid;
     }
 
-    .topic-new-input::placeholder {
+    .collection-new-input::placeholder {
       color: #bbb;
     }
 
@@ -324,89 +323,104 @@
       background: #fafafa;
     }
 
-    .workspace-bar.active {
+    .workspace-bar.mode-workspace {
       background: #e8f0fe;
       border-bottom: 2px solid #1967d2;
     }
 
+    .workspace-bar.mode-private {
+      background: #fef3e8;
+      border-bottom: 2px solid #e8710a;
+    }
+
     .workspace-header {
       display: flex;
-      justify-content: space-between;
+      justify-content: center;
       align-items: center;
     }
 
-    .workspace-label {
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #666;
+    .tri-toggle {
+      position: relative;
+      display: flex;
+      align-items: center;
+      width: 280px;
+      height: 26px;
+      background: #e0e0e0;
+      border-radius: 13px;
+      cursor: pointer;
+      user-select: none;
+      overflow: hidden;
     }
 
-    .workspace-bar.active .workspace-label {
+    .tri-toggle-knob {
+      position: absolute;
+      width: 90px;
+      height: 22px;
+      background: #fff;
+      border-radius: 11px;
+      top: 2px;
+      left: 95px;
+      transition: left 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      pointer-events: none;
+    }
+
+    .tri-toggle.mode-workspace .tri-toggle-knob {
+      left: 2px;
+    }
+
+    .tri-toggle.mode-private .tri-toggle-knob {
+      left: 188px;
+    }
+
+    .tri-toggle-zone {
+      flex: 1;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      position: relative;
+      z-index: 1;
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: #999;
+      transition: color 0.2s;
+      white-space: nowrap;
+    }
+
+    .tri-toggle-zone.left,
+    .tri-toggle-zone.center,
+    .tri-toggle-zone.right {
+      justify-content: center;
+    }
+
+    .tri-toggle.mode-workspace .tri-toggle-zone.left {
       color: #1967d2;
     }
 
-    .workspace-toggle {
-      position: relative;
-      display: inline-block;
-      width: 32px;
-      height: 18px;
-    }
-
-    .workspace-toggle input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-
-    .toggle-slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: #ccc;
-      border-radius: 9px;
-      transition: background 0.2s;
-    }
-
-    .toggle-slider::before {
-      content: '';
-      position: absolute;
-      height: 14px;
-      width: 14px;
-      left: 2px;
-      bottom: 2px;
-      background: white;
-      border-radius: 50%;
-      transition: transform 0.2s;
-    }
-
-    .workspace-toggle input:checked + .toggle-slider {
-      background: #1967d2;
-    }
-
-    .workspace-toggle input:checked + .toggle-slider::before {
-      transform: translateX(14px);
+    .tri-toggle.mode-private .tri-toggle-zone.right {
+      color: #e8710a;
     }
 
     .workspace-config {
       margin-top: 8px;
     }
 
-    .workspace-topic-label {
+    .workspace-collection-label {
       font-size: 10px;
       color: #888;
       margin-bottom: 4px;
     }
 
-    .workspace-topics {
+    .workspace-collections {
       display: flex;
       flex-wrap: wrap;
       gap: 5px;
       margin-bottom: 6px;
     }
 
-    .ws-topic-chip {
+    .ws-collection-chip {
       display: inline-flex;
       align-items: center;
       gap: 3px;
@@ -420,11 +434,11 @@
       transition: background 0.15s, border-color 0.15s;
     }
 
-    .ws-topic-chip:hover {
+    .ws-collection-chip:hover {
       border-color: #aaa;
     }
 
-    .ws-topic-chip.selected {
+    .ws-collection-chip.selected {
       background: #1967d2;
       border-color: #1967d2;
       color: #fff;
@@ -538,15 +552,16 @@
   <div id="dashboard" style="display: none;">
     <div class="workspace-bar" id="workspaceBar">
       <div class="workspace-header">
-        <span class="workspace-label">Workspace</span>
-        <label class="workspace-toggle">
-          <input type="checkbox" id="workspaceToggle">
-          <span class="toggle-slider"></span>
-        </label>
+        <div class="tri-toggle" id="triToggle">
+          <div class="tri-toggle-knob"></div>
+          <div class="tri-toggle-zone left" data-mode="workspace">Workspace</div>
+          <div class="tri-toggle-zone center" data-mode="default"><svg width="20" height="16" viewBox="0 0 20 16" fill="currentColor"><ellipse cx="13" cy="6" rx="2" ry="1.6"/><circle cx="11" cy="3.2" r="1"/><circle cx="12.5" cy="2.2" r="1"/><circle cx="14" cy="2.2" r="1"/><circle cx="15.5" cy="3.2" r="1"/><ellipse cx="7" cy="12.5" rx="2" ry="1.6"/><circle cx="5" cy="9.7" r="1"/><circle cx="6.5" cy="8.7" r="1"/><circle cx="8" cy="8.7" r="1"/><circle cx="9.5" cy="9.7" r="1"/></svg></div>
+          <div class="tri-toggle-zone right" data-mode="private">Private</div>
+        </div>
       </div>
       <div class="workspace-config" id="workspaceConfig" style="display: none;">
-        <div class="workspace-topic-label">Tag pages with:</div>
-        <div class="workspace-topics" id="workspaceTopics"></div>
+        <div class="workspace-collection-label">Tag pages with:</div>
+        <div class="workspace-collections" id="workspaceCollections"></div>
         <label class="workspace-auto-snapshot">
           <input type="checkbox" id="workspaceAutoSnapshot">
           <span>Auto-snapshot visited pages</span>
@@ -554,50 +569,52 @@
       </div>
     </div>
 
-    <div class="header">
-      <div class="page-title" id="pageTitle">—</div>
-      <div class="page-url" id="pageUrl">—</div>
-    </div>
-
-    <div class="section">
-      <div class="section-header">
-        <span class="section-title">Notes &amp; Highlights</span>
-        <span class="shortcut-hint">Alt+H</span>
+    <div id="dashboardContent">
+      <div class="header">
+        <div class="page-title" id="pageTitle">—</div>
+        <div class="page-url" id="pageUrl">—</div>
       </div>
-      <div class="notes-scroll">
-        <textarea class="page-note" id="pageNote" placeholder="Add a page note..."></textarea>
-        <div class="highlight-list" id="highlightList">
-          <div class="empty-state">No highlights</div>
+
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Notes &amp; Highlights</span>
+          <span class="shortcut-hint">Alt+H</span>
+        </div>
+        <div class="notes-scroll">
+          <textarea class="page-note" id="pageNote" placeholder="Add a page note..."></textarea>
+          <div class="highlight-list" id="highlightList">
+            <div class="empty-state">No highlights</div>
+          </div>
         </div>
       </div>
-    </div>
 
-    <div class="section">
-      <div class="section-header">
-        <span class="section-title">Topics</span>
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Collections</span>
+        </div>
+        <div class="collection-chips" id="collectionChips"></div>
       </div>
-      <div class="topic-chips" id="topicChips"></div>
-    </div>
 
-    <div class="section">
-      <div class="section-header">
-        <span class="section-title">Snapshots</span>
-        <span>
-          <span class="shortcut-hint">Alt+S</span>
-          <button class="section-action" id="captureBtn">+ Capture</button>
-        </span>
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Snapshots</span>
+          <span>
+            <span class="shortcut-hint">Alt+S</span>
+            <button class="section-action" id="captureBtn">+ Capture</button>
+          </span>
+        </div>
+        <div class="snapshot-list" id="snapshotList">
+          <div class="empty-state">No snapshots yet</div>
+        </div>
       </div>
-      <div class="snapshot-list" id="snapshotList">
-        <div class="empty-state">No snapshots yet</div>
-      </div>
-    </div>
 
-    <div class="section">
-      <div class="section-header">
-        <span class="section-title">Attention</span>
-      </div>
-      <div class="attention-grid" id="attentionGrid">
-        <div class="empty-state">No data</div>
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Attention</span>
+        </div>
+        <div class="attention-grid" id="attentionGrid">
+          <div class="empty-state">No data</div>
+        </div>
       </div>
     </div>
   </div>

@@ -373,6 +373,30 @@ class FileSystemStorage {
     return contentMap;
   }
 
+  // Load all highlights from pages/{slug}/highlights.json for every slug
+  async loadAllHighlights() {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+
+    const highlightsMap = {};
+
+    try {
+      const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
+      for await (const entry of pagesDir.values()) {
+        if (entry.kind === 'directory') {
+          try {
+            const fh = await entry.getFileHandle('highlights.json');
+            const file = await fh.getFile();
+            highlightsMap[entry.name] = JSON.parse(await file.text());
+          } catch { /* no highlights.json for this slug */ }
+        }
+      }
+    } catch { /* no pages dir */ }
+
+    return highlightsMap;
+  }
+
   // Capture a versioned snapshot: pages/{slug}/{timestamp}.md and .html
   async captureSnapshot(slug, timestamp, markdown, html) {
     const pagesDir = await this.getOrCreatePagesDirectory();
@@ -537,28 +561,41 @@ class FileSystemStorage {
     return match;
   }
 
-  // Load all topic pins from topics.json
-  async loadTopicPins() {
+  // Load all collection pins from collections.json (migrates from topics.json)
+  async loadCollectionPins() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
+    }
+
+    // Try collections.json first
+    try {
+      const fileHandle = await this.directoryHandle.getFileHandle('collections.json');
+      const file = await fileHandle.getFile();
+      return JSON.parse(await file.text());
+    } catch (error) {
+      // Not found — try legacy topics.json
     }
 
     try {
       const fileHandle = await this.directoryHandle.getFileHandle('topics.json');
       const file = await fileHandle.getFile();
-      return JSON.parse(await file.text());
+      const data = JSON.parse(await file.text());
+      // Migrate: save as collections.json, delete old file
+      await this.saveCollectionPins(data);
+      try { await this.directoryHandle.removeEntry('topics.json'); } catch (e) {}
+      return data;
     } catch (error) {
       return {};
     }
   }
 
-  // Save topic pins to topics.json
-  async saveTopicPins(allPins) {
+  // Save collection pins to collections.json
+  async saveCollectionPins(allPins) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
 
-    const fileHandle = await this.directoryHandle.getFileHandle('topics.json', { create: true });
+    const fileHandle = await this.directoryHandle.getFileHandle('collections.json', { create: true });
     const writable = await fileHandle.createWritable();
     await writable.write(JSON.stringify(allPins, null, 2));
     await writable.close();

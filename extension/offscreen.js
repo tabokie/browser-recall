@@ -89,8 +89,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     'loadInteractions', 'loadContent', 'loadAllContent',
     'getDirectoryInfo', 'changeDirectory', 'migrateData',
     'listSnapshots', 'captureSnapshot', 'deleteSnapshot',
-    'loadHighlights', 'saveHighlights', 'loadInteractionByUrl',
-    'loadTopicPins', 'saveTopicPins'
+    'loadHighlights', 'saveHighlights', 'loadAllHighlights', 'loadInteractionByUrl',
+    'loadCollectionPins', 'saveCollectionPins'
   ];
   if (!handledActions.includes(request.action)) {
     return false;
@@ -190,20 +190,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
+        case 'loadAllHighlights': {
+          const highlightsMap = await fsStorage.loadAllHighlights();
+          sendResponse({ success: true, highlightsMap });
+          break;
+        }
+
         case 'loadInteractionByUrl': {
           const interaction = await fsStorage.loadInteractionByUrl(request.url);
           sendResponse({ success: true, interaction });
           break;
         }
 
-        case 'loadTopicPins': {
-          const allPins = await fsStorage.loadTopicPins();
+        case 'loadCollectionPins': {
+          const allPins = await fsStorage.loadCollectionPins();
           sendResponse({ success: true, pins: allPins });
           break;
         }
 
-        case 'saveTopicPins': {
-          await fsStorage.saveTopicPins(request.pins);
+        case 'saveCollectionPins': {
+          await fsStorage.saveCollectionPins(request.pins);
           sendResponse({ success: true });
           break;
         }

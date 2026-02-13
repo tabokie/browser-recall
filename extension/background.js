@@ -59,9 +59,154 @@ chrome.runtime.onStartup.addListener(async () => {
   console.log('Extension started');
 });
 
+// Apply title trimming rules and whitespace trim
+async function trimTitle(rawTitle, url) {
+  let title = rawTitle || 'Untitled';
+  const { titleTrimRules = [] } = await chrome.storage.local.get(['titleTrimRules']);
+  for (const rule of titleTrimRules) {
+    if (url.startsWith(rule.urlPrefix)) {
+      if (rule.action === 'remove_after_pipe') {
+        const pipeIdx = title.indexOf('|');
+        if (pipeIdx > 0) title = title.substring(0, pipeIdx);
+      } else if (rule.action === 'remove_brackets') {
+        title = title.replace(/\s*\[[^\]]*\]\s*/g, ' ');
+      } else if (rule.action === 'remove_parens') {
+        title = title.replace(/\s*\([^)]*\)\s*/g, ' ');
+      }
+    }
+  }
+  return title.trim();
+}
+
+// --- Gateway domain registry ---
+// Storage: chrome.storage.local['gatewayDomains'] = { [origin]: { rootUrl, childUrls, fetched } }
+
+function isSearchQueryGateway(url) {
+  try {
+    const params = new URL(url).searchParams;
+    return params.has('q') || params.has('query') || params.has('search');
+  } catch { return false; }
+}
+
+async function updateGatewayRegistry(url) {
+  try {
+    const parsed = new URL(url);
+    const origin = parsed.origin;
+    const isRoot = parsed.pathname === '/' || parsed.pathname === '' || parsed.pathname === '/index.html' || parsed.pathname === '/index.htm';
+
+    const { gatewayDomains = {} } = await chrome.storage.local.get(['gatewayDomains']);
+    if (!gatewayDomains[origin]) {
+      gatewayDomains[origin] = { rootUrl: null, childUrls: [], fetched: false };
+    }
+    const entry = gatewayDomains[origin];
+
+    if (isRoot) {
+      entry.rootUrl = url;
+    } else {
+      if (!entry.childUrls.includes(url)) {
+        entry.childUrls.push(url);
+      }
+    }
+
+    await chrome.storage.local.set({ gatewayDomains });
+
+    // Auto-promote: if 2+ children and no root visited yet, fetch it
+    if (entry.childUrls.length >= 2 && !entry.rootUrl && !entry.fetched) {
+      fetchAndCreateGatewayRoot(origin);
+    }
+  } catch (e) {
+    console.warn('Gateway registry update failed:', e.message);
+  }
+}
+
+async function fetchAndCreateGatewayRoot(origin) {
+  // Mark fetched immediately to prevent concurrent attempts
+  const { gatewayDomains = {} } = await chrome.storage.local.get(['gatewayDomains']);
+  if (!gatewayDomains[origin]) return;
+  gatewayDomains[origin].fetched = true;
+  await chrome.storage.local.set({ gatewayDomains });
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const resp = await fetch(origin + '/', { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (!resp.ok) return;
+
+    const html = await resp.text();
+    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const rootUrl = origin + '/';
+    const rawTitle = titleMatch ? titleMatch[1].trim() : origin;
+    const title = await trimTitle(rawTitle, rootUrl);
+    const slug = generateSlugFromUrl(rootUrl);
+
+    const interaction = {
+      id: rootUrl,
+      timestamp: Date.now(),
+      url: rootUrl,
+      title: title,
+      intent: '',
+      attention: '',
+      slug: slug
+    };
+
+    await setupOffscreenDocument();
+    await chrome.runtime.sendMessage({
+      action: 'writeInteraction',
+      interaction,
+      markdown: '',
+      html: ''
+    });
+
+    // Update registry with rootUrl
+    const updated = (await chrome.storage.local.get(['gatewayDomains'])).gatewayDomains || {};
+    if (updated[origin]) {
+      updated[origin].rootUrl = rootUrl;
+      await chrome.storage.local.set({ gatewayDomains: updated });
+    }
+
+    console.log(`Gateway: created synthetic root for ${origin}`);
+  } catch (e) {
+    console.warn(`Gateway: failed to fetch root for ${origin}:`, e.message);
+  }
+}
+
 // Track page visits and interactions
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  // Handle title changes — update existing record
+  if (changeInfo.title && tab.url) {
+    if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
+    const { workspace } = await chrome.storage.local.get(['workspace']);
+    if (workspace && workspace.mode === 'private') return;
+
+    const result = await chrome.storage.local.get(['writeBuffer']);
+    const buffer = result.writeBuffer || [];
+    const existingIndex = buffer.findIndex(entry => entry.interaction.url === tab.url);
+    if (existingIndex !== -1) {
+      const title = await trimTitle(changeInfo.title, tab.url);
+      buffer[existingIndex].interaction.title = title;
+      buffer[existingIndex].interaction.timestamp = Date.now();
+      await chrome.storage.local.set({ writeBuffer: buffer });
+
+      await setupOffscreenDocument();
+      chrome.runtime.sendMessage({
+        action: 'writeInteraction',
+        interaction: buffer[existingIndex].interaction,
+        markdown: buffer[existingIndex].markdown,
+        html: buffer[existingIndex].html
+      }).catch(err => {
+        console.warn('Title update write failed:', err.message);
+      });
+      console.log(`Title updated for ${tab.url}: ${title}`);
+    }
+  }
+
   if (changeInfo.status === 'complete' && tab.url) {
+    // Private mode: skip all tracking
+    const { workspace } = await chrome.storage.local.get(['workspace']);
+    if (workspace && workspace.mode === 'private') return;
+
     // Skip chrome:// URLs
     if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
       return;
@@ -85,21 +230,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       const timestamp = Date.now();
       const slug = generateSlugFromUrl(tab.url);
 
-      // Apply title trimming rules
-      let title = tab.title || 'Untitled';
-      const { titleTrimRules = [] } = await chrome.storage.local.get(['titleTrimRules']);
-      for (const rule of titleTrimRules) {
-        if (tab.url.startsWith(rule.urlPrefix)) {
-          if (rule.action === 'remove_after_pipe') {
-            const pipeIdx = title.indexOf('|');
-            if (pipeIdx > 0) title = title.substring(0, pipeIdx).trim();
-          } else if (rule.action === 'remove_brackets') {
-            title = title.replace(/\s*\[[^\]]*\]\s*/g, ' ').trim();
-          } else if (rule.action === 'remove_parens') {
-            title = title.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
-          }
-        }
-      }
+      const title = await trimTitle(tab.title, tab.url);
 
       // Create interaction record (metadata only, no content)
       // URL is the identity — revisiting the same URL updates the entry
@@ -150,6 +281,9 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         console.warn('Offscreen write failed, will retry on next flush:', error.message);
       });
 
+      // Update gateway domain registry (non-blocking)
+      updateGatewayRegistry(tab.url);
+
       // If buffer is large, trigger flush
       if (buffer.length >= 10) {
         console.log('Buffer full, triggering flush...');
@@ -157,26 +291,27 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
           .catch(error => console.warn('Flush failed:', error.message));
       }
 
-      // Workspace mode: auto-pin to workspace topics and optionally snapshot
+      // Workspace mode: auto-pin to workspace collections and optionally snapshot
       const { workspace } = await chrome.storage.local.get(['workspace']);
-      if (workspace && workspace.enabled && workspace.topicIds && workspace.topicIds.length > 0) {
+      const wsCollectionIds = workspace?.collectionIds || workspace?.topicIds || [];
+      if (workspace && (workspace.mode === 'workspace' || workspace.enabled) && wsCollectionIds.length > 0) {
         try {
-          const pinsResp = await chrome.runtime.sendMessage({ action: 'loadTopicPins' });
+          const pinsResp = await chrome.runtime.sendMessage({ action: 'loadCollectionPins' });
           const allPins = (pinsResp && pinsResp.pins) ? pinsResp.pins : {};
           let changed = false;
 
-          for (const topicId of workspace.topicIds) {
-            if (!allPins[topicId]) allPins[topicId] = [];
-            const already = allPins[topicId].some(p => p.url === tab.url);
+          for (const collectionId of wsCollectionIds) {
+            if (!allPins[collectionId]) allPins[collectionId] = [];
+            const already = allPins[collectionId].some(p => p.url === tab.url);
             if (!already) {
-              allPins[topicId].push({ url: tab.url, title: tab.title || 'Untitled', pinnedAt: timestamp });
+              allPins[collectionId].push({ url: tab.url, title: tab.title || 'Untitled', pinnedAt: timestamp });
               changed = true;
             }
           }
 
           if (changed) {
-            await chrome.runtime.sendMessage({ action: 'saveTopicPins', pins: allPins });
-            console.log(`Workspace: auto-pinned ${tab.url} to topics ${workspace.topicIds.join(', ')}`);
+            await chrome.runtime.sendMessage({ action: 'saveCollectionPins', pins: allPins });
+            console.log(`Workspace: auto-pinned ${tab.url} to collections ${wsCollectionIds.join(', ')}`);
           }
 
           if (workspace.autoSnapshot) {
@@ -210,6 +345,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // Handle keyboard shortcuts
 chrome.commands.onCommand.addListener(async (command) => {
   console.log(`[background] Command received: ${command}`);
+
+  // Private mode: disable all commands
+  const { workspace } = await chrome.storage.local.get(['workspace']);
+  if (workspace && workspace.mode === 'private') return;
+
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
     console.log('[background] Command ignored: no suitable tab');

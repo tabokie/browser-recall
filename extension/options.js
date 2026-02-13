@@ -8,21 +8,108 @@ import { generateSlugFromUrl } from './utils.js';
 const fsStorage = new FileSystemStorage();
 
 // --- State ---
-let currentAlgorithm = 0;   // for category/search views
-let pinnedAlgorithm = 0;    // topic pinned section
-let relatedAlgorithm = 0;   // topic related section
-let currentSort = 'lastVisit';  // for category/search views
-let pinnedSort = 'lastVisit';   // topic pinned section
-let relatedSort = 'lastVisit';  // topic related section
+let currentSortState = { column: null, direction: null };
+let pinnedSortState = { column: null, direction: null };
+let relatedSortState = { column: null, direction: null };
+let currentExtraColumns = [];
+let pinnedExtraColumns = [];
+let relatedExtraColumns = [];
 let wasmInitialized = false;
 let cachedData = null; // { interactions, contentMap }
-let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'topic', query: '...', id: '...' }
-let allTopicPins = {}; // topicId -> [{ url, title, pinnedAt }]
+let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'collection', query: '...', id: '...' } or { type: 'explore', query: '...', filter: '...' }
+let allCollectionPins = {}; // collectionId -> [{ url, title, pinnedAt }]
 let recycleBin = []; // [{ url, title, deletedAt }] — global recycle bin
 let permanentDeletes = []; // [url, ...] — permanently deleted URLs
-let localHides = []; // [{ url, viewKey }] — per-category local hides
 let lastClickedRow = null; // for shift-click range select
 let marqueeActive = false; // suppress click during marquee drag
+let gatewayDomainsCache = {}; // { [origin]: { rootUrl, childUrls, fetched } }
+
+// --- Query builder state ---
+let qbNodeIdCounter = 0;
+let qbRoot = null;        // tree root (null = empty)
+let qbMode = 'normal';    // 'normal' | 'professional'
+let cachedAllHighlights = null; // slug → highlights[], lazy-loaded
+let qbDebounceTimer = null;
+
+// Range filter field configs: fallback min/max/step, format for labels
+const RANGE_CONFIGS = {
+  lastVisit:  { min: 0, max: 365, step: 1, format: v => v === 0 ? 'today' : v + 'd ago', isDaysAgo: true },
+  firstVisit: { min: 0, max: 365, step: 1, format: v => v === 0 ? 'today' : v + 'd ago', isDaysAgo: true },
+  visitCount: { min: 1, max: 100, step: 1, format: v => String(v) },
+  timeOnPage: { min: 0, max: 600, step: 5, format: v => v >= 60 ? Math.floor(v/60) + 'm' + (v%60 ? v%60 + 's' : '') : v + 's' },
+  scrollDepth:{ min: 0, max: 100, step: 1, format: v => v + '%' },
+  clicks:     { min: 0, max: 100, step: 1, format: v => String(v) },
+};
+let cachedFieldRanges = null; // { field: { min, max } } — computed from data
+
+// Compute actual data ranges for each range field (lightweight scan)
+function computeFieldRanges(interactions) {
+  const byUrl = new Map();
+  for (const i of interactions) {
+    if (!byUrl.has(i.url)) byUrl.set(i.url, []);
+    byUrl.get(i.url).push(i);
+  }
+  const ranges = {};
+  for (const key of Object.keys(RANGE_CONFIGS)) {
+    ranges[key] = { min: Infinity, max: -Infinity };
+  }
+  for (const [, group] of byUrl) {
+    const timestamps = group.map(i => i.timestamp);
+    const lastVisit = (Date.now() - Math.max(...timestamps)) / 86400000;
+    const firstVisit = (Date.now() - Math.min(...timestamps)) / 86400000;
+    const visitCount = group.length;
+    const latest = group.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+    const att = parseAttention(latest);
+    const vals = {
+      lastVisit, firstVisit, visitCount,
+      timeOnPage: att?.timeOnPage || 0,
+      scrollDepth: att?.scrollDepth || 0,
+      clicks: att?.clicks || 0,
+    };
+    for (const [key, v] of Object.entries(vals)) {
+      if (v < ranges[key].min) ranges[key].min = v;
+      if (v > ranges[key].max) ranges[key].max = v;
+    }
+  }
+  // Round and ensure min < max
+  for (const [field, r] of Object.entries(ranges)) {
+    const step = RANGE_CONFIGS[field].step;
+    r.min = Math.floor(r.min / step) * step;
+    r.max = Math.ceil(r.max / step) * step;
+    if (r.min >= r.max) r.max = r.min + step;
+  }
+  return ranges;
+}
+
+function getFieldRanges() {
+  if (cachedFieldRanges) return cachedFieldRanges;
+  if (!cachedData) return null;
+  cachedFieldRanges = computeFieldRanges(cachedData.interactions);
+  return cachedFieldRanges;
+}
+
+// Get effective min/max for a range field: data-driven if available, else static fallback
+function getRangeConfig(field) {
+  const cfg = RANGE_CONFIGS[field];
+  const dataRanges = getFieldRanges();
+  const dr = dataRanges?.[field];
+  return {
+    ...cfg,
+    min: dr ? dr.min : cfg.min,
+    max: dr ? dr.max : cfg.max,
+  };
+}
+
+// Node constructors
+function qbCreatePredicate(predicateType, config = {}) {
+  return { id: ++qbNodeIdCounter, type: 'predicate', predicateType, ...config };
+}
+function qbCreateOperator(op, children) {
+  return { id: ++qbNodeIdCounter, type: 'operator', op, children };
+}
+function qbCreatePlaceholder() {
+  return { id: ++qbNodeIdCounter, type: 'predicate', predicateType: null };
+}
 
 // --- WASM ---
 async function initWasm() {
@@ -70,42 +157,42 @@ async function loadData() {
   return cachedData;
 }
 
-// --- Topic pins (filesystem) ---
-async function loadAllTopicPins() {
+// --- Collection pins (filesystem) ---
+async function loadAllCollectionPins() {
   try {
-    const response = await chrome.runtime.sendMessage({ action: 'loadTopicPins' });
+    const response = await chrome.runtime.sendMessage({ action: 'loadCollectionPins' });
     if (response && response.success) {
-      allTopicPins = response.pins || {};
+      allCollectionPins = response.pins || {};
     }
   } catch (error) {
-    console.log('Could not load topic pins:', error.message);
+    console.log('Could not load collection pins:', error.message);
   }
-  return allTopicPins;
+  return allCollectionPins;
 }
 
-async function saveAllTopicPins() {
+async function saveAllCollectionPins() {
   try {
-    await chrome.runtime.sendMessage({ action: 'saveTopicPins', pins: allTopicPins });
+    await chrome.runtime.sendMessage({ action: 'saveCollectionPins', pins: allCollectionPins });
   } catch (error) {
-    console.log('Could not save topic pins:', error.message);
+    console.log('Could not save collection pins:', error.message);
   }
 }
 
-function isResultPinned(topicId, url) {
-  const pins = allTopicPins[topicId] || [];
+function isResultPinned(collectionId, url) {
+  const pins = allCollectionPins[collectionId] || [];
   return pins.some(p => p.url === url);
 }
 
-async function toggleResultPin(topicId, url, title) {
-  if (!allTopicPins[topicId]) allTopicPins[topicId] = [];
-  const pins = allTopicPins[topicId];
+async function toggleResultPin(collectionId, url, title) {
+  if (!allCollectionPins[collectionId]) allCollectionPins[collectionId] = [];
+  const pins = allCollectionPins[collectionId];
   const idx = pins.findIndex(p => p.url === url);
   if (idx !== -1) {
     pins.splice(idx, 1);
   } else {
     pins.push({ url, title, pinnedAt: Date.now() });
   }
-  await saveAllTopicPins();
+  await saveAllCollectionPins();
 }
 
 // --- Recycle bin ---
@@ -154,168 +241,245 @@ function updateRecycleSidebarCount() {
   el.textContent = recycleBin.length > 0 ? recycleBin.length : '';
 }
 
-// --- Local hides (per-category) ---
-async function loadLocalHides() {
-  const result = await chrome.storage.local.get(['localHides']);
-  localHides = result.localHides || [];
-  return localHides;
-}
 
-async function saveLocalHides() {
-  await chrome.storage.local.set({ localHides });
-}
-
-function isLocallyHidden(url, viewKey) {
-  return localHides.some(item => item.url === url && item.viewKey === viewKey);
-}
-
-async function locallyHideItem(url, viewKey) {
-  if (isLocallyHidden(url, viewKey)) return;
-  localHides.push({ url, viewKey });
-  await saveLocalHides();
-  updateLocalRecycleBadge();
-}
-
-async function locallyRestoreItem(url, viewKey) {
-  localHides = localHides.filter(item => !(item.url === url && item.viewKey === viewKey));
-  await saveLocalHides();
-  updateLocalRecycleBadge();
-}
-
-function getLocalHidesForCurrentView() {
-  const viewKey = activeViewKey();
-  return localHides.filter(item => item.viewKey === viewKey);
-}
-
-function updateLocalRecycleBadge() {
-  const badge = document.getElementById('localRecycleBadge');
-  const count = getLocalHidesForCurrentView().length;
-  badge.textContent = count > 0 ? count : '';
-}
-
-function renderLocalRecyclePanel() {
-  const list = document.getElementById('localRecyclePanelList');
-  const viewKey = activeViewKey();
-  const items = localHides.filter(item => item.viewKey === viewKey);
-
-  if (items.length === 0) {
-    list.innerHTML = '<div class="local-recycle-empty">No hidden items</div>';
-    return;
-  }
-
-  // Try to find titles from cached data
-  const data = cachedData || { interactions: [] };
-  const titleMap = new Map();
-  for (const i of data.interactions) {
-    if (!titleMap.has(i.url)) titleMap.set(i.url, i.title);
-  }
-
-  const RESTORE_SVG = '<svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18z"/></svg>';
-
-  list.innerHTML = items.map(item => {
-    const title = titleMap.get(item.url) || item.url;
-    return `<div class="local-recycle-item" data-url="${escapeHtml(item.url)}" data-view-key="${escapeHtml(item.viewKey)}">
-      <div class="local-recycle-item-title" title="${escapeHtml(item.url)}">${escapeHtml(title)}</div>
-      <div class="local-recycle-item-actions">
-        <button class="local-restore-btn" title="Restore">${RESTORE_SVG}</button>
-      </div>
-    </div>`;
-  }).join('');
-
-  list.querySelectorAll('.local-restore-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const row = btn.closest('.local-recycle-item');
-      await locallyRestoreItem(row.dataset.url, row.dataset.viewKey);
-      await refreshCurrentView();
-      renderLocalRecyclePanel();
-      document.getElementById('localRecyclePanel').classList.add('open');
-    });
-  });
-}
-
-function activeViewKey() {
-  if (activeView.type === 'category') return `category:${activeView.value}`;
-  if (activeView.type === 'topic') return `topic:${activeView.id}`;
-  if (activeView.type === 'search') return `search:${activeView.query}`;
-  return 'unknown';
-}
-
-// --- Layout switching (topic vs normal) ---
-function showTopicLayout() {
-  document.getElementById('globalRanking').style.display = 'none';
+// --- Layout switching (collection vs normal) ---
+function showCollectionLayout() {
   document.getElementById('attentionChart').classList.remove('visible');
   document.getElementById('attentionChartSecondary').classList.remove('visible');
   document.getElementById('resultsWrapper').style.display = 'none';
-  document.getElementById('topicLayout').classList.add('visible');
-  syncAllRankingButtons();
-  syncAllSortButtons();
+  document.getElementById('collectionLayout').classList.add('visible');
+  document.getElementById('queryBuilder').style.display = 'none';
 }
 
 function showNormalLayout() {
-  document.getElementById('globalRanking').style.display = '';
   document.getElementById('resultsWrapper').style.display = '';
-  document.getElementById('topicLayout').classList.remove('visible');
-  syncAllRankingButtons();
-  syncAllSortButtons();
+  document.getElementById('collectionLayout').classList.remove('visible');
 }
 
-function syncAllRankingButtons() {
-  document.querySelectorAll('#globalRanking .ranking-btn').forEach(btn => {
-    btn.classList.toggle('active', parseInt(btn.dataset.algorithm) === currentAlgorithm);
-  });
-  document.querySelectorAll('.section-ranking[data-section="pinned"] .ranking-btn').forEach(btn => {
-    btn.classList.toggle('active', parseInt(btn.dataset.algorithm) === pinnedAlgorithm);
-  });
-  document.querySelectorAll('.section-ranking[data-section="related"] .ranking-btn').forEach(btn => {
-    btn.classList.toggle('active', parseInt(btn.dataset.algorithm) === relatedAlgorithm);
+// --- Sort helpers ---
+function getSortState(context) {
+  if (context === 'pinned') return pinnedSortState;
+  if (context === 'related') return relatedSortState;
+  return currentSortState;
+}
+
+function setSortState(context, state) {
+  if (context === 'pinned') pinnedSortState = state;
+  else if (context === 'related') relatedSortState = state;
+  else currentSortState = state;
+}
+
+function getExtraColumns(context) {
+  if (context === 'pinned') return pinnedExtraColumns;
+  if (context === 'related') return relatedExtraColumns;
+  return currentExtraColumns;
+}
+
+function setExtraColumns(context, cols) {
+  if (context === 'pinned') pinnedExtraColumns = cols;
+  else if (context === 'related') relatedExtraColumns = cols;
+  else currentExtraColumns = cols;
+}
+
+function getAvailableExtras(context) {
+  if (context === 'pinned') return ['firstVisit', 'pinTime'];
+  return ['firstVisit'];
+}
+
+const COLUMN_LABELS = {
+  title: 'Title',
+  relevance: 'Rel',
+  lastVisit: 'Last Visit',
+  firstVisit: 'First Visit',
+  attention: 'Att',
+  pinTime: 'Pin Time'
+};
+
+function applySortOrder(items, sortState) {
+  if (!sortState || !sortState.column) return items;
+  const { column, direction } = sortState;
+  const dir = direction === 'asc' ? 1 : -1;
+
+  return [...items].sort((a, b) => {
+    let av, bv;
+    switch (column) {
+      case 'title':
+        av = (a.title || '').toLowerCase();
+        bv = (b.title || '').toLowerCase();
+        return dir * av.localeCompare(bv);
+      case 'lastVisit':
+        av = Math.max(...(a.timestamps || [a.latestTs || 0]));
+        bv = Math.max(...(b.timestamps || [b.latestTs || 0]));
+        return dir * (av - bv);
+      case 'firstVisit':
+        av = Math.min(...(a.timestamps || [a.latestTs || 0]));
+        bv = Math.min(...(b.timestamps || [b.latestTs || 0]));
+        return dir * (av - bv);
+      case 'attention':
+        av = a.attScore || 0;
+        bv = b.attScore || 0;
+        return dir * (av - bv);
+      case 'pinTime':
+        av = a.pinnedAt || 0;
+        bv = b.pinnedAt || 0;
+        return dir * (av - bv);
+      case 'relevance':
+        av = a.relevance || 0;
+        bv = b.relevance || 0;
+        return dir * (av - bv);
+      default:
+        return 0;
+    }
   });
 }
 
-function syncAllSortButtons() {
-  document.querySelectorAll('#globalRanking .sort-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.sort === currentSort);
-  });
-  document.querySelectorAll('.section-ranking[data-section="pinned"] .sort-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.sort === pinnedSort);
-  });
-  document.querySelectorAll('.section-ranking[data-section="related"] .sort-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.sort === relatedSort);
-  });
-}
+// --- Column headers ---
+function columnHeaderHtml(context, opts = {}) {
+  const sortState = getSortState(context);
+  const extraCols = getExtraColumns(context);
+  const { hasDelete = true, hasPin = false, showRelevance = false } = opts;
 
-function applySortOrder(items, sortBy) {
-  if (sortBy === 'firstVisit') {
-    // Sort by each item's earliest visit, most recently discovered first
-    return [...items].sort((a, b) => {
-      const aFirst = Math.min(...(a.timestamps || [a.latestTs || 0]));
-      const bFirst = Math.min(...(b.timestamps || [b.latestTs || 0]));
-      return bFirst - aFirst;
-    });
-  } else if (sortBy === 'lastVisit') {
-    // Sort by each item's most recent visit, most recently active first
-    return [...items].sort((a, b) => {
-      const aLast = Math.max(...(a.timestamps || [a.latestTs || 0]));
-      const bLast = Math.max(...(b.timestamps || [b.latestTs || 0]));
-      return bLast - aLast;
-    });
-  } else if (sortBy === 'pinTime') {
-    return [...items].sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0));
+  function arrow(col) {
+    if (sortState.column !== col) return '';
+    return sortState.direction === 'desc' ? ' \u25BC' : ' \u25B2';
   }
-  return items;
+
+  function activeClass(col) {
+    return sortState.column === col ? ' active-sort' : '';
+  }
+
+  let html = `<div class="column-header-row" data-context="${context}">`;
+  html += `<div class="col-spacer"></div>`;
+  html += `<div class="col-header col-title${activeClass('title')}" data-col="title">${COLUMN_LABELS.title}${arrow('title')}</div>`;
+
+  if (showRelevance) {
+    html += `<div class="col-header col-rel${activeClass('relevance')}" data-col="relevance">${COLUMN_LABELS.relevance}${arrow('relevance')}</div>`;
+  }
+
+  html += `<div class="col-header col-time${activeClass('lastVisit')}" data-col="lastVisit">${COLUMN_LABELS.lastVisit}${arrow('lastVisit')}</div>`;
+
+  if (extraCols.includes('firstVisit')) {
+    html += `<div class="col-header col-time${activeClass('firstVisit')}" data-col="firstVisit">${COLUMN_LABELS.firstVisit}${arrow('firstVisit')}</div>`;
+  }
+
+  html += `<div class="col-header col-att${activeClass('attention')}" data-col="attention">${COLUMN_LABELS.attention}${arrow('attention')}</div>`;
+
+  if (extraCols.includes('pinTime')) {
+    html += `<div class="col-header col-time${activeClass('pinTime')}" data-col="pinTime">${COLUMN_LABELS.pinTime}${arrow('pinTime')}</div>`;
+  }
+
+  if (hasDelete) html += `<div class="col-action-spacer"></div>`;
+  if (hasPin) html += `<div class="col-action-spacer"></div>`;
+
+  const availableExtras = getAvailableExtras(context);
+  if (availableExtras.length > 0) {
+    html += `<button class="col-add-btn" data-context="${context}" title="Add columns">+</button>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+function bindColumnHeaderClicks(container) {
+  container.querySelectorAll('.col-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const col = header.dataset.col;
+      const context = header.closest('.column-header-row').dataset.context;
+      const sortState = getSortState(context);
+
+      let newState;
+      if (sortState.column === col) {
+        if (sortState.direction === 'desc') {
+          newState = { column: col, direction: 'asc' };
+        } else {
+          newState = { column: null, direction: null };
+        }
+      } else {
+        newState = { column: col, direction: 'desc' };
+      }
+
+      setSortState(context, newState);
+      refreshCurrentView();
+    });
+  });
+
+  container.querySelectorAll('.col-add-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const context = btn.dataset.context;
+      showColumnPopover(btn, context);
+    });
+  });
+}
+
+let activePopover = null;
+
+function showColumnPopover(anchorBtn, context) {
+  if (activePopover) {
+    activePopover.remove();
+    activePopover = null;
+  }
+
+  const availableExtras = getAvailableExtras(context);
+  const currentExtras = getExtraColumns(context);
+
+  const popover = document.createElement('div');
+  popover.className = 'col-popover';
+
+  for (const col of availableExtras) {
+    const label = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = currentExtras.includes(col);
+    checkbox.dataset.col = col;
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode(' ' + COLUMN_LABELS[col]));
+    popover.appendChild(label);
+
+    checkbox.addEventListener('change', () => {
+      const extras = getExtraColumns(context);
+      if (checkbox.checked) {
+        if (!extras.includes(col)) extras.push(col);
+      } else {
+        const idx = extras.indexOf(col);
+        if (idx !== -1) extras.splice(idx, 1);
+        const st = getSortState(context);
+        if (st.column === col) {
+          setSortState(context, { column: null, direction: null });
+        }
+      }
+      setExtraColumns(context, extras);
+      popover.remove();
+      activePopover = null;
+      refreshCurrentView();
+    });
+  }
+
+  const rect = anchorBtn.getBoundingClientRect();
+  popover.style.position = 'fixed';
+  popover.style.top = (rect.bottom + 4) + 'px';
+  popover.style.right = (window.innerWidth - rect.right) + 'px';
+
+  document.body.appendChild(popover);
+  activePopover = popover;
+
+  const closeHandler = (e) => {
+    if (!popover.contains(e.target) && e.target !== anchorBtn) {
+      popover.remove();
+      activePopover = null;
+      document.removeEventListener('click', closeHandler);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', closeHandler), 0);
 }
 
 function isDeletableView() {
-  return activeView.type === 'category' && activeView.value !== 'recycleBin';
+  if (activeView.type === 'category' && activeView.value === 'recycleBin') return false;
+  return true;
 }
 
 async function handleDelete(url, title) {
-  if (activeView.type === 'category' && activeView.value === 'all') {
-    // "All" → global recycle bin
-    await recycleItem(url, title);
-  } else {
-    // Specific category → local hide
-    await locallyHideItem(url, activeViewKey());
-  }
+  await recycleItem(url, title);
 }
 
 function refreshCurrentView() {
@@ -323,19 +487,18 @@ function refreshCurrentView() {
     showCategory(activeView.value);
   } else if (activeView.type === 'search' && activeView.query) {
     showSearch(activeView.query);
-  } else if (activeView.type === 'topic' && activeView.query) {
-    showTopic({ id: activeView.id, query: activeView.query });
+  } else if (activeView.type === 'collection' && activeView.query) {
+    showCollection({ id: activeView.id, query: activeView.query, qbTree: activeView.qbTree });
+  } else if (activeView.type === 'explore') {
+    showExplore();
   }
 }
 
 // --- Category filters ---
 function filterByCategory(interactions, category) {
   const now = Date.now();
-  const viewKey = `category:${category}`;
-  // All non-recycleBin views exclude globally recycled items
-  // Specific categories also exclude locally hidden items
   function isHidden(url) {
-    return isPermanentlyDeleted(url) || isRecycled(url) || isLocallyHidden(url, viewKey);
+    return isPermanentlyDeleted(url) || isRecycled(url);
   }
   switch (category) {
     case 'today': {
@@ -358,11 +521,24 @@ function filterByCategory(interactions, category) {
   }
 }
 
+async function loadGatewayDomains() {
+  const result = await chrome.storage.local.get(['gatewayDomains']);
+  gatewayDomainsCache = result.gatewayDomains || {};
+}
+
 function isGatewayUrl(url) {
   try {
     const parsed = new URL(url);
-    const path = parsed.pathname;
-    return path === '/' || path === '' || path === '/index.html' || path === '/index.htm';
+    // Search query URLs are gateways
+    if (parsed.searchParams.has('q') || parsed.searchParams.has('query') || parsed.searchParams.has('search')) {
+      return true;
+    }
+    // Domain registry: root URL with 2+ children
+    const entry = gatewayDomainsCache[parsed.origin];
+    if (entry && entry.rootUrl === url && entry.childUrls && entry.childUrls.length >= 2) {
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
@@ -492,7 +668,7 @@ function renderAttentionChartForResults(results, allInteractions) {
   renderAttentionChart(matched);
 }
 
-function renderTopicAttentionCharts(pinnedUrls, unpinnedUrls, allInteractions) {
+function renderCollectionAttentionCharts(pinnedUrls, unpinnedUrls, allInteractions) {
   const pinnedMatched = allInteractions.filter(i => pinnedUrls.has(i.url));
   const unpinnedMatched = allInteractions.filter(i => unpinnedUrls.has(i.url));
 
@@ -516,12 +692,10 @@ async function showCategory(category) {
   updateSidebarActive();
   updateMainTitle(categoryLabel(category));
   document.getElementById('pinSearchBtn').style.display = 'none';
+  document.getElementById('queryBuilder').style.display = 'none';
   showNormalLayout();
-  // Show local recycle button only in specific categories (not "all" or "recycleBin")
-  const showLocalRecycle = category !== 'all' && category !== 'recycleBin';
-  document.getElementById('localRecycleBtn').style.display = showLocalRecycle ? 'flex' : 'none';
-  document.getElementById('localRecyclePanel').classList.remove('open');
-  if (showLocalRecycle) updateLocalRecycleBadge();
+
+  if (category === 'gateways') await loadGatewayDomains();
 
   const data = cachedData || await loadData();
   const filtered = filterByCategory(data.interactions, category);
@@ -543,8 +717,7 @@ async function showSearch(query) {
   updateSidebarActive();
   updateMainTitle(`Search: ${query}`);
   document.getElementById('pinSearchBtn').style.display = 'flex';
-  document.getElementById('localRecycleBtn').style.display = 'none';
-  document.getElementById('localRecyclePanel').classList.remove('open');
+  document.getElementById('queryBuilder').style.display = 'none';
   showNormalLayout();
 
   try {
@@ -558,7 +731,7 @@ async function showSearch(query) {
 
     const engine = new SearchEngine();
     buildInteractionsForEngine(Interaction, engine, data.interactions, data.contentMap);
-    const results = await engine.search(query, currentAlgorithm);
+    const results = await engine.search(query, 0);
     renderAttentionChartForResults(results, data.interactions);
     displaySearchResults(results);
   } catch (error) {
@@ -567,17 +740,708 @@ async function showSearch(query) {
   }
 }
 
-async function showTopic(topic) {
-  activeView = { type: 'topic', query: topic.query, id: topic.id };
+// --- Query builder: Enrichment ---
+function enrichForQuery(interactions, contentMap, highlightsMap) {
+  const byUrl = groupInteractionsByUrl(interactions);
+  return [...byUrl.entries()].map(([url, group]) => {
+    const latest = group.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+    const agg = aggregateAttention(group);
+    const timestamps = group.map(i => i.timestamp);
+    const slug = latest.slug;
+    const content = (slug && contentMap[slug]) || '';
+    const highlights = (slug && highlightsMap && highlightsMap[slug]) || [];
+    const attParsed = parseAttention(latest);
+    return {
+      url, title: latest.title, slug, timestamps,
+      attScore: agg.score, attDetail: agg.detail,
+      content, highlights,
+      visitCount: group.length,
+      lastVisit: Math.max(...timestamps),
+      firstVisit: Math.min(...timestamps),
+      timeOnPage: attParsed?.timeOnPage || 0,
+      scrollDepth: attParsed?.scrollDepth || 0,
+      clicks: attParsed?.clicks || 0,
+      intent: latest.intent || '',
+    };
+  });
+}
+
+// --- Query builder: Predicate matchers ---
+function matchKeyword(item, field, value) {
+  if (!value) return true;
+  const q = value.toLowerCase();
+  if (field === 'title' || field === 'any') if (item.title?.toLowerCase().includes(q)) return true;
+  if (field === 'url'   || field === 'any') if (item.url?.toLowerCase().includes(q)) return true;
+  if (field === 'captures' || field === 'any') if (item.content?.toLowerCase().includes(q)) return true;
+  if (field === 'highlights' || field === 'any') if (item.highlights.some(h => h.text?.toLowerCase().includes(q))) return true;
+  if (field === 'notes' || field === 'any') if (item.highlights.some(h => h.note?.toLowerCase().includes(q))) return true;
+  return false;
+}
+
+function matchSmartFilter(item, filterName) {
+  if (filterName === 'gateways') return isGatewayUrl(item.url);
+  return false;
+}
+
+function matchRange(item, field, op, value, value2) {
+  const cfg = RANGE_CONFIGS[field];
+  let v = item[field] || 0;
+  // For timestamp fields, convert to "days ago" to match slider units
+  if (cfg?.isDaysAgo) {
+    v = (Date.now() - v) / 86400000;
+  }
+  // Dual slider always uses between semantics
+  if (value != null && value2 != null) return v >= value && v <= value2;
+  // Legacy single-value fallback
+  if (op === 'gt')  return v > value;
+  if (op === 'lt')  return v < value;
+  return false;
+}
+
+// --- Query builder: Tree evaluation ---
+function evaluateNode(node, item) {
+  if (!node || node.predicateType === null) return true; // placeholder = pass
+  if (node.type === 'operator') {
+    if (node.op === 'OR')  return node.children.some(c => evaluateNode(c, item));
+    if (node.op === 'AND') return node.children.every(c => evaluateNode(c, item));
+  }
+  // Leaf predicate
+  if (node.predicateType === 'keyword')     return matchKeyword(item, node.field, node.value);
+  if (node.predicateType === 'smartFilter') return matchSmartFilter(item, node.filter);
+  if (node.predicateType === 'range')       return matchRange(item, node.field, node.op, node.value, node.value2);
+  return true;
+}
+
+// --- Query builder: Relevance scoring ---
+function keywordRelevance(item, field, value) {
+  if (!value) return 0;
+  const q = value.toLowerCase();
+  let score = 0;
+  if (field === 'title' || field === 'any') if (item.title?.toLowerCase().includes(q)) score += 2.0;
+  if (field === 'url'   || field === 'any') if (item.url?.toLowerCase().includes(q)) score += 1.0;
+  if (field === 'captures' || field === 'any') if (item.content?.toLowerCase().includes(q)) score += 1.0;
+  if (field === 'highlights' || field === 'any') if (item.highlights.some(h => h.text?.toLowerCase().includes(q))) score += 1.5;
+  if (field === 'notes' || field === 'any') if (item.highlights.some(h => h.note?.toLowerCase().includes(q))) score += 1.5;
+  return score;
+}
+
+function computeRelevance(node, item) {
+  if (!node) return 0;
+  if (node.type === 'operator') return node.children.reduce((sum, c) => sum + computeRelevance(c, item), 0);
+  if (node.predicateType === 'keyword' && node.value) return keywordRelevance(item, node.field, node.value);
+  return 0;
+}
+
+// --- Query builder: Tree helpers ---
+function treeNeedsHighlights(node) {
+  if (!node) return false;
+  if (node.type === 'operator') return node.children.some(c => treeNeedsHighlights(c));
+  if (node.predicateType === 'keyword' && (node.field === 'highlights' || node.field === 'notes' || node.field === 'any')) return true;
+  return false;
+}
+
+function treeHasKeyword(node) {
+  if (!node) return false;
+  if (node.type === 'operator') return node.children.some(c => treeHasKeyword(c));
+  return node.predicateType === 'keyword' && !!node.value;
+}
+
+function treeHasConfiguredPredicate(node) {
+  if (!node) return false;
+  if (node.type === 'operator') return node.children.some(c => treeHasConfiguredPredicate(c));
+  return node.predicateType !== null;
+}
+
+// --- Query builder: Tree manipulation (n-ary operators) ---
+function qbFindNode(root, id) {
+  if (!root) return null;
+  if (root.id === id) return { node: root, parent: null, childIndex: -1 };
+  if (root.type === 'operator') {
+    for (let i = 0; i < root.children.length; i++) {
+      if (root.children[i].id === id) return { node: root.children[i], parent: root, childIndex: i };
+    }
+    for (let i = 0; i < root.children.length; i++) {
+      const found = qbFindNode(root.children[i], id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function qbInsertOnEdge(leafId, op) {
+  const placeholder = qbCreatePlaceholder();
+  if (!qbRoot || qbRoot.id === leafId) {
+    // Root leaf — wrap in requested op
+    qbRoot = qbCreateOperator(op, [qbRoot || placeholder, qbCreatePlaceholder()]);
+    renderQueryBuilder();
+    return;
+  }
+  const found = qbFindNode(qbRoot, leafId);
+  if (!found || !found.parent) return;
+  const parent = found.parent;
+  if (parent.op === op) {
+    // Same op as parent — add sibling next to this leaf
+    parent.children.splice(found.childIndex + 1, 0, placeholder);
+  } else {
+    // Different op — wrap each in its own parent-op group:
+    // e.g. "*" inside OR → AND(OR(leaf), OR(placeholder))
+    const leafGroup = qbCreateOperator(parent.op, [found.node]);
+    const phGroup = qbCreateOperator(parent.op, [placeholder]);
+    const wrapper = qbCreateOperator(op, [leafGroup, phGroup]);
+    parent.children[found.childIndex] = wrapper;
+  }
+  renderQueryBuilder();
+}
+
+// Add a new placeholder child to an existing operator node
+function qbAddChild(nodeId) {
+  const found = qbFindNode(qbRoot, nodeId);
+  if (!found) return;
+  const node = found.node;
+  if (node.type !== 'operator') return;
+  node.children.push(qbCreatePlaceholder());
+  renderQueryBuilder();
+}
+
+function qbRemoveLeaf(nodeId) {
+  if (!qbRoot) return;
+  if (qbRoot.id === nodeId) {
+    qbRoot = qbCreatePlaceholder();
+    renderQueryBuilder();
+    return;
+  }
+  const found = qbFindNode(qbRoot, nodeId);
+  if (!found?.parent) return;
+  found.parent.children.splice(found.childIndex, 1);
+  // Cascade collapse: single-child → unwrap, empty → remove
+  qbRoot = qbCollapseTree(qbRoot);
+  if (!qbRoot) qbRoot = qbCreatePlaceholder(); // only at root level
+  renderQueryBuilder();
+}
+
+// Recursively collapse operators: single-child → unwrap, empty → remove (null)
+function qbCollapseTree(node) {
+  if (!node || node.type !== 'operator') return node;
+  node.children = node.children.map(c => qbCollapseTree(c)).filter(c => c !== null);
+  if (node.children.length === 1) return node.children[0];
+  if (node.children.length === 0) return null; // signal removal to parent
+  return node;
+}
+
+// Flatten same-op nesting (e.g. OR(OR(A,B),C) → OR(A,B,C))
+function qbFlattenSameOp(node) {
+  if (!node || node.type !== 'operator') return node;
+  node.children = node.children.map(c => qbFlattenSameOp(c));
+  const newChildren = [];
+  for (const child of node.children) {
+    if (child.type === 'operator' && child.op === node.op) {
+      newChildren.push(...child.children);
+    } else {
+      newChildren.push(child);
+    }
+  }
+  node.children = newChildren;
+  return node;
+}
+
+// Check if tree can be converted to normal mode (flat OR of predicates only)
+function qbCanConvertToNormal(node) {
+  if (!node) return true;
+  if (node.type === 'predicate') return true;
+  if (node.type === 'operator') {
+    if (node.op !== 'OR') return false;
+    return node.children.every(c => c.type === 'predicate');
+  }
+  return false;
+}
+
+function qbUpdateNode(nodeId, updates) {
+  const found = qbFindNode(qbRoot, nodeId);
+  if (found) Object.assign(found.node, updates);
+}
+
+// Mode switching: predicates → flat OR tree, or tree → predicate list
+function qbToTree(predicates) {
+  if (predicates.length === 0) return qbCreatePlaceholder();
+  if (predicates.length === 1) return predicates[0];
+  return qbCreateOperator('OR', predicates);
+}
+
+function qbFlatten(node) {
+  if (!node) return [];
+  if (node.type === 'predicate') return [node];
+  return node.children.flatMap(c => qbFlatten(c));
+}
+
+// --- Query builder: Query execution ---
+async function runQuery() {
+  if (!qbRoot || (qbRoot.type === 'predicate' && qbRoot.predicateType === null)) {
+    displayMessage('Add filters to start querying');
+    return;
+  }
+  if (!treeHasConfiguredPredicate(qbRoot)) {
+    displayMessage('Configure at least one filter');
+    return;
+  }
+
+  const data = cachedData || await loadData();
+
+  // Lazy-load highlights if any keyword predicate targets highlights/notes/any
+  if (treeNeedsHighlights(qbRoot) && !cachedAllHighlights) {
+    try {
+      const resp = await chrome.runtime.sendMessage({ action: 'loadAllHighlights' });
+      cachedAllHighlights = (resp?.success) ? resp.highlightsMap : {};
+    } catch { cachedAllHighlights = {}; }
+  }
+  await loadGatewayDomains();
+
+  const enriched = enrichForQuery(data.interactions, data.contentMap, cachedAllHighlights || {});
+  const filtered = enriched.filter(item => !isPermanentlyDeleted(item.url) && !isRecycled(item.url));
+  const matched = filtered.filter(item => evaluateNode(qbRoot, item));
+
+  if (matched.length === 0) {
+    displayMessage('No results match your query');
+    return;
+  }
+
+  const hasKeywords = treeHasKeyword(qbRoot);
+  const results = matched.map(item => ({
+    ...item,
+    relevance: hasKeywords ? computeRelevance(qbRoot, item) : 0,
+    highlights: [], // will lazy-load on expand
+  }));
+
+  const effectiveSort = currentSortState.column ? currentSortState
+    : hasKeywords ? { column: 'relevance', direction: 'desc' }
+    : { column: 'lastVisit', direction: 'desc' };
+  const sorted = applySortOrder(results, effectiveSort);
+  const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
+  const maxRel = Math.max(...sorted.map(r => r.relevance), 0.001);
+
+  const normalized = sorted.map(r => ({
+    ...r,
+    relevance: hasKeywords ? r.relevance / maxRel : undefined,
+  }));
+
+  const container = document.getElementById('results');
+  let html = columnHeaderHtml('global', { hasDelete: true, hasPin: false, showRelevance: hasKeywords });
+  html += normalized.map(r =>
+    resultRowHtml(r.title, r.url, {
+      deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
+      highlights: r.highlights, timestamps: r.timestamps, context: 'global', relevance: r.relevance
+    })
+  ).join('');
+  container.innerHTML = html;
+  bindColumnHeaderClicks(container);
+  bindResultClicks(container);
+
+  // Render attention chart for matched results
+  const urlSet = new Set(matched.map(r => r.url));
+  const matchedInteractions = data.interactions.filter(i => urlSet.has(i.url));
+  renderAttentionChart(matchedInteractions);
+
+  // Show pin button since we have valid results
+  if (activeView.type === 'explore') {
+    document.getElementById('pinSearchBtn').style.display = 'flex';
+  }
+}
+
+// --- Query builder: Rendering ---
+function renderQueryBuilder() {
+  const body = document.getElementById('qbBody');
+  if (!body) return;
+
+  if (qbMode === 'normal') {
+    renderQueryBuilderNormal(body);
+  } else {
+    renderQueryBuilderPro(body);
+  }
+  bindQueryBuilderEvents(body);
+
+  // Update Normal mode button: disable if tree has AND operators
+  const toggle = body.closest('.query-builder')?.querySelector('.qb-mode-toggle');
+  const normalBtn = toggle?.querySelector('.qb-mode-btn[data-mode="normal"]');
+  if (normalBtn && toggle) {
+    let hint = toggle.querySelector('.qb-mode-hint');
+    if (qbMode === 'professional' && !qbCanConvertToNormal(qbRoot)) {
+      normalBtn.disabled = true;
+      if (!hint) {
+        hint = document.createElement('span');
+        hint.className = 'qb-mode-hint';
+        toggle.appendChild(hint);
+      }
+      hint.textContent = 'Tree contains AND operators';
+    } else {
+      normalBtn.disabled = false;
+      if (hint) hint.remove();
+    }
+  }
+}
+
+function renderPredicateInputs(node) {
+  const nodeId = node.id;
+
+  if (!node.predicateType || node.predicateType === null) {
+    // Unconfigured placeholder — show type selector only
+    return `<select class="qb-type-select" data-node-id="${nodeId}">
+      <option value="" selected>Select type...</option>
+      <option value="keyword">Keyword</option>
+      <option value="smartFilter">Smart Filter</option>
+      <option value="range">Range</option>
+    </select>`;
+  }
+
+  let html = `<select class="qb-type-select" data-node-id="${nodeId}">
+    <option value="keyword"${node.predicateType === 'keyword' ? ' selected' : ''}>Keyword</option>
+    <option value="smartFilter"${node.predicateType === 'smartFilter' ? ' selected' : ''}>Smart Filter</option>
+    <option value="range"${node.predicateType === 'range' ? ' selected' : ''}>Range</option>
+  </select>`;
+
+  if (node.predicateType === 'keyword') {
+    const field = node.field || 'any';
+    html += `<select class="qb-field-select" data-node-id="${nodeId}">
+      <option value="any"${field === 'any' ? ' selected' : ''}>Any</option>
+      <option value="title"${field === 'title' ? ' selected' : ''}>Title</option>
+      <option value="url"${field === 'url' ? ' selected' : ''}>URL</option>
+      <option value="highlights"${field === 'highlights' ? ' selected' : ''}>Highlights</option>
+      <option value="notes"${field === 'notes' ? ' selected' : ''}>Notes</option>
+      <option value="captures"${field === 'captures' ? ' selected' : ''}>Captures</option>
+    </select>`;
+    html += `<input type="text" class="qb-value-input" data-node-id="${nodeId}" placeholder="Search text..." value="${escapeHtml(node.value || '')}">`;
+  } else if (node.predicateType === 'smartFilter') {
+    const filter = node.filter || 'gateways';
+    html += `<select class="qb-filter-select" data-node-id="${nodeId}">
+      <option value="gateways"${filter === 'gateways' ? ' selected' : ''}>Gateways</option>
+    </select>`;
+  } else if (node.predicateType === 'range') {
+    const field = node.field || 'lastVisit';
+    const cfg = getRangeConfig(field);
+    const lo = node.value != null ? Math.max(node.value, cfg.min) : cfg.min;
+    const hi = node.value2 != null ? Math.min(node.value2, cfg.max) : cfg.max;
+    const range = cfg.max - cfg.min;
+    const loPercent = range > 0 ? ((lo - cfg.min) / range * 100) : 0;
+    const hiPercent = range > 0 ? ((cfg.max - hi) / range * 100) : 0;
+    html += `<select class="qb-range-field-select" data-node-id="${nodeId}">
+      <option value="lastVisit"${field === 'lastVisit' ? ' selected' : ''}>Last Visit</option>
+      <option value="firstVisit"${field === 'firstVisit' ? ' selected' : ''}>First Visit</option>
+      <option value="visitCount"${field === 'visitCount' ? ' selected' : ''}>Visit Count</option>
+      <option value="timeOnPage"${field === 'timeOnPage' ? ' selected' : ''}>Time on Page</option>
+      <option value="scrollDepth"${field === 'scrollDepth' ? ' selected' : ''}>Scroll Depth</option>
+      <option value="clicks"${field === 'clicks' ? ' selected' : ''}>Clicks</option>
+    </select>`;
+    html += `<div class="qb-dual-range" data-node-id="${nodeId}">
+      <span class="qb-dual-range-label qb-dual-range-lo-label">${cfg.format(lo)}</span>
+      <div class="qb-dual-range-track">
+        <div class="qb-dual-range-fill" style="left:${loPercent}%;right:${hiPercent}%"></div>
+        <input type="range" class="qb-dual-range-lo" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${lo}">
+        <input type="range" class="qb-dual-range-hi" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${hi}">
+      </div>
+      <span class="qb-dual-range-label qb-dual-range-hi-label">${cfg.format(hi)}</span>
+    </div>`;
+  }
+
+  return html;
+}
+
+function renderQueryBuilderNormal(body) {
+  const predicates = qbFlatten(qbRoot);
+  let html = '';
+
+  for (const pred of predicates) {
+    html += `<div class="qb-predicate-row" data-node-id="${pred.id}">`;
+    html += renderPredicateInputs(pred);
+    html += `<button class="qb-remove-btn" data-node-id="${pred.id}" title="Remove">&times;</button>`;
+    html += `</div>`;
+  }
+
+  html += `<button class="qb-add-btn">+ Add filter</button>`;
+  body.innerHTML = html;
+}
+
+function qbLeafButtons(depth, parentOp) {
+  if (depth === 0) return ['AND', 'OR']; // root leaf: both (AND first)
+  // Always offer the opposite of parent — alternating pattern
+  // Same-op nesting would just merge into parent, so only opposite is useful
+  return parentOp === 'OR' ? ['AND'] : ['OR'];
+}
+
+function renderTreeNodePro(node, depth = 0, parentOp = null) {
+  if (!node) return '<span style="color:#9aa0a6;font-size:12px">empty</span>';
+
+  if (node.type === 'predicate') {
+    let html = `<div class="qt-leaf" data-node-id="${node.id}">`;
+    const buttons = qbLeafButtons(depth, parentOp);
+    if (buttons.length > 0) {
+      html += `<div class="qt-edge-btns">`;
+      for (let bi = 0; bi < buttons.length; bi++) {
+        if (bi > 0) html += `<span class="qt-line"></span>`;
+        const btn = buttons[bi];
+        if (btn === 'OR') html += `<button class="qt-op-btn" data-leaf-id="${node.id}" data-op="OR" title="Add OR"><span class="qt-sym qt-sym-or"></span></button>`;
+        if (btn === 'AND') html += `<button class="qt-op-btn" data-leaf-id="${node.id}" data-op="AND" title="Add AND"><span class="qt-sym qt-sym-and"></span></button>`;
+      }
+      html += `<span class="qt-line"></span>`;
+      html += `</div>`;
+    }
+    html += renderPredicateInputs(node);
+    // Hide remove button for the sole root placeholder (removing it just recreates it)
+    const isRootPlaceholder = depth === 0 && !parentOp && node.predicateType === null;
+    if (!isRootPlaceholder) {
+      html += `<button class="qb-remove-btn" data-node-id="${node.id}" title="Remove">&times;</button>`;
+    }
+    html += `</div>`;
+    return html;
+  }
+
+  if (node.type === 'operator') {
+    // Single-child: transparent wrapper — just render the child at depth+1
+    if (node.children.length === 1) {
+      return renderTreeNodePro(node.children[0], depth + 1, parentOp);
+    }
+    // Multi-child: branching operator — clickable to add another child
+    const opCls = node.op === 'OR' ? 'qt-sym-or' : 'qt-sym-and';
+    let html = `<div class="qt-op" data-node-id="${node.id}">`;
+    html += `<button class="qt-op-parent-btn" data-node-id="${node.id}" data-op="${node.op}" title="Add child"><span class="qt-sym ${opCls}"></span></button>`;
+    html += `<div class="qt-children">`;
+    for (const child of node.children) {
+      html += `<div class="qt-branch">${renderTreeNodePro(child, depth + 1, node.op)}</div>`;
+    }
+    html += `</div>`;
+    html += `</div>`;
+    return html;
+  }
+
+  return '';
+}
+
+function renderQueryBuilderPro(body) {
+  body.innerHTML = renderTreeNodePro(qbRoot);
+}
+
+function bindQueryBuilderEvents(body) {
+  // Type selector change
+  body.querySelectorAll('.qb-type-select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const nodeId = parseInt(sel.dataset.nodeId);
+      const newType = sel.value || null;
+      const found = qbFindNode(qbRoot, nodeId);
+      if (!found) return;
+      // Reset the node to new type with defaults
+      found.node.predicateType = newType;
+      if (newType === 'keyword') {
+        found.node.field = 'any';
+        found.node.value = '';
+        delete found.node.filter;
+        delete found.node.op;
+        delete found.node.value2;
+      } else if (newType === 'smartFilter') {
+        found.node.filter = 'gateways';
+        delete found.node.field;
+        delete found.node.value;
+        delete found.node.op;
+        delete found.node.value2;
+      } else if (newType === 'range') {
+        found.node.field = 'lastVisit';
+        found.node.op = 'between';
+        const cfg = getRangeConfig('lastVisit');
+        found.node.value = cfg.min;
+        found.node.value2 = cfg.max;
+        delete found.node.filter;
+      }
+      renderQueryBuilder();
+      debouncedRunQuery();
+    });
+  });
+
+  // Keyword field change
+  body.querySelectorAll('.qb-field-select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const nodeId = parseInt(sel.dataset.nodeId);
+      qbUpdateNode(nodeId, { field: sel.value });
+      // Invalidate highlight cache if switching to/from highlights/notes/any
+      cachedAllHighlights = null;
+      debouncedRunQuery();
+    });
+  });
+
+  // Keyword value input
+  body.querySelectorAll('.qb-value-input').forEach(input => {
+    input.addEventListener('input', () => {
+      const nodeId = parseInt(input.dataset.nodeId);
+      qbUpdateNode(nodeId, { value: input.value });
+      debouncedRunQuery();
+    });
+  });
+
+  // Smart filter selector
+  body.querySelectorAll('.qb-filter-select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const nodeId = parseInt(sel.dataset.nodeId);
+      qbUpdateNode(nodeId, { filter: sel.value });
+      debouncedRunQuery();
+    });
+  });
+
+  // Range field selector — reset slider bounds on field change
+  body.querySelectorAll('.qb-range-field-select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const nodeId = parseInt(sel.dataset.nodeId);
+      const cfg = getRangeConfig(sel.value);
+      qbUpdateNode(nodeId, { field: sel.value, op: 'between', value: cfg.min, value2: cfg.max });
+      renderQueryBuilder();
+      debouncedRunQuery();
+    });
+  });
+
+  // Dual-range sliders
+  body.querySelectorAll('.qb-dual-range').forEach(container => {
+    const nodeId = parseInt(container.dataset.nodeId);
+    const loInput = container.querySelector('.qb-dual-range-lo');
+    const hiInput = container.querySelector('.qb-dual-range-hi');
+    const fill = container.querySelector('.qb-dual-range-fill');
+    const loLabel = container.querySelector('.qb-dual-range-lo-label');
+    const hiLabel = container.querySelector('.qb-dual-range-hi-label');
+    const min = parseFloat(loInput.min), max = parseFloat(loInput.max), range = max - min;
+
+    function updateSlider() {
+      let lo = parseFloat(loInput.value), hi = parseFloat(hiInput.value);
+      if (lo > hi) { const t = lo; lo = hi; hi = t; loInput.value = lo; hiInput.value = hi; }
+      fill.style.left = (range > 0 ? (lo - min) / range * 100 : 0) + '%';
+      fill.style.right = (range > 0 ? (max - hi) / range * 100 : 0) + '%';
+      const found = qbFindNode(qbRoot, nodeId);
+      if (found) {
+        const cfg = RANGE_CONFIGS[found.node.field || 'lastVisit'];
+        loLabel.textContent = cfg.format(lo);
+        hiLabel.textContent = cfg.format(hi);
+      }
+      qbUpdateNode(nodeId, { value: lo, value2: hi, op: 'between' });
+      debouncedRunQuery();
+    }
+    loInput.addEventListener('input', () => {
+      if (parseFloat(loInput.value) > parseFloat(hiInput.value)) loInput.value = hiInput.value;
+      updateSlider();
+    });
+    hiInput.addEventListener('input', () => {
+      if (parseFloat(hiInput.value) < parseFloat(loInput.value)) hiInput.value = loInput.value;
+      updateSlider();
+    });
+  });
+
+  // Remove button — use mousedown to avoid focus/blur swallowing the click
+  body.querySelectorAll('.qb-remove-btn').forEach(btn => {
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // prevent focus shift
+      const nodeId = parseInt(btn.dataset.nodeId);
+      qbRemoveLeaf(nodeId);
+      debouncedRunQuery();
+    });
+  });
+
+  // Add filter (normal mode)
+  const addBtn = body.querySelector('.qb-add-btn');
+  if (addBtn) {
+    addBtn.addEventListener('click', () => {
+      const newPred = qbCreatePlaceholder();
+      const predicates = qbFlatten(qbRoot);
+      // Filter out pure placeholders if the user already has configured ones
+      const configured = predicates.filter(p => p.predicateType !== null);
+      const all = [...configured, newPred];
+      if (configured.length === 0) all.unshift(...predicates.filter(p => p.predicateType === null));
+      qbRoot = qbToTree([...predicates, newPred]);
+      renderQueryBuilder();
+    });
+  }
+
+  // Pro mode: leaf edge buttons (insert on edge)
+  body.querySelectorAll('.qt-op-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const leafId = parseInt(btn.dataset.leafId);
+      qbInsertOnEdge(leafId, btn.dataset.op);
+    });
+  });
+
+  // Pro mode: parent operator buttons (add child to existing operator)
+  body.querySelectorAll('.qt-op-parent-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const nodeId = parseInt(btn.dataset.nodeId);
+      qbAddChild(nodeId);
+    });
+  });
+
+  // Mode toggle buttons
+  body.closest('.query-builder')?.querySelectorAll('.qb-mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      const newMode = btn.dataset.mode;
+      if (newMode === qbMode) return;
+      qbMode = newMode;
+      // Update active class
+      btn.closest('.qb-mode-toggle').querySelectorAll('.qb-mode-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderQueryBuilder();
+    });
+  });
+}
+
+function debouncedRunQuery() {
+  if (qbDebounceTimer) clearTimeout(qbDebounceTimer);
+  qbDebounceTimer = setTimeout(() => runQuery(), 300);
+}
+
+// Summarize a query tree into a short display name for collections
+function qbSummarize(node) {
+  if (!node) return 'Empty query';
+  if (node.type === 'predicate') {
+    if (node.predicateType === null) return '...';
+    if (node.predicateType === 'keyword') {
+      const prefix = node.field && node.field !== 'any' ? `${node.field}:` : '';
+      return node.value ? `${prefix}"${node.value}"` : 'keyword';
+    }
+    if (node.predicateType === 'smartFilter') return node.filter || 'filter';
+    if (node.predicateType === 'range') {
+      const cfg = RANGE_CONFIGS[node.field];
+      const lo = node.value != null ? cfg.format(node.value) : '?';
+      const hi = node.value2 != null ? cfg.format(node.value2) : '?';
+      return `${node.field} ${lo}–${hi}`;
+    }
+    return '...';
+  }
+  if (node.type === 'operator') {
+    const parts = node.children.map(c => qbSummarize(c));
+    const full = parts.join(` ${node.op} `);
+    return full.length > 50 ? full.substring(0, 47) + '...' : full;
+  }
+  return 'query';
+}
+
+async function showExplore() {
+  activeView = { type: 'explore' };
   updateSidebarActive();
-  updateMainTitle(topic.query);
+  updateMainTitle('Explore');
+
+  // Show query builder, hide other UI
+  document.getElementById('queryBuilder').style.display = 'block';
+  document.getElementById('pinSearchBtn').style.display =
+    treeHasConfiguredPredicate(qbRoot) ? 'flex' : 'none';
+  showNormalLayout();
+
+  renderQueryBuilder();
+
+  if (treeHasConfiguredPredicate(qbRoot)) {
+    await runQuery();
+  } else {
+    renderAttentionChart([]);
+    displayMessage('Add filters to start querying');
+  }
+}
+
+async function showCollection(collection) {
+  activeView = { type: 'collection', query: collection.query, id: collection.id, qbTree: collection.qbTree || null };
+  updateSidebarActive();
+  updateMainTitle(collection.query);
   document.getElementById('pinSearchBtn').style.display = 'none';
-  document.getElementById('localRecycleBtn').style.display = 'none';
-  document.getElementById('localRecyclePanel').classList.remove('open');
-  showTopicLayout();
+  showCollectionLayout();
 
   try {
-    await initWasm();
     const data = cachedData || await loadData();
 
     if (data.interactions.length === 0) {
@@ -588,23 +1452,40 @@ async function showTopic(topic) {
       return;
     }
 
-    const engine = new SearchEngine();
-    buildInteractionsForEngine(Interaction, engine, data.interactions, data.contentMap);
-    const pinnedResults = await engine.search(topic.query, pinnedAlgorithm);
-    const relatedResults = pinnedAlgorithm === relatedAlgorithm
-      ? pinnedResults
-      : await engine.search(topic.query, relatedAlgorithm);
+    let results;
 
-    displayTopicSections(topic.id, pinnedResults, relatedResults, data);
+    if (collection.qbTree) {
+      // Query builder tree — evaluate it directly
+      if (treeNeedsHighlights(collection.qbTree) && !cachedAllHighlights) {
+        try {
+          const resp = await chrome.runtime.sendMessage({ action: 'loadAllHighlights' });
+          cachedAllHighlights = (resp?.success) ? resp.highlightsMap : {};
+        } catch { cachedAllHighlights = {}; }
+      }
+      await loadGatewayDomains();
+
+      const enriched = enrichForQuery(data.interactions, data.contentMap, cachedAllHighlights || {});
+      results = enriched
+        .filter(item => !isPermanentlyDeleted(item.url) && !isRecycled(item.url))
+        .filter(item => evaluateNode(collection.qbTree, item));
+    } else {
+      // Legacy string query — use WASM search
+      await initWasm();
+      const engine = new SearchEngine();
+      buildInteractionsForEngine(Interaction, engine, data.interactions, data.contentMap);
+      results = await engine.search(collection.query, 0);
+    }
+
+    displayCollectionSections(collection.id, results, results, data);
   } catch (error) {
-    console.error('Topic search error:', error);
+    console.error('Collection search error:', error);
     document.getElementById('pinnedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
     document.getElementById('relatedResults').innerHTML = '';
   }
 }
 
-function displayTopicSections(topicId, pinnedSearchResults, relatedSearchResults, data) {
-  const pins = allTopicPins[topicId] || [];
+function displayCollectionSections(collectionId, pinnedSearchResults, relatedSearchResults, data) {
+  const pins = allCollectionPins[collectionId] || [];
   const pinnedUrls = new Set(pins.map(p => p.url));
   const pinnedResultUrls = new Set(pinnedSearchResults.map(r => r.url));
   const byUrl = groupInteractionsByUrl(data.interactions);
@@ -612,25 +1493,25 @@ function displayTopicSections(topicId, pinnedSearchResults, relatedSearchResults
   function enrichResult(r) {
     const group = byUrl.get(r.url) || [];
     const agg = aggregateAttention(group);
-    const highlights = group.flatMap(i => {
-      const att = parseAttention(i);
-      return (att && att.highlights) || [];
-    });
+    const highlights = [];
     const timestamps = group.map(i => i.timestamp);
     if (timestamps.length === 0) timestamps.push(r.timestamp || r.pinnedAt || Date.now());
-    return { ...r, attScore: agg.score, attDetail: agg.detail, highlights, timestamps };
+    const pin = pins.find(p => p.url === r.url);
+    return { ...r, attScore: agg.score, attDetail: agg.detail, highlights, timestamps, pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null) };
   }
 
-  // Pinned section: search results that are pinned + pure pins (using pinnedSearchResults ordering)
+  // Pinned section: search results that are pinned + pure pins
   const pinnedInResults = pinnedSearchResults.filter(r => pinnedUrls.has(r.url)).map(enrichResult);
   const pinnedOnly = pins.filter(p => !pinnedResultUrls.has(p.url)).map(enrichResult);
   const allPinned = [...pinnedInResults, ...pinnedOnly];
 
-  // Related section: non-pinned results (using relatedSearchResults ordering)
+  // Related section: non-pinned results
   const related = relatedSearchResults.filter(r => !pinnedUrls.has(r.url)).map(enrichResult);
 
-  const sortedPinned = applySortOrder(allPinned, pinnedSort);
-  const sortedRelated = applySortOrder(related, relatedSort);
+  const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
+  const effectiveRelatedSort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
+  const sortedPinned = applySortOrder(allPinned, effectivePinnedSort);
+  const sortedRelated = applySortOrder(related, effectiveRelatedSort);
 
   const allForMax = [...sortedPinned, ...sortedRelated];
   const maxAtt = Math.max(...allForMax.map(r => r.attScore), 0.1);
@@ -640,11 +1521,14 @@ function displayTopicSections(topicId, pinnedSearchResults, relatedSearchResults
   if (sortedPinned.length === 0) {
     pinnedContainer.innerHTML = '<div class="no-results">No pinned pages. Pin results from the Related section.</div>';
   } else {
-    pinnedContainer.innerHTML = sortedPinned.map(r =>
-      resultRowHtml(r.title, r.url, { pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps })
+    let html = columnHeaderHtml('pinned', { hasDelete: true, hasPin: true });
+    html += sortedPinned.map(r =>
+      resultRowHtml(r.title, r.url, { pinned: true, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt })
     ).join('');
+    pinnedContainer.innerHTML = html;
+    bindColumnHeaderClicks(pinnedContainer);
     bindResultClicks(pinnedContainer);
-    bindPinClicks(pinnedContainer, topicId);
+    bindPinClicks(pinnedContainer, collectionId);
   }
 
   // Render related section
@@ -652,11 +1536,14 @@ function displayTopicSections(topicId, pinnedSearchResults, relatedSearchResults
   if (sortedRelated.length === 0) {
     relatedContainer.innerHTML = '<div class="no-results">No related pages found</div>';
   } else {
-    relatedContainer.innerHTML = sortedRelated.map(r =>
-      resultRowHtml(r.title, r.url, { pinned: false, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps })
+    let html = columnHeaderHtml('related', { hasDelete: true, hasPin: true });
+    html += sortedRelated.map(r =>
+      resultRowHtml(r.title, r.url, { pinned: false, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps, context: 'related' })
     ).join('');
+    relatedContainer.innerHTML = html;
+    bindColumnHeaderClicks(relatedContainer);
     bindResultClicks(relatedContainer);
-    bindPinClicks(relatedContainer, topicId);
+    bindPinClicks(relatedContainer, collectionId);
   }
 
   // Render attention charts per section
@@ -688,25 +1575,27 @@ function displaySearchResults(results) {
   const data = cachedData || { interactions: [] };
   const byUrl = groupInteractionsByUrl(data.interactions);
 
-  // Compute attention for each result
-  const resultData = results.map(r => {
+  const total = results.length;
+  const resultData = results.map((r, index) => {
     const group = byUrl.get(r.url) || [];
     const agg = aggregateAttention(group);
-    const highlights = group.flatMap(i => {
-      const att = parseAttention(i);
-      return (att && att.highlights) || [];
-    });
+    const highlights = [];
     const timestamps = group.map(i => i.timestamp);
     if (timestamps.length === 0) timestamps.push(r.timestamp);
-    return { ...r, attScore: agg.score, attDetail: agg.detail, highlights, timestamps };
+    const relevance = total > 1 ? (total - index) / total : 1;
+    return { ...r, attScore: agg.score, attDetail: agg.detail, highlights, timestamps, relevance };
   });
 
-  const sorted = applySortOrder(resultData, currentSort);
+  // When sort is null, preserve WASM relevance order
+  const sorted = applySortOrder(resultData, currentSortState);
   const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
 
-  container.innerHTML = sorted.map(r =>
-    resultRowHtml(r.title, r.url, { attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps })
+  let html = columnHeaderHtml('global', { hasDelete: true, hasPin: false, showRelevance: true });
+  html += sorted.map(r =>
+    resultRowHtml(r.title, r.url, { deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps, context: 'global', relevance: r.relevance })
   ).join('');
+  container.innerHTML = html;
+  bindColumnHeaderClicks(container);
   bindResultClicks(container);
 }
 
@@ -718,25 +1607,26 @@ function displayInteractionRows(interactions) {
   }
 
   const byUrl = groupInteractionsByUrl(interactions);
-  // Aggregate per URL, show most recent first
   const entries = [...byUrl.entries()].map(([url, group]) => {
     const latest = group.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
     const agg = aggregateAttention(group);
-    const highlights = group.flatMap(i => {
-      const att = parseAttention(i);
-      return (att && att.highlights) || [];
-    });
+    const highlights = [];
     const timestamps = group.map(i => i.timestamp);
     return { url, title: latest.title, attScore: agg.score, attDetail: agg.detail, highlights, timestamps, latestTs: latest.timestamp };
   });
 
-  const sorted = applySortOrder(entries, currentSort);
+  // When sort is null, default to lastVisit desc
+  const effectiveSort = currentSortState.column ? currentSortState : { column: 'lastVisit', direction: 'desc' };
+  const sorted = applySortOrder(entries, effectiveSort);
   const maxAtt = Math.max(...sorted.map(e => e.attScore), 0.1);
 
   const deletable = isDeletableView();
-  container.innerHTML = sorted.map(e =>
-    resultRowHtml(e.title, e.url, { deletable, attScore: e.attScore, maxAtt, attDetail: e.attDetail, highlights: e.highlights, timestamps: e.timestamps })
+  let html = columnHeaderHtml('global', { hasDelete: deletable, hasPin: false });
+  html += sorted.map(e =>
+    resultRowHtml(e.title, e.url, { deletable, attScore: e.attScore, maxAtt, attDetail: e.attDetail, highlights: e.highlights, timestamps: e.timestamps, context: 'global' })
   ).join('');
+  container.innerHTML = html;
+  bindColumnHeaderClicks(container);
   bindResultClicks(container);
 }
 
@@ -954,7 +1844,7 @@ function buildDetailHtml(url, attDetail, highlights) {
   return html;
 }
 
-// Lazy-load extra detail data (notes, topics, snapshots) when detail is expanded
+// Lazy-load extra detail data (notes, collections, snapshots) when detail is expanded
 async function loadExtraDetail(url) {
   const slug = generateSlugFromUrl(url);
 
@@ -976,25 +1866,35 @@ async function loadExtraDetail(url) {
     }
   } catch (e) { /* filesystem not available */ }
 
-  // Find belonged topics (reverse lookup)
-  const topics = await loadTopics();
-  const belongedTopics = [];
-  for (const topic of topics) {
-    const pins = allTopicPins[topic.id] || [];
+  // Find belonged collections (reverse lookup)
+  const collections = await loadCollections();
+  const belongedCollections = [];
+  for (const collection of collections) {
+    const pins = allCollectionPins[collection.id] || [];
     if (pins.some(p => p.url === url)) {
-      belongedTopics.push(topic.query);
+      belongedCollections.push(collection.query);
     }
   }
 
-  return { highlights, snapshots, belongedTopics, slug };
+  // Gateway lineage: if this URL is a gateway root, include child URLs
+  let gatewayLineage = [];
+  try {
+    const origin = new URL(url).origin;
+    const entry = gatewayDomainsCache[origin];
+    if (entry && entry.rootUrl === url && entry.childUrls && entry.childUrls.length > 0) {
+      gatewayLineage = entry.childUrls;
+    }
+  } catch {}
+
+  return { highlights, snapshots, belongedCollections, slug, gatewayLineage };
 }
 
 function renderExtraDetailHtml(extra) {
   let html = '';
 
-  if (extra.belongedTopics.length > 0) {
-    html += '<div class="detail-section"><span class="detail-section-label">Topics:</span> ';
-    html += extra.belongedTopics.map(t => `<span class="detail-topic-tag">${escapeHtml(t)}</span>`).join(' ');
+  if (extra.belongedCollections.length > 0) {
+    html += '<div class="detail-section"><span class="detail-section-label">Collections:</span> ';
+    html += extra.belongedCollections.map(t => `<span class="detail-collection-tag">${escapeHtml(t)}</span>`).join(' ');
     html += '</div>';
   }
 
@@ -1024,6 +1924,21 @@ function renderExtraDetailHtml(extra) {
       if (s.hasMd) formats.push('md');
       if (s.hasHtml) formats.push('html');
       html += `<span class="detail-snapshot-item">${escapeHtml(date)} (${formats.join(', ')})</span>`;
+    }
+    html += '</div></div>';
+  }
+
+  if (extra.gatewayLineage && extra.gatewayLineage.length > 0) {
+    const cap = 20;
+    const shown = extra.gatewayLineage.slice(0, cap);
+    const remaining = extra.gatewayLineage.length - cap;
+    html += `<div class="detail-section"><span class="detail-section-label">Child pages (${extra.gatewayLineage.length}):</span>`;
+    html += '<div class="detail-lineage">';
+    for (const childUrl of shown) {
+      html += `<a class="detail-lineage-url" href="${escapeHtml(childUrl)}" target="_blank">${escapeHtml(childUrl)}</a>`;
+    }
+    if (remaining > 0) {
+      html += `<span class="detail-lineage-more">...and ${remaining} more</span>`;
     }
     html += '</div></div>';
   }
@@ -1064,13 +1979,14 @@ function bindHighlightDeleteButtons(container) {
   });
 }
 
-// opts: { pinned, deletable, attScore, maxAtt, attDetail, highlights, timestamps }
+// opts: { pinned, deletable, attScore, maxAtt, attDetail, highlights, timestamps, context, pinnedAt, relevance }
 function resultRowHtml(title, url, opts = {}) {
   const safeTitle = escapeHtml(title || 'Untitled');
   const safeUrl = escapeHtml(url || '');
-  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, highlights = [], timestamps = [] } = opts;
+  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, highlights = [], timestamps = [], context = 'global', pinnedAt, relevance } = opts;
+  const extraCols = getExtraColumns(context);
 
-  const time = timestamps.length > 0 ? formatTimeRange(timestamps) : '';
+  const lastVisit = timestamps.length > 0 ? formatTime(Math.max(...timestamps)) : '';
   const normalized = maxAtt > 0 ? attScore / maxAtt : 0;
   const dotColor = attentionColor(normalized);
 
@@ -1080,16 +1996,37 @@ function resultRowHtml(title, url, opts = {}) {
 
   const detailHtml = buildDetailHtml(url, attDetail, highlights);
 
+  let relevanceCell = '';
+  if (relevance != null) {
+    const pct = Math.round(relevance * 100);
+    relevanceCell = `<div class="result-rel">${pct}%</div>`;
+  }
+
+  let extraTimeCells = '';
+  if (extraCols.includes('firstVisit')) {
+    const firstVisit = timestamps.length > 0 ? formatTime(Math.min(...timestamps)) : '';
+    extraTimeCells += `<div class="result-time">${escapeHtml(firstVisit)}</div>`;
+  }
+
+  let extraAfterAtt = '';
+  if (extraCols.includes('pinTime')) {
+    extraAfterAtt += `<div class="result-time">${pinnedAt ? escapeHtml(formatTime(pinnedAt)) : ''}</div>`;
+  }
+
   return `<div class="result-item">
     <div class="result-row" data-url="${safeUrl}" data-title="${safeTitle}" draggable="true">
       <button class="result-expand" title="Show details">&#9654;</button>
       <div class="result-title">${safeTitle}</div>
-      <div class="result-time">${escapeHtml(time)}</div>
+      ${relevanceCell}
+      <div class="result-time">${escapeHtml(lastVisit)}</div>
+      ${extraTimeCells}
       <div class="attention-dot-wrap" title="Attention: ${(normalized * 100).toFixed(0)}%">
         <div class="attention-dot" style="background: ${dotColor}"></div>
       </div>
+      ${extraAfterAtt}
       ${deletable ? `<button class="result-delete" data-delete-url="${safeUrl}" data-delete-title="${safeTitle}" title="Delete">${DELETE_SVG}</button>` : ''}
       ${pinBtn}
+      <div class="col-add-spacer"></div>
     </div>
     <div class="result-detail">${detailHtml}</div>
   </div>`;
@@ -1190,16 +2127,16 @@ function bindResultClicks(container) {
   });
 }
 
-function bindPinClicks(container, topicId) {
+function bindPinClicks(container, collectionId) {
   container.querySelectorAll('.result-pin').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const url = btn.dataset.pinUrl;
       const title = btn.dataset.pinTitle;
-      await toggleResultPin(topicId, url, title);
-      // Re-render topic view
-      const topic = { id: topicId, query: activeView.query };
-      showTopic(topic);
+      await toggleResultPin(collectionId, url, title);
+      // Re-render collection view
+      const collection = { id: collectionId, query: activeView.query, qbTree: activeView.qbTree };
+      showCollection(collection);
     });
   });
 }
@@ -1212,7 +2149,7 @@ function displayMessage(msg) {
 }
 
 function categoryLabel(category) {
-  const labels = { all: 'All', today: 'Today', week: 'This Week', highlighted: 'Highlighted', gateways: 'Gateways', recycleBin: 'Recycle Bin' };
+  const labels = { all: 'All', today: 'Today', week: 'This Week', highlighted: 'Highlighted', gateways: 'Gateways', recycleBin: 'Recycle Bin', explore: 'Explore' };
   return labels[category] || category;
 }
 
@@ -1222,72 +2159,81 @@ function updateMainTitle(text) {
 
 function updateSidebarActive() {
   document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
+  document.getElementById('exploreBtn').classList.remove('active');
 
   if (activeView.type === 'category') {
     const el = document.querySelector(`.sidebar-item[data-category="${activeView.value}"]`);
     if (el) el.classList.add('active');
-  } else if (activeView.type === 'topic') {
-    const el = document.querySelector(`.sidebar-item[data-topic-id="${activeView.id}"]`);
+  } else if (activeView.type === 'collection') {
+    const el = document.querySelector(`.sidebar-item[data-collection-id="${activeView.id}"]`);
     if (el) el.classList.add('active');
+  } else if (activeView.type === 'explore') {
+    document.getElementById('exploreBtn').classList.add('active');
   }
 }
 
-// --- Topics (pinned searches) ---
-async function loadTopics() {
-  const result = await chrome.storage.local.get(['pinnedTopics']);
-  return result.pinnedTopics || [];
+// --- Collections (pinned searches) ---
+async function loadCollections() {
+  // Migration: try pinnedCollections first, fall back to pinnedTopics
+  const result = await chrome.storage.local.get(['pinnedCollections', 'pinnedTopics']);
+  if (result.pinnedCollections) return result.pinnedCollections;
+  if (result.pinnedTopics) {
+    await chrome.storage.local.set({ pinnedCollections: result.pinnedTopics });
+    return result.pinnedTopics;
+  }
+  return [];
 }
 
-async function saveTopics(topics) {
-  await chrome.storage.local.set({ pinnedTopics: topics });
+async function saveCollections(collections) {
+  await chrome.storage.local.set({ pinnedCollections: collections });
 }
 
-async function renderTopics() {
-  const topics = await loadTopics();
-  const list = document.getElementById('topicsList');
-  const empty = document.getElementById('topicsEmpty');
+async function renderCollections() {
+  const collections = await loadCollections();
+  const list = document.getElementById('collectionsList');
+  const empty = document.getElementById('collectionsEmpty');
 
-  // Remove existing topic items (keep the empty placeholder)
+  // Remove existing collection items (keep the empty placeholder)
   list.querySelectorAll('.sidebar-item').forEach(el => el.remove());
 
-  if (topics.length === 0) {
+  if (collections.length === 0) {
     empty.style.display = 'block';
     return;
   }
 
   empty.style.display = 'none';
-  for (const topic of topics) {
+  for (const collection of collections) {
     const item = document.createElement('div');
     item.className = 'sidebar-item';
-    item.dataset.topicId = topic.id;
+    item.dataset.collectionId = collection.id;
     item.innerHTML = `
       <span class="icon"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg></span>
-      <span class="label">${escapeHtml(topic.query)}</span>
-      <button class="remove-topic" title="Remove topic">&times;</button>
+      <span class="label">${escapeHtml(collection.query)}</span>
+      <button class="remove-collection" title="Remove collection">&times;</button>
     `;
 
     item.addEventListener('click', (e) => {
-      if (e.target.closest('.remove-topic')) return;
-      showTopic(topic);
+      if (e.target.closest('.remove-collection')) return;
+      showCollection(collection);
     });
 
-    item.querySelector('.remove-topic').addEventListener('click', async (e) => {
+    item.querySelector('.remove-collection').addEventListener('click', async (e) => {
       e.stopPropagation();
-      const topics = await loadTopics();
-      const updated = topics.filter(t => t.id !== topic.id);
-      await saveTopics(updated);
-      // Clean up pinned results for this topic
-      if (allTopicPins[topic.id]) {
-        delete allTopicPins[topic.id];
-        await saveAllTopicPins();
+      const collections = await loadCollections();
+      const updated = collections.filter(t => t.id !== collection.id);
+      await saveCollections(updated);
+      // Clean up pinned results for this collection
+      if (allCollectionPins[collection.id]) {
+        delete allCollectionPins[collection.id];
+        await saveAllCollectionPins();
       }
-      renderTopics();
-      if (activeView.type === 'topic' && activeView.id === topic.id) {
+      renderCollections();
+      if (activeView.type === 'collection' && activeView.id === collection.id) {
         showCategory('all');
       }
     });
 
-    // Drag-and-drop: topic as drop target (counter prevents child-triggered dragleave)
+    // Drag-and-drop: collection as drop target (counter prevents child-triggered dragleave)
     let dragCounter = 0;
     item.addEventListener('dragover', (e) => {
       e.preventDefault();
@@ -1311,11 +2257,11 @@ async function renderTopics() {
       item.classList.remove('drag-over');
       try {
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-        if (data.url && !isResultPinned(topic.id, data.url)) {
-          await toggleResultPin(topic.id, data.url, data.title);
-          // If we're viewing this topic, refresh
-          if (activeView.type === 'topic' && activeView.id === topic.id) {
-            showTopic(topic);
+        if (data.url && !isResultPinned(collection.id, data.url)) {
+          await toggleResultPin(collection.id, data.url, data.title);
+          // If we're viewing this collection, refresh
+          if (activeView.type === 'collection' && activeView.id === collection.id) {
+            showCollection(collection);
           }
         }
       } catch (err) {
@@ -1330,19 +2276,37 @@ async function renderTopics() {
 }
 
 async function pinCurrentSearch() {
-  if (activeView.type !== 'search' || !activeView.query) return;
+  if (activeView.type === 'explore') {
+    // Pin explore query tree
+    if (!qbRoot || !treeHasConfiguredPredicate(qbRoot)) return;
+    const collections = await loadCollections();
+    const displayName = qbSummarize(qbRoot);
+    if (collections.some(t => t.query === displayName)) return;
 
-  const topics = await loadTopics();
-  // Don't duplicate
-  if (topics.some(t => t.query === activeView.query)) return;
+    const collection = {
+      id: Date.now().toString(),
+      query: displayName,
+      qbTree: JSON.parse(JSON.stringify(qbRoot)), // deep clone
+    };
+    collections.push(collection);
+    await saveCollections(collections);
+    await renderCollections();
+    showCollection(collection);
+    return;
+  }
 
-  const topic = { id: Date.now().toString(), query: activeView.query };
-  topics.push(topic);
-  await saveTopics(topics);
-  await renderTopics();
+  const query = activeView.query;
+  if (!query) return;
+  if (activeView.type !== 'search') return;
 
-  // Switch to the topic view
-  showTopic(topic);
+  const collections = await loadCollections();
+  if (collections.some(t => t.query === query)) return;
+
+  const collection = { id: Date.now().toString(), query };
+  collections.push(collection);
+  await saveCollections(collections);
+  await renderCollections();
+  showCollection(collection);
 }
 
 // --- Utility ---
@@ -1371,112 +2335,18 @@ function escapeHtml(text) {
 // --- Event listeners: Sidebar categories ---
 document.querySelectorAll('.sidebar-item[data-category]').forEach(item => {
   item.addEventListener('click', () => {
-    document.getElementById('searchInput').value = '';
     showCategory(item.dataset.category);
   });
 });
 
-// --- Event listeners: Search ---
-document.getElementById('searchInput').addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') showSearch(e.target.value);
+// --- Event listeners: Explore button ---
+document.getElementById('exploreBtn').addEventListener('click', () => {
+  showExplore();
 });
 
-// Also search on input clear (when user deletes all text and presses enter, go back to category)
-document.getElementById('searchInput').addEventListener('input', (e) => {
-  if (e.target.value === '' && activeView.type === 'search') {
-    showCategory('all');
-  }
-});
-
-// --- Event listeners: Ranking pills ---
-document.querySelectorAll('.ranking-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const algo = parseInt(btn.dataset.algorithm);
-    const section = btn.closest('.section-ranking');
-
-    if (section) {
-      // Section-specific ranking button
-      const sectionName = section.dataset.section;
-      if (sectionName === 'pinned') {
-        pinnedAlgorithm = algo;
-      } else if (sectionName === 'related') {
-        relatedAlgorithm = algo;
-      }
-      // Update only this section's active state
-      section.querySelectorAll('.ranking-btn').forEach(b => {
-        b.classList.toggle('active', parseInt(b.dataset.algorithm) === algo);
-      });
-      if (activeView.type === 'topic' && activeView.query) {
-        showTopic({ id: activeView.id, query: activeView.query });
-      }
-    } else {
-      // Global ranking button (category/search views)
-      currentAlgorithm = algo;
-      document.querySelectorAll('#globalRanking .ranking-btn').forEach(b => {
-        b.classList.toggle('active', parseInt(b.dataset.algorithm) === currentAlgorithm);
-      });
-      if (activeView.type === 'search' && activeView.query) {
-        showSearch(activeView.query);
-      }
-    }
-  });
-});
-
-// --- Event listeners: Sort buttons ---
-document.querySelectorAll('.sort-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const sortVal = btn.dataset.sort;
-    const section = btn.closest('.section-ranking');
-
-    if (section) {
-      const sectionName = section.dataset.section;
-      if (sectionName === 'pinned') {
-        pinnedSort = sortVal;
-      } else if (sectionName === 'related') {
-        relatedSort = sortVal;
-      }
-      section.querySelectorAll('.sort-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.sort === sortVal);
-      });
-      if (activeView.type === 'topic' && activeView.query) {
-        showTopic({ id: activeView.id, query: activeView.query });
-      }
-    } else {
-      currentSort = sortVal;
-      document.querySelectorAll('#globalRanking .sort-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.sort === currentSort);
-      });
-      if (activeView.type === 'search' && activeView.query) {
-        showSearch(activeView.query);
-      } else if (activeView.type === 'category') {
-        showCategory(activeView.value);
-      }
-    }
-  });
-});
 
 // --- Event listeners: Pin search ---
 document.getElementById('pinSearchBtn').addEventListener('click', pinCurrentSearch);
-
-// --- Event listeners: Local recycle bin ---
-document.getElementById('localRecycleBtn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  const panel = document.getElementById('localRecyclePanel');
-  if (panel.classList.contains('open')) {
-    panel.classList.remove('open');
-  } else {
-    renderLocalRecyclePanel();
-    panel.classList.add('open');
-  }
-});
-
-document.addEventListener('click', (e) => {
-  const panel = document.getElementById('localRecyclePanel');
-  const btn = document.getElementById('localRecycleBtn');
-  if (panel.classList.contains('open') && !panel.contains(e.target) && !btn.contains(e.target)) {
-    panel.classList.remove('open');
-  }
-});
 
 // --- Event listeners: Del key to delete selected rows ---
 document.addEventListener('keydown', async (e) => {
@@ -1596,19 +2466,19 @@ initMarqueeForElements(
   document.getElementById('resultsWrapper'),
   document.getElementById('results')
 );
-// Init marquee for topic sections (shared scroll parent)
-const topicScroller = document.getElementById('topicLayout');
+// Init marquee for collection sections (shared scroll parent)
+const collectionScroller = document.getElementById('collectionLayout');
 initMarqueeForElements(
   document.getElementById('pinnedGutter'),
   document.getElementById('pinnedResultsWrapper'),
   document.getElementById('pinnedResults'),
-  topicScroller
+  collectionScroller
 );
 initMarqueeForElements(
   document.getElementById('relatedGutter'),
   document.getElementById('relatedResultsWrapper'),
   document.getElementById('relatedResults'),
-  topicScroller
+  collectionScroller
 );
 
 // --- Settings modal ---
@@ -1688,7 +2558,7 @@ document.getElementById('selectDirBtn').addEventListener('click', async () => {
       showStatus(`Storage location set: ${result.name}`, 'success');
       chrome.runtime.sendMessage({ action: 'initializeFilesystem' });
       // Reload data for main view
-      cachedData = null;
+      cachedData = null; cachedFieldRanges = null;
       showCategory(activeView.type === 'category' ? activeView.value : 'all');
     } else if (result.error !== 'User cancelled') {
       showStatus(`Error: ${result.error}`, 'error');
@@ -1749,7 +2619,7 @@ document.getElementById('changeDirBtn').addEventListener('click', async () => {
     await updateStorageStatus();
     await updateStatistics();
     chrome.runtime.sendMessage({ action: 'initializeFilesystem' });
-    cachedData = null;
+    cachedData = null; cachedFieldRanges = null;
   } catch (error) {
     showStatus(`Error changing directory: ${error.message}`, 'error');
   }
@@ -1815,7 +2685,7 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
     await chrome.storage.local.set({ writeBuffer: [] });
     showStatus(`Cleared ${deletedCount} files/directories`, 'success');
     await updateStatistics();
-    cachedData = null;
+    cachedData = null; cachedFieldRanges = null;
     showCategory('all');
   } catch (error) {
     showStatus(`Error clearing data: ${error.message}`, 'error');
@@ -1971,13 +2841,16 @@ async function initialize() {
     document.getElementById('archiveQuality').value = settings.archiveQuality || 'medium';
   });
 
+  // Initialize query builder
+  qbRoot = qbCreatePlaceholder();
+
   // Load data and show default view
   await loadData();
-  await loadAllTopicPins();
+  await loadAllCollectionPins();
   await loadRecycleBin();
-  await loadLocalHides();
+  await loadGatewayDomains();
   updateRecycleSidebarCount();
-  await renderTopics();
+  await renderCollections();
   renderBlacklist();
   renderTrimRules();
   showCategory('all');

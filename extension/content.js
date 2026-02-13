@@ -1,5 +1,16 @@
 // Content script for capturing user intent and attention
 console.log('Portal content script loaded on:', window.location.href);
+
+// Private mode: skip all content script functionality
+chrome.storage.local.get(['workspace'], (result) => {
+  if (result.workspace && result.workspace.mode === 'private') {
+    console.log('[content] Private mode — all tracking disabled');
+    return;
+  }
+  initContentScript();
+});
+
+function initContentScript() {
 let currentInteractionId = null;
 let attentionData = {
   scrollDepth: 0,
@@ -972,3 +983,4 @@ window.addEventListener('beforeunload', () => {
     });
   }
 });
+} // end initContentScript

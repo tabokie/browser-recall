@@ -6,6 +6,8 @@ let currentHighlights = [];
 let currentInteraction = null;
 let currentUrl = '';
 let currentTitle = '';
+let currentTab = null;
+let detachedContent = null; // holds dashboardContent when removed in private mode
 
 function escapeHtml(text) {
   const div = document.createElement('div');
@@ -217,57 +219,63 @@ document.getElementById('pageNote').addEventListener('input', (e) => {
   }, 500);
 });
 
-// Topics — pin current page to topics
-async function loadTopics() {
-  const result = await chrome.storage.local.get(['pinnedTopics']);
-  return result.pinnedTopics || [];
+// Collections — pin current page to collections
+async function loadCollections() {
+  // Migration: try pinnedCollections first, fall back to pinnedTopics
+  const result = await chrome.storage.local.get(['pinnedCollections', 'pinnedTopics']);
+  if (result.pinnedCollections) return result.pinnedCollections;
+  if (result.pinnedTopics) {
+    await chrome.storage.local.set({ pinnedCollections: result.pinnedTopics });
+    return result.pinnedTopics;
+  }
+  return [];
 }
 
-async function loadTopicPins() {
+async function loadCollectionPins() {
   try {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadTopicPins' });
+    const resp = await chrome.runtime.sendMessage({ action: 'loadCollectionPins' });
     return (resp && resp.success) ? (resp.pins || {}) : {};
   } catch { return {}; }
 }
 
-async function saveTopicPins(allPins) {
+async function saveCollectionPins(allPins) {
   try {
-    await chrome.runtime.sendMessage({ action: 'saveTopicPins', pins: allPins });
+    await chrome.runtime.sendMessage({ action: 'saveCollectionPins', pins: allPins });
   } catch (error) {
-    console.error('[popup] Failed to save topic pins:', error);
+    console.error('[popup] Failed to save collection pins:', error);
   }
 }
 
-function isPagePinned(allPins, topicId, url) {
-  const pins = allPins[topicId] || [];
+function isPagePinned(allPins, collectionId, url) {
+  const pins = allPins[collectionId] || [];
   return pins.some(p => p.url === url);
 }
 
-async function renderTopicChips() {
-  const container = document.getElementById('topicChips');
-  const [topics, allPins] = await Promise.all([loadTopics(), loadTopicPins()]);
+async function renderCollectionChips() {
+  const container = document.getElementById('collectionChips');
+  const [collections, allPins] = await Promise.all([loadCollections(), loadCollectionPins()]);
 
-  let html = topics.map(topic => {
-    const pinned = isPagePinned(allPins, topic.id, currentUrl);
-    return `<span class="topic-chip${pinned ? ' selected' : ''}" data-topic-id="${topic.id}" data-topic-query="${escapeHtml(topic.query)}">
-      <span class="topic-chip-check">${pinned ? '&#10003;' : ''}</span>
-      ${escapeHtml(topic.query)}
+  let html = collections.map(collection => {
+    const pinned = isPagePinned(allPins, collection.id, currentUrl);
+    return `<span class="collection-chip${pinned ? ' selected' : ''}" data-collection-id="${collection.id}" data-collection-query="${escapeHtml(collection.query)}">
+      <span class="collection-chip-check">${pinned ? '&#10003;' : ''}</span>
+      ${escapeHtml(collection.query)}
     </span>`;
   }).join('');
 
-  html += `<span class="topic-new">
-    <input class="topic-new-input" id="topicNewInput" placeholder="+ New topic" />
+  html += `<span class="collection-new">
+    <input class="collection-new-input" id="collectionNewInput" placeholder="+ New collection" />
   </span>`;
 
   container.innerHTML = html;
 
-  // Toggle existing topics
-  container.querySelectorAll('.topic-chip').forEach(chip => {
+  // Toggle existing collections
+  container.querySelectorAll('.collection-chip').forEach(chip => {
     chip.addEventListener('click', async () => {
-      const topicId = chip.dataset.topicId;
-      const freshPins = await loadTopicPins();
-      if (!freshPins[topicId]) freshPins[topicId] = [];
-      const pins = freshPins[topicId];
+      const collectionId = chip.dataset.collectionId;
+      const freshPins = await loadCollectionPins();
+      if (!freshPins[collectionId]) freshPins[collectionId] = [];
+      const pins = freshPins[collectionId];
       const idx = pins.findIndex(p => p.url === currentUrl);
 
       if (idx !== -1) {
@@ -276,35 +284,35 @@ async function renderTopicChips() {
         pins.push({ url: currentUrl, title: currentTitle, pinnedAt: Date.now() });
       }
 
-      await saveTopicPins(freshPins);
-      renderTopicChips();
+      await saveCollectionPins(freshPins);
+      renderCollectionChips();
     });
   });
 
-  // Create new topic
-  const newInput = document.getElementById('topicNewInput');
+  // Create new collection
+  const newInput = document.getElementById('collectionNewInput');
   newInput.addEventListener('keydown', async (e) => {
     if (e.key === 'Enter') {
       const query = newInput.value.trim();
       if (!query) return;
 
-      const topics = await loadTopics();
-      if (topics.some(t => t.query === query)) {
+      const collections = await loadCollections();
+      if (collections.some(t => t.query === query)) {
         newInput.value = '';
         return;
       }
 
-      const topicId = Date.now().toString();
-      topics.push({ id: topicId, query });
-      await chrome.storage.local.set({ pinnedTopics: topics });
+      const collectionId = Date.now().toString();
+      collections.push({ id: collectionId, query });
+      await chrome.storage.local.set({ pinnedCollections: collections });
 
-      // Also pin the current page to the new topic
-      const freshPins = await loadTopicPins();
-      freshPins[topicId] = [{ url: currentUrl, title: currentTitle, pinnedAt: Date.now() }];
-      await saveTopicPins(freshPins);
+      // Also pin the current page to the new collection
+      const freshPins = await loadCollectionPins();
+      freshPins[collectionId] = [{ url: currentUrl, title: currentTitle, pinnedAt: Date.now() }];
+      await saveCollectionPins(freshPins);
 
-      console.log('[popup] Created topic and pinned page:', query);
-      renderTopicChips();
+      console.log('[popup] Created collection and pinned page:', query);
+      renderCollectionChips();
     } else if (e.key === 'Escape') {
       newInput.value = '';
       newInput.blur();
@@ -315,7 +323,12 @@ async function renderTopicChips() {
 // Workspace mode
 async function loadWorkspace() {
   const result = await chrome.storage.local.get(['workspace']);
-  return result.workspace || { enabled: false, topicIds: [], autoSnapshot: false };
+  const ws = result.workspace || {};
+  // Migrate legacy boolean `enabled` to `mode`
+  if (ws.enabled === true && !ws.mode) ws.mode = 'workspace';
+  // Migration: topicIds → collectionIds
+  if (ws.topicIds && !ws.collectionIds) ws.collectionIds = ws.topicIds;
+  return { mode: 'default', collectionIds: [], autoSnapshot: false, ...ws };
 }
 
 async function saveWorkspace(workspace) {
@@ -324,43 +337,49 @@ async function saveWorkspace(workspace) {
 
 async function renderWorkspaceBar() {
   const workspace = await loadWorkspace();
-  const topics = await loadTopics();
+  const collections = await loadCollections();
 
   const bar = document.getElementById('workspaceBar');
-  const toggle = document.getElementById('workspaceToggle');
+  const triToggle = document.getElementById('triToggle');
   const config = document.getElementById('workspaceConfig');
-  const topicsContainer = document.getElementById('workspaceTopics');
+  const collectionsContainer = document.getElementById('workspaceCollections');
   const autoSnapshotCheckbox = document.getElementById('workspaceAutoSnapshot');
 
-  toggle.checked = workspace.enabled;
   autoSnapshotCheckbox.checked = workspace.autoSnapshot;
 
-  if (workspace.enabled) {
-    bar.classList.add('active');
+  // Update toggle and bar mode classes
+  bar.classList.remove('mode-workspace', 'mode-private');
+  triToggle.classList.remove('mode-workspace', 'mode-private');
+  if (workspace.mode === 'workspace') {
+    bar.classList.add('mode-workspace');
+    triToggle.classList.add('mode-workspace');
     config.style.display = 'block';
+  } else if (workspace.mode === 'private') {
+    bar.classList.add('mode-private');
+    triToggle.classList.add('mode-private');
+    config.style.display = 'none';
   } else {
-    bar.classList.remove('active');
     config.style.display = 'none';
   }
 
-  // Render topic selection chips
-  if (topics.length === 0) {
-    topicsContainer.innerHTML = '<span class="workspace-empty">No topics yet. Create one in Notes section.</span>';
+  // Render collection selection chips
+  if (collections.length === 0) {
+    collectionsContainer.innerHTML = '<span class="workspace-empty">No collections yet. Create one in Notes section.</span>';
   } else {
-    topicsContainer.innerHTML = topics.map(topic => {
-      const selected = workspace.topicIds.includes(topic.id);
-      return `<span class="ws-topic-chip${selected ? ' selected' : ''}" data-topic-id="${topic.id}">${escapeHtml(topic.query)}</span>`;
+    collectionsContainer.innerHTML = collections.map(collection => {
+      const selected = workspace.collectionIds.includes(collection.id);
+      return `<span class="ws-collection-chip${selected ? ' selected' : ''}" data-collection-id="${collection.id}">${escapeHtml(collection.query)}</span>`;
     }).join('');
 
-    topicsContainer.querySelectorAll('.ws-topic-chip').forEach(chip => {
+    collectionsContainer.querySelectorAll('.ws-collection-chip').forEach(chip => {
       chip.addEventListener('click', async () => {
-        const topicId = chip.dataset.topicId;
+        const collectionId = chip.dataset.collectionId;
         const ws = await loadWorkspace();
-        const idx = ws.topicIds.indexOf(topicId);
+        const idx = ws.collectionIds.indexOf(collectionId);
         if (idx !== -1) {
-          ws.topicIds.splice(idx, 1);
+          ws.collectionIds.splice(idx, 1);
         } else {
-          ws.topicIds.push(topicId);
+          ws.collectionIds.push(collectionId);
         }
         await saveWorkspace(ws);
         renderWorkspaceBar();
@@ -369,16 +388,52 @@ async function renderWorkspaceBar() {
   }
 }
 
-// Workspace toggle handler
-document.getElementById('workspaceToggle').addEventListener('change', async (e) => {
+// Three-way toggle handler
+document.getElementById('triToggle').addEventListener('click', async (e) => {
+  const zone = e.target.closest('[data-mode]');
+  if (!zone) return;
   const ws = await loadWorkspace();
-  ws.enabled = e.target.checked;
-  if (!ws.enabled) {
-    ws.topicIds = [];
+  const wasPrivate = ws.mode === 'private';
+  let newMode = zone.dataset.mode;
+  // Clicking the already-active zone resets to default
+  if (newMode === ws.mode) newMode = 'default';
+  ws.mode = newMode;
+  if (newMode !== 'workspace') {
+    ws.collectionIds = [];
     ws.autoSnapshot = false;
   }
   await saveWorkspace(ws);
-  renderWorkspaceBar();
+  await renderWorkspaceBar();
+
+  // Exiting private mode: record the current page visit and show details
+  if (wasPrivate && newMode !== 'private' && currentTab) {
+    const slug = generateSlugFromUrl(currentTab.url);
+    const timestamp = Date.now();
+    await chrome.runtime.sendMessage({
+      action: 'writeInteraction',
+      interaction: {
+        id: currentTab.url,
+        timestamp,
+        url: currentTab.url,
+        title: currentTab.title || 'Untitled',
+        intent: '',
+        attention: '',
+        slug
+      },
+      markdown: '',
+      html: ''
+    });
+    await showDashboard(currentTab);
+  }
+
+  // Entering private mode: remove page details from DOM
+  if (newMode === 'private') {
+    const content = document.getElementById('dashboardContent');
+    if (content) {
+      detachedContent = content;
+      content.remove();
+    }
+  }
 });
 
 // Auto-snapshot toggle handler
@@ -465,6 +520,114 @@ document.getElementById('captureBtn').addEventListener('click', async () => {
   btn.textContent = '+ Capture';
 });
 
+// Show dashboard for a tab: set up state, fetch data, render sections
+async function showDashboard(tab) {
+  // Re-attach dashboardContent if it was removed (e.g. exiting private mode)
+  if (detachedContent && !document.getElementById('dashboardContent')) {
+    document.getElementById('dashboard').appendChild(detachedContent);
+    detachedContent = null;
+  }
+
+  currentUrl = tab.url;
+  currentTitle = tab.title || 'Untitled';
+  document.getElementById('pageTitle').textContent = currentTitle;
+  document.getElementById('pageUrl').textContent = tab.url;
+  currentSlug = generateSlugFromUrl(tab.url);
+
+  // Build a fallback interaction from tab info
+  currentInteraction = {
+    id: tab.url,
+    timestamp: Date.now(),
+    url: tab.url,
+    title: tab.title || 'Untitled',
+    intent: '',
+    attention: '',
+    slug: currentSlug
+  };
+
+  // Fetch page info from background (which queries offscreen)
+  try {
+    console.log(`[popup] Fetching page info for slug=${currentSlug}`);
+    const info = await chrome.runtime.sendMessage({ action: 'getPageInfo', url: tab.url });
+    console.log('[popup] getPageInfo response:', info);
+
+    if (info && info.success) {
+      if (info.interaction) {
+        currentInteraction = info.interaction;
+        // Use stored title if available
+        currentTitle = info.interaction.title || tab.title || 'Untitled';
+        document.getElementById('pageTitle').textContent = currentTitle;
+      }
+      renderSnapshots(info.snapshots);
+      renderAttention(info.interaction);
+      renderHighlights(info.highlights);
+      console.log(`[popup] Loaded ${info.highlights?.length || 0} highlights, ${info.snapshots?.length || 0} snapshots`);
+    } else {
+      console.warn('[popup] getPageInfo returned failure:', info);
+    }
+  } catch (error) {
+    console.error('[popup] Could not load page info:', error);
+  }
+
+  // Render collection chips and workspace bar
+  await Promise.all([renderCollectionChips(), renderWorkspaceBar()]);
+
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('blacklisted').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  document.getElementById('dashboardContent').style.display = 'block';
+
+  // Auto-resize note textareas now that the dashboard is visible
+  requestAnimationFrame(() => {
+    autoResizeTextarea(document.getElementById('pageNote'));
+    document.querySelectorAll('.highlight-note').forEach(ta => autoResizeTextarea(ta));
+  });
+
+  // Re-check tab title after 1s — some sites set a generic title initially
+  const initialTitle = tab.title || 'Untitled';
+  setTimeout(async () => {
+    try {
+      const [freshTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!freshTab || freshTab.id !== tab.id) return;
+
+      const freshTitle = freshTab.title || 'Untitled';
+      if (freshTitle === initialTitle) return;
+
+      // Only auto-update if the displayed title still matches the initial tab title
+      const titleEl = document.getElementById('pageTitle');
+      if (!titleEl || titleEl.textContent !== initialTitle) return;
+
+      titleEl.textContent = freshTitle;
+
+      // Load stored interaction to preserve existing fields, or build a fresh one
+      const resp = await chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url });
+      const interaction = (resp && resp.interaction) || {
+        id: tab.url,
+        url: tab.url,
+        intent: '',
+        attention: '',
+        slug: currentSlug
+      };
+      interaction.title = freshTitle;
+      interaction.timestamp = Date.now();
+
+      await chrome.runtime.sendMessage({
+        action: 'writeInteraction',
+        interaction,
+        markdown: '',
+        html: ''
+      });
+      // Keep currentInteraction in sync if it exists
+      if (currentInteraction) {
+        currentInteraction.title = freshTitle;
+      }
+      console.log('[popup] Auto-updated title to:', freshTitle);
+    } catch (error) {
+      console.warn('[popup] Title re-check failed:', error);
+    }
+  }, 1000);
+}
+
 // Initialize dashboard
 (async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -474,105 +637,18 @@ document.getElementById('captureBtn').addEventListener('click', async () => {
     return;
   }
 
-  // Show dashboard for a tab: set up state, fetch data, render sections
-  async function showDashboard(tab) {
-    currentUrl = tab.url;
-    currentTitle = tab.title || 'Untitled';
-    document.getElementById('pageTitle').textContent = currentTitle;
-    document.getElementById('pageUrl').textContent = tab.url;
-    currentSlug = generateSlugFromUrl(tab.url);
+  currentTab = tab;
 
-    // Build a fallback interaction from tab info
-    currentInteraction = {
-      id: tab.url,
-      timestamp: Date.now(),
-      url: tab.url,
-      title: tab.title || 'Untitled',
-      intent: '',
-      attention: '',
-      slug: currentSlug
-    };
-
-    // Fetch page info from background (which queries offscreen)
-    try {
-      console.log(`[popup] Fetching page info for slug=${currentSlug}`);
-      const info = await chrome.runtime.sendMessage({ action: 'getPageInfo', url: tab.url });
-      console.log('[popup] getPageInfo response:', info);
-
-      if (info && info.success) {
-        if (info.interaction) {
-          currentInteraction = info.interaction;
-          // Use stored title if available
-          currentTitle = info.interaction.title || tab.title || 'Untitled';
-          document.getElementById('pageTitle').textContent = currentTitle;
-        }
-        renderSnapshots(info.snapshots);
-        renderAttention(info.interaction);
-        renderHighlights(info.highlights);
-        console.log(`[popup] Loaded ${info.highlights?.length || 0} highlights, ${info.snapshots?.length || 0} snapshots`);
-      } else {
-        console.warn('[popup] getPageInfo returned failure:', info);
-      }
-    } catch (error) {
-      console.error('[popup] Could not load page info:', error);
-    }
-
-    // Render topic chips and workspace bar
-    await Promise.all([renderTopicChips(), renderWorkspaceBar()]);
-
+  // Private mode: show only the toggle bar, remove page details entirely
+  const wsCheck = await loadWorkspace();
+  if (wsCheck.mode === 'private') {
+    await renderWorkspaceBar();
+    const content = document.getElementById('dashboardContent');
+    detachedContent = content;
+    content.remove();
     document.getElementById('loading').style.display = 'none';
-    document.getElementById('blacklisted').style.display = 'none';
     document.getElementById('dashboard').style.display = 'block';
-
-    // Auto-resize note textareas now that the dashboard is visible
-    requestAnimationFrame(() => {
-      autoResizeTextarea(document.getElementById('pageNote'));
-      document.querySelectorAll('.highlight-note').forEach(ta => autoResizeTextarea(ta));
-    });
-
-    // Re-check tab title after 1s — some sites set a generic title initially
-    const initialTitle = tab.title || 'Untitled';
-    setTimeout(async () => {
-      try {
-        const [freshTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!freshTab || freshTab.id !== tab.id) return;
-
-        const freshTitle = freshTab.title || 'Untitled';
-        if (freshTitle === initialTitle) return;
-
-        // Only auto-update if the displayed title still matches the initial tab title
-        const titleEl = document.getElementById('pageTitle');
-        if (!titleEl || titleEl.textContent !== initialTitle) return;
-
-        titleEl.textContent = freshTitle;
-
-        // Load stored interaction to preserve existing fields, or build a fresh one
-        const resp = await chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url });
-        const interaction = (resp && resp.interaction) || {
-          id: tab.url,
-          url: tab.url,
-          intent: '',
-          attention: '',
-          slug: currentSlug
-        };
-        interaction.title = freshTitle;
-        interaction.timestamp = Date.now();
-
-        await chrome.runtime.sendMessage({
-          action: 'writeInteraction',
-          interaction,
-          markdown: '',
-          html: ''
-        });
-        // Keep currentInteraction in sync if it exists
-        if (currentInteraction) {
-          currentInteraction.title = freshTitle;
-        }
-        console.log('[popup] Auto-updated title to:', freshTitle);
-      } catch (error) {
-        console.warn('[popup] Title re-check failed:', error);
-      }
-    }, 1000);
+    return;
   }
 
   // Skip blacklist if the page has visit history (previously captured and not deleted)
