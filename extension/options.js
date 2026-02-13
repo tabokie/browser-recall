@@ -2125,7 +2125,7 @@ async function loadExtraDetail(url) {
   for (const collection of collections) {
     const pins = allCollectionPins[collection.id] || [];
     if (pins.some(p => p.url === url)) {
-      belongedCollections.push(collection.query);
+      belongedCollections.push(collectionDisplayName(collection));
     }
   }
 

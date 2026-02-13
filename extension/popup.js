@@ -259,7 +259,7 @@ async function renderCollectionChips() {
     const pinned = isPagePinned(allPins, collection.id, currentUrl);
     return `<span class="collection-chip${pinned ? ' selected' : ''}" data-collection-id="${collection.id}" data-collection-query="${escapeHtml(collection.query)}">
       <span class="collection-chip-check">${pinned ? '&#10003;' : ''}</span>
-      ${escapeHtml(collection.query)}
+      ${escapeHtml(collection.name || collection.query)}
     </span>`;
   }).join('');
 
@@ -368,7 +368,7 @@ async function renderWorkspaceBar() {
   } else {
     collectionsContainer.innerHTML = collections.map(collection => {
       const selected = workspace.collectionIds.includes(collection.id);
-      return `<span class="ws-collection-chip${selected ? ' selected' : ''}" data-collection-id="${collection.id}">${escapeHtml(collection.query)}</span>`;
+      return `<span class="ws-collection-chip${selected ? ' selected' : ''}" data-collection-id="${collection.id}">${escapeHtml(collection.name || collection.query)}</span>`;
     }).join('');
 
     collectionsContainer.querySelectorAll('.ws-collection-chip').forEach(chip => {

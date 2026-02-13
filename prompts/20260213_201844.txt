@@ -1,0 +1,34 @@
+// In ~/.claude/user-log.sh:
+//
+// ```
+// #!/bin/bash
+// INPUT=$(cat)
+// PROMPT=$(echo "$INPUT" | jq -r '.prompt')
+// CWD=$(echo "$INPUT" | jq -r '.cwd')
+// echo "- $PROMPT" >> "$CWD/prompts/STAGING.txt"
+// exit 0
+// ```
+//
+// In ~/.claude/settings.json:
+//
+// ```
+// {
+//     "hooks": {
+//         "UserPromptSubmit": [
+//         {
+//             "hooks": [
+//             {
+//                 "type": "command",
+//                 "command": "~/.claude/user-log.sh",
+//                 "timeout": 10
+//             }
+//             ]
+//         }
+//         ]
+//     }
+// }
+// ```
+
+- Give me example on how to set UserPromptSubmit.
+- Finish up.
+- Skip.
