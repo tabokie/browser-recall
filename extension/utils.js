@@ -1,7 +1,17 @@
 // Shared utility functions
 
-// Load a single key from settings.json via offscreen
+// Load a single key from chrome.storage.local cache, falling back to settings.json via offscreen
 export async function loadSettingsValue(key, defaultValue) {
+  // Fast path: read from chrome.storage.local cache
+  try {
+    const cached = await chrome.storage.local.get(key);
+    if (key in cached) {
+      console.debug(`[I/O] loadSettingsValue('${key}'): cache hit`);
+      return cached[key];
+    }
+  } catch {}
+  // Slow path: read from settings.json via offscreen
+  console.debug(`[I/O] loadSettingsValue('${key}'): cache miss, reading from disk`);
   try {
     const resp = await chrome.runtime.sendMessage({ action: 'loadSettings' });
     if (resp && resp.success && resp.settings && key in resp.settings) {

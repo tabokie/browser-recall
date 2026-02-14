@@ -31,7 +31,7 @@ async function hydrateCache() {
       const s = resp.settings;
       const cacheUpdate = {};
       if (s.workspace !== undefined) cacheUpdate.workspace = s.workspace;
-      if (s.collections !== undefined) cacheUpdate.pinnedCollections = s.collections;
+      if (s.collections !== undefined) cacheUpdate.collections = s.collections;
       if (s.urlBlacklist !== undefined) cacheUpdate.urlBlacklist = s.urlBlacklist;
       if (s.titleTrimRules !== undefined) cacheUpdate.titleTrimRules = s.titleTrimRules;
       if (s.recycleBin !== undefined) cacheUpdate.recycleBin = s.recycleBin;

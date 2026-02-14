@@ -140,26 +140,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse(flushResult);
           break;
 
-        case 'loadInteractions':
+        case 'loadInteractions': {
           // Read from filesystem (source of truth) — metadata only
+          const t0 = performance.now();
           const interactions = await fsStorage.loadAllInteractions();
+          console.debug(`[I/O] loadInteractions: ${interactions.length} items in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, interactions });
           break;
+        }
 
-        case 'loadContent':
+        case 'loadContent': {
           // Load markdown content for a single interaction by slug
+          const t0 = performance.now();
           const content = await fsStorage.loadContentForInteraction(request.slug);
+          console.debug(`[I/O] loadContent(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, content });
           break;
+        }
 
-        case 'loadAllContent':
+        case 'loadAllContent': {
           // Load all markdown content from pages/ directory
+          const t0 = performance.now();
           const contentMap = await fsStorage.loadAllContent();
+          console.debug(`[I/O] loadAllContent: ${Object.keys(contentMap).length} pages in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, contentMap });
           break;
+        }
 
         case 'loadContentBatch': {
+          const t0 = performance.now();
           const contentMap2 = await fsStorage.loadContentBatch(request.slugs);
+          console.debug(`[I/O] loadContentBatch: ${request.slugs.length} slugs in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, contentMap: contentMap2 });
           break;
         }
@@ -188,7 +199,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
 
         case 'listSnapshots': {
+          const t0 = performance.now();
           const snapshots = await fsStorage.listSnapshots(request.slug);
+          console.debug(`[I/O] listSnapshots(${request.slug}): ${snapshots.length} snapshots in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, snapshots });
           break;
         }
@@ -206,7 +219,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'loadHighlights': {
+          const t0 = performance.now();
           const highlights = await fsStorage.loadHighlights(request.slug);
+          console.debug(`[I/O] loadHighlights(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, highlights });
           break;
         }
@@ -218,19 +233,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'loadAllHighlights': {
+          const t0 = performance.now();
           const highlightsMap = await fsStorage.loadAllHighlights();
+          console.debug(`[I/O] loadAllHighlights: ${Object.keys(highlightsMap).length} pages in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, highlightsMap });
           break;
         }
 
         case 'loadInteractionByUrl': {
+          const t0 = performance.now();
           const interaction = await fsStorage.loadInteractionByUrl(request.url);
+          console.debug(`[I/O] loadInteractionByUrl: ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, interaction });
           break;
         }
 
         case 'loadCollectionPins': {
+          const t0 = performance.now();
           const allPins = await fsStorage.loadCollectionPins();
+          console.debug(`[I/O] loadCollectionPins: ${Object.keys(allPins).length} collections in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, pins: allPins });
           break;
         }
@@ -242,7 +263,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'loadSettings': {
+          const t0 = performance.now();
           const settings = await fsStorage.loadSettings();
+          console.debug(`[I/O] loadSettings: ${Object.keys(settings).length} keys in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, settings });
           break;
         }
@@ -262,7 +285,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'loadGateways': {
+          const t0 = performance.now();
           const gatewayData = await fsStorage.loadGateways();
+          console.debug(`[I/O] loadGateways: ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, ...gatewayData });
           break;
         }

@@ -1,0 +1,23 @@
+- Why is the collection list on the left loaded so slow? I thought it's cached in localStorage?
+- Yes.
+- Examine the code. Are there some other paths that unnecessarily skip the cache?
+- Print logs for read I/O, so that I can diagnose this issue in the future.
+- Good. But the collection list is still loading slower than I like. It seems to be loading up the same time as results are rendered.
+- Another issue. When I select some items and then scroll out of view, they automatically become deselected.
+- I think the solution is a little too complex. Let's walk through the design of virtual scroller again, and see if the selection can be preserved while keeping some virtual scrolling capabilities.
+- > If they scroll far enough that all selected rows leave the buffer, clear the selection and resume virtual scrolling.
+
+Are you suggesting user's selection can still be dropped silently?
+- Couldn't we only keep the innerHTML of selected items? And recycle non-selected items like usual.
+- Help me understand what is innerHTML and why is it necessary for card render?
+- As I understand, there're two costs involved in rendering large list: (1) the cost of creating card elements for new items, (2) the cost of maintaining existing card elements. Help me understand them using concrete latency numbers.
+- Let's hear your proposals again, go for as many as you can.
+- Help me understand 3 better. If you don't remove the DOMs of rows that left, how is the cost (2) reduced?
+- Why is the selection state preserved when the rows being selected has left and are destroyed?
+- What are the downsides of solution 5?
+- How much is the performance penalty from rendering using individual DOMs instead of bulk innerHTML?
+- Good. Go with 4, and use the idea from 2 to save out-of-sight states.
+- Finish up.
+- Abort it. There's a small issue. Not just selected items are saved, expanded items should be saved as well.
+- Finish up.
+- only C

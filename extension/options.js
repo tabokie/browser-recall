@@ -2841,6 +2841,7 @@ class VirtualScroller {
     this.renderedRange = { start: -1, end: -1 };
     this._expandedIdx = -1;         // index of currently expanded row
     this._expandedExtraH = 0;       // extra height from expansion
+    this._savedNodes = new Map();   // detached stateful DOM nodes (selected rows that scrolled out)
     this._scrollHandler = () => requestAnimationFrame(() => this._render());
     scrollEl.addEventListener('scroll', this._scrollHandler);
     containerEl._virtualScroller = this;
@@ -2854,6 +2855,7 @@ class VirtualScroller {
     this.renderedRange = { start: -1, end: -1 };
     this._expandedIdx = -1;
     this._expandedExtraH = 0;
+    this._savedNodes.clear();
     this._render(true);
   }
 
@@ -2865,6 +2867,7 @@ class VirtualScroller {
     this.renderedRange = { start: -1, end: -1 };
     this._expandedIdx = -1;
     this._expandedExtraH = 0;
+    this._savedNodes.clear();
     this._render(true);
   }
 
@@ -2900,6 +2903,28 @@ class VirtualScroller {
       (this._expandedIdx >= 0 ? this._expandedExtraH : 0);
   }
 
+  // Save a DOM node if it has meaningful state (selected or expanded); otherwise discard it.
+  _saveOrDiscard(item) {
+    const row = item.querySelector('.result-row');
+    if (row && (row.classList.contains('selected') || item.querySelector('.result-detail.open'))) {
+      this._savedNodes.set(row.dataset.url, item);
+    }
+    item.remove();
+  }
+
+  // Insert a row at data index i. Reuses a saved node if one exists for that URL,
+  // otherwise creates fresh HTML via renderRow.
+  // insertFn(element | null, html | null) handles DOM placement.
+  _insertRow(i, insertFn) {
+    const url = this.data[i].url;
+    if (this._savedNodes.has(url)) {
+      insertFn(this._savedNodes.get(url), null);
+      this._savedNodes.delete(url);
+    } else {
+      insertFn(null, this.renderRow(this.data[i], i));
+    }
+  }
+
   _render(force = false) {
     if (!this.renderRow || this.data.length === 0) {
       // Only touch DOM on explicit setData/applyFilter calls (force=true).
@@ -2913,7 +2938,6 @@ class VirtualScroller {
       return;
     }
 
-    const scrollTop = this.scrollEl.scrollTop;
     const viewH = this.scrollEl.clientHeight;
     // Use getBoundingClientRect for correct offset regardless of intermediate
     // positioned ancestors (e.g. .section-results-wrapper with position:relative).
@@ -2924,27 +2948,90 @@ class VirtualScroller {
 
     if (!force && start === this.renderedRange.start && end === this.renderedRange.end) return;
 
-    // If a detail is expanded and still within the new range, skip re-render
-    // to preserve the open DOM state.  Clear expansion state if it scrolled out.
-    if (!force && this._expandedIdx >= 0) {
-      if (this._expandedIdx >= start && this._expandedIdx < end) {
-        return; // expanded item still visible — don't destroy it
+    // Update padding
+    const paddingTop = start * this.rowHeight;
+    let paddingBottom = (this.data.length - end) * this.rowHeight + this.basePaddingBottom;
+    if (this._expandedIdx >= end) paddingBottom += this._expandedExtraH;
+    this.containerEl.style.paddingTop = paddingTop + 'px';
+    this.containerEl.style.paddingBottom = paddingBottom + 'px';
+
+    const { start: oldStart, end: oldEnd } = this.renderedRange;
+
+    if (force || oldStart === -1 || start >= oldEnd || end <= oldStart) {
+      // Full rebuild: forced (setData/applyFilter), first render, or non-overlapping scroll jump.
+      // On non-forced jumps, save selected nodes before destroying.
+      if (!force) {
+        for (const item of this.containerEl.querySelectorAll('.result-item')) {
+          const row = item.querySelector('.result-row');
+          if (row && (row.classList.contains('selected') || item.querySelector('.result-detail.open'))) {
+            this._savedNodes.set(row.dataset.url, item);
+          }
+        }
       }
-      // Expanded item scrolled out of view — clear stale state
+
+      let html = this._headerHtml;
+      for (let i = start; i < end; i++) {
+        html += this.renderRow(this.data[i], i);
+      }
+      this.containerEl.innerHTML = html;
+
+      // Restore any saved nodes that fall within the new range
+      if (this._savedNodes.size > 0) {
+        for (const item of [...this.containerEl.querySelectorAll('.result-item')]) {
+          const row = item.querySelector('.result-row');
+          if (row && this._savedNodes.has(row.dataset.url)) {
+            item.replaceWith(this._savedNodes.get(row.dataset.url));
+            this._savedNodes.delete(row.dataset.url);
+          }
+        }
+      }
+    } else {
+      // Incremental update: only touch rows entering/leaving the range.
+      const items = this.containerEl.querySelectorAll('.result-item');
+
+      // Remove items that left the top
+      const removeTop = Math.max(0, start - oldStart);
+      for (let i = 0; i < removeTop && i < items.length; i++) {
+        this._saveOrDiscard(items[i]);
+      }
+
+      // Remove items that left the bottom
+      const removeBottom = Math.max(0, oldEnd - end);
+      for (let i = 0; i < removeBottom; i++) {
+        const idx = items.length - 1 - i;
+        if (idx >= removeTop && items[idx].parentNode) {
+          this._saveOrDiscard(items[idx]);
+        }
+      }
+
+      // Add items entering the top (insert before first remaining .result-item)
+      const addTopEnd = Math.min(oldStart, end);
+      if (start < addTopEnd) {
+        const ref = this.containerEl.querySelector('.result-item');
+        for (let i = start; i < addTopEnd; i++) {
+          this._insertRow(i, (el, html) => {
+            if (el) { ref ? ref.before(el) : this.containerEl.appendChild(el); }
+            else { ref ? ref.insertAdjacentHTML('beforebegin', html) : this.containerEl.insertAdjacentHTML('beforeend', html); }
+          });
+        }
+      }
+
+      // Add items entering the bottom
+      const addBotStart = Math.max(oldEnd, start);
+      for (let i = addBotStart; i < end; i++) {
+        this._insertRow(i, (el, html) => {
+          if (el) { this.containerEl.appendChild(el); }
+          else { this.containerEl.insertAdjacentHTML('beforeend', html); }
+        });
+      }
+    }
+
+    // Clear expanded state if it scrolled out of range
+    if (this._expandedIdx >= 0 && (this._expandedIdx < start || this._expandedIdx >= end)) {
       this._expandedIdx = -1;
       this._expandedExtraH = 0;
     }
 
-    const paddingTop = start * this.rowHeight;
-    const paddingBottom = (this.data.length - end) * this.rowHeight + this.basePaddingBottom;
-    this.containerEl.style.paddingTop = paddingTop + 'px';
-    this.containerEl.style.paddingBottom = paddingBottom + 'px';
-
-    let html = this._headerHtml;
-    for (let i = start; i < end; i++) {
-      html += this.renderRow(this.data[i], i);
-    }
-    this.containerEl.innerHTML = html;
     this.renderedRange = { start, end };
   }
 }
@@ -3493,7 +3580,7 @@ function formatBytes(bytes) {
 const CACHE_KEYS = [
   { key: 'settings', label: 'Settings' },
   { key: 'workspace', label: 'Workspace' },
-  { key: 'pinnedCollections', label: 'Collections' },
+  { key: 'collections', label: 'Collections' },
   { key: 'urlBlacklist', label: 'URL Blacklist' },
   { key: 'titleTrimRules', label: 'Title Trim Rules' },
   { key: 'recycleBin', label: 'Recycle Bin' },
@@ -3840,15 +3927,14 @@ async function initialize() {
   // Initialize query builder
   qbRoot = qbCreatePlaceholder();
 
-  // Load data and show default view
-  await loadData();
-  await loadAllCollectionPins();
-  await loadRecycleBin();
-  await loadGatewayDomains();
-  updateRecycleSidebarCount();
+  // Render sidebar immediately from cache (no disk I/O)
   await renderCollections();
   renderBlacklist();
   renderTrimRules();
+
+  // Load heavy data from disk in parallel
+  await Promise.all([loadData(), loadAllCollectionPins(), loadRecycleBin(), loadGatewayDomains()]);
+  updateRecycleSidebarCount();
   showCategory('all');
 }
 
