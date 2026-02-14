@@ -164,18 +164,8 @@ class FileSystemStorage {
         byDate[key] = [];
       }
 
-      // Convert old-format interactions: generate slug, extract inline content
       const metadata = { ...interaction };
-      if (!metadata.slug) {
-        metadata.slug = metadata.url ? generateSlugFromUrl(metadata.url) : 'untitled';
-      }
-
-      // If interaction has inline content but no entry in contentMap, migrate it
-      if (metadata.content && !contentMap[metadata.slug]) {
-        contentMap[metadata.slug] = metadata.content;
-      }
       delete metadata.content;
-
       byDate[key].push(metadata);
     });
 
@@ -275,8 +265,6 @@ class FileSystemStorage {
           try {
             const interaction = JSON.parse(line);
             // Deduplicate by URL — last write wins
-            // This also migrates old timestamp-based entries: if two entries
-            // share the same url, only the latest is kept.
             interactionsByUrl.set(interaction.url, interaction);
           } catch (error) {
             console.error(`Error parsing line in ${entry.name}:`, error);
@@ -292,8 +280,7 @@ class FileSystemStorage {
     return interactions;
   }
 
-  // Load markdown content for a single interaction by slug
-  // Checks new directory format first, falls back to old flat format
+  // Load markdown content for a single interaction by slug (latest snapshot)
   async loadContentForInteraction(slug) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
@@ -301,38 +288,26 @@ class FileSystemStorage {
 
     try {
       const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
-
-      // Try new directory format: pages/{slug}/{timestamp}.md — return latest
-      try {
-        const slugDir = await pagesDir.getDirectoryHandle(slug);
-        let latestTs = 0;
-        let latestContent = '';
-        for await (const entry of slugDir.values()) {
-          if (entry.kind === 'file' && entry.name.endsWith('.md')) {
-            const ts = parseInt(entry.name.replace('.md', ''), 10);
-            if (ts > latestTs) {
-              latestTs = ts;
-              const file = await entry.getFile();
-              latestContent = await file.text();
-            }
+      const slugDir = await pagesDir.getDirectoryHandle(slug);
+      let latestTs = 0;
+      let latestContent = '';
+      for await (const entry of slugDir.values()) {
+        if (entry.kind === 'file' && entry.name.endsWith('.md')) {
+          const ts = parseInt(entry.name.replace('.md', ''), 10);
+          if (ts > latestTs) {
+            latestTs = ts;
+            const file = await entry.getFile();
+            latestContent = await file.text();
           }
         }
-        if (latestContent) return latestContent;
-      } catch (e) {
-        // slug directory doesn't exist, try flat format
       }
-
-      // Fall back to old flat format: pages/{slug}.md
-      const fileHandle = await pagesDir.getFileHandle(`${slug}.md`);
-      const file = await fileHandle.getFile();
-      return await file.text();
+      return latestContent;
     } catch (error) {
       return '';
     }
   }
 
-  // Load all markdown content from pages/ directory
-  // Handles both new directory format and old flat format
+  // Load all markdown content from pages/ directory (latest snapshot per slug)
   async loadAllContent() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
@@ -344,13 +319,7 @@ class FileSystemStorage {
       const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
 
       for await (const entry of pagesDir.values()) {
-        if (entry.kind === 'file' && entry.name.endsWith('.md')) {
-          // Old flat format: pages/{slug}.md
-          const slug = entry.name.replace(/\.md$/, '');
-          const file = await entry.getFile();
-          contentMap[slug] = await file.text();
-        } else if (entry.kind === 'directory') {
-          // New directory format: pages/{slug}/{timestamp}.md — use latest
+        if (entry.kind === 'directory') {
           const slug = entry.name;
           let latestTs = 0;
           for await (const subEntry of entry.values()) {
@@ -371,6 +340,111 @@ class FileSystemStorage {
     }
 
     return contentMap;
+  }
+
+  // Load markdown content for a batch of slugs (latest snapshot per slug)
+  async loadContentBatch(slugs) {
+    const contentMap = {};
+    try {
+      const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
+      for (const slug of slugs) {
+        try {
+          const slugDir = await pagesDir.getDirectoryHandle(slug);
+          let latestTs = 0;
+          for await (const entry of slugDir.values()) {
+            if (entry.kind === 'file' && entry.name.endsWith('.md')) {
+              const ts = parseInt(entry.name.replace('.md', ''), 10);
+              if (ts > latestTs) {
+                latestTs = ts;
+                const file = await entry.getFile();
+                contentMap[slug] = await file.text();
+              }
+            }
+          }
+        } catch { /* slug directory doesn't exist */ }
+      }
+    } catch { /* pages directory doesn't exist */ }
+    return contentMap;
+  }
+
+  // Load gateway domains from gateways.json
+  async loadGateways() {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+    try {
+      const fileHandle = await this.directoryHandle.getFileHandle('gateways.json');
+      const file = await fileHandle.getFile();
+      return JSON.parse(await file.text());
+    } catch {
+      return { watermark: 0, domains: {} };
+    }
+  }
+
+  // Save gateway domains to gateways.json
+  async saveGateways(data) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to write directory');
+    }
+    const fileHandle = await this.directoryHandle.getFileHandle('gateways.json', { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(data, null, 2));
+    await writable.close();
+  }
+
+  // Process gateway domains incrementally from JSONL files after a watermark timestamp
+  async processGatewaysAfterWatermark(watermark, existingDomains) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+
+    const domains = { ...existingDomains };
+    let newWatermark = watermark;
+
+    for await (const entry of this.directoryHandle.values()) {
+      if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
+        const file = await entry.getFile();
+        const text = await file.text();
+        const lines = text.split('\n').filter(line => line.trim());
+
+        for (const line of lines) {
+          try {
+            const interaction = JSON.parse(line);
+            if (!interaction.url || !interaction.timestamp) continue;
+            if (interaction.timestamp <= watermark) continue;
+
+            if (interaction.timestamp > newWatermark) {
+              newWatermark = interaction.timestamp;
+            }
+
+            const parsed = new URL(interaction.url);
+            const origin = parsed.origin;
+            const isRoot = parsed.pathname === '/' || parsed.pathname === '' ||
+              parsed.pathname === '/index.html' || parsed.pathname === '/index.htm';
+            const isSearchQuery = parsed.searchParams.has('q') ||
+              parsed.searchParams.has('query') || parsed.searchParams.has('search');
+
+            if (!domains[origin]) {
+              domains[origin] = { rootUrl: null, childCount: 0, fetched: false };
+            }
+
+            const domainEntry = domains[origin];
+
+            if (isSearchQuery) {
+              domainEntry.childCount++;
+            } else if (isRoot) {
+              domainEntry.rootUrl = interaction.url;
+            } else {
+              domainEntry.childCount++;
+            }
+          } catch {
+            // Skip invalid lines
+          }
+        }
+      }
+    }
+
+    return { domains, newWatermark };
   }
 
   // Load all highlights from pages/{slug}/highlights.json for every slug
@@ -417,7 +491,7 @@ class FileSystemStorage {
     }
   }
 
-  // List all snapshots for a slug, checking both old flat format and new directory format
+  // List all snapshots for a slug
   async listSnapshots(slug) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
@@ -427,56 +501,32 @@ class FileSystemStorage {
 
     try {
       const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
+      const slugDir = await pagesDir.getDirectoryHandle(slug);
+      const tsSet = new Map();
 
-      // Check new directory format: pages/{slug}/
-      try {
-        const slugDir = await pagesDir.getDirectoryHandle(slug);
-        const tsSet = new Map(); // timestamp -> {hasMd, hasHtml}
+      for await (const entry of slugDir.values()) {
+        if (entry.kind !== 'file') continue;
+        if (entry.name === 'highlights.json') continue;
 
-        for await (const entry of slugDir.values()) {
-          if (entry.kind !== 'file') continue;
-          if (entry.name === 'highlights.json') continue;
+        const match = entry.name.match(/^(\d+)\.(md|html)$/);
+        if (!match) continue;
 
-          const match = entry.name.match(/^(\d+)\.(md|html)$/);
-          if (!match) continue;
+        const ts = parseInt(match[1], 10);
+        const ext = match[2];
 
-          const ts = parseInt(match[1], 10);
-          const ext = match[2];
-
-          if (!tsSet.has(ts)) {
-            tsSet.set(ts, { timestamp: ts, hasMd: false, hasHtml: false });
-          }
-          tsSet.get(ts)[ext === 'md' ? 'hasMd' : 'hasHtml'] = true;
+        if (!tsSet.has(ts)) {
+          tsSet.set(ts, { timestamp: ts, hasMd: false, hasHtml: false });
         }
-
-        for (const snap of tsSet.values()) {
-          snapshots.push(snap);
-        }
-      } catch (e) {
-        // slug directory doesn't exist
+        tsSet.get(ts)[ext === 'md' ? 'hasMd' : 'hasHtml'] = true;
       }
 
-      // Check old flat format: pages/{slug}.md / pages/{slug}.html
-      let hasOldMd = false;
-      let hasOldHtml = false;
-      try {
-        await pagesDir.getFileHandle(`${slug}.md`);
-        hasOldMd = true;
-      } catch (e) {}
-      try {
-        await pagesDir.getFileHandle(`${slug}.html`);
-        hasOldHtml = true;
-      } catch (e) {}
-
-      if (hasOldMd || hasOldHtml) {
-        // Use 0 as sentinel timestamp for legacy flat files
-        snapshots.push({ timestamp: 0, hasMd: hasOldMd, hasHtml: hasOldHtml, legacy: true });
+      for (const snap of tsSet.values()) {
+        snapshots.push(snap);
       }
     } catch (error) {
-      // pages/ directory may not exist
+      // pages/ directory or slug directory may not exist
     }
 
-    // Sort by timestamp descending (newest first)
     snapshots.sort((a, b) => b.timestamp - a.timestamp);
     return snapshots;
   }
@@ -488,17 +538,9 @@ class FileSystemStorage {
     }
 
     const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
-
-    if (timestamp === 0) {
-      // Delete legacy flat files
-      try { await pagesDir.removeEntry(`${slug}.md`); } catch (e) {}
-      try { await pagesDir.removeEntry(`${slug}.html`); } catch (e) {}
-    } else {
-      // Delete versioned files from slug directory
-      const slugDir = await pagesDir.getDirectoryHandle(slug);
-      try { await slugDir.removeEntry(`${timestamp}.md`); } catch (e) {}
-      try { await slugDir.removeEntry(`${timestamp}.html`); } catch (e) {}
-    }
+    const slugDir = await pagesDir.getDirectoryHandle(slug);
+    try { await slugDir.removeEntry(`${timestamp}.md`); } catch (e) {}
+    try { await slugDir.removeEntry(`${timestamp}.html`); } catch (e) {}
   }
 
   // Load highlights for a slug from pages/{slug}/highlights.json
@@ -561,29 +603,16 @@ class FileSystemStorage {
     return match;
   }
 
-  // Load all collection pins from collections.json (migrates from topics.json)
+  // Load all collection pins from collections.json
   async loadCollectionPins() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
 
-    // Try collections.json first
     try {
       const fileHandle = await this.directoryHandle.getFileHandle('collections.json');
       const file = await fileHandle.getFile();
       return JSON.parse(await file.text());
-    } catch (error) {
-      // Not found — try legacy topics.json
-    }
-
-    try {
-      const fileHandle = await this.directoryHandle.getFileHandle('topics.json');
-      const file = await fileHandle.getFile();
-      const data = JSON.parse(await file.text());
-      // Migrate: save as collections.json, delete old file
-      await this.saveCollectionPins(data);
-      try { await this.directoryHandle.removeEntry('topics.json'); } catch (e) {}
-      return data;
     } catch (error) {
       return {};
     }
@@ -598,6 +627,33 @@ class FileSystemStorage {
     const fileHandle = await this.directoryHandle.getFileHandle('collections.json', { create: true });
     const writable = await fileHandle.createWritable();
     await writable.write(JSON.stringify(allPins, null, 2));
+    await writable.close();
+  }
+
+  // Load settings.json — returns {} if missing or unreadable
+  async loadSettings() {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+
+    try {
+      const fileHandle = await this.directoryHandle.getFileHandle('settings.json');
+      const file = await fileHandle.getFile();
+      return JSON.parse(await file.text());
+    } catch (error) {
+      return {};
+    }
+  }
+
+  // Save settings.json
+  async saveSettings(data) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to write directory');
+    }
+
+    const fileHandle = await this.directoryHandle.getFileHandle('settings.json', { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(data, null, 2));
     await writable.close();
   }
 

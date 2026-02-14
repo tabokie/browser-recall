@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   mergeBufferIntoInteractions,
+  getBufferContentMap,
   buildInteractionsForEngine,
 } from '../extension/search-helpers.js';
 
@@ -12,13 +13,15 @@ describe('mergeBufferIntoInteractions', () => {
     const buffer = [
       { interaction: { url: 'https://b.com', timestamp: 2, slug: 'b' }, markdown: '# B' },
     ];
-    const contentMap = {};
 
-    mergeBufferIntoInteractions(interactions, buffer, contentMap);
+    mergeBufferIntoInteractions(interactions, buffer);
 
     expect(interactions).toHaveLength(2);
     expect(interactions[1].url).toBe('https://b.com');
-    expect(contentMap['b']).toBe('# B');
+
+    // Buffer content is now extracted separately via getBufferContentMap
+    const bufferContent = getBufferContentMap(buffer);
+    expect(bufferContent['b']).toBe('# B');
   });
 
   it('deduplicates by URL (last-write-wins)', () => {
@@ -28,9 +31,8 @@ describe('mergeBufferIntoInteractions', () => {
     const buffer = [
       { interaction: { url: 'https://a.com', timestamp: 3, title: 'new', slug: 'a' } },
     ];
-    const contentMap = {};
 
-    mergeBufferIntoInteractions(interactions, buffer, contentMap);
+    mergeBufferIntoInteractions(interactions, buffer);
 
     expect(interactions).toHaveLength(1);
     expect(interactions[0].title).toBe('new');
@@ -44,9 +46,8 @@ describe('mergeBufferIntoInteractions', () => {
       { interaction: { url: 'https://a.com', timestamp: 1, slug: 'a' } },
       { interaction: { url: 'https://b.com', timestamp: 5, slug: 'b' } },
     ];
-    const contentMap = {};
 
-    mergeBufferIntoInteractions(interactions, buffer, contentMap);
+    mergeBufferIntoInteractions(interactions, buffer);
 
     expect(interactions.map(i => i.url)).toEqual([
       'https://a.com',
@@ -55,16 +56,6 @@ describe('mergeBufferIntoInteractions', () => {
     ]);
   });
 
-  it('handles old-format buffer entries (no .interaction wrapper)', () => {
-    const interactions = [];
-    const buffer = [{ url: 'https://x.com', timestamp: 1, slug: 'x' }];
-    const contentMap = {};
-
-    mergeBufferIntoInteractions(interactions, buffer, contentMap);
-
-    expect(interactions).toHaveLength(1);
-    expect(interactions[0].url).toBe('https://x.com');
-  });
 });
 
 describe('buildInteractionsForEngine', () => {
@@ -114,17 +105,17 @@ describe('buildInteractionsForEngine', () => {
     expect(obj.timestamp).toBe(BigInt(1770700063620));
   });
 
-  it('falls back to inline content when contentMap has no entry', () => {
+  it('uses empty string when contentMap has no entry for slug', () => {
     const MockInteraction = makeMockInteractionClass();
     const engine = { addInteraction: vi.fn() };
     const dataList = [
-      { url: 'https://c.com', title: 'C', id: 'id-c', timestamp: 1, content: 'inline' },
+      { url: 'https://c.com', title: 'C', id: 'id-c', timestamp: 1, slug: 'c' },
     ];
 
     buildInteractionsForEngine(MockInteraction, engine, dataList, {});
 
     const obj = engine.addInteraction.mock.calls[0][0];
-    expect(obj.setContent).toHaveBeenCalledWith('inline');
+    expect(obj.setContent).toHaveBeenCalledWith('');
   });
 
   it('defaults missing optional fields to empty strings', () => {

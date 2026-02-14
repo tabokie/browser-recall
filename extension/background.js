@@ -23,6 +23,66 @@ async function setupOffscreenDocument() {
   console.log('Offscreen document created');
 }
 
+// Hydrate chrome.storage.local cache from settings.json and rebuild gateway domains
+async function hydrateCache() {
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'loadSettings' });
+    if (resp && resp.success && resp.settings) {
+      const s = resp.settings;
+      const cacheUpdate = {};
+      if (s.workspace !== undefined) cacheUpdate.workspace = s.workspace;
+      if (s.collections !== undefined) cacheUpdate.pinnedCollections = s.collections;
+      if (s.urlBlacklist !== undefined) cacheUpdate.urlBlacklist = s.urlBlacklist;
+      if (s.titleTrimRules !== undefined) cacheUpdate.titleTrimRules = s.titleTrimRules;
+      if (s.recycleBin !== undefined) cacheUpdate.recycleBin = s.recycleBin;
+      if (s.permanentDeletes !== undefined) cacheUpdate.permanentDeletes = s.permanentDeletes;
+      if (s.settings !== undefined) cacheUpdate.settings = s.settings;
+      if (Object.keys(cacheUpdate).length > 0) {
+        await chrome.storage.local.set(cacheUpdate);
+        console.log('Cache hydrated from settings.json:', Object.keys(cacheUpdate));
+      }
+    }
+  } catch (error) {
+    console.warn('Cache hydration failed:', error.message);
+  }
+
+  // Load and incrementally process gateway domains
+  try {
+    const gwData = await chrome.runtime.sendMessage({ action: 'loadGateways' });
+    let domains = {};
+    let watermark = 0;
+    if (gwData && gwData.success) {
+      domains = gwData.domains || {};
+      watermark = gwData.watermark || 0;
+    }
+
+    const incremental = await chrome.runtime.sendMessage({
+      action: 'processGatewaysIncremental',
+      watermark,
+      existingDomains: domains
+    });
+
+    if (incremental && incremental.success) {
+      domains = incremental.domains;
+      const newWatermark = incremental.newWatermark;
+
+      await chrome.storage.local.set({ gatewayDomains: domains });
+
+      // Save updated gateways if watermark advanced
+      if (newWatermark > watermark) {
+        await chrome.runtime.sendMessage({
+          action: 'saveGateways',
+          data: { watermark: newWatermark, domains }
+        });
+      }
+
+      console.log('Gateway domains loaded incrementally:', Object.keys(domains).length, 'origins');
+    }
+  } catch (error) {
+    console.warn('Gateway hydration failed:', error.message);
+  }
+}
+
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('Portal extension installed');
@@ -31,14 +91,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   await setupOffscreenDocument();
 
   // Initialize empty write buffer
-  await chrome.storage.local.set({
-    writeBuffer: [],
-    settings: {
-      captureContent: true,
-      captureAttention: true,
-      archiveQuality: 'medium'
-    }
-  });
+  await chrome.storage.local.set({ writeBuffer: [] });
 
   console.log('Storage initialized');
 
@@ -50,6 +103,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     chrome.runtime.openOptionsPage();
   } else {
     console.log('Filesystem configured:', response.info.name);
+    await hydrateCache();
   }
 });
 
@@ -57,6 +111,15 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onStartup.addListener(async () => {
   await setupOffscreenDocument();
   console.log('Extension started');
+
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getDirectoryInfo' });
+    if (response && response.info) {
+      await hydrateCache();
+    }
+  } catch (error) {
+    console.warn('Startup hydration failed:', error.message);
+  }
 });
 
 // Apply title trimming rules and whitespace trim
@@ -79,7 +142,7 @@ async function trimTitle(rawTitle, url) {
 }
 
 // --- Gateway domain registry ---
-// Storage: chrome.storage.local['gatewayDomains'] = { [origin]: { rootUrl, childUrls, fetched } }
+// Storage: chrome.storage.local['gatewayDomains'] = { [origin]: { rootUrl, childCount, fetched } }
 
 function isSearchQueryGateway(url) {
   try {
@@ -97,16 +160,12 @@ async function updateGatewayRegistry(url) {
 
     const { gatewayDomains = {} } = await chrome.storage.local.get(['gatewayDomains']);
     if (!gatewayDomains[origin]) {
-      gatewayDomains[origin] = { rootUrl: null, childUrls: [], fetched: false };
+      gatewayDomains[origin] = { rootUrl: null, childCount: 0, fetched: false };
     }
     const entry = gatewayDomains[origin];
 
     if (isSearchQuery) {
-      // Search query URLs are always children, never the root itself
-      if (!entry.childUrls.includes(url)) {
-        entry.childUrls.push(url);
-      }
-      // Root-path search (e.g. duckduckgo.com/?q=…) — use clean domain as root
+      entry.childCount++;
       if (isRoot && !entry.rootUrl && !entry.fetched) {
         await chrome.storage.local.set({ gatewayDomains });
         fetchAndCreateGatewayRoot(origin);
@@ -115,15 +174,12 @@ async function updateGatewayRegistry(url) {
     } else if (isRoot) {
       entry.rootUrl = url;
     } else {
-      if (!entry.childUrls.includes(url)) {
-        entry.childUrls.push(url);
-      }
+      entry.childCount++;
     }
 
     await chrome.storage.local.set({ gatewayDomains });
 
-    // Auto-promote: if 2+ children and no root visited yet, fetch it
-    if (entry.childUrls.length >= 2 && !entry.rootUrl && !entry.fetched) {
+    if (entry.childCount >= 2 && !entry.rootUrl && !entry.fetched) {
       fetchAndCreateGatewayRoot(origin);
     }
   } catch (e) {
@@ -282,13 +338,24 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
       console.log(`Added to buffer (${buffer.length} pending)`);
 
-      // Trigger immediate write to filesystem
+      // Trigger immediate write to filesystem; on success, remove from buffer
       await setupOffscreenDocument();
       chrome.runtime.sendMessage({
         action: 'writeInteraction',
         interaction: interaction,
         markdown: '',
         html: ''
+      }).then(async (writeResp) => {
+        if (writeResp && writeResp.success) {
+          // Remove written entry from buffer
+          const fresh = await chrome.storage.local.get(['writeBuffer']);
+          const buf = fresh.writeBuffer || [];
+          const idx = buf.findIndex(e => e.interaction.url === tab.url);
+          if (idx !== -1) {
+            buf.splice(idx, 1);
+            await chrome.storage.local.set({ writeBuffer: buf });
+          }
+        }
       }).catch(error => {
         console.warn('Offscreen write failed, will retry on next flush:', error.message);
       });
@@ -296,17 +363,10 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       // Update gateway domain registry (non-blocking)
       updateGatewayRegistry(tab.url);
 
-      // If buffer is large, trigger flush
-      if (buffer.length >= 10) {
-        console.log('Buffer full, triggering flush...');
-        chrome.runtime.sendMessage({ action: 'flushBuffer' })
-          .catch(error => console.warn('Flush failed:', error.message));
-      }
-
       // Workspace mode: auto-pin to workspace collections and optionally snapshot
       const { workspace } = await chrome.storage.local.get(['workspace']);
-      const wsCollectionIds = workspace?.collectionIds || workspace?.topicIds || [];
-      if (workspace && (workspace.mode === 'workspace' || workspace.enabled) && wsCollectionIds.length > 0) {
+      const wsCollectionIds = workspace?.collectionIds || [];
+      if (workspace && workspace.mode === 'workspace' && wsCollectionIds.length > 0) {
         try {
           const pinsResp = await chrome.runtime.sendMessage({ action: 'loadCollectionPins' });
           const allPins = (pinsResp && pinsResp.pins) ? pinsResp.pins : {};
@@ -401,7 +461,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 // Handle messages from content scripts and offscreen document
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  const handledActions = ['updateInteraction', 'getPageInfo', 'captureCurrentPageFromPopup', 'saveHighlight', 'deleteHighlight'];
+  const handledActions = ['updateInteraction', 'getPageInfo', 'captureCurrentPageFromPopup', 'saveHighlight', 'deleteHighlight', 'hydrateCache'];
   if (!handledActions.includes(request.action)) {
     return false;
   }
@@ -422,13 +482,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         await chrome.storage.local.set({ writeBuffer: buffer });
 
-        // Write updated data to filesystem
+        // Write updated data to filesystem; on success, remove from buffer
         await setupOffscreenDocument();
         chrome.runtime.sendMessage({
           action: 'writeInteraction',
           interaction: entry.interaction,
           markdown: entry.markdown,
           html: entry.html
+        }).then(async (writeResp) => {
+          if (writeResp && writeResp.success) {
+            const fresh = await chrome.storage.local.get(['writeBuffer']);
+            const buf = fresh.writeBuffer || [];
+            const idx = buf.findIndex(e => e.interaction.id === request.interactionId);
+            if (idx !== -1) {
+              buf.splice(idx, 1);
+              await chrome.storage.local.set({ writeBuffer: buf });
+            }
+          }
         }).catch(() => {});
 
         console.log('Updated interaction with captured data');
@@ -534,6 +604,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       await chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
       console.log(`[background] Deleted highlight, ${highlights.length} remaining`);
       sendResponse({ success: true, highlights });
+
+    } else if (request.action === 'hydrateCache') {
+      await setupOffscreenDocument();
+      await hydrateCache();
+      sendResponse({ success: true });
     }
   })();
 

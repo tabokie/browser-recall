@@ -1,0 +1,91 @@
+- Examine the code. Where and how do we handle backward compatibility of data?
+- I have a directory at ~/portal-data that contains mixed format data. Could you make sure it's fully converted to new format?
+- Memorize this: In the future, if there's a data schema change, do not handle migration or compatibility in extension code, instead, migrate persistent data at `~/portal-data` to the new format then upgrade the extension.
+- What data is being stored in localStorage now?
+- Make sure localStorage only serves as a buffer/cache. Files are the ground-truth and if localStorage is cleared entirely, we can reconstruct every states using files alone. 
+- Now in settings page, display the sizes of metadata cache, write buffer, storage. Add a button to clear all metadata cache and reload fresh from storage.
+- Is it safe for me to reload now?
+- Is it safe to remove all migration or fallback code logic?
+- Could you add some tests that operate on a newly created extension, wait for data to persist, then reload the extension. Its metadata is the same before and after reload?
+- Infer what would happen when there're 100'000 pages, 1'000 categories, in terms of memory usage, CPU usage, opened files, UI performance.
+- Solve these issues without incurring too much code complexity. You can trade space for performance by saving data redundantly in different formats that serve different types of workloads.
+- Show your plan first for me to reference.
+- A. AFAIK, only search engine reads capture text. It should be loaded inside the search engine. And it should not be forced to load in one step. Search engine should split the search task into different subtasks if the text size is too large, and perform them in pipeline (I/O and CPU parallelize).
+B. I'm not sure why there're so many innerHTMLs and event listeners. Shouldn't they be mounted only for the results that are in viewport, which are small in quantities?
+C. First of all, we don't need to save every child page in the domain node. Secondly, we shouldn't recompute Gateways at all, it is computed the first time a site from that domain is visited, and persisted to files. Because this computation is probably async, we need to have a post-process progress bar that is persisted only when pages before it are persisted and processed. During reload, we need to load persisted Gateways list, and recompute only pages after the post-process progress bar.
+D. The cut is simply too brutal. The correct way is, we iteratively compute each seed and put the relatives into a pool. We put a cap to this pool instead of capping each seed independently. And this limit should be configurable in settings page.
+- I thought all queries are served by WASM search engine? Are you saying we have two different search paths?
+- Why not serve professional search in WASM as well? After all it's pro search, should have best performance.
+- You asked four questions earlier, I haven't answered the latter three of them.
+- <task-notification>
+<task-id>a8923d2</task-id>
+<status>completed</status>
+<summary>Agent "WASM lib.rs A1 changes" completed</summary>
+<result>All edits are in place. Here is a summary of the three changes made to `/Users/xinye.tao/tabokie/claude/extension_project/src/lib.rs`:
+
+1. **Added `SearchResult` struct** (lines 61-71) -- A new non-public struct deriving `Serialize` with fields `url`, `title`, `id`, `timestamp`, `intent`, `attention`, and `score: f64`. It is placed between the `Interaction` impl block and the `RankingAlgorithm` enum.
+
+2. **Changed `search_internal` return type** (line 110) -- The signature changed from `Vec<&Interaction>` to `Vec<SearchResult>`. The body now chains `.map(...)` after `.filter(...)` to construct a `SearchResult` for each matching interaction, calling `self.content_score(i, &query_lower)` to populate the `score` field. For the `RankingAlgorithm::Content` branch, sorting now uses the pre-computed `b.score` / `a.score` directly (lines 133-135) instead of recomputing scores during the sort comparator.
+
+3. **`search` method unchanged but now serializes `Vec<SearchResult>`** -- The `search` method at line 104 already calls `serde_wasm_bindgen::to_value(&results)`, which now serializes the `Vec<SearchResult>` (including the `score` field) instead of `Vec<&Interaction>`. No code change was needed in this method since the type flows through automatically.</result>
+<usage>total_tokens: 18625
+tool_uses: 4
+duration_ms: 43503</usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-503/-Users-xinye-tao-tabokie-claude-extension-project/tasks/a8923d2.output
+- <task-notification>
+<task-id>a755490</task-id>
+<status>completed</status>
+<summary>Agent "Storage/offscreen/background changes" completed</summary>
+<result>All changes are verified and correct. Here is a summary of all edits made across the three files:
+
+---
+
+## filesystem-storage.js (`/Users/xinye.tao/tabokie/claude/extension_project/extension/filesystem-storage.js`)
+
+**Added `loadContentBatch(slugs)` method** (lines 355-378) -- loads markdown content for a batch of slugs without calling `verifyPermission()` (consistent with the pattern noted in MEMORY.md that it's called from methods that already verified).
+
+**Added three gateway persistence methods** (lines 380-458):
+- `loadGateways()` -- reads `gateways.json`, returns `{ watermark, domains }` or defaults
+- `saveGateways(data)` -- writes `gateways.json`
+- `processGatewaysAfterWatermark(watermark, existingDomains)` -- incrementally processes JSONL files, skipping entries at or before the watermark, using the new `childCount` format instead of `childUrls` arrays
+
+**Removed `rebuildGatewayDomains()` method** -- the old full-scan method that used `childUrls` arrays has been deleted.
+
+## offscreen.js (`/Users/xinye.tao/tabokie/claude/extension_project/extension/offscreen.js`)
+
+**Updated `handledActions` array** (lines 114-116) -- replaced `'rebuildGatewayDomains'` with `'loadContentBatch'`, `'loadGateways'`, `'saveGateways'`, `'processGatewaysIncremental'`.
+
+**Added `loadContentBatch` handler** (lines 163-167) -- delegates to `fsStorage.loadContentBatch(request.slugs)`.
+
+**Replaced `rebuildGatewayDomains` handler** (lines 266-284) with three new handlers: `loadGateways`, `saveGateways`, and `processGatewaysIncremental`.
+
+**Added gateway save piggyback in `flushBuffer`** (lines 75-92) -- after clearing the write buffer, opportunistically saves the current `gatewayDomains` from `chrome.storage.local` to `gateways.json` with the max timestamp from the flushed entries as the watermark.
+
+## background.js (`/Users/xinye.tao/tabokie/claude/extension_project/extension/background.js`)
+
+**Replaced gateway rebuild in `hydrateCache`** (lines 49-83) -- now loads persisted gateways first via `loadGateways`, then incrementally processes only new JSONL entries via `processGatewaysIncremental`, and saves back to `gateways.json` only if the watermark advanced.
+
+**Updated comment** (line 145) -- changed `{ rootUrl, childUrls, fetched }` to `{ rootUrl, childCount, fetched }`.
+
+**Simplified `updateGatewayRegistry`** (lines 154-185) -- replaced `childUrls` array tracking (with dedup and 100-cap) with a simple `childCount` integer that gets incremented.</result>
+<usage>total_tokens: 48538
+tool_uses: 16
+duration_ms: 128853</usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-503/-Users-xinye-tao-tabokie-claude-extension-project/tasks/a755490.output
+- In "All" page, I cannot click open the details of a page, it blinks and retracts immediately.
+- Is the results progressively loaded now? Because I sometimes experience a slight delay when opening collection page.
+- The time range selection seems to be broken. When I select a date bar, the result becomes empty, when I scroll a little, the results show up but unfiltered.
+- Does explore view use VirtualScroller?
+- I have reloaded the extension and reloaded storage, can some of the migration/fallback code be removed now?
+- yes.
+- I am looking at the WASM search engine code. I'm confused. How is it working when there's no mention of the query tree?
+- Why is it designed like this instead of putting all search logic into WASM?
+- Add a TODO in code comment.
+- One more thing to fix. The results in "All" doesn't have bottom padding.
+- Now the padding is too large. I want the same padding as top.
+- Finish up.
+- yes
+- yes
+- continue

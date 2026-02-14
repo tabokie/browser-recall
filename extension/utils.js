@@ -1,5 +1,29 @@
 // Shared utility functions
 
+// Load a single key from settings.json via offscreen
+export async function loadSettingsValue(key, defaultValue) {
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'loadSettings' });
+    if (resp && resp.success && resp.settings && key in resp.settings) {
+      return resp.settings[key];
+    }
+  } catch (error) {
+    console.warn('loadSettingsValue failed, using default:', error.message);
+  }
+  return defaultValue;
+}
+
+// Save a single key to settings.json via offscreen, and update chrome.storage.local cache
+export async function saveSettingsValue(key, value) {
+  try {
+    await chrome.runtime.sendMessage({ action: 'saveSettingsKey', key, value });
+  } catch (error) {
+    console.warn('saveSettingsValue file write failed:', error.message);
+  }
+  // Update cache
+  await chrome.storage.local.set({ [key]: value });
+}
+
 // Generate slug from URL for content file naming
 export function generateSlugFromUrl(url) {
   try {

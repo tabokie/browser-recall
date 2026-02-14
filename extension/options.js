@@ -2,8 +2,8 @@
 // Bookmark-manager style UI with sidebar navigation, search, and settings modal
 import { FileSystemStorage } from './filesystem-storage.js';
 import init, { Interaction, SearchEngine } from './pkg/portal_extension.js';
-import { mergeBufferIntoInteractions, buildInteractionsForEngine } from './search-helpers.js';
-import { generateSlugFromUrl } from './utils.js';
+import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine } from './search-helpers.js';
+import { generateSlugFromUrl, loadSettingsValue, saveSettingsValue } from './utils.js';
 
 const fsStorage = new FileSystemStorage();
 
@@ -15,14 +15,15 @@ let currentExtraColumns = [];
 let pinnedExtraColumns = [];
 let relatedExtraColumns = [];
 let wasmInitialized = false;
-let cachedData = null; // { interactions, contentMap }
+let cachedData = null; // { interactions }
 let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'collection', query: '...', id: '...' } or { type: 'explore', query: '...', filter: '...' }
 let allCollectionPins = {}; // collectionId -> [{ url, title, pinnedAt }]
 let recycleBin = []; // [{ url, title, deletedAt }] — global recycle bin
 let permanentDeletes = []; // [url, ...] — permanently deleted URLs
 let lastClickedRow = null; // for shift-click range select
 let marqueeActive = false; // suppress click during marquee drag
-let gatewayDomainsCache = {}; // { [origin]: { rootUrl, childUrls, fetched } }
+let gatewayDomainsCache = {}; // { [origin]: { rootUrl, childCount, fetched } }
+let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
 let pendingPin = null; // { query, qbTree? } — set during pin naming mode
 let pinnedFilterCtx = null; // cached context for related recalculation on date filter
 
@@ -54,6 +55,7 @@ const RANGE_CONFIGS = {
   clicks:     { min: 0, max: 100, step: 1, format: v => String(v) },
 };
 let cachedFieldRanges = null; // { field: { min, max } } — computed from data
+let relatedPagesLimit = 50; // configurable in settings
 
 // Compute actual data ranges for each range field (lightweight scan)
 function computeFieldRanges(interactions) {
@@ -136,10 +138,101 @@ async function initWasm() {
   }
 }
 
+// --- Pipelined search ---
+let capturesMatchCache = null; // Map<queryString, Set<url>> — cleared when cachedData is cleared
+
+async function pipelinedSearch(query, interactions) {
+  await initWasm();
+  const BATCH_SIZE = 500;
+
+  // Group interactions by slug for batching
+  const slugToInteractions = new Map();
+  for (const item of interactions) {
+    const slug = item.slug || '';
+    if (!slugToInteractions.has(slug)) slugToInteractions.set(slug, []);
+    slugToInteractions.get(slug).push(item);
+  }
+
+  // Split into batches of ~BATCH_SIZE interactions
+  const batches = [];
+  let currentBatch = [];
+  let currentSlugs = new Set();
+  for (const [slug, items] of slugToInteractions) {
+    currentBatch.push(...items);
+    currentSlugs.add(slug);
+    if (currentBatch.length >= BATCH_SIZE) {
+      batches.push({ interactions: currentBatch, slugs: [...currentSlugs] });
+      currentBatch = [];
+      currentSlugs = new Set();
+    }
+  }
+  if (currentBatch.length > 0) {
+    batches.push({ interactions: currentBatch, slugs: [...currentSlugs] });
+  }
+
+  if (batches.length === 0) return [];
+
+  const allResults = [];
+
+  // Prefetch first batch content
+  let prefetch = chrome.runtime.sendMessage({ action: 'loadContentBatch', slugs: batches[0].slugs });
+
+  for (let i = 0; i < batches.length; i++) {
+    const contentResp = await prefetch;
+    const content = (contentResp && contentResp.success) ? contentResp.contentMap : {};
+
+    // Start prefetching next batch while we do CPU work
+    if (i + 1 < batches.length) {
+      prefetch = chrome.runtime.sendMessage({ action: 'loadContentBatch', slugs: batches[i + 1].slugs });
+    }
+
+    // Merge buffer content (overrides filesystem content)
+    const mergedContent = { ...content, ...bufferContentMap };
+
+    // Build engine and search
+    const engine = new SearchEngine();
+    buildInteractionsForEngine(Interaction, engine, batches[i].interactions, mergedContent);
+    const results = await engine.search(query, 0);
+    allResults.push(...results);
+  }
+
+  // Sort by score descending (results from WASM now include score)
+  allResults.sort((a, b) => (b.score || 0) - (a.score || 0));
+  return allResults;
+}
+
+// --- Pre-compute captures matches for QB ---
+function extractCapturesQueries(node) {
+  const queries = new Set();
+  if (!node) return queries;
+  if (node.type === 'operator') {
+    for (const child of node.children) {
+      for (const q of extractCapturesQueries(child)) queries.add(q);
+    }
+    return queries;
+  }
+  if (node.predicateType === 'keyword' && node.value && node.value.trim()) {
+    const fields = normalizeFieldToArray(node.field);
+    if (fields.includes('captures')) {
+      queries.add(node.value.trim());
+    }
+  }
+  return queries;
+}
+
+async function precomputeCapturesMatches(queries, interactions) {
+  const cache = new Map();
+  for (const query of queries) {
+    const results = await pipelinedSearch(query, interactions);
+    const urlSet = new Set(results.map(r => r.url));
+    cache.set(query, urlSet);
+  }
+  return cache;
+}
+
 // --- Data loading ---
 async function loadData() {
   let allInteractions = [];
-  let contentMap = {};
 
   try {
     const response = await chrome.runtime.sendMessage({ action: 'loadInteractions' });
@@ -150,23 +243,17 @@ async function loadData() {
     console.log('Filesystem not available:', error.message);
   }
 
-  try {
-    const contentResponse = await chrome.runtime.sendMessage({ action: 'loadAllContent' });
-    if (contentResponse && contentResponse.success) {
-      contentMap = contentResponse.contentMap || {};
-    }
-  } catch (error) {
-    console.log('Could not load content:', error.message);
-  }
-
   const result = await chrome.storage.local.get(['writeBuffer']);
   const buffer = result.writeBuffer || [];
   if (buffer.length > 0) {
-    ({ interactions: allInteractions, contentMap } =
-      mergeBufferIntoInteractions(allInteractions, buffer, contentMap));
+    ({ interactions: allInteractions } =
+      mergeBufferIntoInteractions(allInteractions, buffer));
+    bufferContentMap = getBufferContentMap(buffer);
+  } else {
+    bufferContentMap = {};
   }
 
-  cachedData = { interactions: allInteractions, contentMap };
+  cachedData = { interactions: allInteractions };
   return cachedData;
 }
 
@@ -213,14 +300,14 @@ async function toggleResultPin(collectionId, url, title) {
 // Permanent deletes: URLs that are gone forever
 
 async function loadRecycleBin() {
-  const result = await chrome.storage.local.get(['recycleBin', 'permanentDeletes']);
-  recycleBin = result.recycleBin || [];
-  permanentDeletes = result.permanentDeletes || [];
+  recycleBin = await loadSettingsValue('recycleBin', []);
+  permanentDeletes = await loadSettingsValue('permanentDeletes', []);
   return recycleBin;
 }
 
 async function saveRecycleBin() {
-  await chrome.storage.local.set({ recycleBin, permanentDeletes });
+  await saveSettingsValue('recycleBin', recycleBin);
+  await saveSettingsValue('permanentDeletes', permanentDeletes);
   updateRecycleSidebarCount();
 }
 
@@ -430,34 +517,39 @@ function columnHeaderHtml(context, opts = {}) {
 }
 
 function bindColumnHeaderClicks(container) {
-  container.querySelectorAll('.col-header').forEach(header => {
-    header.addEventListener('click', () => {
-      const col = header.dataset.col;
-      const context = header.closest('.column-header-row').dataset.context;
-      const sortState = getSortState(context);
+  if (container._colHeaderDelegationBound) return;
+  container._colHeaderDelegationBound = true;
 
-      let newState;
-      if (sortState.column === col) {
-        if (sortState.direction === 'desc') {
-          newState = { column: col, direction: 'asc' };
-        } else {
-          newState = { column: null, direction: null };
-        }
-      } else {
-        newState = { column: col, direction: 'desc' };
-      }
-
-      setSortState(context, newState);
-      refreshCurrentView();
-    });
-  });
-
-  container.querySelectorAll('.col-add-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+  container.addEventListener('click', (e) => {
+    const addBtn = e.target.closest('.col-add-btn');
+    if (addBtn) {
       e.stopPropagation();
-      const context = btn.dataset.context;
-      showColumnPopover(btn, context);
-    });
+      const context = addBtn.dataset.context;
+      showColumnPopover(addBtn, context);
+      return;
+    }
+
+    const header = e.target.closest('.col-header');
+    if (!header) return;
+    const col = header.dataset.col;
+    const headerRow = header.closest('.column-header-row');
+    if (!headerRow) return;
+    const context = headerRow.dataset.context;
+    const sortState = getSortState(context);
+
+    let newState;
+    if (sortState.column === col) {
+      if (sortState.direction === 'desc') {
+        newState = { column: col, direction: 'asc' };
+      } else {
+        newState = { column: null, direction: null };
+      }
+    } else {
+      newState = { column: col, direction: 'desc' };
+    }
+
+    setSortState(context, newState);
+    refreshCurrentView();
   });
 }
 
@@ -578,12 +670,8 @@ async function loadGatewayDomains() {
 function isGatewayUrl(url) {
   try {
     const parsed = new URL(url);
-    // Domain registry: root URL with 2+ children
     const entry = gatewayDomainsCache[parsed.origin];
-    if (entry && entry.rootUrl === url && entry.childUrls && entry.childUrls.length >= 2) {
-      return true;
-    }
-    return false;
+    return !!(entry && entry.rootUrl === url && entry.childCount >= 2);
   } catch {
     return false;
   }
@@ -762,8 +850,22 @@ function applyDateFilter(chartEl, resultsContainer) {
   chartEl.querySelectorAll('.chart-bar-group.active').forEach(g => activeDates.add(g.dataset.date));
   const hasFilter = activeDates.size > 0;
 
+  // For virtual-scrolled containers, filter at the data level
+  const vs = resultsContainer._virtualScroller;
+  if (vs) {
+    if (!hasFilter) {
+      vs.applyFilter(null);
+    } else {
+      vs.applyFilter(item => {
+        const ts = item.timestamps || [];
+        return ts.some(t => activeDates.has(new Date(t).toISOString().slice(0, 10)));
+      });
+    }
+    return;
+  }
+
+  // Non-virtual containers: hide/show DOM nodes directly
   resultsContainer.querySelectorAll('.result-item').forEach(item => {
-    // Skip related results and gaps — date filter only applies to pinned/primary results
     if (item.classList.contains('related-result')) return;
     const row = item.querySelector('.result-row');
     if (!row) return;
@@ -875,7 +977,6 @@ async function showSearch(query) {
   showNormalLayout();
 
   try {
-    await initWasm();
     const data = cachedData || await loadData();
 
     if (data.interactions.length === 0) {
@@ -883,9 +984,7 @@ async function showSearch(query) {
       return;
     }
 
-    const engine = new SearchEngine();
-    buildInteractionsForEngine(Interaction, engine, data.interactions, data.contentMap);
-    const results = await engine.search(query, 0);
+    const results = await pipelinedSearch(query, data.interactions);
     renderAttentionChartForResults(results, data.interactions);
     displaySearchResults(results);
   } catch (error) {
@@ -895,20 +994,19 @@ async function showSearch(query) {
 }
 
 // --- Query builder: Enrichment ---
-function enrichForQuery(interactions, contentMap, highlightsMap) {
+function enrichForQuery(interactions, highlightsMap) {
   const byUrl = groupInteractionsByUrl(interactions);
   return [...byUrl.entries()].map(([url, group]) => {
     const latest = group.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
     const agg = aggregateAttention(group);
     const timestamps = group.map(i => i.timestamp);
     const slug = latest.slug;
-    const content = (slug && contentMap[slug]) || '';
     const highlights = (slug && highlightsMap && highlightsMap[slug]) || [];
     const attParsed = parseAttention(latest);
     return {
       url, title: latest.title, slug, timestamps,
       attScore: agg.score, attDetail: agg.detail,
-      content, highlights,
+      highlights,
       visitCount: group.length,
       lastVisit: Math.max(...timestamps),
       firstVisit: Math.min(...timestamps),
@@ -957,57 +1055,56 @@ function scoreTemporalProximity(seedTimestamps, candTimestamps) {
   return 1 - (minGap - ONE_HOUR) / (DAY - ONE_HOUR);
 }
 
-function buildGatewayChildIndex(gatewayCache) {
-  const index = new Map();
-  for (const [origin, entry] of Object.entries(gatewayCache)) {
-    if (!entry.childUrls) continue;
-    for (const childUrl of entry.childUrls) {
-      if (!index.has(childUrl)) index.set(childUrl, new Set());
-      index.get(childUrl).add(origin);
-    }
-  }
-  return index;
+function prepareSeed(seed) {
+  let hostname = '', origin = '';
+  try { const u = new URL(seed.url); hostname = u.hostname; origin = u.origin; } catch {}
+  return {
+    hostname, origin,
+    titleTokens: titleWords(seed.title),
+    intentTokens: titleWords(seed.intent),
+    timestamps: seed.timestamps || [],
+  };
 }
 
-function findRelatedPages(seeds, candidates, gatewayCache) {
+function scorePair(seedData, cand) {
+  let candHostname = '', candOrigin = '';
+  try { const u = new URL(cand.url); candHostname = u.hostname; candOrigin = u.origin; } catch {}
+  let score = 0;
+  if (candHostname && seedData.hostname === candHostname) {
+    score += 0.30;
+    if (candOrigin === seedData.origin) score += 0.10;
+  }
+  score += 0.30 * jaccardSimilarity(seedData.titleTokens, titleWords(cand.title));
+  const candTs = cand.timestamps || [];
+  if (seedData.timestamps.length > 0 && candTs.length > 0)
+    score += 0.25 * scoreTemporalProximity(seedData.timestamps, candTs);
+  score += 0.15 * jaccardSimilarity(seedData.intentTokens, titleWords(cand.intent));
+  return score;
+}
+
+function findRelatedPages(seeds, candidates, poolLimit) {
   if (seeds.length === 0) return [];
-  const gwIndex = buildGatewayChildIndex(gatewayCache);
-  const seedData = seeds.map(s => {
-    let hostname = '', origin = '';
-    try { const u = new URL(s.url); hostname = u.hostname; origin = u.origin; } catch {}
-    return {
-      hostname, origin,
-      titleTokens: titleWords(s.title),
-      intentTokens: titleWords(s.intent),
-      timestamps: s.timestamps || [],
-      gwOrigins: gwIndex.get(s.url) || new Set(),
-    };
-  });
-  return candidates.map(cand => {
-    let candHostname = '', candOrigin = '';
-    try { const u = new URL(cand.url); candHostname = u.hostname; candOrigin = u.origin; } catch {}
-    const candTitle = titleWords(cand.title);
-    const candIntent = titleWords(cand.intent);
-    const candTs = cand.timestamps || [];
-    const candGw = gwIndex.get(cand.url) || new Set();
-    let maxScore = 0;
-    for (const seed of seedData) {
-      let score = 0;
-      if (candHostname && seed.hostname === candHostname) {
-        score += 0.25;
-        if (candOrigin === seed.origin) score += 0.10;
+  const pool = new Map(); // url → { item, relatedness }
+
+  for (const seed of seeds) {
+    if (pool.size >= poolLimit) break;
+
+    const seedData = prepareSeed(seed);
+    for (const cand of candidates) {
+      if (pool.size >= poolLimit && !pool.has(cand.url)) continue;
+      const score = scorePair(seedData, cand);
+      if (score > 0) {
+        const existing = pool.get(cand.url);
+        if (!existing || score > existing.relatedness) {
+          pool.set(cand.url, { ...cand, relatedness: score });
+        }
       }
-      score += 0.25 * jaccardSimilarity(seed.titleTokens, candTitle);
-      if (seed.timestamps.length > 0 && candTs.length > 0)
-        score += 0.20 * scoreTemporalProximity(seed.timestamps, candTs);
-      score += 0.15 * jaccardSimilarity(seed.intentTokens, candIntent);
-      if (candGw.size > 0 && seed.gwOrigins.size > 0) {
-        for (const o of candGw) { if (seed.gwOrigins.has(o)) { score += 0.15; break; } }
-      }
-      maxScore = Math.max(maxScore, score);
     }
-    return { ...cand, relatedness: maxScore };
-  }).filter(c => c.relatedness > 0).sort((a, b) => b.relatedness - a.relatedness).slice(0, 20);
+  }
+
+  return [...pool.values()]
+    .sort((a, b) => b.relatedness - a.relatedness)
+    .slice(0, poolLimit);
 }
 
 // --- Query builder: Predicate matchers ---
@@ -1032,7 +1129,12 @@ function matchKeyword(item, field, value) {
   const fields = normalizeFieldToArray(field);
   if (fields.includes('title') && textMatches(item.title, q, exact)) return true;
   if (fields.includes('url') && textMatches(item.url, q, exact)) return true;
-  if (fields.includes('captures') && textMatches(item.content, q, exact)) return true;
+  if (fields.includes('captures')) {
+    const trimmed = value.trim();
+    if (capturesMatchCache && capturesMatchCache.has(trimmed)) {
+      if (capturesMatchCache.get(trimmed).has(item.url)) return true;
+    }
+  }
   if (fields.includes('highlights') && item.highlights.some(h => {
     const texts = Array.isArray(h.text) ? h.text : [h.text || ''];
     return texts.some(t => textMatches(t, q, exact));
@@ -1049,15 +1151,10 @@ function matchSmartFilter(item, filterName) {
 function matchRange(item, field, op, value, value2) {
   const cfg = RANGE_CONFIGS[field];
   let v = item[field] || 0;
-  // For timestamp fields, convert to "days ago" to match slider units
   if (cfg?.isDaysAgo) {
     v = (Date.now() - v) / 86400000;
   }
-  // Dual slider always uses between semantics
   if (value != null && value2 != null) return v >= value && v <= value2;
-  // Legacy single-value fallback
-  if (op === 'gt')  return v > value;
-  if (op === 'lt')  return v < value;
   return false;
 }
 
@@ -1094,7 +1191,12 @@ function keywordRelevance(item, field, value) {
   let score = 0;
   if (fields.includes('title') && textMatches(item.title, q, exact)) score += 2.0;
   if (fields.includes('url') && textMatches(item.url, q, exact)) score += 1.0;
-  if (fields.includes('captures') && textMatches(item.content, q, exact)) score += 1.0;
+  if (fields.includes('captures')) {
+    const trimmed = value.trim();
+    if (capturesMatchCache && capturesMatchCache.has(trimmed)) {
+      if (capturesMatchCache.get(trimmed).has(item.url)) score += 1.0;
+    }
+  }
   if (fields.includes('highlights') && item.highlights.some(h => {
     const texts = Array.isArray(h.text) ? h.text : [h.text || ''];
     return texts.some(t => textMatches(t, q, exact));
@@ -1284,7 +1386,15 @@ async function runQuery() {
   }
   await loadGatewayDomains();
 
-  const enriched = enrichForQuery(data.interactions, data.contentMap, cachedAllHighlights || {});
+  // Pre-compute captures matches via pipelined WASM search
+  const capturesQueries = extractCapturesQueries(qbRoot);
+  if (capturesQueries.size > 0) {
+    capturesMatchCache = await precomputeCapturesMatches(capturesQueries, data.interactions);
+  } else {
+    capturesMatchCache = null;
+  }
+
+  const enriched = enrichForQuery(data.interactions, cachedAllHighlights || {});
   const filtered = enriched.filter(item => !isPermanentlyDeleted(item.url) && !isRecycled(item.url));
   const matched = filtered.filter(item => evaluateNode(qbRoot, item));
 
@@ -1319,17 +1429,14 @@ async function runQuery() {
     relevance: hasKeywords ? r.relevance / maxRel : undefined,
   }));
 
-  const container = document.getElementById('results');
-  let html = columnHeaderHtml('global', { hasDelete: true, hasPin: false, showRelevance: hasKeywords });
-  html += normalized.map(r =>
+  const vs = getOrCreateGlobalScroller();
+  vs._headerHtml = columnHeaderHtml('global', { hasDelete: true, hasPin: false, showRelevance: hasKeywords });
+  vs.setData(normalized, (r) =>
     resultRowHtml(r.title, r.url, {
       deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       highlights: r.highlights, timestamps: r.timestamps, context: 'global', relevance: r.relevance
     })
-  ).join('');
-  container.innerHTML = html;
-  bindColumnHeaderClicks(container);
-  bindResultClicks(container);
+  );
 
   // Render attention chart for matched results
   const urlSet = new Set(matched.map(r => r.url));
@@ -1402,17 +1509,15 @@ function runCollectionExploreQuery(matched, data) {
     relevance: hasKeywords ? r.relevance / maxRel : undefined,
   }));
 
-  let html = columnHeaderHtml('related', { hasDelete: true, hasPin: true, showRelevance: hasKeywords });
-  html += normalized.map(r =>
+  const vs = getOrCreateRelatedScroller();
+  vs._headerHtml = columnHeaderHtml('related', { hasDelete: true, hasPin: true, showRelevance: hasKeywords });
+  vs.setData(normalized, (r) =>
     resultRowHtml(r.title, r.url, {
       pinned: isResultPinned(collectionId, r.url),
       deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       highlights: r.highlights, timestamps: r.timestamps, context: 'related', relevance: r.relevance,
     })
-  ).join('');
-  relatedContainer.innerHTML = html;
-  bindColumnHeaderClicks(relatedContainer);
-  bindResultClicks(relatedContainer);
+  );
   bindPinClicks(relatedContainer, collectionId);
 
   // Attention chart for explore results
@@ -1916,6 +2021,7 @@ async function showCollection(collection) {
 
   try {
     const data = cachedData || await loadData();
+    const collectionId = collection.id;
 
     if (data.interactions.length === 0) {
       document.querySelector('.collection-section[data-section="pinned"]').style.display = 'none';
@@ -1926,11 +2032,38 @@ async function showCollection(collection) {
       return;
     }
 
+    // --- Phase 1: render pinned section immediately ---
+    const pins = allCollectionPins[collectionId] || [];
+    const byUrl = groupInteractionsByUrl(data.interactions);
+
+    function enrichResult(r) {
+      const group = byUrl.get(r.url) || [];
+      const agg = aggregateAttention(group);
+      const highlights = [];
+      const timestamps = group.map(i => i.timestamp);
+      if (timestamps.length === 0) timestamps.push(r.timestamp || r.pinnedAt || Date.now());
+      const pin = pins.find(p => p.url === r.url);
+      return { ...r, attScore: agg.score, attDetail: agg.detail, highlights, timestamps, pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null) };
+    }
+
+    const allPinned = pins.map(enrichResult);
+    renderPinnedSection(allPinned, collectionId, data);
+
+    // Show loading state for related and explore
+    document.getElementById('relatedResults').innerHTML = '<div class="no-results loading-hint">Computing related pages…</div>';
+    document.getElementById('relatedChart').classList.remove('visible');
+
+    // --- Phase 2: deferred — compute search results, related pages, explore ---
+    // Use setTimeout(0) to yield to the renderer so pinned section paints first.
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Guard: user may have navigated away during the yield
+    if (activeView.type !== 'collection' || activeView.id !== collectionId) return;
+
     let searchResults = [];
     let allEnriched = [];
 
     if (collection.qbTree) {
-      // Query builder tree — evaluate it directly
       if (treeNeedsHighlights(collection.qbTree) && !cachedAllHighlights) {
         try {
           const resp = await chrome.runtime.sendMessage({ action: 'loadAllHighlights' });
@@ -1939,23 +2072,45 @@ async function showCollection(collection) {
       }
       await loadGatewayDomains();
 
-      const enriched = enrichForQuery(data.interactions, data.contentMap, cachedAllHighlights || {});
+      const capturesQueries = extractCapturesQueries(collection.qbTree);
+      if (capturesQueries.size > 0) {
+        capturesMatchCache = await precomputeCapturesMatches(capturesQueries, data.interactions);
+      } else {
+        capturesMatchCache = null;
+      }
+
+      const enriched = enrichForQuery(data.interactions, cachedAllHighlights || {});
       allEnriched = enriched.filter(item => !isPermanentlyDeleted(item.url) && !isRecycled(item.url));
       searchResults = allEnriched.filter(item => evaluateNode(collection.qbTree, item));
     } else if (collection.query) {
-      // Legacy string query — use WASM search
-      await initWasm();
-      const engine = new SearchEngine();
-      buildInteractionsForEngine(Interaction, engine, data.interactions, data.contentMap);
-      searchResults = await engine.search(collection.query, 0);
+      searchResults = await pipelinedSearch(collection.query, data.interactions);
       await loadGatewayDomains();
-      allEnriched = enrichForQuery(data.interactions, data.contentMap, cachedAllHighlights || {})
+      allEnriched = enrichForQuery(data.interactions, cachedAllHighlights || {})
         .filter(item => !isPermanentlyDeleted(item.url) && !isRecycled(item.url));
     }
 
-    displayCollectionSections(collection.id, searchResults, data, allEnriched);
+    // Guard again after async work
+    if (activeView.type !== 'collection' || activeView.id !== collectionId) return;
 
-    // Render Explore section with the collection's query builder
+    // Re-compute pinned with search context (adds search-matched pins)
+    const pinnedUrls = new Set(pins.map(p => p.url));
+    const searchResultUrls = new Set(searchResults.map(r => r.url));
+    const pinnedInResults = searchResults.filter(r => pinnedUrls.has(r.url)).map(enrichResult);
+    const pinnedOnly = pins.filter(p => !searchResultUrls.has(p.url)).map(enrichResult);
+    const fullPinned = [...pinnedInResults, ...pinnedOnly];
+
+    // Related pages
+    let related = [];
+    if (fullPinned.length > 0 && allEnriched.length > 0) {
+      const allPinnedUrls = new Set(fullPinned.map(r => r.url));
+      const seedEnriched = allEnriched.filter(e => allPinnedUrls.has(e.url));
+      const candidateEnriched = allEnriched.filter(e => !allPinnedUrls.has(e.url));
+      related = findRelatedPages(seedEnriched, candidateEnriched, relatedPagesLimit).map(enrichResult);
+    }
+
+    renderPinnedWithRelated(fullPinned, related, collectionId, data);
+    pinnedFilterCtx = { allPinned: fullPinned, allEnriched, data, collectionId, enrichResult, maxAtt: Math.max(...[...fullPinned, ...related].map(r => r.attScore), 0.1) };
+
     renderCollectionExplore(collection, data);
   } catch (error) {
     console.error('Collection search error:', error);
@@ -1964,44 +2119,12 @@ async function showCollection(collection) {
   }
 }
 
-function displayCollectionSections(collectionId, searchResults, data, allEnriched) {
-  const pins = allCollectionPins[collectionId] || [];
-  const pinnedUrls = new Set(pins.map(p => p.url));
-  const searchResultUrls = new Set(searchResults.map(r => r.url));
-  const byUrl = groupInteractionsByUrl(data.interactions);
-
-  function enrichResult(r) {
-    const group = byUrl.get(r.url) || [];
-    const agg = aggregateAttention(group);
-    const highlights = [];
-    const timestamps = group.map(i => i.timestamp);
-    if (timestamps.length === 0) timestamps.push(r.timestamp || r.pinnedAt || Date.now());
-    const pin = pins.find(p => p.url === r.url);
-    return { ...r, attScore: agg.score, attDetail: agg.detail, highlights, timestamps, pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null) };
-  }
-
-  // Pinned: search results that are pinned + pure pins not in search results
-  const pinnedInResults = searchResults.filter(r => pinnedUrls.has(r.url)).map(enrichResult);
-  const pinnedOnly = pins.filter(p => !searchResultUrls.has(p.url)).map(enrichResult);
-  const allPinned = [...pinnedInResults, ...pinnedOnly];
-
-  // Related: seed-based scoring using pinned pages as seeds
-  let related = [];
-  if (allPinned.length > 0 && allEnriched && allEnriched.length > 0) {
-    const allPinnedUrls = new Set(allPinned.map(r => r.url));
-    const seedEnriched = allEnriched.filter(e => allPinnedUrls.has(e.url));
-    const candidateEnriched = allEnriched.filter(e => !allPinnedUrls.has(e.url));
-    related = findRelatedPages(seedEnriched, candidateEnriched, gatewayDomainsCache).map(enrichResult);
-  }
-
+// Phase 1: render pinned rows immediately (no related pages yet)
+function renderPinnedSection(allPinned, collectionId, data) {
   const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
   const sortedPinned = applySortOrder(allPinned, effectivePinnedSort);
-  const sortedRelated = applySortOrder(related, effectivePinnedSort);
+  const maxAtt = Math.max(...sortedPinned.map(r => r.attScore), 0.1);
 
-  const allForMax = [...sortedPinned, ...sortedRelated];
-  const maxAtt = Math.max(...allForMax.map(r => r.attScore), 0.1);
-
-  // Render merged pinned + related into one container
   const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
   const pinnedContainer = document.getElementById('pinnedResults');
 
@@ -2010,30 +2133,16 @@ function displayCollectionSections(collectionId, searchResults, data, allEnriche
   } else {
     pinnedSection.style.display = '';
     let html = columnHeaderHtml('pinned', { hasDelete: true, hasPin: true });
-
-    // Pinned results
     html += sortedPinned.map(r =>
       resultRowHtml(r.title, r.url, { pinned: true, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt })
     ).join('');
-
-    // Related results after pinned, with gap and transparency
-    if (sortedRelated.length > 0 && sortedPinned.length > 0) {
-      html += '<div class="related-gap"></div>';
-    }
-    html += sortedRelated.map(r =>
-      resultRowHtml(r.title, r.url, { pinned: false, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps, context: 'pinned', cssClass: 'related-result' })
-    ).join('');
-
     pinnedContainer.innerHTML = html;
     bindColumnHeaderClicks(pinnedContainer);
-    bindResultClicks(pinnedContainer);
+    bindResultDelegation(pinnedContainer);
     bindPinClicks(pinnedContainer, collectionId);
   }
 
-  // Cache context for related recalculation on date filter
-  pinnedFilterCtx = { allPinned, allEnriched, data, collectionId, enrichResult, maxAtt };
-
-  // Attention chart for pinned pages only
+  // Attention chart for pinned pages
   const pinnedUrlsForChart = new Set(allPinned.map(r => r.url));
   const chartInteractions = data.interactions.filter(i => pinnedUrlsForChart.has(i.url));
   renderAttentionChartInto(
@@ -2043,7 +2152,53 @@ function displayCollectionSections(collectionId, searchResults, data, allEnriche
     'Collection pages'
   );
   bindChartBarClick(document.getElementById('pinnedChart'), document.getElementById('pinnedResults'));
+}
 
+// Phase 2: re-render pinned + related rows together
+function renderPinnedWithRelated(allPinned, related, collectionId, data) {
+  const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
+  const sortedPinned = applySortOrder(allPinned, effectivePinnedSort);
+  const sortedRelated = applySortOrder(related, effectivePinnedSort);
+
+  const allForMax = [...sortedPinned, ...sortedRelated];
+  const maxAtt = Math.max(...allForMax.map(r => r.attScore), 0.1);
+
+  const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
+  const pinnedContainer = document.getElementById('pinnedResults');
+
+  if (sortedPinned.length === 0) {
+    pinnedSection.style.display = 'none';
+  } else {
+    pinnedSection.style.display = '';
+    let html = columnHeaderHtml('pinned', { hasDelete: true, hasPin: true });
+
+    html += sortedPinned.map(r =>
+      resultRowHtml(r.title, r.url, { pinned: true, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt })
+    ).join('');
+
+    if (sortedRelated.length > 0 && sortedPinned.length > 0) {
+      html += '<div class="related-gap"></div>';
+    }
+    html += sortedRelated.map(r =>
+      resultRowHtml(r.title, r.url, { pinned: false, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps, context: 'pinned', cssClass: 'related-result' })
+    ).join('');
+
+    pinnedContainer.innerHTML = html;
+    bindColumnHeaderClicks(pinnedContainer);
+    bindResultDelegation(pinnedContainer);
+    bindPinClicks(pinnedContainer, collectionId);
+  }
+
+  // Re-render attention chart with full set
+  const pinnedUrlsForChart = new Set(allPinned.map(r => r.url));
+  const chartInteractions = data.interactions.filter(i => pinnedUrlsForChart.has(i.url));
+  renderAttentionChartInto(
+    document.getElementById('pinnedChart'),
+    document.getElementById('pinnedChartBars'),
+    chartInteractions,
+    'Collection pages'
+  );
+  bindChartBarClick(document.getElementById('pinnedChart'), document.getElementById('pinnedResults'));
 }
 
 function recalculateRelatedResults() {
@@ -2069,7 +2224,7 @@ function recalculateRelatedResults() {
     const seedEnriched = allEnriched.filter(e => seedUrls.has(e.url));
     const allPinnedUrls = new Set(allPinned.map(r => r.url));
     const candidateEnriched = allEnriched.filter(e => !allPinnedUrls.has(e.url));
-    related = findRelatedPages(seedEnriched, candidateEnriched, gatewayDomainsCache).map(enrichResult);
+    related = findRelatedPages(seedEnriched, candidateEnriched, relatedPagesLimit).map(enrichResult);
   }
 
   const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
@@ -2088,7 +2243,7 @@ function recalculateRelatedResults() {
         context: 'pinned', cssClass: 'related-result'
       })
     ).join('');
-    bindResultClicks(temp);
+    bindResultDelegation(temp);
     bindPinClicks(temp, collectionId);
     while (temp.firstChild) pinnedContainer.appendChild(temp.firstChild);
   }
@@ -2107,7 +2262,7 @@ function renderCollectionExplore(collection, data) {
 
   // Run query with current tree
   if (qbRoot && treeHasConfiguredPredicate(qbRoot)) {
-    const enriched = enrichForQuery(data.interactions, data.contentMap, cachedAllHighlights || {});
+    const enriched = enrichForQuery(data.interactions, cachedAllHighlights || {});
     const filtered = enriched.filter(item => !isPermanentlyDeleted(item.url) && !isRecycled(item.url));
     const matched = filtered.filter(item => evaluateNode(qbRoot, item));
     runCollectionExploreQuery(matched, data);
@@ -2118,7 +2273,6 @@ function renderCollectionExplore(collection, data) {
 }
 
 function displaySearchResults(results) {
-  const container = document.getElementById('results');
   if (!results || results.length === 0) {
     displayMessage('No results found');
     return;
@@ -2142,18 +2296,14 @@ function displaySearchResults(results) {
   const sorted = applySortOrder(resultData, currentSortState);
   const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
 
-  let html = columnHeaderHtml('global', { hasDelete: true, hasPin: false, showRelevance: true });
-  html += sorted.map(r =>
+  const vs = getOrCreateGlobalScroller();
+  vs._headerHtml = columnHeaderHtml('global', { hasDelete: true, hasPin: false, showRelevance: true });
+  vs.setData(sorted, (r) =>
     resultRowHtml(r.title, r.url, { deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps, context: 'global', relevance: r.relevance })
-  ).join('');
-  container.innerHTML = html;
-  bindColumnHeaderClicks(container);
-  bindResultClicks(container);
-
+  );
 }
 
 function displayInteractionRows(interactions) {
-  const container = document.getElementById('results');
   if (!interactions || interactions.length === 0) {
     displayMessage('No interactions found');
     return;
@@ -2174,14 +2324,11 @@ function displayInteractionRows(interactions) {
   const maxAtt = Math.max(...sorted.map(e => e.attScore), 0.1);
 
   const deletable = isDeletableView();
-  let html = columnHeaderHtml('global', { hasDelete: deletable, hasPin: false });
-  html += sorted.map(e =>
+  const vs = getOrCreateGlobalScroller();
+  vs._headerHtml = columnHeaderHtml('global', { hasDelete: deletable, hasPin: false });
+  vs.setData(sorted, (e) =>
     resultRowHtml(e.title, e.url, { deletable, attScore: e.attScore, maxAtt, attDetail: e.attDetail, highlights: e.highlights, timestamps: e.timestamps, context: 'global' })
-  ).join('');
-  container.innerHTML = html;
-  bindColumnHeaderClicks(container);
-  bindResultClicks(container);
-
+  );
 }
 
 function displayRecycleBinRows(interactions) {
@@ -2220,16 +2367,20 @@ function displayRecycleBinRows(interactions) {
 }
 
 function bindRecycleBinClicks(container) {
-  container.querySelectorAll('.result-row').forEach(row => {
-    row.querySelector('.result-expand')?.addEventListener('click', async (e) => {
+  if (container._recycleBinDelegationBound) return;
+  container._recycleBinDelegationBound = true;
+
+  container.addEventListener('click', async (e) => {
+    const expandBtn = e.target.closest('.result-expand');
+    if (expandBtn) {
       e.stopPropagation();
-      const btn = e.currentTarget;
-      const item = row.closest('.result-item');
+      const row = expandBtn.closest('.result-row');
+      const item = row?.closest('.result-item');
       const detail = item?.querySelector('.result-detail');
       if (detail) {
         const wasOpen = detail.classList.contains('open');
         detail.classList.toggle('open');
-        btn.classList.toggle('open');
+        expandBtn.classList.toggle('open');
         if (!wasOpen && !detail.dataset.extraLoaded) {
           detail.dataset.extraLoaded = '1';
           const url = row.dataset.url;
@@ -2244,68 +2395,67 @@ function bindRecycleBinClicks(container) {
           }
         }
       }
-    });
+      return;
+    }
 
-    const restoreBtn = row.querySelector('.result-restore');
+    const restoreBtn = e.target.closest('.result-restore');
     if (restoreBtn) {
-      restoreBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (row.classList.contains('selected')) {
-          for (const r of container.querySelectorAll('.result-row.selected')) {
-            await restoreItem(r.dataset.url);
-          }
-        } else {
-          await restoreItem(restoreBtn.dataset.restoreUrl);
+      e.stopPropagation();
+      const row = restoreBtn.closest('.result-row');
+      if (row && row.classList.contains('selected')) {
+        for (const r of container.querySelectorAll('.result-row.selected')) {
+          await restoreItem(r.dataset.url);
         }
-        lastClickedRow = null;
-        showCategory('recycleBin');
-      });
-    }
-
-    const deleteBtn = row.querySelector('.result-delete');
-    if (deleteBtn) {
-      deleteBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (row.classList.contains('selected')) {
-          for (const r of container.querySelectorAll('.result-row.selected')) {
-            await permanentlyDeleteItem(r.dataset.url);
-          }
-        } else {
-          await permanentlyDeleteItem(deleteBtn.dataset.deleteUrl);
-        }
-        lastClickedRow = null;
-        showCategory('recycleBin');
-      });
-    }
-
-    // Click selects row(s): plain=single, Shift=range, Ctrl/Cmd=toggle
-    row.addEventListener('click', (e) => {
-      if (marqueeActive) return;
-      if (e.target.closest('.result-restore') || e.target.closest('.result-delete') || e.target.closest('.result-expand')) return;
-
-      const allRows = [...container.querySelectorAll('.result-row')];
-
-      if (e.shiftKey && lastClickedRow) {
-        const anchorIdx = allRows.indexOf(lastClickedRow);
-        const curIdx = allRows.indexOf(row);
-        if (anchorIdx !== -1 && curIdx !== -1) {
-          const [start, end] = anchorIdx < curIdx ? [anchorIdx, curIdx] : [curIdx, anchorIdx];
-          if (!e.ctrlKey && !e.metaKey) {
-            allRows.forEach(r => r.classList.remove('selected'));
-          }
-          for (let i = start; i <= end; i++) {
-            allRows[i].classList.add('selected');
-          }
-        }
-      } else if (e.ctrlKey || e.metaKey) {
-        row.classList.toggle('selected');
-        lastClickedRow = row;
       } else {
-        allRows.forEach(r => r.classList.remove('selected'));
-        row.classList.add('selected');
-        lastClickedRow = row;
+        await restoreItem(restoreBtn.dataset.restoreUrl);
       }
-    });
+      lastClickedRow = null;
+      showCategory('recycleBin');
+      return;
+    }
+
+    const deleteBtn = e.target.closest('.result-delete');
+    if (deleteBtn) {
+      e.stopPropagation();
+      const row = deleteBtn.closest('.result-row');
+      if (row && row.classList.contains('selected')) {
+        for (const r of container.querySelectorAll('.result-row.selected')) {
+          await permanentlyDeleteItem(r.dataset.url);
+        }
+      } else {
+        await permanentlyDeleteItem(deleteBtn.dataset.deleteUrl);
+      }
+      lastClickedRow = null;
+      showCategory('recycleBin');
+      return;
+    }
+
+    const row = e.target.closest('.result-row');
+    if (!row) return;
+    if (marqueeActive) return;
+
+    const allRows = [...container.querySelectorAll('.result-row')];
+
+    if (e.shiftKey && lastClickedRow) {
+      const anchorIdx = allRows.indexOf(lastClickedRow);
+      const curIdx = allRows.indexOf(row);
+      if (anchorIdx !== -1 && curIdx !== -1) {
+        const [start, end] = anchorIdx < curIdx ? [anchorIdx, curIdx] : [curIdx, anchorIdx];
+        if (!e.ctrlKey && !e.metaKey) {
+          allRows.forEach(r => r.classList.remove('selected'));
+        }
+        for (let i = start; i <= end; i++) {
+          allRows[i].classList.add('selected');
+        }
+      }
+    } else if (e.ctrlKey || e.metaKey) {
+      row.classList.toggle('selected');
+      lastClickedRow = row;
+    } else {
+      allRows.forEach(r => r.classList.remove('selected'));
+      row.classList.add('selected');
+      lastClickedRow = row;
+    }
   });
 }
 
@@ -2431,17 +2581,7 @@ async function loadExtraDetail(url) {
     }
   }
 
-  // Gateway lineage: if this URL is a gateway root, include child URLs
-  let gatewayLineage = [];
-  try {
-    const origin = new URL(url).origin;
-    const entry = gatewayDomainsCache[origin];
-    if (entry && entry.rootUrl === url && entry.childUrls && entry.childUrls.length > 0) {
-      gatewayLineage = entry.childUrls;
-    }
-  } catch {}
-
-  return { highlights, snapshots, belongedCollections, slug, gatewayLineage };
+  return { highlights, snapshots, belongedCollections, slug };
 }
 
 function renderExtraDetailHtml(extra) {
@@ -2479,21 +2619,6 @@ function renderExtraDetailHtml(extra) {
       if (s.hasMd) formats.push('md');
       if (s.hasHtml) formats.push('html');
       html += `<span class="detail-snapshot-item">${escapeHtml(date)} (${formats.join(', ')})</span>`;
-    }
-    html += '</div></div>';
-  }
-
-  if (extra.gatewayLineage && extra.gatewayLineage.length > 0) {
-    const cap = 20;
-    const shown = extra.gatewayLineage.slice(0, cap);
-    const remaining = extra.gatewayLineage.length - cap;
-    html += `<div class="detail-section"><span class="detail-section-label">Child pages (${extra.gatewayLineage.length}):</span>`;
-    html += '<div class="detail-lineage">';
-    for (const childUrl of shown) {
-      html += `<a class="detail-lineage-url" href="${escapeHtml(childUrl)}" target="_blank">${escapeHtml(childUrl)}</a>`;
-    }
-    if (remaining > 0) {
-      html += `<span class="detail-lineage-more">...and ${remaining} more</span>`;
     }
     html += '</div></div>';
   }
@@ -2588,19 +2713,21 @@ function resultRowHtml(title, url, opts = {}) {
   </div>`;
 }
 
-function bindResultClicks(container) {
-  container.querySelectorAll('.result-row').forEach(row => {
-    // Expand/collapse detail via chevron
-    row.querySelector('.result-expand').addEventListener('click', async (e) => {
+function bindResultDelegation(container) {
+  if (container._resultDelegationBound) return;
+  container._resultDelegationBound = true;
+
+  container.addEventListener('click', async (e) => {
+    const expandBtn = e.target.closest('.result-expand');
+    if (expandBtn) {
       e.stopPropagation();
-      const btn = e.currentTarget;
-      const item = row.closest('.result-item');
+      const row = expandBtn.closest('.result-row');
+      const item = row?.closest('.result-item');
       const detail = item?.querySelector('.result-detail');
       if (detail) {
         const wasOpen = detail.classList.contains('open');
         detail.classList.toggle('open');
-        btn.classList.toggle('open');
-        // Lazy-load extra detail on first expand
+        expandBtn.classList.toggle('open');
         if (!wasOpen && !detail.dataset.extraLoaded) {
           detail.dataset.extraLoaded = '1';
           const url = row.dataset.url;
@@ -2614,98 +2741,247 @@ function bindResultClicks(container) {
             bindHighlightDeleteButtons(extraDiv);
           }
         }
+        // Notify virtual scroller of height change
+        if (container._virtualScroller) container._virtualScroller.onExpandToggle();
       }
-    });
-    // Delete button — deletes all selected if this row is part of selection
-    const deleteBtn = row.querySelector('.result-delete');
-    if (deleteBtn) {
-      deleteBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (row.classList.contains('selected')) {
-          const selectedRows = container.querySelectorAll('.result-row.selected');
-          for (const r of selectedRows) {
-            await handleDelete(r.dataset.url, r.dataset.title);
-          }
-        } else {
-          await handleDelete(deleteBtn.dataset.deleteUrl, deleteBtn.dataset.deleteTitle);
-        }
-        lastClickedRow = null;
-        refreshCurrentView();
-      });
+      return;
     }
-    // Click selects row(s): plain=single, Shift=range, Ctrl/Cmd=toggle
-    row.addEventListener('click', (e) => {
-      if (marqueeActive) return;
-      if (e.target.closest('.result-pin')) return;
-      if (e.target.closest('.result-expand')) return;
-      if (e.target.closest('.result-delete')) return;
 
-      const allRows = [...container.querySelectorAll('.result-row')];
-
-      if (e.shiftKey && lastClickedRow) {
-        // Range select from lastClickedRow to current
-        const anchorIdx = allRows.indexOf(lastClickedRow);
-        const curIdx = allRows.indexOf(row);
-        if (anchorIdx !== -1 && curIdx !== -1) {
-          const [start, end] = anchorIdx < curIdx ? [anchorIdx, curIdx] : [curIdx, anchorIdx];
-          if (!e.ctrlKey && !e.metaKey) {
-            allRows.forEach(r => r.classList.remove('selected'));
-          }
-          for (let i = start; i <= end; i++) {
-            allRows[i].classList.add('selected');
-          }
+    const deleteBtn = e.target.closest('.result-delete');
+    if (deleteBtn) {
+      e.stopPropagation();
+      const row = deleteBtn.closest('.result-row');
+      if (row && row.classList.contains('selected')) {
+        const selectedRows = container.querySelectorAll('.result-row.selected');
+        for (const r of selectedRows) {
+          await handleDelete(r.dataset.url, r.dataset.title);
         }
-      } else if (e.ctrlKey || e.metaKey) {
-        // Toggle individual
-        row.classList.toggle('selected');
-        lastClickedRow = row;
       } else {
-        // Plain click: toggle if already sole selection, otherwise select only this one
-        const wasSelected = row.classList.contains('selected');
-        allRows.forEach(r => r.classList.remove('selected'));
-        if (!wasSelected) {
-          row.classList.add('selected');
-        }
-        lastClickedRow = row;
+        await handleDelete(deleteBtn.dataset.deleteUrl, deleteBtn.dataset.deleteTitle);
       }
-      syncChartHighlights();
-    });
-    // Double-click opens the link
-    row.addEventListener('dblclick', (e) => {
-      if (e.target.closest('.result-pin')) return;
-      if (e.target.closest('.result-expand')) return;
-      if (e.target.closest('.result-delete')) return;
-      chrome.tabs.create({ url: row.dataset.url });
-    });
-    row.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('text/plain', JSON.stringify({
-        url: row.dataset.url,
-        title: row.dataset.title
-      }));
-      e.dataTransfer.effectAllowed = 'copy';
-    });
+      lastClickedRow = null;
+      refreshCurrentView();
+      return;
+    }
+
+    const pinBtn = e.target.closest('.result-pin');
+    if (pinBtn) {
+      e.stopPropagation();
+      return; // pin clicks handled by bindPinDelegation
+    }
+
+    const row = e.target.closest('.result-row');
+    if (!row) return;
+    if (marqueeActive) return;
+
+    const allRows = [...container.querySelectorAll('.result-row')];
+
+    if (e.shiftKey && lastClickedRow) {
+      const anchorIdx = allRows.indexOf(lastClickedRow);
+      const curIdx = allRows.indexOf(row);
+      if (anchorIdx !== -1 && curIdx !== -1) {
+        const [start, end] = anchorIdx < curIdx ? [anchorIdx, curIdx] : [curIdx, anchorIdx];
+        if (!e.ctrlKey && !e.metaKey) {
+          allRows.forEach(r => r.classList.remove('selected'));
+        }
+        for (let i = start; i <= end; i++) {
+          allRows[i].classList.add('selected');
+        }
+      }
+    } else if (e.ctrlKey || e.metaKey) {
+      row.classList.toggle('selected');
+      lastClickedRow = row;
+    } else {
+      const wasSelected = row.classList.contains('selected');
+      allRows.forEach(r => r.classList.remove('selected'));
+      if (!wasSelected) {
+        row.classList.add('selected');
+      }
+      lastClickedRow = row;
+    }
+    syncChartHighlights();
+  });
+
+  container.addEventListener('dblclick', (e) => {
+    const row = e.target.closest('.result-row');
+    if (!row) return;
+    if (e.target.closest('.result-pin') || e.target.closest('.result-expand') || e.target.closest('.result-delete')) return;
+    chrome.tabs.create({ url: row.dataset.url });
+  });
+
+  container.addEventListener('dragstart', (e) => {
+    const row = e.target.closest('.result-row');
+    if (!row) return;
+    e.dataTransfer.setData('text/plain', JSON.stringify({
+      url: row.dataset.url,
+      title: row.dataset.title
+    }));
+    e.dataTransfer.effectAllowed = 'copy';
   });
 }
 
 function bindPinClicks(container, collectionId) {
-  container.querySelectorAll('.result-pin').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const url = btn.dataset.pinUrl;
-      const title = btn.dataset.pinTitle;
-      await toggleResultPin(collectionId, url, title);
-      // Re-render collection view
-      const collection = { id: collectionId, query: activeView.query, qbTree: activeView.qbTree, name: activeView.name };
-      showCollection(collection);
-    });
+  // Use delegation — store collectionId on container for the handler
+  container._pinCollectionId = collectionId;
+  if (container._pinDelegationBound) return;
+  container._pinDelegationBound = true;
+
+  container.addEventListener('click', async (e) => {
+    const pinBtn = e.target.closest('.result-pin');
+    if (!pinBtn) return;
+    e.stopPropagation();
+    const url = pinBtn.dataset.pinUrl;
+    const title = pinBtn.dataset.pinTitle;
+    const cid = container._pinCollectionId;
+    await toggleResultPin(cid, url, title);
+    const collection = { id: cid, query: activeView.query, qbTree: activeView.qbTree, name: activeView.name };
+    showCollection(collection);
   });
+}
+
+// --- Virtual Scroller ---
+class VirtualScroller {
+  constructor(scrollEl, containerEl, rowHeight = 48) {
+    this.scrollEl = scrollEl;       // scrollable parent (.main or wrapper)
+    this.containerEl = containerEl; // container element (#results)
+    this.rowHeight = rowHeight;     // collapsed row height in px
+    this.buffer = 20;               // extra rows above/below viewport
+    this.data = [];
+    this.renderRow = null;
+    this._headerHtml = '';
+    this.renderedRange = { start: -1, end: -1 };
+    this._expandedIdx = -1;         // index of currently expanded row
+    this._expandedExtraH = 0;       // extra height from expansion
+    this._scrollHandler = () => requestAnimationFrame(() => this._render());
+    scrollEl.addEventListener('scroll', this._scrollHandler);
+    containerEl._virtualScroller = this;
+  }
+
+  setData(items, renderRowFn) {
+    this._fullData = items;
+    this.data = items;
+    this.renderRow = renderRowFn;
+    this._filterFn = null;
+    this.renderedRange = { start: -1, end: -1 };
+    this._expandedIdx = -1;
+    this._expandedExtraH = 0;
+    this._render(true);
+  }
+
+  // Filter displayed data without losing the full dataset.
+  // Pass null to clear the filter.
+  applyFilter(filterFn) {
+    this._filterFn = filterFn;
+    this.data = filterFn ? this._fullData.filter(filterFn) : this._fullData;
+    this.renderedRange = { start: -1, end: -1 };
+    this._expandedIdx = -1;
+    this._expandedExtraH = 0;
+    this._render(true);
+  }
+
+  onExpandToggle() {
+    // After expand/collapse, measure actual height difference
+    const openDetail = this.containerEl.querySelector('.result-detail.open');
+    if (openDetail) {
+      const item = openDetail.closest('.result-item');
+      if (item) {
+        this._expandedExtraH = item.offsetHeight - this.rowHeight;
+        const row = item.querySelector('.result-row');
+        if (row) {
+          const url = row.dataset.url;
+          this._expandedIdx = this.data.findIndex(d => d.url === url);
+        }
+      }
+    } else {
+      this._expandedIdx = -1;
+      this._expandedExtraH = 0;
+    }
+    // Only adjust padding-bottom to account for the height change —
+    // do NOT re-render, which would destroy the open detail DOM state.
+    const { end } = this.renderedRange;
+    if (end >= 0) {
+      const extraAfter = (this._expandedIdx >= end) ? this._expandedExtraH : 0;
+      const paddingBottom = Math.max(0, (this.data.length - end) * this.rowHeight + extraAfter);
+      this.containerEl.style.paddingBottom = paddingBottom + 'px';
+    }
+  }
+
+  _totalHeight() {
+    return this.data.length * this.rowHeight +
+      (this._expandedIdx >= 0 ? this._expandedExtraH : 0);
+  }
+
+  _render(force = false) {
+    if (!this.renderRow || this.data.length === 0) {
+      this.containerEl.style.paddingTop = '0px';
+      this.containerEl.style.paddingBottom = '0px';
+      if (this.data.length === 0) this.containerEl.innerHTML = this._headerHtml;
+      return;
+    }
+
+    const scrollTop = this.scrollEl.scrollTop;
+    const viewH = this.scrollEl.clientHeight;
+    const offset = this.containerEl.offsetTop;
+    const adjTop = Math.max(0, scrollTop - offset);
+
+    const start = Math.max(0, Math.floor(adjTop / this.rowHeight) - this.buffer);
+    const end = Math.min(this.data.length, Math.ceil((adjTop + viewH) / this.rowHeight) + this.buffer);
+
+    if (!force && start === this.renderedRange.start && end === this.renderedRange.end) return;
+
+    const paddingTop = start * this.rowHeight;
+    const trailingRows = (this.data.length - end) * this.rowHeight;
+    const paddingBottom = Math.max(10, trailingRows);
+    this.containerEl.style.paddingTop = paddingTop + 'px';
+    this.containerEl.style.paddingBottom = paddingBottom + 'px';
+
+    let html = this._headerHtml;
+    for (let i = start; i < end; i++) {
+      html += this.renderRow(this.data[i], i);
+    }
+    this.containerEl.innerHTML = html;
+    this.renderedRange = { start, end };
+  }
+}
+
+// Virtual scroller instances for main results and collection explore results
+let globalVirtualScroller = null;
+let relatedVirtualScroller = null;
+
+function getOrCreateGlobalScroller() {
+  if (!globalVirtualScroller) {
+    const scrollEl = document.querySelector('.main');
+    const containerEl = document.getElementById('results');
+    globalVirtualScroller = new VirtualScroller(scrollEl, containerEl);
+    bindResultDelegation(containerEl);
+    bindColumnHeaderClicks(containerEl);
+  }
+  return globalVirtualScroller;
+}
+
+function getOrCreateRelatedScroller() {
+  if (!relatedVirtualScroller) {
+    const scrollEl = document.getElementById('relatedResultsWrapper');
+    const containerEl = document.getElementById('relatedResults');
+    relatedVirtualScroller = new VirtualScroller(scrollEl, containerEl);
+    bindResultDelegation(containerEl);
+    bindColumnHeaderClicks(containerEl);
+  }
+  return relatedVirtualScroller;
 }
 
 function displayMessage(msg) {
   document.getElementById('attentionChart').classList.remove('visible');
   document.getElementById('attentionChartSecondary').classList.remove('visible');
-  document.getElementById('results').innerHTML =
-    `<div class="no-results">${escapeHtml(msg)}</div>`;
+  // Reset virtual scroller state so it doesn't re-render over the message
+  if (globalVirtualScroller) {
+    globalVirtualScroller.data = [];
+    globalVirtualScroller.renderedRange = { start: -1, end: -1 };
+  }
+  const container = document.getElementById('results');
+  container.style.paddingTop = '0px';
+  container.style.paddingBottom = '0px';
+  container.innerHTML = `<div class="no-results">${escapeHtml(msg)}</div>`;
 }
 
 function categoryLabel(category) {
@@ -2803,18 +3079,11 @@ function updateSidebarActive() {
 
 // --- Collections (pinned searches) ---
 async function loadCollections() {
-  // Migration: try pinnedCollections first, fall back to pinnedTopics
-  const result = await chrome.storage.local.get(['pinnedCollections', 'pinnedTopics']);
-  if (result.pinnedCollections) return result.pinnedCollections;
-  if (result.pinnedTopics) {
-    await chrome.storage.local.set({ pinnedCollections: result.pinnedTopics });
-    return result.pinnedTopics;
-  }
-  return [];
+  return await loadSettingsValue('collections', []);
 }
 
 async function saveCollections(collections) {
-  await chrome.storage.local.set({ pinnedCollections: collections });
+  await saveSettingsValue('collections', collections);
 }
 
 async function renderCollections() {
@@ -3205,7 +3474,70 @@ async function updateStatistics() {
     const buffer = result.writeBuffer || [];
     document.getElementById('bufferSize').textContent = buffer.length;
   });
+
+  updateCacheTable();
 }
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+const CACHE_KEYS = [
+  { key: 'settings', label: 'Settings' },
+  { key: 'workspace', label: 'Workspace' },
+  { key: 'pinnedCollections', label: 'Collections' },
+  { key: 'urlBlacklist', label: 'URL Blacklist' },
+  { key: 'titleTrimRules', label: 'Title Trim Rules' },
+  { key: 'recycleBin', label: 'Recycle Bin' },
+  { key: 'permanentDeletes', label: 'Permanent Deletes' },
+  { key: 'gatewayDomains', label: 'Gateway Domains' },
+  { key: 'writeBuffer', label: 'Write Buffer' },
+];
+
+async function updateCacheTable() {
+  const keys = CACHE_KEYS.map(c => c.key);
+  const data = await chrome.storage.local.get(keys);
+  const tbody = document.getElementById('cacheTableBody');
+
+  let totalBytes = 0;
+  let rows = '';
+
+  for (const { key, label } of CACHE_KEYS) {
+    const val = data[key];
+    const size = val !== undefined ? new Blob([JSON.stringify(val)]).size : 0;
+    totalBytes += size;
+    rows += `<tr><td>${label}</td><td class="cache-size">${formatBytes(size)}</td></tr>`;
+  }
+
+  rows += `<tr class="cache-total"><td>Total</td><td class="cache-size">${formatBytes(totalBytes)}</td></tr>`;
+  tbody.innerHTML = rows;
+}
+
+document.getElementById('clearCacheBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('clearCacheBtn');
+  btn.disabled = true;
+  btn.textContent = 'Reloading...';
+
+  try {
+    // Clear all metadata cache keys (keep writeBuffer — it's a transient buffer for pending writes)
+    const keysToRemove = CACHE_KEYS.filter(c => c.key !== 'writeBuffer').map(c => c.key);
+    await chrome.storage.local.remove(keysToRemove);
+
+    // Ask background to re-hydrate from settings.json
+    await chrome.runtime.sendMessage({ action: 'hydrateCache' });
+
+    showStatus('Cache cleared and reloaded from storage', 'success');
+  } catch (error) {
+    showStatus('Cache clear failed: ' + error.message, 'error');
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Clear Cache & Reload';
+  updateCacheTable();
+});
 
 // Select directory
 document.getElementById('selectDirBtn').addEventListener('click', async () => {
@@ -3216,7 +3548,7 @@ document.getElementById('selectDirBtn').addEventListener('click', async () => {
       showStatus(`Storage location set: ${result.name}`, 'success');
       chrome.runtime.sendMessage({ action: 'initializeFilesystem' });
       // Reload data for main view
-      cachedData = null; cachedFieldRanges = null;
+      cachedData = null; cachedFieldRanges = null; capturesMatchCache = null;
       showCategory(activeView.type === 'category' ? activeView.value : 'all');
     } else if (result.error !== 'User cancelled') {
       showStatus(`Error: ${result.error}`, 'error');
@@ -3245,12 +3577,6 @@ document.getElementById('changeDirBtn').addEventListener('click', async () => {
       console.log('Could not load old content:', error.message);
     }
 
-    for (const interaction of oldInteractions) {
-      if (interaction.content && interaction.slug && !oldContentMap[interaction.slug]) {
-        oldContentMap[interaction.slug] = interaction.content;
-      }
-    }
-
     const result = await fsStorage.selectDirectory();
 
     if (!result.success) {
@@ -3277,7 +3603,7 @@ document.getElementById('changeDirBtn').addEventListener('click', async () => {
     await updateStorageStatus();
     await updateStatistics();
     chrome.runtime.sendMessage({ action: 'initializeFilesystem' });
-    cachedData = null; cachedFieldRanges = null;
+    cachedData = null; cachedFieldRanges = null; capturesMatchCache = null;
   } catch (error) {
     showStatus(`Error changing directory: ${error.message}`, 'error');
   }
@@ -3289,18 +3615,26 @@ document.getElementById('changeDirBtn').addEventListener('click', async () => {
 // Save settings on change
 ['captureContent', 'captureAttention', 'archiveQuality'].forEach(id => {
   const element = document.getElementById(id);
-  element.addEventListener('change', () => {
-    chrome.storage.local.get(['settings'], (result) => {
-      const settings = result.settings || {};
-      if (id === 'archiveQuality') {
-        settings[id] = element.value;
-      } else {
-        settings[id] = element.checked;
-      }
-      chrome.storage.local.set({ settings });
-      showStatus('Settings saved', 'success');
-    });
+  element.addEventListener('change', async () => {
+    const current = await loadSettingsValue('settings', {});
+    if (id === 'archiveQuality') {
+      current[id] = element.value;
+    } else {
+      current[id] = element.checked;
+    }
+    await saveSettingsValue('settings', current);
+    showStatus('Settings saved', 'success');
   });
+});
+
+document.getElementById('relatedPagesLimit').addEventListener('change', async () => {
+  const val = parseInt(document.getElementById('relatedPagesLimit').value) || 50;
+  relatedPagesLimit = Math.max(1, val);
+  document.getElementById('relatedPagesLimit').value = relatedPagesLimit;
+  const current = await loadSettingsValue('settings', {});
+  current.relatedPagesLimit = relatedPagesLimit;
+  await saveSettingsValue('settings', current);
+  showStatus('Settings saved', 'success');
 });
 
 // Clear all data
@@ -3343,7 +3677,7 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
     await chrome.storage.local.set({ writeBuffer: [] });
     showStatus(`Cleared ${deletedCount} files/directories`, 'success');
     await updateStatistics();
-    cachedData = null; cachedFieldRanges = null;
+    cachedData = null; cachedFieldRanges = null; capturesMatchCache = null;
     showCategory('all');
   } catch (error) {
     showStatus(`Error clearing data: ${error.message}`, 'error');
@@ -3364,16 +3698,16 @@ function showStatus(message, type) {
 const DEFAULT_BLACKLIST = ['chrome://', 'edge://'];
 
 async function loadBlacklist() {
-  const result = await chrome.storage.local.get(['urlBlacklist']);
-  if (result.urlBlacklist === undefined) {
+  const list = await loadSettingsValue('urlBlacklist', null);
+  if (list === null) {
     await saveBlacklist(DEFAULT_BLACKLIST);
     return [...DEFAULT_BLACKLIST];
   }
-  return result.urlBlacklist;
+  return list;
 }
 
 async function saveBlacklist(list) {
-  await chrome.storage.local.set({ urlBlacklist: list });
+  await saveSettingsValue('urlBlacklist', list);
 }
 
 async function renderBlacklist() {
@@ -3431,12 +3765,11 @@ const TRIM_ACTION_LABELS = {
 };
 
 async function loadTrimRules() {
-  const result = await chrome.storage.local.get(['titleTrimRules']);
-  return result.titleTrimRules || [];
+  return await loadSettingsValue('titleTrimRules', []);
 }
 
 async function saveTrimRules(rules) {
-  await chrome.storage.local.set({ titleTrimRules: rules });
+  await saveSettingsValue('titleTrimRules', rules);
 }
 
 async function renderTrimRules() {
@@ -3491,13 +3824,13 @@ document.getElementById('trimUrlInput').addEventListener('keypress', (e) => {
 
 // --- Initialize ---
 async function initialize() {
-  // Load settings
-  chrome.storage.local.get(['settings'], (result) => {
-    const settings = result.settings || {};
-    document.getElementById('captureContent').checked = settings.captureContent !== false;
-    document.getElementById('captureAttention').checked = settings.captureAttention !== false;
-    document.getElementById('archiveQuality').value = settings.archiveQuality || 'medium';
-  });
+  // Load settings from filesystem
+  const settings = await loadSettingsValue('settings', {});
+  document.getElementById('captureContent').checked = settings.captureContent !== false;
+  document.getElementById('captureAttention').checked = settings.captureAttention !== false;
+  document.getElementById('archiveQuality').value = settings.archiveQuality || 'medium';
+  relatedPagesLimit = settings.relatedPagesLimit || 50;
+  document.getElementById('relatedPagesLimit').value = relatedPagesLimit;
 
   // Initialize query builder
   qbRoot = qbCreatePlaceholder();

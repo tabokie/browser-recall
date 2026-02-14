@@ -1,5 +1,5 @@
 // Popup — current-page dashboard
-import { generateSlugFromUrl } from './utils.js';
+import { generateSlugFromUrl, loadSettingsValue, saveSettingsValue } from './utils.js';
 
 let currentSlug = '';
 let currentHighlights = [];
@@ -21,7 +21,6 @@ function autoResizeTextarea(textarea) {
 }
 
 function formatTimestamp(ts) {
-  if (ts === 0) return 'Legacy';
   const d = new Date(ts);
   return d.toLocaleString(undefined, {
     month: 'short', day: 'numeric',
@@ -222,14 +221,7 @@ document.getElementById('pageNote').addEventListener('input', (e) => {
 
 // Collections — pin current page to collections
 async function loadCollections() {
-  // Migration: try pinnedCollections first, fall back to pinnedTopics
-  const result = await chrome.storage.local.get(['pinnedCollections', 'pinnedTopics']);
-  if (result.pinnedCollections) return result.pinnedCollections;
-  if (result.pinnedTopics) {
-    await chrome.storage.local.set({ pinnedCollections: result.pinnedTopics });
-    return result.pinnedTopics;
-  }
-  return [];
+  return await loadSettingsValue('collections', []);
 }
 
 async function loadCollectionPins() {
@@ -436,7 +428,7 @@ async function createCollectionAndPin(query) {
 
   const collectionId = Date.now().toString();
   collections.push({ id: collectionId, query });
-  await chrome.storage.local.set({ pinnedCollections: collections });
+  await saveSettingsValue('collections', collections);
 
   const freshPins = await loadCollectionPins();
   freshPins[collectionId] = [{ url: currentUrl, title: currentTitle, pinnedAt: Date.now() }];
@@ -447,17 +439,12 @@ async function createCollectionAndPin(query) {
 
 // Workspace mode
 async function loadWorkspace() {
-  const result = await chrome.storage.local.get(['workspace']);
-  const ws = result.workspace || {};
-  // Migrate legacy boolean `enabled` to `mode`
-  if (ws.enabled === true && !ws.mode) ws.mode = 'workspace';
-  // Migration: topicIds → collectionIds
-  if (ws.topicIds && !ws.collectionIds) ws.collectionIds = ws.topicIds;
+  const ws = await loadSettingsValue('workspace', {});
   return { mode: 'default', collectionIds: [], autoSnapshot: false, ...ws };
 }
 
 async function saveWorkspace(workspace) {
-  await chrome.storage.local.set({ workspace });
+  await saveSettingsValue('workspace', workspace);
 }
 
 async function renderWorkspaceBar() {

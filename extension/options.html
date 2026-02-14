@@ -943,6 +943,35 @@
       margin-top: 2px;
     }
 
+    .cache-table {
+      width: 100%;
+      font-size: 12px;
+      border-collapse: collapse;
+    }
+
+    .cache-table th,
+    .cache-table td {
+      text-align: left;
+      padding: 5px 8px;
+      border-bottom: 1px solid #e8eaed;
+    }
+
+    .cache-table th {
+      color: #5f6368;
+      font-weight: 500;
+    }
+
+    .cache-table td.cache-size {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: #1a73e8;
+    }
+
+    .cache-table tr.cache-total td {
+      border-top: 2px solid #dadce0;
+      font-weight: 600;
+    }
+
     .option {
       margin-bottom: 8px;
     }
@@ -2062,6 +2091,21 @@
           </div>
         </div>
 
+        <!-- Cache -->
+        <div class="modal-section">
+          <h3>Local Cache</h3>
+          <p>Settings and metadata are cached in browser storage for fast access. The source of truth is <code>settings.json</code> in your storage directory.</p>
+          <table class="cache-table">
+            <thead><tr><th>Key</th><th style="text-align:right">Size</th></tr></thead>
+            <tbody id="cacheTableBody">
+              <tr><td colspan="2" style="color:#999">Loading...</td></tr>
+            </tbody>
+          </table>
+          <div class="modal-btn-group" style="margin-top: 10px;">
+            <button id="clearCacheBtn" class="btn btn-secondary">Clear Cache &amp; Reload</button>
+          </div>
+        </div>
+
         <!-- Capture settings -->
         <div class="modal-section">
           <h3>Capture Settings</h3>
@@ -2079,6 +2123,11 @@
                 <option value="medium">Medium (intent + metadata)</option>
                 <option value="high">High (full content)</option>
               </select>
+            </label>
+          </div>
+          <div class="option">
+            <label>Related pages limit:
+              <input type="number" id="relatedPagesLimit" min="1" value="50" style="width:60px;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;">
             </label>
           </div>
         </div>

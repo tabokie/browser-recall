@@ -2,18 +2,18 @@
 
 /**
  * Merge write-buffer entries into the interactions array, deduplicating by URL
- * (last-write-wins). Also merges buffer markdown content into contentMap.
+ * (last-write-wins).
  *
- * Mutates and returns { interactions, contentMap }.
+ * Mutates and returns { interactions }.
  */
-export function mergeBufferIntoInteractions(interactions, buffer, contentMap) {
+export function mergeBufferIntoInteractions(interactions, buffer) {
   const indexByUrl = new Map();
   interactions.forEach((interaction, i) => {
     indexByUrl.set(interaction.url, i);
   });
 
   for (const entry of buffer) {
-    const interaction = entry.interaction || entry;
+    const interaction = entry.interaction;
     const existingIdx = indexByUrl.get(interaction.url);
     if (existingIdx !== undefined) {
       interactions[existingIdx] = interaction;
@@ -21,13 +21,24 @@ export function mergeBufferIntoInteractions(interactions, buffer, contentMap) {
       indexByUrl.set(interaction.url, interactions.length);
       interactions.push(interaction);
     }
-    if (entry.markdown && interaction.slug) {
-      contentMap[interaction.slug] = entry.markdown;
-    }
   }
 
   interactions.sort((a, b) => a.timestamp - b.timestamp);
-  return { interactions, contentMap };
+  return { interactions };
+}
+
+/**
+ * Get buffer content map: slug → markdown for entries in the write buffer.
+ * Used to overlay fresh content on pipelined batches.
+ */
+export function getBufferContentMap(buffer) {
+  const contentMap = {};
+  for (const entry of buffer) {
+    if (entry.markdown && entry.interaction.slug) {
+      contentMap[entry.interaction.slug] = entry.markdown;
+    }
+  }
+  return contentMap;
 }
 
 /**
@@ -45,8 +56,7 @@ export function buildInteractionsForEngine(InteractionClass, engine, dataList, c
     interaction.timestamp = BigInt(data.timestamp);
     interaction.setIntent(data.intent || '');
 
-    const content = (data.slug && contentMap[data.slug]) || data.content || '';
-    interaction.setContent(content);
+    interaction.setContent((data.slug && contentMap[data.slug]) || '');
 
     interaction.setAttention(data.attention || '');
     engine.addInteraction(interaction);

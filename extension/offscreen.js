@@ -57,8 +57,7 @@ async function flushBuffer() {
 
     // Write each buffered entry (interaction + content)
     for (const entry of buffer) {
-      // Support both new format {interaction, markdown, html} and old format (plain interaction)
-      const interaction = entry.interaction || entry;
+      const interaction = entry.interaction;
       const markdown = entry.markdown || '';
       const html = entry.html || '';
 
@@ -71,6 +70,25 @@ async function flushBuffer() {
 
     // Clear buffer after successful write
     await chrome.storage.local.set({ writeBuffer: [] });
+
+    // Piggyback gateway save on flush
+    try {
+      const { gatewayDomains } = await chrome.storage.local.get(['gatewayDomains']);
+      if (gatewayDomains) {
+        // Find max timestamp from flushed entries
+        let maxTimestamp = 0;
+        for (const entry of buffer) {
+          if (entry.interaction.timestamp > maxTimestamp) maxTimestamp = entry.interaction.timestamp;
+        }
+        await fsStorage.saveGateways({
+          watermark: maxTimestamp,
+          domains: gatewayDomains
+        });
+      }
+    } catch (gwErr) {
+      console.warn('Gateway save during flush failed:', gwErr.message);
+    }
+
     console.log(`Flushed ${buffer.length} interactions`);
 
     return { success: true, count: buffer.length };
@@ -90,7 +108,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     'getDirectoryInfo', 'changeDirectory', 'migrateData',
     'listSnapshots', 'captureSnapshot', 'deleteSnapshot',
     'loadHighlights', 'saveHighlights', 'loadAllHighlights', 'loadInteractionByUrl',
-    'loadCollectionPins', 'saveCollectionPins'
+    'loadCollectionPins', 'saveCollectionPins',
+    'loadSettings', 'saveSettings', 'saveSettingsKey',
+    'loadContentBatch',
+    'loadGateways', 'saveGateways', 'processGatewaysIncremental'
   ];
   if (!handledActions.includes(request.action)) {
     return false;
@@ -136,6 +157,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const contentMap = await fsStorage.loadAllContent();
           sendResponse({ success: true, contentMap });
           break;
+
+        case 'loadContentBatch': {
+          const contentMap2 = await fsStorage.loadContentBatch(request.slugs);
+          sendResponse({ success: true, contentMap: contentMap2 });
+          break;
+        }
 
         case 'getDirectoryInfo':
           const info = await fsStorage.getDirectoryInfo();
@@ -211,6 +238,46 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'saveCollectionPins': {
           await fsStorage.saveCollectionPins(request.pins);
           sendResponse({ success: true });
+          break;
+        }
+
+        case 'loadSettings': {
+          const settings = await fsStorage.loadSettings();
+          sendResponse({ success: true, settings });
+          break;
+        }
+
+        case 'saveSettings': {
+          await fsStorage.saveSettings(request.settings);
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'saveSettingsKey': {
+          const current = await fsStorage.loadSettings();
+          current[request.key] = request.value;
+          await fsStorage.saveSettings(current);
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'loadGateways': {
+          const gatewayData = await fsStorage.loadGateways();
+          sendResponse({ success: true, ...gatewayData });
+          break;
+        }
+
+        case 'saveGateways': {
+          await fsStorage.saveGateways(request.data);
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'processGatewaysIncremental': {
+          const result = await fsStorage.processGatewaysAfterWatermark(
+            request.watermark, request.existingDomains
+          );
+          sendResponse({ success: true, ...result });
           break;
         }
 

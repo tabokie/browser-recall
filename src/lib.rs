@@ -58,6 +58,18 @@ impl Interaction {
     }
 }
 
+/// A single search result with its relevance score.
+#[derive(Serialize)]
+struct SearchResult {
+    url: String,
+    title: String,
+    id: String,
+    timestamp: i64,
+    intent: String,
+    attention: String,
+    score: f64,
+}
+
 /// Search result ranking algorithms
 #[wasm_bindgen]
 pub enum RankingAlgorithm {
@@ -68,7 +80,9 @@ pub enum RankingAlgorithm {
     Hybrid,
 }
 
-/// Search query processor
+/// Text search engine. Currently only handles flat query strings.
+/// TODO: Move the query builder tree evaluation (AND/OR operators, keyword/range/smartFilter
+/// predicates) from options.js into WASM so all filtering and scoring happens in one pass.
 #[wasm_bindgen]
 pub struct SearchEngine {
     interactions: Vec<Interaction>,
@@ -95,14 +109,23 @@ impl SearchEngine {
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 
-    fn search_internal(&self, query: &str, algorithm: RankingAlgorithm) -> Vec<&Interaction> {
+    fn search_internal(&self, query: &str, algorithm: RankingAlgorithm) -> Vec<SearchResult> {
         let query_lower = query.to_lowercase();
-        let mut results: Vec<&Interaction> = self.interactions
+        let mut results: Vec<SearchResult> = self.interactions
             .iter()
             .filter(|i| {
                 i.title.to_lowercase().contains(&query_lower) ||
                 i.content.to_lowercase().contains(&query_lower) ||
                 i.intent.to_lowercase().contains(&query_lower)
+            })
+            .map(|i| SearchResult {
+                url: i.url.clone(),
+                title: i.title.clone(),
+                id: i.id.clone(),
+                timestamp: i.timestamp,
+                intent: i.intent.clone(),
+                attention: i.attention.clone(),
+                score: self.content_score(i, &query_lower),
             })
             .collect();
 
@@ -110,9 +133,7 @@ impl SearchEngine {
         match algorithm {
             RankingAlgorithm::Content => {
                 results.sort_by(|a, b| {
-                    let a_score = self.content_score(a, &query_lower);
-                    let b_score = self.content_score(b, &query_lower);
-                    b_score.partial_cmp(&a_score).unwrap()
+                    b.score.partial_cmp(&a.score).unwrap()
                 });
             }
             RankingAlgorithm::Context => {
