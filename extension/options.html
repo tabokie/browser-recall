@@ -344,6 +344,7 @@
       display: flex;
       justify-content: flex-end;
       overflow-x: auto;
+      min-height: 56px; /* chart-bars-row (44px) + chart-axis (12px) — stable frame before/after load */
     }
 
     .chart-content {
@@ -1209,7 +1210,6 @@
     .collection-layout {
       display: none;
       flex-direction: column;
-      flex: 1;
     }
 
     .collection-layout.visible {
@@ -1219,10 +1219,6 @@
     .collection-section {
       display: flex;
       flex-direction: column;
-    }
-
-    .collection-section:last-child {
-      flex: 1;
     }
 
     .section-header {
@@ -1262,7 +1258,6 @@
     }
 
     .collection-section .section-body {
-      flex: 1;
       display: flex;
       flex-direction: column;
     }
@@ -1289,7 +1284,6 @@
       background: #e8eaed;
       cursor: crosshair;
       user-select: none;
-      flex: 1;
     }
 
     .detail-lineage {
@@ -1984,7 +1978,7 @@
     </div>
 
 
-    <div class="attention-chart" id="attentionChart">
+    <div class="attention-chart visible" id="attentionChart">
       <div class="chart-label">Attention over time</div>
       <div class="chart-bars" id="chartBars"></div>
       <div class="chart-tooltip" id="chartTooltip"></div>
@@ -1998,7 +1992,7 @@
 
     <div class="results-wrapper" id="resultsWrapper">
       <div class="results-container" id="results">
-        <div class="loading">Loading interactions...</div>
+        <div class="column-header-row" data-context="global"><div class="col-spacer"></div><div class="col-header col-title" data-col="title">Title</div><div class="col-header col-time" data-col="lastVisit">Last Visit</div><div class="col-header col-att" data-col="attention">Att</div><button class="col-add-btn" data-context="global" title="Add columns">+</button><div class="col-action-spacer"></div></div>
       </div>
     </div>
 

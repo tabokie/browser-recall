@@ -1,0 +1,25 @@
+- There're bugs in the last commit. Sometimes I cannot click open page detail; sometimes when I switch from "All" to "Recycle Bin", the page list is not updated; sometimes when I open Gateways, it loads rather slow.
+- The deletion is still a mess. When I delete from "All", it sometimes automatically jump to Recycle Bin view, but not showing the deleted item. And the deletion count in left panel constantly mismatch what is displayed in the Recycle Bin result list.
+- I delete a page, then enter recycle bin, the result list is empty when the count is 3.
+- Then I reload the recycle bin, now the list shows two items (including the one I just deleted), the count is still 3.
+- Then I enter "All", scroll down a little, then click open recycle bin, the result is empty again.
+- Are these bugs testable?
+- In the future, when I ask you to fix unexpected behavior, write tests to reproduce and verify your hypothesis before working on fixes.
+- When I open a link detail, then scroll all the way to the bottom and hit the boundary, the detail is automatically closed. This is unexpected.
+- Why is this issue not found in Explore search results? I thought you said they share the same VirtualScroller implementation.
+- Okay. There is an issue with bottom padding still. In the explore subsection of a collection, the bottom padding is larger than usual. In the "All" view, the bottom padding is initially correct, but when I click open the last result detail, the padding becomes too small, and when I close the detail, it doesn't restore to before.
+- Are the attention window and column sort header loaded only after results are ready?
+- They should render immediately. The bars and labels inside the attention window can wait until results are ready.
+- Let's add a sleep before fetching results so that I can verify the change manually.
+- The attention frame height should be fixed. The same before and after the results are ready.
+- Add the same sleep before collection view load results too.
+- When I switch collection, only title changes, but both attention chart and column header don't change. What I wanted is for both of them to load immediately as the title does.
+- Why in "All", the title and other headers are not rendered at the same time?
+- The attention chart and column header in "All" are still rendered rather slow when I first open the extension options.
+- No. The timing is still title -> chart and column headers -> collection list on the left. The delay is very noticable.
+- Great. Now remove the debug sleep.
+- Okay. There is an issue with bottom padding still. In the explore subsection of a collection, the bottom padding of result list is larger than usual. In the "All" view, the bottom padding is too small, smaller than top padding.
+- The second issue is not fixed. The bottom padding is still larger than usual.
+- Now it becomes an infinite scroll... No result is shown and I cannot scroll to the bottom. Why is no tests failing on this obvious bug...
+- Now two sections in collection have their own scrollbars. This is not intended. There is supposed to be only one.
+- Finish up.

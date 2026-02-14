@@ -421,6 +421,49 @@ describe('Persistence round-trip', () => {
       const { domains } = await fs.processGatewaysAfterWatermark(0, {});
       expect(Object.keys(domains)).toEqual(['https://ok.com']);
     });
+
+    it('skips JSONL files whose date is entirely before the watermark', async () => {
+      const oldTs1 = new Date('2026-01-01T10:00:00Z').getTime();
+      const oldTs2 = new Date('2026-01-01T14:00:00Z').getTime();
+      const newTs1 = new Date('2026-02-14T10:00:00Z').getTime();
+      const newTs2 = new Date('2026-02-14T11:00:00Z').getTime();
+
+      await writeJsonl(rootDir, '2026-01-01.jsonl', [
+        { url: 'https://old.com/', timestamp: oldTs1 },
+        { url: 'https://old.com/a', timestamp: oldTs2 },
+      ]);
+      await writeJsonl(rootDir, '2026-02-14.jsonl', [
+        { url: 'https://new.com/', timestamp: newTs1 },
+        { url: 'https://new.com/x', timestamp: newTs2 },
+      ]);
+
+      // Watermark after end-of-day Jan 1 — should skip that file entirely
+      const watermark = new Date('2026-01-02T00:00:00Z').getTime();
+      const { domains, newWatermark } = await fs.processGatewaysAfterWatermark(watermark, {});
+
+      // Only the Feb 14 file should have been processed
+      expect(domains['https://new.com']).toBeDefined();
+      expect(domains['https://old.com']).toBeUndefined();
+      expect(newWatermark).toBe(newTs2);
+    });
+
+    it('processes file on the same day as watermark (partial day overlap)', async () => {
+      const earlyTs = new Date('2026-02-14T08:00:00Z').getTime();
+      const midTs = new Date('2026-02-14T12:00:00Z').getTime();
+      const lateTs = new Date('2026-02-14T18:00:00Z').getTime();
+
+      await writeJsonl(rootDir, '2026-02-14.jsonl', [
+        { url: 'https://a.com/', timestamp: earlyTs },
+        { url: 'https://a.com/early', timestamp: midTs },
+        { url: 'https://a.com/late', timestamp: lateTs },
+      ]);
+
+      // Watermark in the middle of Feb 14 — file should still be read,
+      // but only the entry after the watermark should be processed
+      const { domains } = await fs.processGatewaysAfterWatermark(midTs, {});
+      // Only late entry is new; root and early are at/before watermark
+      expect(domains['https://a.com'].childCount).toBe(1);
+    });
   });
 
   // ---- Collection pins are independent of settings.json ----

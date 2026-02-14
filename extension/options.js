@@ -619,6 +619,40 @@ function isDeletableView() {
   return true;
 }
 
+// Show chart frame + column headers immediately (bars and rows fill in after data loads)
+function renderResultsSkeleton(opts = {}) {
+  const { showRelevance = false } = opts;
+  const chartEl = document.getElementById('attentionChart');
+  chartEl.querySelector('.chart-bars').innerHTML = '';
+  chartEl.classList.add('visible');
+  document.getElementById('attentionChartSecondary').classList.remove('visible');
+
+  const vs = getOrCreateGlobalScroller();
+  vs._headerHtml = columnHeaderHtml('global', { hasDelete: isDeletableView(), hasPin: false, showRelevance });
+  vs.setData([], () => '');
+}
+
+// Show collection chart frames + column headers immediately
+function renderCollectionSkeleton() {
+  // Pinned section: show chart frame + column header
+  const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
+  pinnedSection.style.display = '';
+  const pinnedChart = document.getElementById('pinnedChart');
+  pinnedChart.querySelector('.chart-bars').innerHTML = '';
+  pinnedChart.classList.add('visible');
+  const pinnedContainer = document.getElementById('pinnedResults');
+  pinnedContainer.innerHTML = columnHeaderHtml('pinned', { hasDelete: true, hasPin: true });
+  bindColumnHeaderClicks(pinnedContainer);
+
+  // Explore section: show chart frame + column header
+  const relatedChart = document.getElementById('relatedChart');
+  relatedChart.querySelector('.chart-bars').innerHTML = '';
+  relatedChart.classList.add('visible');
+  const vs = getOrCreateRelatedScroller();
+  vs._headerHtml = columnHeaderHtml('related', { hasDelete: true, hasPin: true, showRelevance: false });
+  vs.setData([], () => '');
+}
+
 async function handleDelete(url, title) {
   await recycleItem(url, title);
 }
@@ -943,24 +977,28 @@ async function showCategory(category) {
   updateMainTitle(categoryLabel(category));
   document.getElementById('pinSearchBtn').style.display = 'none';
   document.getElementById('queryBuilder').style.display = 'none';
-  showNormalLayout();
 
-  if (category === 'gateways') await loadGatewayDomains();
-
-  const data = cachedData || await loadData();
-  const filtered = filterByCategory(data.interactions, category);
   if (category === 'recycleBin') {
+    showNormalLayout();
     document.getElementById('attentionChart').classList.remove('visible');
     document.getElementById('attentionChartSecondary').classList.remove('visible');
     if (recycleBin.length > 0) {
       document.getElementById('restoreAllBtn').style.display = '';
       document.getElementById('deleteAllBtn').style.display = '';
     }
-    displayRecycleBinRows(filtered);
-  } else {
-    renderAttentionChart(filtered);
-    displayInteractionRows(filtered);
+    displayRecycleBinRows();
+    return;
   }
+
+  renderResultsSkeleton();
+  showNormalLayout();
+
+  if (category === 'gateways') await loadGatewayDomains();
+
+  const data = cachedData || await loadData();
+  const filtered = filterByCategory(data.interactions, category);
+  renderAttentionChart(filtered);
+  displayInteractionRows(filtered);
 }
 
 async function showSearch(query) {
@@ -975,6 +1013,8 @@ async function showSearch(query) {
   document.getElementById('pinSearchBtn').style.display = 'flex';
   document.getElementById('queryBuilder').style.display = 'none';
   showNormalLayout();
+
+  renderResultsSkeleton({ showRelevance: true });
 
   try {
     const data = cachedData || await loadData();
@@ -1374,6 +1414,8 @@ async function runQuery() {
     }
     return;
   }
+
+  if (!inCollection) renderResultsSkeleton();
 
   const data = cachedData || await loadData();
 
@@ -2018,6 +2060,7 @@ async function showCollection(collection) {
   }
   attachDblClick(displayName);
   showCollectionLayout();
+  renderCollectionSkeleton();
 
   try {
     const data = cachedData || await loadData();
@@ -2331,23 +2374,28 @@ function displayInteractionRows(interactions) {
   );
 }
 
-function displayRecycleBinRows(interactions) {
+function displayRecycleBinRows() {
   const container = document.getElementById('results');
-  if (!interactions || interactions.length === 0) {
+  if (recycleBin.length === 0) {
     displayMessage('Recycle bin is empty');
     return;
   }
 
-  const byUrl = groupInteractionsByUrl(interactions);
-  const entries = [...byUrl.entries()].map(([url, group]) => {
-    const latest = group.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
-    const recycledItem = recycleBin.find(item => item.url === url);
-    const deletedAt = recycledItem ? recycledItem.deletedAt : latest.timestamp;
-    return { url, title: recycledItem?.title || latest.title, deletedAt };
-  }).sort((a, b) => b.deletedAt - a.deletedAt);
+  // Reset virtual scroller so scroll events don't overwrite recycle bin content
+  if (globalVirtualScroller) {
+    globalVirtualScroller.data = [];
+    globalVirtualScroller.renderedRange = { start: -1, end: -1 };
+  }
+
+  // Use recycleBin array directly — guarantees count matches displayed list
+  const entries = recycleBin
+    .map(item => ({ url: item.url, title: item.title || 'Untitled', deletedAt: item.deletedAt }))
+    .sort((a, b) => b.deletedAt - a.deletedAt);
 
   const RESTORE_SVG = '<svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18z"/></svg>';
 
+  container.style.paddingTop = '0px';
+  container.style.paddingBottom = '0px';
   container.innerHTML = entries.map(e => {
     const safeTitle = escapeHtml(e.title || 'Untitled');
     const safeUrl = escapeHtml(e.url || '');
@@ -2363,6 +2411,8 @@ function displayRecycleBinRows(interactions) {
     </div>`;
   }).join('');
 
+  // Bind expand delegation (shared handler — avoids double-toggle with recycle bin handler)
+  bindResultDelegation(container);
   bindRecycleBinClicks(container);
 }
 
@@ -2371,91 +2421,20 @@ function bindRecycleBinClicks(container) {
   container._recycleBinDelegationBound = true;
 
   container.addEventListener('click', async (e) => {
-    const expandBtn = e.target.closest('.result-expand');
-    if (expandBtn) {
-      e.stopPropagation();
-      const row = expandBtn.closest('.result-row');
-      const item = row?.closest('.result-item');
-      const detail = item?.querySelector('.result-detail');
-      if (detail) {
-        const wasOpen = detail.classList.contains('open');
-        detail.classList.toggle('open');
-        expandBtn.classList.toggle('open');
-        if (!wasOpen && !detail.dataset.extraLoaded) {
-          detail.dataset.extraLoaded = '1';
-          const url = row.dataset.url;
-          const extra = await loadExtraDetail(url);
-          const extraHtml = renderExtraDetailHtml(extra);
-          if (extraHtml) {
-            const extraDiv = document.createElement('div');
-            extraDiv.className = 'detail-extra';
-            extraDiv.innerHTML = extraHtml;
-            detail.appendChild(extraDiv);
-            bindHighlightDeleteButtons(extraDiv);
-          }
-        }
-      }
-      return;
-    }
-
+    // Expand, delete, and selection are handled by bindResultDelegation — only handle restore here
     const restoreBtn = e.target.closest('.result-restore');
-    if (restoreBtn) {
-      e.stopPropagation();
-      const row = restoreBtn.closest('.result-row');
-      if (row && row.classList.contains('selected')) {
-        for (const r of container.querySelectorAll('.result-row.selected')) {
-          await restoreItem(r.dataset.url);
-        }
-      } else {
-        await restoreItem(restoreBtn.dataset.restoreUrl);
+    if (!restoreBtn) return;
+    e.stopPropagation();
+    const row = restoreBtn.closest('.result-row');
+    if (row && row.classList.contains('selected')) {
+      for (const r of container.querySelectorAll('.result-row.selected')) {
+        await restoreItem(r.dataset.url);
       }
-      lastClickedRow = null;
-      showCategory('recycleBin');
-      return;
-    }
-
-    const deleteBtn = e.target.closest('.result-delete');
-    if (deleteBtn) {
-      e.stopPropagation();
-      const row = deleteBtn.closest('.result-row');
-      if (row && row.classList.contains('selected')) {
-        for (const r of container.querySelectorAll('.result-row.selected')) {
-          await permanentlyDeleteItem(r.dataset.url);
-        }
-      } else {
-        await permanentlyDeleteItem(deleteBtn.dataset.deleteUrl);
-      }
-      lastClickedRow = null;
-      showCategory('recycleBin');
-      return;
-    }
-
-    const row = e.target.closest('.result-row');
-    if (!row) return;
-    if (marqueeActive) return;
-
-    const allRows = [...container.querySelectorAll('.result-row')];
-
-    if (e.shiftKey && lastClickedRow) {
-      const anchorIdx = allRows.indexOf(lastClickedRow);
-      const curIdx = allRows.indexOf(row);
-      if (anchorIdx !== -1 && curIdx !== -1) {
-        const [start, end] = anchorIdx < curIdx ? [anchorIdx, curIdx] : [curIdx, anchorIdx];
-        if (!e.ctrlKey && !e.metaKey) {
-          allRows.forEach(r => r.classList.remove('selected'));
-        }
-        for (let i = start; i <= end; i++) {
-          allRows[i].classList.add('selected');
-        }
-      }
-    } else if (e.ctrlKey || e.metaKey) {
-      row.classList.toggle('selected');
-      lastClickedRow = row;
     } else {
-      allRows.forEach(r => r.classList.remove('selected'));
-      row.classList.add('selected');
-      lastClickedRow = row;
+      await restoreItem(restoreBtn.dataset.restoreUrl);
     }
+    lastClickedRow = null;
+    refreshCurrentView();
   });
 }
 
@@ -2750,14 +2729,23 @@ function bindResultDelegation(container) {
     const deleteBtn = e.target.closest('.result-delete');
     if (deleteBtn) {
       e.stopPropagation();
+      const inRecycleBin = activeView.type === 'category' && activeView.value === 'recycleBin';
       const row = deleteBtn.closest('.result-row');
       if (row && row.classList.contains('selected')) {
         const selectedRows = container.querySelectorAll('.result-row.selected');
         for (const r of selectedRows) {
-          await handleDelete(r.dataset.url, r.dataset.title);
+          if (inRecycleBin) {
+            await permanentlyDeleteItem(r.dataset.url);
+          } else {
+            await handleDelete(r.dataset.url, r.dataset.title);
+          }
         }
       } else {
-        await handleDelete(deleteBtn.dataset.deleteUrl, deleteBtn.dataset.deleteTitle);
+        if (inRecycleBin) {
+          await permanentlyDeleteItem(deleteBtn.dataset.deleteUrl);
+        } else {
+          await handleDelete(deleteBtn.dataset.deleteUrl, deleteBtn.dataset.deleteTitle);
+        }
       }
       lastClickedRow = null;
       refreshCurrentView();
@@ -2846,6 +2834,7 @@ class VirtualScroller {
     this.containerEl = containerEl; // container element (#results)
     this.rowHeight = rowHeight;     // collapsed row height in px
     this.buffer = 20;               // extra rows above/below viewport
+    this.basePaddingBottom = parseInt(getComputedStyle(containerEl).paddingBottom) || 0;
     this.data = [];
     this.renderRow = null;
     this._headerHtml = '';
@@ -2900,9 +2889,9 @@ class VirtualScroller {
     // do NOT re-render, which would destroy the open detail DOM state.
     const { end } = this.renderedRange;
     if (end >= 0) {
+      const base = (this.data.length - end) * this.rowHeight + this.basePaddingBottom;
       const extraAfter = (this._expandedIdx >= end) ? this._expandedExtraH : 0;
-      const paddingBottom = Math.max(0, (this.data.length - end) * this.rowHeight + extraAfter);
-      this.containerEl.style.paddingBottom = paddingBottom + 'px';
+      this.containerEl.style.paddingBottom = (base + extraAfter) + 'px';
     }
   }
 
@@ -2913,25 +2902,41 @@ class VirtualScroller {
 
   _render(force = false) {
     if (!this.renderRow || this.data.length === 0) {
-      this.containerEl.style.paddingTop = '0px';
-      this.containerEl.style.paddingBottom = '0px';
-      if (this.data.length === 0) this.containerEl.innerHTML = this._headerHtml;
+      // Only touch DOM on explicit setData/applyFilter calls (force=true).
+      // Scroll-triggered calls (force=false) must not overwrite non-scroller
+      // content (e.g. recycle bin rows rendered directly into the container).
+      if (force) {
+        this.containerEl.style.paddingTop = '0px';
+        this.containerEl.style.paddingBottom = '0px';
+        if (this.data.length === 0) this.containerEl.innerHTML = this._headerHtml;
+      }
       return;
     }
 
     const scrollTop = this.scrollEl.scrollTop;
     const viewH = this.scrollEl.clientHeight;
-    const offset = this.containerEl.offsetTop;
-    const adjTop = Math.max(0, scrollTop - offset);
+    // Use getBoundingClientRect for correct offset regardless of intermediate
+    // positioned ancestors (e.g. .section-results-wrapper with position:relative).
+    const adjTop = Math.max(0, this.scrollEl.getBoundingClientRect().top - this.containerEl.getBoundingClientRect().top);
 
     const start = Math.max(0, Math.floor(adjTop / this.rowHeight) - this.buffer);
     const end = Math.min(this.data.length, Math.ceil((adjTop + viewH) / this.rowHeight) + this.buffer);
 
     if (!force && start === this.renderedRange.start && end === this.renderedRange.end) return;
 
+    // If a detail is expanded and still within the new range, skip re-render
+    // to preserve the open DOM state.  Clear expansion state if it scrolled out.
+    if (!force && this._expandedIdx >= 0) {
+      if (this._expandedIdx >= start && this._expandedIdx < end) {
+        return; // expanded item still visible — don't destroy it
+      }
+      // Expanded item scrolled out of view — clear stale state
+      this._expandedIdx = -1;
+      this._expandedExtraH = 0;
+    }
+
     const paddingTop = start * this.rowHeight;
-    const trailingRows = (this.data.length - end) * this.rowHeight;
-    const paddingBottom = Math.max(10, trailingRows);
+    const paddingBottom = (this.data.length - end) * this.rowHeight + this.basePaddingBottom;
     this.containerEl.style.paddingTop = paddingTop + 'px';
     this.containerEl.style.paddingBottom = paddingBottom + 'px';
 
@@ -2961,7 +2966,7 @@ function getOrCreateGlobalScroller() {
 
 function getOrCreateRelatedScroller() {
   if (!relatedVirtualScroller) {
-    const scrollEl = document.getElementById('relatedResultsWrapper');
+    const scrollEl = document.querySelector('.main');
     const containerEl = document.getElementById('relatedResults');
     relatedVirtualScroller = new VirtualScroller(scrollEl, containerEl);
     bindResultDelegation(containerEl);

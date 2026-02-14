@@ -403,6 +403,15 @@ class FileSystemStorage {
 
     for await (const entry of this.directoryHandle.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
+        // Skip files whose date is entirely before the watermark
+        if (watermark > 0) {
+          const dateMatch = entry.name.match(/^(\d{4}-\d{2}-\d{2})\.jsonl$/);
+          if (dateMatch) {
+            const fileEndOfDay = new Date(dateMatch[1] + 'T23:59:59.999Z').getTime();
+            if (fileEndOfDay < watermark) continue;
+          }
+        }
+
         const file = await entry.getFile();
         const text = await file.text();
         const lines = text.split('\n').filter(line => line.trim());
