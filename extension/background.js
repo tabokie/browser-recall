@@ -92,6 +92,7 @@ async function updateGatewayRegistry(url) {
   try {
     const parsed = new URL(url);
     const origin = parsed.origin;
+    const isSearchQuery = parsed.searchParams.has('q') || parsed.searchParams.has('query') || parsed.searchParams.has('search');
     const isRoot = parsed.pathname === '/' || parsed.pathname === '' || parsed.pathname === '/index.html' || parsed.pathname === '/index.htm';
 
     const { gatewayDomains = {} } = await chrome.storage.local.get(['gatewayDomains']);
@@ -100,7 +101,18 @@ async function updateGatewayRegistry(url) {
     }
     const entry = gatewayDomains[origin];
 
-    if (isRoot) {
+    if (isSearchQuery) {
+      // Search query URLs are always children, never the root itself
+      if (!entry.childUrls.includes(url)) {
+        entry.childUrls.push(url);
+      }
+      // Root-path search (e.g. duckduckgo.com/?q=…) — use clean domain as root
+      if (isRoot && !entry.rootUrl && !entry.fetched) {
+        await chrome.storage.local.set({ gatewayDomains });
+        fetchAndCreateGatewayRoot(origin);
+        return;
+      }
+    } else if (isRoot) {
       entry.rootUrl = url;
     } else {
       if (!entry.childUrls.includes(url)) {
@@ -495,21 +507,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: true, highlights });
 
     } else if (request.action === 'deleteHighlight') {
-      console.log(`[background] deleteHighlight: slug=${request.slug}, text="${request.text?.substring(0, 50)}"`);
+      const displayText = Array.isArray(request.text) ? request.text.join(' ') : request.text;
+      console.log(`[background] deleteHighlight: slug=${request.slug}, text="${displayText?.substring(0, 50)}"`);
       await setupOffscreenDocument();
       const slug = request.slug;
 
       const loadResp = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
       let highlights = loadResp?.highlights || [];
 
-      // Remove by matching text and timestamp
+      // Remove by timestamp first (reliable for both single and grouped highlights)
       const before = highlights.length;
-      highlights = highlights.filter(h =>
-        !(h.text === request.text && h.timestamp === request.timestamp)
-      );
-      // Fallback: match by text only if timestamp didn't match
+      if (request.timestamp) {
+        highlights = highlights.filter(h => h.timestamp !== request.timestamp);
+      }
+      // Fallback: match by text if timestamp didn't match
       if (highlights.length === before && request.text) {
-        const idx = highlights.findIndex(h => h.text === request.text);
+        const idx = highlights.findIndex(h => {
+          if (Array.isArray(h.text) && Array.isArray(request.text)) {
+            return JSON.stringify(h.text) === JSON.stringify(request.text);
+          }
+          return h.text === request.text;
+        });
         if (idx >= 0) highlights.splice(idx, 1);
       }
 

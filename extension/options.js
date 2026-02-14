@@ -24,6 +24,7 @@ let lastClickedRow = null; // for shift-click range select
 let marqueeActive = false; // suppress click during marquee drag
 let gatewayDomainsCache = {}; // { [origin]: { rootUrl, childUrls, fetched } }
 let pendingPin = null; // { query, qbTree? } — set during pin naming mode
+let pinnedFilterCtx = null; // cached context for related recalculation on date filter
 
 // --- Query builder state ---
 let qbNodeIdCounter = 0;
@@ -253,6 +254,24 @@ function updateRecycleSidebarCount() {
   el.textContent = recycleBin.length > 0 ? recycleBin.length : '';
 }
 
+document.getElementById('restoreAllBtn').addEventListener('click', async () => {
+  if (recycleBin.length === 0) return;
+  recycleBin = [];
+  await saveRecycleBin();
+  lastClickedRow = null;
+  showCategory('recycleBin');
+});
+
+document.getElementById('deleteAllBtn').addEventListener('click', async () => {
+  if (recycleBin.length === 0) return;
+  for (const item of recycleBin) {
+    if (!permanentDeletes.includes(item.url)) permanentDeletes.push(item.url);
+  }
+  recycleBin = [];
+  await saveRecycleBin();
+  lastClickedRow = null;
+  showCategory('recycleBin');
+});
 
 // --- Layout switching (collection vs normal) ---
 function showCollectionLayout() {
@@ -559,10 +578,6 @@ async function loadGatewayDomains() {
 function isGatewayUrl(url) {
   try {
     const parsed = new URL(url);
-    // Search query URLs are gateways
-    if (parsed.searchParams.has('q') || parsed.searchParams.has('query') || parsed.searchParams.has('search')) {
-      return true;
-    }
     // Domain registry: root URL with 2+ children
     const entry = gatewayDomainsCache[parsed.origin];
     if (entry && entry.rootUrl === url && entry.childUrls && entry.childUrls.length >= 2) {
@@ -624,30 +639,55 @@ function renderAttentionChartInto(chartEl, barsEl, interactions, label) {
     return;
   }
 
+  const scoreMap = new Map(data);
   const maxScore = Math.max(...data.map(d => d[1]), 0.1);
-  const chartHeight = 48;
+  const chartHeight = 44;
 
-  // Limit to last 60 days to avoid cramming
-  const visible = data.slice(-60);
+  // Expand range: 1st of earliest UTC month → last data day (all UTC)
+  const firstDate = new Date(data[0][0] + 'T00:00:00Z');
+  const lastDate = new Date(data[data.length - 1][0] + 'T00:00:00Z');
+  const rangeStart = new Date(Date.UTC(firstDate.getUTCFullYear(), firstDate.getUTCMonth(), 1));
 
-  barsEl.innerHTML = visible.map(([dateStr, score]) => {
-    const barH = Math.max(2, Math.round((score / maxScore) * chartHeight));
-    const dateLabel = dateStr.slice(5); // MM-DD
-    return `<div class="chart-bar-group" data-date="${dateStr}" data-score="${score.toFixed(1)}">
-      <div class="chart-bar" style="height: ${barH}px"></div>
-      <div class="chart-date">${visible.length <= 14 ? dateLabel : ''}</div>
-    </div>`;
+  const days = [];
+  const months = []; // { label, dayIndex }
+  let prevMonth = null;
+  for (let d = new Date(rangeStart); d <= lastDate; d.setUTCDate(d.getUTCDate() + 1)) {
+    const dateStr = d.toISOString().slice(0, 10);
+    const month = dateStr.slice(0, 7);
+    if (month !== prevMonth) {
+      months.push({ label: month, dayIndex: days.length });
+      prevMonth = month;
+    }
+    days.push(dateStr);
+  }
+
+  // Bars row
+  const daySlotPx = 11; // 10px bar + 1px gap
+  const barsHtml = days.map(dateStr => {
+    const score = scoreMap.get(dateStr);
+    if (score != null) {
+      const barH = Math.max(2, Math.round((score / maxScore) * chartHeight));
+      return `<div class="chart-bar-group has-data" data-date="${dateStr}" data-score="${score.toFixed(1)}"><div class="chart-bar" style="height:${barH}px"></div></div>`;
+    }
+    return `<div class="chart-bar-group" data-date="${dateStr}"></div>`;
   }).join('');
 
-  // Show date labels for first, last, and middle if many bars
-  if (visible.length > 14) {
-    const groups = barsEl.querySelectorAll('.chart-bar-group');
-    const show = [0, Math.floor(groups.length / 2), groups.length - 1];
-    show.forEach(idx => {
-      const g = groups[idx];
-      if (g) g.querySelector('.chart-date').textContent = g.dataset.date.slice(5);
-    });
-  }
+  // Axis row
+  const totalBarWidth = days.length * daySlotPx - 1;
+  const axisHtml = months.map(m =>
+    `<span class="chart-month" style="left:${m.dayIndex * daySlotPx}px">${m.label}</span>`
+  ).join('');
+
+  // Compute min-width: max(bar total, rightmost label end)
+  // Label ~45px wide; last label starts at its dayIndex * daySlotPx
+  const lastLabel = months[months.length - 1];
+  const labelEnd = lastLabel ? lastLabel.dayIndex * daySlotPx + 45 : 0;
+  const contentWidth = Math.max(totalBarWidth, labelEnd);
+
+  barsEl.innerHTML = `<div class="chart-content" style="min-width:${contentWidth}px">
+    <div class="chart-bars-row">${barsHtml}</div>
+    <div class="chart-axis">${axisHtml}</div>
+  </div>`;
 
   chartEl.classList.add('visible');
 }
@@ -660,6 +700,8 @@ function renderAttentionChart(interactions) {
     interactions,
     'Attention over time'
   );
+  bindChartBarClick(document.getElementById('attentionChart'), document.getElementById('results'));
+
 }
 
 // Chart tooltip handler (shared for both charts)
@@ -667,7 +709,7 @@ function bindChartTooltip(chartEl) {
   const barsEl = chartEl.querySelector('.chart-bars');
   const tooltip = chartEl.querySelector('.chart-tooltip');
   barsEl.addEventListener('mouseover', (e) => {
-    const group = e.target.closest('.chart-bar-group');
+    const group = e.target.closest('.chart-bar-group.has-data');
     if (!group) { tooltip.style.display = 'none'; return; }
     tooltip.textContent = `${group.dataset.date}: ${group.dataset.score}`;
     tooltip.style.display = 'block';
@@ -685,6 +727,82 @@ bindChartTooltip(document.getElementById('attentionChart'));
 bindChartTooltip(document.getElementById('attentionChartSecondary'));
 bindChartTooltip(document.getElementById('pinnedChart'));
 bindChartTooltip(document.getElementById('relatedChart'));
+
+// Chart ↔ Results mapping: chartBarsId → resultsContainerId
+const chartResultsPairs = [
+  ['chartBars', 'results'],
+  ['pinnedChartBars', 'pinnedResults'],
+  ['relatedChartBars', 'relatedResults'],
+];
+
+function syncChartHighlights() {
+  for (const [barsId, containerId] of chartResultsPairs) {
+    const barsEl = document.getElementById(barsId);
+    const container = document.getElementById(containerId);
+    if (!barsEl || !container) continue;
+
+    // Collect dates from selected rows (exclude related results from pinned chart)
+    const selectedDates = new Set();
+    container.querySelectorAll('.result-row.selected').forEach(row => {
+      if (row.closest('.result-item.related-result')) return;
+      const d = row.dataset.dates;
+      if (d) d.split(',').forEach(date => selectedDates.add(date));
+    });
+
+    // Toggle highlighted class on chart bars
+    barsEl.querySelectorAll('.chart-bar-group').forEach(group => {
+      const bar = group.querySelector('.chart-bar');
+      if (bar) bar.classList.toggle('highlighted', selectedDates.has(group.dataset.date));
+    });
+  }
+}
+
+function applyDateFilter(chartEl, resultsContainer) {
+  const activeDates = new Set();
+  chartEl.querySelectorAll('.chart-bar-group.active').forEach(g => activeDates.add(g.dataset.date));
+  const hasFilter = activeDates.size > 0;
+
+  resultsContainer.querySelectorAll('.result-item').forEach(item => {
+    // Skip related results and gaps — date filter only applies to pinned/primary results
+    if (item.classList.contains('related-result')) return;
+    const row = item.querySelector('.result-row');
+    if (!row) return;
+    if (!hasFilter) { item.style.display = ''; return; }
+    const rowDates = row.dataset.dates ? row.dataset.dates.split(',') : [];
+    const match = rowDates.some(d => activeDates.has(d));
+    item.style.display = match ? '' : 'none';
+  });
+
+  // Recalculate related results when filtering pinned section
+  if (resultsContainer.id === 'pinnedResults') {
+    recalculateRelatedResults();
+  }
+}
+
+function bindChartBarClick(chartEl, resultsContainer) {
+  const barsEl = chartEl.querySelector('.chart-bars');
+  if (!barsEl || barsEl._chartClickBound) return;
+  barsEl._chartClickBound = true;
+  barsEl.addEventListener('click', (e) => {
+    const bar = e.target.closest('.chart-bar');
+    if (!bar) return;
+    const group = bar.closest('.chart-bar-group');
+    if (group) group.classList.toggle('active');
+    applyDateFilter(chartEl, resultsContainer);
+    syncChartHighlights();
+  });
+  // Click anywhere in chart that isn't a bar clears all active selections
+  if (!chartEl._chartBgClickBound) {
+    chartEl._chartBgClickBound = true;
+    chartEl.addEventListener('click', (e) => {
+      if (e.target.closest('.chart-bar')) return;
+      chartEl.querySelectorAll('.chart-bar-group.active').forEach(g => g.classList.remove('active'));
+      applyDateFilter(chartEl, resultsContainer);
+      syncChartHighlights();
+    });
+  }
+}
+
 
 function renderAttentionChartForResults(results, allInteractions) {
   document.getElementById('attentionChartSecondary').classList.remove('visible');
@@ -729,10 +847,16 @@ async function showCategory(category) {
 
   const data = cachedData || await loadData();
   const filtered = filterByCategory(data.interactions, category);
-  renderAttentionChart(filtered);
   if (category === 'recycleBin') {
+    document.getElementById('attentionChart').classList.remove('visible');
+    document.getElementById('attentionChartSecondary').classList.remove('visible');
+    if (recycleBin.length > 0) {
+      document.getElementById('restoreAllBtn').style.display = '';
+      document.getElementById('deleteAllBtn').style.display = '';
+    }
     displayRecycleBinRows(filtered);
   } else {
+    renderAttentionChart(filtered);
     displayInteractionRows(filtered);
   }
 }
@@ -796,6 +920,96 @@ function enrichForQuery(interactions, contentMap, highlightsMap) {
   });
 }
 
+// --- Seed-based related pages scoring ---
+const STOP_WORDS = new Set([
+  'a','an','the','and','or','but','in','on','at','to','for','of','with','by',
+  'from','up','about','into','over','after','is','are','was','were','be','been',
+  'being','have','has','had','do','does','did','will','would','shall','should',
+  'may','might','must','can','could','that','which','who','whom','this','these',
+  'those','it','its','my','your','his','her','our','their','what','how','when',
+  'where','why','not','no','nor','so','if','then','than','too','very','just',
+  'also','now','here','there','all','each','every','both','few','more','most',
+  'other','some','such','only','same','new','-','|','/'
+]);
+
+function titleWords(text) {
+  if (!text) return new Set();
+  return new Set(text.toLowerCase().split(/[\s\-_|/:.?!,;()\[\]{}]+/).filter(w => w.length > 1 && !STOP_WORDS.has(w)));
+}
+
+function jaccardSimilarity(setA, setB) {
+  if (setA.size === 0 || setB.size === 0) return 0;
+  let intersection = 0;
+  for (const x of setA) if (setB.has(x)) intersection++;
+  const union = setA.size + setB.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function scoreTemporalProximity(seedTimestamps, candTimestamps) {
+  const seeds = seedTimestamps.slice(0, 10);
+  const cands = candTimestamps.slice(0, 10);
+  let minGap = Infinity;
+  for (const s of seeds) for (const c of cands) minGap = Math.min(minGap, Math.abs(s - c));
+  const ONE_HOUR = 3600000;
+  const DAY = 86400000;
+  if (minGap <= ONE_HOUR) return 1;
+  if (minGap >= DAY) return 0;
+  return 1 - (minGap - ONE_HOUR) / (DAY - ONE_HOUR);
+}
+
+function buildGatewayChildIndex(gatewayCache) {
+  const index = new Map();
+  for (const [origin, entry] of Object.entries(gatewayCache)) {
+    if (!entry.childUrls) continue;
+    for (const childUrl of entry.childUrls) {
+      if (!index.has(childUrl)) index.set(childUrl, new Set());
+      index.get(childUrl).add(origin);
+    }
+  }
+  return index;
+}
+
+function findRelatedPages(seeds, candidates, gatewayCache) {
+  if (seeds.length === 0) return [];
+  const gwIndex = buildGatewayChildIndex(gatewayCache);
+  const seedData = seeds.map(s => {
+    let hostname = '', origin = '';
+    try { const u = new URL(s.url); hostname = u.hostname; origin = u.origin; } catch {}
+    return {
+      hostname, origin,
+      titleTokens: titleWords(s.title),
+      intentTokens: titleWords(s.intent),
+      timestamps: s.timestamps || [],
+      gwOrigins: gwIndex.get(s.url) || new Set(),
+    };
+  });
+  return candidates.map(cand => {
+    let candHostname = '', candOrigin = '';
+    try { const u = new URL(cand.url); candHostname = u.hostname; candOrigin = u.origin; } catch {}
+    const candTitle = titleWords(cand.title);
+    const candIntent = titleWords(cand.intent);
+    const candTs = cand.timestamps || [];
+    const candGw = gwIndex.get(cand.url) || new Set();
+    let maxScore = 0;
+    for (const seed of seedData) {
+      let score = 0;
+      if (candHostname && seed.hostname === candHostname) {
+        score += 0.25;
+        if (candOrigin === seed.origin) score += 0.10;
+      }
+      score += 0.25 * jaccardSimilarity(seed.titleTokens, candTitle);
+      if (seed.timestamps.length > 0 && candTs.length > 0)
+        score += 0.20 * scoreTemporalProximity(seed.timestamps, candTs);
+      score += 0.15 * jaccardSimilarity(seed.intentTokens, candIntent);
+      if (candGw.size > 0 && seed.gwOrigins.size > 0) {
+        for (const o of candGw) { if (seed.gwOrigins.has(o)) { score += 0.15; break; } }
+      }
+      maxScore = Math.max(maxScore, score);
+    }
+    return { ...cand, relatedness: maxScore };
+  }).filter(c => c.relatedness > 0).sort((a, b) => b.relatedness - a.relatedness).slice(0, 20);
+}
+
 // --- Query builder: Predicate matchers ---
 function parseKeywordQuery(value) {
   const m = value.match(/^"(.+)"$/);
@@ -819,7 +1033,10 @@ function matchKeyword(item, field, value) {
   if (fields.includes('title') && textMatches(item.title, q, exact)) return true;
   if (fields.includes('url') && textMatches(item.url, q, exact)) return true;
   if (fields.includes('captures') && textMatches(item.content, q, exact)) return true;
-  if (fields.includes('highlights') && item.highlights.some(h => textMatches(h.text, q, exact))) return true;
+  if (fields.includes('highlights') && item.highlights.some(h => {
+    const texts = Array.isArray(h.text) ? h.text : [h.text || ''];
+    return texts.some(t => textMatches(t, q, exact));
+  })) return true;
   if (fields.includes('notes') && item.highlights.some(h => textMatches(h.note, q, exact))) return true;
   return false;
 }
@@ -862,10 +1079,11 @@ function evaluateNode(node, item) {
     if (node.op === 'AND') return configured.every(c => evaluateNode(c, item));
   }
   // Leaf predicate
-  if (node.predicateType === 'keyword')     return matchKeyword(item, node.field, node.value);
-  if (node.predicateType === 'smartFilter') return matchSmartFilter(item, node.filter);
-  if (node.predicateType === 'range')       return matchRange(item, node.field, node.op, node.value, node.value2);
-  return false;
+  let result = false;
+  if (node.predicateType === 'keyword')     result = matchKeyword(item, node.field, node.value);
+  else if (node.predicateType === 'smartFilter') result = matchSmartFilter(item, node.filter);
+  else if (node.predicateType === 'range')       result = matchRange(item, node.field, node.op, node.value, node.value2);
+  return node.negated ? !result : result;
 }
 
 // --- Query builder: Relevance scoring ---
@@ -877,7 +1095,10 @@ function keywordRelevance(item, field, value) {
   if (fields.includes('title') && textMatches(item.title, q, exact)) score += 2.0;
   if (fields.includes('url') && textMatches(item.url, q, exact)) score += 1.0;
   if (fields.includes('captures') && textMatches(item.content, q, exact)) score += 1.0;
-  if (fields.includes('highlights') && item.highlights.some(h => textMatches(h.text, q, exact))) score += 1.5;
+  if (fields.includes('highlights') && item.highlights.some(h => {
+    const texts = Array.isArray(h.text) ? h.text : [h.text || ''];
+    return texts.some(t => textMatches(t, q, exact));
+  })) score += 1.5;
   if (fields.includes('notes') && item.highlights.some(h => textMatches(h.note, q, exact))) score += 1.5;
   return score;
 }
@@ -1009,10 +1230,10 @@ function qbFlattenSameOp(node) {
 // Check if tree can be converted to normal mode (flat OR of predicates only)
 function qbCanConvertToNormal(node) {
   if (!node) return true;
-  if (node.type === 'predicate') return true;
+  if (node.type === 'predicate') return !node.negated;
   if (node.type === 'operator') {
     if (node.op !== 'OR') return false;
-    return node.children.every(c => c.type === 'predicate');
+    return node.children.every(c => c.type === 'predicate' && !c.negated);
   }
   return false;
 }
@@ -1203,6 +1424,8 @@ function runCollectionExploreQuery(matched, data) {
     matchedInteractions,
     'Explore results'
   );
+  bindChartBarClick(document.getElementById('relatedChart'), document.getElementById('relatedResults'));
+
 }
 
 // --- Query builder: Rendering ---
@@ -1238,7 +1461,7 @@ function renderQueryBuilder() {
         hint.className = 'qb-mode-hint';
         toggle.appendChild(hint);
       }
-      hint.textContent = 'Tree contains AND operators';
+      hint.textContent = 'Tree contains AND/NOT operators';
     } else {
       normalBtn.disabled = false;
       if (hint) hint.remove();
@@ -1320,7 +1543,7 @@ function renderQueryBuilderNormal(body) {
 }
 
 function qbLeafButtons(depth, parentOp) {
-  if (depth === 0) return ['AND', 'OR']; // root leaf: both (AND first)
+  if (depth === 0) return ['OR', 'AND']; // root leaf: both (AND first)
   // Always offer the opposite of parent — alternating pattern
   // Same-op nesting would just merge into parent, so only opposite is useful
   return parentOp === 'OR' ? ['AND'] : ['OR'];
@@ -1332,17 +1555,18 @@ function renderTreeNodePro(node, depth = 0, parentOp = null) {
   if (node.type === 'predicate') {
     let html = `<div class="qt-leaf" data-node-id="${node.id}">`;
     const buttons = qbLeafButtons(depth, parentOp);
-    if (buttons.length > 0) {
-      html += `<div class="qt-edge-btns">`;
-      for (let bi = 0; bi < buttons.length; bi++) {
-        if (bi > 0) html += `<span class="qt-line"></span>`;
-        const btn = buttons[bi];
-        if (btn === 'OR') html += `<button class="qt-op-btn" data-leaf-id="${node.id}" data-op="OR" title="Add OR"><span class="qt-sym qt-sym-or"></span></button>`;
-        if (btn === 'AND') html += `<button class="qt-op-btn" data-leaf-id="${node.id}" data-op="AND" title="Add AND"><span class="qt-sym qt-sym-and"></span></button>`;
-      }
-      html += `<span class="qt-line"></span>`;
-      html += `</div>`;
+    html += `<div class="qt-edge-btns">`;
+    for (let bi = 0; bi < buttons.length; bi++) {
+      if (bi > 0) html += `<span class="qt-line"></span>`;
+      const btn = buttons[bi];
+      if (btn === 'OR') html += `<button class="qt-op-btn" data-leaf-id="${node.id}" data-op="OR" title="Add OR"><span class="qt-sym qt-sym-or"></span></button>`;
+      if (btn === 'AND') html += `<button class="qt-op-btn" data-leaf-id="${node.id}" data-op="AND" title="Add AND"><span class="qt-sym qt-sym-and"></span></button>`;
     }
+    if (buttons.length > 0) html += `<span class="qt-line"></span>`;
+    const notActive = node.negated ? ' active' : '';
+    html += `<button class="qt-not-btn${notActive}" data-node-id="${node.id}" title="Negate"><span class="qt-sym qt-sym-not"></span></button>`;
+    html += `<span class="qt-line"></span>`;
+    html += `</div>`;
     html += renderPredicateInputs(node);
     // Hide remove button for the sole root placeholder (removing it just recreates it)
     const isRootPlaceholder = depth === 0 && !parentOp && node.predicateType === null;
@@ -1563,6 +1787,19 @@ function bindQueryBuilderEvents(body) {
     });
   });
 
+  // Pro mode: NOT toggle (negate leaf)
+  body.querySelectorAll('.qt-not-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const nodeId = parseInt(btn.dataset.nodeId);
+      const found = qbFindNode(qbRoot, nodeId);
+      if (found) {
+        found.node.negated = !found.node.negated;
+        btn.classList.toggle('active', found.node.negated);
+        debouncedRunQuery();
+      }
+    });
+  });
+
   // Pro mode: parent operator buttons (add child to existing operator)
   body.querySelectorAll('.qt-op-parent-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1690,6 +1927,7 @@ async function showCollection(collection) {
     }
 
     let searchResults = [];
+    let allEnriched = [];
 
     if (collection.qbTree) {
       // Query builder tree — evaluate it directly
@@ -1702,18 +1940,20 @@ async function showCollection(collection) {
       await loadGatewayDomains();
 
       const enriched = enrichForQuery(data.interactions, data.contentMap, cachedAllHighlights || {});
-      searchResults = enriched
-        .filter(item => !isPermanentlyDeleted(item.url) && !isRecycled(item.url))
-        .filter(item => evaluateNode(collection.qbTree, item));
+      allEnriched = enriched.filter(item => !isPermanentlyDeleted(item.url) && !isRecycled(item.url));
+      searchResults = allEnriched.filter(item => evaluateNode(collection.qbTree, item));
     } else if (collection.query) {
       // Legacy string query — use WASM search
       await initWasm();
       const engine = new SearchEngine();
       buildInteractionsForEngine(Interaction, engine, data.interactions, data.contentMap);
       searchResults = await engine.search(collection.query, 0);
+      await loadGatewayDomains();
+      allEnriched = enrichForQuery(data.interactions, data.contentMap, cachedAllHighlights || {})
+        .filter(item => !isPermanentlyDeleted(item.url) && !isRecycled(item.url));
     }
 
-    displayCollectionSections(collection.id, searchResults, data);
+    displayCollectionSections(collection.id, searchResults, data, allEnriched);
 
     // Render Explore section with the collection's query builder
     renderCollectionExplore(collection, data);
@@ -1724,7 +1964,7 @@ async function showCollection(collection) {
   }
 }
 
-function displayCollectionSections(collectionId, searchResults, data) {
+function displayCollectionSections(collectionId, searchResults, data, allEnriched) {
   const pins = allCollectionPins[collectionId] || [];
   const pinnedUrls = new Set(pins.map(p => p.url));
   const searchResultUrls = new Set(searchResults.map(r => r.url));
@@ -1745,8 +1985,14 @@ function displayCollectionSections(collectionId, searchResults, data) {
   const pinnedOnly = pins.filter(p => !searchResultUrls.has(p.url)).map(enrichResult);
   const allPinned = [...pinnedInResults, ...pinnedOnly];
 
-  // Related: non-pinned search results
-  const related = searchResults.filter(r => !pinnedUrls.has(r.url)).map(enrichResult);
+  // Related: seed-based scoring using pinned pages as seeds
+  let related = [];
+  if (allPinned.length > 0 && allEnriched && allEnriched.length > 0) {
+    const allPinnedUrls = new Set(allPinned.map(r => r.url));
+    const seedEnriched = allEnriched.filter(e => allPinnedUrls.has(e.url));
+    const candidateEnriched = allEnriched.filter(e => !allPinnedUrls.has(e.url));
+    related = findRelatedPages(seedEnriched, candidateEnriched, gatewayDomainsCache).map(enrichResult);
+  }
 
   const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
   const sortedPinned = applySortOrder(allPinned, effectivePinnedSort);
@@ -1759,7 +2005,7 @@ function displayCollectionSections(collectionId, searchResults, data) {
   const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
   const pinnedContainer = document.getElementById('pinnedResults');
 
-  if (sortedPinned.length === 0 && sortedRelated.length === 0) {
+  if (sortedPinned.length === 0) {
     pinnedSection.style.display = 'none';
   } else {
     pinnedSection.style.display = '';
@@ -1784,15 +2030,68 @@ function displayCollectionSections(collectionId, searchResults, data) {
     bindPinClicks(pinnedContainer, collectionId);
   }
 
-  // Attention chart for all collection pages
-  const allUrls = new Set([...allPinned.map(r => r.url), ...related.map(r => r.url)]);
-  const chartInteractions = data.interactions.filter(i => allUrls.has(i.url));
+  // Cache context for related recalculation on date filter
+  pinnedFilterCtx = { allPinned, allEnriched, data, collectionId, enrichResult, maxAtt };
+
+  // Attention chart for pinned pages only
+  const pinnedUrlsForChart = new Set(allPinned.map(r => r.url));
+  const chartInteractions = data.interactions.filter(i => pinnedUrlsForChart.has(i.url));
   renderAttentionChartInto(
     document.getElementById('pinnedChart'),
     document.getElementById('pinnedChartBars'),
     chartInteractions,
     'Collection pages'
   );
+  bindChartBarClick(document.getElementById('pinnedChart'), document.getElementById('pinnedResults'));
+
+}
+
+function recalculateRelatedResults() {
+  const ctx = pinnedFilterCtx;
+  if (!ctx) return;
+  const { allPinned, allEnriched, data, collectionId, enrichResult, maxAtt } = ctx;
+
+  // Collect URLs of visible pinned results
+  const pinnedContainer = document.getElementById('pinnedResults');
+  const visiblePinnedUrls = new Set();
+  pinnedContainer.querySelectorAll('.result-item:not(.related-result)').forEach(item => {
+    if (item.style.display === 'none') return;
+    const row = item.querySelector('.result-row');
+    if (row) visiblePinnedUrls.add(row.dataset.url);
+  });
+
+  // If no filter active, use all pinned
+  const seedUrls = visiblePinnedUrls.size > 0 ? visiblePinnedUrls : new Set(allPinned.map(r => r.url));
+
+  // Recalculate related pages
+  let related = [];
+  if (seedUrls.size > 0 && allEnriched && allEnriched.length > 0) {
+    const seedEnriched = allEnriched.filter(e => seedUrls.has(e.url));
+    const allPinnedUrls = new Set(allPinned.map(r => r.url));
+    const candidateEnriched = allEnriched.filter(e => !allPinnedUrls.has(e.url));
+    related = findRelatedPages(seedEnriched, candidateEnriched, gatewayDomainsCache).map(enrichResult);
+  }
+
+  const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
+  const sortedRelated = applySortOrder(related, effectivePinnedSort);
+
+  // Remove old related results and gap, then append new ones
+  pinnedContainer.querySelectorAll('.related-gap, .result-item.related-result').forEach(el => el.remove());
+
+  if (sortedRelated.length > 0) {
+    // Build HTML in a temp container so we can bind only new rows
+    const temp = document.createElement('div');
+    temp.innerHTML = '<div class="related-gap"></div>' + sortedRelated.map(r =>
+      resultRowHtml(r.title, r.url, {
+        pinned: false, deletable: true, attScore: r.attScore, maxAtt,
+        attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps,
+        context: 'pinned', cssClass: 'related-result'
+      })
+    ).join('');
+    bindResultClicks(temp);
+    bindPinClicks(temp, collectionId);
+    while (temp.firstChild) pinnedContainer.appendChild(temp.firstChild);
+  }
 }
 
 function renderCollectionExplore(collection, data) {
@@ -1850,6 +2149,7 @@ function displaySearchResults(results) {
   container.innerHTML = html;
   bindColumnHeaderClicks(container);
   bindResultClicks(container);
+
 }
 
 function displayInteractionRows(interactions) {
@@ -1881,6 +2181,7 @@ function displayInteractionRows(interactions) {
   container.innerHTML = html;
   bindColumnHeaderClicks(container);
   bindResultClicks(container);
+
 }
 
 function displayRecycleBinRows(interactions) {
@@ -2088,7 +2389,8 @@ function buildDetailHtml(url, attDetail, highlights) {
   if (highlights && highlights.length > 0) {
     html += '<div class="detail-highlights">';
     for (const h of highlights.slice(0, 5)) {
-      const text = typeof h === 'string' ? h : (h.text || '');
+      const raw = typeof h === 'string' ? h : h.text;
+      const text = Array.isArray(raw) ? raw.join(' ') : (raw || '');
       if (text) html += `<div class="detail-highlight-item">${escapeHtml(text)}</div>`;
     }
     html += '</div>';
@@ -2154,13 +2456,13 @@ function renderExtraDetailHtml(extra) {
   if (extra.highlights.length > 0) {
     html += `<div class="detail-section detail-highlights-section" data-slug="${escapeHtml(extra.slug)}"><span class="detail-section-label">Highlights:</span>`;
     for (const h of extra.highlights.slice(0, 20)) {
-      const text = h.text || '';
+      const rawText = Array.isArray(h.text) ? h.text.join(' ') : (h.text || '');
       const note = h.note || '';
       const ts = h.timestamp || 0;
       const isGlobal = h.isGlobalNote;
-      const label = isGlobal ? 'Page note' : escapeHtml(text.substring(0, 100)) + (text.length > 100 ? '...' : '');
+      const label = isGlobal ? 'Page note' : escapeHtml(rawText.substring(0, 100)) + (rawText.length > 100 ? '...' : '');
       const noteHtml = note ? ` <span class="detail-note-text">${escapeHtml(note)}</span>` : '';
-      html += `<div class="detail-highlight-entry" data-text="${escapeHtml(text)}" data-timestamp="${ts}">
+      html += `<div class="detail-highlight-entry" data-text="${escapeHtml(rawText)}" data-timestamp="${ts}">
         <span class="detail-highlight-content">${isGlobal ? '<em>Page note</em>' : `"${label}"`}${noteHtml}</span>
         <button class="detail-highlight-delete" title="Delete">&times;</button>
       </div>`;
@@ -2266,8 +2568,10 @@ function resultRowHtml(title, url, opts = {}) {
     extraAfterAtt += `<div class="result-time">${pinnedAt ? escapeHtml(formatTime(pinnedAt)) : ''}</div>`;
   }
 
+  const dates = [...new Set(timestamps.map(ts => new Date(ts).toISOString().slice(0, 10)))].join(',');
+
   return `<div class="result-item${cssClass ? ' ' + cssClass : ''}">
-    <div class="result-row" data-url="${safeUrl}" data-title="${safeTitle}" draggable="true">
+    <div class="result-row" data-url="${safeUrl}" data-title="${safeTitle}" data-dates="${dates}" draggable="true">
       <button class="result-expand" title="Show details">&#9654;</button>
       <div class="result-title">${safeTitle}</div>
       ${relevanceCell}
@@ -2364,6 +2668,7 @@ function bindResultClicks(container) {
         }
         lastClickedRow = row;
       }
+      syncChartHighlights();
     });
     // Double-click opens the link
     row.addEventListener('dblclick', (e) => {
@@ -2422,6 +2727,9 @@ function updateMainTitle(text) {
   titleEl.ondblclick = null;
   inputEl.style.display = 'none';
   confirmBtn.style.display = 'none';
+  // Hide recycle bin actions by default (showCategory will re-show them)
+  document.getElementById('restoreAllBtn').style.display = 'none';
+  document.getElementById('deleteAllBtn').style.display = 'none';
 }
 
 function enterTitleEditMode(prefill, onConfirm, onCancel) {
@@ -2798,6 +3106,7 @@ function initMarqueeForElements(wrapper, container) {
       b.style.display = 'none';
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
+      syncChartHighlights();
 
       setTimeout(() => { marqueeActive = false; }, 0);
     };
@@ -2826,6 +3135,7 @@ initMarqueeForElements(
 document.querySelectorAll('.section-header[data-collapse]').forEach(header => {
   header.addEventListener('click', () => {
     header.classList.toggle('collapsed');
+  
   });
 });
 

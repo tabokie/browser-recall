@@ -126,10 +126,11 @@ function renderHighlights(highlights) {
 
   container.innerHTML = textHighlights.map(h => {
     const i = currentHighlights.indexOf(h);
+    const displayText = Array.isArray(h.text) ? h.text.join(' ') : h.text;
     return `
       <div class="highlight-item" data-index="${i}">
         <div class="highlight-header">
-          <div class="highlight-text">"${escapeHtml(h.text)}"</div>
+          <div class="highlight-text">"${escapeHtml(displayText)}"</div>
           <button class="highlight-delete" data-index="${i}" title="Delete">&times;</button>
         </div>
         <textarea class="highlight-note" placeholder="Add a note..." data-index="${i}">${escapeHtml(h.note || '')}</textarea>
@@ -150,10 +151,10 @@ function renderHighlights(highlights) {
           text: h.text || '',
           timestamp: h.timestamp || 0
         });
-        // Tell content script to remove the visual mark
+        // Tell content script to remove the visual mark(s)
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (tab?.id && h.text) {
-          chrome.tabs.sendMessage(tab.id, { action: 'removeHighlightMark', text: h.text }).catch(() => {});
+          chrome.tabs.sendMessage(tab.id, { action: 'removeHighlightMark', text: h.text, timestamp: h.timestamp }).catch(() => {});
         }
       } catch (e) {
         console.error('[popup] Delete highlight error:', e);
@@ -255,69 +256,193 @@ async function renderCollectionChips() {
   const container = document.getElementById('collectionChips');
   const [collections, allPins] = await Promise.all([loadCollections(), loadCollectionPins()]);
 
-  let html = collections.map(collection => {
+  // Compute lastActivity for each collection and sort by most recent
+  const ranked = collections.map(collection => {
+    const pins = allPins[collection.id] || [];
+    const maxPinnedAt = pins.reduce((max, p) => Math.max(max, p.pinnedAt || 0), 0);
+    const lastActivity = maxPinnedAt || parseInt(collection.id) || 0;
+    return { collection, lastActivity };
+  });
+  ranked.sort((a, b) => b.lastActivity - a.lastActivity);
+  const topCollections = ranked.slice(0, 5);
+
+  let html = topCollections.map(({ collection }) => {
     const pinned = isPagePinned(allPins, collection.id, currentUrl);
-    return `<span class="collection-chip${pinned ? ' selected' : ''}" data-collection-id="${collection.id}" data-collection-query="${escapeHtml(collection.query)}">
+    return `<span class="collection-chip${pinned ? ' selected' : ''}" data-collection-id="${collection.id}">
       <span class="collection-chip-check">${pinned ? '&#10003;' : ''}</span>
       ${escapeHtml(collection.name || collection.query)}
     </span>`;
   }).join('');
 
-  html += `<span class="collection-new">
-    <input class="collection-new-input" id="collectionNewInput" placeholder="+ New collection" />
-  </span>`;
+  html += `<span class="collection-add-btn" id="collectionAddBtn" title="Add to collection">+</span>`;
 
   container.innerHTML = html;
 
-  // Toggle existing collections
+  // Toggle existing chips
   container.querySelectorAll('.collection-chip').forEach(chip => {
     chip.addEventListener('click', async () => {
       const collectionId = chip.dataset.collectionId;
-      const freshPins = await loadCollectionPins();
-      if (!freshPins[collectionId]) freshPins[collectionId] = [];
-      const pins = freshPins[collectionId];
-      const idx = pins.findIndex(p => p.url === currentUrl);
-
-      if (idx !== -1) {
-        pins.splice(idx, 1);
-      } else {
-        pins.push({ url: currentUrl, title: currentTitle, pinnedAt: Date.now() });
-      }
-
-      await saveCollectionPins(freshPins);
+      await toggleCollectionPin(collectionId);
       renderCollectionChips();
     });
   });
 
-  // Create new collection
-  const newInput = document.getElementById('collectionNewInput');
-  newInput.addEventListener('keydown', async (e) => {
-    if (e.key === 'Enter') {
-      const query = newInput.value.trim();
-      if (!query) return;
+  // + button opens picker dropdown
+  document.getElementById('collectionAddBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    openCollectionPicker(collections, allPins);
+  });
+}
 
-      const collections = await loadCollections();
-      if (collections.some(t => t.query === query)) {
-        newInput.value = '';
-        return;
+async function toggleCollectionPin(collectionId) {
+  const freshPins = await loadCollectionPins();
+  if (!freshPins[collectionId]) freshPins[collectionId] = [];
+  const pins = freshPins[collectionId];
+  const idx = pins.findIndex(p => p.url === currentUrl);
+
+  if (idx !== -1) {
+    pins.splice(idx, 1);
+  } else {
+    pins.push({ url: currentUrl, title: currentTitle, pinnedAt: Date.now() });
+  }
+
+  await saveCollectionPins(freshPins);
+}
+
+function closeCollectionPicker() {
+  const existing = document.getElementById('collectionPicker');
+  if (existing) existing.remove();
+  document.removeEventListener('click', pickerOutsideClickHandler);
+}
+
+function pickerOutsideClickHandler(e) {
+  const picker = document.getElementById('collectionPicker');
+  if (picker && !picker.contains(e.target) && e.target.id !== 'collectionAddBtn') {
+    closeCollectionPicker();
+  }
+}
+
+function openCollectionPicker(collections, allPins) {
+  // Close if already open
+  if (document.getElementById('collectionPicker')) {
+    closeCollectionPicker();
+    return;
+  }
+
+  const wrap = document.querySelector('.collection-chips-wrap');
+  const picker = document.createElement('div');
+  picker.className = 'collection-picker';
+  picker.id = 'collectionPicker';
+  picker.innerHTML = `
+    <input class="collection-picker-input" id="collectionPickerInput" placeholder="Search or create..." />
+    <div class="collection-picker-list" id="collectionPickerList"></div>
+  `;
+  wrap.appendChild(picker);
+
+  const input = document.getElementById('collectionPickerInput');
+  const list = document.getElementById('collectionPickerList');
+
+  function renderPickerRows() {
+    const query = input.value.trim().toLowerCase();
+    const filtered = query
+      ? collections.filter(c => (c.name || c.query).toLowerCase().includes(query))
+      : collections;
+
+    let rowsHtml = filtered.map(c => {
+      const pinned = isPagePinned(allPins, c.id, currentUrl);
+      return `<div class="collection-picker-row${pinned ? ' selected' : ''}" data-collection-id="${c.id}">
+        <span class="collection-picker-row-check">${pinned ? '&#10003;' : ''}</span>
+        <span>${escapeHtml(c.name || c.query)}</span>
+      </div>`;
+    }).join('');
+
+    // Show create option if input doesn't exactly match any existing collection
+    const inputVal = input.value.trim();
+    if (inputVal) {
+      const exactMatch = collections.some(c =>
+        (c.name || c.query).toLowerCase() === inputVal.toLowerCase()
+      );
+      if (!exactMatch) {
+        rowsHtml += `<div class="collection-picker-create" id="collectionPickerCreate">Create "${escapeHtml(inputVal)}"</div>`;
       }
+    }
 
-      const collectionId = Date.now().toString();
-      collections.push({ id: collectionId, query });
-      await chrome.storage.local.set({ pinnedCollections: collections });
+    if (!rowsHtml) {
+      rowsHtml = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">No collections</div>`;
+    }
 
-      // Also pin the current page to the new collection
-      const freshPins = await loadCollectionPins();
-      freshPins[collectionId] = [{ url: currentUrl, title: currentTitle, pinnedAt: Date.now() }];
-      await saveCollectionPins(freshPins);
+    list.innerHTML = rowsHtml;
 
-      console.log('[popup] Created collection and pinned page:', query);
-      renderCollectionChips();
+    // Attach click handlers to rows
+    list.querySelectorAll('.collection-picker-row').forEach(row => {
+      row.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const collectionId = row.dataset.collectionId;
+        await toggleCollectionPin(collectionId);
+        // Refresh allPins and re-render rows in place
+        const freshPins = await loadCollectionPins();
+        Object.assign(allPins, freshPins);
+        renderPickerRows();
+      });
+    });
+
+    const createBtn = document.getElementById('collectionPickerCreate');
+    if (createBtn) {
+      createBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await createCollectionAndPin(inputVal);
+        closeCollectionPicker();
+        renderCollectionChips();
+      });
+    }
+  }
+
+  renderPickerRows();
+  // Use setTimeout to avoid the click event that opened the picker from immediately focusing away
+  setTimeout(() => input.focus(), 0);
+
+  input.addEventListener('input', renderPickerRows);
+
+  input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      const inputVal = input.value.trim();
+      if (!inputVal) return;
+      const exactMatch = collections.find(c =>
+        (c.name || c.query).toLowerCase() === inputVal.toLowerCase()
+      );
+      if (exactMatch) {
+        await toggleCollectionPin(exactMatch.id);
+        closeCollectionPicker();
+        renderCollectionChips();
+      } else {
+        await createCollectionAndPin(inputVal);
+        closeCollectionPicker();
+        renderCollectionChips();
+      }
     } else if (e.key === 'Escape') {
-      newInput.value = '';
-      newInput.blur();
+      closeCollectionPicker();
     }
   });
+
+  // Close on outside click (deferred to avoid catching the opening click)
+  setTimeout(() => {
+    document.addEventListener('click', pickerOutsideClickHandler);
+  }, 0);
+}
+
+async function createCollectionAndPin(query) {
+  const collections = await loadCollections();
+  if (collections.some(c => c.query === query)) return;
+
+  const collectionId = Date.now().toString();
+  collections.push({ id: collectionId, query });
+  await chrome.storage.local.set({ pinnedCollections: collections });
+
+  const freshPins = await loadCollectionPins();
+  freshPins[collectionId] = [{ url: currentUrl, title: currentTitle, pinnedAt: Date.now() }];
+  await saveCollectionPins(freshPins);
+
+  console.log('[popup] Created collection and pinned page:', query);
 }
 
 // Workspace mode

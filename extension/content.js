@@ -615,49 +615,239 @@ function showGlobalNoteOverlay(existingNote) {
 
 // Find text in the page and wrap the first match in a <mark> element.
 // Returns the created <mark> element, or null if the text was not found.
-function highlightTextInPage(text) {
-  if (!text) return null;
-  console.log(`[content] highlightTextInPage: searching for "${text.substring(0, 50)}" (${text.length} chars)`);
+// --- Highlight helpers (mirrored in highlight-helpers.js for testing) ---
 
-  const walker = document.createTreeWalker(
-    document.body,
-    NodeFilter.SHOW_TEXT,
-    {
-      acceptNode: (node) => {
-        // Skip nodes inside our overlay
-        if (node.parentElement && node.parentElement.closest('#portal-highlight-overlay')) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        return NodeFilter.FILTER_ACCEPT;
-      }
-    }
-  );
+function wrapRangeWithMark(range, text, timestamp) {
+  const mark = document.createElement('mark');
+  mark.className = 'portal-highlight';
+  mark.style.cssText = 'background: #fff3b0; border-bottom: 2px solid #f0c000; cursor: pointer;';
+  mark.dataset.highlightText = text;
+  if (timestamp) mark.dataset.highlightTimestamp = String(timestamp);
 
-  let node;
-  while ((node = walker.nextNode())) {
-    const idx = node.textContent.indexOf(text);
-    if (idx === -1) continue;
-
+  if (range.startContainer === range.endContainer) {
     try {
-      const range = document.createRange();
-      range.setStart(node, idx);
-      range.setEnd(node, idx + text.length);
-
-      const mark = document.createElement('mark');
-      mark.className = 'portal-highlight';
-      mark.style.cssText = 'background: #fff3b0; border-bottom: 2px solid #f0c000; cursor: pointer;';
-      mark.dataset.highlightText = text;
       range.surroundContents(mark);
-      console.log('[content] highlightTextInPage: successfully wrapped text');
-      return mark;
-    } catch (e) {
-      console.log('[content] highlightTextInPage: surroundContents failed:', e.message);
-    }
-    break;
+      if (mark.textContent) return mark;
+      unwrapHighlightMark(mark);
+      return null;
+    } catch (e) { /* fall through */ }
   }
 
-  console.log('[content] highlightTextInPage: text not found in any single text node');
-  return null;
+  try {
+    const fragment = range.extractContents();
+    mark.appendChild(fragment);
+    range.insertNode(mark);
+    if (mark.textContent) return mark;
+    unwrapHighlightMark(mark);
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function collectTextNodes(root) {
+  const textNodes = [];
+  function walk(parent) {
+    const walker = document.createTreeWalker(parent, NodeFilter.SHOW_ALL, {
+      acceptNode: (node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+          if (node.parentElement && node.parentElement.closest('#portal-highlight-overlay')) return NodeFilter.FILTER_REJECT;
+          if (node.parentElement && node.parentElement.closest('mark.portal-highlight')) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+        return NodeFilter.FILTER_SKIP;
+      }
+    });
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        textNodes.push(node);
+      }
+    }
+    const elements = parent.querySelectorAll('*');
+    for (const el of elements) {
+      if (el.shadowRoot) walk(el.shadowRoot);
+    }
+  }
+  walk(root);
+  return textNodes;
+}
+
+function findTextRange(root, text) {
+  if (!text) return null;
+
+  const textNodes = collectTextNodes(root);
+
+  let concat = '';
+  const offsets = [];
+  for (const tn of textNodes) { offsets.push(concat.length); concat += tn.textContent; }
+
+  const idx = concat.indexOf(text);
+  if (idx === -1) return null;
+  const endIdx = idx + text.length;
+
+  let startNode = null, startOffset = 0, endNode = null, endOffset = 0;
+  for (let i = 0; i < textNodes.length; i++) {
+    const nodeStart = offsets[i];
+    const nodeEnd = nodeStart + textNodes[i].textContent.length;
+    if (!startNode && nodeEnd > idx) { startNode = textNodes[i]; startOffset = idx - nodeStart; }
+    if (nodeEnd >= endIdx) { endNode = textNodes[i]; endOffset = endIdx - offsets[i]; break; }
+  }
+  if (!startNode || !endNode) return null;
+
+  const range = document.createRange();
+  range.setStart(startNode, startOffset);
+  range.setEnd(endNode, endOffset);
+  return range;
+}
+
+function highlightTextInPage(text) {
+  if (!text) return null;
+
+  const range = findTextRange(document.body, text);
+  if (!range) return null;
+
+  const mark = wrapRangeWithMark(range, text);
+  if (mark) attachMarkClickHandler(mark);
+  return mark;
+}
+
+// --- Case 3: Cross-block helpers (mirrored from highlight-helpers.js) ---
+
+const BLOCK_TAGS = new Set([
+  'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DD', 'DETAILS', 'DIALOG',
+  'DIV', 'DL', 'DT', 'FIELDSET', 'FIGCAPTION', 'FIGURE', 'FOOTER',
+  'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HGROUP', 'HR',
+  'LI', 'MAIN', 'NAV', 'OL', 'P', 'PRE', 'SECTION', 'TABLE', 'UL',
+  'TR', 'TH', 'TD', 'SUMMARY'
+]);
+
+function isBlockElement(el) {
+  return el && el.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(el.tagName);
+}
+
+function getClosestBlock(node) {
+  let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  while (el && el !== document.body && !isBlockElement(el)) {
+    el = el.parentElement;
+  }
+  return el || document.body;
+}
+
+function isCrossBlock(range) {
+  if (range.startContainer === range.endContainer) return false;
+  const startBlock = getClosestBlock(range.startContainer);
+  const endBlock = getClosestBlock(range.endContainer);
+  return startBlock !== endBlock;
+}
+
+function splitSelectionByBlock(range) {
+  const ancestor = range.commonAncestorContainer;
+  if (ancestor.nodeType === Node.TEXT_NODE) {
+    const text = range.toString().trim();
+    return text ? [{ text, block: getClosestBlock(ancestor) }] : [];
+  }
+
+  const textNodes = [];
+  const walker = document.createTreeWalker(ancestor, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (range.intersectsNode(node)) {
+      textNodes.push(node);
+    }
+  }
+  if (textNodes.length === 0) return [];
+
+  const groups = [];
+  let currentBlock = null;
+  let currentNodes = [];
+  for (const tn of textNodes) {
+    const block = getClosestBlock(tn);
+    if (block !== currentBlock) {
+      if (currentNodes.length > 0) {
+        groups.push({ block: currentBlock, nodes: [...currentNodes] });
+      }
+      currentBlock = block;
+      currentNodes = [tn];
+    } else {
+      currentNodes.push(tn);
+    }
+  }
+  if (currentNodes.length > 0) {
+    groups.push({ block: currentBlock, nodes: currentNodes });
+  }
+
+  const chunks = [];
+  for (const group of groups) {
+    let text = '';
+    for (const tn of group.nodes) {
+      let start = 0;
+      let end = tn.textContent.length;
+      if (tn === range.startContainer) start = range.startOffset;
+      if (tn === range.endContainer) end = range.endOffset;
+      text += tn.textContent.substring(start, end);
+    }
+    const trimmed = text.trim();
+    if (trimmed) chunks.push({ text: trimmed, block: group.block });
+  }
+  return chunks;
+}
+
+// Highlight text scoped to a block element, falling back to global search
+function highlightTextInBlock(block, text) {
+  if (!text) return null;
+  // Try scoped search within the block first
+  if (block) {
+    const range = findTextRange(block, text);
+    if (range) {
+      const mark = wrapRangeWithMark(range, text);
+      if (mark) { attachMarkClickHandler(mark); return mark; }
+    }
+  }
+  // Fall back to global search
+  return highlightTextInPage(text);
+}
+
+// Unwrap all marks sharing a timestamp (for grouped Case 3 highlights)
+function unwrapGroupedMarks(timestamp) {
+  if (!timestamp) return;
+  const tsStr = String(timestamp);
+  document.querySelectorAll('mark.portal-highlight').forEach(m => {
+    if (m.dataset.highlightTimestamp === tsStr) unwrapHighlightMark(m);
+  });
+  // Also check shadow DOMs
+  document.querySelectorAll('*').forEach(el => {
+    if (el.shadowRoot) {
+      el.shadowRoot.querySelectorAll('mark.portal-highlight').forEach(m => {
+        if (m.dataset.highlightTimestamp === tsStr) unwrapHighlightMark(m);
+      });
+    }
+  });
+}
+
+// Attach click handler directly to a mark (needed for marks inside shadow DOMs
+// where document-level click events retarget to the shadow host).
+function attachMarkClickHandler(mark) {
+  mark.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const existingOverlay = document.getElementById('portal-highlight-overlay');
+    if (existingOverlay) existingOverlay.remove();
+
+    const text = mark.dataset.highlightText || mark.textContent;
+    const timestamp = mark.dataset.highlightTimestamp ? parseInt(mark.dataset.highlightTimestamp) : 0;
+    const slug = getSlugForCurrentPage();
+
+    chrome.runtime.sendMessage({ action: 'loadHighlights', slug }).then(resp => {
+      const highlights = resp?.highlights || [];
+      // Match by timestamp first (works for grouped array highlights), fall back to text
+      const match = highlights.find(h => h.timestamp === timestamp)
+        || highlights.find(h => h.text === text);
+      const displayText = match ? (Array.isArray(match.text) ? match.text.join(' ') : match.text) : text;
+      showHighlightEditOverlay(mark, displayText, timestamp, match?.note || '', slug);
+    }).catch(() => {
+      showHighlightEditOverlay(mark, text, timestamp, '', slug);
+    });
+  });
 }
 
 // Re-apply saved highlights on page load
@@ -671,34 +861,11 @@ async function reapplyHighlights() {
 
     for (const highlight of response.highlights) {
       if (!highlight.text) continue;
-
-      const walker = document.createTreeWalker(
-        document.body,
-        NodeFilter.SHOW_TEXT,
-        null
-      );
-
-      let node;
-      while ((node = walker.nextNode())) {
-        const idx = node.textContent.indexOf(highlight.text);
-        if (idx === -1) continue;
-
-        const range = document.createRange();
-        range.setStart(node, idx);
-        range.setEnd(node, idx + highlight.text.length);
-
-        const mark = document.createElement('mark');
-        mark.className = 'portal-highlight';
-        mark.style.cssText = 'background: #fff3b0; border-bottom: 2px solid #f0c000; cursor: pointer;';
-        mark.dataset.highlightText = highlight.text;
-        mark.dataset.highlightTimestamp = highlight.timestamp || '';
-
-        try {
-          range.surroundContents(mark);
-        } catch (e) {
-          // May fail if text spans nodes
-        }
-        break;
+      // Normalize to array for Case 3 grouped highlights
+      const texts = Array.isArray(highlight.text) ? highlight.text : [highlight.text];
+      for (const text of texts) {
+        const mark = highlightTextInPage(text);
+        if (mark) mark.dataset.highlightTimestamp = String(highlight.timestamp || '');
       }
     }
   } catch (e) {
@@ -723,8 +890,11 @@ function initHighlightClickHandler() {
     // Load existing note for this highlight, then show overlay
     chrome.runtime.sendMessage({ action: 'loadHighlights', slug }).then(resp => {
       const highlights = resp?.highlights || [];
-      const match = highlights.find(h => h.text === text);
-      showHighlightEditOverlay(mark, text, timestamp, match?.note || '', slug);
+      // Match by timestamp first (works for grouped array highlights), fall back to text
+      const match = highlights.find(h => h.timestamp === timestamp)
+        || highlights.find(h => h.text === text);
+      const displayText = match ? (Array.isArray(match.text) ? match.text.join(' ') : match.text) : text;
+      showHighlightEditOverlay(mark, displayText, timestamp, match?.note || '', slug);
     }).catch(() => {
       showHighlightEditOverlay(mark, text, timestamp, '', slug);
     });
@@ -835,7 +1005,9 @@ function showHighlightEditOverlay(mark, text, timestamp, existingNote, slug) {
       try {
         const resp = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
         const highlights = resp?.highlights || [];
-        const h = highlights.find(h => h.text === text);
+        // Match by timestamp first for grouped highlights
+        const h = highlights.find(h => h.timestamp === timestamp)
+          || highlights.find(h => h.text === text);
         if (h) {
           h.note = textarea.value;
           await chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
@@ -849,7 +1021,12 @@ function showHighlightEditOverlay(mark, text, timestamp, existingNote, slug) {
   // Delete highlight
   deleteBtn.addEventListener('click', (ev) => {
     ev.stopPropagation();
-    unwrapHighlightMark(mark);
+    // For grouped highlights (Case 3), unwrap all marks with same timestamp
+    if (timestamp) {
+      unwrapGroupedMarks(timestamp);
+    } else {
+      unwrapHighlightMark(mark);
+    }
     chrome.runtime.sendMessage({ action: 'deleteHighlight', slug, text, timestamp });
     host.remove();
   });
@@ -924,19 +1101,53 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const slug = getSlugForCurrentPage();
       const timestamp = Date.now();
 
-      // Immediately save the highlight
-      console.log(`[content] Saving highlight immediately: slug=${slug}, text="${selectedText.substring(0, 50)}"`);
-      chrome.runtime.sendMessage({
-        action: 'saveHighlight',
-        slug,
-        highlight: { text: selectedText, note: '', timestamp, cssPath }
-      });
+      if (isCrossBlock(range)) {
+        // Case 3: cross-block selection — split into per-block chunks
+        console.log(`[content] Cross-block selection detected, splitting by block`);
+        const chunkInfos = splitSelectionByBlock(range);
+        if (chunkInfos.length > 0) {
+          const texts = chunkInfos.map(c => c.text);
+          // Store as array if multiple chunks, string if single
+          const storedText = texts.length === 1 ? texts[0] : texts;
+          chrome.runtime.sendMessage({
+            action: 'saveHighlight',
+            slug,
+            highlight: { text: storedText, note: '', timestamp, cssPath }
+          });
 
-      // Visually highlight the text and show edit overlay
-      const mark = highlightTextInPage(selectedText);
-      if (mark) {
-        mark.dataset.highlightTimestamp = String(timestamp);
-        showHighlightEditOverlay(mark, selectedText, timestamp, '', slug);
+          // Highlight each chunk scoped to its block element
+          const marks = [];
+          for (const { text, block } of chunkInfos) {
+            const m = highlightTextInBlock(block, text);
+            if (m) {
+              m.dataset.highlightTimestamp = String(timestamp);
+              marks.push(m);
+            }
+          }
+          if (marks.length > 0) {
+            showHighlightEditOverlay(marks[0], texts.join(' '), timestamp, '', slug);
+          }
+        }
+      } else {
+        // Case 1 & 2: same-block selection
+        console.log(`[content] Saving highlight: slug=${slug}, text="${selectedText.substring(0, 50)}"`);
+        chrome.runtime.sendMessage({
+          action: 'saveHighlight',
+          slug,
+          highlight: { text: selectedText, note: '', timestamp, cssPath }
+        });
+
+        // Try browser's selection range first, fall back to text search
+        let mark = wrapRangeWithMark(range, selectedText, timestamp);
+        if (mark) {
+          attachMarkClickHandler(mark);
+        } else {
+          mark = highlightTextInPage(selectedText);
+          if (mark) mark.dataset.highlightTimestamp = String(timestamp);
+        }
+        if (mark) {
+          showHighlightEditOverlay(mark, selectedText, timestamp, '', slug);
+        }
       }
       sendResponse({ success: true });
     } else {
@@ -953,13 +1164,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: true });
     }
   } else if (request.action === 'removeHighlightMark') {
-    // Remove a visual highlight mark by matching text
-    const marks = document.querySelectorAll('mark.portal-highlight');
-    for (const mark of marks) {
-      const markText = mark.dataset.highlightText || mark.textContent;
-      if (markText === request.text) {
-        unwrapHighlightMark(mark);
-        break;
+    // Remove visual highlight marks — by timestamp for grouped highlights, by text for singles
+    if (request.timestamp) {
+      unwrapGroupedMarks(request.timestamp);
+    } else {
+      const marks = document.querySelectorAll('mark.portal-highlight');
+      for (const mark of marks) {
+        const markText = mark.dataset.highlightText || mark.textContent;
+        if (markText === request.text) {
+          unwrapHighlightMark(mark);
+          break;
+        }
       }
     }
     sendResponse({ success: true });

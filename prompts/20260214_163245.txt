@@ -1,0 +1,97 @@
+- Fix the Gateway detection for URL with query keys. Do not save the specific queries as Gateway, use the search domain (if accessible).
+- In collection UI, hide pinned section if there're no pinned results.
+- Walk me through how the "related" pages are calculated.
+- This is not intended behavior. The correct behavior is, we use pinned results as seeds, and find out pages that are related to them in an independent internal query.  This query may use heuristics such as similar-title, same-domain, temporal-proximity-of-visits, similar-notes, etc.
+- In collection section of the PopupUI, (1) show only some recently updated collections, (2) change the text of "new collection" button to simple '+' sign, and modify it to support both searching existing collections and punch in a new collection name.
+- Sometimes when I make a highlight, the underscore effect does not fully cover the highlighted text.
+- Revert your previous change. Now the note highlight effect doesn't show at all. After you revert them, let's discuss the issue first before making changes. And to clarify, the issue isn't in the search, because the highlight background is correctly marked up, it's only underscore effect that is incomplete.
+- I tested some cases. If it's a sentence with no break, everything work. But when I try to select sentences that has breaks, even those single-lined ones, both the note-taking box and highlight effect don't show. I haven't been able to reproduce the case there highlight background and underscore is inconsistent. Let's fix what I repro-ed first.
+- What do you mean by "text spans nodes"? If it is a single-line sentence, just with breaks of semicolon, does it also "spans notes"?
+- Oh, I was mistaken, it seems your previous hypothesis is correct. The text uses special italic styles that create intermediate nodes. Try your fix.
+- It works now for simple text nodes. But not working for complex style containing multiple div-s. It might cause the original style to break while not displaying highlight properly in the end. I think it is overly complex to try to support it. Could we detect the cases where it doesn't work and avoid highlight alltogether?
+- Revert your previous change. I don't want to fully remove the feature for multi-nodes, I want to be precise in the timing. Revert it and let's discuss.
+- I can observe at least three cases it doesn't work: (1) selecting the lower half of first div and upper half of a second div -> the original style of 2 div-s is now split into 4 (2) selecting text that have nested span-s -> no highlight (3) selecting some list items inside "li" -> empty list items are created before and after selection, no highlight.
+- But why in case 2 the highlight is not shown? The latest implementation should already support it?
+- Okay. For case 1 & 3, is it possible to automatically split the user selection into smaller chunks, (and save it as a list internally), so that we could highlight them one by one?
+- I prefer saving them as one group. The data model is { array of text, notes }, not a linked list though. You might need to change current data schema for this.
+- One thing, no need to use " ... " to join array. When storing them, trim each item; when displaying them, join them using one whitespace.
+- Unfortunately, things got worse. We are back to the state where only simple text without special styling works. Let me recap the different cases: (1) simple case, pure text, no styling, (2) text with inline styles such as <em>, <a>, <strong>, (3) text with complex styles such as <div>, <li>. The idea is, we use simple technique to handle 1 & 2, save only one text element. And we should have tests or other guardrails to make sure these cases are handled well and no regression is introduced. Only after, we use complex technique to handle 3, which is to store multiple text elements in storage.
+- By the way, I am testing this manually on "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Referer", not sure if it helps your testing as well.
+- The command `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh"`, from your output, it seems NVM_DIR variable is not being exported properly.
+- It doesn't work for multiple <p>, and doesn't work for the <code> block in my link. Is it intended? And can they work using the simple technique?
+- Inside code block, multiple lines of code. You can test it yourself, it's this code block in my link:
+
+```
+Referer: https://developer.mozilla.org/en-US/docs/Web/JavaScript
+Referer: https://example.com/page?q=123
+Referer: https://example.com/
+```
+- Let me copy the code for you, why aren't you seeing it yourself by fetching the site?
+
+<code><!--?lit$151489029$--><span class="token header"><span class="token header-name keyword">Referer</span><span class="token punctuation">:</span> <span class="token header-value">https://developer.mozilla.org/en-US/docs/Web/JavaScript</span></span>
+<span class="token header"><span class="token header-name keyword">Referer</span><span class="token punctuation">:</span> <span class="token header-value">https://example.com/page?q=123</span></span>
+<span class="token header"><span class="token header-name keyword">Referer</span><span class="token punctuation">:</span> <span class="token header-value">https://example.com/</span></span>
+</code>
+- Here is the code after you tried to markup, it is not correctly around the code block text:
+
+<section class="content-section" aria-labelledby="examples">
+    <!--lit-part cjTOnCoGGWc=--><!--lit-node 0--><h2 id="examples" class="heading"><!--lit-node 1--><a class="heading-anchor" href="#examples">Examples</a></h2><!--/lit-part-->
+    <mark class="portal-highlight" data-highlight-text="Referer: https://example.com/page?q=123
+Referer: https://example.com/" data-highlight-timestamp="1771048635921" style="background: rgb(255, 243, 176); border-bottom: 2px solid rgb(240, 192, 0); cursor: pointer;"></mark><mdn-code-example class="brush: http notranslate"><template shadowrootmode="open"><!---->
+      <div class="code-example">
+        <div class="example-header">
+          <span class="language-name"><!--?lit$264233120$-->http</span>
+          <mdn-copy-button variant="secondary"><template shadowrootmode="open"><!----><mdn-button variant="secondary"><template shadowrootmode="open"><!---->
+        <button class="button" part="button" aria-labelledby="label-n3zb2e90ed" data-variant="secondary">
+          <!--?lit$264233120$--><!----><!----><!---->
+    <span class="label" part="label" id="label-n3zb2e90ed"><!--?lit$264233120$--><slot></slot></span>
+  <!---->
+        </button>
+      </template><!--?lit$264233120$-->Copy</mdn-button></template></mdn-copy-button>
+          <!--?lit$264233120$-->
+        </div>
+        <pre class="brush: http notranslate"><code><!--?lit$264233120$--><span class="token header"><span class="token header-name keyword">Referer</span><span class="token punctuation">:</span> <span class="token header-value">https://developer.mozilla.org/en-US/docs/Web/JavaScript</span></span>
+<span class="token header"><span class="token header-name keyword">Referer</span><span class="token punctuation">:</span> <span class="token header-value">https://example.com/page?q=123</span></span>
+<span class="token header"><span class="token header-name keyword">Referer</span><span class="token punctuation">:</span> <span class="token header-value">https://example.com/</span></span>
+</code></pre>
+      </div>
+    </template></mdn-code-example>
+  </section>
+- I put the entire site code into ./tmp.html. Look it through and maybe there're some other cases you haven't considered well.
+- The code block is correctly highlighted now. But I cannot recall the note-taking box by clicking on it.
+- Great. Now let's work on case 3.
+- I see there are two issues: (1) For list with short items, searching for each of them globally very easily find the wrong match. We should be specific in the CSS search path when the item is short. (2) In the Mozilla site, I tried to highlight both "Note" and "Warning" sections, and only the warning section is highlighted.
+- Great. Let's refine the attention bar chart and call it a day. The bar chart should show no title inside. And it should display time bars compactly with a slightly smaller width. When a result is selected, its visited dates are highlighted in the bar chart. When user click any date bar, only results visited in that date are displayed.
+- By compact, I don't mean compress their height. I mean make the bars stand side-by-side closely to each other. When the days are overflowing we can use scrollbar to navigate them.
+- The date label is too long to see. And the bars are not aligned properly on their lower-side. Also, the bars should align to the right side in the scroll window.
+- Better. Some refinements: (1) the bars are by default gray, (2) when result is selected, the corresponding bars show the same color as result selection color (share variable), (3) clicking on background inside attention section will deselect all bar selections.
+- Emm. The color is lighter than I thought. Revert the variable sharing and make .chart-bar.highlighted darker blue.
+- The bar chart axis should show month label.
+- Use format "YYYY-MM".
+- Make attention bar and column sort header float as user scroll on. For collection UI, the "Pinned" and "Explore" section header float as well. But when user scrolls past pinned section entirely, it moves out naturally.
+- When I scroll on a newly opened collection page, it sometimes stutters. Is it caused by latest changes?
+- Reduce lower padding in attention bar. And somehow in some cases the attention bar shows a horizontal scroll bar when the bars are few.
+- The scrollbar still shows when the last month-label extend beyond bars.
+- This is a bad fix. I want the label to align to block instead if it spans outside bars.
+- Not working. For this content:
+      |
+      label-text
+
+I want the label-text to align to the viewport, not bar.
+- Not working, it still shows a horizontal scrollbar.
+- This looks pretty hacky and still not working. I'm not sure what's the problem with setting content width as max(bar, label), and align the content to the right.
+- The horizontal scrollbar is gone. But now there's a vertical one! And the bars are not aligned properly, they show up like this:
+||||
+text||||
+- Let me rephrase the requirement. In the bar char UI, we have two sections, the first section displays bars of each day compactly. Empty space is allocated and reserved for days that have no data in between. The second section displays month labels. Each label starts on the first day of that month. If we have attention data in range 02-10~03-10, then the label should align to 02-01, and the first section needs to allocate empty bar space for 02-01~02-10. The width of both sections are the same, which is the max of total bar and total text. The entire content is aligned to the right of viewport.
+- Bar of today is not displayed. And for data that only contains 02-10, it shows a label for month 01 that is aligned to date 01-31.
+- The empth bar space should not have button or hover effect.
+- There're some minor issues with bar selection. (1) When a day is selected, the results no longer has correct upper padding room. (2) In recycle bin, the relationship between bar and results is broken. (3) Selecting related page should not trigger bar highlight.
+- Selecting a date in "Pinned" section should only filter pinned results, and related pages are calculated based on these pinned results. The related pages themselves are not filtered by date.
+- (1) The bar chart should be calculated using Pinned results only. (2) The Related results are still not being recalculated based on latest Pinned results. (3) Padding fix earlier is not working as intended. Now all results upper padding room is smaller than before no matter filtered or not.
+- Make all section headers not sticky anymore. I still suspect it makes the page stutter.
+- In bar chart, the bar's click scope should be precisely the bar's visible height. And clicking on reserved space will disable the select just like clicking on empty space.
+- Add buttons to restore and delete all in recycle bin title header.
+- Add a third operator to professional search. It is a "NOT" operator. The "OR" is blue as before, "AND" is changed to yellow, "NOT" is red. When user click on NOT button, it doesn't create branch, it changes from framed button to filled with red.
+- AND is a little ugly. Is green better?
+- Finish up.
