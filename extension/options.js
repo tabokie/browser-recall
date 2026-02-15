@@ -23,9 +23,12 @@ let permanentDeletes = []; // [url, ...] — permanently deleted URLs
 let lastClickedRow = null; // for shift-click range select
 let marqueeActive = false; // suppress click during marquee drag
 let gatewayDomainsCache = {}; // { [origin]: { rootUrl, childCount, fetched } }
+let gatewayDomainsLoaded = false;
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
 let pendingPin = null; // { query, qbTree? } — set during pin naming mode
 let pinnedFilterCtx = null; // cached context for related recalculation on date filter
+let collectionResultsCache = new Map(); // collectionId → { fullPinned, related }
+const COLLECTION_CACHE_MAX = 10;
 
 // --- Query builder state ---
 let qbNodeIdCounter = 0;
@@ -231,30 +234,116 @@ async function precomputeCapturesMatches(queries, interactions) {
 }
 
 // --- Data loading ---
-async function loadData() {
-  let allInteractions = [];
+const INTERACTION_FILE_BATCH = 30; // number of .jsonl files per batch
+let loadGeneration = 0; // generation counter to abort stale background loads
 
-  try {
-    const response = await chrome.runtime.sendMessage({ action: 'loadInteractions' });
-    if (response && response.success) {
-      allInteractions = response.interactions || [];
+// Merge raw interactions into a Map, keeping the entry with the highest timestamp per URL
+function mergeIntoMap(map, interactions) {
+  for (const item of interactions) {
+    const existing = map.get(item.url);
+    if (!existing || item.timestamp > existing.timestamp) {
+      map.set(item.url, item);
     }
-  } catch (error) {
-    console.log('Filesystem not available:', error.message);
   }
+}
 
+// Convert interactionsByUrl map to sorted array and update cachedData
+function snapshotCachedData(interactionsByUrl) {
+  const arr = Array.from(interactionsByUrl.values());
+  arr.sort((a, b) => a.timestamp - b.timestamp);
+  cachedData = { interactions: arr };
+  return cachedData;
+}
+
+async function loadData() {
+  const gen = ++loadGeneration;
+  const interactionsByUrl = new Map();
+
+  // 1. Merge write buffer first (newest unwritten data)
   const result = await chrome.storage.local.get(['writeBuffer']);
   const buffer = result.writeBuffer || [];
   if (buffer.length > 0) {
-    ({ interactions: allInteractions } =
-      mergeBufferIntoInteractions(allInteractions, buffer));
+    for (const entry of buffer) {
+      const item = entry.interaction;
+      const existing = interactionsByUrl.get(item.url);
+      if (!existing || item.timestamp > existing.timestamp) {
+        interactionsByUrl.set(item.url, item);
+      }
+    }
     bufferContentMap = getBufferContentMap(buffer);
   } else {
     bufferContentMap = {};
   }
 
-  cachedData = { interactions: allInteractions };
+  // 2. List files (newest-first)
+  let files = [];
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
+    if (resp && resp.success) files = resp.files;
+  } catch (error) {
+    console.log('Filesystem not available:', error.message);
+  }
+
+  if (files.length === 0) {
+    return snapshotCachedData(interactionsByUrl);
+  }
+
+  // 3. Load first batch → merge → return immediately
+  const firstBatch = files.slice(0, INTERACTION_FILE_BATCH);
+  const remaining = files.slice(INTERACTION_FILE_BATCH);
+
+  try {
+    const t0 = performance.now();
+    const resp = await chrome.runtime.sendMessage({ action: 'loadInteractionBatch', files: firstBatch });
+    if (resp && resp.success) {
+      mergeIntoMap(interactionsByUrl, resp.interactions);
+      console.debug(`[I/O] loadData batch 1/${Math.ceil(files.length / INTERACTION_FILE_BATCH)}: ${firstBatch.length} files, ${resp.interactions.length} items in ${(performance.now() - t0).toFixed(1)}ms`);
+    }
+  } catch (error) {
+    console.log('Error loading first batch:', error.message);
+  }
+
+  snapshotCachedData(interactionsByUrl);
+
+  // 4. Fire-and-forget: load remaining batches in background
+  if (remaining.length > 0) {
+    loadRemainingData(remaining, interactionsByUrl, gen);
+  }
+
   return cachedData;
+}
+
+async function loadRemainingData(files, interactionsByUrl, gen) {
+  const totalBatches = Math.ceil(files.length / INTERACTION_FILE_BATCH);
+  for (let i = 0; i < files.length; i += INTERACTION_FILE_BATCH) {
+    if (loadGeneration !== gen) return; // abort if loadData() was called again
+
+    const batch = files.slice(i, i + INTERACTION_FILE_BATCH);
+    const batchNum = Math.floor(i / INTERACTION_FILE_BATCH) + 2; // +2 because first batch was #1
+    try {
+      const t0 = performance.now();
+      const resp = await chrome.runtime.sendMessage({ action: 'loadInteractionBatch', files: batch });
+      if (resp && resp.success) {
+        mergeIntoMap(interactionsByUrl, resp.interactions);
+        snapshotCachedData(interactionsByUrl);
+        console.debug(`[I/O] loadData batch ${batchNum}/${totalBatches + 1}: ${batch.length} files, ${resp.interactions.length} items in ${(performance.now() - t0).toFixed(1)}ms`);
+
+        // Update the UI if still on a category view
+        if (loadGeneration === gen && activeView.type === 'category') {
+          const filtered = filterByCategory(cachedData.interactions, activeView.value);
+          displayInteractionRows(filtered);
+        }
+      }
+    } catch (error) {
+      console.log('Error loading batch:', error.message);
+    }
+  }
+
+  // After final batch: rebuild attention chart with complete data
+  if (loadGeneration === gen && activeView.type === 'category') {
+    const filtered = filterByCategory(cachedData.interactions, activeView.value);
+    renderAttentionChart(filtered);
+  }
 }
 
 // --- Collection pins (filesystem) ---
@@ -669,6 +758,26 @@ function refreshCurrentView() {
   }
 }
 
+// Remove deleted/restored rows from the list without full view reload.
+// For virtual scroller views, removes from the data array and re-renders incrementally.
+// For recycle bin (no virtual scroller), removes DOM nodes directly.
+function removeDeletedRows(container, urls, isRecycleBin) {
+  const vs = container._virtualScroller;
+  if (!isRecycleBin && vs && vs.data.length > 0) {
+    vs.removeItems(urls);
+  } else {
+    // Recycle bin or non-scroller view: remove DOM nodes directly
+    const urlSet = new Set(urls);
+    for (const item of [...container.querySelectorAll('.result-item')]) {
+      const row = item.querySelector('.result-row');
+      if (row && urlSet.has(row.dataset.url)) item.remove();
+    }
+    if (isRecycleBin && container.querySelectorAll('.result-item').length === 0) {
+      displayMessage('Recycle bin is empty');
+    }
+  }
+}
+
 // --- Category filters ---
 function filterByCategory(interactions, category) {
   const now = Date.now();
@@ -697,8 +806,10 @@ function filterByCategory(interactions, category) {
 }
 
 async function loadGatewayDomains() {
+  if (gatewayDomainsLoaded) return;
   const result = await chrome.storage.local.get(['gatewayDomains']);
   gatewayDomainsCache = result.gatewayDomains || {};
+  gatewayDomainsLoaded = true;
 }
 
 function isGatewayUrl(url) {
@@ -2075,7 +2186,6 @@ async function showCollection(collection) {
       return;
     }
 
-    // --- Phase 1: render pinned section immediately ---
     const pins = allCollectionPins[collectionId] || [];
     const byUrl = groupInteractionsByUrl(data.interactions);
 
@@ -2089,20 +2199,35 @@ async function showCollection(collection) {
       return { ...r, attScore: agg.score, attDetail: agg.detail, highlights, timestamps, pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null) };
     }
 
-    const allPinned = pins.map(enrichResult);
-    renderPinnedSection(allPinned, collectionId, data);
+    // --- Pinned+Related section: cache or async fetch ---
+    const cachedPinned = collectionResultsCache.get(collectionId);
+    if (cachedPinned) {
+      // LRU touch: delete and re-insert so it becomes newest
+      collectionResultsCache.delete(collectionId);
+      collectionResultsCache.set(collectionId, cachedPinned);
+      renderPinnedWithRelated(cachedPinned.fullPinned, cachedPinned.related, collectionId, data);
+      const allEnriched = enrichForQuery(data.interactions, cachedAllHighlights || {}).filter(item => !isPermanentlyDeleted(item.url) && !isRecycled(item.url));
+      pinnedFilterCtx = { allPinned: cachedPinned.fullPinned, allEnriched, data, collectionId, enrichResult, maxAtt: Math.max(...[...cachedPinned.fullPinned, ...cachedPinned.related].map(r => r.attScore), 0.1) };
+    } else {
+      renderPinnedSection(pins.map(enrichResult), collectionId, data);
+      fetchCollectionResults(collection, collectionId, data, pins, enrichResult);
+    }
 
-    // Show loading state for related and explore
-    document.getElementById('relatedResults').innerHTML = '<div class="no-results loading-hint">Computing related pages…</div>';
-    document.getElementById('relatedChart').classList.remove('visible');
+    // --- Explore section: always immediate (synchronous qbTree evaluation) ---
+    renderCollectionExplore(collection, data);
+  } catch (error) {
+    console.error('Collection load error:', error);
+    document.getElementById('pinnedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
+  }
+}
 
-    // --- Phase 2: deferred — compute search results, related pages, explore ---
-    // Use setTimeout(0) to yield to the renderer so pinned section paints first.
-    await new Promise(resolve => setTimeout(resolve, 0));
+// Async: fetch search results, compute pinned+related, cache, and render both sections
+async function fetchCollectionResults(collection, collectionId, data, pins, enrichResult) {
+  // Yield to browser so Phase 1 paints first
+  await new Promise(resolve => setTimeout(resolve, 0));
+  if (activeView.type !== 'collection' || activeView.id !== collectionId) return;
 
-    // Guard: user may have navigated away during the yield
-    if (activeView.type !== 'collection' || activeView.id !== collectionId) return;
-
+  try {
     let searchResults = [];
     let allEnriched = [];
 
@@ -2132,17 +2257,15 @@ async function showCollection(collection) {
         .filter(item => !isPermanentlyDeleted(item.url) && !isRecycled(item.url));
     }
 
-    // Guard again after async work
     if (activeView.type !== 'collection' || activeView.id !== collectionId) return;
 
-    // Re-compute pinned with search context (adds search-matched pins)
+    // Compute fullPinned + related
     const pinnedUrls = new Set(pins.map(p => p.url));
     const searchResultUrls = new Set(searchResults.map(r => r.url));
     const pinnedInResults = searchResults.filter(r => pinnedUrls.has(r.url)).map(enrichResult);
     const pinnedOnly = pins.filter(p => !searchResultUrls.has(p.url)).map(enrichResult);
     const fullPinned = [...pinnedInResults, ...pinnedOnly];
 
-    // Related pages
     let related = [];
     if (fullPinned.length > 0 && allEnriched.length > 0) {
       const allPinnedUrls = new Set(fullPinned.map(r => r.url));
@@ -2151,18 +2274,23 @@ async function showCollection(collection) {
       related = findRelatedPages(seedEnriched, candidateEnriched, relatedPagesLimit).map(enrichResult);
     }
 
+    // Cache pinned+related (allEnriched is recomputable from cachedData, not stored)
+    if (collectionResultsCache.size >= COLLECTION_CACHE_MAX) {
+      // Evict oldest (first key in Map insertion order)
+      const oldest = collectionResultsCache.keys().next().value;
+      collectionResultsCache.delete(oldest);
+    }
+    collectionResultsCache.set(collectionId, { fullPinned, related });
+
     renderPinnedWithRelated(fullPinned, related, collectionId, data);
     pinnedFilterCtx = { allPinned: fullPinned, allEnriched, data, collectionId, enrichResult, maxAtt: Math.max(...[...fullPinned, ...related].map(r => r.attScore), 0.1) };
-
-    renderCollectionExplore(collection, data);
   } catch (error) {
-    console.error('Collection search error:', error);
-    document.querySelector('.collection-section[data-section="pinned"]').style.display = 'none';
-    document.getElementById('relatedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
+    // Phase 2 failed — leave Phase 1 pinned content intact (already rendered)
+    console.error('Collection fetch error:', error);
   }
 }
 
-// Phase 1: render pinned rows immediately (no related pages yet)
+// Render pinned rows immediately (no related pages yet)
 function renderPinnedSection(allPinned, collectionId, data) {
   const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
   const sortedPinned = applySortOrder(allPinned, effectivePinnedSort);
@@ -2425,16 +2553,19 @@ function bindRecycleBinClicks(container) {
     const restoreBtn = e.target.closest('.result-restore');
     if (!restoreBtn) return;
     e.stopPropagation();
+    const restoredUrls = [];
     const row = restoreBtn.closest('.result-row');
     if (row && row.classList.contains('selected')) {
       for (const r of container.querySelectorAll('.result-row.selected')) {
+        restoredUrls.push(r.dataset.url);
         await restoreItem(r.dataset.url);
       }
     } else {
+      restoredUrls.push(restoreBtn.dataset.restoreUrl);
       await restoreItem(restoreBtn.dataset.restoreUrl);
     }
     lastClickedRow = null;
-    refreshCurrentView();
+    removeDeletedRows(container, restoredUrls, true);
   });
 }
 
@@ -2730,10 +2861,12 @@ function bindResultDelegation(container) {
     if (deleteBtn) {
       e.stopPropagation();
       const inRecycleBin = activeView.type === 'category' && activeView.value === 'recycleBin';
+      const deletedUrls = [];
       const row = deleteBtn.closest('.result-row');
       if (row && row.classList.contains('selected')) {
         const selectedRows = container.querySelectorAll('.result-row.selected');
         for (const r of selectedRows) {
+          deletedUrls.push(r.dataset.url);
           if (inRecycleBin) {
             await permanentlyDeleteItem(r.dataset.url);
           } else {
@@ -2741,14 +2874,16 @@ function bindResultDelegation(container) {
           }
         }
       } else {
+        const url = inRecycleBin ? deleteBtn.dataset.deleteUrl : deleteBtn.dataset.deleteUrl;
+        deletedUrls.push(url);
         if (inRecycleBin) {
-          await permanentlyDeleteItem(deleteBtn.dataset.deleteUrl);
+          await permanentlyDeleteItem(url);
         } else {
-          await handleDelete(deleteBtn.dataset.deleteUrl, deleteBtn.dataset.deleteTitle);
+          await handleDelete(url, deleteBtn.dataset.deleteTitle);
         }
       }
       lastClickedRow = null;
-      refreshCurrentView();
+      removeDeletedRows(container, deletedUrls, inRecycleBin);
       return;
     }
 
@@ -2800,10 +2935,21 @@ function bindResultDelegation(container) {
   container.addEventListener('dragstart', (e) => {
     const row = e.target.closest('.result-row');
     if (!row) return;
-    e.dataTransfer.setData('text/plain', JSON.stringify({
-      url: row.dataset.url,
-      title: row.dataset.title
-    }));
+    let items;
+    const selectedRows = container.querySelectorAll('.result-row.selected');
+    if (row.classList.contains('selected') && selectedRows.length > 1) {
+      items = Array.from(selectedRows).map(r => ({ url: r.dataset.url, title: r.dataset.title }));
+      // Show count badge as drag image
+      const badge = document.createElement('div');
+      badge.textContent = `${items.length} pages`;
+      badge.style.cssText = 'position:absolute;top:-9999px;padding:4px 10px;background:#4a90d9;color:#fff;border-radius:4px;font-size:13px;white-space:nowrap;';
+      document.body.appendChild(badge);
+      e.dataTransfer.setDragImage(badge, 0, 0);
+      requestAnimationFrame(() => badge.remove());
+    } else {
+      items = [{ url: row.dataset.url, title: row.dataset.title }];
+    }
+    e.dataTransfer.setData('text/plain', JSON.stringify({ items }));
     e.dataTransfer.effectAllowed = 'copy';
   });
 }
@@ -2869,6 +3015,25 @@ class VirtualScroller {
     this._expandedExtraH = 0;
     this._savedNodes.clear();
     this._render(true);
+  }
+
+  // Remove items by URL without full reload.
+  // Preserves scroll position and selection state of remaining rows.
+  removeItems(urls) {
+    const urlSet = new Set(urls);
+    this._fullData = this._fullData.filter(d => !urlSet.has(d.url));
+    this.data = this._filterFn ? this._fullData.filter(this._filterFn) : this._fullData;
+    for (const url of urls) this._savedNodes.delete(url);
+    // Remove matching DOM nodes
+    for (const item of [...this.containerEl.querySelectorAll('.result-item')]) {
+      const row = item.querySelector('.result-row');
+      if (row && urlSet.has(row.dataset.url)) item.remove();
+    }
+    this._expandedIdx = -1;
+    this._expandedExtraH = 0;
+    // Trigger non-forced rebuild which saves remaining selected nodes before re-rendering
+    this.renderedRange = { start: -1, end: -1 };
+    this._render(false);
   }
 
   onExpandToggle() {
@@ -3077,7 +3242,7 @@ function displayMessage(msg) {
 }
 
 function categoryLabel(category) {
-  const labels = { all: 'All', today: 'Today', week: 'This Week', highlighted: 'Highlighted', gateways: 'Gateways', recycleBin: 'Recycle Bin', explore: 'Explore' };
+  const labels = { all: 'History', today: 'Today', week: 'This Week', highlighted: 'Highlighted', gateways: 'Gateways', recycleBin: 'Recycle Bin', explore: 'Explore' };
   return labels[category] || category;
 }
 
@@ -3202,6 +3367,19 @@ async function renderCollections() {
       <button class="remove-collection" title="Remove collection">&times;</button>
     `;
 
+    item.draggable = true;
+    item.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('application/x-collection-reorder', collection.id);
+      e.dataTransfer.effectAllowed = 'move';
+      item.classList.add('dragging');
+    });
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      list.querySelectorAll('.reorder-above, .reorder-below').forEach(el => {
+        el.classList.remove('reorder-above', 'reorder-below');
+      });
+    });
+
     item.addEventListener('click', (e) => {
       if (e.target.closest('.remove-collection')) return;
       showCollection(collection);
@@ -3227,35 +3405,81 @@ async function renderCollections() {
     let dragCounter = 0;
     item.addEventListener('dragover', (e) => {
       e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
+      if (e.dataTransfer.types.includes('application/x-collection-reorder')) {
+        e.dataTransfer.dropEffect = 'move';
+        const rect = item.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        if (e.clientY < midY) {
+          item.classList.add('reorder-above');
+          item.classList.remove('reorder-below');
+        } else {
+          item.classList.add('reorder-below');
+          item.classList.remove('reorder-above');
+        }
+      } else {
+        e.dataTransfer.dropEffect = 'copy';
+      }
     });
     item.addEventListener('dragenter', (e) => {
       e.preventDefault();
-      dragCounter++;
-      item.classList.add('drag-over');
+      if (!e.dataTransfer.types.includes('application/x-collection-reorder')) {
+        dragCounter++;
+        item.classList.add('drag-over');
+      }
     });
-    item.addEventListener('dragleave', () => {
-      dragCounter--;
-      if (dragCounter <= 0) {
-        dragCounter = 0;
-        item.classList.remove('drag-over');
+    item.addEventListener('dragleave', (e) => {
+      if (e.dataTransfer.types.includes('application/x-collection-reorder')) {
+        item.classList.remove('reorder-above', 'reorder-below');
+      } else {
+        dragCounter--;
+        if (dragCounter <= 0) {
+          dragCounter = 0;
+          item.classList.remove('drag-over');
+        }
       }
     });
     item.addEventListener('drop', async (e) => {
       e.preventDefault();
-      dragCounter = 0;
-      item.classList.remove('drag-over');
-      try {
-        const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-        if (data.url && !isResultPinned(collection.id, data.url)) {
-          await toggleResultPin(collection.id, data.url, data.title);
-          // If we're viewing this collection, refresh
-          if (activeView.type === 'collection' && activeView.id === collection.id) {
-            showCollection(collection);
+      item.classList.remove('drag-over', 'reorder-above', 'reorder-below');
+
+      if (e.dataTransfer.types.includes('application/x-collection-reorder')) {
+        // --- Reorder ---
+        const draggedId = e.dataTransfer.getData('application/x-collection-reorder');
+        if (draggedId === collection.id) return;
+        const collections = await loadCollections();
+        const fromIdx = collections.findIndex(c => c.id === draggedId);
+        if (fromIdx === -1) return;
+        const [moved] = collections.splice(fromIdx, 1);
+        let toIdx = collections.findIndex(c => c.id === collection.id);
+        const rect = item.getBoundingClientRect();
+        if (e.clientY >= rect.top + rect.height / 2) toIdx++;
+        collections.splice(toIdx, 0, moved);
+        await saveCollections(collections);
+        await renderCollections();
+      } else {
+        // --- Pin drop (existing logic) ---
+        dragCounter = 0;
+        try {
+          const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+          const items = data.items || [{ url: data.url, title: data.title }];
+          if (!allCollectionPins[collection.id]) allCollectionPins[collection.id] = [];
+          const pins = allCollectionPins[collection.id];
+          let added = 0;
+          for (const { url, title } of items) {
+            if (url && !pins.some(p => p.url === url)) {
+              pins.push({ url, title, pinnedAt: Date.now() });
+              added++;
+            }
           }
+          if (added > 0) {
+            await saveAllCollectionPins();
+            if (activeView.type === 'collection' && activeView.id === collection.id) {
+              showCollection(collection);
+            }
+          }
+        } catch (err) {
+          console.error('Drop error:', err);
         }
-      } catch (err) {
-        console.error('Drop error:', err);
       }
     });
 
@@ -3384,6 +3608,7 @@ document.addEventListener('keydown', async (e) => {
     if (!isRecycleBinView && !isDeletableView()) return;
 
     e.preventDefault();
+    const deletedUrls = [...selectedRows].map(r => r.dataset.url);
     if (isRecycleBinView) {
       for (const row of selectedRows) {
         await permanentlyDeleteItem(row.dataset.url);
@@ -3394,7 +3619,8 @@ document.addEventListener('keydown', async (e) => {
       }
     }
     lastClickedRow = null;
-    refreshCurrentView();
+    const container = document.getElementById('results');
+    removeDeletedRows(container, deletedUrls, isRecycleBinView);
   }
 });
 
@@ -3549,23 +3775,15 @@ async function updateStorageStatus() {
 }
 
 async function updateStatistics() {
-  try {
-    const interactions = await fsStorage.loadAllInteractions();
-    document.getElementById('totalInteractions').textContent = interactions.length;
+  const interactions = cachedData?.interactions || [];
+  document.getElementById('totalInteractions').textContent = interactions.length;
 
-    const today = new Date().setHours(0, 0, 0, 0);
-    const todayCount = interactions.filter(i => i.timestamp >= today).length;
-    document.getElementById('todayInteractions').textContent = todayCount;
-  } catch (error) {
-    console.log('Could not load from filesystem:', error.message);
-    document.getElementById('totalInteractions').textContent = '0';
-    document.getElementById('todayInteractions').textContent = '0';
-  }
+  const today = new Date().setHours(0, 0, 0, 0);
+  const todayCount = interactions.filter(i => i.timestamp >= today).length;
+  document.getElementById('todayInteractions').textContent = todayCount;
 
-  chrome.storage.local.get(['writeBuffer'], (result) => {
-    const buffer = result.writeBuffer || [];
-    document.getElementById('bufferSize').textContent = buffer.length;
-  });
+  const result = await chrome.storage.local.get(['writeBuffer']);
+  document.getElementById('bufferSize').textContent = (result.writeBuffer || []).length;
 
   updateCacheTable();
 }
@@ -3640,7 +3858,7 @@ document.getElementById('selectDirBtn').addEventListener('click', async () => {
       showStatus(`Storage location set: ${result.name}`, 'success');
       chrome.runtime.sendMessage({ action: 'initializeFilesystem' });
       // Reload data for main view
-      cachedData = null; cachedFieldRanges = null; capturesMatchCache = null;
+      loadGeneration++; cachedData = null; cachedFieldRanges = null; capturesMatchCache = null; collectionResultsCache.clear();
       showCategory(activeView.type === 'category' ? activeView.value : 'all');
     } else if (result.error !== 'User cancelled') {
       showStatus(`Error: ${result.error}`, 'error');
@@ -3695,7 +3913,7 @@ document.getElementById('changeDirBtn').addEventListener('click', async () => {
     await updateStorageStatus();
     await updateStatistics();
     chrome.runtime.sendMessage({ action: 'initializeFilesystem' });
-    cachedData = null; cachedFieldRanges = null; capturesMatchCache = null;
+    loadGeneration++; cachedData = null; cachedFieldRanges = null; capturesMatchCache = null; collectionResultsCache.clear();
   } catch (error) {
     showStatus(`Error changing directory: ${error.message}`, 'error');
   }
@@ -3769,7 +3987,7 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
     await chrome.storage.local.set({ writeBuffer: [] });
     showStatus(`Cleared ${deletedCount} files/directories`, 'success');
     await updateStatistics();
-    cachedData = null; cachedFieldRanges = null; capturesMatchCache = null;
+    loadGeneration++; cachedData = null; cachedFieldRanges = null; capturesMatchCache = null; collectionResultsCache.clear();
     showCategory('all');
   } catch (error) {
     showStatus(`Error clearing data: ${error.message}`, 'error');
@@ -3927,8 +4145,8 @@ async function initialize() {
   // Initialize query builder
   qbRoot = qbCreatePlaceholder();
 
-  // Render sidebar immediately from cache (no disk I/O)
-  await renderCollections();
+  // Render sidebar concurrently with heavy data (don't block loadData on sidebar)
+  renderCollections(); // fire-and-forget: updates sidebar when ready
   renderBlacklist();
   renderTrimRules();
 

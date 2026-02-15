@@ -134,6 +134,7 @@
     }
 
     .sidebar-item {
+      position: relative;
       display: flex;
       align-items: center;
       gap: 10px;
@@ -1124,6 +1125,27 @@
       outline: 2px solid #1a73e8;
       outline-offset: -2px;
     }
+    .sidebar-item.reorder-above::before {
+      content: '';
+      position: absolute;
+      top: -1px;
+      left: 20px;
+      right: 8px;
+      height: 2px;
+      background: #1a73e8;
+      border-radius: 1px;
+    }
+    .sidebar-item.reorder-below::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 20px;
+      right: 8px;
+      height: 2px;
+      background: #1a73e8;
+      border-radius: 1px;
+    }
+    .sidebar-item.dragging { opacity: 0.4; }
 
     .result-row[draggable="true"] {
       cursor: pointer;
@@ -1933,7 +1955,7 @@
     <div class="sidebar-content">
       <div class="sidebar-item active" data-category="all">
         <span class="icon"><svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg></span>
-        <span class="label">All</span>
+        <span class="label">History</span>
       </div>
       <div class="sidebar-item" data-category="recycleBin">
         <span class="icon"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></span>
@@ -1953,7 +1975,7 @@
   <!-- Main panel -->
   <div class="main">
     <div class="main-header">
-      <span class="main-title" id="mainTitle">All</span>
+      <span class="main-title" id="mainTitle">History</span>
       <input class="main-title-input" id="mainTitleInput" type="text" style="display:none">
       <button class="confirm-title-btn" id="confirmTitleBtn" style="display:none">&#x2713;</button>
       <button class="recycle-action-btn" id="restoreAllBtn" style="display:none" title="Restore all items">Restore all</button>

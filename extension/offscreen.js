@@ -111,7 +111,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     'loadCollectionPins', 'saveCollectionPins',
     'loadSettings', 'saveSettings', 'saveSettingsKey',
     'loadContentBatch',
-    'loadGateways', 'saveGateways', 'processGatewaysIncremental'
+    'loadGateways', 'saveGateways', 'processGatewaysIncremental',
+    'listInteractionFiles', 'loadInteractionBatch'
   ];
   if (!handledActions.includes(request.action)) {
     return false;
@@ -303,6 +304,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             request.watermark, request.existingDomains
           );
           sendResponse({ success: true, ...result });
+          break;
+        }
+
+        case 'listInteractionFiles': {
+          const files = await fsStorage.listInteractionFiles();
+          sendResponse({ success: true, files });
+          break;
+        }
+
+        case 'loadInteractionBatch': {
+          const t0 = performance.now();
+          const interactions = await fsStorage.loadInteractionFiles(request.files);
+          console.debug(`[I/O] loadInteractionBatch: ${request.files.length} files, ${interactions.length} items in ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse({ success: true, interactions });
           break;
         }
 

@@ -245,6 +245,40 @@ class FileSystemStorage {
     };
   }
 
+  // List all .jsonl filenames sorted newest-first
+  async listInteractionFiles() {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+    const files = [];
+    for await (const entry of this.directoryHandle.values()) {
+      if (entry.kind === 'file' && entry.name.endsWith('.jsonl'))
+        files.push(entry.name);
+    }
+    files.sort().reverse(); // YYYY-MM-DD sorts chronologically; reverse = newest first
+    return files;
+  }
+
+  // Read and parse specific .jsonl files, return raw interactions
+  async loadInteractionFiles(filenames) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+    const interactions = [];
+    for (const name of filenames) {
+      try {
+        const fh = await this.directoryHandle.getFileHandle(name);
+        const file = await fh.getFile();
+        const text = await file.text();
+        for (const line of text.split('\n')) {
+          if (!line.trim()) continue;
+          try { interactions.push(JSON.parse(line)); } catch {}
+        }
+      } catch {}
+    }
+    return interactions;
+  }
+
   // Load all interactions from filesystem (metadata only, deduplicated)
   async loadAllInteractions() {
     if (!(await this.verifyPermission())) {

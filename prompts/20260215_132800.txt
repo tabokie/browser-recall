@@ -1,0 +1,38 @@
+- Support dragging multiple selected results to another collection.
+- Support reordering collection list in Portal UI.
+- Fix the issue that deleting a page causes the list to reload.
+- Are the dates of every visits to the same site recorded and saved?
+- Change the "All" to "History"
+- Loading all interactions is too heavy. There could be thousands of history files. We need to load them progressively, not just render progressively.
+- It says "No interactions found".
+- Fixed. Just to check, are collection views affected by this change? Because earlier I saw the collection views are empty as well.
+- Let me elaborate on the render timing again:
+
+1. Section frames such as title, side bar, attention bar chart frame, column sort header. They are rendered instantly with no delay.
+2. Small data such as collection list, search queries, pinned results, the first batch of search results, relatives to the pinned items. Some of them are loaded before and cached, some not, For the group that are cached, it should be rendered instantly just like (1). The cache miss group are loaded into cache and rendered together.
+3. Large data such as full history, full search results. For history view, results are ordered by time (cannot use other column to sort), we can progressively load them file by file. For search result, the results should be merged and sorted before returning to user, therefore we cannot progressively load and must wait for search to complete fully.
+- I'm confused, I explicitly told you there are many different types of data, and for optimal responsiveness, a specific UI should only wait for the data it needs, nothing more. Why are you still waiting for "full dataset"? 
+- Let's write tests to verify the bebavior. More specificly, do these steps:
+
+- prepare some test data (some interactions, create a collection with pinned results and query, the query results need scroll to view)
+- clear cache, inject test-time pause to loading collection list & interaction list, open "History", it should show frames correctly
+- clear cache, inject test-time pause to loading collection list only, open "History", it should show frames and history list correctly
+- clear cache, inject test-time pause to loading interaction list only, open "History", it should show frames and collection list correctly
+- do not clear cache, inject test-time pause to loading pinned results and search query, open a collection, it should show frames and collection list correctly
+- remove test-time pauses, load collection so that search results are returned and the first batch is cached, inject test-time pause to search, reopen the collection, the UI should display ok using cached search results.
+- Wait, now we discover some issues that would cause UI to stutter, then you are supposed to fix those issues by improving the code, not dismiss the test logic by removing it.
+- In 5, the first batch of search results should be cached. So after reopen, we should not see loading state.
+- Can the code be refactored to reflect the new workflow in a cleaner way? For example:
+
+if cache['widget1']:
+  renderWidget1(cache['widget1'])
+else:
+  fireAsync('widget1', fetchWidget1, renderWidget1)
+if cache['widget2']:
+- Why are different widgets in collection UI sharing the same "cached" variable?
+- Examine the codebase again, check all different UIs. Make sure the same philosophy of minimal dependencies and best responsiveness is being followed.
+- Is there cache eviction logic to prevent cache size exceeding limit?
+- Walk me through all the caches and their size estimation.
+- Explain their content.
+- Finish up.
+- C & D.
