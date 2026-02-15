@@ -522,18 +522,19 @@ document.getElementById('triToggle').addEventListener('click', async (e) => {
     const slug = generateSlugFromUrl(currentTab.url);
     const timestamp = Date.now();
     await chrome.runtime.sendMessage({
-      action: 'writeInteraction',
-      interaction: {
-        id: currentTab.url,
-        timestamp,
-        url: currentTab.url,
-        title: currentTab.title || 'Untitled',
-        intent: '',
-        attention: '',
-        slug
-      },
-      markdown: '',
-      html: ''
+      action: 'enqueueInteraction',
+      entry: {
+        interaction: {
+          timestamp,
+          url: currentTab.url,
+          title: currentTab.title || 'Untitled',
+          intent: '',
+          attention: '',
+          slug
+        },
+        markdown: '',
+        html: ''
+      }
     });
     await showDashboard(currentTab);
   }
@@ -583,10 +584,8 @@ function startEditingTitle() {
       currentInteraction.timestamp = Date.now();
       try {
         await chrome.runtime.sendMessage({
-          action: 'writeInteraction',
-          interaction: currentInteraction,
-          markdown: '',
-          html: ''
+          action: 'enqueueInteraction',
+          entry: { interaction: currentInteraction, markdown: '', html: '' }
         });
         console.log('[popup] Title updated to:', newTitle);
       } catch (error) {
@@ -648,7 +647,6 @@ async function showDashboard(tab) {
 
   // Build a fallback interaction from tab info
   currentInteraction = {
-    id: tab.url,
     timestamp: Date.now(),
     url: tab.url,
     title: tab.title || 'Untitled',
@@ -714,7 +712,6 @@ async function showDashboard(tab) {
       // Load stored interaction to preserve existing fields, or build a fresh one
       const resp = await chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url });
       const interaction = (resp && resp.interaction) || {
-        id: tab.url,
         url: tab.url,
         intent: '',
         attention: '',
@@ -724,10 +721,8 @@ async function showDashboard(tab) {
       interaction.timestamp = Date.now();
 
       await chrome.runtime.sendMessage({
-        action: 'writeInteraction',
-        interaction,
-        markdown: '',
-        html: ''
+        action: 'enqueueInteraction',
+        entry: { interaction, markdown: '', html: '' }
       });
       // Keep currentInteraction in sync if it exists
       if (currentInteraction) {
@@ -798,7 +793,6 @@ async function showDashboard(tab) {
 
         // Write interaction record
         const interaction = {
-          id: tab.url,
           timestamp,
           url: tab.url,
           title: tab.title || 'Untitled',
@@ -807,10 +801,8 @@ async function showDashboard(tab) {
           slug
         };
         await chrome.runtime.sendMessage({
-          action: 'writeInteraction',
-          interaction,
-          markdown: '',
-          html: ''
+          action: 'enqueueInteraction',
+          entry: { interaction, markdown: '', html: '' }
         });
 
         // Capture snapshot (content script extracts page, background forwards to offscreen)

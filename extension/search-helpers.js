@@ -52,7 +52,6 @@ export function getBufferContentMap(buffer) {
 export function buildInteractionsForEngine(InteractionClass, engine, dataList, contentMap) {
   for (const data of dataList) {
     const interaction = new InteractionClass(data.url, data.title);
-    interaction.id = data.id;
     interaction.timestamp = BigInt(data.timestamp);
     interaction.setIntent(data.intent || '');
 

@@ -453,10 +453,14 @@ function getSlugForCurrentPage() {
   const url = window.location.href;
   try {
     const parsed = new URL(url);
-    const base = (parsed.hostname + parsed.pathname)
-      .toLowerCase()
+    let domain = parsed.hostname.toLowerCase();
+    if (domain.startsWith('www.')) domain = domain.slice(4);
+    const lastDot = domain.lastIndexOf('.');
+    if (lastDot > 0) domain = domain.slice(0, lastDot);
+    const base = (domain + parsed.pathname)
       .replace(/[^\p{L}\p{N}]+/gu, '-')
-      .replace(/^-+|-+$/g, '');
+      .replace(/^-+|-+$/g, '')
+      .substring(0, 30).replace(/-+$/, '');
     let hash = 0;
     for (let i = 0; i < url.length; i++) {
       hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0;
@@ -873,34 +877,6 @@ async function reapplyHighlights() {
   }
 }
 
-// Show note-edit overlay when an existing highlight is clicked
-function initHighlightClickHandler() {
-  document.addEventListener('click', (e) => {
-    const mark = e.target.closest('mark.portal-highlight');
-    if (!mark) return;
-
-    // Remove any existing overlay
-    const existingOverlay = document.getElementById('portal-highlight-overlay');
-    if (existingOverlay) existingOverlay.remove();
-
-    const text = mark.dataset.highlightText || mark.textContent;
-    const timestamp = mark.dataset.highlightTimestamp ? parseInt(mark.dataset.highlightTimestamp) : 0;
-    const slug = getSlugForCurrentPage();
-
-    // Load existing note for this highlight, then show overlay
-    chrome.runtime.sendMessage({ action: 'loadHighlights', slug }).then(resp => {
-      const highlights = resp?.highlights || [];
-      // Match by timestamp first (works for grouped array highlights), fall back to text
-      const match = highlights.find(h => h.timestamp === timestamp)
-        || highlights.find(h => h.text === text);
-      const displayText = match ? (Array.isArray(match.text) ? match.text.join(' ') : match.text) : text;
-      showHighlightEditOverlay(mark, displayText, timestamp, match?.note || '', slug);
-    }).catch(() => {
-      showHighlightEditOverlay(mark, text, timestamp, '', slug);
-    });
-  });
-}
-
 function showHighlightEditOverlay(mark, text, timestamp, existingNote, slug) {
   const existing = document.getElementById('portal-highlight-overlay');
   if (existing) existing.remove();
@@ -1058,8 +1034,6 @@ function unwrapHighlightMark(mark) {
   parent.removeChild(mark);
   parent.normalize();
 }
-
-initHighlightClickHandler();
 
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

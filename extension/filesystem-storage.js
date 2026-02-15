@@ -104,9 +104,55 @@ class FileSystemStorage {
     return false;
   }
 
-  // Get or create the pages/ subdirectory
-  async getOrCreatePagesDirectory() {
-    return await this.directoryHandle.getDirectoryHandle('pages', { create: true });
+  // Get or create the atoms/ subdirectory (snapshots + per-page metadata)
+  async getAtomsDir() {
+    return this.directoryHandle.getDirectoryHandle('atoms', { create: true });
+  }
+
+  // Get or create the lists/ subdirectory
+  async getListsDir() {
+    return this.directoryHandle.getDirectoryHandle('lists', { create: true });
+  }
+
+  // Get or create the history/ subdirectory for JSONL interaction logs
+  async getHistoryDir() {
+    return this.directoryHandle.getDirectoryHandle('history', { create: true });
+  }
+
+  // Move a file to deleted/{subpath}/ instead of deleting it.
+  // For directories, uses { recursive: true } on the copy target.
+  async softDelete(parentDir, name, opts) {
+    const deletedDir = await this.directoryHandle.getDirectoryHandle('deleted', { create: true });
+    try {
+      if (opts && opts.recursive) {
+        // Directory: copy recursively into deleted/{name}/, then remove original
+        const srcDir = await parentDir.getDirectoryHandle(name);
+        const destDir = await deletedDir.getDirectoryHandle(name, { create: true });
+        for await (const entry of srcDir.values()) {
+          if (entry.kind === 'file') {
+            const file = await entry.getFile();
+            const fh = await destDir.getFileHandle(entry.name, { create: true });
+            const w = await fh.createWritable();
+            await w.write(await file.text());
+            await w.close();
+          }
+        }
+        await parentDir.removeEntry(name, { recursive: true });
+      } else {
+        // File: read content, write to deleted/, then remove original
+        const fh = await parentDir.getFileHandle(name);
+        const file = await fh.getFile();
+        const content = await file.text();
+        const destFh = await deletedDir.getFileHandle(name, { create: true });
+        const w = await destFh.createWritable();
+        await w.write(content);
+        await w.close();
+        await parentDir.removeEntry(name);
+      }
+    } catch (e) {
+      // If move fails, fall through to hard delete as last resort
+      try { await parentDir.removeEntry(name, opts); } catch {}
+    }
   }
 
   // Write interaction metadata to JSONL and content to pages/
@@ -123,7 +169,8 @@ class FileSystemStorage {
       const date = new Date(metadata.timestamp);
       const filename = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}.jsonl`;
 
-      const fileHandle = await this.directoryHandle.getFileHandle(filename, { create: true });
+      const historyDir = await this.getHistoryDir();
+      const fileHandle = await historyDir.getFileHandle(filename, { create: true });
 
       const writable = await fileHandle.createWritable({ keepExistingData: true });
       const file = await fileHandle.getFile();
@@ -152,7 +199,7 @@ class FileSystemStorage {
     }
 
     contentMap = contentMap || {};
-    const pagesDir = await this.getOrCreatePagesDirectory();
+    const atomsDir = await this.getAtomsDir();
 
     // Group interactions by date
     const byDate = {};
@@ -170,9 +217,10 @@ class FileSystemStorage {
     });
 
     // Write each date's interactions
+    const historyDir = await this.getHistoryDir();
     for (const [date, dayInteractions] of Object.entries(byDate)) {
       const filename = `${date}.jsonl`;
-      const fileHandle = await this.directoryHandle.getFileHandle(filename, { create: true });
+      const fileHandle = await historyDir.getFileHandle(filename, { create: true });
       const writable = await fileHandle.createWritable();
 
       for (const interaction of dayInteractions) {
@@ -250,8 +298,9 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
+    const historyDir = await this.getHistoryDir();
     const files = [];
-    for await (const entry of this.directoryHandle.values()) {
+    for await (const entry of historyDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl'))
         files.push(entry.name);
     }
@@ -264,10 +313,11 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
+    const historyDir = await this.getHistoryDir();
     const interactions = [];
     for (const name of filenames) {
       try {
-        const fh = await this.directoryHandle.getFileHandle(name);
+        const fh = await historyDir.getFileHandle(name);
         const file = await fh.getFile();
         const text = await file.text();
         for (const line of text.split('\n')) {
@@ -287,8 +337,9 @@ class FileSystemStorage {
 
     const interactionsByUrl = new Map();
 
-    // Read all .jsonl files
-    for await (const entry of this.directoryHandle.values()) {
+    // Read all .jsonl files from history/
+    const historyDir = await this.getHistoryDir();
+    for await (const entry of historyDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
         const file = await entry.getFile();
         const text = await file.text();
@@ -314,33 +365,6 @@ class FileSystemStorage {
     return interactions;
   }
 
-  // Load markdown content for a single interaction by slug (latest snapshot)
-  async loadContentForInteraction(slug) {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to read directory');
-    }
-
-    try {
-      const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
-      const slugDir = await pagesDir.getDirectoryHandle(slug);
-      let latestTs = 0;
-      let latestContent = '';
-      for await (const entry of slugDir.values()) {
-        if (entry.kind === 'file' && entry.name.endsWith('.md')) {
-          const ts = parseInt(entry.name.replace('.md', ''), 10);
-          if (ts > latestTs) {
-            latestTs = ts;
-            const file = await entry.getFile();
-            latestContent = await file.text();
-          }
-        }
-      }
-      return latestContent;
-    } catch (error) {
-      return '';
-    }
-  }
-
   // Load all markdown content from pages/ directory (latest snapshot per slug)
   async loadAllContent() {
     if (!(await this.verifyPermission())) {
@@ -350,9 +374,9 @@ class FileSystemStorage {
     const contentMap = {};
 
     try {
-      const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
+      const atomsDir = await this.getAtomsDir();
 
-      for await (const entry of pagesDir.values()) {
+      for await (const entry of atomsDir.values()) {
         if (entry.kind === 'directory') {
           const slug = entry.name;
           let latestTs = 0;
@@ -369,45 +393,21 @@ class FileSystemStorage {
         }
       }
     } catch (error) {
-      // pages/ directory may not exist yet
-      console.log('No pages directory found:', error.message);
+      // atoms/ directory may not exist yet
+      console.log('No atoms directory found:', error.message);
     }
 
     return contentMap;
   }
 
-  // Load markdown content for a batch of slugs (latest snapshot per slug)
-  async loadContentBatch(slugs) {
-    const contentMap = {};
-    try {
-      const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
-      for (const slug of slugs) {
-        try {
-          const slugDir = await pagesDir.getDirectoryHandle(slug);
-          let latestTs = 0;
-          for await (const entry of slugDir.values()) {
-            if (entry.kind === 'file' && entry.name.endsWith('.md')) {
-              const ts = parseInt(entry.name.replace('.md', ''), 10);
-              if (ts > latestTs) {
-                latestTs = ts;
-                const file = await entry.getFile();
-                contentMap[slug] = await file.text();
-              }
-            }
-          }
-        } catch { /* slug directory doesn't exist */ }
-      }
-    } catch { /* pages directory doesn't exist */ }
-    return contentMap;
-  }
-
-  // Load gateway domains from gateways.json
+  // Load gateway domains from lists/gateways.json
   async loadGateways() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
     try {
-      const fileHandle = await this.directoryHandle.getFileHandle('gateways.json');
+      const listsDir = await this.getListsDir();
+      const fileHandle = await listsDir.getFileHandle('gateways.json');
       const file = await fileHandle.getFile();
       return JSON.parse(await file.text());
     } catch {
@@ -415,12 +415,13 @@ class FileSystemStorage {
     }
   }
 
-  // Save gateway domains to gateways.json
+  // Save gateway domains to lists/gateways.json
   async saveGateways(data) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write directory');
     }
-    const fileHandle = await this.directoryHandle.getFileHandle('gateways.json', { create: true });
+    const listsDir = await this.getListsDir();
+    const fileHandle = await listsDir.getFileHandle('gateways.json', { create: true });
     const writable = await fileHandle.createWritable();
     await writable.write(JSON.stringify(data, null, 2));
     await writable.close();
@@ -435,7 +436,8 @@ class FileSystemStorage {
     const domains = { ...existingDomains };
     let newWatermark = watermark;
 
-    for await (const entry of this.directoryHandle.values()) {
+    const historyDir = await this.getHistoryDir();
+    for await (const entry of historyDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
         // Skip files whose date is entirely before the watermark
         if (watermark > 0) {
@@ -490,7 +492,7 @@ class FileSystemStorage {
     return { domains, newWatermark };
   }
 
-  // Load all highlights from pages/{slug}/highlights.json for every slug
+  // Load all highlights from atoms/{slug}.json for every slug
   async loadAllHighlights() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
@@ -499,25 +501,28 @@ class FileSystemStorage {
     const highlightsMap = {};
 
     try {
-      const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
-      for await (const entry of pagesDir.values()) {
-        if (entry.kind === 'directory') {
+      const atomsDir = await this.getAtomsDir();
+      for await (const entry of atomsDir.values()) {
+        if (entry.kind === 'file' && entry.name.endsWith('.json')) {
           try {
-            const fh = await entry.getFileHandle('highlights.json');
-            const file = await fh.getFile();
-            highlightsMap[entry.name] = JSON.parse(await file.text());
-          } catch { /* no highlights.json for this slug */ }
+            const file = await entry.getFile();
+            const atom = JSON.parse(await file.text());
+            if (atom.highlights && atom.highlights.length > 0) {
+              const slug = entry.name.replace('.json', '');
+              highlightsMap[slug] = atom.highlights;
+            }
+          } catch { /* skip malformed atom files */ }
         }
       }
-    } catch { /* no pages dir */ }
+    } catch { /* no atoms dir */ }
 
     return highlightsMap;
   }
 
-  // Capture a versioned snapshot: pages/{slug}/{timestamp}.md and .html
+  // Capture a versioned snapshot: atoms/{slug}/{timestamp}.md and .html
   async captureSnapshot(slug, timestamp, markdown, html) {
-    const pagesDir = await this.getOrCreatePagesDirectory();
-    const slugDir = await pagesDir.getDirectoryHandle(slug, { create: true });
+    const atomsDir = await this.getAtomsDir();
+    const slugDir = await atomsDir.getDirectoryHandle(slug, { create: true });
 
     if (markdown) {
       const mdHandle = await slugDir.getFileHandle(`${timestamp}.md`, { create: true });
@@ -543,13 +548,12 @@ class FileSystemStorage {
     const snapshots = [];
 
     try {
-      const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
-      const slugDir = await pagesDir.getDirectoryHandle(slug);
+      const atomsDir = await this.getAtomsDir();
+      const slugDir = await atomsDir.getDirectoryHandle(slug);
       const tsSet = new Map();
 
       for await (const entry of slugDir.values()) {
         if (entry.kind !== 'file') continue;
-        if (entry.name === 'highlights.json') continue;
 
         const match = entry.name.match(/^(\d+)\.(md|html)$/);
         if (!match) continue;
@@ -567,7 +571,7 @@ class FileSystemStorage {
         snapshots.push(snap);
       }
     } catch (error) {
-      // pages/ directory or slug directory may not exist
+      // atoms/ directory or slug directory may not exist
     }
 
     snapshots.sort((a, b) => b.timestamp - a.timestamp);
@@ -580,41 +584,126 @@ class FileSystemStorage {
       throw new Error('No permission to delete');
     }
 
-    const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
-    const slugDir = await pagesDir.getDirectoryHandle(slug);
-    try { await slugDir.removeEntry(`${timestamp}.md`); } catch (e) {}
-    try { await slugDir.removeEntry(`${timestamp}.html`); } catch (e) {}
+    const atomsDir = await this.getAtomsDir();
+    const slugDir = await atomsDir.getDirectoryHandle(slug);
+    try { await this.softDelete(slugDir, `${timestamp}.md`); } catch (e) {}
+    try { await this.softDelete(slugDir, `${timestamp}.html`); } catch (e) {}
   }
 
-  // Load highlights for a slug from pages/{slug}/highlights.json
+  // Load highlights for a slug from atoms/{slug}.json
   async loadHighlights(slug) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
 
     try {
-      const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
-      const slugDir = await pagesDir.getDirectoryHandle(slug);
-      const fileHandle = await slugDir.getFileHandle('highlights.json');
-      const file = await fileHandle.getFile();
-      return JSON.parse(await file.text());
+      const atom = await this.loadAtom(slug);
+      return atom ? (atom.highlights || []) : [];
     } catch (error) {
       return [];
     }
   }
 
-  // Save highlights for a slug to pages/{slug}/highlights.json
+  // Save highlights for a slug to atoms/{slug}.json (read-modify-write)
   async saveHighlights(slug, highlights) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
 
-    const pagesDir = await this.getOrCreatePagesDirectory();
-    const slugDir = await pagesDir.getDirectoryHandle(slug, { create: true });
-    const fileHandle = await slugDir.getFileHandle('highlights.json', { create: true });
+    const atom = (await this.loadAtom(slug)) || {};
+    atom.highlights = highlights;
+    await this.saveAtom(slug, atom);
+  }
+
+  // Load atom metadata from atoms/{slug}.json
+  async loadAtom(slug) {
+    try {
+      const atomsDir = await this.getAtomsDir();
+      const fileHandle = await atomsDir.getFileHandle(`${slug}.json`);
+      const file = await fileHandle.getFile();
+      return JSON.parse(await file.text());
+    } catch {
+      return null;
+    }
+  }
+
+  // Load multiple atoms in one call
+  async loadAtomBatch(slugs) {
+    const atomsDir = await this.getAtomsDir();
+    const result = {};
+    for (const slug of slugs) {
+      try {
+        const fh = await atomsDir.getFileHandle(`${slug}.json`);
+        const file = await fh.getFile();
+        result[slug] = JSON.parse(await file.text());
+      } catch { /* atom doesn't exist */ }
+    }
+    return result;
+  }
+
+  // Save atom metadata to atoms/{slug}.json
+  async saveAtom(slug, data) {
+    const atomsDir = await this.getAtomsDir();
+    const fileHandle = await atomsDir.getFileHandle(`${slug}.json`, { create: true });
     const writable = await fileHandle.createWritable();
-    await writable.write(JSON.stringify(highlights, null, 2));
+    await writable.write(JSON.stringify(data, null, 2));
     await writable.close();
+  }
+
+  // Load page detail: merge atom with history entries after watermark
+  // Returns { atom, interaction } where interaction has the freshest metadata
+  async loadPageDetail(slug, url) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+
+    const atom = (await this.loadAtom(slug)) || { highlights: [], watermark: 0 };
+    const watermark = atom.watermark || 0;
+
+    // Scan JSONL files after watermark for this URL
+    let freshInteraction = null;
+    const historyDir = await this.getHistoryDir();
+    for await (const entry of historyDir.values()) {
+      if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
+        if (watermark > 0) {
+          const dateMatch = entry.name.match(/^(\d{4}-\d{2}-\d{2})\.jsonl$/);
+          if (dateMatch) {
+            const fileEndOfDay = new Date(dateMatch[1] + 'T23:59:59.999Z').getTime();
+            if (fileEndOfDay < watermark) continue;
+          }
+        }
+
+        const file = await entry.getFile();
+        const text = await file.text();
+        for (const line of text.split('\n')) {
+          if (!line.trim()) continue;
+          try {
+            const interaction = JSON.parse(line);
+            if (interaction.url === url && interaction.timestamp > watermark) {
+              freshInteraction = interaction;
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // Merge: use atom's cached metadata, overlay with fresher JSONL if available
+    let interaction;
+    if (freshInteraction) {
+      interaction = freshInteraction;
+      // Update atom with fresh metadata and advance watermark
+      atom.url = interaction.url;
+      atom.title = interaction.title;
+      atom.attention = interaction.attention || '';
+      atom.watermark = interaction.timestamp;
+      await this.saveAtom(slug, atom);
+    } else if (atom.url) {
+      interaction = { url: atom.url, title: atom.title, attention: atom.attention || '', timestamp: atom.watermark, slug };
+    } else {
+      interaction = null;
+    }
+
+    return { atom, interaction };
   }
 
   // Load a single interaction metadata by URL from JSONL files
@@ -625,7 +714,8 @@ class FileSystemStorage {
 
     let match = null;
 
-    for await (const entry of this.directoryHandle.values()) {
+    const historyDir = await this.getHistoryDir();
+    for await (const entry of historyDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
         const file = await entry.getFile();
         const text = await file.text();
@@ -646,30 +736,112 @@ class FileSystemStorage {
     return match;
   }
 
-  // Load all collection pins from collections.json
+  // Load pins for a single collection from lists/user/{id}.json
+  async loadCollectionPinsById(collectionId) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+    try {
+      const listsDir = await this.getListsDir();
+      const userDir = await listsDir.getDirectoryHandle('user');
+      const fh = await userDir.getFileHandle(`${collectionId}.json`);
+      const file = await fh.getFile();
+      return JSON.parse(await file.text());
+    } catch {
+      return [];
+    }
+  }
+
+  // Load all collection pins from lists/user/{id}.json files
   async loadCollectionPins() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
 
+    const allPins = {};
     try {
-      const fileHandle = await this.directoryHandle.getFileHandle('collections.json');
-      const file = await fileHandle.getFile();
-      return JSON.parse(await file.text());
-    } catch (error) {
-      return {};
-    }
+      const listsDir = await this.getListsDir();
+      const userDir = await listsDir.getDirectoryHandle('user');
+      for await (const entry of userDir.values()) {
+        if (entry.kind === 'file' && entry.name.endsWith('.json')) {
+          try {
+            const file = await entry.getFile();
+            const id = entry.name.replace('.json', '');
+            allPins[id] = JSON.parse(await file.text());
+          } catch { /* skip malformed files */ }
+        }
+      }
+    } catch { /* user dir doesn't exist yet */ }
+    return allPins;
   }
 
-  // Save collection pins to collections.json
+  // Save pins for a single collection to lists/user/{id}.json
+  async saveCollectionPinsById(collectionId, pins) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to write');
+    }
+    const listsDir = await this.getListsDir();
+    const userDir = await listsDir.getDirectoryHandle('user', { create: true });
+    const fileHandle = await userDir.getFileHandle(`${collectionId}.json`, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(pins, null, 2));
+    await writable.close();
+  }
+
+  // Save collection pins to lists/user/{id}.json files
   async saveCollectionPins(allPins) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
 
-    const fileHandle = await this.directoryHandle.getFileHandle('collections.json', { create: true });
+    const listsDir = await this.getListsDir();
+    const userDir = await listsDir.getDirectoryHandle('user', { create: true });
+
+    // Write each collection as a separate file
+    const activeIds = new Set();
+    for (const [id, pins] of Object.entries(allPins)) {
+      activeIds.add(id);
+      const fileHandle = await userDir.getFileHandle(`${id}.json`, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(JSON.stringify(pins, null, 2));
+      await writable.close();
+    }
+
+    // Soft-delete orphaned files not in allPins
+    for await (const entry of userDir.values()) {
+      if (entry.kind === 'file' && entry.name.endsWith('.json')) {
+        const id = entry.name.replace('.json', '');
+        if (!activeIds.has(id)) {
+          await this.softDelete(userDir, entry.name);
+        }
+      }
+    }
+  }
+
+  // Load permanent deletes from lists/permanent-deletes.json
+  async loadPermanentDeletes() {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+    try {
+      const listsDir = await this.getListsDir();
+      const fileHandle = await listsDir.getFileHandle('permanent-deletes.json');
+      const file = await fileHandle.getFile();
+      return JSON.parse(await file.text());
+    } catch {
+      return [];
+    }
+  }
+
+  // Save permanent deletes to lists/permanent-deletes.json
+  async savePermanentDeletes(urls) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to write directory');
+    }
+    const listsDir = await this.getListsDir();
+    const fileHandle = await listsDir.getFileHandle('permanent-deletes.json', { create: true });
     const writable = await fileHandle.createWritable();
-    await writable.write(JSON.stringify(allPins, null, 2));
+    await writable.write(JSON.stringify(urls, null, 2));
     await writable.close();
   }
 
@@ -700,53 +872,6 @@ class FileSystemStorage {
     await writable.close();
   }
 
-  // Delete old interactions (for data retention policy)
-  async deleteOldFiles(daysToKeep = 90) {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to delete files');
-    }
-
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
-    const cutoffTimestamp = cutoffDate.getTime();
-
-    let deletedCount = 0;
-
-    // Delete old JSONL files
-    for await (const entry of this.directoryHandle.values()) {
-      if (entry.kind === 'file' && entry.name.endsWith('.jsonl') && entry.name.match(/^\d{4}-\d{2}-\d{2}\.jsonl$/)) {
-        const dateStr = entry.name.replace('.jsonl', '');
-        const fileDate = new Date(dateStr);
-
-        if (fileDate < cutoffDate) {
-          await this.directoryHandle.removeEntry(entry.name);
-          deletedCount++;
-        }
-      }
-    }
-
-    // Delete old page content files (based on timestamp prefix in slug)
-    try {
-      const pagesDir = await this.directoryHandle.getDirectoryHandle('pages');
-
-      for await (const entry of pagesDir.values()) {
-        if (entry.kind === 'file') {
-          const match = entry.name.match(/^(\d+)-/);
-          if (match) {
-            const fileTimestamp = parseInt(match[1], 10);
-            if (fileTimestamp < cutoffTimestamp) {
-              await pagesDir.removeEntry(entry.name);
-              deletedCount++;
-            }
-          }
-        }
-      }
-    } catch (error) {
-      // pages/ directory may not exist
-    }
-
-    return { success: true, deletedCount };
-  }
 }
 
 export { FileSystemStorage };

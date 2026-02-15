@@ -38,10 +38,14 @@ export async function saveSettingsValue(key, value) {
 export function generateSlugFromUrl(url) {
   try {
     const parsed = new URL(url);
-    const base = (parsed.hostname + parsed.pathname)
-      .toLowerCase()
+    let domain = parsed.hostname.toLowerCase();
+    if (domain.startsWith('www.')) domain = domain.slice(4);
+    const lastDot = domain.lastIndexOf('.');
+    if (lastDot > 0) domain = domain.slice(0, lastDot);
+    const base = (domain + parsed.pathname)
       .replace(/[^\p{L}\p{N}]+/gu, '-')
-      .replace(/^-+|-+$/g, '');
+      .replace(/^-+|-+$/g, '')
+      .substring(0, 30).replace(/-+$/, '');
     // Short hash of full URL for uniqueness (query params, fragments, etc.)
     let hash = 0;
     for (let i = 0; i < url.length; i++) {

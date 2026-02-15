@@ -303,7 +303,8 @@ describe('Persistence round-trip', () => {
 
   describe('gateway persistence (incremental)', () => {
     async function writeJsonl(dir, filename, lines) {
-      const fh = await dir.getFileHandle(filename, { create: true });
+      const historyDir = await dir.getDirectoryHandle('history', { create: true });
+      const fh = await historyDir.getFileHandle(filename, { create: true });
       const w = await fh.createWritable();
       await w.write(lines.map(l => JSON.stringify(l)).join('\n'));
       await w.close();
@@ -410,10 +411,11 @@ describe('Persistence round-trip', () => {
       await writeJsonl(rootDir, '2026-02-14.jsonl', [
         { url: 'https://ok.com/page', timestamp: 1 },
       ]);
-      const fh = await rootDir.getFileHandle('2026-02-14.jsonl');
+      const historyDir = await rootDir.getDirectoryHandle('history');
+      const fh = await historyDir.getFileHandle('2026-02-14.jsonl');
       const file = await fh.getFile();
       const existing = await file.text();
-      const fh2 = await rootDir.getFileHandle('2026-02-14.jsonl', { create: true });
+      const fh2 = await historyDir.getFileHandle('2026-02-14.jsonl', { create: true });
       const w2 = await fh2.createWritable();
       await w2.write(existing + '\n{not valid json\n');
       await w2.close();
@@ -482,5 +484,108 @@ describe('Persistence round-trip', () => {
 
     expect(loadedPins).toEqual(pins);
     expect(loadedSettings.collections).toEqual([{ id: 'c1', query: 'test' }]);
+  });
+
+  // ---- Per-collection pin isolation (regression: lazy pins + bulk save deleted other files) ----
+
+  describe('per-collection pin operations', () => {
+    const PINS_C1 = [
+      { url: 'https://a.com', title: 'A', pinnedAt: 100 },
+      { url: 'https://b.com', title: 'B', pinnedAt: 200 },
+    ];
+    const PINS_C2 = [
+      { url: 'https://x.com', title: 'X', pinnedAt: 300 },
+    ];
+    const PINS_C3 = [
+      { url: 'https://y.com', title: 'Y', pinnedAt: 400 },
+      { url: 'https://z.com', title: 'Z', pinnedAt: 500 },
+      { url: 'https://w.com', title: 'W', pinnedAt: 600 },
+    ];
+
+    async function seedAllPins() {
+      await fs.saveCollectionPins({ c1: PINS_C1, c2: PINS_C2, c3: PINS_C3 });
+    }
+
+    it('saveCollectionPinsById writes only one file, leaves others intact', async () => {
+      await seedAllPins();
+
+      // Update c1 only
+      const updated = [...PINS_C1, { url: 'https://new.com', title: 'New', pinnedAt: 700 }];
+      await fs.saveCollectionPinsById('c1', updated);
+
+      // c1 updated
+      const c1 = await fs.loadCollectionPinsById('c1');
+      expect(c1).toEqual(updated);
+
+      // c2 and c3 untouched
+      const c2 = await fs.loadCollectionPinsById('c2');
+      expect(c2).toEqual(PINS_C2);
+      const c3 = await fs.loadCollectionPinsById('c3');
+      expect(c3).toEqual(PINS_C3);
+    });
+
+    it('saveCollectionPinsById creates new file for unknown collection', async () => {
+      await seedAllPins();
+
+      const newPins = [{ url: 'https://brand-new.com', title: 'Brand New', pinnedAt: 800 }];
+      await fs.saveCollectionPinsById('c4', newPins);
+
+      // New collection saved
+      const c4 = await fs.loadCollectionPinsById('c4');
+      expect(c4).toEqual(newPins);
+
+      // Existing collections untouched
+      const all = await fs.loadCollectionPins();
+      expect(all.c1).toEqual(PINS_C1);
+      expect(all.c2).toEqual(PINS_C2);
+      expect(all.c3).toEqual(PINS_C3);
+    });
+
+    it('loadCollectionPinsById returns [] for missing collection', async () => {
+      await seedAllPins();
+      const pins = await fs.loadCollectionPinsById('nonexistent');
+      expect(pins).toEqual([]);
+    });
+
+    it('loadCollectionPinsById round-trips with saveCollectionPinsById', async () => {
+      const pins = [{ url: 'https://solo.com', title: 'Solo', pinnedAt: 999 }];
+      await fs.saveCollectionPinsById('solo', pins);
+      const loaded = await fs.loadCollectionPinsById('solo');
+      expect(loaded).toEqual(pins);
+    });
+
+    it('saving empty pins for deleted collection does not affect others', async () => {
+      await seedAllPins();
+
+      // Simulate delete-collection: save empty pins for c2
+      await fs.saveCollectionPinsById('c2', []);
+
+      // c2 is now empty
+      const c2 = await fs.loadCollectionPinsById('c2');
+      expect(c2).toEqual([]);
+
+      // c1 and c3 untouched
+      const c1 = await fs.loadCollectionPinsById('c1');
+      expect(c1).toEqual(PINS_C1);
+      const c3 = await fs.loadCollectionPinsById('c3');
+      expect(c3).toEqual(PINS_C3);
+    });
+
+    it('concurrent per-collection saves do not interfere', async () => {
+      await seedAllPins();
+
+      const updatedC1 = [{ url: 'https://c1-new.com', title: 'C1 New', pinnedAt: 900 }];
+      const updatedC3 = [{ url: 'https://c3-new.com', title: 'C3 New', pinnedAt: 1000 }];
+
+      // Save c1 and c3 concurrently
+      await Promise.all([
+        fs.saveCollectionPinsById('c1', updatedC1),
+        fs.saveCollectionPinsById('c3', updatedC3),
+      ]);
+
+      expect(await fs.loadCollectionPinsById('c1')).toEqual(updatedC1);
+      expect(await fs.loadCollectionPinsById('c2')).toEqual(PINS_C2);
+      expect(await fs.loadCollectionPinsById('c3')).toEqual(updatedC3);
+    });
   });
 });

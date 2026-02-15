@@ -63,7 +63,6 @@ describe('buildInteractionsForEngine', () => {
     return vi.fn().mockImplementation((url, title) => ({
       url,
       title,
-      id: undefined,
       timestamp: undefined,
       setIntent: vi.fn(),
       setContent: vi.fn(),
@@ -75,7 +74,7 @@ describe('buildInteractionsForEngine', () => {
     const MockInteraction = makeMockInteractionClass();
     const engine = { addInteraction: vi.fn() };
     const dataList = [
-      { url: 'https://a.com', title: 'A', id: 'id-a', timestamp: 100, intent: 'test', slug: 'a', attention: '{}' },
+      { url: 'https://a.com', title: 'A', timestamp: 100, intent: 'test', slug: 'a', attention: '{}' },
     ];
     const contentMap = { a: '# A content' };
 
@@ -85,7 +84,6 @@ describe('buildInteractionsForEngine', () => {
     expect(engine.addInteraction).toHaveBeenCalledTimes(1);
 
     const obj = engine.addInteraction.mock.calls[0][0];
-    expect(obj.id).toBe('id-a');
     expect(obj.timestamp).toBe(BigInt(100));
     expect(obj.setIntent).toHaveBeenCalledWith('test');
     expect(obj.setContent).toHaveBeenCalledWith('# A content');
@@ -96,7 +94,7 @@ describe('buildInteractionsForEngine', () => {
     const MockInteraction = makeMockInteractionClass();
     const engine = { addInteraction: vi.fn() };
     const dataList = [
-      { url: 'https://b.com', title: 'B', id: 'id-b', timestamp: 1770700063620 },
+      { url: 'https://b.com', title: 'B', timestamp: 1770700063620 },
     ];
 
     buildInteractionsForEngine(MockInteraction, engine, dataList, {});
@@ -109,7 +107,7 @@ describe('buildInteractionsForEngine', () => {
     const MockInteraction = makeMockInteractionClass();
     const engine = { addInteraction: vi.fn() };
     const dataList = [
-      { url: 'https://c.com', title: 'C', id: 'id-c', timestamp: 1, slug: 'c' },
+      { url: 'https://c.com', title: 'C', timestamp: 1, slug: 'c' },
     ];
 
     buildInteractionsForEngine(MockInteraction, engine, dataList, {});
@@ -122,7 +120,7 @@ describe('buildInteractionsForEngine', () => {
     const MockInteraction = makeMockInteractionClass();
     const engine = { addInteraction: vi.fn() };
     const dataList = [
-      { url: 'https://d.com', title: 'D', id: 'id-d', timestamp: 1 },
+      { url: 'https://d.com', title: 'D', timestamp: 1 },
     ];
 
     buildInteractionsForEngine(MockInteraction, engine, dataList, {});

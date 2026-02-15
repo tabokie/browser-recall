@@ -4,7 +4,7 @@ import { generateSlugFromUrl } from '../extension/utils.js';
 describe('generateSlugFromUrl', () => {
   it('produces a slug from a simple URL', () => {
     const slug = generateSlugFromUrl('https://example.com/page');
-    expect(slug).toMatch(/^example-com-page-/);
+    expect(slug).toMatch(/^example-page-/);
   });
 
   it('strips leading/trailing hyphens', () => {

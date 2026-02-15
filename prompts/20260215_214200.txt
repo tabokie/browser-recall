@@ -1,0 +1,91 @@
+- Walk me through the data model (schema, content, size estimation, access pattern) of files, storage.local, in-memory cache variables.
+- Can WASM engine access storage.local or JS memory variables?
+- The current model has a few issues. Memory footprint is too large. I/O overhead is too large. Let me propose a new model and debate with me.
+- 1. History logs (`history/<date>.jsonl`)
+
+Serve as an operation logs. All mutable operations are appended to it, that include Visit (only the first visit in a day is recorded), PinToCollection, CreateCollection, AddNotes, etc.
+
+But the record should be smaller than current schema. It only has two long strings "url" and "slug", not "id" because it's the same as "url". Other metadata including title is stored in page detail files, which I will explain in next section.
+
+This file is loaded and accessed in two cases: (1) in "History" view. And the most recent records is cached in storage.local. (2) in search where time filter or relation search is applied.
+
+2. Page details (`atoms/<slug>.json`)
+
+Each page (URL) is uniquely identified as an atom, whose details are stored in json file. All information needed to display its detail UI is here.
+
+When user browses the web, some transient interation data is generated that is not saved to history logs (too noisy). But these data are sent to background to persist to page detail files async.
+
+This data is cached in local.storage, but with size limit and eviction settings.
+
+3. Collection (`lists/<slug>.json`)
+
+Similar to existing schema, but every collection has its own file.
+
+Additionally, if the collection has a query, it will save the top query results in the file (a list of page slugs). When new interactions are generated, we run them against every collections in the background, and save the matches (scored together with existing saves) back to collection file. When we open the collection UI, first recall the file content, only run searches over pages that are not materialized yet.
+
+Gateways is stored in this folder as well. We already have a post-process progress timestamp, now that more collections need post-process, it will be a global progress that applies to all collections.
+
+4. Captures (`captures/<slug>.md,html`)
+
+Similar to existing format. But without sub-folders.
+
+5. Slug should be shorter, <domain-without-www-or-com>-<random> is good enough. 
+- 1 & 2. Good points. Consider interactions and page first visits both have temporal locality. I propose this variation:
+
+Page details are stored in large files split by the first-visit time of page (`atoms/<date>.json`). In the folder, a smaller index file (`index.txt`) stores the mapping from page-slug to first-visit date, this index is always loaded in memory (date is represented numerically, not as string). Date file is immutable once written, so it is easy to cache them in memory or in storage.local.
+
+Interaction logs keep slug, title, but no URL because URL is not displayed on result card. Before interaction logs is being rotated after a day, we need to update atom index, when atomically write (using rename) a new page detail file for pages first visited in that day.
+
+When loading page details, we read the entire date file and cache in memory. This way adjacent pages are likely to cache hit.
+
+3. Go with deterministic slugs but shorter, drops "www" and "com".
+4. For individual collection, use a special flag to mark invalidated. It only goes back to normal when all pages before watermark are caught-up in this collection.
+5. Keep only the latest capture, use page slug as capture file name.
+- Walk me through the data model (schema, content, size estimation, access pattern) of files, storage.local, in-memory cache variables.
+- Let's reduce size of interation logs first. Drop the id field which is duplicated with url. For page slugs, use a smaller website prefx that only contains domain name, without the "www" or "com".
+- I see the page slug is still very long, any idea?
+- Go ahead
+- Move gateways, collections, permanentDeletes files to folder `lists/`, and make every collection has its own files.
+- Use "user" instead of "collections"
+- Move interaction logs into folder `history/`.
+- Rename `pages/` to `captures/`, and move `highlights.json` out. Create a folder `atoms/`, in it each page stores a `<slug>.json` which has all metadata (title, url, attention) and highlights and notes. Additionally, it has a watermark similar to the gateway collection watermark. The watermark means this persistent metadata is consistent with history before this timestamp (including). When we open this page detail, we shall merge the disk format with history after this watermark.
+- Actually, merge captures into pages folder. This is cleaner.
+- Actually, merge captures into atoms folder. This is cleaner.
+- Now let's reduce memory footprint and I/O overhead.
+
+Full history is only needed for (1) "History" view, and the most recent immutable history files are cached in memory, (2) Search with time filter, and the history is loaded in WASM, not cached by JS.
+
+For other views, the list stored in the file contains title, url, etc -- fields that are needed for display and column sort. On a clean reload, we show the snapshot in file first. Then async for each item, we check if there're in-memory page details that are newer, and update the list. Then, we ask background worker to update the list file async.
+- The pages.json seems unnecessary. We can load history files, but:
+
+Don't load them all at once. The load is done progressively in batches (e.g. 10 days for a batch). Only partial data that surrounds visible area (e.g. 10 batches) is stored in memory variable. When user scroll off the center of this memory window, we automatically slide the window to load more data from files.
+
+Don't load them for other UIs. E.g. collection UI or search UI shouldn't depend on loading full history.
+- Reload token.
+- Now walk me through the data flow for each UI. Preferrably with time sequence graph that illustrates serial operations and concurent operations.
+- A few issues:
+
+- Why load all collection files during initialize? We only need the titles and order of them.
+- Because history files are lazily loaded, does it mean the attention chart is also lazily rendered?
+- Why does search view still load files in JS side? We can accomplish pipelined search by (a) for day in 0..10 { spawn(engine.search(query, day)) }, or (b) let (first_batch, cursor) = engine.search(query), render(first_batch), spawn(engine.search(query, cursor)).
+- We shouldn't need to load atoms in collection view. Collection file should save the fields of pinned atoms that are needed for card render. And when we render, we merge file content with fresh atom data in memory. The collection file is updated to reflect freshest atom data in the background.
+- Plan and implement, ask clarifying questions.
+- Running the search in parallel is more scalable. Just make sure all I/O in done in Rust side, don't fetch in JS and pass to Rust.
+- There are atom read cache and atom write buffer. When an interaction is created, and it affects an atom metadata, we will (1) insert the atom to read cache, (2) send the atom along with timestamp to background write buffer to be flushed. When extension is reloaded, we use the flush watermark to restore the state of read cache and write buffer. When rendering collection UI, for each atom from file, we check if a different version is in read cache, if so, we use that version.
+- Don't fallback. Why not create real directory for tests?
+- Reload token.
+- There is regression. Opening my ~/portal-data, some collection doesn't show related pages as before. Some collections are empty now, they show up in sidebar but no file anymore.
+- Add tests to cover these issues.
+- This particular collection still doesn't show relative pages: 1770862579460.json
+- No, by "relative" I mean pages related to the pinned page.
+- Reproduce it in tests then fix it. This is already instructed in the rules. Refine the rules so that you remember it next time.
+- Change the code so that files are never deleted, they are moved to `deleted/` folder instead. This can prevent data loss bug during development.
+- For each UI, walk me through what data is being cached in memory or in storage.local, and if it is reused during refresh, and updated to reflect latest state.
+- Fix those issues. Write tests to repro first.
+- The code comment is too long. Write the conclusion only.
+- Walk me through the foreground and background updates of file storage and storage.local. Are there data race or write loss?
+- Why not use a MPSC queue for I/O tasks, never write in foreground? And in background, each file is written single-threadedly (or with lock).
+- Continue
+- Will there be data leaks or any other resource leaks if I repeatedly delete and recreate entities in the system, e.g. collection, page, query.
+- Examine the codebase line by line. Remove dead code that are not reachable in UI. Reorganize code paths and simplify them to be concise, focused.
+- Finish up.

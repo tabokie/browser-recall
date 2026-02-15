@@ -89,16 +89,28 @@ const TEST_COLLECTION = {
   name: 'Rust Lang',
 };
 
+// Collection whose query matches NO interactions in metadata (like "AI Core")
+// but whose pins share hostname with loaded history → related pages should still appear
+const TEST_COLLECTION_NOHIT = {
+  id: 'col-nohit',
+  query: 'xyzzy nonexistent query',
+  name: 'No-Hit Query',
+};
+
 const TEST_COLLECTION_PINS = {
   'col-rust': [
     { url: 'https://rust-lang.org/doc0', title: 'Rust Documentation 0', pinnedAt: NOW - DAY },
     { url: 'https://rust-lang.org/doc1', title: 'Rust Documentation 1', pinnedAt: NOW - DAY },
     { url: 'https://rust-lang.org/doc2', title: 'Rust Documentation 2', pinnedAt: NOW - DAY },
   ],
+  'col-nohit': [
+    // Pin from example.com — shares hostname with FILE1_INTERACTIONS (Today Page 0..19)
+    { url: 'https://example.com/today0', title: 'Today Page 0', pinnedAt: NOW - DAY },
+  ],
 };
 
 const TEST_SETTINGS = {
-  collections: [TEST_COLLECTION],
+  collections: [TEST_COLLECTION, TEST_COLLECTION_NOHIT],
   settings: { captureContent: true, captureAttention: true, archiveQuality: 'medium' },
   urlBlacklist: [],
   titleTrimRules: [],
@@ -126,12 +138,22 @@ const FILE_MAP = {
 // We must set up mocks BEFORE dynamic import of options.js.
 // vi.mock calls are hoisted above imports by vitest.
 
+// Hoisted mock for searchBatch — configurable per-test
+const { mockSearchBatchFn } = vi.hoisted(() => ({
+  mockSearchBatchFn: vi.fn(async () => []),
+}));
+
+// Mock directory handle for FileSystem Access API
+function mockDirectoryHandle() {
+  return { getDirectoryHandle: async () => mockDirectoryHandle() };
+}
+
 vi.mock('../extension/filesystem-storage.js', () => ({
   FileSystemStorage: class {
-    constructor() { this.directoryHandle = null; }
+    constructor() { this.directoryHandle = mockDirectoryHandle(); }
     async getDirectoryInfo() { return { name: 'test-portal-data', hasPermission: true }; }
     async verifyPermission() { return true; }
-    async loadDirectoryHandle() { return {}; }
+    async loadDirectoryHandle() { return this.directoryHandle; }
     async selectDirectory() { return { success: true, name: 'test' }; }
     async loadAllInteractions() { return []; }
     async loadAllContent() { return {}; }
@@ -164,6 +186,7 @@ vi.mock('../extension/pkg/portal_extension.js', () => {
     default: async () => {}, // init()
     Interaction: MockInteraction,
     SearchEngine: MockSearchEngine,
+    searchBatch: (...args) => mockSearchBatchFn(...args),
   };
 });
 
@@ -244,6 +267,9 @@ describe('Progressive loading', () => {
       }
 
       case 'loadCollectionPins':
+        if (msg.collectionId) {
+          return { success: true, pins: TEST_COLLECTION_PINS[msg.collectionId] || [] };
+        }
         return { success: true, pins: TEST_COLLECTION_PINS };
 
       case 'loadContentBatch':
@@ -258,6 +284,9 @@ describe('Progressive loading', () => {
 
       case 'loadAllHighlights':
         return { success: true, highlightsMap: {} };
+
+      case 'loadAtomBatch':
+        return { success: true, atoms: {} };
 
       case 'saveSettingsKey':
         return { success: true };
@@ -287,6 +316,8 @@ describe('Progressive loading', () => {
 
   beforeEach(() => {
     vi.resetModules();
+    mockSearchBatchFn.mockReset();
+    mockSearchBatchFn.mockImplementation(async () => []);
     // Set up minimal DOM
     document.head.innerHTML = `<style>${styleContent}</style>`;
     document.body.innerHTML = bodyContent;
@@ -375,6 +406,7 @@ describe('Progressive loading', () => {
     deferreds['listInteractionFiles'] = createDeferred();
 
     // Import triggers initialize() — it blocks at loadSettingsValue('settings') cache miss
+    // and at initHistoryFiles() (listInteractionFiles paused)
     const importDone = importOptions();
     await tick(50);
 
@@ -388,7 +420,7 @@ describe('Progressive loading', () => {
     // No collection items (loadSettings blocked → renderCollections hasn't completed)
     expect(sidebarCollections()).toEqual([]);
 
-    // No result rows (initialize stuck before loadData → showCategory hasn't run)
+    // No result rows (initialize stuck before initHistoryFiles → showCategory hasn't run)
     expect(resultRows()).toEqual([]);
 
     // Clean up: resolve deferreds so initialize can finish
@@ -422,7 +454,7 @@ describe('Progressive loading', () => {
     expect(sidebarCategories()).toContain('all');
     expect(chartFrameVisible()).toBe(true);
 
-    // History results visible (loadData + showCategory completed independently)
+    // History results visible (initHistoryFiles + showCategory completed independently)
     expect(resultRows().length).toBeGreaterThan(0);
 
     // But collections still empty (renderCollections waiting for loadSettings)
@@ -452,7 +484,7 @@ describe('Progressive loading', () => {
     expect(sidebarCategories()).toContain('all');
     expect(chartFrameVisible()).toBe(true);
 
-    // loadData blocked → Promise.all blocked → showCategory hasn't run → no result rows
+    // initHistoryFiles blocked → Promise.all blocked → showCategory hasn't run → no result rows
     expect(resultRows()).toEqual([]);
 
     // Unblock
@@ -477,8 +509,12 @@ describe('Progressive loading', () => {
     expect(sidebarCollections()).toContain('col-rust');
 
     // Now inject pauses and open a collection
-    deferreds['loadCollectionPins'] = createDeferred();
-    deferreds['loadContentBatch'] = createDeferred(); // blocks pipelinedSearch
+    // Block searchBatch (Rust-side search) so Phase 2 is deferred while Phase 1 renders instantly
+    const searchDeferred = createDeferred();
+    mockSearchBatchFn.mockImplementation(async () => {
+      await searchDeferred.promise;
+      return [];
+    });
 
     // Simulate clicking on the collection — call showCollection via its sidebar click handler
     const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-rust"]');
@@ -498,8 +534,8 @@ describe('Progressive loading', () => {
     // Main title should reflect collection
     expect(mainTitle()).toBe('Rust Lang');
 
-    // Phase 1: pinned section renders immediately (allCollectionPins + cachedData
-    // were loaded during initialize, and Phase 1 paints before Phase 2 via setTimeout(0)).
+    // Phase 1: pinned section renders immediately (lazy-loaded pins enriched
+    // from cached fields + atomReadCache, no blocking I/O).
     expect(pinnedOnlyRows().length).toBe(3);
 
     // Explore section renders immediately (decoupled from pinned search)
@@ -507,13 +543,19 @@ describe('Progressive loading', () => {
     expect(relatedResultsContent()).toContain('Add filters to start querying');
 
     // Clean up
-    deferreds['loadCollectionPins'].resolve();
-    deferreds['loadContentBatch'].resolve();
+    searchDeferred.resolve();
     await tick(200);
   });
 
   it('Test 5: load collection fully, then reopen with search paused → pinned section renders from cache', async () => {
     populateCache();
+
+    // Configure searchBatch to return rust interactions (matching "rust" query)
+    const rustResults = RUST_INTERACTIONS.map(i => ({
+      url: i.url, title: i.title, score: 1.0, timestamp: i.timestamp,
+      intent: i.intent || '', attention: i.attention || '',
+    }));
+    mockSearchBatchFn.mockImplementation(async () => rustResults);
 
     // Let initialize() complete
     const importDone = importOptions();
@@ -537,8 +579,12 @@ describe('Progressive loading', () => {
     const firstLoadPinnedCount = pinnedResultRows().length;
     expect(firstLoadPinnedCount).toBeGreaterThan(3); // 3 pinned + related items
 
-    // Now inject pause on search and reopen
-    deferreds['loadContentBatch'] = createDeferred();
+    // Now block searchBatch and reopen — cache should serve immediately
+    const searchDeferred = createDeferred();
+    mockSearchBatchFn.mockImplementation(async () => {
+      await searchDeferred.promise;
+      return [];
+    });
 
     // Click the collection again to reopen
     collItem.click();
@@ -557,7 +603,41 @@ describe('Progressive loading', () => {
     expect(sidebarCollections()).toContain('col-rust');
 
     // Clean up
-    deferreds['loadContentBatch'].resolve();
+    searchDeferred.resolve();
     await tick(200);
+  });
+
+  it('Test 6: collection with zero-hit query still shows related pages from loaded history', async () => {
+    populateCache();
+
+    // searchBatch returns [] (query matches nothing in metadata)
+    mockSearchBatchFn.mockImplementation(async () => []);
+
+    // Let initialize() complete
+    const importDone = importOptions();
+    await importDone;
+    await tick(100);
+
+    // History should be loaded (historyByUrl populated)
+    expect(resultRows().length).toBeGreaterThan(0);
+
+    // Open the no-hit collection
+    const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-nohit"]');
+    expect(collItem).not.toBeNull();
+    collItem.click();
+    await tick(300);
+
+    // Collection layout visible with correct title
+    expect(collectionLayoutVisible()).toBe(true);
+    expect(mainTitle()).toBe('No-Hit Query');
+
+    // Phase 1: the single pin should render
+    expect(pinnedOnlyRows().length).toBe(1);
+
+    // Phase 2: related pages should appear from loaded history even though
+    // search returned 0 results — the pin shares hostname (example.com) with
+    // many loaded interactions, so findRelatedPages should find candidates.
+    const totalRows = pinnedResultRows().length;
+    expect(totalRows).toBeGreaterThan(1); // 1 pinned + at least 1 related
   });
 });

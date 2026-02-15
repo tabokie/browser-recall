@@ -35,7 +35,6 @@ async function hydrateCache() {
       if (s.urlBlacklist !== undefined) cacheUpdate.urlBlacklist = s.urlBlacklist;
       if (s.titleTrimRules !== undefined) cacheUpdate.titleTrimRules = s.titleTrimRules;
       if (s.recycleBin !== undefined) cacheUpdate.recycleBin = s.recycleBin;
-      if (s.permanentDeletes !== undefined) cacheUpdate.permanentDeletes = s.permanentDeletes;
       if (s.settings !== undefined) cacheUpdate.settings = s.settings;
       if (Object.keys(cacheUpdate).length > 0) {
         await chrome.storage.local.set(cacheUpdate);
@@ -44,6 +43,14 @@ async function hydrateCache() {
     }
   } catch (error) {
     console.warn('Cache hydration failed:', error.message);
+  }
+
+  // Load permanent deletes from lists/permanent-deletes.json
+  try {
+    const pdResp = await chrome.runtime.sendMessage({ action: 'loadPermanentDeletes' });
+    if (pdResp?.success) await chrome.storage.local.set({ permanentDeletes: pdResp.urls });
+  } catch (error) {
+    console.warn('Permanent deletes hydration failed:', error.message);
   }
 
   // Load and incrementally process gateway domains
@@ -89,9 +96,6 @@ chrome.runtime.onInstalled.addListener(async () => {
 
   // Create offscreen document
   await setupOffscreenDocument();
-
-  // Initialize empty write buffer
-  await chrome.storage.local.set({ writeBuffer: [] });
 
   console.log('Storage initialized');
 
@@ -143,13 +147,6 @@ async function trimTitle(rawTitle, url) {
 
 // --- Gateway domain registry ---
 // Storage: chrome.storage.local['gatewayDomains'] = { [origin]: { rootUrl, childCount, fetched } }
-
-function isSearchQueryGateway(url) {
-  try {
-    const params = new URL(url).searchParams;
-    return params.has('q') || params.has('query') || params.has('search');
-  } catch { return false; }
-}
 
 async function updateGatewayRegistry(url) {
   try {
@@ -210,7 +207,6 @@ async function fetchAndCreateGatewayRoot(origin) {
     const slug = generateSlugFromUrl(rootUrl);
 
     const interaction = {
-      id: rootUrl,
       timestamp: Date.now(),
       url: rootUrl,
       title: title,
@@ -221,10 +217,8 @@ async function fetchAndCreateGatewayRoot(origin) {
 
     await setupOffscreenDocument();
     await chrome.runtime.sendMessage({
-      action: 'writeInteraction',
-      interaction,
-      markdown: '',
-      html: ''
+      action: 'enqueueInteraction',
+      entry: { interaction, markdown: '', html: '' }
     });
 
     // Update registry with rootUrl
@@ -248,26 +242,14 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     const { workspace } = await chrome.storage.local.get(['workspace']);
     if (workspace && workspace.mode === 'private') return;
 
-    const result = await chrome.storage.local.get(['writeBuffer']);
-    const buffer = result.writeBuffer || [];
-    const existingIndex = buffer.findIndex(entry => entry.interaction.url === tab.url);
-    if (existingIndex !== -1) {
-      const title = await trimTitle(changeInfo.title, tab.url);
-      buffer[existingIndex].interaction.title = title;
-      buffer[existingIndex].interaction.timestamp = Date.now();
-      await chrome.storage.local.set({ writeBuffer: buffer });
-
-      await setupOffscreenDocument();
-      chrome.runtime.sendMessage({
-        action: 'writeInteraction',
-        interaction: buffer[existingIndex].interaction,
-        markdown: buffer[existingIndex].markdown,
-        html: buffer[existingIndex].html
-      }).catch(err => {
-        console.warn('Title update write failed:', err.message);
-      });
-      console.log(`Title updated for ${tab.url}: ${title}`);
-    }
+    const title = await trimTitle(changeInfo.title, tab.url);
+    await setupOffscreenDocument();
+    chrome.runtime.sendMessage({
+      action: 'updateQueuedInteraction',
+      url: tab.url,
+      updates: { interaction: { title, timestamp: Date.now() } }
+    }).catch(err => console.warn('Title update failed:', err.message));
+    console.log(`Title updated for ${tab.url}: ${title}`);
   }
 
   if (changeInfo.status === 'complete' && tab.url) {
@@ -303,7 +285,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       // Create interaction record (metadata only, no content)
       // URL is the identity — revisiting the same URL updates the entry
       const interaction = {
-        id: tab.url,
         timestamp: timestamp,
         url: tab.url,
         title: title,
@@ -315,50 +296,17 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       // Send message to content script to capture intent and attention
       chrome.tabs.sendMessage(tabId, {
         action: 'captureInteraction',
-        interactionId: interaction.id
+        interactionId: interaction.url
       }).catch((error) => {
         console.warn('Could not send message to content script:', error.message);
       });
 
-      // Add to write buffer: metadata + content placeholders
-      // Dedup by URL — on revisit, update existing buffer entry
-      const result = await chrome.storage.local.get(['writeBuffer']);
-      const buffer = result.writeBuffer || [];
-      const existingIndex = buffer.findIndex(entry => entry.interaction.url === tab.url);
-      if (existingIndex !== -1) {
-        buffer[existingIndex].interaction = interaction;
-      } else {
-        buffer.push({
-          interaction: interaction,
-          markdown: '',
-          html: ''
-        });
-      }
-      await chrome.storage.local.set({ writeBuffer: buffer });
-
-      console.log(`Added to buffer (${buffer.length} pending)`);
-
-      // Trigger immediate write to filesystem; on success, remove from buffer
+      // Enqueue for filesystem write (offscreen drains sequentially)
       await setupOffscreenDocument();
       chrome.runtime.sendMessage({
-        action: 'writeInteraction',
-        interaction: interaction,
-        markdown: '',
-        html: ''
-      }).then(async (writeResp) => {
-        if (writeResp && writeResp.success) {
-          // Remove written entry from buffer
-          const fresh = await chrome.storage.local.get(['writeBuffer']);
-          const buf = fresh.writeBuffer || [];
-          const idx = buf.findIndex(e => e.interaction.url === tab.url);
-          if (idx !== -1) {
-            buf.splice(idx, 1);
-            await chrome.storage.local.set({ writeBuffer: buf });
-          }
-        }
-      }).catch(error => {
-        console.warn('Offscreen write failed, will retry on next flush:', error.message);
-      });
+        action: 'enqueueInteraction',
+        entry: { interaction, markdown: '', html: '' }
+      }).catch(err => console.warn('Enqueue failed:', err.message));
 
       // Update gateway domain registry (non-blocking)
       updateGatewayRegistry(tab.url);
@@ -461,67 +409,28 @@ chrome.commands.onCommand.addListener(async (command) => {
 
 // Handle messages from content scripts and offscreen document
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  const handledActions = ['updateInteraction', 'getPageInfo', 'captureCurrentPageFromPopup', 'saveHighlight', 'deleteHighlight', 'hydrateCache'];
+  const handledActions = ['getPageInfo', 'captureCurrentPageFromPopup', 'hydrateCache'];
   if (!handledActions.includes(request.action)) {
     return false;
   }
 
   (async () => {
-    if (request.action === 'updateInteraction') {
-      // Update interaction in buffer with captured content
-      const result = await chrome.storage.local.get(['writeBuffer']);
-      const buffer = result.writeBuffer || [];
-      const index = buffer.findIndex(entry => entry.interaction.id === request.interactionId);
-
-      if (index !== -1) {
-        const entry = buffer[index];
-        if (request.intent) entry.interaction.intent = request.intent;
-        if (request.attention) entry.interaction.attention = JSON.stringify(request.attention);
-        if (request.markdown) entry.markdown = request.markdown;
-        if (request.html) entry.html = request.html;
-
-        await chrome.storage.local.set({ writeBuffer: buffer });
-
-        // Write updated data to filesystem; on success, remove from buffer
-        await setupOffscreenDocument();
-        chrome.runtime.sendMessage({
-          action: 'writeInteraction',
-          interaction: entry.interaction,
-          markdown: entry.markdown,
-          html: entry.html
-        }).then(async (writeResp) => {
-          if (writeResp && writeResp.success) {
-            const fresh = await chrome.storage.local.get(['writeBuffer']);
-            const buf = fresh.writeBuffer || [];
-            const idx = buf.findIndex(e => e.interaction.id === request.interactionId);
-            if (idx !== -1) {
-              buf.splice(idx, 1);
-              await chrome.storage.local.set({ writeBuffer: buf });
-            }
-          }
-        }).catch(() => {});
-
-        console.log('Updated interaction with captured data');
-      }
-      sendResponse({ success: true });
-
-    } else if (request.action === 'getPageInfo') {
+    if (request.action === 'getPageInfo') {
       // Popup requests bundled page info for a URL
       await setupOffscreenDocument();
       const slug = generateSlugFromUrl(request.url);
 
-      const [interactionResp, snapshotsResp, highlightsResp] = await Promise.all([
-        chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: request.url }),
-        chrome.runtime.sendMessage({ action: 'listSnapshots', slug }),
-        chrome.runtime.sendMessage({ action: 'loadHighlights', slug })
+      const [detailResp, snapshotsResp] = await Promise.all([
+        chrome.runtime.sendMessage({ action: 'loadPageDetail', slug, url: request.url }),
+        chrome.runtime.sendMessage({ action: 'listSnapshots', slug })
       ]);
 
       sendResponse({
         success: true,
         slug,
-        interaction: interactionResp?.interaction || null,
+        interaction: detailResp?.interaction || null,
         snapshots: snapshotsResp?.snapshots || [],
-        highlights: highlightsResp?.highlights || []
+        highlights: detailResp?.atom?.highlights || []
       });
 
     } else if (request.action === 'captureCurrentPageFromPopup') {
@@ -550,61 +459,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       }
 
-    } else if (request.action === 'saveHighlight') {
-      // Content script or popup saves a highlight
-      console.log(`[background] saveHighlight: slug=${request.slug}`);
-      await setupOffscreenDocument();
-      const slug = request.slug;
-
-      // Load existing highlights, upsert global note or append highlight
-      const loadResp = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
-      console.log(`[background] Loaded ${loadResp?.highlights?.length || 0} existing highlights`);
-      const highlights = loadResp?.highlights || [];
-
-      if (request.highlight.isGlobalNote) {
-        const idx = highlights.findIndex(h => h.isGlobalNote);
-        if (idx >= 0) {
-          highlights[idx] = request.highlight;
-        } else {
-          highlights.unshift(request.highlight);
-        }
-      } else {
-        highlights.push(request.highlight);
-      }
-
-      await chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
-      console.log(`[background] Saved ${highlights.length} highlights for slug=${slug}`);
-      sendResponse({ success: true, highlights });
-
-    } else if (request.action === 'deleteHighlight') {
-      const displayText = Array.isArray(request.text) ? request.text.join(' ') : request.text;
-      console.log(`[background] deleteHighlight: slug=${request.slug}, text="${displayText?.substring(0, 50)}"`);
-      await setupOffscreenDocument();
-      const slug = request.slug;
-
-      const loadResp = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
-      let highlights = loadResp?.highlights || [];
-
-      // Remove by timestamp first (reliable for both single and grouped highlights)
-      const before = highlights.length;
-      if (request.timestamp) {
-        highlights = highlights.filter(h => h.timestamp !== request.timestamp);
-      }
-      // Fallback: match by text if timestamp didn't match
-      if (highlights.length === before && request.text) {
-        const idx = highlights.findIndex(h => {
-          if (Array.isArray(h.text) && Array.isArray(request.text)) {
-            return JSON.stringify(h.text) === JSON.stringify(request.text);
-          }
-          return h.text === request.text;
-        });
-        if (idx >= 0) highlights.splice(idx, 1);
-      }
-
-      await chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
-      console.log(`[background] Deleted highlight, ${highlights.length} remaining`);
-      sendResponse({ success: true, highlights });
-
     } else if (request.action === 'hydrateCache') {
       await setupOffscreenDocument();
       await hydrateCache();
@@ -615,15 +469,3 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
-// Periodic flush (every 60 seconds)
-setInterval(async () => {
-  try {
-    await setupOffscreenDocument();
-    const response = await chrome.runtime.sendMessage({ action: 'flushBuffer' });
-    if (response && response.count > 0) {
-      console.log(`Periodic flush: ${response.count} interactions written`);
-    }
-  } catch (error) {
-    console.warn('Periodic flush failed:', error.message);
-  }
-}, 60000);
