@@ -3,6 +3,7 @@ import {
   mergeBufferIntoInteractions,
   getBufferContentMap,
   buildInteractionsForEngine,
+  extractInteractionBuffer,
 } from '../extension/search-helpers.js';
 
 describe('mergeBufferIntoInteractions', () => {
@@ -56,6 +57,80 @@ describe('mergeBufferIntoInteractions', () => {
     ]);
   });
 
+});
+
+describe('extractInteractionBuffer (new writeBuffer format)', () => {
+  it('extracts interaction entries from typed writeBuffer', () => {
+    const writeBuffer = [
+      { id: 1, type: 'interaction', entry: { interaction: { url: 'https://a.com', timestamp: 1, slug: 'a' }, markdown: '# A', html: '' } },
+      { id: 2, type: 'json', path: 'settings.json', data: { workspace: {} } },
+      { id: 3, type: 'interaction', entry: { interaction: { url: 'https://b.com', timestamp: 2, slug: 'b' }, markdown: '', html: '' } },
+      { id: 4, type: 'snapshot', slug: 'c', timestamp: 3, markdown: '# C', html: '<p>C</p>' },
+    ];
+
+    const result = extractInteractionBuffer(writeBuffer);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].interaction.url).toBe('https://a.com');
+    expect(result[0].markdown).toBe('# A');
+    expect(result[1].interaction.url).toBe('https://b.com');
+  });
+
+  it('returns empty array for buffer with no interaction entries', () => {
+    const writeBuffer = [
+      { id: 1, type: 'json', path: 'settings.json', data: {} },
+      { id: 2, type: 'snapshot', slug: 'x', timestamp: 1, markdown: '', html: '' },
+    ];
+
+    const result = extractInteractionBuffer(writeBuffer);
+    expect(result).toHaveLength(0);
+  });
+
+  it('works with mergeBufferIntoInteractions after extraction', () => {
+    const interactions = [
+      { url: 'https://old.com', timestamp: 1, slug: 'old' },
+    ];
+    const writeBuffer = [
+      { id: 1, type: 'interaction', entry: { interaction: { url: 'https://new.com', timestamp: 2, slug: 'new' }, markdown: '# New', html: '' } },
+      { id: 2, type: 'json', path: 'atoms/x.json', data: { highlights: [] } },
+    ];
+
+    const extracted = extractInteractionBuffer(writeBuffer);
+    mergeBufferIntoInteractions(interactions, extracted);
+
+    expect(interactions).toHaveLength(2);
+    expect(interactions.map(i => i.url)).toContain('https://new.com');
+  });
+
+  it('handles legacy (pre-migration) buffer entries without type field', () => {
+    const writeBuffer = [
+      // Legacy format: no type field, interaction at top level
+      { interaction: { url: 'https://legacy.com', timestamp: 1, slug: 'legacy' }, markdown: '# Legacy', html: '' },
+      // New format
+      { id: 2, type: 'interaction', entry: { interaction: { url: 'https://new.com', timestamp: 2, slug: 'new' }, markdown: '# New', html: '' } },
+      // Non-interaction new format
+      { id: 3, type: 'json', path: 'settings.json', data: {} },
+    ];
+
+    const result = extractInteractionBuffer(writeBuffer);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].interaction.url).toBe('https://legacy.com');
+    expect(result[0].markdown).toBe('# Legacy');
+    expect(result[1].interaction.url).toBe('https://new.com');
+  });
+
+  it('works with getBufferContentMap after extraction', () => {
+    const writeBuffer = [
+      { id: 1, type: 'interaction', entry: { interaction: { url: 'https://a.com', timestamp: 1, slug: 'a' }, markdown: '# A content', html: '' } },
+      { id: 2, type: 'json', path: 'settings.json', data: {} },
+    ];
+
+    const extracted = extractInteractionBuffer(writeBuffer);
+    const contentMap = getBufferContentMap(extracted);
+
+    expect(contentMap['a']).toBe('# A content');
+  });
 });
 
 describe('buildInteractionsForEngine', () => {
@@ -129,5 +204,24 @@ describe('buildInteractionsForEngine', () => {
     expect(obj.setIntent).toHaveBeenCalledWith('');
     expect(obj.setContent).toHaveBeenCalledWith('');
     expect(obj.setAttention).toHaveBeenCalledWith('');
+  });
+
+  it('stringifies object attention field (writeBuffer entries have raw objects)', () => {
+    const MockInteraction = makeMockInteractionClass();
+    const engine = { addInteraction: vi.fn() };
+    const dataList = [
+      {
+        url: 'https://e.com', title: 'E', timestamp: 1, slug: 'e',
+        intent: '', attention: { scrollDepth: 42, timeOnPage: 5000, clicks: 3, highlights: [] }
+      },
+    ];
+
+    buildInteractionsForEngine(MockInteraction, engine, dataList, {});
+
+    const obj = engine.addInteraction.mock.calls[0][0];
+    // Must be a string, not an object — WASM passStringToWasm0 rejects objects
+    expect(typeof obj.setAttention.mock.calls[0][0]).toBe('string');
+    const parsed = JSON.parse(obj.setAttention.mock.calls[0][0]);
+    expect(parsed.scrollDepth).toBe(42);
   });
 });

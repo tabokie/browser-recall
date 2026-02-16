@@ -763,7 +763,7 @@ async function showDashboard(tab) {
   try {
     const [resp, binData] = await Promise.all([
       chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url }),
-      chrome.storage.local.get(['recycleBin', 'permanentDeletes'])
+      chrome.storage.session.get(['recycleBin', 'permanentDeletes'])
     ]);
     const recycled = (binData.recycleBin || []).some(item => item.url === tab.url);
     const permDeleted = (binData.permanentDeletes || []).includes(tab.url);
@@ -771,7 +771,7 @@ async function showDashboard(tab) {
   } catch {}
 
   // Check blacklist only for pages with no visit history
-  const { urlBlacklist } = await chrome.storage.local.get(['urlBlacklist']);
+  const { urlBlacklist } = await chrome.storage.session.get(['urlBlacklist']);
   const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
   if (!hasVisitHistory && blacklist.some(prefix => tab.url.startsWith(prefix))) {
     document.getElementById('loading').style.display = 'none';

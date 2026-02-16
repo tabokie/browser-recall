@@ -2,7 +2,7 @@
 console.log('Portal content script loaded on:', window.location.href);
 
 // Private mode: skip all content script functionality
-chrome.storage.local.get(['workspace'], (result) => {
+chrome.storage.session.get(['workspace'], (result) => {
   if (result.workspace && result.workspace.mode === 'private') {
     console.log('[content] Private mode — all tracking disabled');
     return;
@@ -1035,26 +1035,42 @@ function unwrapHighlightMark(mark) {
   parent.normalize();
 }
 
+// Report page visit to background (replaces background's tabs.onUpdated tracking)
+function reportInteraction() {
+  const url = window.location.href;
+  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return;
+  currentInteractionId = url;
+  const intent = extractIntent();
+  attentionData.timeOnPage = Date.now() - startTime;
+  chrome.runtime.sendMessage({
+    action: 'reportPageVisit',
+    url,
+    title: document.title,
+    slug: getSlugForCurrentPage(),
+    intent: JSON.stringify(intent),
+    attention: attentionData
+  }).catch(() => {});
+}
+
+// Report page visit on initial load
+reportInteraction();
+
+// Observe title changes (SPA navigation)
+const titleEl = document.querySelector('title');
+if (titleEl) {
+  new MutationObserver(() => reportInteraction()).observe(titleEl, {
+    childList: true, characterData: true, subtree: true
+  });
+}
+
+// Report re-activation when tab becomes visible
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') reportInteraction();
+});
+
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'captureInteraction') {
-    // Only record metadata (intent + attention). Page content snapshots are
-    // captured explicitly via Alt+S or the popup capture button.
-    currentInteractionId = request.interactionId;
-    attentionData.timeOnPage = Date.now() - startTime;
-
-    const intent = extractIntent();
-    console.log('[content] captureInteraction: intent only (no snapshot)');
-
-    chrome.runtime.sendMessage({
-      action: 'updateInteraction',
-      interactionId: currentInteractionId,
-      intent: JSON.stringify(intent),
-      attention: attentionData
-    });
-
-    sendResponse({ success: true });
-  } else if (request.action === 'captureCurrentPage') {
+  if (request.action === 'captureCurrentPage') {
     // Capture page content for snapshot (triggered by Alt+S or popup capture button)
     (async () => {
       const markdown = extractMarkdown();

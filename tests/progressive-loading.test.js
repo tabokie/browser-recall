@@ -139,8 +139,9 @@ const FILE_MAP = {
 // vi.mock calls are hoisted above imports by vitest.
 
 // Hoisted mock for searchBatch — configurable per-test
-const { mockSearchBatchFn } = vi.hoisted(() => ({
+const { mockSearchBatchFn, mockFsHandler } = vi.hoisted(() => ({
   mockSearchBatchFn: vi.fn(async () => []),
+  mockFsHandler: { fn: (action, msg) => ({ success: true }) },
 }));
 
 // Mock directory handle for FileSystem Access API
@@ -157,6 +158,16 @@ vi.mock('../extension/filesystem-storage.js', () => ({
     async selectDirectory() { return { success: true, name: 'test' }; }
     async loadAllInteractions() { return []; }
     async loadAllContent() { return {}; }
+    async loadSettings() { return (await mockFsHandler.fn('loadSettings', {})).settings || {}; }
+    async listInteractionFiles() { return (await mockFsHandler.fn('listInteractionFiles', {})).files || []; }
+    async loadInteractionFiles(files) { return (await mockFsHandler.fn('loadInteractionBatch', { files })).interactions || []; }
+    async loadCollectionPins() { return (await mockFsHandler.fn('loadCollectionPins', {})).pins || {}; }
+    async loadCollectionPinsById(id) { return (await mockFsHandler.fn('loadCollectionPinsById', { collectionId: id })).pins || []; }
+    async loadPermanentDeletes() { return (await mockFsHandler.fn('loadPermanentDeletes', {})).urls || []; }
+    async loadHighlights() { return []; }
+    async loadAllHighlights() { return {}; }
+    async loadAtomBatch(slugs) { return (await mockFsHandler.fn('loadAtomBatch', { slugs })).atoms || {}; }
+    async listSnapshots() { return []; }
   },
 }));
 
@@ -210,41 +221,51 @@ const styleContent = styleMatch ? styleMatch[1] : '';
 describe('Progressive loading', () => {
   /** @type {Record<string, {promise: Promise, resolve: Function}>} */
   let deferreds;
-  let storageData;
+  let sessionData;  // chrome.storage.session
+  let localData;    // chrome.storage.local
   let initPromise;
 
+  function makeStorageMock(dataRef) {
+    return {
+      get: vi.fn(async (keys) => {
+        const data = dataRef();
+        if (!keys) return { ...data };
+        if (typeof keys === 'string') keys = [keys];
+        const result = {};
+        for (const k of keys) {
+          if (k in data) result[k] = data[k];
+        }
+        return result;
+      }),
+      set: vi.fn(async (obj) => { Object.assign(dataRef(), obj); }),
+      remove: vi.fn(async (keys) => { const d = dataRef(); for (const k of keys) delete d[k]; }),
+      clear: vi.fn(async () => { const d = dataRef(); for (const k of Object.keys(d)) delete d[k]; }),
+    };
+  }
+
   function setupChromeMock() {
-    storageData = {};
+    sessionData = {};
+    localData = {};
     deferreds = {};
+
+    mockFsHandler.fn = async (action, params) => {
+      const deferred = deferreds[action];
+      if (deferred) await deferred.promise;
+      return handleAction({ action, ...params });
+    };
 
     const chromeMock = {
       runtime: {
         sendMessage: vi.fn(async (msg) => {
-          // If there's a deferred for this action, wait for it
           const deferred = deferreds[msg.action];
           if (deferred) await deferred.promise;
           return handleAction(msg);
         }),
+        onMessage: { addListener: vi.fn() },
       },
       storage: {
-        local: {
-          get: vi.fn(async (keys) => {
-            if (!keys) return { ...storageData };
-            if (typeof keys === 'string') keys = [keys];
-            const result = {};
-            for (const k of keys) {
-              if (k in storageData) result[k] = storageData[k];
-            }
-            return result;
-          }),
-          set: vi.fn(async (obj) => {
-            Object.assign(storageData, obj);
-          }),
-          remove: vi.fn(async (keys) => {
-            for (const k of keys) delete storageData[k];
-          }),
-          clear: vi.fn(async () => { storageData = {}; }),
-        },
+        session: makeStorageMock(() => sessionData),
+        local: makeStorageMock(() => localData),
       },
     };
     globalThis.chrome = chromeMock;
@@ -272,6 +293,12 @@ describe('Progressive loading', () => {
         }
         return { success: true, pins: TEST_COLLECTION_PINS };
 
+      case 'loadCollectionPinsById':
+        return { success: true, pins: TEST_COLLECTION_PINS[msg.collectionId] || [] };
+
+      case 'loadPermanentDeletes':
+        return { success: true, urls: [] };
+
       case 'loadContentBatch':
         // Return empty content — search still works via title matching
         return { success: true, contentMap: {} };
@@ -298,7 +325,7 @@ describe('Progressive loading', () => {
 
   // Populate cache with all settings so loadSettingsValue hits fast path
   function populateCache() {
-    storageData = {
+    sessionData = {
       settings: TEST_SETTINGS.settings,
       collections: TEST_SETTINGS.collections,
       urlBlacklist: TEST_SETTINGS.urlBlacklist,
@@ -306,12 +333,15 @@ describe('Progressive loading', () => {
       recycleBin: TEST_SETTINGS.recycleBin,
       permanentDeletes: TEST_SETTINGS.permanentDeletes,
       gatewayDomains: {},
+    };
+    localData = {
       writeBuffer: [],
     };
   }
 
   function clearCache() {
-    storageData = {};
+    sessionData = {};
+    localData = {};
   }
 
   beforeEach(() => {
@@ -432,16 +462,16 @@ describe('Progressive loading', () => {
 
   it('Test 2: pause collection list only → frames + history list visible', async () => {
     // Cache all settings EXCEPT 'collections' → renderCollections hits slow path
-    storageData = {
+    sessionData = {
       settings: TEST_SETTINGS.settings,
       urlBlacklist: TEST_SETTINGS.urlBlacklist,
       titleTrimRules: TEST_SETTINGS.titleTrimRules,
       recycleBin: TEST_SETTINGS.recycleBin,
       permanentDeletes: TEST_SETTINGS.permanentDeletes,
       gatewayDomains: {},
-      writeBuffer: [],
       // 'collections' intentionally missing → loadSettings slow path
     };
+    localData = { writeBuffer: [] };
 
     // Pause loadSettings → renderCollections() blocks on collection list
     // But since renderCollections is fire-and-forget, loadData() proceeds concurrently

@@ -1,0 +1,76 @@
+- Will there be data leaks or any other resource leaks if I repeatedly delete and recreate entities in the system, e.g. collection, page, query.
+- Explain the concurrency model. When I open multiple pages and they are firing events concurrently, is extension code writing to in-memory variables or storage.local or file storage concurrently?
+- List the messages between content script and extension worker.
+- Why aren't all messages sent by content (except for popup UI)? After all, all events are triggered directly by user interacting with the front page?
+- 1 & 3 makes sense. For 2, we can let content send the interactions regardless of the gates. The gates are processed after background receives the interactions. Before we take this approach, I just want to make sure, not only the first page load is recorded, but subsequent visits are also recorded. Are DOM events good for it?
+- Can DOM event detect (1) simple title changes, (2) tab re-activation?
+- Good. Use those, we best-effort handle title changes.
+- Run tests.
+- List the different modules in the system and how they interact.
+- What is the rationale behind seperating offscreen and background? Does I/O blocks JS runtime?
+- Document this rationale in code comments of offscreen.rs.
+- How are updates that are not interactions send to offscreen? e.g. Deletion, Update settings, etc.
+- Is storage.local really faster than file system?
+- Does chrome cache storage.local data in memory?
+- Can we implement a file handle cache in offscreen.rs that improves I/O performance?
+- Implement a file handle cache in offscreen.rs that can reduce the file opening and permission check overhead. Unify the file caching and file locking under a clean API, e.g. `GetFileHandleWithLock(file_path)`.
+- Continue
+- What data is in storage.local right now?
+- Another question: why not handle every thing in offscreen? It sounds to have all the benefits (can do I/O, doesn't pause) but no downside.
+- Can background worker serve as an in-memory caching layer?
+- This is a pickle. storage.local is not a good cache because we can't easily implement LRU eviction on top of it. And you said background worker can't maintain reliable memory states. And if offscreen handles data cache, it takes two message round-trip for background worker to progress.
+- What is the idiomatic way that has been used in other mature extension projects?
+- Don't fixate on repo that doesn't exist or have been changed to other organization. Use search to double-check the repo's location.
+- Check the source code to understand performance of storage.local and localStorage.
+- Memorize the findings in succinct words.
+- How about this:
+
+All mutations are sent to background worker as messages. Offscreen doesn't directly process the messages. Background worker uses a memory variable to store pendind writes (mutations that involve file I/O). It is also saved to storage.local. Each time background worker is created, it first initializes the memory variable using storage.local. Using memory variable as the ground-truth prevents write loss from racing accesses of storage.local.
+
+Offscreen worker monitors the storage.local pending writes. It flushes them to file system periodically. When flush is finished, it send a "persisted" message to background worker with watermark. And background worker can free up some write buffer.
+
+All read reqeusts are served by background worker. If I/O is needed, background worker is responsible for asking the offscreen. Background worker caches data in storage.session, including atoms. But it maintains a limit of atoms in cache using a memory variable (list of keys).
+- Your ideas are gold. Go ahead.
+- I found a few issues, make sure repro them in tests before fix.
+
+First opening options page shows an empty list in "History".
+
+Recycle Bin row in sidebar doesn't count anymore.
+
+The pins-related pages in collection are not searched out.
+- Why existing tests didn't cover them? These are pretty basic functionality.
+- The related pages to pinned results are still not showing up, when the collection doesn't have a query.
+- Still not working, e.g. for my 1770862579460.json in portal-data.
+- No, the collection file I gave you is still not working.
+- The terminal reports: Collection fetch error: RuntimeError: memory access out of bounds
+- Now repro and fix pipelinedSearch.
+- Hwo does WASM engine get file handle now?
+- But loading files then pass to WASM is costly. The old approach is designed to reduce data copy. Or are you saying there's no cost in passing data through WASM interface?
+- > WASM async state machines can invalidate references when memory reallocates
+
+Really? WASM is different from native Rust code? Because I didn't know Rust messes with reference across await.
+- Remove the slow path fallback, and investigate the real cause. You can open the WASM directly over my portal-data files.
+- <task-notification>
+<task-id>bbf3f42</task-id>
+<output-file>/private/tmp/claude-503/-Users-xinye-tao-tabokie-claude-extension-project/tasks/bbf3f42.output</output-file>
+<status>completed</status>
+<summary>Background command "Start local HTTP server for test page" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-503/-Users-xinye-tao-tabokie-claude-extension-project/tasks/bbf3f42.output
+- The test engine says okay. I re-run the browser extension. It actually reports a different message now:
+
+ollection search failed, continuing with related pages: expected a string argument, found object
+- Walk me through the data model again. What data is in memory, in storage.local, storage.session, and in files.
+- A few issues:
+(1) Why does background.rs have fileLocks? Aren't files only used in offscreen.rs?
+(2) Is chrome.storage.session initialized only once on restart?
+(3) atomReadCache and collectionResultsCache in options.rs can be moved to background.rs. options.rs can take advantage of the cache directly via storage.session.
+- When a mutation arrives, let background.rs send options.rs a message to refresh.
+- Refactor the read flow. options.rs first ask background.rs for cached data, if not found, read files directly from options.rs. The same goes for other UIs. offscreen.rs will only serve reads from background.rs.
+- Refactor the read flow. options.rs first ask storage.session for cached data, if not found, read files directly from options.rs. The same goes for other UIs. offscreen.rs will only serve reads from background.rs.
+- Refactor the read flow. options.rs first ask storage.session for cached data, if not found, read files directly from options.rs. The same goes for other UIs. offscreen.rs will only serve reads from background.rs. We wouldn't read files that are being modified because dirty objects should be in cache.
+- Go over the codebase thoroughly. Cleanup dead code and unnecessary abstraction. Simplify it.
+- Go over the codebase thoroughly. Cleanup dead code and unnecessary abstraction. Simplify it.
+- Finish up
+- no
+- no

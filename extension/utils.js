@@ -1,16 +1,16 @@
 // Shared utility functions
 
-// Load a single key from chrome.storage.local cache, falling back to settings.json via offscreen
+// Load a single key from chrome.storage.session cache, falling back to settings.json via background
 export async function loadSettingsValue(key, defaultValue) {
-  // Fast path: read from chrome.storage.local cache
+  // Fast path: read from chrome.storage.session cache
   try {
-    const cached = await chrome.storage.local.get(key);
+    const cached = await chrome.storage.session.get(key);
     if (key in cached) {
       console.debug(`[I/O] loadSettingsValue('${key}'): cache hit`);
       return cached[key];
     }
   } catch {}
-  // Slow path: read from settings.json via offscreen
+  // Slow path: read from settings.json via background→offscreen
   console.debug(`[I/O] loadSettingsValue('${key}'): cache miss, reading from disk`);
   try {
     const resp = await chrome.runtime.sendMessage({ action: 'loadSettings' });
@@ -23,15 +23,13 @@ export async function loadSettingsValue(key, defaultValue) {
   return defaultValue;
 }
 
-// Save a single key to settings.json via offscreen, and update chrome.storage.local cache
+// Save a single key to settings.json via background, which updates session cache + buffers write
 export async function saveSettingsValue(key, value) {
   try {
     await chrome.runtime.sendMessage({ action: 'saveSettingsKey', key, value });
   } catch (error) {
     console.warn('saveSettingsValue file write failed:', error.message);
   }
-  // Update cache
-  await chrome.storage.local.set({ [key]: value });
 }
 
 // Generate slug from URL for content file naming

@@ -1,43 +1,202 @@
 // Background service worker for Portal extension
-// Uses filesystem as primary storage with IndexedDB as write buffer
+// Central authority for reads and mutations. Offscreen is a pure filesystem I/O worker.
 import { generateSlugFromUrl } from './utils.js';
 
 console.log('Background script loading...');
 
-// Create offscreen document for filesystem operations
+// Session storage: in-memory IPC, survives SW termination, cleared on browser restart.
+// hydrateCache() re-populates from filesystem on every startup.
+chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
+
+// ─── Offscreen Document ───────────────────────────────────────────────
+
 async function setupOffscreenDocument() {
   const existingContexts = await chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT']
   });
-
-  if (existingContexts.length > 0) {
-    return;
-  }
+  if (existingContexts.length > 0) return;
 
   await chrome.offscreen.createDocument({
     url: 'offscreen.html',
     reasons: ['LOCAL_STORAGE'],
     justification: 'Manage filesystem operations for interaction history'
   });
-
   console.log('Offscreen document created');
 }
 
-// Hydrate chrome.storage.local cache from settings.json and rebuild gateway domains
+// ─── Port Channel to Offscreen ────────────────────────────────────────
+
+let offscreenPort = null;
+let portCallId = 0;
+const portCallbacks = new Map();
+
+function connectToOffscreen() {
+  offscreenPort = chrome.runtime.connect({ name: 'bg-offscreen' });
+  offscreenPort.onMessage.addListener(handleOffscreenResponse);
+  offscreenPort.onDisconnect.addListener(() => {
+    offscreenPort = null;
+    console.warn('Offscreen port disconnected');
+  });
+}
+
+function handleOffscreenResponse(msg) {
+  if (msg.action === 'persisted') {
+    // Watermark from offscreen flush
+    pendingWrites = pendingWrites.filter(e => e.id > msg.watermark);
+    chrome.storage.local.set({ writeBuffer: pendingWrites });
+    return;
+  }
+  const cb = portCallbacks.get(msg.id);
+  if (cb) {
+    portCallbacks.delete(msg.id);
+    cb(msg);
+  }
+}
+
+async function ensureOffscreenPort() {
+  if (offscreenPort) return;
+  await setupOffscreenDocument();
+  connectToOffscreen();
+}
+
+async function requestOffscreen(params) {
+  await ensureOffscreenPort();
+  return new Promise((resolve) => {
+    const id = ++portCallId;
+    portCallbacks.set(id, resolve);
+    offscreenPort.postMessage({ id, ...params });
+  });
+}
+
+// ─── R-M-W Lock ──────────────────────────────────────────────────────
+// Serializes read-modify-write on session cache. Keys like 'settings.json'
+// and 'atoms/{slug}.json' match the buffer write paths for clarity but
+// these are logical locks, not file locks — files live in offscreen only.
+
+const rwLocks = new Map();
+
+function withLock(key, fn) {
+  const prev = rwLocks.get(key) || Promise.resolve();
+  const next = prev.catch(() => {}).then(() => fn());
+  rwLocks.set(key, next);
+  next.catch(() => {}).then(() => {
+    if (rwLocks.get(key) === next) rwLocks.delete(key);
+  });
+  return next;
+}
+
+// ─── Mutation Notifications ───────────────────────────────────────────
+// Notify extension pages (options, popup) after data mutations so they can refresh.
+
+function notifyMutation(type, detail) {
+  chrome.runtime.sendMessage({ action: 'mutation', type, ...detail }).catch(() => {});
+}
+
+// ─── Write Buffer ─────────────────────────────────────────────────────
+// Ground truth during SW lifetime. Backed up to storage.local for durability.
+// Offscreen monitors storage.local['writeBuffer'] via onChanged and drains to filesystem.
+
+let pendingWrites = [];
+let writeSeq = 0;
+
+async function restoreWriteBuffer() {
+  const { writeBuffer = [] } = await chrome.storage.local.get(['writeBuffer']);
+  pendingWrites = writeBuffer;
+  writeSeq = pendingWrites.reduce((max, e) => Math.max(max, e.id || 0), writeSeq);
+  if (pendingWrites.length > 0) {
+    console.log(`Restored ${pendingWrites.length} pending writes from storage.local`);
+  }
+}
+
+async function bufferWrite(entry) {
+  entry.id = ++writeSeq;
+  // Dedup: for 'json' type, replace existing entry with same path
+  if (entry.type === 'json') {
+    const idx = pendingWrites.findIndex(e => e.type === 'json' && e.path === entry.path);
+    if (idx !== -1) pendingWrites[idx] = entry;
+    else pendingWrites.push(entry);
+  } else {
+    pendingWrites.push(entry);
+  }
+  await chrome.storage.local.set({ writeBuffer: pendingWrites });
+}
+
+// ─── Interaction Queue ────────────────────────────────────────────────
+// Interactions are buffered as { type: 'interaction', entry: { interaction, markdown, html } }
+
+function enqueueInteraction(entry) {
+  const url = entry.interaction.url;
+  const idx = pendingWrites.findIndex(
+    e => e.type === 'interaction' && e.entry?.interaction?.url === url
+  );
+  if (idx !== -1) {
+    pendingWrites[idx] = { ...pendingWrites[idx], entry };
+  } else {
+    pendingWrites.push({ id: ++writeSeq, type: 'interaction', entry });
+  }
+  chrome.storage.local.set({ writeBuffer: pendingWrites });
+}
+
+function updateQueuedInteraction(url, updates) {
+  const idx = pendingWrites.findIndex(
+    e => e.type === 'interaction' && e.entry?.interaction?.url === url
+  );
+  if (idx !== -1) {
+    const qEntry = pendingWrites[idx].entry;
+    Object.assign(qEntry.interaction, updates.interaction || {});
+    if (updates.markdown !== undefined) qEntry.markdown = updates.markdown;
+    if (updates.html !== undefined) qEntry.html = updates.html;
+    chrome.storage.local.set({ writeBuffer: pendingWrites });
+  }
+}
+
+// ─── Atom LRU Cache (Phase 4) ────────────────────────────────────────
+
+let atomCacheKeys = []; // LRU order, most recent at end
+const ATOM_CACHE_LIMIT = 500;
+
+async function getCachedAtom(slug) {
+  const key = 'atom:' + slug;
+  const cached = (await chrome.storage.session.get(key))[key];
+  if (cached) {
+    // Move to end (most recently used)
+    atomCacheKeys = atomCacheKeys.filter(k => k !== slug);
+    atomCacheKeys.push(slug);
+    return cached;
+  }
+  return null;
+}
+
+async function setCachedAtom(slug, atom) {
+  const key = 'atom:' + slug;
+  await chrome.storage.session.set({ [key]: atom });
+  atomCacheKeys = atomCacheKeys.filter(k => k !== slug);
+  atomCacheKeys.push(slug);
+  // Evict if over limit
+  while (atomCacheKeys.length > ATOM_CACHE_LIMIT) {
+    const evict = atomCacheKeys.shift();
+    await chrome.storage.session.remove('atom:' + evict);
+  }
+}
+
+// ─── Settings Keys ───────────────────────────────────────────────────
+// Keys from settings.json that are mirrored in session cache.
+
+const SETTINGS_KEYS = ['workspace', 'collections', 'urlBlacklist', 'titleTrimRules', 'recycleBin', 'settings'];
+
+// ─── Cache Hydration ──────────────────────────────────────────────────
+
 async function hydrateCache() {
   try {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadSettings' });
+    const resp = await requestOffscreen({ action: 'loadSettings' });
     if (resp && resp.success && resp.settings) {
       const s = resp.settings;
       const cacheUpdate = {};
-      if (s.workspace !== undefined) cacheUpdate.workspace = s.workspace;
-      if (s.collections !== undefined) cacheUpdate.collections = s.collections;
-      if (s.urlBlacklist !== undefined) cacheUpdate.urlBlacklist = s.urlBlacklist;
-      if (s.titleTrimRules !== undefined) cacheUpdate.titleTrimRules = s.titleTrimRules;
-      if (s.recycleBin !== undefined) cacheUpdate.recycleBin = s.recycleBin;
-      if (s.settings !== undefined) cacheUpdate.settings = s.settings;
+      for (const key of SETTINGS_KEYS) {
+        if (s[key] !== undefined) cacheUpdate[key] = s[key];
+      }
       if (Object.keys(cacheUpdate).length > 0) {
-        await chrome.storage.local.set(cacheUpdate);
+        await chrome.storage.session.set(cacheUpdate);
         console.log('Cache hydrated from settings.json:', Object.keys(cacheUpdate));
       }
     }
@@ -45,17 +204,17 @@ async function hydrateCache() {
     console.warn('Cache hydration failed:', error.message);
   }
 
-  // Load permanent deletes from lists/permanent-deletes.json
+  // Load permanent deletes
   try {
-    const pdResp = await chrome.runtime.sendMessage({ action: 'loadPermanentDeletes' });
-    if (pdResp?.success) await chrome.storage.local.set({ permanentDeletes: pdResp.urls });
+    const pdResp = await requestOffscreen({ action: 'loadPermanentDeletes' });
+    if (pdResp?.success) await chrome.storage.session.set({ permanentDeletes: pdResp.urls });
   } catch (error) {
     console.warn('Permanent deletes hydration failed:', error.message);
   }
 
   // Load and incrementally process gateway domains
   try {
-    const gwData = await chrome.runtime.sendMessage({ action: 'loadGateways' });
+    const gwData = await requestOffscreen({ action: 'loadGateways' });
     let domains = {};
     let watermark = 0;
     if (gwData && gwData.success) {
@@ -63,7 +222,7 @@ async function hydrateCache() {
       watermark = gwData.watermark || 0;
     }
 
-    const incremental = await chrome.runtime.sendMessage({
+    const incremental = await requestOffscreen({
       action: 'processGatewaysIncremental',
       watermark,
       existingDomains: domains
@@ -73,12 +232,12 @@ async function hydrateCache() {
       domains = incremental.domains;
       const newWatermark = incremental.newWatermark;
 
-      await chrome.storage.local.set({ gatewayDomains: domains });
+      await chrome.storage.session.set({ gatewayDomains: domains });
 
-      // Save updated gateways if watermark advanced
       if (newWatermark > watermark) {
-        await chrome.runtime.sendMessage({
-          action: 'saveGateways',
+        await bufferWrite({
+          type: 'json',
+          path: 'lists/gateways.json',
           data: { watermark: newWatermark, domains }
         });
       }
@@ -90,46 +249,11 @@ async function hydrateCache() {
   }
 }
 
-// Initialize on install
-chrome.runtime.onInstalled.addListener(async () => {
-  console.log('Portal extension installed');
+// ─── Title Trimming ───────────────────────────────────────────────────
 
-  // Create offscreen document
-  await setupOffscreenDocument();
-
-  console.log('Storage initialized');
-
-  // Check if filesystem is configured
-  const response = await chrome.runtime.sendMessage({ action: 'getDirectoryInfo' });
-
-  if (!response.info) {
-    console.log('Filesystem not configured - user needs to select directory');
-    chrome.runtime.openOptionsPage();
-  } else {
-    console.log('Filesystem configured:', response.info.name);
-    await hydrateCache();
-  }
-});
-
-// Ensure offscreen document on startup
-chrome.runtime.onStartup.addListener(async () => {
-  await setupOffscreenDocument();
-  console.log('Extension started');
-
-  try {
-    const response = await chrome.runtime.sendMessage({ action: 'getDirectoryInfo' });
-    if (response && response.info) {
-      await hydrateCache();
-    }
-  } catch (error) {
-    console.warn('Startup hydration failed:', error.message);
-  }
-});
-
-// Apply title trimming rules and whitespace trim
 async function trimTitle(rawTitle, url) {
   let title = rawTitle || 'Untitled';
-  const { titleTrimRules = [] } = await chrome.storage.local.get(['titleTrimRules']);
+  const { titleTrimRules = [] } = await chrome.storage.session.get(['titleTrimRules']);
   for (const rule of titleTrimRules) {
     if (url.startsWith(rule.urlPrefix)) {
       if (rule.action === 'remove_after_pipe') {
@@ -145,8 +269,7 @@ async function trimTitle(rawTitle, url) {
   return title.trim();
 }
 
-// --- Gateway domain registry ---
-// Storage: chrome.storage.local['gatewayDomains'] = { [origin]: { rootUrl, childCount, fetched } }
+// ─── Gateway Domain Registry ──────────────────────────────────────────
 
 async function updateGatewayRegistry(url) {
   try {
@@ -155,7 +278,7 @@ async function updateGatewayRegistry(url) {
     const isSearchQuery = parsed.searchParams.has('q') || parsed.searchParams.has('query') || parsed.searchParams.has('search');
     const isRoot = parsed.pathname === '/' || parsed.pathname === '' || parsed.pathname === '/index.html' || parsed.pathname === '/index.htm';
 
-    const { gatewayDomains = {} } = await chrome.storage.local.get(['gatewayDomains']);
+    const { gatewayDomains = {} } = await chrome.storage.session.get(['gatewayDomains']);
     if (!gatewayDomains[origin]) {
       gatewayDomains[origin] = { rootUrl: null, childCount: 0, fetched: false };
     }
@@ -164,7 +287,7 @@ async function updateGatewayRegistry(url) {
     if (isSearchQuery) {
       entry.childCount++;
       if (isRoot && !entry.rootUrl && !entry.fetched) {
-        await chrome.storage.local.set({ gatewayDomains });
+        await chrome.storage.session.set({ gatewayDomains });
         fetchAndCreateGatewayRoot(origin);
         return;
       }
@@ -174,7 +297,7 @@ async function updateGatewayRegistry(url) {
       entry.childCount++;
     }
 
-    await chrome.storage.local.set({ gatewayDomains });
+    await chrome.storage.session.set({ gatewayDomains });
 
     if (entry.childCount >= 2 && !entry.rootUrl && !entry.fetched) {
       fetchAndCreateGatewayRoot(origin);
@@ -185,11 +308,10 @@ async function updateGatewayRegistry(url) {
 }
 
 async function fetchAndCreateGatewayRoot(origin) {
-  // Mark fetched immediately to prevent concurrent attempts
-  const { gatewayDomains = {} } = await chrome.storage.local.get(['gatewayDomains']);
+  const { gatewayDomains = {} } = await chrome.storage.session.get(['gatewayDomains']);
   if (!gatewayDomains[origin]) return;
   gatewayDomains[origin].fetched = true;
-  await chrome.storage.local.set({ gatewayDomains });
+  await chrome.storage.session.set({ gatewayDomains });
 
   try {
     const controller = new AbortController();
@@ -215,17 +337,13 @@ async function fetchAndCreateGatewayRoot(origin) {
       slug: slug
     };
 
-    await setupOffscreenDocument();
-    await chrome.runtime.sendMessage({
-      action: 'enqueueInteraction',
-      entry: { interaction, markdown: '', html: '' }
-    });
+    enqueueInteraction({ interaction, markdown: '', html: '' });
 
     // Update registry with rootUrl
-    const updated = (await chrome.storage.local.get(['gatewayDomains'])).gatewayDomains || {};
+    const updated = (await chrome.storage.session.get(['gatewayDomains'])).gatewayDomains || {};
     if (updated[origin]) {
       updated[origin].rootUrl = rootUrl;
-      await chrome.storage.local.set({ gatewayDomains: updated });
+      await chrome.storage.session.set({ gatewayDomains: updated });
     }
 
     console.log(`Gateway: created synthetic root for ${origin}`);
@@ -234,140 +352,49 @@ async function fetchAndCreateGatewayRoot(origin) {
   }
 }
 
-// Track page visits and interactions
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  // Handle title changes — update existing record
-  if (changeInfo.title && tab.url) {
-    if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
-    const { workspace } = await chrome.storage.local.get(['workspace']);
-    if (workspace && workspace.mode === 'private') return;
+// ─── Initialization ───────────────────────────────────────────────────
 
-    const title = await trimTitle(changeInfo.title, tab.url);
-    await setupOffscreenDocument();
-    chrome.runtime.sendMessage({
-      action: 'updateQueuedInteraction',
-      url: tab.url,
-      updates: { interaction: { title, timestamp: Date.now() } }
-    }).catch(err => console.warn('Title update failed:', err.message));
-    console.log(`Title updated for ${tab.url}: ${title}`);
-  }
+async function startBackground() {
+  await setupOffscreenDocument();
+  connectToOffscreen();
+  await restoreWriteBuffer();
+}
 
-  if (changeInfo.status === 'complete' && tab.url) {
-    // Private mode: skip all tracking
-    const { workspace } = await chrome.storage.local.get(['workspace']);
-    if (workspace && workspace.mode === 'private') return;
+chrome.runtime.onInstalled.addListener(async () => {
+  console.log('Portal extension installed');
+  await startBackground();
+  console.log('Storage initialized');
 
-    // Skip chrome:// URLs
-    if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
-      return;
-    }
-
-    // Skip blacklisted URL prefixes, unless the page was previously captured
-    const { urlBlacklist } = await chrome.storage.local.get(['urlBlacklist']);
-    const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
-    if (blacklist.some(prefix => tab.url.startsWith(prefix))) {
-      const existing = await chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url });
-      if (!existing || !existing.interaction) {
-        console.log(`Skipping blacklisted URL (not in database): ${tab.url}`);
-        return;
-      }
-      console.log(`Blacklisted URL but already in database, continuing: ${tab.url}`);
-    }
-
-    try {
-      console.log(`Processing page: ${tab.url}`);
-
-      const timestamp = Date.now();
-      const slug = generateSlugFromUrl(tab.url);
-
-      const title = await trimTitle(tab.title, tab.url);
-
-      // Create interaction record (metadata only, no content)
-      // URL is the identity — revisiting the same URL updates the entry
-      const interaction = {
-        timestamp: timestamp,
-        url: tab.url,
-        title: title,
-        intent: '',
-        attention: '',
-        slug: slug
-      };
-
-      // Send message to content script to capture intent and attention
-      chrome.tabs.sendMessage(tabId, {
-        action: 'captureInteraction',
-        interactionId: interaction.url
-      }).catch((error) => {
-        console.warn('Could not send message to content script:', error.message);
-      });
-
-      // Enqueue for filesystem write (offscreen drains sequentially)
-      await setupOffscreenDocument();
-      chrome.runtime.sendMessage({
-        action: 'enqueueInteraction',
-        entry: { interaction, markdown: '', html: '' }
-      }).catch(err => console.warn('Enqueue failed:', err.message));
-
-      // Update gateway domain registry (non-blocking)
-      updateGatewayRegistry(tab.url);
-
-      // Workspace mode: auto-pin to workspace collections and optionally snapshot
-      const { workspace } = await chrome.storage.local.get(['workspace']);
-      const wsCollectionIds = workspace?.collectionIds || [];
-      if (workspace && workspace.mode === 'workspace' && wsCollectionIds.length > 0) {
-        try {
-          const pinsResp = await chrome.runtime.sendMessage({ action: 'loadCollectionPins' });
-          const allPins = (pinsResp && pinsResp.pins) ? pinsResp.pins : {};
-          let changed = false;
-
-          for (const collectionId of wsCollectionIds) {
-            if (!allPins[collectionId]) allPins[collectionId] = [];
-            const already = allPins[collectionId].some(p => p.url === tab.url);
-            if (!already) {
-              allPins[collectionId].push({ url: tab.url, title: tab.title || 'Untitled', pinnedAt: timestamp });
-              changed = true;
-            }
-          }
-
-          if (changed) {
-            await chrome.runtime.sendMessage({ action: 'saveCollectionPins', pins: allPins });
-            console.log(`Workspace: auto-pinned ${tab.url} to collections ${wsCollectionIds.join(', ')}`);
-          }
-
-          if (workspace.autoSnapshot) {
-            chrome.tabs.sendMessage(tabId, { action: 'captureCurrentPage' }).then(async (response) => {
-              if (response && response.success) {
-                await setupOffscreenDocument();
-                await chrome.runtime.sendMessage({
-                  action: 'captureSnapshot',
-                  slug,
-                  timestamp,
-                  markdown: response.markdown || '',
-                  html: response.html || ''
-                });
-                console.log(`Workspace: auto-snapshot captured for ${tab.url}`);
-              }
-            }).catch(err => {
-              console.warn('Workspace: auto-snapshot failed:', err.message);
-            });
-          }
-        } catch (err) {
-          console.warn('Workspace: auto-pin/snapshot error:', err.message);
-        }
-      }
-
-    } catch (error) {
-      console.error('Error processing page visit:', error);
-    }
+  const response = await requestOffscreen({ action: 'getDirectoryInfo' });
+  if (!response.info) {
+    console.log('Filesystem not configured - user needs to select directory');
+    chrome.runtime.openOptionsPage();
+  } else {
+    console.log('Filesystem configured:', response.info.name);
+    await hydrateCache();
   }
 });
 
-// Handle keyboard shortcuts
+chrome.runtime.onStartup.addListener(async () => {
+  await startBackground();
+  console.log('Extension started');
+
+  try {
+    const response = await requestOffscreen({ action: 'getDirectoryInfo' });
+    if (response && response.info) {
+      await hydrateCache();
+    }
+  } catch (error) {
+    console.warn('Startup hydration failed:', error.message);
+  }
+});
+
+// ─── Keyboard Shortcuts ───────────────────────────────────────────────
+
 chrome.commands.onCommand.addListener(async (command) => {
   console.log(`[background] Command received: ${command}`);
 
-  // Private mode: disable all commands
-  const { workspace } = await chrome.storage.local.get(['workspace']);
+  const { workspace } = await chrome.storage.session.get(['workspace']);
   if (workspace && workspace.mode === 'private') return;
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -377,15 +404,13 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 
   if (command === 'capture-snapshot') {
-    // Ask content script to extract page content
     try {
       const response = await chrome.tabs.sendMessage(tab.id, { action: 'captureCurrentPage' });
       if (response && response.success) {
         const slug = generateSlugFromUrl(tab.url);
         const timestamp = Date.now();
-        await setupOffscreenDocument();
-        await chrome.runtime.sendMessage({
-          action: 'captureSnapshot',
+        await bufferWrite({
+          type: 'snapshot',
           slug,
           timestamp,
           markdown: response.markdown || '',
@@ -407,65 +432,504 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 
-// Handle messages from content scripts and offscreen document
+// ─── Message Handler (ALL actions) ────────────────────────────────────
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  const handledActions = ['getPageInfo', 'captureCurrentPageFromPopup', 'hydrateCache'];
-  if (!handledActions.includes(request.action)) {
-    return false;
-  }
-
   (async () => {
-    if (request.action === 'getPageInfo') {
-      // Popup requests bundled page info for a URL
-      await setupOffscreenDocument();
-      const slug = generateSlugFromUrl(request.url);
+    try {
+      switch (request.action) {
 
-      const [detailResp, snapshotsResp] = await Promise.all([
-        chrome.runtime.sendMessage({ action: 'loadPageDetail', slug, url: request.url }),
-        chrome.runtime.sendMessage({ action: 'listSnapshots', slug })
-      ]);
+        // ── Tab-dependent (background-only) ──
 
-      sendResponse({
-        success: true,
-        slug,
-        interaction: detailResp?.interaction || null,
-        snapshots: snapshotsResp?.snapshots || [],
-        highlights: detailResp?.atom?.highlights || []
-      });
-
-    } else if (request.action === 'captureCurrentPageFromPopup') {
-      // Popup requests a snapshot capture of the active tab
-      try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab) { sendResponse({ success: false, error: 'No active tab' }); return; }
-
-        const response = await chrome.tabs.sendMessage(tab.id, { action: 'captureCurrentPage' });
-        if (response && response.success) {
-          const slug = generateSlugFromUrl(tab.url);
-          const timestamp = Date.now();
-          await setupOffscreenDocument();
-          await chrome.runtime.sendMessage({
-            action: 'captureSnapshot',
+        case 'getPageInfo': {
+          const slug = generateSlugFromUrl(request.url);
+          const [detailResp, snapshotsResp] = await Promise.all([
+            requestOffscreen({ action: 'loadPageDetail', slug, url: request.url }),
+            requestOffscreen({ action: 'listSnapshots', slug })
+          ]);
+          // Cache the atom if loadPageDetail returned one
+          if (detailResp?.atom) {
+            await setCachedAtom(slug, detailResp.atom);
+          }
+          sendResponse({
+            success: true,
             slug,
-            timestamp,
-            markdown: response.markdown || '',
-            html: response.html || ''
+            interaction: detailResp?.interaction || null,
+            snapshots: snapshotsResp?.snapshots || [],
+            highlights: detailResp?.atom?.highlights || []
           });
-          sendResponse({ success: true, timestamp });
-        } else {
-          sendResponse({ success: false, error: 'Content script capture failed' });
+          break;
         }
-      } catch (error) {
-        sendResponse({ success: false, error: error.message });
-      }
 
-    } else if (request.action === 'hydrateCache') {
-      await setupOffscreenDocument();
-      await hydrateCache();
-      sendResponse({ success: true });
+        case 'captureCurrentPageFromPopup': {
+          try {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tab) { sendResponse({ success: false, error: 'No active tab' }); return; }
+
+            const response = await chrome.tabs.sendMessage(tab.id, { action: 'captureCurrentPage' });
+            if (response && response.success) {
+              const slug = generateSlugFromUrl(tab.url);
+              const timestamp = Date.now();
+              await bufferWrite({
+                type: 'snapshot',
+                slug,
+                timestamp,
+                markdown: response.markdown || '',
+                html: response.html || ''
+              });
+              sendResponse({ success: true, timestamp });
+            } else {
+              sendResponse({ success: false, error: 'Content script capture failed' });
+            }
+          } catch (error) {
+            sendResponse({ success: false, error: error.message });
+          }
+          break;
+        }
+
+        case 'hydrateCache': {
+          await setupOffscreenDocument();
+          connectToOffscreen();
+          await hydrateCache();
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'reportPageVisit': {
+          try {
+            const url = request.url;
+
+            const { workspace } = await chrome.storage.session.get(['workspace']);
+            if (workspace && workspace.mode === 'private') {
+              sendResponse({ success: true });
+              return;
+            }
+
+            // Check blacklist
+            const { urlBlacklist } = await chrome.storage.session.get(['urlBlacklist']);
+            const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
+            if (blacklist.some(prefix => url.startsWith(prefix))) {
+              const existing = await requestOffscreen({ action: 'loadInteractionByUrl', url });
+              if (!existing || !existing.interaction) {
+                console.log(`Skipping blacklisted URL (not in database): ${url}`);
+                sendResponse({ success: true });
+                return;
+              }
+              console.log(`Blacklisted URL but already in database, continuing: ${url}`);
+            }
+
+            const timestamp = Date.now();
+            const title = await trimTitle(request.title, url);
+            const slug = request.slug;
+
+            const interaction = {
+              timestamp,
+              url,
+              title,
+              intent: request.intent || '',
+              attention: typeof request.attention === 'string' ? request.attention : (request.attention ? JSON.stringify(request.attention) : ''),
+              slug
+            };
+
+            enqueueInteraction({ interaction, markdown: '', html: '' });
+
+            // Update gateway domain registry (non-blocking)
+            updateGatewayRegistry(url);
+
+            // Workspace mode: auto-pin and optionally snapshot
+            const wsCollectionIds = workspace?.collectionIds || [];
+            if (workspace && workspace.mode === 'workspace' && wsCollectionIds.length > 0) {
+              try {
+                const pinsResp = await requestOffscreen({ action: 'loadCollectionPins' });
+                const allPins = (pinsResp && pinsResp.pins) ? pinsResp.pins : {};
+                let changed = false;
+
+                for (const collectionId of wsCollectionIds) {
+                  if (!allPins[collectionId]) allPins[collectionId] = [];
+                  const already = allPins[collectionId].some(p => p.url === url);
+                  if (!already) {
+                    allPins[collectionId].push({ url, title: request.title || 'Untitled', pinnedAt: timestamp });
+                    changed = true;
+                  }
+                }
+
+                if (changed) {
+                  await requestOffscreen({ action: 'saveCollectionPins', pins: allPins });
+                  console.log(`Workspace: auto-pinned ${url} to collections ${wsCollectionIds.join(', ')}`);
+                }
+
+                if (workspace.autoSnapshot && sender.tab) {
+                  chrome.tabs.sendMessage(sender.tab.id, { action: 'captureCurrentPage' }).then(async (response) => {
+                    if (response && response.success) {
+                      await bufferWrite({
+                        type: 'snapshot',
+                        slug,
+                        timestamp,
+                        markdown: response.markdown || '',
+                        html: response.html || ''
+                      });
+                      console.log(`Workspace: auto-snapshot captured for ${url}`);
+                    }
+                  }).catch(err => {
+                    console.warn('Workspace: auto-snapshot failed:', err.message);
+                  });
+                }
+              } catch (err) {
+                console.warn('Workspace: auto-pin/snapshot error:', err.message);
+              }
+            }
+
+            console.log(`Processed page visit: ${url}`);
+            sendResponse({ success: true });
+            notifyMutation('interaction', { url });
+          } catch (error) {
+            console.error('Error processing reportPageVisit:', error);
+            sendResponse({ success: false, error: error.message });
+          }
+          break;
+        }
+
+        // ── Queue Operations ──
+
+        case 'enqueueInteraction': {
+          enqueueInteraction(request.entry);
+          sendResponse({ success: true });
+          notifyMutation('interaction', { url: request.entry?.interaction?.url });
+          break;
+        }
+
+        case 'updateInteraction': {
+          const updates = { interaction: {} };
+          if (request.intent) updates.interaction.intent = request.intent;
+          if (request.attention) updates.interaction.attention = JSON.stringify(request.attention);
+          if (request.markdown) updates.markdown = request.markdown;
+          if (request.html) updates.html = request.html;
+          updateQueuedInteraction(request.interactionId, updates);
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'clearWriteQueue': {
+          pendingWrites = [];
+          await chrome.storage.local.set({ writeBuffer: pendingWrites });
+          sendResponse({ success: true });
+          break;
+        }
+
+        // ── Pure Reads (relay to offscreen, cache atoms) ──
+
+        case 'loadSettings': {
+          const t0 = performance.now();
+          const resp = await requestOffscreen({ action: 'loadSettings' });
+          console.debug(`[I/O] loadSettings: ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse(resp);
+          break;
+        }
+
+        case 'loadHighlights': {
+          const t0 = performance.now();
+          // Check atom cache
+          const cachedAtom = await getCachedAtom(request.slug);
+          if (cachedAtom) {
+            console.debug(`[I/O] loadHighlights(${request.slug}): cache hit`);
+            sendResponse({ success: true, highlights: cachedAtom.highlights || [] });
+            break;
+          }
+          const resp = await requestOffscreen({ action: 'loadHighlights', slug: request.slug });
+          console.debug(`[I/O] loadHighlights(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse(resp);
+          break;
+        }
+
+        case 'loadAllHighlights': {
+          const t0 = performance.now();
+          const resp = await requestOffscreen({ action: 'loadAllHighlights' });
+          console.debug(`[I/O] loadAllHighlights: ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse(resp);
+          break;
+        }
+
+        case 'loadInteractionByUrl': {
+          const t0 = performance.now();
+          const resp = await requestOffscreen({ action: 'loadInteractionByUrl', url: request.url });
+          console.debug(`[I/O] loadInteractionByUrl: ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse(resp);
+          break;
+        }
+
+        case 'loadAtomBatch': {
+          const t0 = performance.now();
+          const result = {};
+          const uncachedSlugs = [];
+
+          // Check atom cache for each slug
+          for (const slug of request.slugs) {
+            const cached = await getCachedAtom(slug);
+            if (cached) {
+              result[slug] = cached;
+            } else {
+              uncachedSlugs.push(slug);
+            }
+          }
+
+          // Fetch uncached from offscreen
+          if (uncachedSlugs.length > 0) {
+            const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: uncachedSlugs });
+            if (resp?.success && resp.atoms) {
+              for (const [slug, atom] of Object.entries(resp.atoms)) {
+                result[slug] = atom;
+                await setCachedAtom(slug, atom);
+              }
+            }
+          }
+
+          console.debug(`[I/O] loadAtomBatch: ${request.slugs.length} slugs (${request.slugs.length - uncachedSlugs.length} cached) in ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse({ success: true, atoms: result });
+          break;
+        }
+
+        case 'loadPageDetail': {
+          const t0 = performance.now();
+          const resp = await requestOffscreen({ action: 'loadPageDetail', slug: request.slug, url: request.url });
+          if (resp?.atom) {
+            await setCachedAtom(request.slug, resp.atom);
+          }
+          console.debug(`[I/O] loadPageDetail(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse(resp);
+          break;
+        }
+
+        case 'loadCollectionPins': {
+          const t0 = performance.now();
+          if (request.collectionId) {
+            const resp = await requestOffscreen({ action: 'loadCollectionPins', collectionId: request.collectionId });
+            console.debug(`[I/O] loadCollectionPins(${request.collectionId}): ${(performance.now() - t0).toFixed(1)}ms`);
+            sendResponse(resp);
+          } else {
+            const resp = await requestOffscreen({ action: 'loadCollectionPins' });
+            console.debug(`[I/O] loadCollectionPins: ${(performance.now() - t0).toFixed(1)}ms`);
+            sendResponse(resp);
+          }
+          break;
+        }
+
+        case 'listSnapshots': {
+          const t0 = performance.now();
+          const resp = await requestOffscreen({ action: 'listSnapshots', slug: request.slug });
+          console.debug(`[I/O] listSnapshots(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse(resp);
+          break;
+        }
+
+        case 'getDirectoryInfo': {
+          const resp = await requestOffscreen({ action: 'getDirectoryInfo' });
+          sendResponse(resp);
+          break;
+        }
+
+        case 'listInteractionFiles': {
+          const resp = await requestOffscreen({ action: 'listInteractionFiles' });
+          sendResponse(resp);
+          break;
+        }
+
+        case 'loadInteractionBatch': {
+          const t0 = performance.now();
+          const resp = await requestOffscreen({ action: 'loadInteractionBatch', files: request.files });
+          console.debug(`[I/O] loadInteractionBatch: ${request.files.length} files in ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse(resp);
+          break;
+        }
+
+        // ── Writes (session cache + bufferWrite) ──
+
+        case 'saveSettings': {
+          const s = request.settings;
+          const cacheUpdate = {};
+          for (const key of SETTINGS_KEYS) {
+            if (s[key] !== undefined) cacheUpdate[key] = s[key];
+          }
+          if (Object.keys(cacheUpdate).length > 0) {
+            await chrome.storage.session.set(cacheUpdate);
+          }
+          await bufferWrite({ type: 'json', path: 'settings.json', data: s });
+          sendResponse({ success: true });
+          notifyMutation('settings');
+          break;
+        }
+
+        case 'saveSettingsKey': {
+          await withLock('settings.json', async () => {
+            const sessionData = await chrome.storage.session.get(SETTINGS_KEYS);
+            const current = {};
+            for (const key of SETTINGS_KEYS) {
+              if (sessionData[key] !== undefined) current[key] = sessionData[key];
+            }
+
+            // If session is empty (cold start), read from offscreen
+            if (Object.keys(current).length === 0) {
+              const resp = await requestOffscreen({ action: 'loadSettings' });
+              if (resp?.success && resp.settings) {
+                Object.assign(current, resp.settings);
+              }
+            }
+
+            current[request.key] = request.value;
+
+            await chrome.storage.session.set({ [request.key]: request.value });
+            await bufferWrite({ type: 'json', path: 'settings.json', data: current });
+          });
+          sendResponse({ success: true });
+          notifyMutation('settings', { key: request.key });
+          break;
+        }
+
+        case 'saveHighlight': {
+          const hlSlug = request.slug;
+          const highlights = await withLock('atoms/' + hlSlug + '.json', async () => {
+            // Read atom from cache or offscreen
+            let atom = await getCachedAtom(hlSlug);
+            if (!atom) {
+              const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [hlSlug] });
+              atom = resp?.atoms?.[hlSlug] || {};
+            }
+            const hl = atom.highlights || [];
+            if (request.highlight.isGlobalNote) {
+              const idx = hl.findIndex(h => h.isGlobalNote);
+              if (idx >= 0) hl[idx] = request.highlight;
+              else hl.unshift(request.highlight);
+            } else {
+              hl.push(request.highlight);
+            }
+            atom.highlights = hl;
+            await setCachedAtom(hlSlug, atom);
+            await bufferWrite({ type: 'json', path: 'atoms/' + hlSlug + '.json', data: atom });
+            return hl;
+          });
+          sendResponse({ success: true, highlights });
+          notifyMutation('highlight', { slug: hlSlug });
+          break;
+        }
+
+        case 'deleteHighlight': {
+          const dhSlug = request.slug;
+          const remaining = await withLock('atoms/' + dhSlug + '.json', async () => {
+            let atom = await getCachedAtom(dhSlug);
+            if (!atom) {
+              const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [dhSlug] });
+              atom = resp?.atoms?.[dhSlug] || {};
+            }
+            let hl = atom.highlights || [];
+            const before = hl.length;
+            if (request.timestamp) {
+              hl = hl.filter(h => h.timestamp !== request.timestamp);
+            }
+            if (hl.length === before && request.text) {
+              const idx = hl.findIndex(h => {
+                if (Array.isArray(h.text) && Array.isArray(request.text)) {
+                  return JSON.stringify(h.text) === JSON.stringify(request.text);
+                }
+                return h.text === request.text;
+              });
+              if (idx >= 0) hl.splice(idx, 1);
+            }
+            atom.highlights = hl;
+            await setCachedAtom(dhSlug, atom);
+            await bufferWrite({ type: 'json', path: 'atoms/' + dhSlug + '.json', data: atom });
+            return hl;
+          });
+          sendResponse({ success: true, highlights: remaining });
+          notifyMutation('highlight', { slug: dhSlug });
+          break;
+        }
+
+        case 'saveHighlights': {
+          const shSlug = request.slug;
+          await withLock('atoms/' + shSlug + '.json', async () => {
+            let atom = await getCachedAtom(shSlug);
+            if (!atom) {
+              const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [shSlug] });
+              atom = resp?.atoms?.[shSlug] || {};
+            }
+            atom.highlights = request.highlights;
+            await setCachedAtom(shSlug, atom);
+            await bufferWrite({ type: 'json', path: 'atoms/' + shSlug + '.json', data: atom });
+          });
+          sendResponse({ success: true });
+          notifyMutation('highlight', { slug: shSlug });
+          break;
+        }
+
+        case 'saveCollectionPins': {
+          await requestOffscreen({ action: 'saveCollectionPins', pins: request.pins });
+          sendResponse({ success: true });
+          notifyMutation('pins');
+          break;
+        }
+
+        case 'saveCollectionPinsById': {
+          await bufferWrite({
+            type: 'json',
+            path: 'lists/user/' + request.collectionId + '.json',
+            data: request.pins
+          });
+          sendResponse({ success: true });
+          notifyMutation('pins', { collectionId: request.collectionId });
+          break;
+        }
+
+        case 'savePermanentDeletes': {
+          await chrome.storage.session.set({ permanentDeletes: request.urls });
+          await bufferWrite({
+            type: 'json',
+            path: 'lists/permanent-deletes.json',
+            data: request.urls
+          });
+          sendResponse({ success: true });
+          notifyMutation('permanentDeletes');
+          break;
+        }
+
+        // ── Pass-through (complex FS ops) ──
+
+        case 'initializeFilesystem': {
+          const resp = await requestOffscreen({ action: 'initializeFilesystem' });
+          sendResponse(resp);
+          break;
+        }
+
+        case 'captureSnapshot': {
+          await bufferWrite({
+            type: 'snapshot',
+            slug: request.slug,
+            timestamp: request.timestamp,
+            markdown: request.markdown || '',
+            html: request.html || ''
+          });
+          sendResponse({ success: true });
+          notifyMutation('snapshot', { slug: request.slug });
+          break;
+        }
+
+        case 'deleteSnapshot': {
+          const resp = await requestOffscreen({
+            action: 'deleteSnapshot',
+            slug: request.slug,
+            timestamp: request.timestamp
+          });
+          sendResponse(resp);
+          notifyMutation('snapshot', { slug: request.slug });
+          break;
+        }
+
+        default:
+          sendResponse({ success: false, error: `Unknown action: ${request.action}` });
+      }
+    } catch (error) {
+      console.error('Error handling message:', error);
+      sendResponse({ success: false, error: error.message });
     }
   })();
 
   return true;
 });
-

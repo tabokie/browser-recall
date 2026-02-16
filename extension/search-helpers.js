@@ -1,6 +1,18 @@
 // Extracted search helpers — pure functions testable without browser APIs
 
 /**
+ * Extract interaction entries from the typed writeBuffer.
+ * The writeBuffer contains entries of different types: 'interaction', 'json', 'snapshot'.
+ * This returns only interaction entries in the old format { interaction, markdown, html }
+ * that mergeBufferIntoInteractions and getBufferContentMap expect.
+ */
+export function extractInteractionBuffer(writeBuffer) {
+  return writeBuffer
+    .filter(e => e.type === 'interaction' || (!e.type && e.interaction))
+    .map(e => e.type === 'interaction' ? e.entry : e);
+}
+
+/**
  * Merge write-buffer entries into the interactions array, deduplicating by URL
  * (last-write-wins).
  *
@@ -57,7 +69,8 @@ export function buildInteractionsForEngine(InteractionClass, engine, dataList, c
 
     interaction.setContent((data.slug && contentMap[data.slug]) || '');
 
-    interaction.setAttention(data.attention || '');
+    const att = data.attention;
+    interaction.setAttention(typeof att === 'string' ? att : (att ? JSON.stringify(att) : ''));
     engine.addInteraction(interaction);
   }
 }

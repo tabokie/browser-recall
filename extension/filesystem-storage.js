@@ -3,6 +3,10 @@
 import { generateSlugFromUrl } from './utils.js';
 
 class FileSystemStorage {
+  #permissionGranted = false;
+  #dirCache = new Map();
+  #fileCache = new Map();
+
   constructor() {
     this.directoryHandle = null;
     this.dbName = 'PortalFS';
@@ -34,6 +38,8 @@ class FileSystemStorage {
         mode: 'readwrite',
         startIn: 'documents'
       });
+
+      this.clearCache();
 
       // Store handle in IndexedDB
       await this.saveDirectoryHandle();
@@ -81,6 +87,8 @@ class FileSystemStorage {
 
   // Verify we still have permission to the directory
   async verifyPermission() {
+    if (this.#permissionGranted) return true;
+
     if (!this.directoryHandle) {
       await this.loadDirectoryHandle();
     }
@@ -93,30 +101,85 @@ class FileSystemStorage {
 
     // Check if permission was already granted
     if ((await this.directoryHandle.queryPermission(options)) === 'granted') {
+      this.#permissionGranted = true;
       return true;
     }
 
     // Request permission
     if ((await this.directoryHandle.requestPermission(options)) === 'granted') {
+      this.#permissionGranted = true;
       return true;
     }
 
     return false;
   }
 
-  // Get or create the atoms/ subdirectory (snapshots + per-page metadata)
-  async getAtomsDir() {
-    return this.directoryHandle.getDirectoryHandle('atoms', { create: true });
+  // Resolve a directory path, creating segments as needed. Results are cached.
+  async resolveDir(path) {
+    const cached = this.#dirCache.get(path);
+    if (cached) return cached;
+
+    const segments = path.split('/');
+    let current = this.directoryHandle;
+    let builtPath = '';
+
+    for (const segment of segments) {
+      builtPath = builtPath ? builtPath + '/' + segment : segment;
+      const cachedSeg = this.#dirCache.get(builtPath);
+      if (cachedSeg) {
+        current = cachedSeg;
+        continue;
+      }
+      current = await current.getDirectoryHandle(segment, { create: true });
+      this.#dirCache.set(builtPath, current);
+    }
+
+    return current;
   }
 
-  // Get or create the lists/ subdirectory
-  async getListsDir() {
-    return this.directoryHandle.getDirectoryHandle('lists', { create: true });
+  // Resolve a file handle by path. Results are cached; evicts on error.
+  async resolveFile(path, { create = false } = {}) {
+    const cached = this.#fileCache.get(path);
+    if (cached) return cached;
+
+    const lastSlash = path.lastIndexOf('/');
+    let dirHandle, fileName;
+    if (lastSlash === -1) {
+      dirHandle = this.directoryHandle;
+      fileName = path;
+    } else {
+      dirHandle = await this.resolveDir(path.substring(0, lastSlash));
+      fileName = path.substring(lastSlash + 1);
+    }
+
+    try {
+      const fileHandle = await dirHandle.getFileHandle(fileName, create ? { create: true } : undefined);
+      this.#fileCache.set(path, fileHandle);
+      return fileHandle;
+    } catch (e) {
+      this.#fileCache.delete(path);
+      throw e;
+    }
   }
 
-  // Get or create the history/ subdirectory for JSONL interaction logs
-  async getHistoryDir() {
-    return this.directoryHandle.getDirectoryHandle('history', { create: true });
+  // Read and parse JSON from a file handle
+  async readJson(handle) {
+    const file = await handle.getFile();
+    return JSON.parse(await file.text());
+  }
+
+  // Write JSON to a file handle (overwrites)
+  async writeJson(handle, data) {
+    const writable = await handle.createWritable();
+    await writable.write(JSON.stringify(data, null, 2));
+    await writable.close();
+  }
+
+  // Clear all cached handles and permission state
+  clearCache() {
+    this.#permissionGranted = false;
+    this.#dirCache.clear();
+    this.#fileCache.clear();
   }
 
   // Move a file to deleted/{subpath}/ instead of deleting it.
@@ -153,6 +216,7 @@ class FileSystemStorage {
       // If move fails, fall through to hard delete as last resort
       try { await parentDir.removeEntry(name, opts); } catch {}
     }
+    this.clearCache();
   }
 
   // Write interaction metadata to JSONL and content to pages/
@@ -169,8 +233,7 @@ class FileSystemStorage {
       const date = new Date(metadata.timestamp);
       const filename = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}.jsonl`;
 
-      const historyDir = await this.getHistoryDir();
-      const fileHandle = await historyDir.getFileHandle(filename, { create: true });
+      const fileHandle = await this.resolveFile('history/' + filename, { create: true });
 
       const writable = await fileHandle.createWritable({ keepExistingData: true });
       const file = await fileHandle.getFile();
@@ -199,7 +262,6 @@ class FileSystemStorage {
     }
 
     contentMap = contentMap || {};
-    const atomsDir = await this.getAtomsDir();
 
     // Group interactions by date
     const byDate = {};
@@ -217,10 +279,9 @@ class FileSystemStorage {
     });
 
     // Write each date's interactions
-    const historyDir = await this.getHistoryDir();
     for (const [date, dayInteractions] of Object.entries(byDate)) {
       const filename = `${date}.jsonl`;
-      const fileHandle = await historyDir.getFileHandle(filename, { create: true });
+      const fileHandle = await this.resolveFile('history/' + filename, { create: true });
       const writable = await fileHandle.createWritable();
 
       for (const interaction of dayInteractions) {
@@ -247,7 +308,7 @@ class FileSystemStorage {
 
   // Write an index/summary file in human-readable format
   async writeIndexFile(interactions) {
-    const fileHandle = await this.directoryHandle.getFileHandle('README.md', { create: true });
+    const fileHandle = await this.resolveFile('README.md', { create: true });
     const writable = await fileHandle.createWritable();
 
     let content = '# Portal Interaction History\n\n';
@@ -298,7 +359,7 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
-    const historyDir = await this.getHistoryDir();
+    const historyDir = await this.resolveDir('history');
     const files = [];
     for await (const entry of historyDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl'))
@@ -313,11 +374,10 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
-    const historyDir = await this.getHistoryDir();
     const interactions = [];
     for (const name of filenames) {
       try {
-        const fh = await historyDir.getFileHandle(name);
+        const fh = await this.resolveFile('history/' + name);
         const file = await fh.getFile();
         const text = await file.text();
         for (const line of text.split('\n')) {
@@ -338,7 +398,7 @@ class FileSystemStorage {
     const interactionsByUrl = new Map();
 
     // Read all .jsonl files from history/
-    const historyDir = await this.getHistoryDir();
+    const historyDir = await this.resolveDir('history');
     for await (const entry of historyDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
         const file = await entry.getFile();
@@ -374,7 +434,7 @@ class FileSystemStorage {
     const contentMap = {};
 
     try {
-      const atomsDir = await this.getAtomsDir();
+      const atomsDir = await this.resolveDir('atoms');
 
       for await (const entry of atomsDir.values()) {
         if (entry.kind === 'directory') {
@@ -406,10 +466,8 @@ class FileSystemStorage {
       throw new Error('No permission to read directory');
     }
     try {
-      const listsDir = await this.getListsDir();
-      const fileHandle = await listsDir.getFileHandle('gateways.json');
-      const file = await fileHandle.getFile();
-      return JSON.parse(await file.text());
+      const fileHandle = await this.resolveFile('lists/gateways.json');
+      return this.readJson(fileHandle);
     } catch {
       return { watermark: 0, domains: {} };
     }
@@ -420,11 +478,8 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write directory');
     }
-    const listsDir = await this.getListsDir();
-    const fileHandle = await listsDir.getFileHandle('gateways.json', { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(JSON.stringify(data, null, 2));
-    await writable.close();
+    const fileHandle = await this.resolveFile('lists/gateways.json', { create: true });
+    await this.writeJson(fileHandle, data);
   }
 
   // Process gateway domains incrementally from JSONL files after a watermark timestamp
@@ -436,7 +491,7 @@ class FileSystemStorage {
     const domains = { ...existingDomains };
     let newWatermark = watermark;
 
-    const historyDir = await this.getHistoryDir();
+    const historyDir = await this.resolveDir('history');
     for await (const entry of historyDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
         // Skip files whose date is entirely before the watermark
@@ -501,7 +556,7 @@ class FileSystemStorage {
     const highlightsMap = {};
 
     try {
-      const atomsDir = await this.getAtomsDir();
+      const atomsDir = await this.resolveDir('atoms');
       for await (const entry of atomsDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
           try {
@@ -521,8 +576,7 @@ class FileSystemStorage {
 
   // Capture a versioned snapshot: atoms/{slug}/{timestamp}.md and .html
   async captureSnapshot(slug, timestamp, markdown, html) {
-    const atomsDir = await this.getAtomsDir();
-    const slugDir = await atomsDir.getDirectoryHandle(slug, { create: true });
+    const slugDir = await this.resolveDir('atoms/' + slug);
 
     if (markdown) {
       const mdHandle = await slugDir.getFileHandle(`${timestamp}.md`, { create: true });
@@ -548,7 +602,7 @@ class FileSystemStorage {
     const snapshots = [];
 
     try {
-      const atomsDir = await this.getAtomsDir();
+      const atomsDir = await this.resolveDir('atoms');
       const slugDir = await atomsDir.getDirectoryHandle(slug);
       const tsSet = new Map();
 
@@ -584,7 +638,7 @@ class FileSystemStorage {
       throw new Error('No permission to delete');
     }
 
-    const atomsDir = await this.getAtomsDir();
+    const atomsDir = await this.resolveDir('atoms');
     const slugDir = await atomsDir.getDirectoryHandle(slug);
     try { await this.softDelete(slugDir, `${timestamp}.md`); } catch (e) {}
     try { await this.softDelete(slugDir, `${timestamp}.html`); } catch (e) {}
@@ -604,24 +658,11 @@ class FileSystemStorage {
     }
   }
 
-  // Save highlights for a slug to atoms/{slug}.json (read-modify-write)
-  async saveHighlights(slug, highlights) {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to write');
-    }
-
-    const atom = (await this.loadAtom(slug)) || {};
-    atom.highlights = highlights;
-    await this.saveAtom(slug, atom);
-  }
-
   // Load atom metadata from atoms/{slug}.json
   async loadAtom(slug) {
     try {
-      const atomsDir = await this.getAtomsDir();
-      const fileHandle = await atomsDir.getFileHandle(`${slug}.json`);
-      const file = await fileHandle.getFile();
-      return JSON.parse(await file.text());
+      const fileHandle = await this.resolveFile(`atoms/${slug}.json`);
+      return this.readJson(fileHandle);
     } catch {
       return null;
     }
@@ -629,13 +670,11 @@ class FileSystemStorage {
 
   // Load multiple atoms in one call
   async loadAtomBatch(slugs) {
-    const atomsDir = await this.getAtomsDir();
     const result = {};
     for (const slug of slugs) {
       try {
-        const fh = await atomsDir.getFileHandle(`${slug}.json`);
-        const file = await fh.getFile();
-        result[slug] = JSON.parse(await file.text());
+        const fh = await this.resolveFile(`atoms/${slug}.json`);
+        result[slug] = await this.readJson(fh);
       } catch { /* atom doesn't exist */ }
     }
     return result;
@@ -643,11 +682,8 @@ class FileSystemStorage {
 
   // Save atom metadata to atoms/{slug}.json
   async saveAtom(slug, data) {
-    const atomsDir = await this.getAtomsDir();
-    const fileHandle = await atomsDir.getFileHandle(`${slug}.json`, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(JSON.stringify(data, null, 2));
-    await writable.close();
+    const fileHandle = await this.resolveFile(`atoms/${slug}.json`, { create: true });
+    await this.writeJson(fileHandle, data);
   }
 
   // Load page detail: merge atom with history entries after watermark
@@ -662,7 +698,7 @@ class FileSystemStorage {
 
     // Scan JSONL files after watermark for this URL
     let freshInteraction = null;
-    const historyDir = await this.getHistoryDir();
+    const historyDir = await this.resolveDir('history');
     for await (const entry of historyDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
         if (watermark > 0) {
@@ -714,7 +750,7 @@ class FileSystemStorage {
 
     let match = null;
 
-    const historyDir = await this.getHistoryDir();
+    const historyDir = await this.resolveDir('history');
     for await (const entry of historyDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
         const file = await entry.getFile();
@@ -742,11 +778,8 @@ class FileSystemStorage {
       throw new Error('No permission to read directory');
     }
     try {
-      const listsDir = await this.getListsDir();
-      const userDir = await listsDir.getDirectoryHandle('user');
-      const fh = await userDir.getFileHandle(`${collectionId}.json`);
-      const file = await fh.getFile();
-      return JSON.parse(await file.text());
+      const fh = await this.resolveFile(`lists/user/${collectionId}.json`);
+      return this.readJson(fh);
     } catch {
       return [];
     }
@@ -760,8 +793,7 @@ class FileSystemStorage {
 
     const allPins = {};
     try {
-      const listsDir = await this.getListsDir();
-      const userDir = await listsDir.getDirectoryHandle('user');
+      const userDir = await this.resolveDir('lists/user');
       for await (const entry of userDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
           try {
@@ -780,12 +812,8 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
-    const listsDir = await this.getListsDir();
-    const userDir = await listsDir.getDirectoryHandle('user', { create: true });
-    const fileHandle = await userDir.getFileHandle(`${collectionId}.json`, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(JSON.stringify(pins, null, 2));
-    await writable.close();
+    const fileHandle = await this.resolveFile(`lists/user/${collectionId}.json`, { create: true });
+    await this.writeJson(fileHandle, pins);
   }
 
   // Save collection pins to lists/user/{id}.json files
@@ -794,17 +822,14 @@ class FileSystemStorage {
       throw new Error('No permission to write');
     }
 
-    const listsDir = await this.getListsDir();
-    const userDir = await listsDir.getDirectoryHandle('user', { create: true });
+    const userDir = await this.resolveDir('lists/user');
 
     // Write each collection as a separate file
     const activeIds = new Set();
     for (const [id, pins] of Object.entries(allPins)) {
       activeIds.add(id);
-      const fileHandle = await userDir.getFileHandle(`${id}.json`, { create: true });
-      const writable = await fileHandle.createWritable();
-      await writable.write(JSON.stringify(pins, null, 2));
-      await writable.close();
+      const fileHandle = await this.resolveFile(`lists/user/${id}.json`, { create: true });
+      await this.writeJson(fileHandle, pins);
     }
 
     // Soft-delete orphaned files not in allPins
@@ -824,10 +849,8 @@ class FileSystemStorage {
       throw new Error('No permission to read directory');
     }
     try {
-      const listsDir = await this.getListsDir();
-      const fileHandle = await listsDir.getFileHandle('permanent-deletes.json');
-      const file = await fileHandle.getFile();
-      return JSON.parse(await file.text());
+      const fileHandle = await this.resolveFile('lists/permanent-deletes.json');
+      return this.readJson(fileHandle);
     } catch {
       return [];
     }
@@ -838,11 +861,8 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write directory');
     }
-    const listsDir = await this.getListsDir();
-    const fileHandle = await listsDir.getFileHandle('permanent-deletes.json', { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(JSON.stringify(urls, null, 2));
-    await writable.close();
+    const fileHandle = await this.resolveFile('lists/permanent-deletes.json', { create: true });
+    await this.writeJson(fileHandle, urls);
   }
 
   // Load settings.json — returns {} if missing or unreadable
@@ -852,9 +872,8 @@ class FileSystemStorage {
     }
 
     try {
-      const fileHandle = await this.directoryHandle.getFileHandle('settings.json');
-      const file = await fileHandle.getFile();
-      return JSON.parse(await file.text());
+      const fileHandle = await this.resolveFile('settings.json');
+      return this.readJson(fileHandle);
     } catch (error) {
       return {};
     }
@@ -866,10 +885,8 @@ class FileSystemStorage {
       throw new Error('No permission to write directory');
     }
 
-    const fileHandle = await this.directoryHandle.getFileHandle('settings.json', { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(JSON.stringify(data, null, 2));
-    await writable.close();
+    const fileHandle = await this.resolveFile('settings.json', { create: true });
+    await this.writeJson(fileHandle, data);
   }
 
 }
