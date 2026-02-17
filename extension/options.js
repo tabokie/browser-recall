@@ -46,7 +46,8 @@ let gatewayDomainsCache = {}; // { [origin]: { rootUrl, childCount, fetched } }
 let gatewayDomainsLoaded = false;
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
 let pendingPin = null; // { query, qbTree? } — set during pin naming mode
-let pinnedFilterCtx = null; // cached context for related recalculation on date filter
+// pinnedFilterCtx removed — pinned section no longer has related pages
+const EXPLORE_COLLECTION_ID = 'explore';
 // Collection results and atom data are cached in chrome.storage.session
 // (managed by background for atoms, by options for collection results).
 // Keys: 'atom:{slug}' for atoms, 'colCache:{id}' for collection results.
@@ -55,11 +56,14 @@ let colCacheKeys = []; // tracks which colCache:* keys exist in session
 // --- Query builder state ---
 let qbNodeIdCounter = 0;
 let qbRoot = null;        // tree root (null = empty)
-let qbMode = 'normal';    // 'normal' | 'professional'
 let cachedAllHighlights = null; // slug → highlights[], lazy-loaded
 let qbDebounceTimer = null;
 let savedExploreQbRoot = null;  // saved global explore QB state when viewing a collection
-let savedExploreQbMode = null;
+
+// --- Explore blocks state ---
+let exploreBlocks = []; // [{ id, type:'auto'|'manual', label, enabled, urls?:Set, tree? }]
+let exploreBlockIdCounter = 0;
+let activeBlockId = null; // which block's QB tree is currently being edited
 
 const KEYWORD_FIELDS = ['title', 'url', 'captures', 'highlights', 'notes'];
 const KEYWORD_FIELD_LABELS = { title: 'Title', url: 'URL', captures: 'Captures', highlights: 'Highlights', notes: 'Notes' };
@@ -309,7 +313,6 @@ function resetHistory() {
   gatewayDomainsCache = {};
   gatewayDomainsLoaded = false;
   bufferContentMap = {};
-  pinnedFilterCtx = null;
 }
 
 // --- Collection pins (filesystem) ---
@@ -328,6 +331,12 @@ async function saveCollectionPinsById(collectionId) {
   } catch (error) {
     console.log('Could not save collection pins:', error.message);
   }
+}
+
+function getActivePinCollectionId() {
+  if (activeView.type === 'explore') return EXPLORE_COLLECTION_ID;
+  if (activeView.type === 'collection') return activeView.id;
+  return EXPLORE_COLLECTION_ID; // default: pin to explore
 }
 
 function isResultPinned(collectionId, url) {
@@ -432,16 +441,13 @@ function showNormalLayout() {
 function saveExploreQbState() {
   if (savedExploreQbRoot === null) {
     savedExploreQbRoot = qbRoot;
-    savedExploreQbMode = qbMode;
   }
 }
 
 function restoreExploreQbState() {
   if (savedExploreQbRoot !== null) {
     qbRoot = savedExploreQbRoot;
-    qbMode = savedExploreQbMode;
     savedExploreQbRoot = null;
-    savedExploreQbMode = null;
   }
 }
 
@@ -686,12 +692,9 @@ function renderResultsSkeleton(opts = {}) {
 
 // Show collection chart frames + column headers immediately
 function renderCollectionSkeleton() {
-  // Pinned section: show chart frame + column header
+  // Pinned section: show column header
   const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
   pinnedSection.style.display = '';
-  const pinnedChart = document.getElementById('pinnedChart');
-  pinnedChart.querySelector('.chart-bars').innerHTML = '';
-  pinnedChart.classList.add('visible');
   const pinnedContainer = document.getElementById('pinnedResults');
   pinnedContainer.innerHTML = columnHeaderHtml('pinned', { hasDelete: true, hasPin: true });
   bindColumnHeaderClicks(pinnedContainer);
@@ -919,13 +922,11 @@ function bindChartTooltip(chartEl) {
 }
 
 bindChartTooltip(document.getElementById('attentionChart'));
-bindChartTooltip(document.getElementById('pinnedChart'));
 bindChartTooltip(document.getElementById('relatedChart'));
 
 // Chart ↔ Results mapping: chartBarsId → resultsContainerId
 const chartResultsPairs = [
   ['chartBars', 'results'],
-  ['pinnedChartBars', 'pinnedResults'],
   ['relatedChartBars', 'relatedResults'],
 ];
 
@@ -935,10 +936,9 @@ function syncChartHighlights() {
     const container = document.getElementById(containerId);
     if (!barsEl || !container) continue;
 
-    // Collect dates from selected rows (exclude related results from pinned chart)
+    // Collect dates from selected rows
     const selectedDates = new Set();
     container.querySelectorAll('.result-row.selected').forEach(row => {
-      if (row.closest('.result-item.related-result')) return;
       const d = row.dataset.dates;
       if (d) d.split(',').forEach(date => selectedDates.add(date));
     });
@@ -972,7 +972,6 @@ function applyDateFilter(chartEl, resultsContainer) {
 
   // Non-virtual containers: hide/show DOM nodes directly
   resultsContainer.querySelectorAll('.result-item').forEach(item => {
-    if (item.classList.contains('related-result')) return;
     const row = item.querySelector('.result-row');
     if (!row) return;
     if (!hasFilter) { item.style.display = ''; return; }
@@ -981,10 +980,6 @@ function applyDateFilter(chartEl, resultsContainer) {
     item.style.display = match ? '' : 'none';
   });
 
-  // Recalculate related results when filtering pinned section
-  if (resultsContainer.id === 'pinnedResults') {
-    recalculateRelatedResults();
-  }
 }
 
 function bindChartBarClick(chartEl, resultsContainer) {
@@ -1064,7 +1059,8 @@ async function showCategory(category) {
 
 async function showSearch(query) {
   if (!query.trim()) {
-    showCategory(activeView.type === 'category' ? activeView.value : 'all');
+    if (activeView.type === 'category') showCategory(activeView.value);
+    else showExplore();
     return;
   }
 
@@ -1404,16 +1400,6 @@ function qbFlattenSameOp(node) {
   return node;
 }
 
-// Check if tree can be converted to normal mode (flat OR of predicates only)
-function qbCanConvertToNormal(node) {
-  if (!node) return true;
-  if (node.type === 'predicate') return !node.negated;
-  if (node.type === 'operator') {
-    if (node.op !== 'OR') return false;
-    return node.children.every(c => c.type === 'predicate' && !c.negated);
-  }
-  return false;
-}
 
 function qbUpdateNode(nodeId, updates) {
   const found = qbFindNode(qbRoot, nodeId);
@@ -1647,36 +1633,21 @@ function getActiveQbBody() {
 }
 
 function renderQueryBuilder() {
+  // In explore/collection view, always use block layout
+  if (activeView.type === 'explore' || activeView.type === 'collection') {
+    // Copy mutated qbRoot back to active block's tree
+    const block = exploreBlocks.find(b => b.id === activeBlockId);
+    if (block && block.type === 'manual') block.tree = qbRoot;
+    renderExploreBlocks();
+    return;
+  }
+
   const body = getActiveQbBody();
   if (!body) return;
 
-  if (qbMode === 'normal') {
-    body.classList.remove('qb-mode-pro');
-    renderQueryBuilderNormal(body);
-  } else {
-    body.classList.add('qb-mode-pro');
-    renderQueryBuilderPro(body);
-  }
+  body.classList.add('qb-mode-pro');
+  body.innerHTML = renderTreeNodePro(qbRoot);
   bindQueryBuilderEvents(body);
-
-  // Update Normal mode button: disable if tree has AND operators
-  const toggle = body.closest('.query-builder')?.querySelector('.qb-mode-toggle');
-  const normalBtn = toggle?.querySelector('.qb-mode-btn[data-mode="normal"]');
-  if (normalBtn && toggle) {
-    let hint = toggle.querySelector('.qb-mode-hint');
-    if (qbMode === 'professional' && !qbCanConvertToNormal(qbRoot)) {
-      normalBtn.disabled = true;
-      if (!hint) {
-        hint = document.createElement('span');
-        hint.className = 'qb-mode-hint';
-        toggle.appendChild(hint);
-      }
-      hint.textContent = 'Tree contains AND/NOT operators';
-    } else {
-      normalBtn.disabled = false;
-      if (hint) hint.remove();
-    }
-  }
 }
 
 function renderPredicateInputs(node) {
@@ -1737,34 +1708,33 @@ function renderPredicateInputs(node) {
   return html;
 }
 
-function renderQueryBuilderNormal(body) {
-  const predicates = qbFlatten(qbRoot);
-  let html = '';
 
-  for (const pred of predicates) {
-    html += `<div class="qb-predicate-row" data-node-id="${pred.id}">`;
-    html += renderPredicateInputs(pred);
-    html += `<button class="qb-remove-btn" data-node-id="${pred.id}" title="Remove">&times;</button>`;
-    html += `</div>`;
-  }
-
-  html += `<button class="qb-add-btn">+ Add filter</button>`;
-  body.innerHTML = html;
+function qbCountLeaves(node) {
+  if (!node) return 0;
+  if (node.type === 'predicate') return 1;
+  if (node.type === 'operator') return node.children.reduce((sum, c) => sum + qbCountLeaves(c), 0);
+  return 0;
 }
 
-function qbLeafButtons(depth, parentOp) {
-  if (depth === 0) return ['OR', 'AND']; // root leaf: both (AND first)
+function qbLeafButtons(depth, parentOp, singleLeafTree) {
+  if (depth === 0) {
+    // Single-node tree: only AND (use separate blocks for OR)
+    if (singleLeafTree) return ['AND'];
+    return ['OR', 'AND'];
+  }
   // Always offer the opposite of parent — alternating pattern
   // Same-op nesting would just merge into parent, so only opposite is useful
   return parentOp === 'OR' ? ['AND'] : ['OR'];
 }
 
-function renderTreeNodePro(node, depth = 0, parentOp = null) {
+function renderTreeNodePro(node, depth = 0, parentOp = null, singleLeafTree = null) {
   if (!node) return '<span style="color:#9aa0a6;font-size:12px">empty</span>';
+  // Compute once at root level
+  if (singleLeafTree === null) singleLeafTree = qbCountLeaves(node) <= 1;
 
   if (node.type === 'predicate') {
     let html = `<div class="qt-leaf" data-node-id="${node.id}">`;
-    const buttons = qbLeafButtons(depth, parentOp);
+    const buttons = qbLeafButtons(depth, parentOp, singleLeafTree);
     html += `<div class="qt-edge-btns">`;
     for (let bi = 0; bi < buttons.length; bi++) {
       if (bi > 0) html += `<span class="qt-line"></span>`;
@@ -1790,7 +1760,7 @@ function renderTreeNodePro(node, depth = 0, parentOp = null) {
   if (node.type === 'operator') {
     // Single-child: transparent wrapper — just render the child at depth+1
     if (node.children.length === 1) {
-      return renderTreeNodePro(node.children[0], depth + 1, parentOp);
+      return renderTreeNodePro(node.children[0], depth + 1, parentOp, singleLeafTree);
     }
     // Multi-child: branching operator — clickable to add another child
     const opCls = node.op === 'OR' ? 'qt-sym-or' : 'qt-sym-and';
@@ -1798,7 +1768,7 @@ function renderTreeNodePro(node, depth = 0, parentOp = null) {
     html += `<button class="qt-op-parent-btn" data-node-id="${node.id}" data-op="${node.op}" title="Add child"><span class="qt-sym ${opCls}"></span></button>`;
     html += `<div class="qt-children">`;
     for (const child of node.children) {
-      html += `<div class="qt-branch">${renderTreeNodePro(child, depth + 1, node.op)}</div>`;
+      html += `<div class="qt-branch">${renderTreeNodePro(child, depth + 1, node.op, singleLeafTree)}</div>`;
     }
     html += `</div>`;
     html += `</div>`;
@@ -1808,9 +1778,6 @@ function renderTreeNodePro(node, depth = 0, parentOp = null) {
   return '';
 }
 
-function renderQueryBuilderPro(body) {
-  body.innerHTML = renderTreeNodePro(qbRoot);
-}
 
 function bindQueryBuilderEvents(body) {
   // Type selector change
@@ -1974,22 +1941,7 @@ function bindQueryBuilderEvents(body) {
     });
   });
 
-  // Add filter (normal mode)
-  const addBtn = body.querySelector('.qb-add-btn');
-  if (addBtn) {
-    addBtn.addEventListener('click', () => {
-      const newPred = qbCreatePlaceholder();
-      const predicates = qbFlatten(qbRoot);
-      // Filter out pure placeholders if the user already has configured ones
-      const configured = predicates.filter(p => p.predicateType !== null);
-      const all = [...configured, newPred];
-      if (configured.length === 0) all.unshift(...predicates.filter(p => p.predicateType === null));
-      qbRoot = qbToTree([...predicates, newPred]);
-      renderQueryBuilder();
-    });
-  }
-
-  // Pro mode: leaf edge buttons (insert on edge)
+  // Leaf edge buttons (insert on edge)
   body.querySelectorAll('.qt-op-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const leafId = parseInt(btn.dataset.leafId);
@@ -1997,7 +1949,7 @@ function bindQueryBuilderEvents(body) {
     });
   });
 
-  // Pro mode: NOT toggle (negate leaf)
+  // NOT toggle (negate leaf)
   body.querySelectorAll('.qt-not-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const nodeId = parseInt(btn.dataset.nodeId);
@@ -2010,7 +1962,7 @@ function bindQueryBuilderEvents(body) {
     });
   });
 
-  // Pro mode: parent operator buttons (add child to existing operator)
+  // Parent operator buttons (add child to existing operator)
   body.querySelectorAll('.qt-op-parent-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const nodeId = parseInt(btn.dataset.nodeId);
@@ -2018,24 +1970,18 @@ function bindQueryBuilderEvents(body) {
     });
   });
 
-  // Mode toggle buttons
-  body.closest('.query-builder')?.querySelectorAll('.qb-mode-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (btn.disabled) return;
-      const newMode = btn.dataset.mode;
-      if (newMode === qbMode) return;
-      qbMode = newMode;
-      // Update active class
-      btn.closest('.qb-mode-toggle').querySelectorAll('.qb-mode-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      renderQueryBuilder();
-    });
-  });
 }
 
 function debouncedRunQuery() {
   if (qbDebounceTimer) clearTimeout(qbDebounceTimer);
-  qbDebounceTimer = setTimeout(() => runQuery(), 300);
+  qbDebounceTimer = setTimeout(() => {
+    // In explore/collection view, always use block query
+    if (activeView.type === 'explore' || activeView.type === 'collection') {
+      runExploreBlockQuery();
+    } else {
+      runQuery();
+    }
+  }, 300);
 }
 
 // Summarize a query tree into a short display name for collections
@@ -2070,26 +2016,57 @@ async function showExplore() {
   activeView = { type: 'explore' };
   updateSidebarActive();
   updateMainTitle('Explore');
+  document.getElementById('pinSearchBtn').style.display = 'none';
 
-  // Default to a keyword search over all if no query configured
-  if (!qbRoot) {
-    qbRoot = qbCreatePlaceholder();
-  }
+  // Always use collection layout with block-based explore
+  showCollectionLayout();
+  renderCollectionSkeleton();
 
-  // Show query builder, hide other UI
-  document.getElementById('queryBuilder').style.display = 'block';
-  document.getElementById('pinSearchBtn').style.display =
-    treeHasConfiguredPredicate(qbRoot) ? 'flex' : 'none';
-  showNormalLayout();
+  const pins = getExplorePins();
+  const collectionId = EXPLORE_COLLECTION_ID;
 
-  renderQueryBuilder();
-
-  if (treeHasConfiguredPredicate(qbRoot)) {
-    await runQuery();
+  // Hide pinned section when no pins
+  const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
+  if (pins.length === 0) {
+    pinnedSection.style.display = 'none';
   } else {
-    renderAttentionChart([]);
-    displayMessage('Add filters to start querying');
+    // Enrich pins with atom data from session
+    const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
+    const atomKeys = pinSlugs.map(s => 'atom:' + s);
+    const atomData = atomKeys.length > 0 ? await chrome.storage.session.get(atomKeys) : {};
+    const atomSnap = new Map();
+    for (const slug of pinSlugs) {
+      const atom = atomData['atom:' + slug];
+      if (atom) atomSnap.set(slug, atom);
+    }
+
+    function enrichResult(r) {
+      const slug = generateSlugFromUrl(r.url);
+      const cached = atomSnap.get(slug);
+      const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
+      const attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
+      const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
+      const pin = pins.find(p => p.url === r.url);
+      return {
+        ...r, slug, attScore, attDetail: attParsed,
+        highlights: source.highlights || r.highlights || [],
+        timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
+        pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
+      };
+    }
+
+    const fullPinned = pins.map(enrichResult);
+    renderPinnedSection(fullPinned, collectionId);
   }
+
+  // Load history for block evaluation and fallback display
+  await initHistoryFiles();
+  await loadHistoryBatch();
+
+  // Build auto-blocks from pins (empty array if no pins)
+  exploreBlocks = pins.length > 0 ? await buildExploreAutoBlocks(pins) : [];
+  renderExploreBlocks();
+  runExploreBlockQuery();
 }
 
 async function showCollection(collection) {
@@ -2165,8 +2142,7 @@ async function showCollection(collection) {
     const colCacheKey = 'colCache:' + collectionId;
     const cachedPinned = (await chrome.storage.session.get(colCacheKey))[colCacheKey] || null;
     if (cachedPinned) {
-      renderPinnedWithRelated(cachedPinned.fullPinned, cachedPinned.related, collectionId);
-      pinnedFilterCtx = { allPinned: cachedPinned.fullPinned, allEnriched: [], collectionId, enrichResult, maxAtt: Math.max(...[...cachedPinned.fullPinned, ...cachedPinned.related].map(r => r.attScore), 0.1) };
+      renderPinnedSection(cachedPinned.fullPinned, collectionId);
     } else {
       renderPinnedSection(pins.map(enrichResult), collectionId);
       fetchCollectionResults(collection, collectionId, pins, enrichResult);
@@ -2233,60 +2209,37 @@ async function fetchCollectionResults(collection, collectionId, pins, enrichResu
 
   try {
     let searchResults = [];
-    let allEnriched = [];
 
     if (collection.qbTree) {
-      allEnriched = await evaluateQueryStream(collection.qbTree);
-      searchResults = allEnriched;
+      searchResults = await evaluateQueryStream(collection.qbTree);
     } else if (collection.query) {
       try {
         searchResults = await pipelinedSearch(collection.query);
       } catch (searchErr) {
-        console.warn('Collection search failed, continuing with related pages:', searchErr.message);
+        console.warn('Collection search failed:', searchErr.message);
       }
-    }
-
-    // Related pages use ALL loaded history as candidates (not just search hits)
-    if (!collection.qbTree) {
-      allEnriched = Array.from(historyByUrl.values()).map(r => ({
-        ...r,
-        timestamps: [r.timestamp || Date.now()],
-        attScore: 0,
-        attDetail: null,
-        highlights: [],
-      }));
     }
 
     if (activeView.type !== 'collection' || activeView.id !== collectionId) return;
 
-    // Compute fullPinned + related
+    // Enrich pinned pages with search result data where available
     const pinnedUrls = new Set(pins.map(p => p.url));
     const searchResultUrls = new Set(searchResults.map(r => r.url));
     const pinnedInResults = searchResults.filter(r => pinnedUrls.has(r.url)).map(enrichResult);
     const pinnedOnly = pins.filter(p => !searchResultUrls.has(p.url)).map(enrichResult);
     const fullPinned = [...pinnedInResults, ...pinnedOnly];
 
-    let related = [];
-    if (fullPinned.length > 0 && allEnriched.length > 0) {
-      const allPinnedUrls = new Set(fullPinned.map(r => r.url));
-      const seedEnriched = allEnriched.filter(e => allPinnedUrls.has(e.url));
-      const candidateEnriched = allEnriched.filter(e => !allPinnedUrls.has(e.url));
-      related = findRelatedPages(seedEnriched, candidateEnriched, relatedPagesLimit).map(enrichResult);
-    }
-
-    // Cache pinned+related in session
+    // Cache pinned in session
     if (!colCacheKeys.includes(collectionId)) colCacheKeys.push(collectionId);
-    chrome.storage.session.set({ ['colCache:' + collectionId]: { fullPinned, related } });
+    chrome.storage.session.set({ ['colCache:' + collectionId]: { fullPinned } });
 
-    renderPinnedWithRelated(fullPinned, related, collectionId);
-    pinnedFilterCtx = { allPinned: fullPinned, allEnriched, collectionId, enrichResult, maxAtt: Math.max(...[...fullPinned, ...related].map(r => r.attScore), 0.1) };
+    renderPinnedSection(fullPinned, collectionId);
   } catch (error) {
-    // Phase 2 failed — leave Phase 1 pinned content intact (already rendered)
     console.error('Collection fetch error:', error);
   }
 }
 
-// Render pinned rows immediately (no related pages yet)
+// Render pinned rows (no related pages, no attention chart)
 function renderPinnedSection(allPinned, collectionId) {
   const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
   const sortedPinned = applySortOrder(allPinned, effectivePinnedSort);
@@ -2308,131 +2261,36 @@ function renderPinnedSection(allPinned, collectionId) {
     bindResultDelegation(pinnedContainer);
     bindPinClicks(pinnedContainer, collectionId);
   }
-
-  // Attention chart for pinned pages — use enriched data directly
-  const chartData = allPinned.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || Date.now(), attention: '' }));
-  renderAttentionChartInto(
-    document.getElementById('pinnedChart'),
-    document.getElementById('pinnedChartBars'),
-    chartData,
-    'Collection pages'
-  );
-  bindChartBarClick(document.getElementById('pinnedChart'), document.getElementById('pinnedResults'));
 }
 
-// Phase 2: re-render pinned + related rows together
-function renderPinnedWithRelated(allPinned, related, collectionId) {
-  const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
-  const sortedPinned = applySortOrder(allPinned, effectivePinnedSort);
-  const sortedRelated = applySortOrder(related, effectivePinnedSort);
+// renderPinnedWithRelated removed — pinned section only shows pinned rows
 
-  const allForMax = [...sortedPinned, ...sortedRelated];
-  const maxAtt = Math.max(...allForMax.map(r => r.attScore), 0.1);
-
-  const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
-  const pinnedContainer = document.getElementById('pinnedResults');
-
-  if (sortedPinned.length === 0) {
-    pinnedSection.style.display = 'none';
-  } else {
-    pinnedSection.style.display = '';
-    let html = columnHeaderHtml('pinned', { hasDelete: true, hasPin: true });
-
-    html += sortedPinned.map(r =>
-      resultRowHtml(r.title, r.url, { pinned: true, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt })
-    ).join('');
-
-    if (sortedRelated.length > 0 && sortedPinned.length > 0) {
-      html += '<div class="related-gap"></div>';
-    }
-    html += sortedRelated.map(r =>
-      resultRowHtml(r.title, r.url, { pinned: false, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps, context: 'pinned', cssClass: 'related-result' })
-    ).join('');
-
-    pinnedContainer.innerHTML = html;
-    bindColumnHeaderClicks(pinnedContainer);
-    bindResultDelegation(pinnedContainer);
-    bindPinClicks(pinnedContainer, collectionId);
-  }
-
-  // Re-render attention chart with full set — use enriched data directly
-  const chartData = allPinned.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || Date.now(), attention: '' }));
-  renderAttentionChartInto(
-    document.getElementById('pinnedChart'),
-    document.getElementById('pinnedChartBars'),
-    chartData,
-    'Collection pages'
-  );
-  bindChartBarClick(document.getElementById('pinnedChart'), document.getElementById('pinnedResults'));
-}
-
-function recalculateRelatedResults() {
-  const ctx = pinnedFilterCtx;
-  if (!ctx) return;
-  const { allPinned, allEnriched, collectionId, enrichResult, maxAtt } = ctx;
-
-  // Collect URLs of visible pinned results
-  const pinnedContainer = document.getElementById('pinnedResults');
-  const visiblePinnedUrls = new Set();
-  pinnedContainer.querySelectorAll('.result-item:not(.related-result)').forEach(item => {
-    if (item.style.display === 'none') return;
-    const row = item.querySelector('.result-row');
-    if (row) visiblePinnedUrls.add(row.dataset.url);
-  });
-
-  // If no filter active, use all pinned
-  const seedUrls = visiblePinnedUrls.size > 0 ? visiblePinnedUrls : new Set(allPinned.map(r => r.url));
-
-  // Recalculate related pages
-  let related = [];
-  if (seedUrls.size > 0 && allEnriched && allEnriched.length > 0) {
-    const seedEnriched = allEnriched.filter(e => seedUrls.has(e.url));
-    const allPinnedUrls = new Set(allPinned.map(r => r.url));
-    const candidateEnriched = allEnriched.filter(e => !allPinnedUrls.has(e.url));
-    related = findRelatedPages(seedEnriched, candidateEnriched, relatedPagesLimit).map(enrichResult);
-  }
-
-  const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
-  const sortedRelated = applySortOrder(related, effectivePinnedSort);
-
-  // Remove old related results and gap, then append new ones
-  pinnedContainer.querySelectorAll('.related-gap, .result-item.related-result').forEach(el => el.remove());
-
-  if (sortedRelated.length > 0) {
-    // Build HTML in a temp container so we can bind only new rows
-    const temp = document.createElement('div');
-    temp.innerHTML = '<div class="related-gap"></div>' + sortedRelated.map(r =>
-      resultRowHtml(r.title, r.url, {
-        pinned: false, deletable: true, attScore: r.attScore, maxAtt,
-        attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps,
-        context: 'pinned', cssClass: 'related-result'
-      })
-    ).join('');
-    bindResultDelegation(temp);
-    bindPinClicks(temp, collectionId);
-    while (temp.firstChild) pinnedContainer.appendChild(temp.firstChild);
-  }
-}
+// recalculateRelatedResults removed — pinned section no longer has related pages
 
 async function renderCollectionExplore(collection) {
-  const qbContainer = document.getElementById('collectionQueryBuilder');
+  const collectionId = collection.id;
+  const pins = allCollectionPins[collectionId] || [];
 
-  // Load the collection's tree into the global qbRoot (explore state already saved)
-  qbRoot = collection.qbTree ? JSON.parse(JSON.stringify(collection.qbTree)) : null;
-  qbMode = (qbRoot && !qbCanConvertToNormal(qbRoot)) ? 'professional' : 'normal';
+  // Load history for block evaluation
+  await initHistoryFiles();
+  await loadHistoryBatch();
 
-  // Show the query builder (interactive)
-  qbContainer.style.display = 'block';
-  renderQueryBuilder();
+  // Build auto-blocks from collection pins
+  exploreBlocks = pins.length > 0 ? await buildExploreAutoBlocks(pins) : [];
 
-  // Run query with current tree
-  if (qbRoot && treeHasConfiguredPredicate(qbRoot)) {
-    const matched = await evaluateQueryStream(qbRoot);
-    runCollectionExploreQuery(matched);
-  } else {
-    document.getElementById('relatedResults').innerHTML = '<div class="no-results">Add filters to start querying</div>';
-    document.getElementById('relatedChart').classList.remove('visible');
+  // Add saved qbTree as a manual block if present
+  if (collection.qbTree) {
+    exploreBlocks.push({
+      id: ++exploreBlockIdCounter,
+      type: 'manual',
+      label: 'Saved query',
+      enabled: true,
+      tree: JSON.parse(JSON.stringify(collection.qbTree)),
+    });
   }
+
+  renderExploreBlocks();
+  runExploreBlockQuery();
 }
 
 function displaySearchResults(results) {
@@ -2561,6 +2419,7 @@ function bindRecycleBinClicks(container) {
 
 const PIN_SVG = '<svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>';
 const DELETE_SVG = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+const FOCUS_SVG = '<svg viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>';
 
 
 // Blue (low) → Red (high) color scale
@@ -2742,20 +2601,19 @@ function bindHighlightDeleteButtons(container) {
   });
 }
 
-// opts: { pinned, deletable, attScore, maxAtt, attDetail, highlights, timestamps, context, pinnedAt, relevance }
+// opts: { pinned, deletable, attScore, maxAtt, attDetail, highlights, timestamps, context, pinnedAt, relevance, noFocusButton }
 function resultRowHtml(title, url, opts = {}) {
   const safeTitle = escapeHtml(title || 'Untitled');
   const safeUrl = escapeHtml(url || '');
-  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, highlights = [], timestamps = [], context = 'global', pinnedAt, relevance, cssClass } = opts;
+  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, highlights = [], timestamps = [], context = 'global', pinnedAt, relevance, cssClass, noFocusButton = false } = opts;
   const extraCols = getExtraColumns(context);
 
   const lastVisit = timestamps.length > 0 ? formatTime(Math.max(...timestamps)) : '';
   const normalized = maxAtt > 0 ? attScore / maxAtt : 0;
   const dotColor = attentionColor(normalized);
 
-  const pinBtn = pinned !== undefined
-    ? `<button class="result-pin${pinned ? ' pinned' : ''}" data-pin-url="${safeUrl}" data-pin-title="${safeTitle}" title="${pinned ? 'Unpin' : 'Pin'}">${PIN_SVG}</button>`
-    : '';
+  const isPinned = pinned !== undefined ? pinned : isResultPinned(getActivePinCollectionId(), url);
+  const pinBtn = `<button class="result-pin${isPinned ? ' pinned' : ''}" data-pin-url="${safeUrl}" data-pin-title="${safeTitle}" title="${isPinned ? 'Unpin' : 'Pin'}">${PIN_SVG}</button>`;
 
   const detailHtml = buildDetailHtml(url, attDetail, highlights);
 
@@ -2791,6 +2649,7 @@ function resultRowHtml(title, url, opts = {}) {
       ${extraAfterAtt}
       ${deletable ? `<button class="result-delete" data-delete-url="${safeUrl}" data-delete-title="${safeTitle}" title="Delete">${DELETE_SVG}</button>` : ''}
       ${pinBtn}
+      ${noFocusButton ? '' : `<button class="result-focus" data-focus-url="${safeUrl}" data-focus-title="${safeTitle}" title="Focus">${FOCUS_SVG}</button>`}
     </div>
     <div class="result-detail">${detailHtml}</div>
   </div>`;
@@ -2863,7 +2722,14 @@ function bindResultDelegation(container) {
     const pinBtn = e.target.closest('.result-pin');
     if (pinBtn) {
       e.stopPropagation();
-      return; // pin clicks handled by bindPinDelegation
+      return; // pin clicks handled by bindPinClicks
+    }
+
+    const focusBtn = e.target.closest('.result-focus');
+    if (focusBtn) {
+      e.stopPropagation();
+      openFocusPanel(focusBtn.dataset.focusUrl, focusBtn.dataset.focusTitle);
+      return;
     }
 
     const row = e.target.closest('.result-row');
@@ -2901,7 +2767,7 @@ function bindResultDelegation(container) {
   container.addEventListener('dblclick', (e) => {
     const row = e.target.closest('.result-row');
     if (!row) return;
-    if (e.target.closest('.result-pin') || e.target.closest('.result-expand') || e.target.closest('.result-delete')) return;
+    if (e.target.closest('.result-pin') || e.target.closest('.result-expand') || e.target.closest('.result-delete') || e.target.closest('.result-focus')) return;
     chrome.tabs.create({ url: row.dataset.url });
   });
 
@@ -2941,8 +2807,12 @@ function bindPinClicks(container, collectionId) {
     const title = pinBtn.dataset.pinTitle;
     const cid = container._pinCollectionId;
     await toggleResultPin(cid, url, title);
-    const collection = { id: cid, query: activeView.query, qbTree: activeView.qbTree, name: activeView.name };
-    showCollection(collection);
+    if (cid === EXPLORE_COLLECTION_ID) {
+      showExplore();
+    } else {
+      const collection = { id: cid, query: activeView.query, qbTree: activeView.qbTree, name: activeView.name };
+      showCollection(collection);
+    }
   });
 }
 
@@ -3195,13 +3065,15 @@ let globalVirtualScroller = null;
 let relatedVirtualScroller = null;
 
 function getOrCreateGlobalScroller() {
+  const containerEl = document.getElementById('results');
   if (!globalVirtualScroller) {
     const scrollEl = document.querySelector('.main');
-    const containerEl = document.getElementById('results');
     globalVirtualScroller = new VirtualScroller(scrollEl, containerEl);
     bindResultDelegation(containerEl);
     bindColumnHeaderClicks(containerEl);
   }
+  // Always refresh pin target for the active view
+  bindPinClicks(containerEl, getActivePinCollectionId());
   return globalVirtualScroller;
 }
 
@@ -3385,7 +3257,7 @@ async function renderCollections() {
       await chrome.runtime.sendMessage({ action: 'saveCollectionPinsById', collectionId: collection.id, pins: [] });
       renderCollections();
       if (activeView.type === 'collection' && activeView.id === collection.id) {
-        showCategory('all');
+        showExplore();
       }
     });
 
@@ -3968,7 +3840,7 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
     showStatus(`Cleared ${deletedCount} files/directories`, 'success');
     await updateStatistics();
     resetHistory();
-    showCategory('all');
+    showExplore();
   } catch (error) {
     showStatus(`Error clearing data: ${error.message}`, 'error');
   }
@@ -4202,6 +4074,522 @@ document.addEventListener('visibilitychange', async () => {
   }
 });
 
+// --- Explore Pins ---
+
+function getExplorePins() {
+  return allCollectionPins[EXPLORE_COLLECTION_ID] || [];
+}
+
+function updateExploreBadge() {
+  const badge = document.getElementById('exploreBadge');
+  if (!badge) return;
+  const pins = getExplorePins();
+  if (pins.length > 0) {
+    badge.textContent = pins.length;
+    badge.classList.add('visible');
+  } else {
+    badge.textContent = '';
+    badge.classList.remove('visible');
+  }
+}
+
+// --- Explore Blocks ---
+
+async function buildExploreAutoBlocks(pins) {
+  const pinnedUrls = new Set(pins.map(p => p.url));
+
+  // Children of pins: URLs that appear in referrerIndex for each pin
+  const { referrerIndex = {} } = await chrome.storage.session.get(['referrerIndex']);
+  const childrenUrls = new Set();
+  for (const pin of pins) {
+    const children = referrerIndex[pin.url] || [];
+    for (const childUrl of children) {
+      if (!pinnedUrls.has(childUrl)) childrenUrls.add(childUrl);
+    }
+  }
+
+  // Parents of pins: referrers from each pin's atom
+  const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
+  const atomKeys = pinSlugs.map(s => 'atom:' + s);
+  const atomData = atomKeys.length > 0 ? await chrome.storage.session.get(atomKeys) : {};
+  const parentUrls = new Set();
+  for (const slug of pinSlugs) {
+    const atom = atomData['atom:' + slug];
+    if (atom && atom.referrers) {
+      for (const ref of atom.referrers) {
+        if (!pinnedUrls.has(ref)) parentUrls.add(ref);
+      }
+    }
+  }
+
+  // Similar to pins: use findRelatedPages
+  const allEnriched = Array.from(historyByUrl.values()).map(r => ({
+    ...r, timestamps: [r.timestamp || Date.now()], attScore: 0, attDetail: null, highlights: [],
+  }));
+  const seedEnriched = allEnriched.filter(e => pinnedUrls.has(e.url));
+  const candidateEnriched = allEnriched.filter(e => !pinnedUrls.has(e.url));
+  const similarResults = findRelatedPages(seedEnriched, candidateEnriched, relatedPagesLimit);
+  const similarUrls = new Set(similarResults.map(r => r.url));
+
+  const blocks = [];
+
+  if (childrenUrls.size > 0) {
+    blocks.push({
+      id: ++exploreBlockIdCounter,
+      type: 'auto',
+      label: 'Children of pins',
+      enabled: false,
+      urls: childrenUrls,
+    });
+  }
+
+  if (parentUrls.size > 0) {
+    blocks.push({
+      id: ++exploreBlockIdCounter,
+      type: 'auto',
+      label: 'Parents of pins',
+      enabled: false,
+      urls: parentUrls,
+    });
+  }
+
+  if (similarUrls.size > 0) {
+    blocks.push({
+      id: ++exploreBlockIdCounter,
+      type: 'auto',
+      label: 'Similar to pins',
+      enabled: false,
+      urls: similarUrls,
+    });
+  }
+
+  return blocks;
+}
+
+function renderExploreBlocks() {
+  const container = document.getElementById('collectionQueryBuilder');
+  container.style.display = 'block';
+
+  let html = '<div class="explore-blocks">';
+
+  const eyeOpenSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const eyeClosedSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  const removeSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+
+  for (const block of exploreBlocks) {
+    const enabledClass = block.enabled ? 'enabled' : 'disabled';
+    const blockClass = block.enabled ? '' : ' disabled';
+    const countLabel = block.urls ? `(${block.urls.size})` : '';
+
+    html += `<div class="explore-block${blockClass}" data-block-id="${block.id}">`;
+
+    // Left: full-height toggle
+    html += `<button class="explore-block-toggle ${enabledClass}" data-block-id="${block.id}" title="${block.enabled ? 'Disable' : 'Enable'}">${block.enabled ? eyeOpenSvg : eyeClosedSvg}</button>`;
+
+    // Middle: content
+    html += `<div class="explore-block-content">`;
+    html += `<span class="explore-block-label">${escapeHtml(block.label)} <span class="explore-block-count">${countLabel}</span></span>`;
+
+    if (block.type === 'manual' && block.tree) {
+      html += `<div class="explore-block-body">`;
+      html += `<div class="qb-body qb-mode-pro" data-block-id="${block.id}">`;
+      html += renderTreeNodePro(block.tree);
+      html += `</div></div>`;
+    }
+    html += `</div>`;
+
+    // Right: full-height remove
+    html += `<button class="explore-block-remove" data-block-id="${block.id}" title="Remove">${removeSvg}</button>`;
+
+    html += `</div>`;
+  }
+
+  html += `<button class="explore-add-block">+ Add query block</button>`;
+  html += '</div>';
+
+  // Replace qb-header and qb-body with block layout
+  container.innerHTML = html;
+
+  // Bind events
+  bindExploreBlockEvents(container);
+}
+
+function bindExploreBlockEvents(container) {
+  // Toggle buttons
+  container.querySelectorAll('.explore-block-toggle').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const blockId = parseInt(btn.dataset.blockId);
+      const block = exploreBlocks.find(b => b.id === blockId);
+      if (!block) return;
+      block.enabled = !block.enabled;
+      renderExploreBlocks();
+      runExploreBlockQuery();
+    });
+  });
+
+  // Remove buttons
+  container.querySelectorAll('.explore-block-remove').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const blockId = parseInt(btn.dataset.blockId);
+      exploreBlocks = exploreBlocks.filter(b => b.id !== blockId);
+      renderExploreBlocks();
+      runExploreBlockQuery();
+    });
+  });
+
+  // Add block button
+  const addBtn = container.querySelector('.explore-add-block');
+  if (addBtn) {
+    addBtn.addEventListener('click', () => {
+      const newBlock = {
+        id: ++exploreBlockIdCounter,
+        type: 'manual',
+        label: 'Custom query',
+        enabled: true,
+        tree: qbCreatePlaceholder(),
+      };
+      exploreBlocks.push(newBlock);
+      renderExploreBlocks();
+    });
+  }
+
+  // Bind QB events on each manual block's body
+  // For block-scoped QB, we swap qbRoot to the block's tree during event binding.
+  // The events that call qbUpdateNode/debouncedRunQuery will work because those
+  // search the tree for node IDs. The debouncedRunQuery checks the context.
+  // However, tree-structure mutations (insert/remove/add child) also call
+  // renderQueryBuilder() which we need to redirect to renderExploreBlocks().
+  container.querySelectorAll('.qb-body[data-block-id]').forEach(body => {
+    const blockId = parseInt(body.dataset.blockId);
+    const block = exploreBlocks.find(b => b.id === blockId);
+    if (!block || block.type !== 'manual') return;
+
+    // Swap qbRoot to block's tree for binding.
+    // QB mutation functions (qbInsertOnEdge, etc.) reference qbRoot globally.
+    // They call renderQueryBuilder() which checks the explore context and
+    // copies qbRoot back to the active block's tree.
+    const savedRoot = qbRoot;
+    qbRoot = block.tree;
+    activeBlockId = blockId;
+    bindQueryBuilderEvents(body);
+    qbRoot = savedRoot;
+    activeBlockId = null;
+
+    // Wrap the interactive elements to swap qbRoot before their handlers fire
+    body.addEventListener('click', () => { qbRoot = block.tree; activeBlockId = blockId; }, true);
+    body.addEventListener('mousedown', () => { qbRoot = block.tree; activeBlockId = blockId; }, true);
+    body.addEventListener('input', () => { qbRoot = block.tree; activeBlockId = blockId; }, true);
+    body.addEventListener('change', () => { qbRoot = block.tree; activeBlockId = blockId; }, true);
+  });
+}
+
+let exploreBlockDebounceTimer = null;
+function debouncedRunExploreBlockQuery() {
+  if (exploreBlockDebounceTimer) clearTimeout(exploreBlockDebounceTimer);
+  exploreBlockDebounceTimer = setTimeout(() => runExploreBlockQuery(), 300);
+}
+
+async function runExploreBlockQuery() {
+  if (activeView.type !== 'explore' && activeView.type !== 'collection') return;
+
+  // Derive pinned URLs and collectionId from active view
+  let pinnedUrls, collectionId;
+  if (activeView.type === 'explore') {
+    collectionId = EXPLORE_COLLECTION_ID;
+    pinnedUrls = new Set(getExplorePins().map(p => p.url));
+  } else {
+    collectionId = activeView.id;
+    pinnedUrls = new Set((allCollectionPins[collectionId] || []).map(p => p.url));
+    // Auto-save the first manual block's tree back to the collection's qbTree
+    const savedBlock = exploreBlocks.find(b => b.type === 'manual' && b.label === 'Saved query');
+    if (savedBlock && savedBlock.tree) {
+      qbRoot = savedBlock.tree;
+      saveCollectionQbTree();
+    }
+  }
+
+  const enabledBlocks = exploreBlocks.filter(b => b.enabled);
+  let results;
+  let showAllHistory = false;
+
+  if (enabledBlocks.length === 0) {
+    if (activeView.type === 'explore') {
+      // Explore: show entire history when no blocks enabled
+      showAllHistory = true;
+      const allHistory = Array.from(historyByUrl.values());
+      results = allHistory
+        .filter(item => !pinnedUrls.has(item.url))
+        .map(item => ({
+          ...item,
+          timestamps: [item.timestamp || Date.now()],
+          attScore: 0,
+          attDetail: null,
+          highlights: [],
+          relevance: 0,
+        }));
+    } else {
+      // Collection: show empty state when no blocks enabled
+      const relatedContainer = document.getElementById('relatedResults');
+      relatedContainer.innerHTML = '<div class="no-results">Enable a block or add a query</div>';
+      document.getElementById('relatedChart').classList.remove('visible');
+      return;
+    }
+  } else {
+    const mergedUrls = new Set();
+
+    // Collect URLs from auto blocks
+    for (const block of enabledBlocks) {
+      if (block.type === 'auto' && block.urls) {
+        for (const url of block.urls) {
+          if (!pinnedUrls.has(url)) mergedUrls.add(url);
+        }
+      }
+    }
+
+    // Evaluate manual blocks
+    let matchAll = false;
+    for (const block of enabledBlocks) {
+      if (block.type === 'manual') {
+        if (!block.tree || !treeHasConfiguredPredicate(block.tree)) {
+          // Uninitialized block = no filter = all history
+          matchAll = true;
+          showAllHistory = true;
+          break;
+        }
+        const matched = await evaluateQueryStream(block.tree);
+        for (const item of matched) {
+          if (!pinnedUrls.has(item.url)) mergedUrls.add(item.url);
+        }
+      }
+    }
+
+    // Build result items
+    const allEnriched = Array.from(historyByUrl.values());
+    results = [];
+    for (const item of allEnriched) {
+      if (pinnedUrls.has(item.url)) continue;
+      if (matchAll || mergedUrls.has(item.url)) {
+        results.push({
+          ...item,
+          timestamps: [item.timestamp || Date.now()],
+          attScore: 0,
+          attDetail: null,
+          highlights: [],
+          relevance: 0,
+        });
+      }
+    }
+  }
+
+  const relatedContainer = document.getElementById('relatedResults');
+  if (results.length === 0) {
+    relatedContainer.innerHTML = '<div class="no-results">No results</div>';
+    document.getElementById('relatedChart').classList.remove('visible');
+    return;
+  }
+
+  const effectiveSort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
+  const sorted = applySortOrder(results, effectiveSort);
+  const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
+
+  const vs = getOrCreateRelatedScroller();
+  vs._headerHtml = columnHeaderHtml('related', { hasDelete: true, hasPin: true, showRelevance: false });
+  vs.setData(sorted, (r) =>
+    resultRowHtml(r.title, r.url, {
+      pinned: isResultPinned(collectionId, r.url),
+      deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
+      highlights: r.highlights, timestamps: r.timestamps, context: 'related',
+    })
+  );
+  bindPinClicks(relatedContainer, collectionId);
+
+  // Demand-load more history when scrolling (for all-history mode)
+  if (showAllHistory) {
+    vs.onLoadMore = async () => {
+      const newItems = await loadHistoryBatch();
+      if (newItems.length > 0) {
+        const newResults = newItems
+          .filter(item => !pinnedUrls.has(item.url))
+          .map(item => ({
+            ...item,
+            timestamps: [item.timestamp || Date.now()],
+            attScore: 0, attDetail: null, highlights: [], relevance: 0,
+          }));
+        if (newResults.length > 0) vs.appendData(newResults);
+      }
+    };
+  }
+
+  // Attention chart for explore results
+  const chartData = results.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || Date.now(), attention: '' }));
+  renderAttentionChartInto(
+    document.getElementById('relatedChart'),
+    document.getElementById('relatedChartBars'),
+    chartData,
+    'Explore results'
+  );
+  bindChartBarClick(document.getElementById('relatedChart'), document.getElementById('relatedResults'));
+}
+
+// --- Focus Panel ---
+
+async function openFocusPanel(url, title) {
+  const overlay = document.getElementById('focusOverlay');
+  const content = document.getElementById('focusContent');
+
+  content.innerHTML = '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">Loading...</div></div></div>';
+  overlay.classList.add('visible');
+
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'getPageRelations', url });
+    if (!resp?.success) {
+      content.innerHTML = '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">Could not load relations</div></div></div>';
+      return;
+    }
+
+    // Compute similar pages from loaded history
+    const seedInteraction = historyByUrl.get(url);
+    let similar = [];
+    if (seedInteraction) {
+      const seed = { ...seedInteraction, timestamps: [seedInteraction.timestamp || Date.now()], attScore: 0, attDetail: null, highlights: [] };
+      const candidates = Array.from(historyByUrl.values())
+        .filter(i => i.url !== url)
+        .map(i => ({ ...i, timestamps: [i.timestamp || Date.now()], attScore: 0, attDetail: null, highlights: [] }));
+      similar = findRelatedPages([seed], candidates, 20);
+    }
+
+    renderFocusWaterfall(content, url, title, resp.parents, resp.children, similar);
+  } catch (error) {
+    content.innerHTML = `<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">${escapeHtml('Error: ' + error.message)}</div></div></div>`;
+  }
+}
+
+async function openCollectionFocusPanel(collectionId, collectionName) {
+  const overlay = document.getElementById('focusOverlay');
+  const content = document.getElementById('focusContent');
+
+  content.innerHTML = '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">Loading...</div></div></div>';
+  overlay.classList.add('visible');
+
+  try {
+    let pins = allCollectionPins[collectionId];
+    if (!pins) {
+      pins = await fsStorage.loadCollectionPinsById(collectionId);
+      allCollectionPins[collectionId] = pins;
+    }
+
+    let html = '';
+
+    // Pinned pages section
+    html += '<div class="focus-section"><div class="focus-section-label">Pinned</div><div class="focus-section-cards">';
+    if (pins.length === 0) {
+      html += '<div class="focus-empty">No pinned pages</div>';
+    } else {
+      const maxAtt = 0.1;
+      html += pins.map(p =>
+        resultRowHtml(p.title || 'Untitled', p.url, {
+          deletable: false, attScore: 0, maxAtt, timestamps: [p.pinnedAt || Date.now()], context: 'global', noFocusButton: true
+        })
+      ).join('');
+    }
+    html += '</div></div>';
+
+    content.innerHTML = html;
+
+    // Bind event delegation for focus content cards
+    bindFocusContentDelegation(content);
+  } catch (error) {
+    content.innerHTML = `<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">${escapeHtml('Error: ' + error.message)}</div></div></div>`;
+  }
+}
+
+function renderFocusWaterfall(content, url, title, parents, children, similar) {
+  const maxAtt = 0.1;
+  const focusOpts = { deletable: false, maxAtt, context: 'global', noFocusButton: true };
+
+  function makeCard(cardUrl, cardTitle, opts = {}) {
+    const hist = historyByUrl.get(cardUrl);
+    const resolvedTitle = cardTitle || (hist ? hist.title : cardUrl);
+    const timestamps = hist ? [hist.timestamp || Date.now()] : [Date.now()];
+    const attScore = 0;
+    return resultRowHtml(resolvedTitle, cardUrl, { ...focusOpts, attScore, timestamps, ...opts });
+  }
+
+  let html = '';
+
+  // Parents section
+  html += '<div class="focus-section"><div class="focus-section-label">Parents</div><div class="focus-section-cards">';
+  const hasParents = (parents.referrers.length + parents.collections.length) > 0;
+  if (!hasParents) {
+    html += '<div class="focus-empty">No known parents</div>';
+  } else {
+    html += parents.referrers.map(ref => {
+      let refTitle = ref;
+      try { refTitle = new URL(ref).hostname + new URL(ref).pathname; } catch {}
+      return makeCard(ref, refTitle);
+    }).join('');
+  }
+  html += '</div></div>';
+
+  // Focused page
+  html += '<div class="focus-section"><div class="focus-section-label">Focus</div><div class="focus-section-cards">';
+  html += makeCard(url, title, { cssClass: 'focus-highlight' });
+  html += '</div></div>';
+
+  // Children section
+  html += '<div class="focus-section"><div class="focus-section-label">Children</div><div class="focus-section-cards">';
+  if (children.length === 0) {
+    html += '<div class="focus-empty">No known children</div>';
+  } else {
+    html += children.map(childUrl => makeCard(childUrl, null)).join('');
+  }
+  html += '</div></div>';
+
+  // Similar section
+  if (similar.length > 0) {
+    html += '<div class="focus-section"><div class="focus-section-label">Similar</div><div class="focus-section-cards">';
+    html += similar.map(s => makeCard(s.url, s.title)).join('');
+    html += '</div></div>';
+  }
+
+  content.innerHTML = html;
+
+  // Bind delegation for focus content
+  bindFocusContentDelegation(content);
+}
+
+function closeFocusPanel() {
+  document.getElementById('focusOverlay').classList.remove('visible');
+}
+
+function bindFocusContentDelegation(content) {
+  // Re-use result delegation for expand/pin on focus cards
+  bindResultDelegation(content);
+
+  // Focus card row clicks (not on buttons) re-open focus for that URL
+  if (content._focusDelegationBound) return;
+  content._focusDelegationBound = true;
+
+  content.addEventListener('click', (e) => {
+    // Skip if click was on a button or handled by result delegation
+    if (e.target.closest('.result-expand') || e.target.closest('.result-delete') ||
+        e.target.closest('.result-pin') ||
+        e.target.closest('.result-focus') || e.target.closest('.attention-dot-wrap')) return;
+
+    const row = e.target.closest('.result-row');
+    if (!row) return;
+
+    // Don't re-focus the highlighted (focused) page
+    const item = row.closest('.result-item');
+    if (item && item.classList.contains('focus-highlight')) return;
+
+    e.stopPropagation();
+    openFocusPanel(row.dataset.url, row.dataset.title);
+  });
+}
+
 // --- Initialize ---
 async function initialize() {
   // Load settings from filesystem
@@ -4218,9 +4606,58 @@ async function initialize() {
   renderTrimRules();
 
   // Load metadata in parallel (history is demand-loaded in showCategory, pins loaded per-collection)
-  await Promise.all([initHistoryFiles(), loadRecycleBin(), loadGatewayDomains()]);
+  await Promise.all([
+    initHistoryFiles(), loadRecycleBin(), loadGatewayDomains(),
+    fsStorage.loadCollectionPinsById(EXPLORE_COLLECTION_ID).then(pins => { allCollectionPins[EXPLORE_COLLECTION_ID] = pins; }).catch(() => { allCollectionPins[EXPLORE_COLLECTION_ID] = []; }),
+  ]);
   updateRecycleSidebarCount();
-  showCategory('all');
+  updateExploreBadge();
+  showExplore();
+
+  // Focus overlay: close on backdrop click or Escape
+  document.getElementById('focusOverlay').addEventListener('click', (e) => {
+    // Close when clicking the backdrop (not the content)
+    if (e.target === e.currentTarget) closeFocusPanel();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('focusOverlay').classList.contains('visible')) {
+      e.stopPropagation();
+      closeFocusPanel();
+    }
+  });
+
+  // Explore button: drag-to-explore
+  const exploreBtn = document.getElementById('exploreBtn');
+  exploreBtn.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    exploreBtn.classList.add('drag-over');
+  });
+  exploreBtn.addEventListener('dragleave', () => {
+    exploreBtn.classList.remove('drag-over');
+  });
+  exploreBtn.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    exploreBtn.classList.remove('drag-over');
+    try {
+      const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+      if (data.items) {
+        if (!allCollectionPins[EXPLORE_COLLECTION_ID]) allCollectionPins[EXPLORE_COLLECTION_ID] = [];
+        const pins = allCollectionPins[EXPLORE_COLLECTION_ID];
+        let added = 0;
+        for (const item of data.items) {
+          if (!pins.some(p => p.url === item.url)) {
+            pins.push({ url: item.url, title: item.title, pinnedAt: Date.now() });
+            added++;
+          }
+        }
+        if (added > 0) {
+          await saveCollectionPinsById(EXPLORE_COLLECTION_ID);
+          updateExploreBadge();
+          if (activeView.type === 'explore') showExplore();
+        }
+      }
+    } catch {}
+  });
 }
 
 initialize();

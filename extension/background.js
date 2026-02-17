@@ -39,9 +39,10 @@ function connectToOffscreen() {
   });
 }
 
-function handleOffscreenResponse(msg) {
+async function handleOffscreenResponse(msg) {
   if (msg.action === 'persisted') {
     // Watermark from offscreen flush
+    await ensureWriteBuffer();
     pendingWrites = pendingWrites.filter(e => e.id > msg.watermark);
     chrome.storage.local.set({ writeBuffer: pendingWrites });
     return;
@@ -95,11 +96,13 @@ function notifyMutation(type, detail) {
 // ─── Write Buffer ─────────────────────────────────────────────────────
 // Ground truth during SW lifetime. Backed up to storage.local for durability.
 // Offscreen monitors storage.local['writeBuffer'] via onChanged and drains to filesystem.
+// Lazy-restored on first access so idle wake-ups don't lose unflushed entries.
 
-let pendingWrites = [];
+let pendingWrites = null; // null = not yet restored from storage.local
 let writeSeq = 0;
 
-async function restoreWriteBuffer() {
+async function ensureWriteBuffer() {
+  if (pendingWrites !== null) return;
   const { writeBuffer = [] } = await chrome.storage.local.get(['writeBuffer']);
   pendingWrites = writeBuffer;
   writeSeq = pendingWrites.reduce((max, e) => Math.max(max, e.id || 0), writeSeq);
@@ -109,6 +112,7 @@ async function restoreWriteBuffer() {
 }
 
 async function bufferWrite(entry) {
+  await ensureWriteBuffer();
   entry.id = ++writeSeq;
   // Dedup: for 'json' type, replace existing entry with same path
   if (entry.type === 'json') {
@@ -124,7 +128,8 @@ async function bufferWrite(entry) {
 // ─── Interaction Queue ────────────────────────────────────────────────
 // Interactions are buffered as { type: 'interaction', entry: { interaction, markdown, html } }
 
-function enqueueInteraction(entry) {
+async function enqueueInteraction(entry) {
+  await ensureWriteBuffer();
   const url = entry.interaction.url;
   const idx = pendingWrites.findIndex(
     e => e.type === 'interaction' && e.entry?.interaction?.url === url
@@ -137,7 +142,8 @@ function enqueueInteraction(entry) {
   chrome.storage.local.set({ writeBuffer: pendingWrites });
 }
 
-function updateQueuedInteraction(url, updates) {
+async function updateQueuedInteraction(url, updates) {
+  await ensureWriteBuffer();
   const idx = pendingWrites.findIndex(
     e => e.type === 'interaction' && e.entry?.interaction?.url === url
   );
@@ -247,6 +253,42 @@ async function hydrateCache() {
   } catch (error) {
     console.warn('Gateway hydration failed:', error.message);
   }
+
+  // Load and incrementally process referrer index
+  try {
+    const riData = await requestOffscreen({ action: 'loadReferrerIndex' });
+    let index = {};
+    let watermark = 0;
+    if (riData && riData.success) {
+      index = riData.index || {};
+      watermark = riData.watermark || 0;
+    }
+
+    const incremental = await requestOffscreen({
+      action: 'buildReferrerIndexIncremental',
+      watermark,
+      existingIndex: index
+    });
+
+    if (incremental && incremental.success) {
+      index = incremental.index;
+      const newWatermark = incremental.newWatermark;
+
+      await chrome.storage.session.set({ referrerIndex: index });
+
+      if (newWatermark > watermark) {
+        await bufferWrite({
+          type: 'json',
+          path: 'lists/referrer-index.json',
+          data: { watermark: newWatermark, index }
+        });
+      }
+
+      console.log('Referrer index loaded incrementally:', Object.keys(index).length, 'parent URLs');
+    }
+  } catch (error) {
+    console.warn('Referrer index hydration failed:', error.message);
+  }
 }
 
 // ─── Title Trimming ───────────────────────────────────────────────────
@@ -337,7 +379,7 @@ async function fetchAndCreateGatewayRoot(origin) {
       slug: slug
     };
 
-    enqueueInteraction({ interaction, markdown: '', html: '' });
+    await enqueueInteraction({ interaction, markdown: '', html: '' });
 
     // Update registry with rootUrl
     const updated = (await chrome.storage.session.get(['gatewayDomains'])).gatewayDomains || {};
@@ -352,12 +394,53 @@ async function fetchAndCreateGatewayRoot(origin) {
   }
 }
 
+// ─── Referrer Tracking ───────────────────────────────────────────────
+
+const REFERRER_CAP = 50;
+
+async function updateAtomReferrers(slug, referrer) {
+  try {
+    await withLock('atoms/' + slug + '.json', async () => {
+      let atom = await getCachedAtom(slug);
+      if (!atom) {
+        const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [slug] });
+        atom = resp?.atoms?.[slug] || {};
+      }
+      const referrers = atom.referrers || [];
+      if (!referrers.includes(referrer)) {
+        referrers.push(referrer);
+        if (referrers.length > REFERRER_CAP) referrers.shift();
+      }
+      atom.referrers = referrers;
+      await setCachedAtom(slug, atom);
+      await bufferWrite({ type: 'json', path: 'atoms/' + slug + '.json', data: atom });
+    });
+  } catch (e) {
+    console.warn('updateAtomReferrers failed:', e.message);
+  }
+}
+
+async function updateReferrerIndex(referrerUrl, childUrl) {
+  try {
+    const { referrerIndex = {} } = await chrome.storage.session.get(['referrerIndex']);
+    if (!referrerIndex[referrerUrl]) referrerIndex[referrerUrl] = [];
+    const children = referrerIndex[referrerUrl];
+    if (!children.includes(childUrl)) {
+      children.push(childUrl);
+      if (children.length > REFERRER_CAP) children.shift();
+    }
+    await chrome.storage.session.set({ referrerIndex });
+  } catch (e) {
+    console.warn('updateReferrerIndex failed:', e.message);
+  }
+}
+
 // ─── Initialization ───────────────────────────────────────────────────
 
 async function startBackground() {
   await setupOffscreenDocument();
   connectToOffscreen();
-  await restoreWriteBuffer();
+  await ensureWriteBuffer();
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -530,8 +613,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               attention: typeof request.attention === 'string' ? request.attention : (request.attention ? JSON.stringify(request.attention) : ''),
               slug
             };
+            if (request.referrer) interaction.referrer = request.referrer;
 
-            enqueueInteraction({ interaction, markdown: '', html: '' });
+            await enqueueInteraction({ interaction, markdown: '', html: '' });
+
+            // Update atom referrers (non-blocking)
+            if (request.referrer) {
+              updateAtomReferrers(slug, request.referrer);
+              updateReferrerIndex(request.referrer, url);
+            }
 
             // Update gateway domain registry (non-blocking)
             updateGatewayRegistry(url);
@@ -592,7 +682,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // ── Queue Operations ──
 
         case 'enqueueInteraction': {
-          enqueueInteraction(request.entry);
+          await enqueueInteraction(request.entry);
           sendResponse({ success: true });
           notifyMutation('interaction', { url: request.entry?.interaction?.url });
           break;
@@ -604,7 +694,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           if (request.attention) updates.interaction.attention = JSON.stringify(request.attention);
           if (request.markdown) updates.markdown = request.markdown;
           if (request.html) updates.html = request.html;
-          updateQueuedInteraction(request.interactionId, updates);
+          await updateQueuedInteraction(request.interactionId, updates);
           sendResponse({ success: true });
           break;
         }
@@ -738,6 +828,52 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const resp = await requestOffscreen({ action: 'loadInteractionBatch', files: request.files });
           console.debug(`[I/O] loadInteractionBatch: ${request.files.length} files in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse(resp);
+          break;
+        }
+
+        // ── Page Relations ──
+
+        case 'getPageRelations': {
+          try {
+            const url = request.url;
+            const slug = generateSlugFromUrl(url);
+
+            // Parents: referrers from atom
+            let atom = await getCachedAtom(slug);
+            if (!atom) {
+              const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [slug] });
+              atom = resp?.atoms?.[slug] || {};
+            }
+            const parentReferrers = atom.referrers || [];
+
+            // Parents: collections containing this URL
+            const parentCollections = [];
+            const { collections: colSettings } = await chrome.storage.session.get(['collections']);
+            const allCols = colSettings || [];
+            // Check pinned membership
+            for (const col of allCols) {
+              const colCacheKey = 'colCache:' + col.id;
+              const cached = (await chrome.storage.session.get(colCacheKey))[colCacheKey];
+              if (cached) {
+                const inPinned = cached.fullPinned?.some(p => p.url === url);
+                const inRelated = cached.related?.some(r => r.url === url);
+                if (inPinned) parentCollections.push({ id: col.id, name: col.name || col.query, type: 'pin' });
+                else if (inRelated) parentCollections.push({ id: col.id, name: col.name || col.query, type: 'appear' });
+              }
+            }
+
+            // Children: from referrer index
+            const { referrerIndex = {} } = await chrome.storage.session.get(['referrerIndex']);
+            const children = referrerIndex[url] || [];
+
+            sendResponse({
+              success: true,
+              parents: { referrers: parentReferrers, collections: parentCollections },
+              children
+            });
+          } catch (error) {
+            sendResponse({ success: false, error: error.message });
+          }
           break;
         }
 

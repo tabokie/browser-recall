@@ -547,6 +547,66 @@ class FileSystemStorage {
     return { domains, newWatermark };
   }
 
+  // Load referrer index from lists/referrer-index.json
+  async loadReferrerIndex() {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+    try {
+      const fileHandle = await this.resolveFile('lists/referrer-index.json');
+      return this.readJson(fileHandle);
+    } catch {
+      return { watermark: 0, index: {} };
+    }
+  }
+
+  // Scan JSONL files after watermark to build incremental referrer index entries
+  async buildReferrerIndexAfterWatermark(watermark, existingIndex) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+
+    const index = { ...existingIndex };
+    let newWatermark = watermark;
+
+    const historyDir = await this.resolveDir('history');
+    for await (const entry of historyDir.values()) {
+      if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
+        if (watermark > 0) {
+          const dateMatch = entry.name.match(/^(\d{4}-\d{2}-\d{2})\.jsonl$/);
+          if (dateMatch) {
+            const fileEndOfDay = new Date(dateMatch[1] + 'T23:59:59.999Z').getTime();
+            if (fileEndOfDay < watermark) continue;
+          }
+        }
+
+        const file = await entry.getFile();
+        const text = await file.text();
+        const lines = text.split('\n').filter(line => line.trim());
+
+        for (const line of lines) {
+          try {
+            const interaction = JSON.parse(line);
+            if (!interaction.referrer || !interaction.url || !interaction.timestamp) continue;
+            if (interaction.timestamp <= watermark) continue;
+
+            if (interaction.timestamp > newWatermark) {
+              newWatermark = interaction.timestamp;
+            }
+
+            const ref = interaction.referrer;
+            if (!index[ref]) index[ref] = [];
+            if (!index[ref].includes(interaction.url)) {
+              index[ref].push(interaction.url);
+            }
+          } catch { /* skip invalid lines */ }
+        }
+      }
+    }
+
+    return { index, newWatermark };
+  }
+
   // Load all highlights from atoms/{slug}.json for every slug
   async loadAllHighlights() {
     if (!(await this.verifyPermission())) {

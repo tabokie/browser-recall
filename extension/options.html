@@ -112,6 +112,36 @@
       fill: currentColor;
     }
 
+    .explore-btn {
+      position: relative;
+    }
+
+    .explore-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      background: #ea4335;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 16px;
+      text-align: center;
+      border-radius: 8px;
+      display: none;
+    }
+
+    .explore-badge.visible {
+      display: block;
+    }
+
+    .explore-btn.drag-over {
+      background: #174ea6;
+      box-shadow: 0 0 0 2px #a8c7fa;
+    }
+
     .sidebar-separator {
       border: none;
       border-top: 1px solid #dadce0;
@@ -577,6 +607,37 @@
       fill: currentColor;
     }
 
+    .result-focus {
+      width: var(--col-action);
+      height: var(--col-action);
+      border: none;
+      background: none;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: #dadce0;
+      opacity: 0;
+      transition: opacity 0.1s;
+    }
+
+    .result-row:hover .result-focus {
+      opacity: 1;
+    }
+
+    .result-focus:hover {
+      background: #f1f3f4;
+      color: #5f6368;
+    }
+
+    .result-focus svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
     /* ── Inline detail ── */
     .result-detail {
       display: none;
@@ -763,6 +824,70 @@
       color: #9aa0a6;
       padding: 48px 24px;
       font-size: 14px;
+    }
+
+    /* ── Focus overlay (centered, frameless) ── */
+    .focus-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.35);
+      z-index: 200;
+      overflow-y: auto;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+      justify-content: center;
+      padding: 48px 24px;
+    }
+    .focus-overlay::-webkit-scrollbar { display: none; }
+    .focus-overlay.visible {
+      display: flex;
+    }
+
+    .focus-content {
+      max-width: 700px;
+      width: 100%;
+      align-self: flex-start;
+    }
+
+    .focus-section {
+      display: flex;
+      flex-direction: row;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+
+    .focus-section-label {
+      width: 64px;
+      flex-shrink: 0;
+      font-size: 10px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.7);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding-top: 10px;
+      text-align: right;
+      padding-right: 12px;
+    }
+
+    .focus-section-cards {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .focus-section-cards .result-item {
+      margin-bottom: 4px;
+    }
+
+    .focus-section-cards .result-item.focus-highlight {
+      border-color: #a8c7fa;
+      box-shadow: 0 0 0 1px #a8c7fa;
+    }
+
+    .focus-empty {
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 12px;
+      padding: 8px 0;
     }
 
     /* ── Settings modal ── */
@@ -1284,19 +1409,6 @@
       flex-direction: column;
     }
 
-    .related-gap {
-      height: 12px;
-      background: #e8eaed;
-    }
-
-    .result-item.related-result {
-      opacity: 0.65;
-    }
-
-    .result-item.related-result:hover {
-      opacity: 0.85;
-    }
-
     .collection-qb {
       border-top: none;
     }
@@ -1334,6 +1446,112 @@
       padding: 2px 0;
     }
 
+    /* ── Explore blocks ── */
+    .explore-blocks {
+      padding: 8px 24px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .explore-block {
+      display: flex;
+      border-radius: 8px;
+      background: #f1f3f4;
+      overflow: hidden;
+    }
+
+    .explore-block.disabled {
+      background: #f8f9fa;
+    }
+
+    /* Full-height side buttons (toggle left, remove right) */
+    .explore-block-toggle,
+    .explore-block-remove {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      flex-shrink: 0;
+      border: none;
+      background: none;
+      cursor: pointer;
+      padding: 0;
+      color: #5f6368;
+    }
+
+    .explore-block-toggle {
+      border-right: 1px solid #dadce0;
+    }
+    .explore-block-toggle svg { width: 16px; height: 16px; }
+    .explore-block-toggle.enabled svg { color: #1a73e8; }
+    .explore-block-toggle.disabled svg { color: #bdc1c6; }
+
+    .explore-block-toggle:hover { background: #e8eaed; }
+    .explore-block.disabled .explore-block-toggle:hover { background: #f1f3f4; }
+
+    .explore-block-remove {
+      border-left: 1px solid #dadce0;
+      visibility: hidden;
+    }
+    .explore-block-remove svg { width: 14px; height: 14px; }
+    .explore-block:hover .explore-block-remove { visibility: visible; }
+    .explore-block-remove:hover { background: #fce8e6; color: #d93025; }
+
+    /* Middle content area */
+    .explore-block-content {
+      flex: 1;
+      min-width: 0;
+      padding: 8px 10px;
+    }
+
+    .explore-block-label {
+      font-size: 12px;
+      font-weight: 500;
+      color: #202124;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .explore-block.disabled .explore-block-label { color: #9aa0a6; }
+
+    .explore-block-count {
+      font-size: 11px;
+      color: #9aa0a6;
+      font-weight: 400;
+    }
+
+    .explore-block-body {
+      margin-top: 6px;
+    }
+
+    .explore-block.disabled .explore-block-body {
+      opacity: 0.4;
+      pointer-events: none;
+    }
+
+    /* Add-block button — dotted outline, block-shaped, no fill */
+    .explore-add-block {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      padding: 10px 0;
+      border: 1.5px dashed #dadce0;
+      background: none;
+      border-radius: 8px;
+      font-size: 12px;
+      color: #9aa0a6;
+      cursor: pointer;
+    }
+
+    .explore-add-block:hover {
+      border-color: #1a73e8;
+      color: #1a73e8;
+      background: #f8f9fe;
+    }
+
     /* ── Query builder ── */
     .query-builder {
       display: none;
@@ -1356,83 +1574,12 @@
       letter-spacing: 0.5px;
     }
 
-    .qb-mode-toggle {
-      display: flex;
-      border: 1px solid #dadce0;
-      border-radius: 12px;
-      position: relative;
-    }
-
-    .qb-mode-btn {
-      padding: 2px 10px;
-      border: none;
-      background: #fff;
-      font-size: 11px;
-      color: #5f6368;
-      cursor: pointer;
-    }
-
-    .qb-mode-btn:first-child {
-      border-radius: 12px 0 0 12px;
-    }
-
-    .qb-mode-btn:last-of-type {
-      border-radius: 0 12px 12px 0;
-    }
-
-    .qb-mode-btn:hover {
-      background: #f1f3f4;
-    }
-
-    .qb-mode-btn.active {
-      background: #d3e3fd;
-      color: #1a73e8;
-      font-weight: 500;
-    }
-
-    .qb-mode-btn:disabled {
-      color: #bdc1c6;
-      cursor: not-allowed;
-      background: #f8f9fa;
-    }
-
-    .qb-mode-btn:disabled:hover {
-      background: #f8f9fa;
-    }
-
-    .qb-mode-hint {
-      display: none;
-      position: absolute;
-      top: calc(100% + 4px);
-      right: 0;
-      background: #202124;
-      color: #fff;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 11px;
-      white-space: nowrap;
-      pointer-events: none;
-      z-index: 50;
-    }
-
-    .qb-mode-toggle:hover .qb-mode-hint {
-      display: block;
-    }
-
     .qb-body {
       min-height: 28px;
     }
 
     .qb-body.qb-mode-pro {
       overflow-x: auto;
-    }
-
-    /* Normal mode predicate rows */
-    .qb-predicate-row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 4px;
     }
 
     .qb-type-select,
@@ -1611,27 +1758,7 @@
       color: #d93025;
     }
 
-    .qb-add-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 4px 12px;
-      border: 1px dashed #dadce0;
-      background: #fff;
-      border-radius: 4px;
-      font-size: 12px;
-      color: #5f6368;
-      cursor: pointer;
-      margin-top: 2px;
-    }
-
-    .qb-add-btn:hover {
-      border-color: #1a73e8;
-      color: #1a73e8;
-      background: #f8f9fa;
-    }
-
-    /* Professional mode tree — technical line-drawing style */
+    /* Tree mode — technical line-drawing style */
     /* All tree rows use a fixed 28px row height so connectors align */
     .qt-op {
       display: flex;
@@ -1815,7 +1942,7 @@
       display: flex;
       align-items: center;
       gap: var(--col-gap);
-      padding: 4px calc(var(--results-padding) * 2);
+      padding: 4px var(--results-padding);
       margin: 0 calc(-1 * var(--results-padding)) var(--results-gap);
       background: #f8f9fa;
       border-bottom: 1px solid #e8eaed;
@@ -1950,13 +2077,10 @@
     <button class="explore-btn" id="exploreBtn">
       <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
       Explore
+      <span class="explore-badge" id="exploreBadge"></span>
     </button>
 
     <div class="sidebar-content">
-      <div class="sidebar-item active" data-category="all">
-        <span class="icon"><svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg></span>
-        <span class="label">History</span>
-      </div>
       <div class="sidebar-item" data-category="recycleBin">
         <span class="icon"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></span>
         <span class="label">Recycle Bin</span>
@@ -1975,7 +2099,7 @@
   <!-- Main panel -->
   <div class="main">
     <div class="main-header">
-      <span class="main-title" id="mainTitle">History</span>
+      <span class="main-title" id="mainTitle">Explore</span>
       <input class="main-title-input" id="mainTitleInput" type="text" style="display:none">
       <button class="confirm-title-btn" id="confirmTitleBtn" style="display:none">&#x2713;</button>
       <button class="recycle-action-btn" id="restoreAllBtn" style="display:none" title="Restore all items">Restore all</button>
@@ -1989,10 +2113,6 @@
     <div class="query-builder" id="queryBuilder" style="display:none">
       <div class="qb-header">
         <span class="qb-title">Query</span>
-        <div class="qb-mode-toggle">
-          <button class="qb-mode-btn active" data-mode="normal">Normal</button>
-          <button class="qb-mode-btn" data-mode="professional">Pro</button>
-        </div>
       </div>
       <div class="qb-body" id="qbBody">
         <!-- Rendered by JS -->
@@ -2017,11 +2137,6 @@
       <div class="collection-section" data-section="pinned">
         <div class="section-header" data-collapse="pinned"><span class="section-chevron">&#9654;</span> Pinned</div>
         <div class="section-body">
-          <div class="attention-chart" id="pinnedChart">
-            <div class="chart-label">Collection pages</div>
-            <div class="chart-bars" id="pinnedChartBars"></div>
-            <div class="chart-tooltip" id="pinnedChartTooltip"></div>
-          </div>
           <div class="section-results-wrapper" id="pinnedResultsWrapper">
             <div class="results-container" id="pinnedResults"></div>
           </div>
@@ -2033,10 +2148,6 @@
           <div class="query-builder collection-qb" id="collectionQueryBuilder" style="display:none">
             <div class="qb-header">
               <span class="qb-title">Query</span>
-              <div class="qb-mode-toggle">
-                <button class="qb-mode-btn active" data-mode="normal">Normal</button>
-                <button class="qb-mode-btn" data-mode="professional">Pro</button>
-              </div>
             </div>
             <div class="qb-body" id="collectionQbBody"></div>
           </div>
@@ -2051,6 +2162,11 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Focus overlay (centered, no frame) -->
+  <div class="focus-overlay" id="focusOverlay">
+    <div class="focus-content" id="focusContent"></div>
   </div>
 
   <!-- Settings modal -->

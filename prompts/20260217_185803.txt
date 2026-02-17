@@ -1,0 +1,52 @@
+- I want to redesign the UI around page relations. Currently, we can only see pages related to pinned results in collection UI. But I want to be able to find relations in any UI for any individual page, and the relations show both parents (referer) and children. One idea is, there is a "focus" button for every page, when clicked, we expand the area around the page card to show parents (cards above this row) and children (cards below this row). But it is tricky to change focus to its parent or child and show deeper relations, because the parent/child only exists on the virtual focus layer, not on the original page list. What do you think?
+- Let's redesign in this way:
+
+1. Relation tracking. Each page has parents and children. Parents include referer link, collections that pin this page (pin), collections whose search returns this page (appear). The relations are automatically extracted, not editable by user.
+2. Global explore. Anywhere in the portal UI, I can pin a page to the pending explore collection (using page item button). I can also drag pages directly to the Explore button to pin them. When some pages are pinned in pending list, the Explore button shows a red dot with number upper-right corner. Note that in a collection UI, the pin button is still pinning to the current collection.
+3. Each page now has a new button "Focus". By clicking it, we enter a special UI that floats above in the right-side window. The UI displays page relations similar to a waterfall. The current focused page card is displayed at the center, parents are displayed above it, children below. Pages that have no direct link but similar in content are displayed below the children using slight transparent card (just like how we currently implement relations-of-pins). User can click to any parent/child to change focus.
+- There is a regression from last commit. The history files are not updated, and I experience data loss after reloading extension.
+- One more thing, even if write loss is possible after worker reload, it still doesn't explain why offscreen makes no progress at all. No file is being created and not one single interaction is persisted.
+- Reproduce the first bug using tests first.
+- Re-run the planning, including explore.
+- A few issues:
+
+1. Column header is not aligned with actual result card. Fix this issue in a future-proof way by making card and header share some width calculation code.
+2. Let's merge "History" with "Explore" entirely. The starting page of portal is "Explore". When there's no user query, we show all history instead of an empty list.
+3. The focus UI should be a floating panel in the center of the viewport, like the settings UI. And the pages are displayed in focus UI using cards identical to old page list (without focus button). The different sections in focus UI are not seperated using hard section lines, but like this:
+
+  parent [ card - 1     ]
+         [ card - 2     ]
+      -> [ focused card ]
+children [ card - 3     ]
+         [ card - 4     ]
+ similar [ card - 5     ]
+
+Scroll bar is hidden. The entire UI has no visible frame and background, just cards floating over the collection UI.
+4. Rework the collection / explore UI. (a) Pinned pages show no attention chart, (b) Pinned pages show no related pages, (c) Remove basic/pro distinction from Explore query. All queries are professional. (d) Explore queries layout multiple OR rules in different blocks, and each block can be toggled on/off individually. When there're pinned pages, rules such as "children of pins", "parents of pins", "similar to pins" are automatically added to the query blocks.
+
+Explore
+================================
+# Children of pins
+--------------------------------
+# Similar to pins
+--------------------------------
+# QUERY
+#    *--- a query tree ...
+--------------------------------
+# QUERY
+#    *---- another query tree
+================================
+[ result list ...              ]
+
+The '#' I draw is a color-filled block-shaped toggle that controls the enabling of rule. If disabled, the entire block is grey.
+- The initial state of Explore should show query layout, just no block and a add-block button. When no block is present or all blocks are disabled, entire history is shown.
+- When new items are pinned to explore or collection, the render should refresh immediately.
+- Rework the query block UI. A block is visually a block/card with slight grey color background. The enable button extend to cover the entire height of block, and has an eye icon. On the other side (right), there's a similar delete button. The add-block button is drawn like a block with no color and doted frame.
+- When a pin is first added, and related blocks are added, disable them initially.
+- Search block that are not initialized (no keyword provided) represent no-filter, all history is shown. Therefore when I disable and enable an uninitialized block, the history should show up.
+- For query tree with one node, show AND and NOT, don't show OR operator. Because we should use different query blocks to reach the same effect. But for tree with multiple nodes, OR operator is still displayed as before.
+- Remove the redundant section line under blocks.
+- For existing collection, show blocks such as "children of pins" as well.
+- Unify the code and mental model of "Explore" and collections. (a) Explore data is referenced in background.rs and file system as a special collection (e.g. `lists/explore.json`). (b) "Pin" and "Pin to explore" are merged to one single "Pin". It pins to collection or Explore depending on the page being opened. (c) One distinction still exits, in collection, the history is not shown when there's no initialized block.
+- Finish up.
+- No.

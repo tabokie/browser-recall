@@ -164,6 +164,20 @@ async function handleRequest(request) {
         return { success: true, ...result };
       }
 
+      case 'loadReferrerIndex': {
+        const t0 = performance.now();
+        const data = await fsStorage.loadReferrerIndex();
+        console.debug(`[I/O] loadReferrerIndex: ${(performance.now() - t0).toFixed(1)}ms`);
+        return { success: true, ...data };
+      }
+
+      case 'buildReferrerIndexIncremental': {
+        const result = await fsStorage.buildReferrerIndexAfterWatermark(
+          request.watermark, request.existingIndex
+        );
+        return { success: true, ...result };
+      }
+
       case 'listInteractionFiles': {
         const files = await fsStorage.listInteractionFiles();
         return { success: true, files };
@@ -248,13 +262,20 @@ async function drainQueue() {
       }
     }
 
-    // Piggyback gateway save on interaction drain
+    // Piggyback gateway + referrer index save on interaction drain
     if (maxInteractionTimestamp > 0) {
       try {
         const { gatewayDomains } = await chrome.storage.session.get(['gatewayDomains']);
         if (gatewayDomains) {
           const fh = await fsStorage.resolveFile('lists/gateways.json', { create: true });
           await fsStorage.writeJson(fh, { watermark: maxInteractionTimestamp, domains: gatewayDomains });
+        }
+      } catch {}
+      try {
+        const { referrerIndex } = await chrome.storage.session.get(['referrerIndex']);
+        if (referrerIndex) {
+          const fh = await fsStorage.resolveFile('lists/referrer-index.json', { create: true });
+          await fsStorage.writeJson(fh, { watermark: maxInteractionTimestamp, index: referrerIndex });
         }
       } catch {}
     }

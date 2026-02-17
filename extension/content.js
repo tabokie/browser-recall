@@ -1042,14 +1042,24 @@ function reportInteraction() {
   currentInteractionId = url;
   const intent = extractIntent();
   attentionData.timeOnPage = Date.now() - startTime;
-  chrome.runtime.sendMessage({
+  const msg = {
     action: 'reportPageVisit',
     url,
     title: document.title,
     slug: getSlugForCurrentPage(),
     intent: JSON.stringify(intent),
     attention: attentionData
-  }).catch(() => {});
+  };
+  // Track navigation referrer (skip same-origin to avoid noise from anchor/SPA navs)
+  try {
+    const ref = document.referrer;
+    if (ref) {
+      const refOrigin = new URL(ref).origin;
+      const curOrigin = new URL(url).origin;
+      if (refOrigin !== curOrigin) msg.referrer = ref;
+    }
+  } catch {}
+  chrome.runtime.sendMessage(msg).catch(() => {});
 }
 
 // Report page visit on initial load
