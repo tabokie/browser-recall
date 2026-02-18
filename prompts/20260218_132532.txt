@@ -1,0 +1,480 @@
+- Rework page capture to use the exact same implementation as "Save Page WE". Give due credits in code comments.
+- This is a mirror from 2 years ago. Might be stale. Could you get source code from Chrome extension .crx file?
+- Port it with as little change as you could, and write in comments or *.md how to find the latest source and maintain it in the future.
+-  When I capture, it reports:
+
+Error in event handler: TypeError: Cannot read properties of undefined (reading 'toLowerCase')
+    at loadSuccess (<URL>)
+    at <URL>
+- When I click capture button, nothing happens. When I use Alt-S, the same error occurs:
+
+Error in event handler: TypeError: Cannot read properties of undefined (reading 'toLowerCase')
+    at loadSuccess (<URL>)
+    at <URL>
+- Here is the log:
+
+[savepage:content] received message type=performAction resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=performAction resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=performAction resourceMimeType.length=0
+VM4496 content.js:317 [savepage:content] received message type=requestFrames resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=requestFrames resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=requestFrames resourceMimeType.length=0
+VM4496 content.js:317 [savepage:content] received message type=requestFrames resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=requestFrames resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=requestFrames resourceMimeType.length=0
+VM4496 content.js:317 [savepage:content] received message type=requestFrames resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=requestFrames resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=requestFrames resourceMimeType.length=0
+VM4496 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4496 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4496 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4496 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4496 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4496 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4496 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4496 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4496 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+VM4498 content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+content.js:317 [savepage:content] received message type=replyFrame resourceMimeType.length=0
+content.js:1838  [savepage] loadSuccess: resourceMimeType[5] is undefined. resourceMimeType.length=0, reason=, mimetype=text/css, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[0] is undefined. resourceMimeType.length=0, reason=, mimetype=text/css, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[1] is undefined. resourceMimeType.length=0, reason=, mimetype=text/css, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[3] is undefined. resourceMimeType.length=0, reason=, mimetype=text/css, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[4] is undefined. resourceMimeType.length=0, reason=, mimetype=text/css, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[2] is undefined. resourceMimeType.length=0, reason=, mimetype=text/css, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[6] is undefined. resourceMimeType.length=0, reason=, mimetype=image/vnd.microsoft.icon, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[7] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[10] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[9] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[12] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[22] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[25] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[29] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[28] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[14] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[35] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[32] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[34] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[41] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[36] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[43] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[44] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[26] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[13] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[16] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[42] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[46] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[23] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[15] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[21] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[11] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[8] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[19] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[18] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[33] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[30] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[37] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[17] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[24] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[27] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[31] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[39] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[40] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[38] is undefined. resourceMimeType.length=0, reason=, mimetype=image/png, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[45] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+loadSuccess @ content.js:1838
+loadResource @ content.js:1785
+await in loadResource
+loadResources @ content.js:1724
+gatherOtherResources @ content.js:827
+loadResources @ content.js:1713
+gatherStyleSheets @ content.js:685
+(匿名) @ content.js:663
+content.js:1838  [savepage] loadSuccess: resourceMimeType[20] is undefined. resourceMimeType.length=0, reason=, mimetype=image/jpeg, resourceLocation[index]=N/A
+- No errors now. But the capture doesn't show up in PopupUI.
+- Page console: [savepage] sending savepageDone, html length=6569160
+Background console: [savepage] savepageDone received from tab 1545201646, html length=6569160, has resolver=true
+- background.rs: [savepage] savepageDone received from tab 1545201646, html length=6569167, has resolver=true
+
+No other logs.
+- Couldn't you reproduce this in a test? A test that has complete setup including foreground, background, offscreen.
+- There is no error or log. But no capture is shown either.
+- [savepage] injecting scripts into tab 1545201646
+background.js:489 [savepage] content-frame.js injected, now injecting content.js
+background.js:521 [savepage] scriptLoaded received from tab 1545201646
+background.js:495 [savepage] content.js injected, waiting for scriptLoaded message
+background.js:571 [savepage] savepageDone from tab 1545201646 html length: 6273632
+- [savepage] injecting scripts into tab 1545201646
+background.js:489 [savepage] content-frame.js injected, now injecting content.js
+background.js:521 [savepage] scriptLoaded received from tab 1545201646
+background.js:495 [savepage] content.js injected, waiting for scriptLoaded message
+background.js:571 [savepage] savepageDone from tab 1545201646 html length: 6409678
+background.js:743 [capture-popup] step 3: captureSavePage done, length: 6409678
+background.js:754  [capture-popup] ERROR: Resource::kQuotaBytes quota exceeded Error: Resource::kQuotaBytes quota exceeded
+- Finish up.
+- yes
+- continue
