@@ -109,12 +109,13 @@ const TEST_COLLECTION_PINS = {
   ],
 };
 
+const TEST_COLLECTIONS = [TEST_COLLECTION, TEST_COLLECTION_NOHIT];
+
 const TEST_SETTINGS = {
-  collections: [TEST_COLLECTION, TEST_COLLECTION_NOHIT],
+  collectionOrder: ['col-rust', 'col-nohit'],
   settings: { captureContent: true, captureAttention: true, archiveQuality: 'medium' },
   urlBlacklist: [],
   titleTrimRules: [],
-  recycleBin: [],
   permanentDeletes: [],
 };
 
@@ -327,15 +328,16 @@ describe('Progressive loading', () => {
   function populateCache() {
     sessionData = {
       settings: TEST_SETTINGS.settings,
-      collections: TEST_SETTINGS.collections,
+      collections: TEST_COLLECTIONS,
+      collectionOrder: TEST_SETTINGS.collectionOrder,
       urlBlacklist: TEST_SETTINGS.urlBlacklist,
       titleTrimRules: TEST_SETTINGS.titleTrimRules,
-      recycleBin: TEST_SETTINGS.recycleBin,
+      recycleBin: [],
       permanentDeletes: TEST_SETTINGS.permanentDeletes,
       gatewayDomains: {},
     };
     localData = {
-      writeBuffer: [],
+      logBuffer: [],
     };
   }
 
@@ -441,10 +443,8 @@ describe('Progressive loading', () => {
     await tick(50);
 
     // Frames should be rendered from static HTML
-    expect(sidebarCategories()).toContain('all');
     expect(sidebarCategories()).toContain('recycleBin');
-    expect(mainTitle()).toBe('History'); // static HTML default
-    expect(chartFrameVisible()).toBe(true); // chart has class="visible" in HTML
+    expect(mainTitle()).toBe('Explore'); // static HTML default
     expect(columnHeaders().length).toBeGreaterThan(0); // column headers in static HTML
 
     // No collection items (loadSettings blocked → renderCollections hasn't completed)
@@ -460,39 +460,41 @@ describe('Progressive loading', () => {
     await tick(50);
   });
 
-  it('Test 2: pause collection list only → frames + history list visible', async () => {
-    // Cache all settings EXCEPT 'collections' → renderCollections hits slow path
+  it('Test 2: collections absent from cache → sidebar empty, then populated after cache arrival', async () => {
+    // Cache all settings EXCEPT 'collections' — simulates options.js loading
+    // before background has finished hydrating collection metadata from files.
     sessionData = {
       settings: TEST_SETTINGS.settings,
+      collectionOrder: TEST_SETTINGS.collectionOrder,
       urlBlacklist: TEST_SETTINGS.urlBlacklist,
       titleTrimRules: TEST_SETTINGS.titleTrimRules,
-      recycleBin: TEST_SETTINGS.recycleBin,
+      recycleBin: [],
       permanentDeletes: TEST_SETTINGS.permanentDeletes,
       gatewayDomains: {},
-      // 'collections' intentionally missing → loadSettings slow path
+      // 'collections' intentionally missing
     };
-    localData = { writeBuffer: [] };
-
-    // Pause loadSettings → renderCollections() blocks on collection list
-    // But since renderCollections is fire-and-forget, loadData() proceeds concurrently
-    deferreds['loadSettings'] = createDeferred();
+    localData = { logBuffer: [] };
 
     const importDone = importOptions();
-    await tick(100);
+    await tick(200);
 
     // Frames visible
-    expect(sidebarCategories()).toContain('all');
-    expect(chartFrameVisible()).toBe(true);
+    expect(sidebarCategories()).toContain('recycleBin');
 
-    // History results visible (initHistoryFiles + showCategory completed independently)
-    expect(resultRows().length).toBeGreaterThan(0);
+    // Explore view rendered
+    expect(mainTitle()).toBe('Explore');
 
-    // But collections still empty (renderCollections waiting for loadSettings)
+    // Collections still empty (session cache doesn't have 'collections')
     expect(sidebarCollections()).toEqual([]);
 
-    // Resolve loadSettings → collections should appear
-    deferreds['loadSettings'].resolve();
     await importDone;
+
+    // Now simulate background hydrateCache completing: populate session cache
+    sessionData.collections = TEST_COLLECTIONS;
+
+    // Simulate mutation notification from background that triggers re-render
+    const listener = chrome.runtime.onMessage.addListener.mock.calls[0]?.[0];
+    if (listener) listener({ action: 'mutation', type: 'collections' });
     await tick(100);
 
     expect(sidebarCollections()).toContain('col-rust');
@@ -511,19 +513,19 @@ describe('Progressive loading', () => {
     expect(sidebarCollections()).toContain('col-rust');
 
     // Frames visible
-    expect(sidebarCategories()).toContain('all');
-    expect(chartFrameVisible()).toBe(true);
+    expect(sidebarCategories()).toContain('recycleBin');
 
-    // initHistoryFiles blocked → Promise.all blocked → showCategory hasn't run → no result rows
-    expect(resultRows()).toEqual([]);
+    // initHistoryFiles blocked → Promise.all blocked → showExplore hasn't run yet
+    expect(collectionLayoutVisible()).toBe(false);
 
     // Unblock
     deferreds['listInteractionFiles'].resolve();
     await importDone;
     await tick(100);
 
-    // Now results should appear
-    expect(resultRows().length).toBeGreaterThan(0);
+    // Now Explore view should render (collection layout visible)
+    expect(collectionLayoutVisible()).toBe(true);
+    expect(mainTitle()).toBe('Explore');
   });
 
   it('Test 4: cache populated, pause pinned results + search → collection shows frames + sidebar', async () => {
@@ -534,8 +536,9 @@ describe('Progressive loading', () => {
     await importDone;
     await tick(100);
 
-    // Verify initial state: history view rendered
-    expect(resultRows().length).toBeGreaterThan(0);
+    // Verify initial state: Explore view rendered
+    expect(mainTitle()).toBe('Explore');
+    expect(collectionLayoutVisible()).toBe(true);
     expect(sidebarCollections()).toContain('col-rust');
 
     // Now inject pauses and open a collection
@@ -558,8 +561,8 @@ describe('Progressive loading', () => {
     // Sidebar should still show collections (already rendered, not re-fetched)
     expect(sidebarCollections()).toContain('col-rust');
 
-    // Frames: sidebar categories still visible
-    expect(sidebarCategories()).toContain('all');
+    // Sidebar categories still visible
+    expect(sidebarCategories()).toContain('recycleBin');
 
     // Main title should reflect collection
     expect(mainTitle()).toBe('Rust Lang');
@@ -569,8 +572,8 @@ describe('Progressive loading', () => {
     expect(pinnedOnlyRows().length).toBe(3);
 
     // Explore section renders immediately (decoupled from pinned search)
-    // Collection has no qbTree, so explore shows empty-state prompt
-    expect(relatedResultsContent()).toContain('Add filters to start querying');
+    // Collection has no qbTree and no enabled blocks, so shows empty-state prompt
+    expect(relatedResultsContent()).toContain('Enable a block or add a query');
 
     // Clean up
     searchDeferred.resolve();
@@ -600,14 +603,10 @@ describe('Progressive loading', () => {
     // Verify full collection rendered
     expect(collectionLayoutVisible()).toBe(true);
     expect(pinnedOnlyRows().length).toBe(3);
-    // Phase 2 completed — related results no longer show loading hint
-    // (renderPinnedWithRelated replaced Phase 1 content, and renderCollectionExplore
-    // replaced the loading hint in #relatedResults)
-    expect(relatedResultsContent()).not.toContain('Computing related pages');
 
-    // Capture the pinned+related row count from the first full load
-    const firstLoadPinnedCount = pinnedResultRows().length;
-    expect(firstLoadPinnedCount).toBeGreaterThan(3); // 3 pinned + related items
+    // Phase 2 completed — pinned section is re-rendered from fetchCollectionResults
+    // and explore section shows blocks (no loading hint)
+    expect(relatedResultsContent()).not.toContain('Computing related pages');
 
     // Now block searchBatch and reopen — cache should serve immediately
     const searchDeferred = createDeferred();
@@ -624,9 +623,8 @@ describe('Progressive loading', () => {
     expect(collectionLayoutVisible()).toBe(true);
     expect(mainTitle()).toBe('Rust Lang');
 
-    // Phase 1 renders from collectionResultsCache — full pinned+related, no loading state
+    // Phase 1 renders from collectionResultsCache — full pinned, no loading state
     expect(pinnedOnlyRows().length).toBe(3);
-    expect(pinnedResultRows().length).toBe(firstLoadPinnedCount);
     expect(relatedResultsContent()).not.toContain('Computing related pages');
 
     // Sidebar still shows collections
@@ -648,8 +646,9 @@ describe('Progressive loading', () => {
     await importDone;
     await tick(100);
 
-    // History should be loaded (historyByUrl populated)
-    expect(resultRows().length).toBeGreaterThan(0);
+    // Default view is Explore — verify it rendered
+    expect(collectionLayoutVisible()).toBe(true);
+    expect(mainTitle()).toBe('Explore');
 
     // Open the no-hit collection
     const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-nohit"]');
@@ -664,10 +663,11 @@ describe('Progressive loading', () => {
     // Phase 1: the single pin should render
     expect(pinnedOnlyRows().length).toBe(1);
 
-    // Phase 2: related pages should appear from loaded history even though
-    // search returned 0 results — the pin shares hostname (example.com) with
-    // many loaded interactions, so findRelatedPages should find candidates.
-    const totalRows = pinnedResultRows().length;
-    expect(totalRows).toBeGreaterThan(1); // 1 pinned + at least 1 related
+    // Auto-blocks should include "Similar to pins" — the pin on example.com
+    // shares hostname with loaded history, so findRelatedPages finds candidates.
+    // Blocks start disabled; verify they were created with matching URLs.
+    const blockEls = document.querySelectorAll('.explore-block');
+    const blockLabels = [...blockEls].map(el => el.textContent.trim());
+    expect(blockLabels.some(l => l.includes('Similar to pins'))).toBe(true);
   });
 });

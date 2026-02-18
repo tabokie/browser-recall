@@ -15,8 +15,8 @@ async function loadSettingsValue(key, defaultValue) {
     if (key in cached) return cached[key];
   } catch {}
   try {
-    const settings = await fsStorage.loadSettings();
-    if (key in settings) return settings[key];
+    const resp = await chrome.runtime.sendMessage({ action: 'loadSettings' });
+    if (resp?.success && resp.settings && key in resp.settings) return resp.settings[key];
   } catch {}
   return defaultValue;
 }
@@ -178,11 +178,12 @@ async function pipelinedSearch(query) {
   const historyDir = await rootDir.getDirectoryHandle('history');
   const atomsDir = await rootDir.getDirectoryHandle('atoms');
 
-  const files = await fsStorage.listInteractionFiles();
+  const filesResp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
+  const files = filesResp?.files || [];
 
   // Write buffer overlay
-  const { writeBuffer = [] } = await chrome.storage.local.get(['writeBuffer']);
-  const interactionBuffer = extractInteractionBuffer(writeBuffer);
+  const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
+  const interactionBuffer = extractInteractionBuffer(logBuffer);
   bufferContentMap = getBufferContentMap(interactionBuffer);
 
   // WASM reads files directly (no JS↔WASM data copy)
@@ -203,11 +204,10 @@ async function pipelinedSearch(query) {
     }
   }
 
-  // Also search write buffer entries
+  // Also search log buffer entries
   if (interactionBuffer.length > 0) {
-    const bufferItems = interactionBuffer.map(e => e.interaction);
     const engine = new SearchEngine();
-    buildInteractionsForEngine(Interaction, engine, bufferItems, bufferContentMap);
+    buildInteractionsForEngine(Interaction, engine, interactionBuffer, bufferContentMap);
     const bufferResults = await engine.search(query, 0);
     for (const r of bufferResults) {
       const existing = byUrl.get(r.url);
@@ -254,17 +254,17 @@ async function precomputeCapturesMatches(queries) {
 async function initHistoryFiles() {
   if (historyFiles.length > 0) return;
   try {
-    historyFiles = await fsStorage.listInteractionFiles();
+    const resp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
+    historyFiles = resp?.files || [];
   } catch (error) {
     console.log('Filesystem not available:', error.message);
   }
-  // Merge write buffer (newest unwritten data)
-  const { writeBuffer = [] } = await chrome.storage.local.get(['writeBuffer']);
-  const interactionBuffer = extractInteractionBuffer(writeBuffer);
+  // Merge log buffer (newest unwritten data)
+  const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
+  const interactionBuffer = extractInteractionBuffer(logBuffer);
   for (const entry of interactionBuffer) {
-    const item = entry.interaction;
-    if (!historyByUrl.has(item.url) || item.timestamp > historyByUrl.get(item.url).timestamp) {
-      historyByUrl.set(item.url, item);
+    if (!historyByUrl.has(entry.url) || entry.timestamp > historyByUrl.get(entry.url).timestamp) {
+      historyByUrl.set(entry.url, entry);
     }
   }
   bufferContentMap = getBufferContentMap(interactionBuffer);
@@ -277,7 +277,8 @@ async function loadHistoryBatch() {
   const batch = historyFiles.slice(historyLoadedCount, historyLoadedCount + HISTORY_FILE_BATCH);
   try {
     const t0 = performance.now();
-    const interactions = await fsStorage.loadInteractionFiles(batch);
+    const resp = await chrome.runtime.sendMessage({ action: 'loadInteractionBatch', files: batch });
+    const interactions = resp?.interactions || [];
     const newItems = [];
     for (const item of interactions) {
       if (!historyByUrl.has(item.url)) {
@@ -318,7 +319,8 @@ function resetHistory() {
 // --- Collection pins (filesystem) ---
 async function loadAllCollectionPins() {
   try {
-    allCollectionPins = await fsStorage.loadCollectionPins();
+    const resp = await chrome.runtime.sendMessage({ action: 'loadCollectionPins' });
+    allCollectionPins = resp?.pins || {};
   } catch (error) {
     console.log('Could not load collection pins:', error.message);
   }
@@ -361,14 +363,22 @@ async function toggleResultPin(collectionId, url, title) {
 // Permanent deletes: URLs that are gone forever
 
 async function loadRecycleBin() {
-  recycleBin = await loadSettingsValue('recycleBin', []);
+  const { recycleBin: rb = [] } = await chrome.storage.session.get(['recycleBin']);
+  recycleBin = rb;
   const pdCached = await chrome.storage.session.get('permanentDeletes');
-  permanentDeletes = pdCached.permanentDeletes || (await fsStorage.loadPermanentDeletes().catch(() => []));
+  if (pdCached.permanentDeletes) {
+    permanentDeletes = pdCached.permanentDeletes;
+  } else {
+    try {
+      const resp = await chrome.runtime.sendMessage({ action: 'loadPermanentDeletes' });
+      permanentDeletes = resp?.urls || [];
+    } catch { permanentDeletes = []; }
+  }
   return recycleBin;
 }
 
 async function saveRecycleBin() {
-  await saveSettingsValue('recycleBin', recycleBin);
+  await chrome.runtime.sendMessage({ action: 'saveRecycleBin', items: recycleBin });
   await chrome.runtime.sendMessage({ action: 'savePermanentDeletes', urls: permanentDeletes });
   await chrome.storage.session.set({ permanentDeletes });
   updateRecycleSidebarCount();
@@ -1421,11 +1431,14 @@ function qbFlatten(node) {
 
 // --- Stream-evaluate a qbTree against all JSONL files ---
 async function evaluateQueryStream(qbTree) {
-  const files = await fsStorage.listInteractionFiles();
-  const highlightsMap = treeNeedsHighlights(qbTree)
-    ? await fsStorage.loadAllHighlights()
-    : {};
-  if (treeNeedsHighlights(qbTree)) cachedAllHighlights = highlightsMap;
+  const filesResp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
+  const files = filesResp?.files || [];
+  let highlightsMap = {};
+  if (treeNeedsHighlights(qbTree)) {
+    const hlResp = await chrome.runtime.sendMessage({ action: 'loadAllHighlights' });
+    highlightsMap = hlResp?.highlightsMap || {};
+    cachedAllHighlights = highlightsMap;
+  }
   await loadGatewayDomains();
 
   const capturesQueries = extractCapturesQueries(qbTree);
@@ -1436,22 +1449,22 @@ async function evaluateQueryStream(qbTree) {
   }
 
   // Merge write buffer
-  const { writeBuffer = [] } = await chrome.storage.local.get(['writeBuffer']);
-  const interactionBuffer = extractInteractionBuffer(writeBuffer);
+  const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
+  const interactionBuffer = extractInteractionBuffer(logBuffer);
   const seenUrls = new Set();
   const results = [];
 
   // Process buffer entries first (newest)
   for (const entry of interactionBuffer) {
-    const item = entry.interaction;
-    if (seenUrls.has(item.url)) continue;
-    seenUrls.add(item.url);
-    const enriched = enrichSingle(item, highlightsMap);
+    if (seenUrls.has(entry.url)) continue;
+    seenUrls.add(entry.url);
+    const enriched = enrichSingle(entry, highlightsMap);
     if (!isPermanentlyDeleted(enriched.url) && !isRecycled(enriched.url) && evaluateNode(qbTree, enriched)) results.push(enriched);
   }
 
   for (let fi = 0; fi < files.length; fi += 10) {
-    const batchItems = await fsStorage.loadInteractionFiles(files.slice(fi, fi + 10));
+    const batchResp = await chrome.runtime.sendMessage({ action: 'loadInteractionBatch', files: files.slice(fi, fi + 10) });
+    const batchItems = batchResp?.interactions || [];
     for (const item of batchItems) {
       if (seenUrls.has(item.url)) continue;
       seenUrls.add(item.url);
@@ -1553,13 +1566,9 @@ async function runQuery() {
 
 async function saveCollectionQbTree() {
   if (activeView.type !== 'collection') return;
-  const collections = await loadCollections();
-  const col = collections.find(c => c.id === activeView.id);
-  if (col) {
-    col.qbTree = JSON.parse(JSON.stringify(qbRoot));
-    activeView.qbTree = col.qbTree;
-    await saveCollections(collections);
-  }
+  const tree = JSON.parse(JSON.stringify(qbRoot));
+  activeView.qbTree = tree;
+  await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId: activeView.id, qbTree: tree });
 }
 
 function runCollectionExploreQuery(matched) {
@@ -2081,14 +2090,9 @@ async function showCollection(collection) {
   function attachDblClick(currentName) {
     titleEl.ondblclick = () => {
       enterTitleEditMode(currentName, async (newName) => {
-        const collections = await loadCollections();
-        const col = collections.find(c => c.id === collection.id);
-        if (col) {
-          col.name = newName;
-          collection.name = newName;
-          await saveCollections(collections);
-          await renderCollections();
-        }
+        collection.name = newName;
+        await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId: collection.id, name: newName });
+        await renderCollections();
         activeView.name = newName;
         updateMainTitle(newName);
         attachDblClick(newName);
@@ -2107,7 +2111,8 @@ async function showCollection(collection) {
 
     // Lazy-load pins for this collection
     if (!allCollectionPins[collectionId]) {
-      allCollectionPins[collectionId] = await fsStorage.loadCollectionPinsById(collectionId);
+      const pinsResp = await chrome.runtime.sendMessage({ action: 'loadCollectionPinsById', collectionId });
+      allCollectionPins[collectionId] = pinsResp?.pins || [];
     }
     const pins = allCollectionPins[collectionId] || [];
 
@@ -2127,7 +2132,12 @@ async function showCollection(collection) {
       const cached = atomSnap.get(slug);
       // Use session atom if available and newer than pin's watermark, else use pin's cached fields
       const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
-      const attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
+      let attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
+      // Fallback: use attention from loaded history when atom lacks it
+      if (!attParsed) {
+        const histEntry = historyByUrl.get(r.url);
+        if (histEntry) attParsed = parseAttention(histEntry);
+      }
       const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
       const pin = pins.find(p => p.url === r.url);
       return {
@@ -2175,8 +2185,8 @@ async function refreshCollectionAtoms(collectionId, pins) {
       else uncachedSlugs.push(slug);
     }
     if (uncachedSlugs.length > 0) {
-      const fsAtoms = await fsStorage.loadAtomBatch(uncachedSlugs);
-      Object.assign(atoms, fsAtoms);
+      const atomResp = await chrome.runtime.sendMessage({ action: 'loadAtomBatch', slugs: uncachedSlugs });
+      Object.assign(atoms, atomResp?.atoms || {});
     }
     let changed = false;
     for (const pin of pins) {
@@ -2184,7 +2194,12 @@ async function refreshCollectionAtoms(collectionId, pins) {
       const atom = atoms[slug];
       if (!atom) continue;
       if ((atom.watermark || 0) > (pin.watermark || 0)) {
-        const attParsed = atom.attention ? parseAttention({ attention: atom.attention }) : null;
+        let attParsed = atom.attention ? parseAttention({ attention: atom.attention }) : null;
+        // Fallback: use attention from loaded history when atom lacks it
+        if (!attParsed) {
+          const histEntry = historyByUrl.get(pin.url);
+          if (histEntry) attParsed = parseAttention(histEntry);
+        }
         pin.attScore = attParsed ? attentionStrength(attParsed) : 0;
         pin.attDetail = attParsed;
         pin.highlights = atom.highlights || [];
@@ -2505,12 +2520,18 @@ async function loadExtraDetail(url) {
   let highlights = [];
   try {
     const cached = (await chrome.storage.session.get('atom:' + slug))['atom:' + slug];
-    highlights = cached ? (cached.highlights || []) : await fsStorage.loadHighlights(slug);
-  } catch (e) { /* filesystem not available */ }
+    if (cached) {
+      highlights = cached.highlights || [];
+    } else {
+      const hlResp = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
+      highlights = hlResp?.highlights || [];
+    }
+  } catch (e) { /* not available */ }
 
   let snapshots = [];
   try {
-    snapshots = await fsStorage.listSnapshots(slug);
+    const snapResp = await chrome.runtime.sendMessage({ action: 'listSnapshots', slug });
+    snapshots = snapResp?.snapshots || [];
   } catch (e) { /* filesystem not available */ }
 
   // Find belonged collections (reverse lookup)
@@ -2554,13 +2575,11 @@ function renderExtraDetailHtml(extra) {
 
   if (extra.snapshots.length > 0) {
     html += '<div class="detail-section"><span class="detail-section-label">Snapshots:</span>';
-    html += '<div class="detail-snapshots">';
+    html += `<div class="detail-snapshots" data-slug="${escapeHtml(extra.slug)}">`;
     for (const s of extra.snapshots) {
       const date = new Date(s.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-      const formats = [];
-      if (s.hasMd) formats.push('md');
-      if (s.hasHtml) formats.push('html');
-      html += `<span class="detail-snapshot-item">${escapeHtml(date)} (${formats.join(', ')})</span>`;
+      if (s.hasHtml) html += `<span class="detail-snapshot-item html" data-ts="${s.timestamp}">${escapeHtml(date)} (html)</span>`;
+      if (s.hasMd) html += `<span class="detail-snapshot-item md" data-ts="${s.timestamp}">${escapeHtml(date)} (md)</span>`;
     }
     html += '</div></div>';
   }
@@ -2597,6 +2616,19 @@ function bindHighlightDeleteButtons(container) {
       if (section && section.querySelectorAll('.detail-highlight-entry').length === 0) {
         section.remove();
       }
+    });
+  });
+}
+
+function bindSnapshotClickHandlers(container) {
+  container.querySelectorAll('.detail-snapshot-item').forEach(item => {
+    item.addEventListener('dblclick', async (e) => {
+      e.stopPropagation();
+      const slug = item.closest('.detail-snapshots')?.dataset.slug;
+      const ts = parseInt(item.dataset.ts, 10);
+      if (!slug || !ts) return;
+      const resp = await chrome.runtime.sendMessage({ action: 'getSnapshotUrl', slug, timestamp: ts });
+      if (resp?.success) chrome.tabs.create({ url: resp.url });
     });
   });
 }
@@ -2681,6 +2713,7 @@ function bindResultDelegation(container) {
             extraDiv.innerHTML = extraHtml;
             detail.appendChild(extraDiv);
             bindHighlightDeleteButtons(extraDiv);
+            bindSnapshotClickHandlers(extraDiv);
           }
         }
         // Notify virtual scroller of height change
@@ -3199,9 +3232,7 @@ async function loadCollections() {
   return await loadSettingsValue('collections', []);
 }
 
-async function saveCollections(collections) {
-  await saveSettingsValue('collections', collections);
-}
+// saveCollections removed — use saveCollectionMeta/deleteCollection messages instead
 
 async function renderCollections() {
   const collections = await loadCollections();
@@ -3247,14 +3278,11 @@ async function renderCollections() {
 
     item.querySelector('.remove-collection').addEventListener('click', async (e) => {
       e.stopPropagation();
-      const collections = await loadCollections();
-      const updated = collections.filter(t => t.id !== collection.id);
-      await saveCollections(updated);
-      // Clean up pinned results for this collection
+      await chrome.runtime.sendMessage({ action: 'deleteCollection', collectionId: collection.id });
+      // Clean up local state
       delete allCollectionPins[collection.id];
       chrome.storage.session.remove('colCache:' + collection.id);
       colCacheKeys = colCacheKeys.filter(id => id !== collection.id);
-      await chrome.runtime.sendMessage({ action: 'saveCollectionPinsById', collectionId: collection.id, pins: [] });
       renderCollections();
       if (activeView.type === 'collection' && activeView.id === collection.id) {
         showExplore();
@@ -3314,7 +3342,7 @@ async function renderCollections() {
         const rect = item.getBoundingClientRect();
         if (e.clientY >= rect.top + rect.height / 2) toIdx++;
         collections.splice(toIdx, 0, moved);
-        await saveCollections(collections);
+        await saveSettingsValue('collectionOrder', collections.map(c => c.id));
         await renderCollections();
       } else {
         // --- Pin drop (existing logic) ---
@@ -3365,15 +3393,17 @@ async function pinCurrentSearch() {
       pendingPin = null;
       if (!pin) return;
 
-      const collections = await loadCollections();
+      const collectionId = Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => b.toString(16).padStart(2, '0')).join('');
+      const collectionName = name !== pin.query ? name : pin.query;
       const collection = {
-        id: Date.now().toString(),
+        id: collectionId,
         query: pin.query,
-        name: name !== pin.query ? name : undefined,
+        name: collectionName,
         qbTree: pin.qbTree,
       };
-      collections.push(collection);
-      await saveCollections(collections);
+      await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name: collectionName, query: pin.query, qbTree: pin.qbTree });
+      const { collectionOrder: order = [] } = await chrome.storage.session.get(['collectionOrder']);
+      await saveSettingsValue('collectionOrder', [...order, collectionId]);
       await renderCollections();
       showCollection(collection);
     }, () => {
@@ -3400,13 +3430,16 @@ async function pinCurrentSearch() {
     const collections = await loadCollections();
     if (collections.some(t => t.query === pin.query)) return;
 
+    const collectionId = Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => b.toString(16).padStart(2, '0')).join('');
+    const collectionName = name !== pin.query ? name : pin.query;
     const collection = {
-      id: Date.now().toString(),
+      id: collectionId,
       query: pin.query,
-      name: name !== pin.query ? name : undefined,
+      name: collectionName,
     };
-    collections.push(collection);
-    await saveCollections(collections);
+    await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name: collectionName, query: pin.query });
+    const { collectionOrder: order = [] } = await chrome.storage.session.get(['collectionOrder']);
+    await saveSettingsValue('collectionOrder', [...order, collectionId]);
     await renderCollections();
     showCollection(collection);
   }, () => {
@@ -3642,8 +3675,8 @@ async function updateStatistics() {
   const todayCount = interactions.filter(i => i.timestamp >= today).length;
   document.getElementById('todayInteractions').textContent = todayCount;
 
-  const result = await chrome.storage.local.get(['writeBuffer']);
-  document.getElementById('bufferSize').textContent = (result.writeBuffer || []).length;
+  const result = await chrome.storage.local.get(['logBuffer']);
+  document.getElementById('bufferSize').textContent = (result.logBuffer || []).length;
 
   updateCacheTable();
 }
@@ -3655,7 +3688,7 @@ function formatBytes(bytes) {
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
-// Session-cached keys live in chrome.storage.session; writeBuffer lives in chrome.storage.local
+// Session-cached keys live in chrome.storage.session; logBuffer lives in chrome.storage.local
 const SESSION_CACHE_KEYS = [
   { key: 'settings', label: 'Settings' },
   { key: 'workspace', label: 'Workspace' },
@@ -3667,7 +3700,7 @@ const SESSION_CACHE_KEYS = [
   { key: 'gatewayDomains', label: 'Gateway Domains' },
 ];
 const LOCAL_CACHE_KEYS = [
-  { key: 'writeBuffer', label: 'Write Buffer' },
+  { key: 'logBuffer', label: 'Log Buffer' },
 ];
 const CACHE_KEYS = [...SESSION_CACHE_KEYS, ...LOCAL_CACHE_KEYS];
 
@@ -3693,13 +3726,35 @@ async function updateCacheTable() {
   tbody.innerHTML = rows;
 }
 
+document.getElementById('flushBufferBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('flushBufferBtn');
+  btn.disabled = true;
+  btn.textContent = 'Flushing...';
+
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'flushLogBuffer' });
+    if (resp?.success) {
+      btn.textContent = resp.remaining > 0 ? `${resp.remaining} remaining` : 'Flushed!';
+      await updateStatistics();
+    } else {
+      btn.textContent = 'Failed: ' + (resp?.error || 'unknown');
+    }
+  } catch (e) {
+    btn.textContent = 'Error: ' + e.message;
+  }
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = 'Flush to Disk';
+  }, 2000);
+});
+
 document.getElementById('clearCacheBtn').addEventListener('click', async () => {
   const btn = document.getElementById('clearCacheBtn');
   btn.disabled = true;
   btn.textContent = 'Reloading...';
 
   try {
-    // Clear session cache keys (writeBuffer stays in local — it's a transient buffer for pending writes)
+    // Clear session cache keys (logBuffer stays in local — it's a transient buffer for pending log entries)
     const sessionKeysToRemove = SESSION_CACHE_KEYS.map(c => c.key);
     await chrome.storage.session.remove(sessionKeysToRemove);
 
@@ -3994,17 +4049,16 @@ chrome.runtime.onMessage.addListener((request) => {
 
   if (type === 'interaction') {
     // New page visit — merge into historyByUrl immediately
-    // The interaction is in the writeBuffer; read it on next refresh
+    // The interaction is in the logBuffer; read it on next refresh
     clearTimeout(mutationRefreshTimer);
     mutationRefreshTimer = setTimeout(async () => {
-      // Reload writeBuffer overlay
-      const { writeBuffer = [] } = await chrome.storage.local.get(['writeBuffer']);
-      const interactionBuffer = extractInteractionBuffer(writeBuffer);
+      // Reload logBuffer overlay
+      const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
+      const interactionBuffer = extractInteractionBuffer(logBuffer);
       let changed = false;
       for (const entry of interactionBuffer) {
-        const item = entry.interaction;
-        if (!historyByUrl.has(item.url) || item.timestamp > historyByUrl.get(item.url).timestamp) {
-          historyByUrl.set(item.url, item);
+        if (!historyByUrl.has(entry.url) || entry.timestamp > historyByUrl.get(entry.url).timestamp) {
+          historyByUrl.set(entry.url, entry);
           changed = true;
         }
       }
@@ -4028,9 +4082,16 @@ chrome.runtime.onMessage.addListener((request) => {
         colCacheKeys = [];
       }
     }
+  } else if (type === 'collections') {
+    renderCollections();
+  } else if (type === 'recycleBin') {
+    // Reload recycle bin from session cache
+    chrome.storage.session.get(['recycleBin']).then(({ recycleBin: rb = [] }) => {
+      recycleBin = rb;
+      updateRecycleSidebarCount();
+    });
   } else if (type === 'settings') {
-    // Settings changed — re-render sidebar collections if collection list changed
-    if (request.key === 'collections' || request.key === 'recycleBin') {
+    if (request.key === 'collectionOrder') {
       renderCollections();
     }
   }
@@ -4050,11 +4111,13 @@ document.addEventListener('visibilitychange', async () => {
 
   // Re-list history files and load any new ones
   try {
-    const allFiles = await fsStorage.listInteractionFiles();
+    const filesResp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
+    const allFiles = filesResp?.files || [];
     const newFiles = allFiles.filter(f => !historyFiles.includes(f));
     if (newFiles.length > 0) {
       historyFiles = allFiles;
-      const newInteractions = await fsStorage.loadInteractionFiles(newFiles);
+      const batchResp = await chrome.runtime.sendMessage({ action: 'loadInteractionBatch', files: newFiles });
+      const newInteractions = batchResp?.interactions || [];
       let changed = false;
       for (const item of newInteractions) {
         if (!historyByUrl.has(item.url) || item.timestamp > historyByUrl.get(item.url).timestamp) {
@@ -4476,7 +4539,8 @@ async function openCollectionFocusPanel(collectionId, collectionName) {
   try {
     let pins = allCollectionPins[collectionId];
     if (!pins) {
-      pins = await fsStorage.loadCollectionPinsById(collectionId);
+      const fpResp = await chrome.runtime.sendMessage({ action: 'loadCollectionPinsById', collectionId });
+      pins = fpResp?.pins || [];
       allCollectionPins[collectionId] = pins;
     }
 
@@ -4608,7 +4672,7 @@ async function initialize() {
   // Load metadata in parallel (history is demand-loaded in showCategory, pins loaded per-collection)
   await Promise.all([
     initHistoryFiles(), loadRecycleBin(), loadGatewayDomains(),
-    fsStorage.loadCollectionPinsById(EXPLORE_COLLECTION_ID).then(pins => { allCollectionPins[EXPLORE_COLLECTION_ID] = pins; }).catch(() => { allCollectionPins[EXPLORE_COLLECTION_ID] = []; }),
+    chrome.runtime.sendMessage({ action: 'loadCollectionPinsById', collectionId: EXPLORE_COLLECTION_ID }).then(resp => { allCollectionPins[EXPLORE_COLLECTION_ID] = resp?.pins || []; }).catch(() => { allCollectionPins[EXPLORE_COLLECTION_ID] = []; }),
   ]);
   updateRecycleSidebarCount();
   updateExploreBadge();

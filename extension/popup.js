@@ -47,8 +47,8 @@ function renderSnapshots(snapshots) {
     <div class="snapshot-row" data-ts="${snap.timestamp}">
       <span class="snapshot-time">${escapeHtml(formatTimestamp(snap.timestamp))}</span>
       <span class="snapshot-badges">
-        ${snap.hasMd ? '<span class="badge">MD</span>' : ''}
-        ${snap.hasHtml ? '<span class="badge">HTML</span>' : ''}
+        ${snap.hasMd ? `<span class="badge md" data-ts="${snap.timestamp}">MD</span>` : ''}
+        ${snap.hasHtml ? `<span class="badge html" data-ts="${snap.timestamp}">HTML</span>` : ''}
         <button class="delete-btn" data-ts="${snap.timestamp}" title="Delete snapshot">&times;</button>
       </span>
     </div>
@@ -63,6 +63,15 @@ function renderSnapshots(snapshots) {
       // Re-fetch and re-render
       const resp = await chrome.runtime.sendMessage({ action: 'listSnapshots', slug: currentSlug });
       renderSnapshots(resp?.snapshots || []);
+    });
+  });
+
+  // Double-click to open snapshot in new tab
+  container.querySelectorAll('.snapshot-row').forEach(row => {
+    row.addEventListener('dblclick', async () => {
+      const ts = parseInt(row.dataset.ts, 10);
+      const resp = await chrome.runtime.sendMessage({ action: 'getSnapshotUrl', slug: currentSlug, timestamp: ts });
+      if (resp?.success) chrome.tabs.create({ url: resp.url });
     });
   });
 }
@@ -426,13 +435,16 @@ async function createCollectionAndPin(query) {
   const collections = await loadCollections();
   if (collections.some(c => c.query === query)) return;
 
-  const collectionId = Date.now().toString();
-  collections.push({ id: collectionId, query });
-  await saveSettingsValue('collections', collections);
+  const collectionId = Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => b.toString(16).padStart(2, '0')).join('');
+  await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name: query, query });
+  const { collectionOrder: order = [] } = await chrome.storage.session.get(['collectionOrder']);
+  await saveSettingsValue('collectionOrder', [...order, collectionId]);
 
-  const freshPins = await loadCollectionPins();
-  freshPins[collectionId] = [{ url: currentUrl, title: currentTitle, pinnedAt: Date.now() }];
-  await saveCollectionPins(freshPins);
+  await chrome.runtime.sendMessage({
+    action: 'saveCollectionPinsById',
+    collectionId,
+    pins: [{ url: currentUrl, title: currentTitle, pinnedAt: Date.now() }]
+  });
 
   console.log('[popup] Created collection and pinned page:', query);
 }

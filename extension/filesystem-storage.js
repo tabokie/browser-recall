@@ -2,10 +2,19 @@
 // Manages writing interactions to a user-selected directory
 import { generateSlugFromUrl } from './utils.js';
 
+// Sanitize a collection name for use as a filename.
+// Replaces / with -, strips leading/trailing dots/spaces.
+function sanitizeFilename(name) {
+  return name.replace(/\//g, '-').replace(/^[.\s]+|[.\s]+$/g, '') || '_';
+}
+
 class FileSystemStorage {
   #permissionGranted = false;
   #dirCache = new Map();
   #fileCache = new Map();
+  // Maps collection ID → filename (without .json extension).
+  // Built by loadAllCollectionMetadata(), updated by saveCollectionMeta/deleteCollectionFile.
+  #collectionIdToFilename = new Map();
 
   constructor() {
     this.directoryHandle = null;
@@ -692,6 +701,20 @@ class FileSystemStorage {
     return snapshots;
   }
 
+  // Get a blob URL for a snapshot file (html preferred, falls back to md)
+  async getSnapshotBlobUrl(slug, timestamp) {
+    const atomsDir = await this.resolveDir('atoms');
+    const slugDir = await atomsDir.getDirectoryHandle(slug);
+    for (const ext of ['html', 'md']) {
+      try {
+        const handle = await slugDir.getFileHandle(`${timestamp}.${ext}`);
+        const file = await handle.getFile();
+        return URL.createObjectURL(file);
+      } catch (e) { /* try next */ }
+    }
+    return null;
+  }
+
   // Delete a specific snapshot by slug and timestamp
   async deleteSnapshot(slug, timestamp) {
     if (!(await this.verifyPermission())) {
@@ -753,8 +776,8 @@ class FileSystemStorage {
       throw new Error('No permission to read directory');
     }
 
-    const atom = (await this.loadAtom(slug)) || { highlights: [], watermark: 0 };
-    const watermark = atom.watermark || 0;
+    const atom = (await this.loadAtom(slug)) || { highlights: [], timestamp: 0 };
+    const watermark = atom.timestamp || 0;
 
     // Scan JSONL files after watermark for this URL
     let freshInteraction = null;
@@ -787,14 +810,14 @@ class FileSystemStorage {
     let interaction;
     if (freshInteraction) {
       interaction = freshInteraction;
-      // Update atom with fresh metadata and advance watermark
+      // Update atom with fresh metadata and advance timestamp
       atom.url = interaction.url;
       atom.title = interaction.title;
       atom.attention = interaction.attention || '';
-      atom.watermark = interaction.timestamp;
+      atom.timestamp = interaction.timestamp;
       await this.saveAtom(slug, atom);
     } else if (atom.url) {
-      interaction = { url: atom.url, title: atom.title, attention: atom.attention || '', timestamp: atom.watermark, slug };
+      interaction = { url: atom.url, title: atom.title, attention: atom.attention || '', timestamp: atom.timestamp, slug };
     } else {
       interaction = null;
     }
@@ -832,20 +855,50 @@ class FileSystemStorage {
     return match;
   }
 
-  // Load pins for a single collection from lists/user/{id}.json
+  // Resolve the filename for a collection ID.
+  // Returns the filename (without .json) from the map, or falls back to the ID itself.
+  #resolveCollectionFilename(collectionId) {
+    return this.#collectionIdToFilename.get(collectionId) || collectionId;
+  }
+
+  // Load pins for a single collection.
+  // Returns the pins array (unwraps self-describing entity).
   async loadCollectionPinsById(collectionId) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
+    const filename = this.#resolveCollectionFilename(collectionId);
     try {
-      const fh = await this.resolveFile(`lists/user/${collectionId}.json`);
-      return this.readJson(fh);
+      const fh = await this.resolveFile(`lists/user/${filename}.json`);
+      const data = await this.readJson(fh);
+      if (data && typeof data === 'object' && !Array.isArray(data) && data.pins) {
+        return data.pins;
+      }
+      return data; // legacy bare array
     } catch {
       return [];
     }
   }
 
-  // Load all collection pins from lists/user/{id}.json files
+  // Load the full self-describing entity for a single collection.
+  // Returns { timestamp, id, name, query, qbTree, pins: [...] }
+  async loadCollectionPinsEntity(collectionId) {
+    const filename = this.#resolveCollectionFilename(collectionId);
+    try {
+      const fh = await this.resolveFile(`lists/user/${filename}.json`);
+      const data = await this.readJson(fh);
+      if (data && typeof data === 'object' && !Array.isArray(data) && data.pins) {
+        return data;
+      }
+      // Legacy bare array — wrap with timestamp 0
+      return { timestamp: 0, pins: Array.isArray(data) ? data : [] };
+    } catch {
+      return { timestamp: 0, pins: [] };
+    }
+  }
+
+  // Load all collection pins from lists/user/ files
+  // Returns { collectionId: pinsArray } keyed by internal ID (not filename).
   async loadCollectionPins() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
@@ -856,10 +909,18 @@ class FileSystemStorage {
       const userDir = await this.resolveDir('lists/user');
       for await (const entry of userDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
+          const filename = entry.name.replace('.json', '');
+          if (filename === 'explore') continue;
           try {
             const file = await entry.getFile();
-            const id = entry.name.replace('.json', '');
-            allPins[id] = JSON.parse(await file.text());
+            const data = JSON.parse(await file.text());
+            // Use internal ID from file, fall back to filename
+            const id = (data && data.id) || filename;
+            if (data && typeof data === 'object' && !Array.isArray(data) && data.pins) {
+              allPins[id] = data.pins;
+            } else {
+              allPins[id] = data; // legacy bare array
+            }
           } catch { /* skip malformed files */ }
         }
       }
@@ -867,16 +928,112 @@ class FileSystemStorage {
     return allPins;
   }
 
-  // Save pins for a single collection to lists/user/{id}.json
-  async saveCollectionPinsById(collectionId, pins) {
+  // Save pins for a single collection.
+  // Preserves existing metadata fields via read-merge-write.
+  async saveCollectionPinsById(collectionId, pins, timestamp = 0) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
-    const fileHandle = await this.resolveFile(`lists/user/${collectionId}.json`, { create: true });
-    await this.writeJson(fileHandle, pins);
+    const filename = this.#resolveCollectionFilename(collectionId);
+    // Read existing entity to preserve metadata (name, query, qbTree)
+    let existing = {};
+    try {
+      const fh = await this.resolveFile(`lists/user/${filename}.json`);
+      const data = await this.readJson(fh);
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        existing = data;
+      }
+    } catch { /* file doesn't exist yet */ }
+    const fileHandle = await this.resolveFile(`lists/user/${filename}.json`, { create: true });
+    await this.writeJson(fileHandle, { ...existing, timestamp, pins });
   }
 
-  // Save collection pins to lists/user/{id}.json files
+  // Save collection metadata (name, query, qbTree) without touching pins.
+  // Read-merge-write to preserve existing pins.
+  // If name changes, the file is renamed (old deleted, new created).
+  async saveCollectionMeta(collectionId, meta, timestamp = 0) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to write');
+    }
+    const oldFilename = this.#resolveCollectionFilename(collectionId);
+    // Read existing data from old file
+    let existing = { timestamp: 0, pins: [] };
+    try {
+      const fh = await this.resolveFile(`lists/user/${oldFilename}.json`);
+      const data = await this.readJson(fh);
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        existing = data;
+      }
+    } catch { /* file doesn't exist yet */ }
+    const updated = { ...existing, ...meta, timestamp };
+    // Determine new filename from name
+    const newName = updated.name || oldFilename;
+    const newFilename = sanitizeFilename(newName);
+    if (newFilename !== oldFilename && oldFilename !== collectionId) {
+      // Name changed — delete old file
+      try {
+        const userDir = await this.resolveDir('lists/user');
+        await this.softDelete(userDir, `${oldFilename}.json`);
+        // Evict stale file cache entry
+        this.#fileCache.delete(`lists/user/${oldFilename}.json`);
+      } catch { /* old file may not exist */ }
+    }
+    // Write to new filename
+    const fileHandle = await this.resolveFile(`lists/user/${newFilename}.json`, { create: true });
+    await this.writeJson(fileHandle, updated);
+    // Update map
+    this.#collectionIdToFilename.set(collectionId, newFilename);
+  }
+
+  // Delete a collection file from lists/user/
+  async deleteCollectionFile(collectionId) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to write');
+    }
+    const filename = this.#resolveCollectionFilename(collectionId);
+    try {
+      const userDir = await this.resolveDir('lists/user');
+      await this.softDelete(userDir, `${filename}.json`);
+      this.#fileCache.delete(`lists/user/${filename}.json`);
+    } catch { /* file may not exist */ }
+    this.#collectionIdToFilename.delete(collectionId);
+  }
+
+  // Load metadata for all collections from lists/user/ files.
+  // Returns [{ id, name, query, qbTree }] — skips explore.
+  // Also rebuilds the #collectionIdToFilename map.
+  async loadAllCollectionMetadata() {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+    this.#collectionIdToFilename.clear();
+    const result = [];
+    try {
+      const userDir = await this.resolveDir('lists/user');
+      for await (const entry of userDir.values()) {
+        if (entry.kind === 'file' && entry.name.endsWith('.json')) {
+          const filename = entry.name.replace('.json', '');
+          if (filename === 'explore') continue;
+          try {
+            const file = await entry.getFile();
+            const data = JSON.parse(await file.text());
+            const id = data.id || filename;
+            this.#collectionIdToFilename.set(id, filename);
+            result.push({
+              id,
+              name: data.name || filename,
+              query: data.query || '',
+              qbTree: data.qbTree || null,
+            });
+          } catch { /* skip malformed */ }
+        }
+      }
+    } catch { /* lists/user/ doesn't exist */ }
+    return result;
+  }
+
+  // Save collection pins to lists/user/ files
+  // Preserves existing metadata in each file.
   async saveCollectionPins(allPins) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
@@ -884,45 +1041,117 @@ class FileSystemStorage {
 
     const userDir = await this.resolveDir('lists/user');
 
-    // Write each collection as a separate file
-    const activeIds = new Set();
+    // Write each collection, preserving metadata
+    const activeFilenames = new Set();
     for (const [id, pins] of Object.entries(allPins)) {
-      activeIds.add(id);
-      const fileHandle = await this.resolveFile(`lists/user/${id}.json`, { create: true });
-      await this.writeJson(fileHandle, pins);
+      const filename = this.#resolveCollectionFilename(id);
+      activeFilenames.add(filename);
+      const pinsArray = Array.isArray(pins) ? pins : (pins.pins || []);
+      let existing = {};
+      try {
+        const fh = await this.resolveFile(`lists/user/${filename}.json`);
+        const data = await this.readJson(fh);
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          existing = data;
+        }
+      } catch { /* file doesn't exist yet */ }
+      const fileHandle = await this.resolveFile(`lists/user/${filename}.json`, { create: true });
+      await this.writeJson(fileHandle, { ...existing, timestamp: 0, pins: pinsArray });
     }
 
-    // Soft-delete orphaned files not in allPins
+    // Soft-delete orphaned files (skip explore)
     for await (const entry of userDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.json')) {
-        const id = entry.name.replace('.json', '');
-        if (!activeIds.has(id)) {
+        const filename = entry.name.replace('.json', '');
+        if (filename === 'explore') continue;
+        if (!activeFilenames.has(filename)) {
           await this.softDelete(userDir, entry.name);
         }
       }
     }
   }
 
+  // Load recycle bin from lists/recycle-bin.json
+  // Returns the items array.
+  async loadRecycleBin() {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+    try {
+      const fh = await this.resolveFile('lists/recycle-bin.json');
+      const data = await this.readJson(fh);
+      if (data && typeof data === 'object' && data.items) {
+        return data.items;
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  // Load the full recycle-bin entity (includes timestamp).
+  async loadRecycleBinEntity() {
+    try {
+      const fh = await this.resolveFile('lists/recycle-bin.json');
+      const data = await this.readJson(fh);
+      if (data && typeof data === 'object' && data.items) {
+        return data;
+      }
+      return { timestamp: 0, items: [] };
+    } catch {
+      return { timestamp: 0, items: [] };
+    }
+  }
+
+  // Save recycle bin to lists/recycle-bin.json
+  async saveRecycleBin(items, timestamp = 0) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to write');
+    }
+    const fh = await this.resolveFile('lists/recycle-bin.json', { create: true });
+    await this.writeJson(fh, { timestamp, items });
+  }
+
   // Load permanent deletes from lists/permanent-deletes.json
+  // Returns the urls array (unwraps { timestamp, urls } wrapper).
   async loadPermanentDeletes() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
     try {
       const fileHandle = await this.resolveFile('lists/permanent-deletes.json');
-      return this.readJson(fileHandle);
+      const data = await this.readJson(fileHandle);
+      // New format: { timestamp, urls: [...] }
+      if (data && typeof data === 'object' && !Array.isArray(data) && data.urls) {
+        return data.urls;
+      }
+      return data; // legacy bare array
     } catch {
       return [];
     }
   }
 
-  // Save permanent deletes to lists/permanent-deletes.json
-  async savePermanentDeletes(urls) {
+  // Load the raw wrapped entity for permanent deletes (includes timestamp).
+  async loadPermanentDeletesEntity() {
+    try {
+      const fileHandle = await this.resolveFile('lists/permanent-deletes.json');
+      const data = await this.readJson(fileHandle);
+      if (data && typeof data === 'object' && !Array.isArray(data) && data.urls) {
+        return data;
+      }
+      return { timestamp: 0, urls: Array.isArray(data) ? data : [] };
+    } catch {
+      return { timestamp: 0, urls: [] };
+    }
+  }
+
+  // Save permanent deletes to lists/permanent-deletes.json (wrapped format)
+  async savePermanentDeletes(urls, timestamp = 0) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write directory');
     }
     const fileHandle = await this.resolveFile('lists/permanent-deletes.json', { create: true });
-    await this.writeJson(fileHandle, urls);
+    await this.writeJson(fileHandle, { timestamp, urls });
   }
 
   // Load settings.json — returns {} if missing or unreadable

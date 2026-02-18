@@ -1,0 +1,44 @@
+- Let's work on interaction logs.
+
+1. Interaction logs is the source of all data. Every mutation is first persisted to log-buffer (previously write-buffer), and then persisted by offscreen.rs to log files. Other entities such as setting.json, collection.json, are changed by replaying the logs. To guarantee the re-entrancy of replay, each entity have a version=timestamp field. When we are replaying logs after extension reload, we only replay logs after the version watermark.
+2. However, some data is too large to fit in log-buffer, e.g. capture, large notes and highlights. For these types of mutations, we first persist the content to file (and wait for it to complete), then write a log that references the content using path. For example, first persist the capture html file, then persist a log that says "capture(slug)", then return to user.
+- If a capture is requested using Alt+S, when the capture is completed, show a notification bubble in the center of the viewport to user.
+- Double click to open the capture in PopupUI or in page details UI.
+- Revert it. I meant, change the SNAPSHOTS item to clickable.
+- No, keep the pause notification, but add the new functionality I requested, which is to change SNAPSHOTS item clickable.
+- Let's revert the changes in this session. Then:
+
+1. When user uses key-shortcut Alt-S to capture snapshot, show a notification bubble at the center of viewport after the snapshot is persisted.
+2. When user double clicks on a SNAPSHOTS item, we open the directly html link to the capture file on file system.
+- Revert changes individually, some files could be changed by anothe session.
+- Why do you still read snapshot out yourself? You should open the directly link (e.g. local://capture/xx.html) and let browser handle the render.
+- > The File System Access API doesn't expose absolute paths
+
+Why couldn't you deduce it? You have the storage location and relative path no?
+- Show the plan first
+- I see. Then let's try URL.createObjectURL first.
+- 1. List transient fields in a log entry and explain their usefulness.
+2. Why not directly use timestamp as seqno? I see there is no practical reason to use a dense seqno. Also, to keep concept clean, we need to use "timestamp" instead of "version".
+3. Remove the dedup rules on write path, it is in conflict with the immutable nature of logs. We can keep it only for rendering. However, we still want to prevent excessive logs from page interactions. To do that, we keep track of the page attention inside the page frontend (without sending to background), when the page is closed or frozen, we send the accumulative attention data as one log.
+4. Make sure we are on the same page. On mutations, read cache in background.js should be refreshed immediately before the logs are persisted. When there's a cache miss, we first load from offscreen.js, then applies log-buffer in backround.js. The log replay logic in background.js and offscreen.js must be sharing the essential code to avoid inconsistency.
+- Why is the capture html rendered slightly differently from me directly opening the path? Some pictures are not showing and layout different.
+- Can we configure the absolute path and do the chrome's native file location selection in one action? I don't want user having to perform two actions just to configure storage.
+- Fair enough. Let't make the SNAPSHOTS item in portal UI clickable as well.
+- For both type of item, show the item with colored frames with hover effect.
+- A few issues:
+1. The collection list in settings.json is inconsistent with actual files. I have files in `lists/user` that are not displayed in settings.json and in portal UI.
+2. Files are not updated. By that I means history/*.json and settings.json. I constantly experience data loss from extension reload because the log-buffer is not persisted.
+3. In settings page there should be a flush button to ensure log-buffer is fully persisted to files.
+- When I flush: Failed: Cannot read properties of undefined (reading 'local)
+- How do we ensure offscreen write history file in the same order as logs are sent to it.
+- Why don't you fix the broken tests?
+- The manual flush works alright. But the auto draining doesn't seem to work. The log files are not updated after 5 minutes.
+- Remove all collection listings from settings.json, including admin lists such as recycle bin. It is redundant. Also, for a collection json, don't use the filename as title, use the actual title field.
+- Do these tasks one by one. Finish one before handling the next:
+
+(1) The collection ID is way too long. 8 characters is more than enough.
+(2) Change the read flow. All reads are handled by background.rs. If data is not cached, background.rs is responsible for asking offscreen.rs for data.
+(3) Use user provided name as the collection file name. For a read request to a collection ID, we need to maintain an in-memory map from ID to filename. This mapping is maintained by offscreen.rs.
+(4) Attention data of an existing page is not properly applied to the atom, at least I cannot see attention data on the page detail UI. Write failing tests before fixing this.
+(5) By looking at the ~/portal-data/history, "set collection" log is written multiple times even though the collection is not changed.
+- Finish up

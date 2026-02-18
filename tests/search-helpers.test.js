@@ -12,17 +12,13 @@ describe('mergeBufferIntoInteractions', () => {
       { url: 'https://a.com', timestamp: 1, slug: 'a' },
     ];
     const buffer = [
-      { interaction: { url: 'https://b.com', timestamp: 2, slug: 'b' }, markdown: '# B' },
+      { url: 'https://b.com', title: 'B', timestamp: 2, slug: 'b' },
     ];
 
     mergeBufferIntoInteractions(interactions, buffer);
 
     expect(interactions).toHaveLength(2);
     expect(interactions[1].url).toBe('https://b.com');
-
-    // Buffer content is now extracted separately via getBufferContentMap
-    const bufferContent = getBufferContentMap(buffer);
-    expect(bufferContent['b']).toBe('# B');
   });
 
   it('deduplicates by URL (last-write-wins)', () => {
@@ -30,7 +26,7 @@ describe('mergeBufferIntoInteractions', () => {
       { url: 'https://a.com', timestamp: 1, title: 'old', slug: 'a' },
     ];
     const buffer = [
-      { interaction: { url: 'https://a.com', timestamp: 3, title: 'new', slug: 'a' } },
+      { url: 'https://a.com', timestamp: 3, title: 'new', slug: 'a' },
     ];
 
     mergeBufferIntoInteractions(interactions, buffer);
@@ -44,8 +40,8 @@ describe('mergeBufferIntoInteractions', () => {
       { url: 'https://c.com', timestamp: 10, slug: 'c' },
     ];
     const buffer = [
-      { interaction: { url: 'https://a.com', timestamp: 1, slug: 'a' } },
-      { interaction: { url: 'https://b.com', timestamp: 5, slug: 'b' } },
+      { url: 'https://a.com', timestamp: 1, slug: 'a' },
+      { url: 'https://b.com', timestamp: 5, slug: 'b' },
     ];
 
     mergeBufferIntoInteractions(interactions, buffer);
@@ -56,33 +52,31 @@ describe('mergeBufferIntoInteractions', () => {
       'https://c.com',
     ]);
   });
-
 });
 
-describe('extractInteractionBuffer (new writeBuffer format)', () => {
-  it('extracts interaction entries from typed writeBuffer', () => {
-    const writeBuffer = [
-      { id: 1, type: 'interaction', entry: { interaction: { url: 'https://a.com', timestamp: 1, slug: 'a' }, markdown: '# A', html: '' } },
-      { id: 2, type: 'json', path: 'settings.json', data: { workspace: {} } },
-      { id: 3, type: 'interaction', entry: { interaction: { url: 'https://b.com', timestamp: 2, slug: 'b' }, markdown: '', html: '' } },
-      { id: 4, type: 'snapshot', slug: 'c', timestamp: 3, markdown: '# C', html: '<p>C</p>' },
+describe('extractInteractionBuffer (logBuffer format)', () => {
+  it('extracts visit entries (no action field) from logBuffer', () => {
+    const logBuffer = [
+      { timestamp: 1, url: 'https://a.com', title: 'A', slug: 'a', intent: '', attention: '' },
+      { timestamp: 2, action: 'set', key: 'workspace', value: {} },
+      { timestamp: 3, url: 'https://b.com', title: 'B', slug: 'b', intent: '', attention: '' },
+      { timestamp: 4, action: 'highlight', slug: 'a', highlight: { text: 'hi' } },
     ];
 
-    const result = extractInteractionBuffer(writeBuffer);
+    const result = extractInteractionBuffer(logBuffer);
 
     expect(result).toHaveLength(2);
-    expect(result[0].interaction.url).toBe('https://a.com');
-    expect(result[0].markdown).toBe('# A');
-    expect(result[1].interaction.url).toBe('https://b.com');
+    expect(result[0].url).toBe('https://a.com');
+    expect(result[1].url).toBe('https://b.com');
   });
 
-  it('returns empty array for buffer with no interaction entries', () => {
-    const writeBuffer = [
-      { id: 1, type: 'json', path: 'settings.json', data: {} },
-      { id: 2, type: 'snapshot', slug: 'x', timestamp: 1, markdown: '', html: '' },
+  it('returns empty array for buffer with no visit entries', () => {
+    const logBuffer = [
+      { timestamp: 1, action: 'set', key: 'workspace', value: {} },
+      { timestamp: 2, action: 'highlight', slug: 'x', highlight: {} },
     ];
 
-    const result = extractInteractionBuffer(writeBuffer);
+    const result = extractInteractionBuffer(logBuffer);
     expect(result).toHaveLength(0);
   });
 
@@ -90,46 +84,31 @@ describe('extractInteractionBuffer (new writeBuffer format)', () => {
     const interactions = [
       { url: 'https://old.com', timestamp: 1, slug: 'old' },
     ];
-    const writeBuffer = [
-      { id: 1, type: 'interaction', entry: { interaction: { url: 'https://new.com', timestamp: 2, slug: 'new' }, markdown: '# New', html: '' } },
-      { id: 2, type: 'json', path: 'atoms/x.json', data: { highlights: [] } },
+    const logBuffer = [
+      { timestamp: 2, url: 'https://new.com', title: 'New', slug: 'new', intent: '', attention: '' },
+      { timestamp: 3, action: 'set', key: 'workspace', value: {} },
     ];
 
-    const extracted = extractInteractionBuffer(writeBuffer);
+    const extracted = extractInteractionBuffer(logBuffer);
     mergeBufferIntoInteractions(interactions, extracted);
 
     expect(interactions).toHaveLength(2);
     expect(interactions.map(i => i.url)).toContain('https://new.com');
   });
 
-  it('handles legacy (pre-migration) buffer entries without type field', () => {
-    const writeBuffer = [
-      // Legacy format: no type field, interaction at top level
-      { interaction: { url: 'https://legacy.com', timestamp: 1, slug: 'legacy' }, markdown: '# Legacy', html: '' },
-      // New format
-      { id: 2, type: 'interaction', entry: { interaction: { url: 'https://new.com', timestamp: 2, slug: 'new' }, markdown: '# New', html: '' } },
-      // Non-interaction new format
-      { id: 3, type: 'json', path: 'settings.json', data: {} },
-    ];
-
-    const result = extractInteractionBuffer(writeBuffer);
-
-    expect(result).toHaveLength(2);
-    expect(result[0].interaction.url).toBe('https://legacy.com');
-    expect(result[0].markdown).toBe('# Legacy');
-    expect(result[1].interaction.url).toBe('https://new.com');
+  it('returns empty array for empty buffer', () => {
+    const result = extractInteractionBuffer([]);
+    expect(result).toHaveLength(0);
   });
+});
 
-  it('works with getBufferContentMap after extraction', () => {
-    const writeBuffer = [
-      { id: 1, type: 'interaction', entry: { interaction: { url: 'https://a.com', timestamp: 1, slug: 'a' }, markdown: '# A content', html: '' } },
-      { id: 2, type: 'json', path: 'settings.json', data: {} },
+describe('getBufferContentMap', () => {
+  it('returns empty map (content is on disk in event-sourced model)', () => {
+    const buffer = [
+      { timestamp: 1, url: 'https://a.com', title: 'A', slug: 'a' },
     ];
-
-    const extracted = extractInteractionBuffer(writeBuffer);
-    const contentMap = getBufferContentMap(extracted);
-
-    expect(contentMap['a']).toBe('# A content');
+    const contentMap = getBufferContentMap(buffer);
+    expect(contentMap).toEqual({});
   });
 });
 
@@ -206,7 +185,7 @@ describe('buildInteractionsForEngine', () => {
     expect(obj.setAttention).toHaveBeenCalledWith('');
   });
 
-  it('stringifies object attention field (writeBuffer entries have raw objects)', () => {
+  it('stringifies object attention field (log entries may have raw objects)', () => {
     const MockInteraction = makeMockInteractionClass();
     const engine = { addInteraction: vi.fn() };
     const dataList = [

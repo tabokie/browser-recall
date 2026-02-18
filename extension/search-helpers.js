@@ -1,20 +1,17 @@
 // Extracted search helpers — pure functions testable without browser APIs
 
 /**
- * Extract interaction entries from the typed writeBuffer.
- * The writeBuffer contains entries of different types: 'interaction', 'json', 'snapshot'.
- * This returns only interaction entries in the old format { interaction, markdown, html }
- * that mergeBufferIntoInteractions and getBufferContentMap expect.
+ * Extract visit entries from the logBuffer.
+ * The logBuffer contains entries of different types: visits (no action field)
+ * and mutations (with action field). This returns only visit entries.
  */
-export function extractInteractionBuffer(writeBuffer) {
-  return writeBuffer
-    .filter(e => e.type === 'interaction' || (!e.type && e.interaction))
-    .map(e => e.type === 'interaction' ? e.entry : e);
+export function extractInteractionBuffer(logBuffer) {
+  return logBuffer.filter(e => !e.action);
 }
 
 /**
- * Merge write-buffer entries into the interactions array, deduplicating by URL
- * (last-write-wins).
+ * Merge log buffer visit entries into the interactions array, deduplicating
+ * by URL (last-write-wins).
  *
  * Mutates and returns { interactions }.
  */
@@ -25,13 +22,13 @@ export function mergeBufferIntoInteractions(interactions, buffer) {
   });
 
   for (const entry of buffer) {
-    const interaction = entry.interaction;
-    const existingIdx = indexByUrl.get(interaction.url);
+    // Log buffer entries are flat (url, title, timestamp, slug, etc.)
+    const existingIdx = indexByUrl.get(entry.url);
     if (existingIdx !== undefined) {
-      interactions[existingIdx] = interaction;
+      interactions[existingIdx] = entry;
     } else {
-      indexByUrl.set(interaction.url, interactions.length);
-      interactions.push(interaction);
+      indexByUrl.set(entry.url, interactions.length);
+      interactions.push(entry);
     }
   }
 
@@ -40,17 +37,12 @@ export function mergeBufferIntoInteractions(interactions, buffer) {
 }
 
 /**
- * Get buffer content map: slug → markdown for entries in the write buffer.
- * Used to overlay fresh content on pipelined batches.
+ * Get buffer content map: slug → markdown for entries in the log buffer.
+ * In the event-sourced model, content is on disk (referenced by mdPath).
+ * This returns an empty map — content is not inline in log entries.
  */
 export function getBufferContentMap(buffer) {
-  const contentMap = {};
-  for (const entry of buffer) {
-    if (entry.markdown && entry.interaction.slug) {
-      contentMap[entry.interaction.slug] = entry.markdown;
-    }
-  }
-  return contentMap;
+  return {};
 }
 
 /**

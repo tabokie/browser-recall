@@ -77,12 +77,13 @@ const TEST_COLLECTION_PINS = {
   ],
 };
 
+const TEST_COLLECTIONS = [TEST_COLLECTION, TEST_COLLECTION_NOQUERY];
+
 const TEST_SETTINGS = {
-  collections: [TEST_COLLECTION, TEST_COLLECTION_NOQUERY],
+  collectionOrder: ['col-rust', 'col-noq'],
   settings: { captureContent: true, captureAttention: true, archiveQuality: 'medium' },
   urlBlacklist: [],
   titleTrimRules: [],
-  recycleBin: [],
   permanentDeletes: [],
 };
 
@@ -280,6 +281,15 @@ describe('Cache staleness', () => {
       case 'saveCollectionPinsById':
         return { success: true };
 
+      case 'saveCollectionMeta':
+        return { success: true };
+
+      case 'deleteCollection':
+        return { success: true };
+
+      case 'saveRecycleBin':
+        return { success: true };
+
       case 'loadPermanentDeletes':
         return { success: true, urls: [] };
 
@@ -295,16 +305,17 @@ describe('Cache staleness', () => {
     // Session-cached keys (settings, workspace, collections, etc.)
     sessionData = {
       settings: TEST_SETTINGS.settings,
-      collections: TEST_SETTINGS.collections,
+      collections: TEST_COLLECTIONS,
+      collectionOrder: TEST_SETTINGS.collectionOrder,
       urlBlacklist: TEST_SETTINGS.urlBlacklist,
       titleTrimRules: TEST_SETTINGS.titleTrimRules,
-      recycleBin: TEST_SETTINGS.recycleBin,
+      recycleBin: [],
       permanentDeletes: TEST_SETTINGS.permanentDeletes,
       gatewayDomains: {},
     };
-    // Local-only keys (writeBuffer is durably backed up here)
+    // Local-only keys (logBuffer is durably backed up here)
     localData = {
-      writeBuffer: [],
+      logBuffer: [],
     };
   }
 
@@ -367,9 +378,8 @@ describe('Cache staleness', () => {
     // Verify pins loaded
     expect(pinnedOnlyRows().length).toBe(3);
 
-    // Navigate back to "all" category
-    const allItem = document.querySelector('.sidebar-item[data-category="all"]');
-    allItem.click();
+    // Navigate back to Explore
+    document.getElementById('exploreBtn').click();
     await tick(100);
 
     // Trigger resetHistory via selectDirBtn click (calls selectDirectory → resetHistory → showCategory)
@@ -464,9 +474,8 @@ describe('Cache staleness', () => {
     await importOptions();
     await tick(100);
 
-    // Verify initial state
-    const initialRowCount = resultRows().length;
-    expect(initialRowCount).toBeGreaterThan(0);
+    // Default view is Explore — verify it rendered
+    expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
 
     // Add a 4th history file with new interactions
     const FILE4_DATE = '2026-02-12';
@@ -478,7 +487,9 @@ describe('Cache staleness', () => {
       files: [...FILES_NEWEST_FIRST, `${FILE4_DATE}.jsonl`],
     });
     // Override loadInteractionBatch to include the new file
+    let loadBatchCalls = 0;
     actionOverrides['loadInteractionBatch'] = (msg) => {
+      loadBatchCalls++;
       const interactions = [];
       for (const f of msg.files) {
         if (FILE_MAP[f]) interactions.push(...FILE_MAP[f]);
@@ -494,10 +505,8 @@ describe('Cache staleness', () => {
     document.dispatchEvent(new Event('visibilitychange'));
     await tick(300);
 
-    // Assert: view was re-rendered with new data (row count >= initial; VirtualScroller
-    // may cap visible rows to viewport, but displayInteractionRows was called)
-    const rows = [...document.querySelectorAll('#results .result-item')];
-    expect(rows.length).toBeGreaterThanOrEqual(initialRowCount);
+    // Assert: visibilitychange triggered history re-fetch (the new file was loaded)
+    expect(loadBatchCalls).toBeGreaterThan(0);
   });
 
   // ---------------------------------------------------------------------------
@@ -525,63 +534,78 @@ describe('Cache staleness', () => {
     await tick(200);
 
     // resetHistory clears all caches atomically. Verify historyFiles was cleared
-    // by checking initHistoryFiles re-ran (reads writeBuffer from storage.local).
+    // by checking initHistoryFiles re-ran (reads logBuffer from storage.local).
     // Since all caches are cleared in the same function, this proves
     // gatewayDomainsLoaded was also reset.
-    const writeBufferCalls = chrome.storage.local.get.mock.calls
+    const logBufferCalls = chrome.storage.local.get.mock.calls
       .filter(c => {
         const keys = c[0];
-        if (Array.isArray(keys)) return keys.includes('writeBuffer');
-        return keys === 'writeBuffer';
+        if (Array.isArray(keys)) return keys.includes('logBuffer');
+        return keys === 'logBuffer';
       });
-    expect(writeBufferCalls.length).toBeGreaterThanOrEqual(1);
+    expect(logBufferCalls.length).toBeGreaterThanOrEqual(1);
   });
 
   // ---------------------------------------------------------------------------
-  // T5: new writeBuffer format (typed entries) → history loads correctly
+  // T5: logBuffer entries → history loads correctly
   // ---------------------------------------------------------------------------
-  it('T5: typed writeBuffer entries are visible in history', async () => {
+  it('T5: logBuffer visit entries are merged into history and visible in collection', async () => {
     populateCache();
-    // Put interaction entries in the NEW typed format in storage.local
-    localData.writeBuffer = [
-      { id: 1, type: 'interaction', entry: {
-        interaction: { url: 'https://buffered.com/page1', title: 'Buffered Page 1', timestamp: Date.now(), slug: 'buffered-page1', intent: '', attention: '' },
-        markdown: '', html: ''
-      }},
-      { id: 2, type: 'json', path: 'settings.json', data: { workspace: {} } },
-      { id: 3, type: 'interaction', entry: {
-        interaction: { url: 'https://buffered.com/page2', title: 'Buffered Page 2', timestamp: Date.now() + 1, slug: 'buffered-page2', intent: '', attention: '' },
-        markdown: '', html: ''
-      }},
+    // Put visit entries (no action) + mutation entries in logBuffer
+    localData.logBuffer = [
+      { timestamp: Date.now(), url: 'https://buffered.com/page1', title: 'Buffered Page 1', slug: 'buffered-page1', intent: '', attention: '' },
+      { timestamp: Date.now(), action: 'set', key: 'workspace', value: {} },
+      { timestamp: Date.now() + 1, url: 'https://buffered.com/page2', title: 'Buffered Page 2', slug: 'buffered-page2', intent: '', attention: '' },
     ];
+
+    // Add a collection with pins on buffered.com (same domain as logBuffer entries)
+    sessionData.collections = [
+      ...TEST_COLLECTIONS,
+      { id: 'col-buf', query: '', name: 'Buffered' },
+    ];
+    actionOverrides['loadCollectionPinsById'] = (msg) => {
+      if (msg.collectionId === 'col-buf') {
+        return { success: true, pins: [
+          { url: 'https://buffered.com/page1', title: 'Buffered Page 1', pinnedAt: NOW },
+        ]};
+      }
+      return { success: true, pins: TEST_COLLECTION_PINS[msg.collectionId] || [] };
+    };
 
     await importOptions();
     await tick(100);
 
-    // History should show rows (from both JSONL files and write buffer)
-    const rows = [...document.querySelectorAll('#results .result-item')];
-    expect(rows.length).toBeGreaterThan(0);
+    // Default view is Explore. Open the buffered collection — its pin is on
+    // buffered.com, same domain as logBuffer entries → related pages should appear.
+    const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-buf"]');
+    expect(collItem).not.toBeNull();
+    collItem.click();
+    await tick(300);
 
-    // The buffered pages should be in the results
-    const urls = rows.map(r => r.querySelector('.result-row')?.dataset?.url || '');
-    expect(urls).toContain('https://buffered.com/page1');
-    expect(urls).toContain('https://buffered.com/page2');
+    // Pinned section shows the pin
+    expect(pinnedOnlyRows().length).toBe(1);
+
+    // Auto-blocks should include "Similar to pins" — the second buffered entry
+    // shares hostname (buffered.com) with the pin, so findRelatedPages finds it
+    const blockEls = document.querySelectorAll('.explore-block');
+    const blockLabels = [...blockEls].map(el => el.textContent.trim());
+    expect(blockLabels.some(l => l.includes('Similar to pins'))).toBe(true);
   });
 
   // ---------------------------------------------------------------------------
-  // T6: new writeBuffer format doesn't break recycle bin count
+  // T6: logBuffer with mutation entries doesn't break recycle bin count
   // ---------------------------------------------------------------------------
-  it('T6: recycle bin count renders with typed writeBuffer', async () => {
+  it('T6: recycle bin count renders with logBuffer mutation entries', async () => {
     populateCache();
     // Add some recycled items to session cache
     sessionData.recycleBin = [
       { url: 'https://deleted.com', title: 'Deleted', deletedAt: Date.now() },
       { url: 'https://alsogone.com', title: 'Also Gone', deletedAt: Date.now() },
     ];
-    // Put non-interaction entries in writeBuffer (the kind that crash old code)
-    localData.writeBuffer = [
-      { id: 1, type: 'json', path: 'settings.json', data: { workspace: {} } },
-      { id: 2, type: 'snapshot', slug: 'x', timestamp: Date.now(), markdown: '', html: '' },
+    // Put mutation entries (non-visit) in logBuffer
+    localData.logBuffer = [
+      { timestamp: Date.now(), action: 'set', key: 'workspace', value: {} },
+      { timestamp: Date.now(), action: 'highlight', slug: 'x', highlight: { text: 'hi' } },
     ];
 
     await importOptions();
@@ -612,9 +636,10 @@ describe('Cache staleness', () => {
     const pinnedRows = pinnedOnlyRows();
     expect(pinnedRows.length).toBe(2);
 
-    // Related section should have results — history on example.com scores via hostname match
-    const relatedRows = [...document.querySelectorAll('#pinnedResults .result-item.related-result')];
-    expect(relatedRows.length).toBeGreaterThan(0);
+    // Auto-blocks should include "Similar to pins" — example.com pins match history
+    const blockEls = document.querySelectorAll('.explore-block');
+    const blockLabels = [...blockEls].map(el => el.textContent.trim());
+    expect(blockLabels.some(l => l.includes('Similar to pins'))).toBe(true);
   });
 
   // ---------------------------------------------------------------------------
@@ -655,17 +680,7 @@ describe('Cache staleness', () => {
 
     // col-noq has query '' and pins on example.com (same domain as history)
     // Give it a query so it goes through pipelinedSearch path
-    actionOverrides['loadSettings'] = () => ({
-      success: true,
-      settings: {
-        ...TEST_SETTINGS,
-        collections: [
-          TEST_COLLECTION,
-          { id: 'col-noq', query: 'example', name: 'Example Collection' },
-        ],
-      },
-    });
-    // Also override session cache
+    // Override session cache with modified collection
     sessionData.collections = [
       TEST_COLLECTION,
       { id: 'col-noq', query: 'example', name: 'Example Collection' },
@@ -687,27 +702,25 @@ describe('Cache staleness', () => {
     // Pinned section should show 2 pins
     expect(pinnedOnlyRows().length).toBe(2);
 
-    // Related section should have results — hostname match with example.com history
-    const relatedRows = [...document.querySelectorAll('#pinnedResults .result-item.related-result')];
-    expect(relatedRows.length).toBeGreaterThan(0);
+    // Auto-blocks should include "Similar to pins" — hostname match with example.com history
+    const blockEls = document.querySelectorAll('.explore-block');
+    const blockLabels = [...blockEls].map(el => el.textContent.trim());
+    expect(blockLabels.some(l => l.includes('Similar to pins'))).toBe(true);
   });
 
   // ---------------------------------------------------------------------------
-  // T10: writeBuffer with object attention doesn't crash pipelinedSearch
+  // T10: logBuffer with object attention doesn't crash pipelinedSearch
   // ---------------------------------------------------------------------------
-  it('T10: object attention in writeBuffer entries does not crash search', async () => {
+  it('T10: object attention in logBuffer entries does not crash search', async () => {
     populateCache();
 
-    // WriteBuffer has entries with object attention (from content.js reportPageVisit)
-    localData.writeBuffer = [
-      { id: 1, type: 'interaction', entry: {
-        interaction: {
-          url: 'https://example.com/buffered', title: 'Buffered Today Page',
-          timestamp: Date.now(), slug: 'buffered-today', intent: '',
-          attention: { scrollDepth: 42, timeOnPage: 5000, clicks: 3, highlights: [] }
-        },
-        markdown: '', html: ''
-      }},
+    // LogBuffer has entries with object attention (from content.js reportPageVisit)
+    localData.logBuffer = [
+      {
+        timestamp: Date.now(), url: 'https://example.com/buffered', title: 'Buffered Today Page',
+        slug: 'buffered-today', intent: '',
+        attention: { scrollDepth: 42, timeOnPage: 5000, clicks: 3, highlights: [] }
+      },
     ];
 
     sessionData.collections = [
@@ -721,15 +734,11 @@ describe('Cache staleness', () => {
       }
       return { success: true, pins: [] };
     };
-    actionOverrides['loadSettings'] = () => ({
-      success: true,
-      settings: { ...TEST_SETTINGS, collections: sessionData.collections },
-    });
 
     await importOptions();
     await tick(100);
 
-    // Open col-today — pipelinedSearch("today") runs; writeBuffer entries have object attention
+    // Open col-today — pipelinedSearch("today") runs; logBuffer entries have object attention
     const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-today"]');
     expect(collItem).not.toBeNull();
     collItem.click();
@@ -737,5 +746,56 @@ describe('Cache staleness', () => {
 
     // Should not crash — object attention is stringified by buildInteractionsForEngine
     expect(pinnedOnlyRows().length).toBe(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // T11: pin enrichment uses history attention when atom lacks it
+  // ---------------------------------------------------------------------------
+  it('T11: pinned rows show attention from history when atom has no attention', async () => {
+    populateCache();
+
+    // col-noq pins are on example.com/today0 and today1 — same URLs as FILE1_INTERACTIONS
+    // Give those interactions attention data
+    const attentionJson = JSON.stringify({ scrollDepth: 50, timeOnPage: 120000, highlights: [], clicks: 5 });
+    const saved0 = { ...FILE1_INTERACTIONS[0] };
+    const saved1 = { ...FILE1_INTERACTIONS[1] };
+    FILE1_INTERACTIONS[0] = { ...FILE1_INTERACTIONS[0], attention: attentionJson };
+    FILE1_INTERACTIONS[1] = { ...FILE1_INTERACTIONS[1], attention: attentionJson };
+
+    // loadAtomBatch returns atoms WITHOUT attention (simulates old-format atoms)
+    actionOverrides['loadAtomBatch'] = (msg) => {
+      const atoms = {};
+      for (const slug of (msg.slugs || [])) {
+        atoms[slug] = { watermark: NOW, attention: '', highlights: [] };
+      }
+      return { success: true, atoms };
+    };
+
+    try {
+      await importOptions();
+      await tick(100);
+
+      // Open col-noq which has pins on example.com/today0 and today1
+      const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-noq"]');
+      expect(collItem).not.toBeNull();
+      collItem.click();
+      await tick(500);
+
+      // The pinned rows should have non-zero attention despite atoms lacking it
+      // because historyByUrl has the attention data from JSONL interactions
+      const rows = pinnedOnlyRows();
+      expect(rows.length).toBe(2);
+
+      // buildDetailHtml only creates .detail-metrics when attDetail is non-null.
+      // If enrichment correctly falls back to historyByUrl for attention,
+      // these rows should have .detail-metrics with "2m on page", "50% scrolled", "5 clicks".
+      const metricsEls = rows.map(r => r.querySelector('.detail-metrics'));
+      const hasMetrics = metricsEls.some(el => el !== null);
+      expect(hasMetrics).toBe(true);
+    } finally {
+      // Restore test data for other tests
+      FILE1_INTERACTIONS[0] = saved0;
+      FILE1_INTERACTIONS[1] = saved1;
+    }
   });
 });

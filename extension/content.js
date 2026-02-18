@@ -820,22 +820,29 @@ function unwrapHighlightMark(mark) {
   parent.normalize();
 }
 
-// Report page visit to background (replaces background's tabs.onUpdated tracking)
-function reportInteraction() {
+// ─── Page Visit Reporting ──────────────────────────────────────────────
+// Send initial visit immediately (so page appears in history).
+// Accumulate attention data internally. Send final visit with attention
+// on page close/freeze (visibilitychange hidden, freeze, beforeunload).
+
+let visitReported = false;
+let finalVisitSent = false;
+let currentTitle = document.title;
+
+function buildVisitMessage() {
   const url = window.location.href;
-  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return;
+  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return null;
   currentInteractionId = url;
   const intent = extractIntent();
   attentionData.timeOnPage = Date.now() - startTime;
   const msg = {
     action: 'reportPageVisit',
     url,
-    title: document.title,
+    title: currentTitle,
     slug: getSlugForCurrentPage(),
     intent: JSON.stringify(intent),
     attention: attentionData
   };
-  // Track navigation referrer (skip same-origin to avoid noise from anchor/SPA navs)
   try {
     const ref = document.referrer;
     if (ref) {
@@ -844,24 +851,80 @@ function reportInteraction() {
       if (refOrigin !== curOrigin) msg.referrer = ref;
     }
   } catch {}
-  chrome.runtime.sendMessage(msg).catch(() => {});
+  return msg;
 }
 
-// Report page visit on initial load
-reportInteraction();
+function reportInitialVisit() {
+  if (visitReported) return;
+  visitReported = true;
+  const msg = buildVisitMessage();
+  if (msg) chrome.runtime.sendMessage(msg).catch(() => {});
+}
 
-// Observe title changes (SPA navigation)
+function reportFinalVisit() {
+  if (finalVisitSent) return;
+  finalVisitSent = true;
+  const msg = buildVisitMessage();
+  if (msg) chrome.runtime.sendMessage(msg).catch(() => {});
+}
+
+// Send initial visit on page load
+reportInitialVisit();
+
+// Track title changes locally (no re-report — final visit uses latest title)
 const titleEl = document.querySelector('title');
 if (titleEl) {
-  new MutationObserver(() => reportInteraction()).observe(titleEl, {
+  new MutationObserver(() => {
+    currentTitle = document.title;
+  }).observe(titleEl, {
     childList: true, characterData: true, subtree: true
   });
 }
 
-// Report re-activation when tab becomes visible
+// Send final visit with accumulated attention on page close/freeze
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') reportInteraction();
+  if (document.visibilityState === 'hidden') {
+    reportFinalVisit();
+  }
 });
+
+document.addEventListener('freeze', () => {
+  reportFinalVisit();
+});
+
+// ─── Capture notification bubble ──────────────────────────────────────
+function showCaptureNotification() {
+  const host = document.createElement('div');
+  const shadow = host.attachShadow({ mode: 'closed' });
+  shadow.innerHTML = `
+    <style>
+      .bubble {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0.92);
+        z-index: 2147483647;
+        background: rgba(0, 0, 0, 0.78);
+        color: #fff;
+        font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        padding: 10px 20px;
+        border-radius: 8px;
+        pointer-events: none;
+        opacity: 0;
+        animation: fadeInOut 1.6s ease forwards;
+      }
+      @keyframes fadeInOut {
+        0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
+        12%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        75%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+      }
+    </style>
+    <div class="bubble">Snapshot captured</div>
+  `;
+  document.documentElement.appendChild(host);
+  setTimeout(() => host.remove(), 1700);
+}
 
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -963,6 +1026,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     }
     sendResponse({ success: true });
+  } else if (request.action === 'showCaptureNotification') {
+    showCaptureNotification();
+    sendResponse({ success: true });
   }
 
   return true; // Keep channel open for async sendResponse
@@ -971,16 +1037,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Re-apply highlights on page load
 reapplyHighlights();
 
-// Before unload, send final attention data
+// Before unload, send final visit with accumulated attention
 window.addEventListener('beforeunload', () => {
-  if (currentInteractionId) {
-    attentionData.timeOnPage = Date.now() - startTime;
-
-    chrome.runtime.sendMessage({
-      action: 'updateInteraction',
-      interactionId: currentInteractionId,
-      attention: attentionData
-    });
-  }
+  reportFinalVisit();
 });
 } // end initContentScript

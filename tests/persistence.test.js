@@ -140,12 +140,20 @@ async function hydrateCache(fsStorage, chromeStorage) {
   const settings = await fsStorage.loadSettings();
   const cacheUpdate = {};
   if (settings.workspace !== undefined) cacheUpdate.workspace = settings.workspace;
-  if (settings.collections !== undefined) cacheUpdate.pinnedCollections = settings.collections;
+  if (settings.collectionOrder !== undefined) cacheUpdate.collectionOrder = settings.collectionOrder;
   if (settings.urlBlacklist !== undefined) cacheUpdate.urlBlacklist = settings.urlBlacklist;
   if (settings.titleTrimRules !== undefined) cacheUpdate.titleTrimRules = settings.titleTrimRules;
-  if (settings.recycleBin !== undefined) cacheUpdate.recycleBin = settings.recycleBin;
   if (settings.permanentDeletes !== undefined) cacheUpdate.permanentDeletes = settings.permanentDeletes;
   if (settings.settings !== undefined) cacheUpdate.settings = settings.settings;
+
+  // Load collections from self-describing files
+  const collections = await fsStorage.loadAllCollectionMetadata();
+  cacheUpdate.collections = collections;
+
+  // Load recycle bin from its own file
+  const recycleBinItems = await fsStorage.loadRecycleBin();
+  cacheUpdate.recycleBin = recycleBinItems;
+
   if (Object.keys(cacheUpdate).length > 0) await chromeStorage.set(cacheUpdate);
 
   // Load and incrementally process gateway domains
@@ -179,10 +187,9 @@ describe('Persistence round-trip', () => {
   it('saveSettings → loadSettings round-trips correctly', async () => {
     const data = {
       workspace: { mode: 'workspace', collectionIds: ['c1'], autoSnapshot: true },
-      collections: [{ id: 'c1', query: 'rust' }],
+      collectionOrder: ['c1'],
       urlBlacklist: ['chrome://', 'edge://'],
       titleTrimRules: [{ urlPrefix: 'https://github.com', action: 'remove_after_pipe' }],
-      recycleBin: [{ url: 'https://old.com', title: 'Old', deletedAt: 1000 }],
       permanentDeletes: ['https://gone.com'],
       settings: { captureContent: true, captureAttention: false, archiveQuality: 'high' },
     };
@@ -228,25 +235,34 @@ describe('Persistence round-trip', () => {
   describe('simulated extension reload', () => {
     const initialSettings = {
       workspace: { mode: 'workspace', collectionIds: ['c1', 'c2'], autoSnapshot: true },
-      collections: [
-        { id: 'c1', query: 'AI' },
-        { id: 'c2', query: 'Rust', name: 'Rust Lang' },
-      ],
+      collectionOrder: ['c1', 'c2'],
       urlBlacklist: ['chrome://', 'edge://', 'https://private.example.com/'],
       titleTrimRules: [
         { urlPrefix: 'https://github.com', action: 'remove_after_pipe' },
         { urlPrefix: 'https://zhihu.com', action: 'remove_parens' },
       ],
-      recycleBin: [
-        { url: 'https://old.com', title: 'Old page', deletedAt: 1000 },
-      ],
       permanentDeletes: ['https://gone.com', 'https://alsoGone.com'],
       settings: { captureContent: true, captureAttention: true, archiveQuality: 'medium' },
     };
 
+    // Collection metadata in self-describing files
+    const collectionMeta = [
+      { id: 'c1', name: 'AI', query: 'AI', qbTree: null },
+      { id: 'c2', name: 'Rust Lang', query: 'Rust', qbTree: null },
+    ];
+
+    // Recycle bin in its own file
+    const recycleBinItems = [
+      { url: 'https://old.com', title: 'Old page', deletedAt: 1000 },
+    ];
+
     it('data survives chrome.storage.local.clear() + hydrateCache', async () => {
-      // 1. Persist settings to filesystem
+      // 1. Persist settings + collection files + recycle bin
       await fs.saveSettings(initialSettings);
+      for (const col of collectionMeta) {
+        await fs.saveCollectionMeta(col.id, col);
+      }
+      await fs.saveRecycleBin(recycleBinItems);
 
       // 2. Hydrate chrome cache (simulates startup)
       await hydrateCache(fs, chromeStorage);
@@ -268,8 +284,12 @@ describe('Persistence round-trip', () => {
       expect(cacheAfter).toEqual(cacheBefore);
     });
 
-    it('individual cache keys match settings.json after reload', async () => {
+    it('individual cache keys match after reload', async () => {
       await fs.saveSettings(initialSettings);
+      for (const col of collectionMeta) {
+        await fs.saveCollectionMeta(col.id, col);
+      }
+      await fs.saveRecycleBin(recycleBinItems);
       await hydrateCache(fs, chromeStorage);
 
       // Clear + re-hydrate
@@ -277,25 +297,26 @@ describe('Persistence round-trip', () => {
       await hydrateCache(fs, chromeStorage);
 
       const cached = await chromeStorage.get([
-        'workspace', 'pinnedCollections', 'urlBlacklist',
+        'workspace', 'collectionOrder', 'collections', 'urlBlacklist',
         'titleTrimRules', 'recycleBin', 'permanentDeletes', 'settings',
       ]);
 
       expect(cached.workspace).toEqual(initialSettings.workspace);
-      expect(cached.pinnedCollections).toEqual(initialSettings.collections);
+      expect(cached.collectionOrder).toEqual(initialSettings.collectionOrder);
+      expect(cached.collections).toEqual(collectionMeta);
       expect(cached.urlBlacklist).toEqual(initialSettings.urlBlacklist);
       expect(cached.titleTrimRules).toEqual(initialSettings.titleTrimRules);
-      expect(cached.recycleBin).toEqual(initialSettings.recycleBin);
+      expect(cached.recycleBin).toEqual(recycleBinItems);
       expect(cached.permanentDeletes).toEqual(initialSettings.permanentDeletes);
       expect(cached.settings).toEqual(initialSettings.settings);
     });
 
-    it('writeBuffer is not populated by hydrateCache (it is transient)', async () => {
+    it('logBuffer is not populated by hydrateCache (it is transient)', async () => {
       await fs.saveSettings(initialSettings);
       await hydrateCache(fs, chromeStorage);
 
-      const { writeBuffer } = await chromeStorage.get(['writeBuffer']);
-      expect(writeBuffer).toBeUndefined();
+      const { logBuffer } = await chromeStorage.get(['logBuffer']);
+      expect(logBuffer).toBeUndefined();
     });
   });
 
@@ -470,20 +491,22 @@ describe('Persistence round-trip', () => {
 
   // ---- Collection pins are independent of settings.json ----
 
-  it('collection pins (collections.json) are separate from settings', async () => {
-    // Save pins
-    const pins = { c1: [{ url: 'https://a.com', title: 'A', pinnedAt: 100 }] };
-    await fs.saveCollectionPins(pins);
+  it('collection files are separate from settings', async () => {
+    // Save collection with metadata + pins
+    await fs.saveCollectionMeta('c1', { id: 'c1', name: 'Test', query: 'test', qbTree: null });
+    await fs.saveCollectionPinsById('c1', [{ url: 'https://a.com', title: 'A', pinnedAt: 100 }]);
 
     // Save settings
-    await fs.saveSettings({ collections: [{ id: 'c1', query: 'test' }] });
+    await fs.saveSettings({ collectionOrder: ['c1'] });
 
     // Both round-trip independently
-    const loadedPins = await fs.loadCollectionPins();
+    const loadedPins = await fs.loadCollectionPinsById('c1');
     const loadedSettings = await fs.loadSettings();
+    const meta = await fs.loadAllCollectionMetadata();
 
-    expect(loadedPins).toEqual(pins);
-    expect(loadedSettings.collections).toEqual([{ id: 'c1', query: 'test' }]);
+    expect(loadedPins).toEqual([{ url: 'https://a.com', title: 'A', pinnedAt: 100 }]);
+    expect(loadedSettings.collectionOrder).toEqual(['c1']);
+    expect(meta).toEqual([{ id: 'c1', name: 'Test', query: 'test', qbTree: null }]);
   });
 
   // ---- Per-collection pin isolation (regression: lazy pins + bulk save deleted other files) ----
