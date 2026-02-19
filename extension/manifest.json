@@ -9,7 +9,8 @@
     "activeTab",
     "history",
     "offscreen",
-    "scripting"
+    "scripting",
+    "webNavigation"
   ],
   "host_permissions": [
     "<all_urls>"

@@ -30,7 +30,7 @@ let pinnedExtraColumns = [];
 let relatedExtraColumns = [];
 let wasmInitialized = false;
 // --- Demand-loaded history ---
-const HISTORY_FILE_BATCH = 10;    // files per load
+let historyFileBatch = 10;        // files per load (configurable in settings)
 const HISTORY_MAX_FILES = 100;    // cap total loaded files
 let historyFiles = [];             // all JSONL filenames, newest-first
 let historyLoadedCount = 0;        // how many files loaded so far
@@ -274,7 +274,7 @@ async function loadHistoryBatch() {
   if (historyLoading || historyLoadedCount >= historyFiles.length
       || historyLoadedCount >= HISTORY_MAX_FILES) return [];
   historyLoading = true;
-  const batch = historyFiles.slice(historyLoadedCount, historyLoadedCount + HISTORY_FILE_BATCH);
+  const batch = historyFiles.slice(historyLoadedCount, historyLoadedCount + historyFileBatch);
   try {
     const t0 = performance.now();
     const resp = await chrome.runtime.sendMessage({ action: 'loadInteractionBatch', files: batch });
@@ -363,8 +363,16 @@ async function toggleResultPin(collectionId, url, title) {
 // Permanent deletes: URLs that are gone forever
 
 async function loadRecycleBin() {
-  const { recycleBin: rb = [] } = await chrome.storage.session.get(['recycleBin']);
-  recycleBin = rb;
+  const cached = await chrome.storage.session.get(['recycleBin']);
+  if ('recycleBin' in cached) {
+    recycleBin = cached.recycleBin;
+  } else {
+    // Fallback: ask background (awaits hydration, then reads session cache)
+    try {
+      const resp = await chrome.runtime.sendMessage({ action: 'getRecycleBin' });
+      recycleBin = resp?.items || [];
+    } catch { recycleBin = []; }
+  }
   const pdCached = await chrome.storage.session.get('permanentDeletes');
   if (pdCached.permanentDeletes) {
     permanentDeletes = pdCached.permanentDeletes;
@@ -618,7 +626,7 @@ function bindColumnHeaderClicks(container) {
     }
 
     setSortState(context, newState);
-    refreshCurrentView();
+    resortActiveScroller(context);
   });
 }
 
@@ -732,6 +740,23 @@ function refreshCurrentView() {
   } else if (activeView.type === 'explore') {
     showExplore();
   }
+}
+
+function resortActiveScroller(context) {
+  if (context === 'pinned') { refreshCurrentView(); return; }
+  const vs = context === 'related' ? relatedVirtualScroller : globalVirtualScroller;
+  if (!vs || vs.data.length === 0) { refreshCurrentView(); return; }
+
+  const sortState = getSortState(context);
+  const effectiveSort = sortState.column ? sortState : { column: 'lastVisit', direction: 'desc' };
+  const sorted = applySortOrder([...vs._fullData], effectiveSort);
+
+  // Regenerate header with updated sort indicators
+  const showRelevance = vs._headerHtml.includes('col-rel');
+  const hasPin = context === 'related' || context === 'pinned';
+  vs._headerHtml = columnHeaderHtml(context, { hasDelete: true, hasPin, showRelevance });
+
+  vs.updateData(sorted);
 }
 
 // Remove deleted/restored rows from the list without full view reload.
@@ -1057,7 +1082,8 @@ async function showCategory(category) {
     if (newItems.length > 0) {
       const newFiltered = filterByCategory(newItems, activeView.value);
       if (newFiltered.length > 0) {
-        vs.appendData(processInteractionsForDisplay(newFiltered));
+        const sort = currentSortState.column ? currentSortState : { column: 'lastVisit', direction: 'desc' };
+        vs.appendData(applySortOrder(processInteractionsForDisplay(newFiltered), sort));
       }
       // Re-render chart with all loaded history
       const allInteractions = Array.from(historyByUrl.values());
@@ -2031,8 +2057,13 @@ async function showExplore() {
   showCollectionLayout();
   renderCollectionSkeleton();
 
-  const pins = getExplorePins();
   const collectionId = EXPLORE_COLLECTION_ID;
+  // Lazy-load explore pins (may have been invalidated by visibilitychange)
+  if (!allCollectionPins[collectionId]) {
+    const pinsResp = await chrome.runtime.sendMessage({ action: 'loadCollectionPinsById', collectionId });
+    allCollectionPins[collectionId] = pinsResp?.pins || [];
+  }
+  const pins = getExplorePins();
 
   // Hide pinned section when no pins
   const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
@@ -2882,6 +2913,24 @@ class VirtualScroller {
     this._render(true);
   }
 
+  updateData(items, renderRowFn) {
+    // Save nodes with meaningful state (selected/expanded) before destroying
+    for (const item of this.containerEl.querySelectorAll('.result-item')) {
+      this._saveOrDiscard(item);
+    }
+    this._fullData = items;
+    this.data = items;
+    if (renderRowFn) this.renderRow = renderRowFn;
+    this._filterFn = null;
+    this.renderedRange = { start: -1, end: -1 };
+    this._expandedIdx = -1;
+    this._expandedExtraH = 0;
+    // _savedNodes NOT cleared — _render(true) will restore matching nodes
+    this._render(true);
+    // Re-detect expanded state from restored nodes
+    this.onExpandToggle();
+  }
+
   // Filter displayed data without losing the full dataset.
   // Pass null to clear the filter.
   applyFilter(filterFn) {
@@ -3229,7 +3278,15 @@ function updateSidebarActive() {
 
 // --- Collections (pinned searches) ---
 async function loadCollections() {
-  return await loadSettingsValue('collections', []);
+  // Session cache (populated by background hydrateCache)
+  const cached = await chrome.storage.session.get('collections');
+  if ('collections' in cached) return cached.collections;
+  // Fallback: ask background (awaits hydration, then reads session cache)
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'getCollections' });
+    if (resp?.collections) return resp.collections;
+  } catch {}
+  return [];
 }
 
 // saveCollections removed — use saveCollectionMeta/deleteCollection messages instead
@@ -3854,6 +3911,16 @@ document.getElementById('relatedPagesLimit').addEventListener('change', async ()
   showStatus('Settings saved', 'success');
 });
 
+document.getElementById('historyFileBatch').addEventListener('change', async () => {
+  const val = parseInt(document.getElementById('historyFileBatch').value) || 10;
+  historyFileBatch = Math.max(1, val);
+  document.getElementById('historyFileBatch').value = historyFileBatch;
+  const current = await loadSettingsValue('settings', {});
+  current.historyFileBatch = historyFileBatch;
+  await saveSettingsValue('settings', current);
+  showStatus('Settings saved', 'success');
+});
+
 // Clear all data
 document.getElementById('clearBtn').addEventListener('click', async () => {
   if (!confirm('WARNING: This will DELETE ALL FILES in your storage directory!\n\nThis cannot be undone. Are you absolutely sure?')) {
@@ -4062,11 +4129,12 @@ chrome.runtime.onMessage.addListener((request) => {
           changed = true;
         }
       }
-      if (changed && activeView.type === 'category') {
-        const interactions = Array.from(historyByUrl.values());
-        interactions.sort((a, b) => b.timestamp - a.timestamp);
-        const filtered = filterByCategory(interactions, activeView.value);
-        displayInteractionRows(filtered);
+      if (changed) {
+        if (activeView.type === 'explore' || activeView.type === 'collection') {
+          runExploreBlockQuery();
+        } else {
+          refreshCurrentView();
+        }
       }
     }, 500);
   } else if (type === 'pins') {
@@ -4081,6 +4149,10 @@ chrome.runtime.onMessage.addListener((request) => {
         chrome.storage.session.remove(colCacheKeys.map(id => 'colCache:' + id));
         colCacheKeys = [];
       }
+    }
+    // Refresh active view if it depends on pins
+    if (activeView.type === 'collection' || activeView.type === 'explore') {
+      refreshCurrentView();
     }
   } else if (type === 'collections') {
     renderCollections();
@@ -4109,7 +4181,11 @@ document.addEventListener('visibilitychange', async () => {
     colCacheKeys = [];
   }
 
+  // Refresh sidebar collections (may have been created/deleted in popup)
+  renderCollections();
+
   // Re-list history files and load any new ones
+  let historyChanged = false;
   try {
     const filesResp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
     const allFiles = filesResp?.files || [];
@@ -4118,23 +4194,20 @@ document.addEventListener('visibilitychange', async () => {
       historyFiles = allFiles;
       const batchResp = await chrome.runtime.sendMessage({ action: 'loadInteractionBatch', files: newFiles });
       const newInteractions = batchResp?.interactions || [];
-      let changed = false;
       for (const item of newInteractions) {
         if (!historyByUrl.has(item.url) || item.timestamp > historyByUrl.get(item.url).timestamp) {
           historyByUrl.set(item.url, item);
-          changed = true;
+          historyChanged = true;
         }
-      }
-      if (changed && activeView.type === 'category') {
-        const interactions = Array.from(historyByUrl.values());
-        interactions.sort((a, b) => b.timestamp - a.timestamp);
-        const filtered = filterByCategory(interactions, activeView.value);
-        displayInteractionRows(filtered);
       }
     }
   } catch (error) {
     console.debug('visibilitychange refresh failed:', error.message);
   }
+
+  // Don't refreshCurrentView() here — mutation notifications from background already
+  // handle re-rendering for pin/collection/interaction changes. A full re-render would
+  // destroy scroll position, block enable/disable state, and expanded details.
 });
 
 // --- Explore Pins ---
@@ -4194,39 +4267,29 @@ async function buildExploreAutoBlocks(pins) {
   const similarResults = findRelatedPages(seedEnriched, candidateEnriched, relatedPagesLimit);
   const similarUrls = new Set(similarResults.map(r => r.url));
 
-  const blocks = [];
-
-  if (childrenUrls.size > 0) {
-    blocks.push({
+  return [
+    {
       id: ++exploreBlockIdCounter,
       type: 'auto',
       label: 'Children of pins',
       enabled: false,
       urls: childrenUrls,
-    });
-  }
-
-  if (parentUrls.size > 0) {
-    blocks.push({
+    },
+    {
       id: ++exploreBlockIdCounter,
       type: 'auto',
       label: 'Parents of pins',
       enabled: false,
       urls: parentUrls,
-    });
-  }
-
-  if (similarUrls.size > 0) {
-    blocks.push({
+    },
+    {
       id: ++exploreBlockIdCounter,
       type: 'auto',
       label: 'Similar to pins',
       enabled: false,
       urls: similarUrls,
-    });
-  }
-
-  return blocks;
+    },
+  ];
 }
 
 function renderExploreBlocks() {
@@ -4459,7 +4522,7 @@ async function runExploreBlockQuery() {
 
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = columnHeaderHtml('related', { hasDelete: true, hasPin: true, showRelevance: false });
-  vs.setData(sorted, (r) =>
+  vs.updateData(sorted, (r) =>
     resultRowHtml(r.title, r.url, {
       pinned: isResultPinned(collectionId, r.url),
       deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
@@ -4480,7 +4543,10 @@ async function runExploreBlockQuery() {
             timestamps: [item.timestamp || Date.now()],
             attScore: 0, attDetail: null, highlights: [], relevance: 0,
           }));
-        if (newResults.length > 0) vs.appendData(newResults);
+        if (newResults.length > 0) {
+          const sort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
+          vs.appendData(applySortOrder(newResults, sort));
+        }
       }
     };
   }
@@ -4575,7 +4641,10 @@ function renderFocusWaterfall(content, url, title, parents, children, similar) {
 
   function makeCard(cardUrl, cardTitle, opts = {}) {
     const hist = historyByUrl.get(cardUrl);
-    const resolvedTitle = cardTitle || (hist ? hist.title : cardUrl);
+    let resolvedTitle = cardTitle || (hist ? hist.title : null);
+    if (!resolvedTitle) {
+      try { resolvedTitle = new URL(cardUrl).hostname + new URL(cardUrl).pathname; } catch { resolvedTitle = cardUrl; }
+    }
     const timestamps = hist ? [hist.timestamp || Date.now()] : [Date.now()];
     const attScore = 0;
     return resultRowHtml(resolvedTitle, cardUrl, { ...focusOpts, attScore, timestamps, ...opts });
@@ -4589,11 +4658,7 @@ function renderFocusWaterfall(content, url, title, parents, children, similar) {
   if (!hasParents) {
     html += '<div class="focus-empty">No known parents</div>';
   } else {
-    html += parents.referrers.map(ref => {
-      let refTitle = ref;
-      try { refTitle = new URL(ref).hostname + new URL(ref).pathname; } catch {}
-      return makeCard(ref, refTitle);
-    }).join('');
+    html += parents.referrers.map(ref => makeCard(ref, null)).join('');
   }
   html += '</div></div>';
 
@@ -4660,6 +4725,8 @@ async function initialize() {
   const settings = await loadSettingsValue('settings', {});
   relatedPagesLimit = settings.relatedPagesLimit || 50;
   document.getElementById('relatedPagesLimit').value = relatedPagesLimit;
+  historyFileBatch = settings.historyFileBatch || 10;
+  document.getElementById('historyFileBatch').value = historyFileBatch;
 
   // Initialize query builder
   qbRoot = qbCreatePlaceholder();

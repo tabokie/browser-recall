@@ -9,6 +9,9 @@ console.log('Background script loading...');
 // hydrateCache() re-populates from filesystem on every startup.
 chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
 
+// Resolves when hydrateCache() completes (or immediately if no hydration needed).
+let hydrationDone = Promise.resolve();
+
 // ─── Offscreen Document ───────────────────────────────────────────────
 
 async function setupOffscreenDocument() {
@@ -523,6 +526,34 @@ async function updateReferrerIndex(referrerUrl, childUrl) {
   }
 }
 
+// ─── Supplementary referrer detection ─────────────────────────────────
+// Sites that suppress document.referrer via Referrer-Policy or rel="noreferrer"
+// leave an empty string in content script. webNavigation sees the real navigation.
+const tabUrls = new Map();
+const tabReferrers = new Map();
+
+chrome.webNavigation.onCommitted.addListener((details) => {
+  if (details.frameId !== 0) return;
+  const { tabId, url, transitionType } = details;
+  const previousUrl = tabUrls.get(tabId);
+  if (transitionType === 'link' && previousUrl) {
+    tabReferrers.set(tabId, previousUrl);
+  }
+  tabUrls.set(tabId, url);
+});
+
+chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
+  const sourceUrl = tabUrls.get(details.sourceTabId);
+  if (sourceUrl) {
+    tabReferrers.set(details.tabId, sourceUrl);
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  tabUrls.delete(tabId);
+  tabReferrers.delete(tabId);
+});
+
 // ─── Initialization ───────────────────────────────────────────────────
 
 async function startBackground() {
@@ -542,7 +573,8 @@ chrome.runtime.onInstalled.addListener(async () => {
     chrome.runtime.openOptionsPage();
   } else {
     console.log('Filesystem configured:', response.info.name);
-    await hydrateCache();
+    hydrationDone = hydrateCache();
+    await hydrationDone;
   }
 });
 
@@ -553,7 +585,8 @@ chrome.runtime.onStartup.addListener(async () => {
   try {
     const response = await requestOffscreen({ action: 'getDirectoryInfo' });
     if (response && response.info) {
-      await hydrateCache();
+      hydrationDone = hydrateCache();
+      await hydrationDone;
     }
   } catch (error) {
     console.warn('Startup hydration failed:', error.message);
@@ -906,14 +939,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               attention: typeof request.attention === 'string' ? request.attention : (request.attention ? JSON.stringify(request.attention) : ''),
               slug
             };
-            if (request.referrer) interaction.referrer = request.referrer;
+            let referrer = request.referrer;
+            if (!referrer && sender.tab?.id != null) {
+              const bgRef = tabReferrers.get(sender.tab.id);
+              tabReferrers.delete(sender.tab.id);
+              if (bgRef) {
+                try {
+                  const refOrigin = new URL(bgRef).origin;
+                  const curOrigin = new URL(url).origin;
+                  if (refOrigin !== curOrigin) referrer = bgRef;
+                } catch {}
+              }
+            }
+            if (referrer) interaction.referrer = referrer;
 
             await appendVisit(interaction);
 
             // Update atom referrers (non-blocking)
-            if (request.referrer) {
-              updateAtomReferrers(slug, request.referrer);
-              updateReferrerIndex(request.referrer, url);
+            if (referrer) {
+              updateAtomReferrers(slug, referrer);
+              updateReferrerIndex(referrer, url);
             }
 
             // Update gateway domain registry (non-blocking)
@@ -1104,6 +1149,73 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             console.debug(`[I/O] loadCollectionPins: ${(performance.now() - t0).toFixed(1)}ms`);
             sendResponse(resp);
           }
+          break;
+        }
+
+        case 'loadCollectionPinsById': {
+          const t0 = performance.now();
+          const resp = await requestOffscreen({ action: 'loadCollectionPinsById', collectionId: request.collectionId });
+          console.debug(`[I/O] loadCollectionPinsById(${request.collectionId}): ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse(resp);
+          break;
+        }
+
+        case 'getCollections': {
+          await hydrationDone;
+          const cached = await chrome.storage.session.get('collections');
+          if ('collections' in cached) {
+            sendResponse({ collections: cached.collections });
+          } else {
+            // Hydration didn't run (e.g., disable/re-enable) — load from filesystem
+            try {
+              const metaResp = await requestOffscreen({ action: 'loadAllCollectionMetadata' });
+              let collections = metaResp?.collections || [];
+              // Apply ordering
+              const { collectionOrder = [] } = await chrome.storage.session.get(['collectionOrder']);
+              if (collectionOrder.length > 0) {
+                const ordered = [];
+                for (const id of collectionOrder) {
+                  const col = collections.find(c => c.id === id);
+                  if (col) ordered.push(col);
+                }
+                for (const col of collections) {
+                  if (!collectionOrder.includes(col.id)) ordered.push(col);
+                }
+                collections = ordered;
+              }
+              await chrome.storage.session.set({ collections });
+              sendResponse({ collections });
+            } catch (e) {
+              sendResponse({ collections: [] });
+            }
+          }
+          break;
+        }
+
+        case 'getRecycleBin': {
+          await hydrationDone;
+          const cached = await chrome.storage.session.get('recycleBin');
+          if ('recycleBin' in cached) {
+            sendResponse({ items: cached.recycleBin });
+          } else {
+            // Hydration didn't run — load from filesystem
+            try {
+              const rbResp = await requestOffscreen({ action: 'loadRecycleBin' });
+              const items = rbResp?.items || [];
+              await chrome.storage.session.set({ recycleBin: items });
+              sendResponse({ items });
+            } catch (e) {
+              sendResponse({ items: [] });
+            }
+          }
+          break;
+        }
+
+        case 'loadPermanentDeletes': {
+          const t0 = performance.now();
+          const resp = await requestOffscreen({ action: 'loadPermanentDeletes' });
+          console.debug(`[I/O] loadPermanentDeletes: ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse(resp);
           break;
         }
 

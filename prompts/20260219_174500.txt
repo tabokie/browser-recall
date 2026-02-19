@@ -1,0 +1,18 @@
+- In this session, if you find a bug, ask me whether a failing test should be added before working on fix.
+- In options.js UI, I cannot see pinned pages in collections.
+- Test first.
+- Popup UI and options.js doesn't respond immediately to user input, e.g. pin current page to collection, visit a new page, create a new collection.
+- Walk me through the data flow in detail. Different types of user inputs, mutation logs, derived data, caches/memory state/UI state, and persistent data.
+- For some interactins, the page render is not refreshed as expected. e.g. When I pin current page to collection, the options.js doesn't refresh collection UI; when I visit a new page, the options.js doesn't refresh explore UI; when I create a new collection in popup UI, the options.js doesn't refresh collection list.
+- There're some issues with referer tracking. (a) Some sites don't have referer even when they are opened from a parent. (b) In focus UI, when I switch focus to a child, its parent display changes from a card of title to a card of raw URL.
+- The Explore UI sometimes doesn't show pinned results when I switch back and forth between options.js and other webpages.
+- Why the list order is different between when a page visit triggers a re-render, and when I fully reload the explore UI?
+- Why is it that when I switch back and forth between options.js and another webpage, the page is re-rendered and scroll position gone?
+- Even for re-render (triggered by user interactions), the selection state, detail opening state, scroll position, should be preserved.
+- "Similar to pins", "Children of pins" should be calculated on spot, show a button even if there's no children. It is not saved in collection files.
+- What is the prefetch size of virtual scroller. Because I see my full history of 8 days are rendered in the beginning.
+- Check ~/portal-data. I think there are hundreds.
+- That's okay. We can add a option in settings page for the file count.
+- recycle bin and collection list are empty after I disable and enable extension again
+- Still not working. After I disable and enable the list is not shown, but after I reload the list is shown.
+- Finish up

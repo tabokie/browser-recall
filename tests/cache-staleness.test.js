@@ -75,6 +75,11 @@ const TEST_COLLECTION_PINS = {
     { url: 'https://example.com/today0', title: 'Today Page 0', pinnedAt: NOW - DAY },
     { url: 'https://example.com/today1', title: 'Today Page 1', pinnedAt: NOW - DAY },
   ],
+  // Explore pins — used by T12
+  'explore': [
+    { url: 'https://explore.example.com/a', title: 'Explore Pin A', pinnedAt: NOW - DAY },
+    { url: 'https://explore.example.com/b', title: 'Explore Pin B', pinnedAt: NOW - DAY },
+  ],
 };
 
 const TEST_COLLECTIONS = [TEST_COLLECTION, TEST_COLLECTION_NOQUERY];
@@ -797,5 +802,175 @@ describe('Cache staleness', () => {
       FILE1_INTERACTIONS[0] = saved0;
       FILE1_INTERACTIONS[1] = saved1;
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // T12: visibilitychange on Explore reloads explore pins
+  // ---------------------------------------------------------------------------
+  it('T12: visibilitychange on Explore view reloads explore pins', async () => {
+    populateCache();
+
+    await importOptions();
+    await tick(100);
+
+    // Default view is Explore — verify pinned section is visible with 2 explore pins
+    expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
+    const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
+    expect(pinnedSection.style.display).not.toBe('none');
+    expect(pinnedOnlyRows().length).toBe(2);
+
+    // Dispatch visibilitychange (simulates switching to another tab and back)
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: true, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await tick(500);
+
+    // After visibilitychange, Explore should still show its pinned section with 2 rows
+    expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
+    expect(pinnedSection.style.display, 'pinned section should be visible').not.toBe('none');
+    expect(pinnedOnlyRows().length).toBe(2);
+  });
+
+  // ---------------------------------------------------------------------------
+  // T13: demand-loaded explore items are sorted by lastVisit desc
+  // ---------------------------------------------------------------------------
+  it('T13: demand-loaded explore items are sorted by lastVisit desc', async () => {
+    populateCache();
+
+    // Create 11 file dates (newest first) so batch 1 = 10 files, batch 2 = 1 file
+    const fileDates = [];
+    for (let i = 0; i < 11; i++) {
+      const d = new Date(NOW - i * DAY);
+      fileDates.push(d.toISOString().split('T')[0]);
+    }
+    const allFiles = fileDates.map(d => d + '.jsonl');
+
+    // Each file has 5 items with timestamps ascending within the file
+    const allFileData = {};
+    for (let f = 0; f < 11; f++) {
+      const base = new Date(fileDates[f] + 'T12:00:00Z').getTime();
+      const items = [];
+      for (let i = 0; i < 5; i++) {
+        items.push(makeInteraction(
+          `https://example.com/f${f}-i${i}`,
+          `File ${f} Page ${i}`,
+          base + i * 60000
+        ));
+      }
+      allFileData[allFiles[f]] = items;
+    }
+
+    actionOverrides['listInteractionFiles'] = () => ({
+      success: true, files: allFiles,
+    });
+    actionOverrides['loadInteractionBatch'] = (msg) => {
+      const interactions = [];
+      for (const f of msg.files) {
+        if (allFileData[f]) interactions.push(...allFileData[f]);
+      }
+      return { success: true, interactions };
+    };
+    // No explore pins → showAllHistory path with onLoadMore
+    actionOverrides['loadCollectionPinsById'] = () => ({ success: true, pins: [] });
+
+    await importOptions();
+    await tick(200);
+
+    expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
+
+    // Get the related virtual scroller
+    const relatedContainer = document.getElementById('relatedResults');
+    const vs = relatedContainer._virtualScroller;
+    expect(vs).toBeTruthy();
+
+    // First batch: 10 files × 5 items = 50 items, sorted
+    expect(vs.data.length).toBe(50);
+
+    // Trigger demand-load of batch 2 (file 11, 5 items)
+    expect(typeof vs.onLoadMore).toBe('function');
+    await vs.onLoadMore();
+    await tick(100);
+
+    // After demand-load: 55 items total
+    expect(vs.data.length).toBe(55);
+
+    // ALL items must be in non-increasing lastVisit order (desc)
+    for (let i = 1; i < vs.data.length; i++) {
+      const prevTs = Math.max(...(vs.data[i - 1].timestamps || [0]));
+      const currTs = Math.max(...(vs.data[i].timestamps || [0]));
+      expect(prevTs >= currTs,
+        `Item ${i - 1} (ts=${prevTs}) should be >= item ${i} (ts=${currTs})`
+      ).toBe(true);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // T14: visibilitychange does not full-re-render explore view
+  // ---------------------------------------------------------------------------
+  it('T14: visibilitychange preserves explore block state', async () => {
+    populateCache();
+    // Add referrerIndex so auto-blocks "Children of pins" is non-empty
+    sessionData.referrerIndex = {
+      'https://explore.example.com/a': ['https://example.com/today0'],
+    };
+
+    await importOptions();
+    await tick(200);
+
+    expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
+
+    // Verify auto-blocks were created (at least "Children of pins")
+    const blockEls = document.querySelectorAll('.explore-block');
+    expect(blockEls.length).toBeGreaterThan(0);
+
+    // All blocks start disabled
+    const toggleBtn = blockEls[0].querySelector('.explore-block-toggle');
+    expect(toggleBtn.classList.contains('disabled')).toBe(true);
+
+    // Enable the first block
+    toggleBtn.click();
+    await tick(200);
+
+    // Verify block is now enabled
+    const toggleAfterClick = document.querySelector('.explore-block .explore-block-toggle');
+    expect(toggleAfterClick.classList.contains('enabled')).toBe(true);
+
+    // Dispatch visibilitychange
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: true, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await tick(500);
+
+    // Block should still be enabled (not reset by full re-render)
+    const toggleAfterVis = document.querySelector('.explore-block .explore-block-toggle');
+    expect(toggleAfterVis).not.toBeNull();
+    expect(toggleAfterVis.classList.contains('enabled'),
+      'block should still be enabled after visibilitychange'
+    ).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // T15: empty session cache (disable/re-enable) still loads collections and recycle bin
+  // ---------------------------------------------------------------------------
+  it('T15: empty session cache still loads collections and recycle bin via fallback', async () => {
+    // Do NOT call populateCache() — simulate disable/re-enable clearing session
+    sessionData = {};
+    localData = { logBuffer: [] };
+
+    // Background would handle these actions after hydration
+    const TEST_RECYCLE_BIN = [
+      { url: 'https://deleted.com', title: 'Deleted Page', deletedAt: Date.now() },
+    ];
+    actionOverrides['getCollections'] = () => ({ collections: TEST_COLLECTIONS });
+    actionOverrides['getRecycleBin'] = () => ({ items: TEST_RECYCLE_BIN });
+
+    await importOptions();
+    await tick(200);
+
+    // Collections should render in sidebar
+    const collItems = document.querySelectorAll('#collectionsList .sidebar-item');
+    expect(collItems.length, 'collections sidebar should have items').toBe(TEST_COLLECTIONS.length);
+
+    // Recycle bin count should show
+    const countEl = document.getElementById('recycleSidebarCount');
+    expect(countEl.textContent, 'recycle bin count should show 1').toBe('1');
   });
 });
