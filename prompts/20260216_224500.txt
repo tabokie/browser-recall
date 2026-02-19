@@ -50,13 +50,6 @@ The pins-related pages in collection are not searched out.
 
 Really? WASM is different from native Rust code? Because I didn't know Rust messes with reference across await.
 - Remove the slow path fallback, and investigate the real cause. You can open the WASM directly over my portal-data files.
-- <task-notification>
-<task-id>bbf3f42</task-id>
-<output-file>/private/tmp/claude-503/-Users-xinye-tao-tabokie-claude-extension-project/tasks/bbf3f42.output</output-file>
-<status>completed</status>
-<summary>Background command "Start local HTTP server for test page" completed (exit code 0)</summary>
-</task-notification>
-Read the output file to retrieve the result: /private/tmp/claude-503/-Users-xinye-tao-tabokie-claude-extension-project/tasks/bbf3f42.output
 - The test engine says okay. I re-run the browser extension. It actually reports a different message now:
 
 ollection search failed, continuing with related pages: expected a string argument, found object
