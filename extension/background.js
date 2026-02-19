@@ -2,6 +2,8 @@
 // Central authority for reads and mutations. Offscreen is a pure filesystem I/O worker.
 import { generateSlugFromUrl } from './utils.js';
 import { applyLogToSettings, applyLogToAtom, applyLogToPins, applyLogToDeletes, applyLogToRecycleBin } from './replay.js';
+import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
+import { getCachedAtom, setCachedAtom } from './atom-cache.js';
 
 console.log('Background script loading...');
 
@@ -166,35 +168,6 @@ async function appendVisit(interaction) {
   await appendLog(entry);
 }
 
-// ─── Atom LRU Cache (Phase 4) ────────────────────────────────────────
-
-let atomCacheKeys = []; // LRU order, most recent at end
-const ATOM_CACHE_LIMIT = 500;
-
-async function getCachedAtom(slug) {
-  const key = 'atom:' + slug;
-  const cached = (await chrome.storage.session.get(key))[key];
-  if (cached) {
-    // Move to end (most recently used)
-    atomCacheKeys = atomCacheKeys.filter(k => k !== slug);
-    atomCacheKeys.push(slug);
-    return cached;
-  }
-  return null;
-}
-
-async function setCachedAtom(slug, atom) {
-  const key = 'atom:' + slug;
-  await chrome.storage.session.set({ [key]: atom });
-  atomCacheKeys = atomCacheKeys.filter(k => k !== slug);
-  atomCacheKeys.push(slug);
-  // Evict if over limit
-  while (atomCacheKeys.length > ATOM_CACHE_LIMIT) {
-    const evict = atomCacheKeys.shift();
-    await chrome.storage.session.remove('atom:' + evict);
-  }
-}
-
 // ─── Settings Keys ───────────────────────────────────────────────────
 // Keys from settings.json that are mirrored in session cache.
 
@@ -309,75 +282,48 @@ async function hydrateCache() {
   }
 
   // 5. Load and incrementally process gateway domains
-  try {
-    const gwData = await requestOffscreen({ action: 'loadGateways' });
-    let domains = {};
-    let watermark = 0;
-    if (gwData && gwData.success) {
-      domains = gwData.domains || {};
-      watermark = gwData.watermark || 0;
-    }
-
-    const incremental = await requestOffscreen({
-      action: 'processGatewaysIncremental',
-      watermark,
-      existingDomains: domains
-    });
-
-    if (incremental && incremental.success) {
-      domains = incremental.domains;
-      const newWatermark = incremental.newWatermark;
-
-      await chrome.storage.session.set({ gatewayDomains: domains });
-
-      if (newWatermark > watermark) {
-        await requestOffscreen({
-          action: 'saveJson',
-          path: 'lists/gateways.json',
-          data: { watermark: newWatermark, domains }
-        });
-      }
-
-      console.log('Gateway domains loaded incrementally:', Object.keys(domains).length, 'origins');
-    }
-  } catch (error) {
-    console.warn('Gateway hydration failed:', error.message);
-  }
+  await hydrateIncrementalIndex({
+    loadAction: 'loadGateways', processAction: 'processGatewaysIncremental',
+    sessionKey: 'gatewayDomains', savePath: 'lists/gateways.json', dataKey: 'domains',
+    existingKey: 'existingDomains', label: 'Gateway domains'
+  });
 
   // 6. Load and incrementally process referrer index
+  await hydrateIncrementalIndex({
+    loadAction: 'loadReferrerIndex', processAction: 'buildReferrerIndexIncremental',
+    sessionKey: 'referrerIndex', savePath: 'lists/referrer-index.json', dataKey: 'index',
+    existingKey: 'existingIndex', label: 'Referrer index'
+  });
+}
+
+async function hydrateIncrementalIndex({ loadAction, processAction, sessionKey, savePath, dataKey, existingKey, label }) {
   try {
-    const riData = await requestOffscreen({ action: 'loadReferrerIndex' });
-    let index = {};
+    const loaded = await requestOffscreen({ action: loadAction });
+    let data = {};
     let watermark = 0;
-    if (riData && riData.success) {
-      index = riData.index || {};
-      watermark = riData.watermark || 0;
+    if (loaded?.success) {
+      data = loaded[dataKey] || {};
+      watermark = loaded.watermark || 0;
     }
 
     const incremental = await requestOffscreen({
-      action: 'buildReferrerIndexIncremental',
-      watermark,
-      existingIndex: index
+      action: processAction, watermark, [existingKey]: data
     });
 
-    if (incremental && incremental.success) {
-      index = incremental.index;
+    if (incremental?.success) {
+      data = incremental[dataKey];
       const newWatermark = incremental.newWatermark;
-
-      await chrome.storage.session.set({ referrerIndex: index });
-
+      await chrome.storage.session.set({ [sessionKey]: data });
       if (newWatermark > watermark) {
         await requestOffscreen({
-          action: 'saveJson',
-          path: 'lists/referrer-index.json',
-          data: { watermark: newWatermark, index }
+          action: 'saveJson', path: savePath,
+          data: { watermark: newWatermark, [dataKey]: data }
         });
       }
-
-      console.log('Referrer index loaded incrementally:', Object.keys(index).length, 'parent URLs');
+      console.log(`${label} loaded incrementally:`, Object.keys(data).length, 'entries');
     }
   } catch (error) {
-    console.warn('Referrer index hydration failed:', error.message);
+    console.warn(`${label} hydration failed:`, error.message);
   }
 }
 
@@ -529,42 +475,42 @@ async function updateReferrerIndex(referrerUrl, childUrl) {
 // ─── Supplementary referrer detection ─────────────────────────────────
 // Sites that suppress document.referrer via Referrer-Policy or rel="noreferrer"
 // leave an empty string in content script. webNavigation sees the real navigation.
-const tabUrls = new Map();
-const tabReferrers = new Map();
+const getReferrer = (() => {
+  const tabUrls = new Map();
+  const tabReferrers = new Map();
 
-chrome.webNavigation.onCommitted.addListener((details) => {
-  if (details.frameId !== 0) return;
-  const { tabId, url, transitionType } = details;
-  const previousUrl = tabUrls.get(tabId);
-  if (transitionType === 'link' && previousUrl) {
-    tabReferrers.set(tabId, previousUrl);
-  }
-  tabUrls.set(tabId, url);
-});
+  chrome.webNavigation.onCommitted.addListener((details) => {
+    if (details.frameId !== 0) return;
+    const previousUrl = tabUrls.get(details.tabId);
+    if (details.transitionType === 'link' && previousUrl) {
+      tabReferrers.set(details.tabId, previousUrl);
+    }
+    tabUrls.set(details.tabId, details.url);
+  });
 
-chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
-  const sourceUrl = tabUrls.get(details.sourceTabId);
-  if (sourceUrl) {
-    tabReferrers.set(details.tabId, sourceUrl);
-  }
-});
+  chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
+    const sourceUrl = tabUrls.get(details.sourceTabId);
+    if (sourceUrl) tabReferrers.set(details.tabId, sourceUrl);
+  });
 
-chrome.tabs.onRemoved.addListener((tabId) => {
-  tabUrls.delete(tabId);
-  tabReferrers.delete(tabId);
-});
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    tabUrls.delete(tabId);
+    tabReferrers.delete(tabId);
+  });
+
+  return (tabId) => {
+    const ref = tabReferrers.get(tabId);
+    tabReferrers.delete(tabId);
+    return ref;
+  };
+})();
 
 // ─── Initialization ───────────────────────────────────────────────────
 
-async function startBackground() {
-  await setupOffscreenDocument();
-  connectToOffscreen();
-  await ensureLogBuffer();
-}
-
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('Portal extension installed');
-  await startBackground();
+  await ensureOffscreenPort();
+  await ensureLogBuffer();
   console.log('Storage initialized');
 
   const response = await requestOffscreen({ action: 'getDirectoryInfo' });
@@ -579,7 +525,8 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  await startBackground();
+  await ensureOffscreenPort();
+  await ensureLogBuffer();
   console.log('Extension started');
 
   try {
@@ -594,180 +541,23 @@ chrome.runtime.onStartup.addListener(async () => {
 });
 
 // ─── Save Page WE Integration ─────────────────────────────────────────
+initSavepageBridge();
 
-const savepageResolvers = new Map();
+// ─── Snapshot Capture ─────────────────────────────────────────────────
 
-async function captureSavePage(tabId) {
-  return new Promise((resolve, reject) => {
-    savepageResolvers.set(tabId, { resolve, reject });
-    console.log('[savepage] injecting scripts into tab', tabId);
-
-    // Inject content-frame.js into all frames, then content.js into main frame
-    chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      files: ['savepage/content-frame.js']
-    }).then(() => {
-      console.log('[savepage] content-frame.js injected, now injecting content.js');
-      return chrome.scripting.executeScript({
-        target: { tabId },
-        files: ['savepage/content.js']
-      });
-    }).then(() => {
-      console.log('[savepage] content.js injected, waiting for scriptLoaded message');
-    }).catch(err => {
-      console.warn('[savepage] injection error:', err.message);
-      savepageResolvers.delete(tabId);
-      reject(err);
-    });
-
-    // Timeout after 60s
-    setTimeout(() => {
-      if (savepageResolvers.has(tabId)) {
-        savepageResolvers.delete(tabId);
-        reject(new Error('Save Page WE capture timed out'));
-      }
-    }, 60000);
+async function captureAndLog(tabId, slug, timestamp) {
+  const mdResp = await chrome.tabs.sendMessage(tabId, { action: 'extractMarkdown' });
+  const html = await captureSavePage(tabId);
+  await requestOffscreen({
+    action: 'captureSnapshot', slug, timestamp,
+    markdown: mdResp?.markdown || '', html: html || ''
   });
-}
-
-// Save Page WE message handlers (use `type` field, distinct from our `action` field)
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message.type) return false; // Not a Save Page WE message
-
-  const tabId = sender.tab?.id;
-
-  switch (message.type) {
-    case 'scriptLoaded':
-      // Reply with performAction to kick off the save
-      console.log('[savepage] scriptLoaded received from tab', tabId);
-      if (tabId != null) {
-        chrome.tabs.sendMessage(tabId, {
-          type: 'performAction',
-          menuaction: 0,
-          saveditems: 1,
-          togglelazy: false,
-          extractsrcurl: null,
-          externalsave: false,
-          swapdevices: false,
-          multiplesaves: false,
-          csprestriction: false
-        });
-      }
-      break;
-
-    case 'setDelay':
-      setTimeout(() => { sendResponse({}); }, message.milliseconds);
-      return true; // async response
-
-    case 'requestFrames':
-      if (tabId != null) {
-        chrome.tabs.sendMessage(tabId, { type: 'requestFrames' });
-      }
-      break;
-
-    case 'replyFrame':
-      if (tabId != null) {
-        chrome.tabs.sendMessage(tabId, {
-          type: 'replyFrame',
-          key: message.key,
-          url: message.url,
-          html: message.html,
-          fonts: message.fonts
-        });
-      }
-      break;
-
-    case 'loadResource':
-      if (tabId != null) {
-        loadSavepageResource(tabId, message.index, message.location, message.referrer, message.referrerPolicy);
-      }
-      break;
-
-    case 'stateChanged':
-      // Log progress
-      if (debugSavepage) console.log(`[savepage] state: pageType=${message.pagetype} saveState=${message.savestate}`);
-      break;
-
-    case 'savepageDone': {
-      console.log('[savepage] savepageDone from tab', tabId, 'html length:', message.html?.length);
-      const resolver = savepageResolvers.get(tabId);
-      if (resolver) {
-        savepageResolvers.delete(tabId);
-        resolver.resolve(message.html);
-      } else {
-        console.warn('[savepage] savepageDone but no resolver for tab', tabId);
-      }
-      break;
-    }
-
-    case 'saveExit': {
-      console.warn('[savepage] saveExit from tab', tabId);
-      const resolver = savepageResolvers.get(tabId);
-      if (resolver) {
-        savepageResolvers.delete(tabId);
-        resolver.reject(new Error('Save Page WE exited without producing HTML'));
-      }
-      break;
-    }
-
-    default:
-      return false; // Unknown type — don't hold the channel
-  }
-});
-
-const debugSavepage = false;
-
-async function loadSavepageResource(tabId, index, location, referrer, referrerPolicy) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => { controller.abort(); }, 10 * 1000); // maxResourceTime
-
-  try {
-    const response = await fetch(location, {
-      method: 'GET', mode: 'cors', cache: 'no-cache',
-      referrer: referrer, referrerPolicy: referrerPolicy,
-      signal: controller.signal
-    });
-    clearTimeout(timeout);
-
-    if (response.status === 200) {
-      const contentType = response.headers.get('Content-Type') || '';
-      const contentLength = +(response.headers.get('Content-Length') || 0);
-
-      if (contentLength > 50 * 1024 * 1024) { // maxResourceSize
-        chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'maxsize*' });
-        return;
-      }
-
-      const matches = contentType.match(/([^;]+)/i);
-      const mimetype = matches ? matches[1].toLowerCase() : '';
-      const charsetMatch = contentType.match(/;charset=([^;]+)/i);
-      const charset = charsetMatch ? charsetMatch[1].toLowerCase() : '';
-
-      if (mimetype !== 'text/css' && mimetype !== 'image/vnd.microsoft.icon' &&
-          !mimetype.startsWith('image/') && !mimetype.startsWith('audio/') && !mimetype.startsWith('video/') &&
-          !mimetype.startsWith('font/') && !mimetype.startsWith('application/font') &&
-          mimetype !== 'application/octet-stream') {
-        chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'blocked*' });
-        return;
-      }
-
-      const buffer = await response.arrayBuffer();
-      const byteArray = new Uint8Array(buffer);
-      let binaryString = '';
-      for (let i = 0; i < byteArray.byteLength; i++) binaryString += String.fromCharCode(byteArray[i]);
-
-      chrome.tabs.sendMessage(tabId, { type: 'loadSuccess', index, reason: '*', content: binaryString, mimetype, charset });
-    } else {
-      chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'load:' + response.status + '*' });
-    }
-  } catch (e) {
-    clearTimeout(timeout);
-    if (e.name === 'AbortError') {
-      chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'maxtime*' });
-    } else {
-      chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'fetcherr*' });
-    }
-  }
+  await appendLog({
+    timestamp, action: 'capture', slug,
+    mdPath: `pages/${slug}/${timestamp}.md`,
+    htmlPath: `pages/${slug}/${timestamp}.html`
+  });
+  notifyMutation('snapshot', { slug });
 }
 
 // ─── Keyboard Shortcuts ───────────────────────────────────────────────
@@ -788,31 +578,7 @@ chrome.commands.onCommand.addListener(async (command) => {
     try {
       const slug = generateSlugFromUrl(tab.url);
       const timestamp = Date.now();
-      console.log('[capture] step 1: starting for', tab.url);
-      // extractMarkdown first (fast, synchronous) — must complete before
-      // captureSavePage injects SPWE scripts, whose listeners interfere
-      // with the sendMessage response channel.
-      const mdResp = await chrome.tabs.sendMessage(tab.id, { action: 'extractMarkdown' });
-      console.log('[capture] step 2: extractMarkdown done, length:', mdResp?.markdown?.length);
-      const html = await captureSavePage(tab.id);
-      console.log('[capture] step 3: captureSavePage done, length:', html?.length);
-      await requestOffscreen({
-        action: 'captureSnapshot',
-        slug,
-        timestamp,
-        markdown: mdResp?.markdown || '',
-        html: html || ''
-      });
-      // Log capture entry (files already written by offscreen)
-      await appendLog({
-        timestamp,
-        action: 'capture',
-        slug,
-        mdPath: `pages/${slug}/${timestamp}.md`,
-        htmlPath: `pages/${slug}/${timestamp}.html`
-      });
-      console.log(`[capture] step 4: Snapshot captured for ${tab.url}`);
-      notifyMutation('snapshot', { slug });
+      await captureAndLog(tab.id, slug, timestamp);
       chrome.tabs.sendMessage(tab.id, { action: 'showCaptureNotification' }).catch(() => {});
     } catch (error) {
       console.warn('[capture] ERROR:', error.message, error);
@@ -865,29 +631,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
             if (!tab) { sendResponse({ success: false, error: 'No active tab' }); return; }
 
-            console.log('[capture-popup] step 1: starting for', tab.url);
             const slug = generateSlugFromUrl(tab.url);
             const timestamp = Date.now();
-            const mdResp = await chrome.tabs.sendMessage(tab.id, { action: 'extractMarkdown' });
-            console.log('[capture-popup] step 2: extractMarkdown done, length:', mdResp?.markdown?.length);
-            const html = await captureSavePage(tab.id);
-            console.log('[capture-popup] step 3: captureSavePage done, length:', html?.length);
-            await requestOffscreen({
-              action: 'captureSnapshot',
-              slug,
-              timestamp,
-              markdown: mdResp?.markdown || '',
-              html: html || ''
-            });
-            await appendLog({
-              timestamp,
-              action: 'capture',
-              slug,
-              mdPath: `pages/${slug}/${timestamp}.md`,
-              htmlPath: `pages/${slug}/${timestamp}.html`
-            });
-            console.log('[capture-popup] step 4: snapshot written');
-            notifyMutation('snapshot', { slug });
+            await captureAndLog(tab.id, slug, timestamp);
             sendResponse({ success: true, timestamp });
           } catch (error) {
             console.warn('[capture-popup] ERROR:', error.message, error);
@@ -941,8 +687,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             };
             let referrer = request.referrer;
             if (!referrer && sender.tab?.id != null) {
-              const bgRef = tabReferrers.get(sender.tab.id);
-              tabReferrers.delete(sender.tab.id);
+              const bgRef = getReferrer(sender.tab.id);
               if (bgRef) {
                 try {
                   const refOrigin = new URL(bgRef).origin;
@@ -987,28 +732,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
 
                 if (workspace.autoSnapshot && sender.tab) {
-                  console.log('[auto-snapshot] starting for', url);
-                  chrome.tabs.sendMessage(sender.tab.id, { action: 'extractMarkdown' }).then(async (mdResp) => {
-                    console.log('[auto-snapshot] extractMarkdown done, length:', mdResp?.markdown?.length);
-                    const html = await captureSavePage(sender.tab.id);
-                    console.log('[auto-snapshot] captureSavePage done, length:', html?.length);
-                    await requestOffscreen({
-                      action: 'captureSnapshot',
-                      slug,
-                      timestamp,
-                      markdown: mdResp?.markdown || '',
-                      html: html || ''
-                    });
-                    await appendLog({
-                      timestamp,
-                      action: 'capture',
-                      slug,
-                      mdPath: `pages/${slug}/${timestamp}.md`,
-                      htmlPath: `pages/${slug}/${timestamp}.html`
-                    });
-                    console.log(`[auto-snapshot] captured for ${url}`);
-                    notifyMutation('snapshot', { slug });
-                  }).catch(err => {
+                  captureAndLog(sender.tab.id, slug, timestamp).catch(err => {
                     console.warn('[auto-snapshot] ERROR:', err.message, err);
                   });
                 }
@@ -1507,26 +1231,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'initializeFilesystem': {
           const resp = await requestOffscreen({ action: 'initializeFilesystem' });
           sendResponse(resp);
-          break;
-        }
-
-        case 'captureSnapshot': {
-          await requestOffscreen({
-            action: 'captureSnapshot',
-            slug: request.slug,
-            timestamp: request.timestamp,
-            markdown: request.markdown || '',
-            html: request.html || ''
-          });
-          await appendLog({
-            timestamp: request.timestamp,
-            action: 'capture',
-            slug: request.slug,
-            mdPath: `pages/${request.slug}/${request.timestamp}.md`,
-            htmlPath: `pages/${request.slug}/${request.timestamp}.html`
-          });
-          sendResponse({ success: true });
-          notifyMutation('snapshot', { slug: request.slug });
           break;
         }
 

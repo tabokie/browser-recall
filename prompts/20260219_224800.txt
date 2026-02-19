@@ -1,0 +1,8 @@
+- Clean up the codebase step by step:
+1. Error handling: Prefer not to use fallback to handle errors. Use one implementation that works instead of multiple solutions each with low confidence.
+2. Inline more: Function that are used only once should be inlined to the callsite. Use bracket to scope the code if needed.
+3. Converge concepts: Objects that are similar in concept should be handled by the same code, with a small amount of parameters to adjust behavior. In general, large chunk of code logic that are similar should be refactored to share a function or module.
+4. Remove deadcode: Code that are not reachable in theory and in reality should be removed.
+- One more thing. Narrow scope: Prefer using local variable instead of global variable. The access scope of a variable should be close to the scope of its actual usage. If a set of functions are leaves to a few entry functions, then they should be refactored into a separate file or module.
+- Finish up
+- no

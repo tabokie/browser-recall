@@ -4,6 +4,11 @@ import { FileSystemStorage } from './filesystem-storage.js';
 import init, { Interaction, SearchEngine, searchBatch } from './pkg/portal_extension.js';
 import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine, extractInteractionBuffer } from './search-helpers.js';
 import { generateSlugFromUrl, saveSettingsValue } from './utils.js';
+import { findRelatedPages } from './related-scoring.js';
+import { parseAttention, attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
+import { qbCreatePredicate, qbCreateOperator, qbCreatePlaceholder, qbFindNode, qbCollapseTree, qbFlattenSameOp, qbToTree, qbFlatten } from './qb-tree.js';
+import { initCharts, renderAttentionChart, renderAttentionChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './attention-chart.js';
+import { VirtualScroller } from './virtual-scroller.js';
 
 const fsStorage = new FileSystemStorage();
 
@@ -54,7 +59,6 @@ const EXPLORE_COLLECTION_ID = 'explore';
 let colCacheKeys = []; // tracks which colCache:* keys exist in session
 
 // --- Query builder state ---
-let qbNodeIdCounter = 0;
 let qbRoot = null;        // tree root (null = empty)
 let cachedAllHighlights = null; // slug → highlights[], lazy-loaded
 let qbDebounceTimer = null;
@@ -142,17 +146,6 @@ function getRangeConfig(field) {
     min: dr ? dr.min : cfg.min,
     max: dr ? dr.max : cfg.max,
   };
-}
-
-// Node constructors
-function qbCreatePredicate(predicateType, config = {}) {
-  return { id: ++qbNodeIdCounter, type: 'predicate', predicateType, ...config };
-}
-function qbCreateOperator(op, children) {
-  return { id: ++qbNodeIdCounter, type: 'operator', op, children };
-}
-function qbCreatePlaceholder() {
-  return { id: ++qbNodeIdCounter, type: 'predicate', predicateType: 'keyword', field: [...KEYWORD_FIELDS], value: '' };
 }
 
 // --- WASM ---
@@ -726,15 +719,9 @@ function renderCollectionSkeleton() {
   vs.setData([], () => '');
 }
 
-async function handleDelete(url, title) {
-  await recycleItem(url, title);
-}
-
 function refreshCurrentView() {
   if (activeView.type === 'category') {
     showCategory(activeView.value);
-  } else if (activeView.type === 'search' && activeView.query) {
-    showSearch(activeView.query);
   } else if (activeView.type === 'collection' && activeView.query) {
     showCollection({ id: activeView.id, query: activeView.query, qbTree: activeView.qbTree, name: activeView.name });
   } else if (activeView.type === 'explore') {
@@ -823,230 +810,15 @@ function isGatewayUrl(url) {
   }
 }
 
-// --- Attention chart ---
-function parseAttention(interaction) {
-  if (!interaction.attention) return null;
-  try {
-    return typeof interaction.attention === 'string'
-      ? JSON.parse(interaction.attention)
-      : interaction.attention;
-  } catch { return null; }
-}
-
-function attentionStrength(att) {
-  // Composite score: weighted sum of normalized metrics
-  let score = 0;
-  if (att.timeOnPage) score += Math.min(att.timeOnPage / 60000, 10); // minutes, cap at 10
-  if (att.scrollDepth) score += att.scrollDepth / 100 * 2; // 0-2
-  if (att.clicks) score += Math.min(att.clicks, 20) / 5; // 0-4
-  if (att.highlights && att.highlights.length) score += Math.min(att.highlights.length, 5); // 0-5
-  return score;
-}
-
-function aggregateAttentionByDay(interactions) {
-  const byDay = new Map();
-  for (const i of interactions) {
-    const att = parseAttention(i);
-    const dayKey = new Date(i.timestamp).toISOString().slice(0, 10);
-    const prev = byDay.get(dayKey) || 0;
-    byDay.set(dayKey, prev + (att ? attentionStrength(att) : 0.1)); // minimal presence even without attention
-  }
-  // Sort by date
-  const entries = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  return entries; // [[dateStr, score], ...]
-}
-
-function renderAttentionChartInto(chartEl, barsEl, interactions, label) {
-  if (label !== undefined) {
-    const labelEl = chartEl.querySelector('.chart-label');
-    if (labelEl) labelEl.textContent = label;
-  }
-
-  if (!interactions || interactions.length === 0) {
-    chartEl.classList.remove('visible');
-    return;
-  }
-
-  const data = aggregateAttentionByDay(interactions);
-  if (data.length === 0) {
-    chartEl.classList.remove('visible');
-    return;
-  }
-
-  const scoreMap = new Map(data);
-  const maxScore = Math.max(...data.map(d => d[1]), 0.1);
-  const chartHeight = 44;
-
-  // Expand range: 1st of earliest UTC month → last data day (all UTC)
-  const firstDate = new Date(data[0][0] + 'T00:00:00Z');
-  const lastDate = new Date(data[data.length - 1][0] + 'T00:00:00Z');
-  const rangeStart = new Date(Date.UTC(firstDate.getUTCFullYear(), firstDate.getUTCMonth(), 1));
-
-  const days = [];
-  const months = []; // { label, dayIndex }
-  let prevMonth = null;
-  for (let d = new Date(rangeStart); d <= lastDate; d.setUTCDate(d.getUTCDate() + 1)) {
-    const dateStr = d.toISOString().slice(0, 10);
-    const month = dateStr.slice(0, 7);
-    if (month !== prevMonth) {
-      months.push({ label: month, dayIndex: days.length });
-      prevMonth = month;
-    }
-    days.push(dateStr);
-  }
-
-  // Bars row
-  const daySlotPx = 11; // 10px bar + 1px gap
-  const barsHtml = days.map(dateStr => {
-    const score = scoreMap.get(dateStr);
-    if (score != null) {
-      const barH = Math.max(2, Math.round((score / maxScore) * chartHeight));
-      return `<div class="chart-bar-group has-data" data-date="${dateStr}" data-score="${score.toFixed(1)}"><div class="chart-bar" style="height:${barH}px"></div></div>`;
-    }
-    return `<div class="chart-bar-group" data-date="${dateStr}"></div>`;
-  }).join('');
-
-  // Axis row
-  const totalBarWidth = days.length * daySlotPx - 1;
-  const axisHtml = months.map(m =>
-    `<span class="chart-month" style="left:${m.dayIndex * daySlotPx}px">${m.label}</span>`
-  ).join('');
-
-  // Compute min-width: max(bar total, rightmost label end)
-  // Label ~45px wide; last label starts at its dayIndex * daySlotPx
-  const lastLabel = months[months.length - 1];
-  const labelEnd = lastLabel ? lastLabel.dayIndex * daySlotPx + 45 : 0;
-  const contentWidth = Math.max(totalBarWidth, labelEnd);
-
-  barsEl.innerHTML = `<div class="chart-content" style="min-width:${contentWidth}px">
-    <div class="chart-bars-row">${barsHtml}</div>
-    <div class="chart-axis">${axisHtml}</div>
-  </div>`;
-
-  chartEl.classList.add('visible');
-}
-
-function renderAttentionChart(interactions) {
-  renderAttentionChartInto(
-    document.getElementById('attentionChart'),
-    document.getElementById('chartBars'),
-    interactions,
-    'Attention over time'
-  );
-  bindChartBarClick(document.getElementById('attentionChart'), document.getElementById('results'));
-
-}
-
-// Chart tooltip handler (shared for both charts)
-function bindChartTooltip(chartEl) {
-  const barsEl = chartEl.querySelector('.chart-bars');
-  const tooltip = chartEl.querySelector('.chart-tooltip');
-  barsEl.addEventListener('mouseover', (e) => {
-    const group = e.target.closest('.chart-bar-group.has-data');
-    if (!group) { tooltip.style.display = 'none'; return; }
-    tooltip.textContent = `${group.dataset.date}: ${group.dataset.score}`;
-    tooltip.style.display = 'block';
-    const rect = group.getBoundingClientRect();
-    const chartRect = chartEl.getBoundingClientRect();
-    tooltip.style.left = (rect.left - chartRect.left + rect.width / 2 - tooltip.offsetWidth / 2) + 'px';
-    tooltip.style.top = (rect.top - chartRect.top - 22) + 'px';
-  });
-  barsEl.addEventListener('mouseout', () => {
-    tooltip.style.display = 'none';
-  });
-}
-
-bindChartTooltip(document.getElementById('attentionChart'));
-bindChartTooltip(document.getElementById('relatedChart'));
-
-// Chart ↔ Results mapping: chartBarsId → resultsContainerId
-const chartResultsPairs = [
-  ['chartBars', 'results'],
-  ['relatedChartBars', 'relatedResults'],
-];
-
-function syncChartHighlights() {
-  for (const [barsId, containerId] of chartResultsPairs) {
-    const barsEl = document.getElementById(barsId);
-    const container = document.getElementById(containerId);
-    if (!barsEl || !container) continue;
-
-    // Collect dates from selected rows
-    const selectedDates = new Set();
-    container.querySelectorAll('.result-row.selected').forEach(row => {
-      const d = row.dataset.dates;
-      if (d) d.split(',').forEach(date => selectedDates.add(date));
-    });
-
-    // Toggle highlighted class on chart bars
-    barsEl.querySelectorAll('.chart-bar-group').forEach(group => {
-      const bar = group.querySelector('.chart-bar');
-      if (bar) bar.classList.toggle('highlighted', selectedDates.has(group.dataset.date));
-    });
-  }
-}
-
-function applyDateFilter(chartEl, resultsContainer) {
-  const activeDates = new Set();
-  chartEl.querySelectorAll('.chart-bar-group.active').forEach(g => activeDates.add(g.dataset.date));
-  const hasFilter = activeDates.size > 0;
-
-  // For virtual-scrolled containers, filter at the data level
-  const vs = resultsContainer._virtualScroller;
-  if (vs) {
-    if (!hasFilter) {
-      vs.applyFilter(null);
-    } else {
-      vs.applyFilter(item => {
-        const ts = item.timestamps || [];
-        return ts.some(t => activeDates.has(new Date(t).toISOString().slice(0, 10)));
-      });
-    }
-    return;
-  }
-
-  // Non-virtual containers: hide/show DOM nodes directly
-  resultsContainer.querySelectorAll('.result-item').forEach(item => {
-    const row = item.querySelector('.result-row');
-    if (!row) return;
-    if (!hasFilter) { item.style.display = ''; return; }
-    const rowDates = row.dataset.dates ? row.dataset.dates.split(',') : [];
-    const match = rowDates.some(d => activeDates.has(d));
-    item.style.display = match ? '' : 'none';
-  });
-
-}
-
-function bindChartBarClick(chartEl, resultsContainer) {
-  const barsEl = chartEl.querySelector('.chart-bars');
-  if (!barsEl || barsEl._chartClickBound) return;
-  barsEl._chartClickBound = true;
-  barsEl.addEventListener('click', (e) => {
-    const bar = e.target.closest('.chart-bar');
-    if (!bar) return;
-    const group = bar.closest('.chart-bar-group');
-    if (group) group.classList.toggle('active');
-    applyDateFilter(chartEl, resultsContainer);
-    syncChartHighlights();
-  });
-  // Click anywhere in chart that isn't a bar clears all active selections
-  if (!chartEl._chartBgClickBound) {
-    chartEl._chartBgClickBound = true;
-    chartEl.addEventListener('click', (e) => {
-      if (e.target.closest('.chart-bar')) return;
-      chartEl.querySelectorAll('.chart-bar-group.active').forEach(g => g.classList.remove('active'));
-      applyDateFilter(chartEl, resultsContainer);
-      syncChartHighlights();
-    });
-  }
-}
+// Attention chart tooltips initialized via initCharts() in initialize()
 
 
 // --- Display ---
 async function showCategory(category) {
   activeView = { type: 'category', value: category };
   updateSidebarActive();
-  updateMainTitle(categoryLabel(category));
+  const categoryLabels = { all: 'History', today: 'Today', week: 'This Week', highlighted: 'Highlighted', gateways: 'Gateways', recycleBin: 'Recycle Bin', explore: 'Explore' };
+  updateMainTitle(categoryLabels[category] || category);
   document.getElementById('pinSearchBtn').style.display = 'none';
   document.getElementById('queryBuilder').style.display = 'none';
 
@@ -1091,127 +863,6 @@ async function showCategory(category) {
       renderAttentionChart(allFiltered);
     }
   };
-}
-
-async function showSearch(query) {
-  if (!query.trim()) {
-    if (activeView.type === 'category') showCategory(activeView.value);
-    else showExplore();
-    return;
-  }
-
-  activeView = { type: 'search', query };
-  updateSidebarActive();
-  updateMainTitle(`Search: ${query}`);
-  document.getElementById('pinSearchBtn').style.display = 'flex';
-  document.getElementById('queryBuilder').style.display = 'none';
-  showNormalLayout();
-
-  renderResultsSkeleton({ showRelevance: true });
-
-  try {
-    const results = await pipelinedSearch(query);
-
-    if (results.length === 0) {
-      displayMessage('No results found');
-      return;
-    }
-
-    renderAttentionChart(results.map(r => ({ url: r.url, timestamp: r.timestamp, attention: '' })));
-    displaySearchResults(results);
-  } catch (error) {
-    console.error('Search error:', error);
-    displayMessage('Error performing search: ' + error.message);
-  }
-}
-
-// --- Seed-based related pages scoring ---
-const STOP_WORDS = new Set([
-  'a','an','the','and','or','but','in','on','at','to','for','of','with','by',
-  'from','up','about','into','over','after','is','are','was','were','be','been',
-  'being','have','has','had','do','does','did','will','would','shall','should',
-  'may','might','must','can','could','that','which','who','whom','this','these',
-  'those','it','its','my','your','his','her','our','their','what','how','when',
-  'where','why','not','no','nor','so','if','then','than','too','very','just',
-  'also','now','here','there','all','each','every','both','few','more','most',
-  'other','some','such','only','same','new','-','|','/'
-]);
-
-function titleWords(text) {
-  if (!text) return new Set();
-  return new Set(text.toLowerCase().split(/[\s\-_|/:.?!,;()\[\]{}]+/).filter(w => w.length > 1 && !STOP_WORDS.has(w)));
-}
-
-function jaccardSimilarity(setA, setB) {
-  if (setA.size === 0 || setB.size === 0) return 0;
-  let intersection = 0;
-  for (const x of setA) if (setB.has(x)) intersection++;
-  const union = setA.size + setB.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-function scoreTemporalProximity(seedTimestamps, candTimestamps) {
-  const seeds = seedTimestamps.slice(0, 10);
-  const cands = candTimestamps.slice(0, 10);
-  let minGap = Infinity;
-  for (const s of seeds) for (const c of cands) minGap = Math.min(minGap, Math.abs(s - c));
-  const ONE_HOUR = 3600000;
-  const DAY = 86400000;
-  if (minGap <= ONE_HOUR) return 1;
-  if (minGap >= DAY) return 0;
-  return 1 - (minGap - ONE_HOUR) / (DAY - ONE_HOUR);
-}
-
-function prepareSeed(seed) {
-  let hostname = '', origin = '';
-  try { const u = new URL(seed.url); hostname = u.hostname; origin = u.origin; } catch {}
-  return {
-    hostname, origin,
-    titleTokens: titleWords(seed.title),
-    intentTokens: titleWords(seed.intent),
-    timestamps: seed.timestamps || [],
-  };
-}
-
-function scorePair(seedData, cand) {
-  let candHostname = '', candOrigin = '';
-  try { const u = new URL(cand.url); candHostname = u.hostname; candOrigin = u.origin; } catch {}
-  let score = 0;
-  if (candHostname && seedData.hostname === candHostname) {
-    score += 0.30;
-    if (candOrigin === seedData.origin) score += 0.10;
-  }
-  score += 0.30 * jaccardSimilarity(seedData.titleTokens, titleWords(cand.title));
-  const candTs = cand.timestamps || [];
-  if (seedData.timestamps.length > 0 && candTs.length > 0)
-    score += 0.25 * scoreTemporalProximity(seedData.timestamps, candTs);
-  score += 0.15 * jaccardSimilarity(seedData.intentTokens, titleWords(cand.intent));
-  return score;
-}
-
-function findRelatedPages(seeds, candidates, poolLimit) {
-  if (seeds.length === 0) return [];
-  const pool = new Map(); // url → { item, relatedness }
-
-  for (const seed of seeds) {
-    if (pool.size >= poolLimit) break;
-
-    const seedData = prepareSeed(seed);
-    for (const cand of candidates) {
-      if (pool.size >= poolLimit && !pool.has(cand.url)) continue;
-      const score = scorePair(seedData, cand);
-      if (score > 0) {
-        const existing = pool.get(cand.url);
-        if (!existing || score > existing.relatedness) {
-          pool.set(cand.url, { ...cand, relatedness: score });
-        }
-      }
-    }
-  }
-
-  return [...pool.values()]
-    .sort((a, b) => b.relatedness - a.relatedness)
-    .slice(0, poolLimit);
 }
 
 // --- Query builder: Predicate matchers ---
@@ -1345,26 +996,11 @@ function treeHasConfiguredPredicate(node) {
 }
 
 // --- Query builder: Tree manipulation (n-ary operators) ---
-function qbFindNode(root, id) {
-  if (!root) return null;
-  if (root.id === id) return { node: root, parent: null, childIndex: -1 };
-  if (root.type === 'operator') {
-    for (let i = 0; i < root.children.length; i++) {
-      if (root.children[i].id === id) return { node: root.children[i], parent: root, childIndex: i };
-    }
-    for (let i = 0; i < root.children.length; i++) {
-      const found = qbFindNode(root.children[i], id);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
 function qbInsertOnEdge(leafId, op) {
-  const placeholder = qbCreatePlaceholder();
+  const placeholder = qbCreatePlaceholder(KEYWORD_FIELDS);
   if (!qbRoot || qbRoot.id === leafId) {
     // Root leaf — wrap in requested op
-    qbRoot = qbCreateOperator(op, [qbRoot || placeholder, qbCreatePlaceholder()]);
+    qbRoot = qbCreateOperator(op, [qbRoot || placeholder, qbCreatePlaceholder(KEYWORD_FIELDS)]);
     renderQueryBuilder();
     return;
   }
@@ -1391,14 +1027,14 @@ function qbAddChild(nodeId) {
   if (!found) return;
   const node = found.node;
   if (node.type !== 'operator') return;
-  node.children.push(qbCreatePlaceholder());
+  node.children.push(qbCreatePlaceholder(KEYWORD_FIELDS));
   renderQueryBuilder();
 }
 
 function qbRemoveLeaf(nodeId) {
   if (!qbRoot) return;
   if (qbRoot.id === nodeId) {
-    qbRoot = qbCreatePlaceholder();
+    qbRoot = qbCreatePlaceholder(KEYWORD_FIELDS);
     renderQueryBuilder();
     return;
   }
@@ -1407,52 +1043,13 @@ function qbRemoveLeaf(nodeId) {
   found.parent.children.splice(found.childIndex, 1);
   // Cascade collapse: single-child → unwrap, empty → remove
   qbRoot = qbCollapseTree(qbRoot);
-  if (!qbRoot) qbRoot = qbCreatePlaceholder(); // only at root level
+  if (!qbRoot) qbRoot = qbCreatePlaceholder(KEYWORD_FIELDS); // only at root level
   renderQueryBuilder();
 }
-
-// Recursively collapse operators: single-child → unwrap, empty → remove (null)
-function qbCollapseTree(node) {
-  if (!node || node.type !== 'operator') return node;
-  node.children = node.children.map(c => qbCollapseTree(c)).filter(c => c !== null);
-  if (node.children.length === 1) return node.children[0];
-  if (node.children.length === 0) return null; // signal removal to parent
-  return node;
-}
-
-// Flatten same-op nesting (e.g. OR(OR(A,B),C) → OR(A,B,C))
-function qbFlattenSameOp(node) {
-  if (!node || node.type !== 'operator') return node;
-  node.children = node.children.map(c => qbFlattenSameOp(c));
-  const newChildren = [];
-  for (const child of node.children) {
-    if (child.type === 'operator' && child.op === node.op) {
-      newChildren.push(...child.children);
-    } else {
-      newChildren.push(child);
-    }
-  }
-  node.children = newChildren;
-  return node;
-}
-
 
 function qbUpdateNode(nodeId, updates) {
   const found = qbFindNode(qbRoot, nodeId);
   if (found) Object.assign(found.node, updates);
-}
-
-// Mode switching: predicates → flat OR tree, or tree → predicate list
-function qbToTree(predicates) {
-  if (predicates.length === 0) return qbCreatePlaceholder();
-  if (predicates.length === 1) return predicates[0];
-  return qbCreateOperator('OR', predicates);
-}
-
-function qbFlatten(node) {
-  if (!node) return [];
-  if (node.type === 'predicate') return [node];
-  return node.children.flatMap(c => qbFlatten(c));
 }
 
 // --- Stream-evaluate a qbTree against all JSONL files ---
@@ -2339,30 +1936,6 @@ async function renderCollectionExplore(collection) {
   runExploreBlockQuery();
 }
 
-function displaySearchResults(results) {
-  if (!results || results.length === 0) {
-    displayMessage('No results found');
-    return;
-  }
-
-  const total = results.length;
-  const resultData = results.map((r, index) => {
-    const timestamps = [r.timestamp || Date.now()];
-    const relevance = total > 1 ? (total - index) / total : 1;
-    return { ...r, attScore: 0, attDetail: null, highlights: [], timestamps, relevance };
-  });
-
-  // When sort is null, preserve WASM relevance order
-  const sorted = applySortOrder(resultData, currentSortState);
-  const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
-
-  const vs = getOrCreateGlobalScroller();
-  vs._headerHtml = columnHeaderHtml('global', { hasDelete: true, hasPin: false, showRelevance: true });
-  vs.setData(sorted, (r) =>
-    resultRowHtml(r.title, r.url, { deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps, context: 'global', relevance: r.relevance })
-  );
-}
-
 // Convert raw interactions (already deduped by URL) to display entries
 function processInteractionsForDisplay(interactions) {
   const byUrl = groupInteractionsByUrl(interactions);
@@ -2468,25 +2041,6 @@ const DELETE_SVG = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 
 const FOCUS_SVG = '<svg viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>';
 
 
-// Blue (low) → Red (high) color scale
-function attentionColor(normalizedScore) {
-  // 0 = blue (#4285f4), 0.5 = yellow (#fbbc04), 1 = red (#ea4335)
-  const t = Math.max(0, Math.min(1, normalizedScore));
-  if (t <= 0.5) {
-    const s = t * 2; // 0→1
-    const r = Math.round(66 + (251 - 66) * s);
-    const g = Math.round(133 + (188 - 133) * s);
-    const b = Math.round(244 + (4 - 244) * s);
-    return `rgb(${r},${g},${b})`;
-  } else {
-    const s = (t - 0.5) * 2; // 0→1
-    const r = Math.round(251 + (234 - 251) * s);
-    const g = Math.round(188 + (67 - 188) * s);
-    const b = Math.round(4 + (53 - 4) * s);
-    return `rgb(${r},${g},${b})`;
-  }
-}
-
 // Group interactions by URL, return Map<url, interaction[]>
 function groupInteractionsByUrl(interactions) {
   const map = new Map();
@@ -2495,20 +2049,6 @@ function groupInteractionsByUrl(interactions) {
     map.get(i.url).push(i);
   }
   return map;
-}
-
-// Compute aggregate attention for a group of interactions
-function aggregateAttention(interactions) {
-  let total = 0;
-  let att = null;
-  for (const i of interactions) {
-    const a = parseAttention(i);
-    if (a) {
-      total += attentionStrength(a);
-      att = a; // keep last one for details
-    }
-  }
-  return { score: total, detail: att };
 }
 
 function buildDetailHtml(url, attDetail, highlights) {
@@ -2766,7 +2306,7 @@ function bindResultDelegation(container) {
           if (inRecycleBin) {
             await permanentlyDeleteItem(r.dataset.url);
           } else {
-            await handleDelete(r.dataset.url, r.dataset.title);
+            await recycleItem(r.dataset.url, r.dataset.title);
           }
         }
       } else {
@@ -2775,7 +2315,7 @@ function bindResultDelegation(container) {
         if (inRecycleBin) {
           await permanentlyDeleteItem(url);
         } else {
-          await handleDelete(url, deleteBtn.dataset.deleteTitle);
+          await recycleItem(url, deleteBtn.dataset.deleteTitle);
         }
       }
       lastClickedRow = null;
@@ -2880,268 +2420,6 @@ function bindPinClicks(container, collectionId) {
   });
 }
 
-// --- Virtual Scroller ---
-class VirtualScroller {
-  constructor(scrollEl, containerEl, rowHeight = 48) {
-    this.scrollEl = scrollEl;       // scrollable parent (.main or wrapper)
-    this.containerEl = containerEl; // container element (#results)
-    this.rowHeight = rowHeight;     // collapsed row height in px
-    this.buffer = 20;               // extra rows above/below viewport
-    this.basePaddingBottom = parseInt(getComputedStyle(containerEl).paddingBottom) || 0;
-    this.data = [];
-    this.renderRow = null;
-    this._headerHtml = '';
-    this.renderedRange = { start: -1, end: -1 };
-    this._expandedIdx = -1;         // index of currently expanded row
-    this._expandedExtraH = 0;       // extra height from expansion
-    this._savedNodes = new Map();   // detached stateful DOM nodes (selected rows that scrolled out)
-    this.onLoadMore = null;         // callback when user scrolls near end of data
-    this._scrollHandler = () => requestAnimationFrame(() => this._render());
-    scrollEl.addEventListener('scroll', this._scrollHandler);
-    containerEl._virtualScroller = this;
-  }
-
-  setData(items, renderRowFn) {
-    this._fullData = items;
-    this.data = items;
-    this.renderRow = renderRowFn;
-    this._filterFn = null;
-    this.renderedRange = { start: -1, end: -1 };
-    this._expandedIdx = -1;
-    this._expandedExtraH = 0;
-    this._savedNodes.clear();
-    this._render(true);
-  }
-
-  updateData(items, renderRowFn) {
-    // Save nodes with meaningful state (selected/expanded) before destroying
-    for (const item of this.containerEl.querySelectorAll('.result-item')) {
-      this._saveOrDiscard(item);
-    }
-    this._fullData = items;
-    this.data = items;
-    if (renderRowFn) this.renderRow = renderRowFn;
-    this._filterFn = null;
-    this.renderedRange = { start: -1, end: -1 };
-    this._expandedIdx = -1;
-    this._expandedExtraH = 0;
-    // _savedNodes NOT cleared — _render(true) will restore matching nodes
-    this._render(true);
-    // Re-detect expanded state from restored nodes
-    this.onExpandToggle();
-  }
-
-  // Filter displayed data without losing the full dataset.
-  // Pass null to clear the filter.
-  applyFilter(filterFn) {
-    this._filterFn = filterFn;
-    this.data = filterFn ? this._fullData.filter(filterFn) : this._fullData;
-    this.renderedRange = { start: -1, end: -1 };
-    this._expandedIdx = -1;
-    this._expandedExtraH = 0;
-    this._savedNodes.clear();
-    this._render(true);
-  }
-
-  // Append new items to the dataset (for demand-loading).
-  // Updates padding so the scrollbar reflects the new total height.
-  appendData(newItems) {
-    this._fullData = this._fullData.concat(newItems);
-    this.data = this._filterFn ? this._fullData.filter(this._filterFn) : this._fullData;
-    // Just update padding — _render on next scroll will pick up new rows
-    const paddingBottom = (this.data.length - this.renderedRange.end) * this.rowHeight + this.basePaddingBottom;
-    this.containerEl.style.paddingBottom = paddingBottom + 'px';
-  }
-
-  // Remove items by URL without full reload.
-  // Preserves scroll position and selection state of remaining rows.
-  removeItems(urls) {
-    const urlSet = new Set(urls);
-    this._fullData = this._fullData.filter(d => !urlSet.has(d.url));
-    this.data = this._filterFn ? this._fullData.filter(this._filterFn) : this._fullData;
-    for (const url of urls) this._savedNodes.delete(url);
-    // Remove matching DOM nodes
-    for (const item of [...this.containerEl.querySelectorAll('.result-item')]) {
-      const row = item.querySelector('.result-row');
-      if (row && urlSet.has(row.dataset.url)) item.remove();
-    }
-    this._expandedIdx = -1;
-    this._expandedExtraH = 0;
-    // Trigger non-forced rebuild which saves remaining selected nodes before re-rendering
-    this.renderedRange = { start: -1, end: -1 };
-    this._render(false);
-  }
-
-  onExpandToggle() {
-    // After expand/collapse, measure actual height difference
-    const openDetail = this.containerEl.querySelector('.result-detail.open');
-    if (openDetail) {
-      const item = openDetail.closest('.result-item');
-      if (item) {
-        this._expandedExtraH = item.offsetHeight - this.rowHeight;
-        const row = item.querySelector('.result-row');
-        if (row) {
-          const url = row.dataset.url;
-          this._expandedIdx = this.data.findIndex(d => d.url === url);
-        }
-      }
-    } else {
-      this._expandedIdx = -1;
-      this._expandedExtraH = 0;
-    }
-    // Only adjust padding-bottom to account for the height change —
-    // do NOT re-render, which would destroy the open detail DOM state.
-    const { end } = this.renderedRange;
-    if (end >= 0) {
-      const base = (this.data.length - end) * this.rowHeight + this.basePaddingBottom;
-      const extraAfter = (this._expandedIdx >= end) ? this._expandedExtraH : 0;
-      this.containerEl.style.paddingBottom = (base + extraAfter) + 'px';
-    }
-  }
-
-  _totalHeight() {
-    return this.data.length * this.rowHeight +
-      (this._expandedIdx >= 0 ? this._expandedExtraH : 0);
-  }
-
-  // Save a DOM node if it has meaningful state (selected or expanded); otherwise discard it.
-  _saveOrDiscard(item) {
-    const row = item.querySelector('.result-row');
-    if (row && (row.classList.contains('selected') || item.querySelector('.result-detail.open'))) {
-      this._savedNodes.set(row.dataset.url, item);
-    }
-    item.remove();
-  }
-
-  // Insert a row at data index i. Reuses a saved node if one exists for that URL,
-  // otherwise creates fresh HTML via renderRow.
-  // insertFn(element | null, html | null) handles DOM placement.
-  _insertRow(i, insertFn) {
-    const url = this.data[i].url;
-    if (this._savedNodes.has(url)) {
-      insertFn(this._savedNodes.get(url), null);
-      this._savedNodes.delete(url);
-    } else {
-      insertFn(null, this.renderRow(this.data[i], i));
-    }
-  }
-
-  _render(force = false) {
-    if (!this.renderRow || this.data.length === 0) {
-      // Only touch DOM on explicit setData/applyFilter calls (force=true).
-      // Scroll-triggered calls (force=false) must not overwrite non-scroller
-      // content (e.g. recycle bin rows rendered directly into the container).
-      if (force) {
-        this.containerEl.style.paddingTop = '0px';
-        this.containerEl.style.paddingBottom = '0px';
-        if (this.data.length === 0) this.containerEl.innerHTML = this._headerHtml;
-      }
-      return;
-    }
-
-    const viewH = this.scrollEl.clientHeight;
-    // Use getBoundingClientRect for correct offset regardless of intermediate
-    // positioned ancestors (e.g. .section-results-wrapper with position:relative).
-    const adjTop = Math.max(0, this.scrollEl.getBoundingClientRect().top - this.containerEl.getBoundingClientRect().top);
-
-    const start = Math.max(0, Math.floor(adjTop / this.rowHeight) - this.buffer);
-    const end = Math.min(this.data.length, Math.ceil((adjTop + viewH) / this.rowHeight) + this.buffer);
-
-    if (!force && start === this.renderedRange.start && end === this.renderedRange.end) return;
-
-    // Update padding
-    const paddingTop = start * this.rowHeight;
-    let paddingBottom = (this.data.length - end) * this.rowHeight + this.basePaddingBottom;
-    if (this._expandedIdx >= end) paddingBottom += this._expandedExtraH;
-    this.containerEl.style.paddingTop = paddingTop + 'px';
-    this.containerEl.style.paddingBottom = paddingBottom + 'px';
-
-    const { start: oldStart, end: oldEnd } = this.renderedRange;
-
-    if (force || oldStart === -1 || start >= oldEnd || end <= oldStart) {
-      // Full rebuild: forced (setData/applyFilter), first render, or non-overlapping scroll jump.
-      // On non-forced jumps, save selected nodes before destroying.
-      if (!force) {
-        for (const item of this.containerEl.querySelectorAll('.result-item')) {
-          const row = item.querySelector('.result-row');
-          if (row && (row.classList.contains('selected') || item.querySelector('.result-detail.open'))) {
-            this._savedNodes.set(row.dataset.url, item);
-          }
-        }
-      }
-
-      let html = this._headerHtml;
-      for (let i = start; i < end; i++) {
-        html += this.renderRow(this.data[i], i);
-      }
-      this.containerEl.innerHTML = html;
-
-      // Restore any saved nodes that fall within the new range
-      if (this._savedNodes.size > 0) {
-        for (const item of [...this.containerEl.querySelectorAll('.result-item')]) {
-          const row = item.querySelector('.result-row');
-          if (row && this._savedNodes.has(row.dataset.url)) {
-            item.replaceWith(this._savedNodes.get(row.dataset.url));
-            this._savedNodes.delete(row.dataset.url);
-          }
-        }
-      }
-    } else {
-      // Incremental update: only touch rows entering/leaving the range.
-      const items = this.containerEl.querySelectorAll('.result-item');
-
-      // Remove items that left the top
-      const removeTop = Math.max(0, start - oldStart);
-      for (let i = 0; i < removeTop && i < items.length; i++) {
-        this._saveOrDiscard(items[i]);
-      }
-
-      // Remove items that left the bottom
-      const removeBottom = Math.max(0, oldEnd - end);
-      for (let i = 0; i < removeBottom; i++) {
-        const idx = items.length - 1 - i;
-        if (idx >= removeTop && items[idx].parentNode) {
-          this._saveOrDiscard(items[idx]);
-        }
-      }
-
-      // Add items entering the top (insert before first remaining .result-item)
-      const addTopEnd = Math.min(oldStart, end);
-      if (start < addTopEnd) {
-        const ref = this.containerEl.querySelector('.result-item');
-        for (let i = start; i < addTopEnd; i++) {
-          this._insertRow(i, (el, html) => {
-            if (el) { ref ? ref.before(el) : this.containerEl.appendChild(el); }
-            else { ref ? ref.insertAdjacentHTML('beforebegin', html) : this.containerEl.insertAdjacentHTML('beforeend', html); }
-          });
-        }
-      }
-
-      // Add items entering the bottom
-      const addBotStart = Math.max(oldEnd, start);
-      for (let i = addBotStart; i < end; i++) {
-        this._insertRow(i, (el, html) => {
-          if (el) { this.containerEl.appendChild(el); }
-          else { this.containerEl.insertAdjacentHTML('beforeend', html); }
-        });
-      }
-    }
-
-    // Clear expanded state if it scrolled out of range
-    if (this._expandedIdx >= 0 && (this._expandedIdx < start || this._expandedIdx >= end)) {
-      this._expandedIdx = -1;
-      this._expandedExtraH = 0;
-    }
-
-    this.renderedRange = { start, end };
-
-    // Trigger load-more when approaching the end of data
-    if (this.onLoadMore && end >= this.data.length - this.buffer * 2) {
-      this.onLoadMore();
-    }
-  }
-}
-
 // Virtual scroller instances for main results and collection explore results
 let globalVirtualScroller = null;
 let relatedVirtualScroller = null;
@@ -3181,11 +2459,6 @@ function displayMessage(msg) {
   container.style.paddingTop = '0px';
   container.style.paddingBottom = '0px';
   container.innerHTML = `<div class="no-results">${escapeHtml(msg)}</div>`;
-}
-
-function categoryLabel(category) {
-  const labels = { all: 'History', today: 'Today', week: 'This Week', highlighted: 'Highlighted', gateways: 'Gateways', recycleBin: 'Recycle Bin', explore: 'Explore' };
-  return labels[category] || category;
 }
 
 function collectionDisplayName(collection) {
@@ -3565,7 +2838,7 @@ document.addEventListener('keydown', async (e) => {
       }
     } else {
       for (const row of selectedRows) {
-        await handleDelete(row.dataset.url, row.dataset.title);
+        await recycleItem(row.dataset.url, row.dataset.title);
       }
     }
     lastClickedRow = null;
@@ -4374,7 +3647,7 @@ function bindExploreBlockEvents(container) {
         type: 'manual',
         label: 'Custom query',
         enabled: true,
-        tree: qbCreatePlaceholder(),
+        tree: qbCreatePlaceholder(KEYWORD_FIELDS),
       };
       exploreBlocks.push(newBlock);
       renderExploreBlocks();
@@ -4728,8 +4001,9 @@ async function initialize() {
   historyFileBatch = settings.historyFileBatch || 10;
   document.getElementById('historyFileBatch').value = historyFileBatch;
 
-  // Initialize query builder
-  qbRoot = qbCreatePlaceholder();
+  // Initialize query builder and chart tooltips
+  qbRoot = qbCreatePlaceholder(KEYWORD_FIELDS);
+  initCharts();
 
   // Render sidebar concurrently with heavy data (don't block on sidebar)
   renderCollections(); // fire-and-forget: updates sidebar when ready

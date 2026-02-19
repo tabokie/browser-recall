@@ -33,22 +33,23 @@ function mockElement(tag, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Extract VirtualScroller class from options.js without loading full module.
-// We do this by reading the source and evaluating just the class.
+// Extract VirtualScroller class from its own module file.
+// We evaluate the source with mocked globals so no real DOM is needed.
 // ---------------------------------------------------------------------------
 
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-const src = readFileSync(resolve(__dirname, '../extension/options.js'), 'utf-8');
-const classMatch = src.match(/^class VirtualScroller \{[\s\S]*?^}/m);
-if (!classMatch) throw new Error('Could not extract VirtualScroller class from options.js');
+const src = readFileSync(resolve(__dirname, '../extension/virtual-scroller.js'), 'utf-8');
+const classMatch = src.match(/^export class VirtualScroller \{[\s\S]*?^}/m);
+if (!classMatch) throw new Error('Could not extract VirtualScroller class from virtual-scroller.js');
 
-// Wrap in a function so `requestAnimationFrame` and `getComputedStyle` are available
+// Strip 'export' and wrap in a function so `requestAnimationFrame` and `getComputedStyle` are available
+const classSource = classMatch[0].replace(/^export /, '');
 const VirtualScroller = new Function(
   'requestAnimationFrame',
   'getComputedStyle',
-  `${classMatch[0]}\nreturn VirtualScroller;`
+  `${classSource}\nreturn VirtualScroller;`
 )(fn => fn(), () => ({ paddingBottom: '0px' })); // execute rAF callbacks synchronously; stub getComputedStyle
 
 // ---------------------------------------------------------------------------

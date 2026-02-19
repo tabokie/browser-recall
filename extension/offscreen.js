@@ -288,18 +288,6 @@ let draining = false;
 let pendingDrainEntries = null; // Set by port 'drainEntries' message
 let lastDrainedTimestamp = 0;   // Local watermark — skip entries already written to JSONL
 
-// Fallback: chrome.storage.onChanged may work in some Chrome versions.
-// Primary drain trigger is the port-based 'drainEntries' message.
-try {
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local' || !changes.logBuffer) return;
-    pendingDrainEntries = changes.logBuffer.newValue || [];
-    scheduleDrain();
-  });
-} catch {
-  console.warn('chrome.storage.onChanged not available in offscreen');
-}
-
 function scheduleDrain() {
   if (drainTimer) return;
   drainTimer = setTimeout(() => { drainTimer = null; drainQueue(); }, 100);
