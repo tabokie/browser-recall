@@ -3,7 +3,7 @@
 import { FileSystemStorage } from './filesystem-storage.js';
 import init, { Interaction, SearchEngine, searchBatch } from './pkg/portal_extension.js';
 import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine, extractInteractionBuffer } from './search-helpers.js';
-import { generateSlugFromUrl, saveSettingsValue } from './utils.js';
+import { generateSlugFromUrl, generateSlugFromTitle, saveSettingsValue } from './utils.js';
 import { findRelatedPages } from './related-scoring.js';
 import { parseAttention, attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
 import { qbCreatePredicate, qbCreateOperator, qbCreatePlaceholder, qbFindNode, qbCollapseTree, qbFlattenSameOp, qbToTree, qbFlatten } from './qb-tree.js';
@@ -2511,11 +2511,6 @@ function bindResultDelegation(container) {
     if (!row) return;
     if (e.target.closest('.result-pin') || e.target.closest('.result-expand') || e.target.closest('.result-delete') || e.target.closest('.result-focus')) return;
     chrome.tabs.create({ url: row.dataset.url });
-    chrome.runtime.sendMessage({
-      action: 'ensureCheckpoint',
-      url: row.dataset.url,
-      title: row.dataset.title || ''
-    }).catch(() => {});
   });
 
   container.addEventListener('dragstart', (e) => {
@@ -2868,8 +2863,8 @@ async function pinCurrentSearch() {
       pendingPin = null;
       if (!pin) return;
 
-      const collectionId = Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => b.toString(16).padStart(2, '0')).join('');
       const collectionName = name !== pin.query ? name : pin.query;
+      const collectionId = generateSlugFromTitle(collectionName);
       const collection = {
         id: collectionId,
         query: pin.query,
@@ -2905,8 +2900,8 @@ async function pinCurrentSearch() {
     const collections = await loadCollections();
     if (collections.some(t => t.query === pin.query)) return;
 
-    const collectionId = Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => b.toString(16).padStart(2, '0')).join('');
     const collectionName = name !== pin.query ? name : pin.query;
+    const collectionId = generateSlugFromTitle(collectionName);
     const collection = {
       id: collectionId,
       query: pin.query,

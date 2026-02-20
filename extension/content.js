@@ -1,4 +1,4 @@
-// Content script for capturing user intent and attention
+// Content script for capturing user intent and attention (scroll depth, time on page)
 console.log('Portal content script loaded on:', window.location.href);
 
 // Private mode: skip all content script functionality
@@ -12,15 +12,9 @@ chrome.storage.session.get(['workspace'], (result) => {
 
 function initContentScript() {
 let currentInteractionId = null;
-let attentionData = {
-  scrollDepth: 0,
-  timeOnPage: 0,
-  highlights: [],
-  clicks: 0
-};
-
-let startTime = Date.now();
 let maxScrollDepth = 0;
+let startTime = Date.now();
+let lastReportTime = Date.now();
 
 // Track scroll depth
 window.addEventListener('scroll', () => {
@@ -28,68 +22,7 @@ window.addEventListener('scroll', () => {
   const currentScroll = window.scrollY;
   const depth = scrollHeight > 0 ? (currentScroll / scrollHeight) * 100 : 0;
   maxScrollDepth = Math.max(maxScrollDepth, depth);
-  attentionData.scrollDepth = maxScrollDepth;
 });
-
-// Track clicks
-document.addEventListener('click', () => {
-  attentionData.clicks++;
-});
-
-// Track text selection (highlights)
-document.addEventListener('mouseup', () => {
-  const selection = window.getSelection();
-  const selectedText = selection.toString().trim();
-
-  if (selectedText.length > 10) {
-    attentionData.highlights.push({
-      text: selectedText,
-      timestamp: Date.now(),
-      context: getSelectionContext(selection)
-    });
-  }
-});
-
-function getSelectionContext(selection) {
-  if (selection.rangeCount > 0) {
-    const range = selection.getRangeAt(0);
-    const container = range.commonAncestorContainer;
-    const element = container.nodeType === 3 ? container.parentElement : container;
-
-    return {
-      tagName: element.tagName,
-      className: element.className,
-      id: element.id
-    };
-  }
-  return null;
-}
-
-// Extract user intent from search queries or input fields
-function extractIntent() {
-  const intents = [];
-
-  // Check URL for search parameters
-  const url = new URL(window.location.href);
-  const searchParams = ['q', 'query', 'search', 's', 'term'];
-
-  searchParams.forEach(param => {
-    const value = url.searchParams.get(param);
-    if (value) {
-      intents.push({ type: 'search', value });
-    }
-  });
-
-  // Check for input fields (search boxes)
-  const searchInputs = document.querySelectorAll('input[type="search"], input[name*="search"], input[name*="query"]');
-  searchInputs.forEach(input => {
-    if (input.value) {
-      intents.push({ type: 'input', value: input.value });
-    }
-  });
-
-  return intents;
-}
 
 // Extract page content as Markdown
 function extractMarkdown() {
@@ -822,48 +755,55 @@ function unwrapHighlightMark(mark) {
 
 // ─── Page Visit Reporting ──────────────────────────────────────────────
 // Send initial visit immediately (so page appears in history).
-// Accumulate attention data internally. Send final visit with attention
-// on page close/freeze (visibilitychange hidden, freeze, beforeunload).
+// Split reporting: immediate visit (no attention), periodic attention reports
 
 let visitReported = false;
-let finalVisitSent = false;
 let currentTitle = document.title;
+const REPORT_INTERVAL = 10000; // 10 seconds
 
-function buildVisitMessage() {
+function reportVisit() {
+  if (visitReported) return;
+  visitReported = true;
+
   const url = window.location.href;
-  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return null;
+  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return;
+
   currentInteractionId = url;
-  const intent = extractIntent();
-  attentionData.timeOnPage = Date.now() - startTime;
   const msg = {
     action: 'reportPageVisit',
     url,
     title: currentTitle,
-    slug: getSlugForCurrentPage(),
-    intent: JSON.stringify(intent),
-    attention: attentionData
+    slug: getSlugForCurrentPage()
   };
   const ref = document.referrer;
   if (ref) msg.referrer = ref;
-  return msg;
+
+  chrome.runtime.sendMessage(msg).catch(() => {});
 }
 
-function reportInitialVisit() {
-  if (visitReported) return;
-  visitReported = true;
-  const msg = buildVisitMessage();
-  if (msg) chrome.runtime.sendMessage(msg).catch(() => {});
-}
+function reportAttention() {
+  const url = window.location.href;
+  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return;
 
-function reportFinalVisit() {
-  if (finalVisitSent) return;
-  finalVisitSent = true;
-  const msg = buildVisitMessage();
-  if (msg) chrome.runtime.sendMessage(msg).catch(() => {});
+  const now = Date.now();
+  const incrementalTime = now - lastReportTime;
+  lastReportTime = now;
+
+  const msg = {
+    action: 'reportAttention',
+    url,
+    scrollDepth: Math.round(maxScrollDepth),
+    timeOnPage: incrementalTime
+  };
+
+  chrome.runtime.sendMessage(msg).catch(() => {});
 }
 
 // Send initial visit on page load
-reportInitialVisit();
+reportVisit();
+
+// Send periodic attention reports
+setInterval(reportAttention, REPORT_INTERVAL);
 
 // Track title changes locally (no re-report — final visit uses latest title)
 const titleEl = document.querySelector('title');
@@ -875,15 +815,15 @@ if (titleEl) {
   });
 }
 
-// Send final visit with accumulated attention on page close/freeze
+// Send final attention report on page close/freeze
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
-    reportFinalVisit();
+    reportAttention();
   }
 });
 
 document.addEventListener('freeze', () => {
-  reportFinalVisit();
+  reportAttention();
 });
 
 // ─── Capture notification bubble ──────────────────────────────────────
@@ -1031,8 +971,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Re-apply highlights on page load
 reapplyHighlights();
 
-// Before unload, send final visit with accumulated attention
+// Before unload, send final attention report
 window.addEventListener('beforeunload', () => {
-  reportFinalVisit();
+  reportAttention();
 });
 } // end initContentScript

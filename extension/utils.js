@@ -32,6 +32,28 @@ export async function saveSettingsValue(key, value) {
   }
 }
 
+// Generic slug generation: normalize text + hash for uniqueness
+function generateSlug(text, hashInput) {
+  if (!text || text.trim() === '') {
+    text = 'untitled';
+  }
+  // Normalize: lowercase, replace non-alphanumeric with hyphens, trim to 30 chars
+  const base = text.toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .substring(0, 30)
+    .replace(/-+$/, '');
+
+  // Short hash for uniqueness
+  let hash = 0;
+  for (let i = 0; i < hashInput.length; i++) {
+    hash = ((hash << 5) - hash + hashInput.charCodeAt(i)) | 0;
+  }
+  const hashStr = Math.abs(hash).toString(36);
+  const slug = `${base}-${hashStr}`;
+  return slug.substring(0, 80);
+}
+
 // Generate slug from URL for content file naming
 export function generateSlugFromUrl(url) {
   try {
@@ -40,19 +62,17 @@ export function generateSlugFromUrl(url) {
     if (domain.startsWith('www.')) domain = domain.slice(4);
     const lastDot = domain.lastIndexOf('.');
     if (lastDot > 0) domain = domain.slice(0, lastDot);
-    const base = (domain + parsed.pathname)
-      .replace(/[^\p{L}\p{N}]+/gu, '-')
-      .replace(/^-+|-+$/g, '')
-      .substring(0, 30).replace(/-+$/, '');
-    // Short hash of full URL for uniqueness (query params, fragments, etc.)
-    let hash = 0;
-    for (let i = 0; i < url.length; i++) {
-      hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0;
-    }
-    const hashStr = Math.abs(hash).toString(36);
-    const slug = `${base}-${hashStr}`;
-    return slug.substring(0, 80);
+    const text = domain + parsed.pathname;
+    // Hash the full URL for uniqueness (includes query params, fragments, etc.)
+    return generateSlug(text, url);
   } catch {
     return 'untitled';
   }
+}
+
+// Generate slug from collection title for list file naming
+export function generateSlugFromTitle(title) {
+  // Hash title + timestamp for uniqueness
+  const hashInput = title + Date.now();
+  return generateSlug(title, hashInput);
 }

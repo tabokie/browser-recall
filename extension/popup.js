@@ -1,5 +1,5 @@
 // Popup — current-page dashboard
-import { generateSlugFromUrl, loadSettingsValue, saveSettingsValue } from './utils.js';
+import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue } from './utils.js';
 
 let currentSlug = '';
 let currentHighlights = [];
@@ -101,12 +101,6 @@ function renderAttention(interaction) {
   }
   if (attention.timeOnPage !== undefined) {
     items.push(`<span class="attention-item"><strong>Time:</strong> ${formatDuration(attention.timeOnPage)}</span>`);
-  }
-  if (attention.clicks !== undefined) {
-    items.push(`<span class="attention-item"><strong>Clicks:</strong> ${attention.clicks}</span>`);
-  }
-  if (attention.highlights && attention.highlights.length > 0) {
-    items.push(`<span class="attention-item"><strong>Selections:</strong> ${attention.highlights.length}</span>`);
   }
 
   container.innerHTML = items.length > 0
@@ -435,7 +429,7 @@ async function createCollectionAndPin(query) {
   const collections = await loadCollections();
   if (collections.some(c => c.query === query)) return;
 
-  const collectionId = Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b => b.toString(16).padStart(2, '0')).join('');
+  const collectionId = generateSlugFromTitle(query);
   await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name: query, query });
   const { collectionOrder: order = [] } = await chrome.storage.session.get(['collectionOrder']);
   await saveSettingsValue('collectionOrder', [...order, collectionId]);

@@ -586,7 +586,7 @@ describe('Progressive loading', () => {
     // Configure searchBatch to return rust interactions (matching "rust" query)
     const rustResults = RUST_INTERACTIONS.map(i => ({
       url: i.url, title: i.title, score: 1.0, timestamp: i.timestamp,
-      intent: i.intent || '', attention: i.attention || '',
+       attention: i.attention || '',
     }));
     mockSearchBatchFn.mockImplementation(async () => rustResults);
 

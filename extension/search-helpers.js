@@ -57,7 +57,7 @@ export function buildInteractionsForEngine(InteractionClass, engine, dataList, c
   for (const data of dataList) {
     const interaction = new InteractionClass(data.url, data.title);
     interaction.timestamp = BigInt(data.timestamp);
-    interaction.setIntent(data.intent || '');
+    // intent removed: not very useful
 
     interaction.setContent((data.slug && contentMap[data.slug]) || '');
 

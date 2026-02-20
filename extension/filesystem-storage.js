@@ -335,8 +335,7 @@ class FileSystemStorage {
       timestamp: 1234567890,
       url: 'https://example.com',
       title: 'Page Title',
-      intent: 'Search query or user intent',
-      attention: 'JSON string of engagement metrics',
+      attention: 'JSON string: {"scrollDepth": 0-100, "timeOnPage": ms}',
       slug: '1234567890-page-title'
     }, null, 2);
     content += '\n```\n';

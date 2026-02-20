@@ -558,9 +558,9 @@ describe('Cache staleness', () => {
     populateCache();
     // Put visit entries (no action) + mutation entries in logBuffer
     localData.logBuffer = [
-      { timestamp: Date.now(), url: 'https://buffered.com/page1', title: 'Buffered Page 1', slug: 'buffered-page1', intent: '', attention: '' },
+      { timestamp: Date.now(), url: 'https://buffered.com/page1', title: 'Buffered Page 1', slug: 'buffered-page1',  attention: '' },
       { timestamp: Date.now(), action: 'set', key: 'workspace', value: {} },
-      { timestamp: Date.now() + 1, url: 'https://buffered.com/page2', title: 'Buffered Page 2', slug: 'buffered-page2', intent: '', attention: '' },
+      { timestamp: Date.now() + 1, url: 'https://buffered.com/page2', title: 'Buffered Page 2', slug: 'buffered-page2',  attention: '' },
     ];
 
     // Add a collection with pins on buffered.com (same domain as logBuffer entries)
@@ -719,12 +719,12 @@ describe('Cache staleness', () => {
   it('T10: object attention in logBuffer entries does not crash search', async () => {
     populateCache();
 
-    // LogBuffer has entries with object attention (from content.js reportPageVisit)
+    // LogBuffer has entries with object attention (from background.js appendLog for report entries)
     localData.logBuffer = [
       {
         timestamp: Date.now(), url: 'https://example.com/buffered', title: 'Buffered Today Page',
-        slug: 'buffered-today', intent: '',
-        attention: { scrollDepth: 42, timeOnPage: 5000, clicks: 3, highlights: [] }
+        slug: 'buffered-today', 
+        attention: { scrollDepth: 42, timeOnPage: 5000 }
       },
     ];
 
@@ -761,7 +761,7 @@ describe('Cache staleness', () => {
 
     // col-noq pins are on example.com/today0 and today1 — same URLs as FILE1_INTERACTIONS
     // Give those interactions attention data
-    const attentionJson = JSON.stringify({ scrollDepth: 50, timeOnPage: 120000, highlights: [], clicks: 5 });
+    const attentionJson = JSON.stringify({ scrollDepth: 50, timeOnPage: 120000 });
     const saved0 = { ...FILE1_INTERACTIONS[0] };
     const saved1 = { ...FILE1_INTERACTIONS[1] };
     FILE1_INTERACTIONS[0] = { ...FILE1_INTERACTIONS[0], attention: attentionJson };

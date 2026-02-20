@@ -1,7 +1,7 @@
 // Background service worker for Portal extension
 // Central authority for reads and mutations. Offscreen is a pure filesystem I/O worker.
 import { generateSlugFromUrl } from './utils.js';
-import { applyLogToSettings, applyLogToAtom, applyLogToPins, applyLogToDeletes, applyLogToRecycleBin } from './replay.js';
+import { effectOf } from './replay.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { getCachedAtom, setCachedAtom } from './atom-cache.js';
 
@@ -13,6 +13,14 @@ chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONT
 
 // Resolves when hydrateCache() completes (or immediately if no hydration needed).
 let hydrationDone = Promise.resolve();
+
+function dateKeyFromTimestamp(ts) {
+  const d = new Date(ts);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 // ─── Offscreen Document ───────────────────────────────────────────────
 
@@ -94,6 +102,20 @@ function withLock(key, fn) {
   return next;
 }
 
+// ─── Atom Cache Helper ───────────────────────────────────────────────
+// Ensure an atom is in session cache; loads from offscreen if missing.
+// Returns the atom (or empty object if not found anywhere).
+
+async function ensureAtomCached(slug) {
+  let atom = await getCachedAtom(slug);
+  if (!atom) {
+    const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [slug] });
+    atom = resp?.atoms?.[slug] || {};
+    await setCachedAtom(slug, atom);
+  }
+  return atom;
+}
+
 // ─── Mutation Notifications ───────────────────────────────────────────
 // Notify extension pages (options, popup) after data mutations so they can refresh.
 
@@ -140,17 +162,101 @@ function scheduleDrainNotify() {
   }, 500);
 }
 
+// Low-level: append to logBuffer + persist, no cache update.
 async function appendLog(entry) {
-  // Serialize to prevent concurrent handlers from interleaving push + set,
-  // which could cause a stale snapshot to overwrite newer entries.
   await withLock('logBuffer', async () => {
     await ensureLogBuffer();
     logBuffer.push(entry);
     await chrome.storage.local.set({ logBuffer });
   });
-  // Ensure offscreen exists so drain can happen via port channel.
   ensureOffscreenPort().catch(() => {});
   scheduleDrainNotify();
+}
+
+// Read an entity from session cache by replay key.
+// Returns entity or null (null = not cached / doesn't exist).
+async function sessionLoad(key) {
+  if (key.startsWith('atom:')) {
+    return await getCachedAtom(key.slice(5));
+  }
+  if (key === 'settings') {
+    const data = await chrome.storage.session.get(SETTINGS_KEYS);
+    // Assemble entity from individual session keys
+    return { timestamp: 0, ...data };
+  }
+  if (key.startsWith('list:user/')) {
+    const cid = key.slice('list:user/'.length);
+    const { collections = [] } = await chrome.storage.session.get(['collections']);
+    const col = collections.find(c => c.id === cid);
+    if (col) return { timestamp: 0, id: cid, name: col.name || '', query: col.query || '', qbTree: col.qbTree || null, pins: [] };
+    return null;
+  }
+  if (key === 'list:recycle-bin') {
+    const { recycleBin } = await chrome.storage.session.get(['recycleBin']);
+    return recycleBin ? { timestamp: 0, items: recycleBin } : null;
+  }
+  if (key === 'list:permanent-deletes') {
+    const { permanentDeletes } = await chrome.storage.session.get(['permanentDeletes']);
+    return permanentDeletes ? { timestamp: 0, urls: permanentDeletes } : null;
+  }
+  if (key === 'index:parent-index') {
+    const { parentIndex } = await chrome.storage.session.get(['parentIndex']);
+    return parentIndex || null;
+  }
+  return null;
+}
+
+// Write effectOf results back to session cache.
+async function sessionWrite(effects) {
+  for (const [key, entity] of Object.entries(effects)) {
+    if (entity === null) continue;
+    if (key.startsWith('atom:')) {
+      await setCachedAtom(key.slice(5), entity);
+    } else if (key === 'settings') {
+      const cacheUpdate = {};
+      for (const k of SETTINGS_KEYS) {
+        if (entity[k] !== undefined) cacheUpdate[k] = entity[k];
+      }
+      if (Object.keys(cacheUpdate).length > 0) {
+        await chrome.storage.session.set(cacheUpdate);
+      }
+    } else if (key.startsWith('list:user/')) {
+      const { collections = [] } = await chrome.storage.session.get(['collections']);
+      const cid = key.slice('list:user/'.length);
+      if (entity.deleted) {
+        await chrome.storage.session.set({ collections: collections.filter(c => c.id !== cid) });
+      } else {
+        const idx = collections.findIndex(c => c.id === cid);
+        const meta = { id: entity.id, name: entity.name, query: entity.query, qbTree: entity.qbTree };
+        if (idx >= 0) collections[idx] = meta;
+        else collections.push(meta);
+        await chrome.storage.session.set({ collections });
+      }
+    } else if (key === 'list:recycle-bin') {
+      await chrome.storage.session.set({ recycleBin: entity.items });
+    } else if (key === 'list:permanent-deletes') {
+      await chrome.storage.session.set({ permanentDeletes: entity.urls });
+    } else if (key === 'index:parent-index') {
+      await chrome.storage.session.set({ parentIndex: entity });
+    }
+  }
+}
+
+// High-level: append to logBuffer + replay against session cache via effectOf.
+// Returns effectOf result { key: entity | null }.
+// Serialized via logBuffer lock so concurrent calls see each other's cache writes.
+async function addLog(entry) {
+  let effects;
+  await withLock('logBuffer', async () => {
+    await ensureLogBuffer();
+    logBuffer.push(entry);
+    await chrome.storage.local.set({ logBuffer });
+    effects = await effectOf(entry, sessionLoad);
+    await sessionWrite(effects);
+  });
+  ensureOffscreenPort().catch(() => {});
+  scheduleDrainNotify();
+  return effects;
 }
 
 async function appendVisit(interaction) {
@@ -158,14 +264,9 @@ async function appendVisit(interaction) {
     timestamp: interaction.timestamp,
     url: interaction.url,
     title: interaction.title,
-    slug: interaction.slug,
-    intent: interaction.intent || '',
-    attention: typeof interaction.attention === 'string'
-      ? interaction.attention
-      : (interaction.attention ? JSON.stringify(interaction.attention) : ''),
   };
   if (interaction.referrer) entry.referrer = interaction.referrer;
-  await appendLog(entry);
+  await addLog(entry);
 }
 
 // ─── Settings Keys ───────────────────────────────────────────────────
@@ -176,141 +277,74 @@ const SETTINGS_KEYS = ['workspace', 'collectionOrder', 'urlBlacklist', 'titleTri
 // ─── Cache Hydration ──────────────────────────────────────────────────
 
 async function hydrateCache() {
-  // 1. Load settings.json (workspace, collectionOrder, urlBlacklist, titleTrimRules, settings)
+  // Phase 1: Load base entities from offscreen into session cache
   try {
     const resp = await requestOffscreen({ action: 'loadSettings' });
-    if (resp && resp.success && resp.settings) {
-      let s = resp.settings;
-      const settingsTimestamp = s.timestamp || 0;
-
-      // Replay pending log entries that haven't been checkpointed yet
-      await ensureLogBuffer();
-      for (const entry of logBuffer) {
-        if (entry.timestamp > settingsTimestamp) {
-          s = applyLogToSettings(s, entry);
-        }
-      }
-
+    if (resp?.success && resp.settings) {
       const cacheUpdate = {};
       for (const key of SETTINGS_KEYS) {
-        if (s[key] !== undefined) cacheUpdate[key] = s[key];
+        if (resp.settings[key] !== undefined) cacheUpdate[key] = resp.settings[key];
       }
       if (Object.keys(cacheUpdate).length > 0) {
         await chrome.storage.session.set(cacheUpdate);
-        console.log('Cache hydrated from settings.json:', Object.keys(cacheUpdate));
       }
     }
-  } catch (error) {
-    console.warn('Cache hydration failed:', error.message);
-  }
+  } catch (e) { console.warn('Settings load failed:', e.message); }
 
-  // 2. Load collection metadata from self-describing files
   try {
     const metaResp = await requestOffscreen({ action: 'loadAllCollectionMetadata' });
     if (metaResp?.success && metaResp.collections) {
-      let collections = metaResp.collections;
-
-      // Replay pending collection_meta / collection_delete entries
-      await ensureLogBuffer();
-      for (const entry of logBuffer) {
-        if (entry.action === 'collection_meta') {
-          const idx = collections.findIndex(c => c.id === entry.collectionId);
-          if (idx >= 0) {
-            if (entry.name !== undefined) collections[idx].name = entry.name;
-            if (entry.query !== undefined) collections[idx].query = entry.query;
-            if (entry.qbTree !== undefined) collections[idx].qbTree = entry.qbTree;
-          } else {
-            collections.push({
-              id: entry.collectionId,
-              name: entry.name || '',
-              query: entry.query || '',
-              qbTree: entry.qbTree || null,
-            });
-          }
-        } else if (entry.action === 'collection_delete') {
-          collections = collections.filter(c => c.id !== entry.collectionId);
-        }
-      }
-
-      // Order by collectionOrder, append any unknown IDs at end
-      const { collectionOrder = [] } = await chrome.storage.session.get(['collectionOrder']);
-      const ordered = [];
-      const idSet = new Set(collections.map(c => c.id));
-      for (const id of collectionOrder) {
-        const col = collections.find(c => c.id === id);
-        if (col) ordered.push(col);
-      }
-      for (const col of collections) {
-        if (!collectionOrder.includes(col.id)) ordered.push(col);
-      }
-
-      await chrome.storage.session.set({ collections: ordered });
-      console.log('Collections hydrated from files:', ordered.length);
+      await chrome.storage.session.set({ collections: metaResp.collections });
     }
-  } catch (e) {
-    console.warn('Collection metadata hydration failed:', e.message);
-  }
+  } catch (e) { console.warn('Collection metadata load failed:', e.message); }
 
-  // 3. Load recycle bin from lists/recycle-bin.json
   try {
     const rbResp = await requestOffscreen({ action: 'loadRecycleBin' });
-    if (rbResp?.success) {
-      let items = rbResp.items || [];
+    if (rbResp?.success) await chrome.storage.session.set({ recycleBin: rbResp.items || [] });
+  } catch (e) { console.warn('Recycle bin load failed:', e.message); }
 
-      // Replay pending recycle_replace entries
-      await ensureLogBuffer();
-      let entity = { timestamp: 0, items };
-      for (const entry of logBuffer) {
-        if (entry.action === 'recycle_replace') {
-          entity = applyLogToRecycleBin(entity, entry);
-        }
-      }
-
-      await chrome.storage.session.set({ recycleBin: entity.items });
-      console.log('Recycle bin hydrated:', entity.items.length, 'items');
-    }
-  } catch (error) {
-    console.warn('Recycle bin hydration failed:', error.message);
-  }
-
-  // 4. Load permanent deletes
   try {
     const pdResp = await requestOffscreen({ action: 'loadPermanentDeletes' });
-    if (pdResp?.success) await chrome.storage.session.set({ permanentDeletes: pdResp.urls });
-  } catch (error) {
-    console.warn('Permanent deletes hydration failed:', error.message);
+    if (pdResp?.success) await chrome.storage.session.set({ permanentDeletes: pdResp.urls || [] });
+  } catch (e) { console.warn('Permanent deletes load failed:', e.message); }
+
+  try {
+    const piResp = await requestOffscreen({ action: 'loadParentIndex' });
+    const parentIndex = piResp?.success
+      ? { timestamp: piResp.timestamp || 0, index: piResp.index || {} }
+      : { timestamp: 0, index: {} };
+    await chrome.storage.session.set({ parentIndex });
+  } catch (e) { console.warn('Parent-index load failed:', e.message); }
+
+  // Phase 2: Replay pending logBuffer entries via effectOf
+  await ensureLogBuffer();
+  for (const entry of logBuffer) {
+    try {
+      const effects = await effectOf(entry, sessionLoad);
+      await sessionWrite(effects);
+    } catch (e) { console.warn('Hydration replay failed for entry:', e.message); }
   }
 
-  // 5. Load and incrementally process gateway domains
+  // Phase 3: Order collections by collectionOrder
+  const { collections = [], collectionOrder = [] } = await chrome.storage.session.get(['collections', 'collectionOrder']);
+  const ordered = [];
+  for (const id of collectionOrder) {
+    const col = collections.find(c => c.id === id);
+    if (col) ordered.push(col);
+  }
+  for (const col of collections) {
+    if (!collectionOrder.includes(col.id)) ordered.push(col);
+  }
+  await chrome.storage.session.set({ collections: ordered });
+
+  // Phase 4: Gateways (incremental processing — separate from replay)
   await hydrateIncrementalIndex({
     loadAction: 'loadGateways', processAction: 'processGatewaysIncremental',
     sessionKey: 'gatewayDomains', savePath: 'lists/gateways.json', dataKey: 'domains',
     existingKey: 'existingDomains', label: 'Gateway domains'
   });
 
-  // 6. Load parent-index and replay pending logBuffer entries
-  try {
-    const piResp = await requestOffscreen({ action: 'loadParentIndex' });
-    let parentIndex = { timestamp: 0, index: {} };
-    if (piResp?.success) {
-      parentIndex = { timestamp: piResp.timestamp || 0, index: piResp.index || {} };
-    }
-    // Replay pending logBuffer visit entries with referrers
-    await ensureLogBuffer();
-    for (const entry of logBuffer) {
-      if (!entry.action && entry.referrer && entry.url && entry.timestamp > parentIndex.timestamp) {
-        const parentSlug = generateSlugFromUrl(entry.referrer);
-        if (!parentIndex.index[entry.url]) parentIndex.index[entry.url] = [];
-        if (!parentIndex.index[entry.url].includes(parentSlug)) {
-          parentIndex.index[entry.url].push(parentSlug);
-        }
-      }
-    }
-    await chrome.storage.session.set({ parentIndex });
-    console.log('Parent-index hydrated:', Object.keys(parentIndex.index).length, 'entries');
-  } catch (error) {
-    console.warn('Parent-index hydration failed:', error.message);
-  }
+  console.log('Cache hydrated');
 }
 
 async function hydrateIncrementalIndex({ loadAction, processAction, sessionKey, savePath, dataKey, existingKey, label }) {
@@ -527,7 +561,7 @@ async function captureAndLog(tabId, slug, timestamp) {
     action: 'captureSnapshot', slug, timestamp,
     markdown: mdResp?.markdown || '', html: html || ''
   });
-  await appendLog({
+  await addLog({
     timestamp, action: 'capture', slug,
     mdPath: `pages/${slug}/${timestamp}.md`,
     htmlPath: `pages/${slug}/${timestamp}.html`
@@ -656,8 +690,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               timestamp,
               url,
               title,
-              intent: request.intent || '',
-              attention: typeof request.attention === 'string' ? request.attention : (request.attention ? JSON.stringify(request.attention) : ''),
+              // intent removed: not very useful
+              // attention removed: logged separately via reportAttention action
               slug
             };
             let referrer = request.referrer;
@@ -667,65 +701,53 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
             if (referrer) interaction.referrer = referrer;
 
-            await appendVisit(interaction);
-
-            // Event-source referrer relationships (non-blocking)
-            if (referrer) {
-              (async () => {
-                try {
-                  const refSlug = generateSlugFromUrl(referrer);
-
-                  // Ensure parent gets checkpointed (it has children)
-                  const cachedRefAtom = await getCachedAtom(refSlug);
-                  if (!cachedRefAtom) {
-                    await appendLog({
-                      timestamp: Date.now(),
-                      action: 'ensure_checkpoint',
-                      slug: refSlug,
-                      url: referrer,
-                      title: ''
-                    });
-                  }
-
-                  // Event-source: add child to parent atom
-                  await appendLog({
+            // Helper: ensure checkpoint if atom doesn't exist in cache or disk
+            const ensureCheckpointIfMissing = async (checkSlug, checkUrl, checkTitle) => {
+              const cached = await getCachedAtom(checkSlug);
+              if (!cached) {
+                const existsResp = await requestOffscreen({ action: 'atomExists', slug: checkSlug });
+                if (!existsResp?.exists) {
+                  await addLog({
                     timestamp: Date.now(),
-                    action: 'add_child',
-                    slug: refSlug,
-                    childSlug: slug,
-                    childUrl: url,
-                    childTitle: title
+                    action: 'create_checkpoint',
+                    url: checkUrl,
+                    title: checkTitle
                   });
-
-                  // Instant visibility: update session caches
-                  // Parent atom: add child URL
-                  let refAtom = cachedRefAtom || {};
-                  const refChildren = [...(refAtom.children || [])];
-                  if (!refChildren.some(c => (typeof c === 'string' ? c === url : c.url === url))) {
-                    refChildren.push(url);
-                    await setCachedAtom(refSlug, { ...refAtom, children: refChildren });
-                  }
-                  // Child atom: add parent URL (if cached)
-                  let childAtom = await getCachedAtom(slug);
-                  if (childAtom) {
-                    const parents = [...(childAtom.parents || [])];
-                    if (!parents.some(p => (typeof p === 'string' ? p === referrer : p.url === referrer))) {
-                      parents.push(referrer);
-                      await setCachedAtom(slug, { ...childAtom, parents });
-                    }
-                  }
-                  // Parent-index: add parent for child URL (session cache)
-                  const { parentIndex = { index: {} } } = await chrome.storage.session.get(['parentIndex']);
-                  if (!parentIndex.index[url]) parentIndex.index[url] = [];
-                  if (!parentIndex.index[url].includes(refSlug)) {
-                    parentIndex.index[url].push(refSlug);
-                    await chrome.storage.session.set({ parentIndex });
-                  }
-                } catch (e) {
-                  console.warn('Referrer tracking failed:', e.message);
                 }
-              })();
+              }
+            };
+
+            // Ensure checkpoints BEFORE appending the visit entry, so log
+            // order is deterministic: create_checkpoint precedes visit.
+            await ensureLogBuffer();
+            const todayStr = new Date().toISOString().slice(0, 10);
+
+            // Multi-day visit: if this URL was visited on a previous day,
+            // ensure it gets a checkpoint.
+            const cachedAtom = await getCachedAtom(slug);
+            let isMultiDay = false;
+            if (cachedAtom && cachedAtom.visitDates) {
+              const todayYMD = (() => { const d = new Date(); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); })();
+              isMultiDay = cachedAtom.visitDates.some(ymd => ymd !== todayYMD);
+            } else {
+              // Check logBuffer for a visit to same URL on a different date
+              isMultiDay = logBuffer.some(e => !e.action && e.url === url && dateKeyFromTimestamp(e.timestamp) !== todayStr);
             }
+            if (isMultiDay) {
+              await ensureCheckpointIfMissing(slug, url, title);
+            }
+
+            // Ensure parent checkpoint if parent was visited in current buffer.
+            if (referrer) {
+              const parentInBuffer = logBuffer.some(e => !e.action && e.url === referrer);
+              if (parentInBuffer) {
+                const refSlug = generateSlugFromUrl(referrer);
+                await ensureCheckpointIfMissing(refSlug, referrer, '');
+              }
+            }
+
+            // appendVisit calls addLog which replays against session cache
+            await appendVisit(interaction);
 
             // Update gateway domain registry (non-blocking)
             updateGatewayRegistry(url);
@@ -742,11 +764,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                   const already = allPins[collectionId].some(p => p.url === url);
                   if (!already) {
                     allPins[collectionId].push({ url, title: request.title || 'Untitled', pinnedAt: timestamp });
-                    await appendLog({
+                    await addLog({
                       timestamp: Date.now(),
-                      action: 'pins_replace',
-                      collectionId,
-                      pins: allPins[collectionId]
+                      action: 'list',
+                      id: `user/${collectionId}`,
+                      op: 'add',
+                      urls: [url]
                     });
                     console.log(`Workspace: auto-pinned ${url} to collection ${collectionId}`);
                   }
@@ -767,6 +790,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             notifyMutation('interaction', { url });
           } catch (error) {
             console.error('Error processing reportPageVisit:', error);
+            sendResponse({ success: false, error: error.message });
+          }
+          break;
+        }
+
+        case 'reportAttention': {
+          try {
+            const url = request.url;
+
+            const { workspace } = await chrome.storage.session.get(['workspace']);
+            if (workspace && workspace.mode === 'private') {
+              sendResponse({ success: true });
+              return;
+            }
+
+            // Check blacklist
+            const { urlBlacklist } = await chrome.storage.session.get(['urlBlacklist']);
+            const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
+            if (blacklist.some(prefix => url.startsWith(prefix))) {
+              sendResponse({ success: true });
+              return;
+            }
+
+            const entry = {
+              timestamp: Date.now(),
+              action: 'report',
+              url,
+              scrollDepth: request.scrollDepth,
+              timeOnPage: request.timeOnPage
+            };
+
+            await addLog(entry);
+            console.log(`Logged attention report: ${url} (scroll=${request.scrollDepth}, time=${request.timeOnPage}ms)`);
+            sendResponse({ success: true });
+          } catch (error) {
+            console.error('Error processing reportAttention:', error);
             sendResponse({ success: false, error: error.message });
           }
           break;
@@ -1078,33 +1137,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         // ── Writes (session cache + log buffer) ──
 
-        case 'ensureCheckpoint': {
-          const ecSlug = request.slug || generateSlugFromUrl(request.url);
-          await appendLog({
-            timestamp: Date.now(),
-            action: 'ensure_checkpoint',
-            slug: ecSlug,
-            url: request.url,
-            title: request.title || ''
-          });
-          sendResponse({ success: true });
-          break;
-        }
-
         case 'saveSettings': {
           const s = request.settings;
-          const cacheUpdate = {};
-          for (const key of SETTINGS_KEYS) {
-            if (s[key] !== undefined) cacheUpdate[key] = s[key];
-          }
-          if (Object.keys(cacheUpdate).length > 0) {
-            await chrome.storage.session.set(cacheUpdate);
-          }
-          // Log each key as a separate set entry
           const ts = Date.now();
           for (const key of SETTINGS_KEYS) {
             if (s[key] !== undefined) {
-              await appendLog({ timestamp: ts, action: 'set', key, value: s[key] });
+              await addLog({ timestamp: ts, action: 'set', key, value: s[key] });
             }
           }
           sendResponse({ success: true });
@@ -1113,8 +1151,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'saveSettingsKey': {
-          await chrome.storage.session.set({ [request.key]: request.value });
-          await appendLog({ timestamp: Date.now(), action: 'set', key: request.key, value: request.value });
+          await addLog({ timestamp: Date.now(), action: 'set', key: request.key, value: request.value });
           sendResponse({ success: true });
           notifyMutation('settings', { key: request.key });
           break;
@@ -1122,28 +1159,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'saveHighlight': {
           const hlSlug = request.slug;
-          const highlights = await withLock('atoms/' + hlSlug + '.json', async () => {
-            // Read atom from cache or offscreen
-            let atom = await getCachedAtom(hlSlug);
-            if (!atom) {
-              const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [hlSlug] });
-              atom = resp?.atoms?.[hlSlug] || {};
-            }
-            // Apply locally to cache
-            const hl = atom.highlights || [];
-            if (request.highlight.isGlobalNote) {
-              const idx = hl.findIndex(h => h.isGlobalNote);
-              if (idx >= 0) hl[idx] = request.highlight;
-              else hl.unshift(request.highlight);
-            } else {
-              hl.push(request.highlight);
-            }
-            atom.highlights = hl;
-            await setCachedAtom(hlSlug, atom);
-            // Log the highlight mutation
-            await appendLog({ timestamp: Date.now(), action: 'highlight', slug: hlSlug, highlight: request.highlight });
-            return hl;
+          // Ensure atom is cached so addLog's effectOf can find it
+          await ensureAtomCached(hlSlug);
+          const effects = await addLog({
+            timestamp: Date.now(), action: 'highlight', slug: hlSlug,
+            highlight: request.highlight
           });
+          const highlights = effects[`atom:${hlSlug}`]?.highlights || [];
           sendResponse({ success: true, highlights });
           notifyMutation('highlight', { slug: hlSlug });
           break;
@@ -1151,37 +1173,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'deleteHighlight': {
           const dhSlug = request.slug;
-          const remaining = await withLock('atoms/' + dhSlug + '.json', async () => {
-            let atom = await getCachedAtom(dhSlug);
-            if (!atom) {
-              const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [dhSlug] });
-              atom = resp?.atoms?.[dhSlug] || {};
-            }
-            let hl = atom.highlights || [];
-            const before = hl.length;
-            // Find the timestamp to use for the log entry
-            let matchTimestamp = request.timestamp || 0;
-            if (request.timestamp) {
-              hl = hl.filter(h => h.timestamp !== request.timestamp);
-            }
-            if (hl.length === before && request.text) {
-              const idx = hl.findIndex(h => {
-                if (Array.isArray(h.text) && Array.isArray(request.text)) {
-                  return JSON.stringify(h.text) === JSON.stringify(request.text);
-                }
-                return h.text === request.text;
-              });
-              if (idx >= 0) {
-                matchTimestamp = hl[idx].timestamp || 0;
-                hl.splice(idx, 1);
+          // Read atom to find matchTimestamp before constructing log entry
+          const dhAtom = await ensureAtomCached(dhSlug);
+          const hl = dhAtom?.highlights || [];
+          let matchTimestamp = request.timestamp || 0;
+          if (!matchTimestamp && request.text) {
+            const found = hl.find(h => {
+              if (Array.isArray(h.text) && Array.isArray(request.text)) {
+                return JSON.stringify(h.text) === JSON.stringify(request.text);
               }
-            }
-            atom.highlights = hl;
-            await setCachedAtom(dhSlug, atom);
-            // Log the unhighlight mutation
-            await appendLog({ timestamp: Date.now(), action: 'unhighlight', slug: dhSlug, matchTimestamp });
-            return hl;
+              return h.text === request.text;
+            });
+            if (found) matchTimestamp = found.timestamp || 0;
+          }
+          const effects = await addLog({
+            timestamp: Date.now(), action: 'unhighlight', slug: dhSlug, matchTimestamp
           });
+          const remaining = effects[`atom:${dhSlug}`]?.highlights || [];
           sendResponse({ success: true, highlights: remaining });
           notifyMutation('highlight', { slug: dhSlug });
           break;
@@ -1189,15 +1197,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'saveHighlights': {
           const shSlug = request.slug;
-          await withLock('atoms/' + shSlug + '.json', async () => {
-            let atom = await getCachedAtom(shSlug);
-            if (!atom) {
-              const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [shSlug] });
-              atom = resp?.atoms?.[shSlug] || {};
-            }
-            atom.highlights = request.highlights;
-            await setCachedAtom(shSlug, atom);
-            await appendLog({ timestamp: Date.now(), action: 'highlights_replace', slug: shSlug, highlights: request.highlights });
+          await ensureAtomCached(shSlug);
+          await addLog({
+            timestamp: Date.now(), action: 'highlights_replace', slug: shSlug,
+            highlights: request.highlights
           });
           sendResponse({ success: true });
           notifyMutation('highlight', { slug: shSlug });
@@ -1212,81 +1215,74 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'saveCollectionPinsById': {
-          await appendLog({
-            timestamp: Date.now(),
-            action: 'pins_replace',
-            collectionId: request.collectionId,
-            pins: request.pins
+          const ts = Date.now();
+          await addLog({
+            timestamp: ts, action: 'list',
+            id: `user/${request.collectionId}`, op: 'clear', urls: []
           });
+          if (request.pins && request.pins.length > 0) {
+            await addLog({
+              timestamp: ts + 1, action: 'list',
+              id: `user/${request.collectionId}`, op: 'add',
+              urls: request.pins.map(p => p.url)
+            });
+          }
           sendResponse({ success: true });
           notifyMutation('pins', { collectionId: request.collectionId });
           break;
         }
 
         case 'savePermanentDeletes': {
-          await chrome.storage.session.set({ permanentDeletes: request.urls });
-          await appendLog({
-            timestamp: Date.now(),
-            action: 'deletes_replace',
-            urls: request.urls
+          const ts = Date.now();
+          await addLog({
+            timestamp: ts, action: 'list',
+            id: 'permanent-deletes', op: 'clear', urls: []
           });
+          if (request.urls && request.urls.length > 0) {
+            await addLog({
+              timestamp: ts + 1, action: 'list',
+              id: 'permanent-deletes', op: 'add', urls: request.urls
+            });
+          }
           sendResponse({ success: true });
           notifyMutation('permanentDeletes');
           break;
         }
 
         case 'saveCollectionMeta': {
-          // Update session cache
-          const { collections: currentCols = [] } = await chrome.storage.session.get(['collections']);
-          const idx = currentCols.findIndex(c => c.id === request.collectionId);
-          if (idx >= 0) {
-            if (request.name !== undefined) currentCols[idx].name = request.name;
-            if (request.query !== undefined) currentCols[idx].query = request.query;
-            if (request.qbTree !== undefined) currentCols[idx].qbTree = request.qbTree;
-          } else {
-            currentCols.push({
-              id: request.collectionId,
-              name: request.name || '',
-              query: request.query || '',
-              qbTree: request.qbTree || null,
-            });
-          }
-          await chrome.storage.session.set({ collections: currentCols });
-          // Log
-          const metaEntry = { timestamp: Date.now(), action: 'collection_meta', collectionId: request.collectionId };
+          const metaEntry = { timestamp: Date.now(), action: 'list_meta', id: `user/${request.collectionId}` };
           if (request.name !== undefined) metaEntry.name = request.name;
           if (request.query !== undefined) metaEntry.query = request.query;
           if (request.qbTree !== undefined) metaEntry.qbTree = request.qbTree;
-          await appendLog(metaEntry);
+          await addLog(metaEntry);
           sendResponse({ success: true });
           notifyMutation('collections');
           break;
         }
 
         case 'deleteCollection': {
-          // Remove from session cache
-          const { collections: cols = [] } = await chrome.storage.session.get(['collections']);
-          const filtered = cols.filter(c => c.id !== request.collectionId);
-          await chrome.storage.session.set({ collections: filtered });
-          // Remove from collectionOrder
           const { collectionOrder: order = [] } = await chrome.storage.session.get(['collectionOrder']);
           const newOrder = order.filter(id => id !== request.collectionId);
-          await chrome.storage.session.set({ collectionOrder: newOrder });
-          await appendLog({ timestamp: Date.now(), action: 'set', key: 'collectionOrder', value: newOrder });
-          // Log delete
-          await appendLog({ timestamp: Date.now(), action: 'collection_delete', collectionId: request.collectionId });
+          await addLog({ timestamp: Date.now(), action: 'set', key: 'collectionOrder', value: newOrder });
+          await addLog({ timestamp: Date.now(), action: 'del_list', id: `user/${request.collectionId}` });
           sendResponse({ success: true });
           notifyMutation('collections');
           break;
         }
 
         case 'saveRecycleBin': {
-          await chrome.storage.session.set({ recycleBin: request.items });
-          await appendLog({
-            timestamp: Date.now(),
-            action: 'recycle_replace',
-            items: request.items
+          const ts = Date.now();
+          await addLog({
+            timestamp: ts, action: 'list',
+            id: 'recycle-bin', op: 'clear', urls: []
           });
+          if (request.items && request.items.length > 0) {
+            await addLog({
+              timestamp: ts + 1, action: 'list',
+              id: 'recycle-bin', op: 'add',
+              urls: request.items.map(item => item.url)
+            });
+          }
           sendResponse({ success: true });
           notifyMutation('recycleBin');
           break;

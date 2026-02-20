@@ -57,9 +57,9 @@ describe('mergeBufferIntoInteractions', () => {
 describe('extractInteractionBuffer (logBuffer format)', () => {
   it('extracts visit entries (no action field) from logBuffer', () => {
     const logBuffer = [
-      { timestamp: 1, url: 'https://a.com', title: 'A', slug: 'a', intent: '', attention: '' },
+      { timestamp: 1, url: 'https://a.com', title: 'A', slug: 'a',  attention: '' },
       { timestamp: 2, action: 'set', key: 'workspace', value: {} },
-      { timestamp: 3, url: 'https://b.com', title: 'B', slug: 'b', intent: '', attention: '' },
+      { timestamp: 3, url: 'https://b.com', title: 'B', slug: 'b',  attention: '' },
       { timestamp: 4, action: 'highlight', slug: 'a', highlight: { text: 'hi' } },
     ];
 
@@ -85,7 +85,7 @@ describe('extractInteractionBuffer (logBuffer format)', () => {
       { url: 'https://old.com', timestamp: 1, slug: 'old' },
     ];
     const logBuffer = [
-      { timestamp: 2, url: 'https://new.com', title: 'New', slug: 'new', intent: '', attention: '' },
+      { timestamp: 2, url: 'https://new.com', title: 'New', slug: 'new',  attention: '' },
       { timestamp: 3, action: 'set', key: 'workspace', value: {} },
     ];
 
@@ -118,7 +118,6 @@ describe('buildInteractionsForEngine', () => {
       url,
       title,
       timestamp: undefined,
-      setIntent: vi.fn(),
       setContent: vi.fn(),
       setAttention: vi.fn(),
     }));
@@ -128,7 +127,7 @@ describe('buildInteractionsForEngine', () => {
     const MockInteraction = makeMockInteractionClass();
     const engine = { addInteraction: vi.fn() };
     const dataList = [
-      { url: 'https://a.com', title: 'A', timestamp: 100, intent: 'test', slug: 'a', attention: '{}' },
+      { url: 'https://a.com', title: 'A', timestamp: 100,  slug: 'a', attention: '{}' },
     ];
     const contentMap = { a: '# A content' };
 
@@ -139,7 +138,6 @@ describe('buildInteractionsForEngine', () => {
 
     const obj = engine.addInteraction.mock.calls[0][0];
     expect(obj.timestamp).toBe(BigInt(100));
-    expect(obj.setIntent).toHaveBeenCalledWith('test');
     expect(obj.setContent).toHaveBeenCalledWith('# A content');
     expect(obj.setAttention).toHaveBeenCalledWith('{}');
   });
@@ -180,7 +178,6 @@ describe('buildInteractionsForEngine', () => {
     buildInteractionsForEngine(MockInteraction, engine, dataList, {});
 
     const obj = engine.addInteraction.mock.calls[0][0];
-    expect(obj.setIntent).toHaveBeenCalledWith('');
     expect(obj.setContent).toHaveBeenCalledWith('');
     expect(obj.setAttention).toHaveBeenCalledWith('');
   });
@@ -191,7 +188,7 @@ describe('buildInteractionsForEngine', () => {
     const dataList = [
       {
         url: 'https://e.com', title: 'E', timestamp: 1, slug: 'e',
-        intent: '', attention: { scrollDepth: 42, timeOnPage: 5000, clicks: 3, highlights: [] }
+         attention: { scrollDepth: 42, timeOnPage: 5000 }
       },
     ];
 

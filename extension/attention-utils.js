@@ -14,8 +14,6 @@ export function attentionStrength(att) {
   let score = 0;
   if (att.timeOnPage) score += Math.min(att.timeOnPage / 60000, 10); // minutes, cap at 10
   if (att.scrollDepth) score += att.scrollDepth / 100 * 2; // 0-2
-  if (att.clicks) score += Math.min(att.clicks, 20) / 5; // 0-4
-  if (att.highlights && att.highlights.length) score += Math.min(att.highlights.length, 5); // 0-5
   return score;
 }
 

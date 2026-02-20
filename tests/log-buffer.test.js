@@ -109,7 +109,7 @@ function makeVisit(url, timestamp) {
     title: url,
     timestamp,
     slug: url.replace(/\W/g, '-'),
-    intent: '',
+    
     attention: '',
   };
 }
@@ -253,8 +253,8 @@ describe('Log buffer', () => {
       await lb.appendVisit(makeVisit('https://a.com', 1000));
       await lb.appendLog({ timestamp: 2000, action: 'set', key: 'workspace', value: { mode: 'private' } });
       await lb.appendLog({ timestamp: 3000, action: 'highlight', slug: 'a', highlight: { text: 'hi' } });
-      await lb.appendLog({ timestamp: 4000, action: 'pins_replace', collectionId: 'c1', pins: [] });
-      await lb.appendLog({ timestamp: 5000, action: 'deletes_replace', urls: ['https://gone.com'] });
+      await lb.appendLog({ timestamp: 4000, action: 'list', id: 'user/c1', op: 'clear', urls: [] });
+      await lb.appendLog({ timestamp: 5000, action: 'list', id: 'permanent-deletes', op: 'add', urls: ['https://gone.com'] });
 
       const { logBuffer } = await storage.get(['logBuffer']);
       expect(logBuffer).toHaveLength(5);
@@ -266,8 +266,8 @@ describe('Log buffer', () => {
       // Mutations: have action
       expect(logBuffer[1].action).toBe('set');
       expect(logBuffer[2].action).toBe('highlight');
-      expect(logBuffer[3].action).toBe('pins_replace');
-      expect(logBuffer[4].action).toBe('deletes_replace');
+      expect(logBuffer[3].action).toBe('list');
+      expect(logBuffer[4].action).toBe('list');
     });
 
     it('appendVisit stringifies object attention', async () => {

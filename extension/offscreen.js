@@ -10,7 +10,7 @@
 // and call its methods.
 import { FileSystemStorage } from './filesystem-storage.js';
 import { generateSlugFromUrl } from './utils.js';
-import { applyLogToSettings, applyLogToAtom, applyLogToPins, applyLogToDeletes, applyLogToRecycleBin, applyLogToParentIndex } from './replay.js';
+import { effectOf, defaultEntity } from './replay.js';
 
 console.log('Offscreen document loaded');
 
@@ -128,6 +128,11 @@ async function handleRequest(request) {
         const atoms = await fsStorage.loadAtomBatch(request.slugs);
         console.debug(`[I/O] loadAtomBatch: ${request.slugs.length} slugs in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, atoms };
+      }
+
+      case 'atomExists': {
+        const exists = await fsStorage.atomExists(request.slug);
+        return { success: true, exists };
       }
 
       case 'loadPageDetail': {
@@ -335,63 +340,88 @@ async function drainQueue() {
     // Group entries by date for batch JSONL append
     const entriesByDate = new Map();
 
-    // Group entries by entity key for efficient checkpointing
-    const settingsEntries = [];
-    const atomEntries = new Map(); // slug → [entries]
-    const pinsEntries = new Map(); // collectionId → [entries] (pins_replace + collection_meta + collection_delete)
-    const deletesEntries = [];
-    const recycleBinEntries = [];
+    // ── Round cache: entity key → entity (or null for non-existent atoms) ──
+    // Populated lazily from filesystem on first access per key.
+    // After processing all entries, dirty keys are flushed back to disk.
+    const roundCache = new Map();   // key → entity | null
+    const dirtyKeys = new Set();
+
+    // Filesystem existence cache for atoms (avoids repeated disk checks)
+    const atomExistsCache = new Map();
+    const atomExistsCached = async (slug) => {
+      let v = atomExistsCache.get(slug);
+      if (v === undefined) {
+        v = await fsStorage.atomExists(slug);
+        atomExistsCache.set(slug, v);
+      }
+      return v;
+    };
+
+    // Load an entity into roundCache if not already present
+    const ensureLoaded = async (key) => {
+      if (roundCache.has(key)) return;
+      if (key.startsWith('atom:')) {
+        const slug = key.slice(5);
+        const exists = await atomExistsCached(slug);
+        if (exists) {
+          const atom = (await fsStorage.loadAtom(slug)) || defaultEntity(key);
+          if (!atom.slug) atom.slug = slug;
+          roundCache.set(key, atom);
+        } else {
+          roundCache.set(key, null);
+        }
+      } else if (key === 'settings') {
+        let s = await fsStorage.loadSettings();
+        if (!s.timestamp) s.timestamp = 0;
+        roundCache.set(key, s);
+      } else if (key.startsWith('list:user/')) {
+        const cid = key.slice('list:user/'.length);
+        roundCache.set(key, await fsStorage.loadCollectionPinsEntity(cid));
+      } else if (key === 'list:recycle-bin') {
+        roundCache.set(key, await fsStorage.loadRecycleBinEntity());
+      } else if (key === 'list:permanent-deletes') {
+        roundCache.set(key, await fsStorage.loadPermanentDeletesEntity());
+      } else if (key === 'index:parent-index') {
+        try {
+          roundCache.set(key, await fsStorage.loadParentIndex());
+        } catch {
+          roundCache.set(key, defaultEntity(key));
+        }
+      }
+    };
+
+    // ── Sequential replay: process entries in log order ──
+    // load closure: reads from round cache, populating lazily from filesystem
+    const load = async (key) => {
+      await ensureLoaded(key);
+      return roundCache.get(key) ?? null;
+    };
 
     for (const entry of logBuffer) {
-      // Group by date for JSONL (skip internal signals: ensure_checkpoint, add_child)
-      if (entry.action !== 'ensure_checkpoint' && entry.action !== 'add_child') {
-        const dateKey = dateKeyFromTimestamp(entry.timestamp);
-        if (!entriesByDate.has(dateKey)) entriesByDate.set(dateKey, []);
-        entriesByDate.get(dateKey).push(entry);
+      // Group by date for JSONL
+      const dateKey = dateKeyFromTimestamp(entry.timestamp);
+      if (!entriesByDate.has(dateKey)) entriesByDate.set(dateKey, []);
+      entriesByDate.get(dateKey).push(entry);
+
+      // Apply entry via unified effectOf
+      const updated = await effectOf(entry, load);
+
+      // Write updated entities back to round cache
+      for (const [key, entity] of Object.entries(updated)) {
+        const prev = roundCache.get(key);
+        if (entity !== prev) {
+          roundCache.set(key, entity);
+          if (entity !== null) dirtyKeys.add(key);
+          // Update atomExistsCache when atom transitions null → non-null
+          if (key.startsWith('atom:') && prev === null && entity !== null) {
+            atomExistsCache.set(key.slice(5), true);
+          }
+        }
       }
 
-      // Categorize for entity checkpoint
-      if (!entry.action) {
-        // Visit entry
-        if (entry.slug) {
-          if (!atomEntries.has(entry.slug)) atomEntries.set(entry.slug, []);
-          atomEntries.get(entry.slug).push(entry);
-        }
-        if (entry.timestamp > maxInteractionTimestamp) {
-          maxInteractionTimestamp = entry.timestamp;
-        }
-      } else if (entry.action === 'set') {
-        settingsEntries.push(entry);
-      } else if (entry.action === 'highlight' || entry.action === 'unhighlight' || entry.action === 'highlights_replace') {
-        if (entry.slug) {
-          if (!atomEntries.has(entry.slug)) atomEntries.set(entry.slug, []);
-          atomEntries.get(entry.slug).push(entry);
-        }
-      } else if (entry.action === 'capture') {
-        if (entry.slug) {
-          if (!atomEntries.has(entry.slug)) atomEntries.set(entry.slug, []);
-          atomEntries.get(entry.slug).push(entry);
-        }
-      } else if (entry.action === 'ensure_checkpoint') {
-        if (entry.slug) {
-          if (!atomEntries.has(entry.slug)) atomEntries.set(entry.slug, []);
-          atomEntries.get(entry.slug).push(entry);
-        }
-      } else if (entry.action === 'add_child') {
-        if (entry.slug) {
-          if (!atomEntries.has(entry.slug)) atomEntries.set(entry.slug, []);
-          atomEntries.get(entry.slug).push(entry);
-        }
-      } else if (entry.action === 'pins_replace' || entry.action === 'collection_meta' || entry.action === 'collection_delete') {
-        const cid = entry.collectionId;
-        if (!pinsEntries.has(cid)) pinsEntries.set(cid, []);
-        pinsEntries.get(cid).push(entry);
-      } else if (entry.action === 'deletes_replace') {
-        deletesEntries.push(entry);
-      } else if (entry.action === 'recycle_replace') {
-        recycleBinEntries.push(entry);
+      if (!entry.action && entry.timestamp > maxInteractionTimestamp) {
+        maxInteractionTimestamp = entry.timestamp;
       }
-
       lastTimestamp = entry.timestamp;
     }
 
@@ -415,145 +445,81 @@ async function drainQueue() {
       }
     }
 
-    // 2. Checkpoint entities (one read per entity)
-    // Settings
-    if (settingsEntries.length > 0) {
-      await withLock('settings.json', async () => {
-        let settings = await fsStorage.loadSettings();
-        if (!settings.timestamp) settings.timestamp = 0;
-        for (const entry of settingsEntries) {
-          settings = applyLogToSettings(settings, entry);
-        }
-        await fsStorage.saveSettings(settings);
-      });
-    }
-
-    // Atoms — selective checkpointing
-    // Determine which slugs deserve a checkpoint (atom file on disk)
-    const RICH_ACTIONS = new Set(['highlight', 'unhighlight', 'highlights_replace', 'capture', 'ensure_checkpoint', 'add_child']);
-    const slugsToCheckpoint = new Set();
-
-    for (const [slug, entries] of atomEntries) {
-      // Always checkpoint if atom already exists on disk
-      if (await fsStorage.atomExists(slug)) {
-        slugsToCheckpoint.add(slug);
-        continue;
-      }
-      // Rich data actions (includes add_child) → checkpoint
-      if (entries.some(e => e.action && RICH_ACTIONS.has(e.action))) {
-        slugsToCheckpoint.add(slug);
-        continue;
-      }
-    }
-
-    // Multi-day visit check for remaining unchecked slugs
-    const uncheckedSlugs = [...atomEntries.keys()].filter(s => !slugsToCheckpoint.has(s));
-    if (uncheckedSlugs.length > 0) {
-      try {
-        const multiDaySlugs = await fsStorage.checkMultiDayVisits(uncheckedSlugs, 30);
-        for (const slug of multiDaySlugs) slugsToCheckpoint.add(slug);
-      } catch (e) {
-        console.warn('checkMultiDayVisits failed:', e.message);
-      }
-    }
-
-    // Build URL→title map from all entries in this batch (for {url,title} resolution)
+    // 2. Flush dirty entities from round cache to disk
+    // Build URL→title map for parent/children resolution
     const titleByUrl = new Map();
     for (const entry of logBuffer) {
       if (entry.url && entry.title) titleByUrl.set(entry.url, entry.title);
-      if (entry.childUrl && entry.childTitle) titleByUrl.set(entry.childUrl, entry.childTitle);
     }
 
-    // Checkpoint only selected slugs
-    for (const [slug, entries] of atomEntries) {
-      if (!slugsToCheckpoint.has(slug)) continue;
-      await withLock('atoms/' + slug + '.json', async () => {
-        let atom = (await fsStorage.loadAtom(slug)) || { slug, timestamp: 0, highlights: [], parents: [], children: [] };
-        if (!atom.slug) atom.slug = slug;
-        for (const entry of entries) {
-          atom = applyLogToAtom(atom, entry);
-        }
-        // Resolve parents/children: URL → slug (checkpointed) or {url,title} (non-checkpointed)
-        for (const field of ['parents', 'children']) {
-          if (atom[field] && atom[field].length > 0) {
-            const resolved = [];
-            for (const ref of atom[field]) {
-              if (typeof ref !== 'string') { resolved.push(ref); continue; } // already {url,title}
-              if (!ref.startsWith('http')) { resolved.push(ref); continue; } // already a slug
-              const refSlug = generateSlugFromUrl(ref);
-              if (slugsToCheckpoint.has(refSlug) || await fsStorage.atomExists(refSlug)) {
-                resolved.push(refSlug);
-              } else {
-                resolved.push({ url: ref, title: titleByUrl.get(ref) || '' });
+    // Collect all checkpointed atom slugs for parent/children resolution
+    const checkpointedSlugs = new Set();
+    for (const key of dirtyKeys) {
+      if (key.startsWith('atom:')) checkpointedSlugs.add(key.slice(5));
+    }
+
+    for (const key of dirtyKeys) {
+      const entity = roundCache.get(key);
+      if (entity === null) continue;
+
+      if (key.startsWith('atom:')) {
+        const slug = key.slice(5);
+        await withLock('atoms/' + slug + '.json', async () => {
+          const atom = entity;
+          // Resolve parents/children: URL → slug (checkpointed) or {url,title}
+          for (const field of ['parents', 'children']) {
+            if (atom[field] && atom[field].length > 0) {
+              const resolved = [];
+              for (const ref of atom[field]) {
+                if (typeof ref !== 'string') { resolved.push(ref); continue; }
+                if (!ref.startsWith('http')) { resolved.push(ref); continue; }
+                const refSlug = generateSlugFromUrl(ref);
+                if (checkpointedSlugs.has(refSlug) || await fsStorage.atomExists(refSlug)) {
+                  resolved.push(refSlug);
+                } else {
+                  resolved.push({ url: ref, title: titleByUrl.get(ref) || '' });
+                }
               }
+              atom[field] = resolved;
             }
-            atom[field] = resolved;
           }
-        }
-        await fsStorage.saveAtom(slug, atom);
-      });
-    }
-
-    // Checkpoint parent-index: accumulate referrer visits for non-checkpointed pages, prune checkpointed ones
-    const visitEntriesWithReferrers = logBuffer.filter(e => !e.action && e.referrer && e.url);
-    if (visitEntriesWithReferrers.length > 0) {
-      await withLock('lists/index/parent-index.json', async () => {
-        let parentIndex;
-        try {
-          parentIndex = await fsStorage.loadParentIndex();
-        } catch {
-          parentIndex = { timestamp: 0, index: {} };
-        }
-        for (const entry of visitEntriesWithReferrers) {
-          parentIndex = applyLogToParentIndex(parentIndex, entry);
-        }
-        // Remove entries for URLs whose slugs were just checkpointed (their parents are now in atom.parents)
-        for (const url of Object.keys(parentIndex.index)) {
-          const urlSlug = generateSlugFromUrl(url);
-          if (slugsToCheckpoint.has(urlSlug)) {
-            delete parentIndex.index[url];
+          await fsStorage.saveAtom(slug, atom);
+        });
+      } else if (key === 'settings') {
+        await withLock('settings.json', async () => {
+          await fsStorage.saveSettings(entity);
+        });
+      } else if (key.startsWith('list:user/')) {
+        const cid = key.slice('list:user/'.length);
+        await withLock('lists/user/' + cid + '.json', async () => {
+          if (entity.deleted) {
+            await fsStorage.deleteCollectionFile(cid);
+          } else {
+            await fsStorage.saveCollectionMeta(cid, entity, entity.timestamp);
           }
-        }
-        const fh = await fsStorage.resolveFile('lists/index/parent-index.json', { create: true });
-        await fsStorage.writeJson(fh, parentIndex);
-      });
-    }
-
-    // Collection entities (pins_replace, collection_meta, collection_delete)
-    for (const [collectionId, entries] of pinsEntries) {
-      await withLock('lists/user/' + collectionId + '.json', async () => {
-        let entity = await fsStorage.loadCollectionPinsEntity(collectionId);
-        for (const entry of entries) {
-          entity = applyLogToPins(entity, entry);
-        }
-        if (entity.deleted) {
-          await fsStorage.deleteCollectionFile(collectionId);
-        } else {
-          await fsStorage.saveCollectionMeta(collectionId, entity, entity.timestamp);
-        }
-      });
-    }
-
-    // Recycle bin
-    if (recycleBinEntries.length > 0) {
-      await withLock('lists/recycle-bin.json', async () => {
-        let entity = await fsStorage.loadRecycleBinEntity();
-        for (const entry of recycleBinEntries) {
-          entity = applyLogToRecycleBin(entity, entry);
-        }
-        await fsStorage.saveRecycleBin(entity.items, entity.timestamp);
-      });
-    }
-
-    // Permanent deletes
-    if (deletesEntries.length > 0) {
-      await withLock('lists/permanent-deletes.json', async () => {
-        let entity = await fsStorage.loadPermanentDeletesEntity();
-        for (const entry of deletesEntries) {
-          entity = applyLogToDeletes(entity, entry);
-        }
-        await fsStorage.savePermanentDeletes(entity.urls, entity.timestamp);
-      });
+        });
+      } else if (key === 'list:recycle-bin') {
+        await withLock('lists/recycle-bin.json', async () => {
+          await fsStorage.saveRecycleBin(entity.items, entity.timestamp);
+        });
+      } else if (key === 'list:permanent-deletes') {
+        await withLock('lists/permanent-deletes.json', async () => {
+          await fsStorage.savePermanentDeletes(entity.urls, entity.timestamp);
+        });
+      } else if (key === 'index:parent-index') {
+        await withLock('lists/index/parent-index.json', async () => {
+          // Prune entries for URLs whose atoms were just checkpointed
+          const idx = { ...entity, index: { ...entity.index } };
+          for (const url of Object.keys(idx.index)) {
+            const urlSlug = generateSlugFromUrl(url);
+            if (checkpointedSlugs.has(urlSlug)) {
+              delete idx.index[url];
+            }
+          }
+          const fh = await fsStorage.resolveFile('lists/index/parent-index.json', { create: true });
+          await fsStorage.writeJson(fh, idx);
+        });
+      }
     }
 
     // Piggyback gateway save on interaction drain
