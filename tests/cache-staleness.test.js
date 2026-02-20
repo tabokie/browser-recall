@@ -948,6 +948,33 @@ describe('Cache staleness', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // T16: pin mutation notification does not revert in-memory pin changes
+  // ---------------------------------------------------------------------------
+  it('T16: explore pin toggle survives mutation notification from background', async () => {
+    populateCache();
+
+    await importOptions();
+    await tick(100);
+
+    // Default view is Explore with 2 pins
+    expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
+    expect(pinnedOnlyRows().length).toBe(2);
+
+    // Simulate background mutation notification for pins
+    // This is what happens after saveCollectionPinsById resolves:
+    // background sends notifyMutation('pins', { collectionId: 'explore' })
+    const listeners = chrome.runtime.onMessage.addListener.mock.calls.map(c => c[0]);
+    for (const listener of listeners) {
+      listener({ action: 'mutation', type: 'pins', collectionId: 'explore' });
+    }
+    await tick(500);
+
+    // The mutation notification should NOT cause the pins to disappear or flicker.
+    // The in-memory allCollectionPins should be preserved for the active explore view.
+    expect(pinnedOnlyRows().length, 'pinned rows should be preserved after mutation notification').toBe(2);
+  });
+
+  // ---------------------------------------------------------------------------
   // T15: empty session cache (disable/re-enable) still loads collections and recycle bin
   // ---------------------------------------------------------------------------
   it('T15: empty session cache still loads collections and recycle bin via fallback', async () => {

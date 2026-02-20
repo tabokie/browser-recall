@@ -556,64 +556,17 @@ class FileSystemStorage {
     return { domains, newWatermark };
   }
 
-  // Load referrer index from lists/referrer-index.json
-  async loadReferrerIndex() {
+  // Load parent-index from lists/index/parent-index.json
+  async loadParentIndex() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
     try {
-      const fileHandle = await this.resolveFile('lists/referrer-index.json');
+      const fileHandle = await this.resolveFile('lists/index/parent-index.json');
       return this.readJson(fileHandle);
     } catch {
-      return { watermark: 0, index: {} };
+      return { timestamp: 0, index: {} };
     }
-  }
-
-  // Scan JSONL files after watermark to build incremental referrer index entries
-  async buildReferrerIndexAfterWatermark(watermark, existingIndex) {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to read directory');
-    }
-
-    const index = { ...existingIndex };
-    let newWatermark = watermark;
-
-    const historyDir = await this.resolveDir('history');
-    for await (const entry of historyDir.values()) {
-      if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
-        if (watermark > 0) {
-          const dateMatch = entry.name.match(/^(\d{4}-\d{2}-\d{2})\.jsonl$/);
-          if (dateMatch) {
-            const fileEndOfDay = new Date(dateMatch[1] + 'T23:59:59.999Z').getTime();
-            if (fileEndOfDay < watermark) continue;
-          }
-        }
-
-        const file = await entry.getFile();
-        const text = await file.text();
-        const lines = text.split('\n').filter(line => line.trim());
-
-        for (const line of lines) {
-          try {
-            const interaction = JSON.parse(line);
-            if (!interaction.referrer || !interaction.url || !interaction.timestamp) continue;
-            if (interaction.timestamp <= watermark) continue;
-
-            if (interaction.timestamp > newWatermark) {
-              newWatermark = interaction.timestamp;
-            }
-
-            const ref = interaction.referrer;
-            if (!index[ref]) index[ref] = [];
-            if (!index[ref].includes(interaction.url)) {
-              index[ref].push(interaction.url);
-            }
-          } catch { /* skip invalid lines */ }
-        }
-      }
-    }
-
-    return { index, newWatermark };
   }
 
   // Load all highlights from atoms/{slug}.json for every slug
@@ -739,6 +692,53 @@ class FileSystemStorage {
     } catch (error) {
       return [];
     }
+  }
+
+  // Check if an atom file exists on disk
+  async atomExists(slug) {
+    try {
+      await this.resolveFile('atoms/' + slug + '.json');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Scan recent JSONL files to find slugs visited on 2+ distinct days.
+  // Returns Set of slug strings.
+  async checkMultiDayVisits(slugs, days) {
+    const slugSet = new Set(slugs);
+    const visitDays = new Map(); // slug → Set<YYYY-MM-DD>
+
+    const historyDir = await this.resolveDir('history');
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    for await (const entry of historyDir.values()) {
+      if (entry.kind !== 'file' || !entry.name.endsWith('.jsonl')) continue;
+      const dateStr = entry.name.replace('.jsonl', '');
+      if (dateStr < cutoffStr) continue;
+
+      const file = await entry.getFile();
+      const text = await file.text();
+      for (const line of text.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const item = JSON.parse(line);
+          if (!item.slug || item.action) continue; // only visit entries
+          if (!slugSet.has(item.slug)) continue;
+          if (!visitDays.has(item.slug)) visitDays.set(item.slug, new Set());
+          visitDays.get(item.slug).add(dateStr);
+        } catch { /* skip malformed */ }
+      }
+    }
+
+    const result = new Set();
+    for (const [slug, days] of visitDays) {
+      if (days.size >= 2) result.add(slug);
+    }
+    return result;
   }
 
   // Load atom metadata from atoms/{slug}.json

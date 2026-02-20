@@ -843,14 +843,8 @@ function buildVisitMessage() {
     intent: JSON.stringify(intent),
     attention: attentionData
   };
-  try {
-    const ref = document.referrer;
-    if (ref) {
-      const refOrigin = new URL(ref).origin;
-      const curOrigin = new URL(url).origin;
-      if (refOrigin !== curOrigin) msg.referrer = ref;
-    }
-  } catch {}
+  const ref = document.referrer;
+  if (ref) msg.referrer = ref;
   return msg;
 }
 

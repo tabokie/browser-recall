@@ -288,12 +288,29 @@ async function hydrateCache() {
     existingKey: 'existingDomains', label: 'Gateway domains'
   });
 
-  // 6. Load and incrementally process referrer index
-  await hydrateIncrementalIndex({
-    loadAction: 'loadReferrerIndex', processAction: 'buildReferrerIndexIncremental',
-    sessionKey: 'referrerIndex', savePath: 'lists/referrer-index.json', dataKey: 'index',
-    existingKey: 'existingIndex', label: 'Referrer index'
-  });
+  // 6. Load parent-index and replay pending logBuffer entries
+  try {
+    const piResp = await requestOffscreen({ action: 'loadParentIndex' });
+    let parentIndex = { timestamp: 0, index: {} };
+    if (piResp?.success) {
+      parentIndex = { timestamp: piResp.timestamp || 0, index: piResp.index || {} };
+    }
+    // Replay pending logBuffer visit entries with referrers
+    await ensureLogBuffer();
+    for (const entry of logBuffer) {
+      if (!entry.action && entry.referrer && entry.url && entry.timestamp > parentIndex.timestamp) {
+        const parentSlug = generateSlugFromUrl(entry.referrer);
+        if (!parentIndex.index[entry.url]) parentIndex.index[entry.url] = [];
+        if (!parentIndex.index[entry.url].includes(parentSlug)) {
+          parentIndex.index[entry.url].push(parentSlug);
+        }
+      }
+    }
+    await chrome.storage.session.set({ parentIndex });
+    console.log('Parent-index hydrated:', Object.keys(parentIndex.index).length, 'entries');
+  } catch (error) {
+    console.warn('Parent-index hydration failed:', error.message);
+  }
 }
 
 async function hydrateIncrementalIndex({ loadAction, processAction, sessionKey, savePath, dataKey, existingKey, label }) {
@@ -427,48 +444,6 @@ async function fetchAndCreateGatewayRoot(origin) {
     console.log(`Gateway: created synthetic root for ${origin}`);
   } catch (e) {
     console.warn(`Gateway: failed to fetch root for ${origin}:`, e.message);
-  }
-}
-
-// ─── Referrer Tracking ───────────────────────────────────────────────
-
-const REFERRER_CAP = 50;
-
-async function updateAtomReferrers(slug, referrer) {
-  try {
-    await withLock('atoms/' + slug + '.json', async () => {
-      let atom = await getCachedAtom(slug);
-      if (!atom) {
-        const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [slug] });
-        atom = resp?.atoms?.[slug] || {};
-      }
-      const referrers = atom.referrers || [];
-      if (!referrers.includes(referrer)) {
-        referrers.push(referrer);
-        if (referrers.length > REFERRER_CAP) referrers.shift();
-      }
-      atom.referrers = referrers;
-      await setCachedAtom(slug, atom);
-      // Derived data — save directly via offscreen, not logged
-      await requestOffscreen({ action: 'saveJson', path: 'atoms/' + slug + '.json', data: atom });
-    });
-  } catch (e) {
-    console.warn('updateAtomReferrers failed:', e.message);
-  }
-}
-
-async function updateReferrerIndex(referrerUrl, childUrl) {
-  try {
-    const { referrerIndex = {} } = await chrome.storage.session.get(['referrerIndex']);
-    if (!referrerIndex[referrerUrl]) referrerIndex[referrerUrl] = [];
-    const children = referrerIndex[referrerUrl];
-    if (!children.includes(childUrl)) {
-      children.push(childUrl);
-      if (children.length > REFERRER_CAP) children.shift();
-    }
-    await chrome.storage.session.set({ referrerIndex });
-  } catch (e) {
-    console.warn('updateReferrerIndex failed:', e.message);
   }
 }
 
@@ -688,22 +663,68 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             let referrer = request.referrer;
             if (!referrer && sender.tab?.id != null) {
               const bgRef = getReferrer(sender.tab.id);
-              if (bgRef) {
-                try {
-                  const refOrigin = new URL(bgRef).origin;
-                  const curOrigin = new URL(url).origin;
-                  if (refOrigin !== curOrigin) referrer = bgRef;
-                } catch {}
-              }
+              if (bgRef) referrer = bgRef;
             }
             if (referrer) interaction.referrer = referrer;
 
             await appendVisit(interaction);
 
-            // Update atom referrers (non-blocking)
+            // Event-source referrer relationships (non-blocking)
             if (referrer) {
-              updateAtomReferrers(slug, referrer);
-              updateReferrerIndex(referrer, url);
+              (async () => {
+                try {
+                  const refSlug = generateSlugFromUrl(referrer);
+
+                  // Ensure parent gets checkpointed (it has children)
+                  const cachedRefAtom = await getCachedAtom(refSlug);
+                  if (!cachedRefAtom) {
+                    await appendLog({
+                      timestamp: Date.now(),
+                      action: 'ensure_checkpoint',
+                      slug: refSlug,
+                      url: referrer,
+                      title: ''
+                    });
+                  }
+
+                  // Event-source: add child to parent atom
+                  await appendLog({
+                    timestamp: Date.now(),
+                    action: 'add_child',
+                    slug: refSlug,
+                    childSlug: slug,
+                    childUrl: url,
+                    childTitle: title
+                  });
+
+                  // Instant visibility: update session caches
+                  // Parent atom: add child URL
+                  let refAtom = cachedRefAtom || {};
+                  const refChildren = [...(refAtom.children || [])];
+                  if (!refChildren.some(c => (typeof c === 'string' ? c === url : c.url === url))) {
+                    refChildren.push(url);
+                    await setCachedAtom(refSlug, { ...refAtom, children: refChildren });
+                  }
+                  // Child atom: add parent URL (if cached)
+                  let childAtom = await getCachedAtom(slug);
+                  if (childAtom) {
+                    const parents = [...(childAtom.parents || [])];
+                    if (!parents.some(p => (typeof p === 'string' ? p === referrer : p.url === referrer))) {
+                      parents.push(referrer);
+                      await setCachedAtom(slug, { ...childAtom, parents });
+                    }
+                  }
+                  // Parent-index: add parent for child URL (session cache)
+                  const { parentIndex = { index: {} } } = await chrome.storage.session.get(['parentIndex']);
+                  if (!parentIndex.index[url]) parentIndex.index[url] = [];
+                  if (!parentIndex.index[url].includes(refSlug)) {
+                    parentIndex.index[url].push(refSlug);
+                    await chrome.storage.session.set({ parentIndex });
+                  }
+                } catch (e) {
+                  console.warn('Referrer tracking failed:', e.message);
+                }
+              })();
             }
 
             // Update gateway domain registry (non-blocking)
@@ -984,19 +1005,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const url = request.url;
             const slug = generateSlugFromUrl(url);
 
-            // Parents: referrers from atom
+            // Load atom
             let atom = await getCachedAtom(slug);
             if (!atom) {
               const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [slug] });
               atom = resp?.atoms?.[slug] || {};
             }
-            const parentReferrers = atom.referrers || [];
+
+            // Resolve mixed-format refs: slug → URL via loadAtomBatch, URL/{url,title} → use directly
+            async function resolveRefs(refs) {
+              const urls = [];
+              const slugsToLoad = [];
+              for (const ref of refs) {
+                if (typeof ref === 'object') { urls.push(ref.url); continue; }
+                if (ref.startsWith('http')) { urls.push(ref); continue; }
+                slugsToLoad.push(ref); // slug
+              }
+              if (slugsToLoad.length > 0) {
+                const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: slugsToLoad });
+                for (const s of slugsToLoad) {
+                  const a = resp?.atoms?.[s];
+                  if (a && a.url) urls.push(a.url);
+                }
+              }
+              return urls;
+            }
+
+            // Parents: from atom.parents, fallback to parentIndex for non-checkpointed pages
+            let parentRefs = atom.parents || [];
+            if (parentRefs.length === 0) {
+              const { parentIndex = { index: {} } } = await chrome.storage.session.get(['parentIndex']);
+              parentRefs = parentIndex.index[url] || []; // parentIndex stores slugs
+            }
+            const parentReferrers = await resolveRefs(parentRefs);
 
             // Parents: collections containing this URL
             const parentCollections = [];
             const { collections: colSettings } = await chrome.storage.session.get(['collections']);
             const allCols = colSettings || [];
-            // Check pinned membership
             for (const col of allCols) {
               const colCacheKey = 'colCache:' + col.id;
               const cached = (await chrome.storage.session.get(colCacheKey))[colCacheKey];
@@ -1008,9 +1054,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               }
             }
 
-            // Children: from referrer index
-            const { referrerIndex = {} } = await chrome.storage.session.get(['referrerIndex']);
-            const children = referrerIndex[url] || [];
+            // Children: from atom.children + parentIndex inverse lookup
+            const childRefs = atom.children || [];
+            let children = await resolveRefs(childRefs);
+            // Also check parentIndex for non-checkpointed children
+            const { parentIndex: piForChildren = { index: {} } } = await chrome.storage.session.get(['parentIndex']);
+            for (const [childUrl, pSlugs] of Object.entries(piForChildren.index)) {
+              if (pSlugs.includes(slug) && !children.includes(childUrl)) {
+                children.push(childUrl);
+              }
+            }
 
             sendResponse({
               success: true,
@@ -1024,6 +1077,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         // ── Writes (session cache + log buffer) ──
+
+        case 'ensureCheckpoint': {
+          const ecSlug = request.slug || generateSlugFromUrl(request.url);
+          await appendLog({
+            timestamp: Date.now(),
+            action: 'ensure_checkpoint',
+            slug: ecSlug,
+            url: request.url,
+            title: request.title || ''
+          });
+          sendResponse({ success: true });
+          break;
+        }
 
         case 'saveSettings': {
           const s = request.settings;

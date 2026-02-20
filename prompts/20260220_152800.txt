@@ -1,0 +1,37 @@
+- How is the referer url extracted?
+- What do you mean "same-origin"?
+- I want to keep intra-site navigation.
+- For some site, the title changes, and I can see the latest title in popup UI, but in Explore UI the title is still the old one.
+- While at this, let's rework a few things.
+
+1. Not all pages are saved as json checkpoint file, that would be too many files. Instead, we only save files of pages that (a) have rich data such as captures, highlights, notes, (b) are visited in multiple days. During log buffer replay, for each URL visit, we check if there's an existing checkpoint, if not, we check if it appears in history files before. The second check is expensive, so we only run it against recent history (e.g. 30d).
+1.a. If a page is opened directly from Portal UI, we immediately know it should have a checkpoint file, even if the last visit is ancient.
+2. For page that has checkpoint, we save the dates (small integer) that it is visited in the checkpoint as an array.
+3. For page that has checkpoint, there is only one version of data globally (checkpoint + log buffer). When displaying full history full logs, we don't use the content stored in the logs, instead we use the URL to find the latest version atom.
+4. During rendering history, we maintain a set of rendered pages and perform dedup. But this set is reset on date boundaries. In effect, we render the last visit of a site in one day, and the same site can appear multiple times on different days.
+- Another thing. If a page has children, it should have checkpoint too. A page can be referenced by other pages in their referrer fields. If a page has no checkpoint, we need to reference it using (url + title). Otherwise, we reference it using slug.
+- Have you run the migration?
+- Why is "search-douban-movie-subject-se-nksbdj.json" kept?
+- No, a page should be checkpoint if it has children, regardless of whether they are checkpointed or not. Abort your current task.
+- Here is an issue, I cannot see a page's parents on the focus UI now, if this page is not checkpointed. I think: (a) both parents and children should be saved in checkpoint files (not referers, but parents & children), (b) for page that doesn't have checkpoint, we need to keep an index file of url->parent_slugs, this index file itself follows the checkpoint logic and replayed using log buffer, (c) when a page first becomes checkpointed, we remember to remove it from index file.
+- Move index json to a folder `lists/index/`.
+- Continue the plan
+- The parents, children of checkpointed pages are not updated (both during migration and during new interactions). When I focus on the child page (not checkpointed), I can see its parent, but re-focusing on the parent I don't see any children.
+- No, I am saying checkpointed pages have issues, not non-checkpointed pages.
+- No, earlier I said, pages that have no checkpoints should be referenced using { url, title }, not slug. There are two cases where we render non-checkpointed pages: (a) in history, we use the history log to construct an atom, this atom is not cached, (b) in focus UI as a reference, we use the reference { url, title } to construct an atom, without timestamp etc. This atom is also not cached.
+- Reload token
+- Now let's check again the migration. For "zhihu-ybcruu.json", I expect it to have many children. For "zhuanlan-zhihu-p-2007147036185-y40fkz" capture directory, I expect there is a checkpoint file. Both of these expectations doesn't hold right now.
+- Actually, let's ignore the first issue. Just look at the second one.
+- A few issues when I pin a page in Explore: (a) pinning it or unpinning it triggers a page flicker, but the pinned list is not updated, I have to fully refresh portal to see the pins, (b) the parents/children of pinned pages are not properly calculated after I added new pins.
+- BTW, no need to show a count hint for query blocks.
+- Reload token
+- For (c), remove count hint for all blocks. For (a), the list is still not updated after I pin or unpin.
+- A few other issues: (a) When I change pins, the explore UI states should be preserved (e.g. scroll position, query block selection), (b) When I add a pin, the "children of pins" still shows only children of the old pin. (c) Pinning inside focus UI doesn't work, and the UI in the background of focus UI should change as well.
+- I still couldn't see parents of a pin using query block, even though its parent shows up in focus UI.
+- Using the current portal-data history, I see there is a mysterious "Untitled" page with no URL at the front of explore results. What is it?
+- No, the detail is empty. And I deleted it and look at permenant-deletes, the URL is indeed empty string. Also, I have no way to truly delete it, the Untitled shows up regardless of being deleted or not.
+- One last thing. Remember the day-wise dedup logic? Only reset the dedup set when we are rendering full history. For filtered results (e.g. query blocks), perform global dedup.
+- In global dedup mode, selecting a page will highlight all visited dates on the attention bar chart.
+- Reloading explore UI should preserve query blocks, just like in collection UI.
+- Finish up
+- only 2

@@ -9,7 +9,8 @@
 // Access API requires a document to store FileSystemDirectoryHandle in IndexedDB
 // and call its methods.
 import { FileSystemStorage } from './filesystem-storage.js';
-import { applyLogToSettings, applyLogToAtom, applyLogToPins, applyLogToDeletes, applyLogToRecycleBin } from './replay.js';
+import { generateSlugFromUrl } from './utils.js';
+import { applyLogToSettings, applyLogToAtom, applyLogToPins, applyLogToDeletes, applyLogToRecycleBin, applyLogToParentIndex } from './replay.js';
 
 console.log('Offscreen document loaded');
 
@@ -191,18 +192,11 @@ async function handleRequest(request) {
         return { success: true, ...result };
       }
 
-      case 'loadReferrerIndex': {
+      case 'loadParentIndex': {
         const t0 = performance.now();
-        const data = await fsStorage.loadReferrerIndex();
-        console.debug(`[I/O] loadReferrerIndex: ${(performance.now() - t0).toFixed(1)}ms`);
+        const data = await fsStorage.loadParentIndex();
+        console.debug(`[I/O] loadParentIndex: ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, ...data };
-      }
-
-      case 'buildReferrerIndexIncremental': {
-        const result = await fsStorage.buildReferrerIndexAfterWatermark(
-          request.watermark, request.existingIndex
-        );
-        return { success: true, ...result };
       }
 
       case 'listInteractionFiles': {
@@ -349,10 +343,12 @@ async function drainQueue() {
     const recycleBinEntries = [];
 
     for (const entry of logBuffer) {
-      // Group by date for JSONL
-      const dateKey = dateKeyFromTimestamp(entry.timestamp);
-      if (!entriesByDate.has(dateKey)) entriesByDate.set(dateKey, []);
-      entriesByDate.get(dateKey).push(entry);
+      // Group by date for JSONL (skip internal signals: ensure_checkpoint, add_child)
+      if (entry.action !== 'ensure_checkpoint' && entry.action !== 'add_child') {
+        const dateKey = dateKeyFromTimestamp(entry.timestamp);
+        if (!entriesByDate.has(dateKey)) entriesByDate.set(dateKey, []);
+        entriesByDate.get(dateKey).push(entry);
+      }
 
       // Categorize for entity checkpoint
       if (!entry.action) {
@@ -372,6 +368,16 @@ async function drainQueue() {
           atomEntries.get(entry.slug).push(entry);
         }
       } else if (entry.action === 'capture') {
+        if (entry.slug) {
+          if (!atomEntries.has(entry.slug)) atomEntries.set(entry.slug, []);
+          atomEntries.get(entry.slug).push(entry);
+        }
+      } else if (entry.action === 'ensure_checkpoint') {
+        if (entry.slug) {
+          if (!atomEntries.has(entry.slug)) atomEntries.set(entry.slug, []);
+          atomEntries.get(entry.slug).push(entry);
+        }
+      } else if (entry.action === 'add_child') {
         if (entry.slug) {
           if (!atomEntries.has(entry.slug)) atomEntries.set(entry.slug, []);
           atomEntries.get(entry.slug).push(entry);
@@ -422,15 +428,94 @@ async function drainQueue() {
       });
     }
 
-    // Atoms
+    // Atoms — selective checkpointing
+    // Determine which slugs deserve a checkpoint (atom file on disk)
+    const RICH_ACTIONS = new Set(['highlight', 'unhighlight', 'highlights_replace', 'capture', 'ensure_checkpoint', 'add_child']);
+    const slugsToCheckpoint = new Set();
+
     for (const [slug, entries] of atomEntries) {
+      // Always checkpoint if atom already exists on disk
+      if (await fsStorage.atomExists(slug)) {
+        slugsToCheckpoint.add(slug);
+        continue;
+      }
+      // Rich data actions (includes add_child) → checkpoint
+      if (entries.some(e => e.action && RICH_ACTIONS.has(e.action))) {
+        slugsToCheckpoint.add(slug);
+        continue;
+      }
+    }
+
+    // Multi-day visit check for remaining unchecked slugs
+    const uncheckedSlugs = [...atomEntries.keys()].filter(s => !slugsToCheckpoint.has(s));
+    if (uncheckedSlugs.length > 0) {
+      try {
+        const multiDaySlugs = await fsStorage.checkMultiDayVisits(uncheckedSlugs, 30);
+        for (const slug of multiDaySlugs) slugsToCheckpoint.add(slug);
+      } catch (e) {
+        console.warn('checkMultiDayVisits failed:', e.message);
+      }
+    }
+
+    // Build URL→title map from all entries in this batch (for {url,title} resolution)
+    const titleByUrl = new Map();
+    for (const entry of logBuffer) {
+      if (entry.url && entry.title) titleByUrl.set(entry.url, entry.title);
+      if (entry.childUrl && entry.childTitle) titleByUrl.set(entry.childUrl, entry.childTitle);
+    }
+
+    // Checkpoint only selected slugs
+    for (const [slug, entries] of atomEntries) {
+      if (!slugsToCheckpoint.has(slug)) continue;
       await withLock('atoms/' + slug + '.json', async () => {
-        let atom = (await fsStorage.loadAtom(slug)) || { slug, timestamp: 0, highlights: [], referrers: [] };
+        let atom = (await fsStorage.loadAtom(slug)) || { slug, timestamp: 0, highlights: [], parents: [], children: [] };
         if (!atom.slug) atom.slug = slug;
         for (const entry of entries) {
           atom = applyLogToAtom(atom, entry);
         }
+        // Resolve parents/children: URL → slug (checkpointed) or {url,title} (non-checkpointed)
+        for (const field of ['parents', 'children']) {
+          if (atom[field] && atom[field].length > 0) {
+            const resolved = [];
+            for (const ref of atom[field]) {
+              if (typeof ref !== 'string') { resolved.push(ref); continue; } // already {url,title}
+              if (!ref.startsWith('http')) { resolved.push(ref); continue; } // already a slug
+              const refSlug = generateSlugFromUrl(ref);
+              if (slugsToCheckpoint.has(refSlug) || await fsStorage.atomExists(refSlug)) {
+                resolved.push(refSlug);
+              } else {
+                resolved.push({ url: ref, title: titleByUrl.get(ref) || '' });
+              }
+            }
+            atom[field] = resolved;
+          }
+        }
         await fsStorage.saveAtom(slug, atom);
+      });
+    }
+
+    // Checkpoint parent-index: accumulate referrer visits for non-checkpointed pages, prune checkpointed ones
+    const visitEntriesWithReferrers = logBuffer.filter(e => !e.action && e.referrer && e.url);
+    if (visitEntriesWithReferrers.length > 0) {
+      await withLock('lists/index/parent-index.json', async () => {
+        let parentIndex;
+        try {
+          parentIndex = await fsStorage.loadParentIndex();
+        } catch {
+          parentIndex = { timestamp: 0, index: {} };
+        }
+        for (const entry of visitEntriesWithReferrers) {
+          parentIndex = applyLogToParentIndex(parentIndex, entry);
+        }
+        // Remove entries for URLs whose slugs were just checkpointed (their parents are now in atom.parents)
+        for (const url of Object.keys(parentIndex.index)) {
+          const urlSlug = generateSlugFromUrl(url);
+          if (slugsToCheckpoint.has(urlSlug)) {
+            delete parentIndex.index[url];
+          }
+        }
+        const fh = await fsStorage.resolveFile('lists/index/parent-index.json', { create: true });
+        await fsStorage.writeJson(fh, parentIndex);
       });
     }
 
@@ -471,20 +556,13 @@ async function drainQueue() {
       });
     }
 
-    // Piggyback gateway + referrer index save on interaction drain
+    // Piggyback gateway save on interaction drain
     if (maxInteractionTimestamp > 0) {
       try {
         const { gatewayDomains } = await chrome.storage.session.get(['gatewayDomains']);
         if (gatewayDomains) {
           const fh = await fsStorage.resolveFile('lists/gateways.json', { create: true });
           await fsStorage.writeJson(fh, { watermark: maxInteractionTimestamp, domains: gatewayDomains });
-        }
-      } catch {}
-      try {
-        const { referrerIndex } = await chrome.storage.session.get(['referrerIndex']);
-        if (referrerIndex) {
-          const fh = await fsStorage.resolveFile('lists/referrer-index.json', { create: true });
-          await fsStorage.writeJson(fh, { watermark: maxInteractionTimestamp, index: referrerIndex });
         }
       } catch {}
     }
