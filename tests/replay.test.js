@@ -25,14 +25,14 @@ import { generateSlugFromUrl } from '../extension/utils.js';
 // ---------------------------------------------------------------------------
 
 describe('getAffectedSlugs', () => {
-  it('returns entry slug for visit entry without referrer', () => {
-    const slugs = getAffectedSlugs({ timestamp: 100, url: 'https://a.com', title: 'A' });
+  it('returns entry slug for page entry without referrer', () => {
+    const slugs = getAffectedSlugs({ timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' });
     expect(slugs.size).toBe(1);
     expect(slugs.has(generateSlugFromUrl('https://a.com'))).toBe(true);
   });
 
-  it('returns both child and parent slugs for visit with referrer', () => {
-    const slugs = getAffectedSlugs({ timestamp: 100, url: 'https://child.com', title: 'C', referrer: 'https://parent.com' });
+  it('returns both child and parent slugs for page with referrer', () => {
+    const slugs = getAffectedSlugs({ timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrer: 'https://parent.com' });
     expect(slugs.size).toBe(2);
     expect(slugs.has(generateSlugFromUrl('https://child.com'))).toBe(true);
     expect(slugs.has(generateSlugFromUrl('https://parent.com'))).toBe(true);
@@ -45,7 +45,7 @@ describe('getAffectedSlugs', () => {
   });
 
   it('returns single slug when referrer is same as url', () => {
-    const slugs = getAffectedSlugs({ timestamp: 100, url: 'https://a.com', title: 'A', referrer: 'https://a.com' });
+    const slugs = getAffectedSlugs({ timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://a.com' });
     expect(slugs.size).toBe(1);
   });
 
@@ -83,9 +83,9 @@ describe('applyLogToSettings', () => {
     expect(result).toBe(settings); // same reference
   });
 
-  it('ignores visit entries (no action)', () => {
+  it('ignores page entries', () => {
     const settings = { timestamp: 0 };
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'A', slug: 'a' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
     const result = applyLogToSettings(settings, entry);
     expect(result).toBe(settings);
   });
@@ -110,10 +110,10 @@ describe('applyLogToSettings', () => {
 // applyLogToAtom — visit entries
 // ---------------------------------------------------------------------------
 
-describe('applyLogToAtom — visit', () => {
-  it('updates url, title, timestamp from visit entry (no attention)', () => {
+describe('applyLogToAtom — page (visit)', () => {
+  it('updates url, title, timestamp from page entry', () => {
     const atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, url: '', title: '', highlights: [] };
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'Page A' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'Page A' };
     const result = applyLogToAtom(atom, entry);
     expect(result.url).toBe('https://a.com');
     expect(result.title).toBe('Page A');
@@ -122,7 +122,7 @@ describe('applyLogToAtom — visit', () => {
 
   it('accumulates parent URLs from referrer', () => {
     const atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: ['old-slug-abc'] };
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
     const result = applyLogToAtom(atom, entry);
     expect(result.parents).toHaveLength(2);
     expect(result.parents[0]).toBe('old-slug-abc');
@@ -131,14 +131,14 @@ describe('applyLogToAtom — visit', () => {
 
   it('does not duplicate existing parent URL', () => {
     const atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: ['https://google.com'] };
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
     const result = applyLogToAtom(atom, entry);
     expect(result.parents).toEqual(['https://google.com']);
   });
 
   it('does not duplicate when existing parent is a slug matching the referrer', () => {
     // Simulate post-drain state: parent resolved to slug
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
     const googleSlug = generateSlugFromUrl('https://google.com');
     const atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: [googleSlug] };
     const result = applyLogToAtom(atom, entry);
@@ -147,7 +147,7 @@ describe('applyLogToAtom — visit', () => {
 
   it('does not duplicate when existing parent is {url,title} object', () => {
     const atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: [{ url: 'https://google.com', title: 'Google' }] };
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
     const result = applyLogToAtom(atom, entry);
     expect(result.parents).toHaveLength(1); // no duplicate
   });
@@ -156,33 +156,65 @@ describe('applyLogToAtom — visit', () => {
     const parents = [];
     for (let i = 0; i < 50; i++) parents.push(`https://ref${i}.com`);
     const atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents };
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'A', referrer: 'https://new-ref.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://new-ref.com' };
     const result = applyLogToAtom(atom, entry);
     expect(result.parents).toHaveLength(50);
     expect(result.parents[0]).toBe('https://ref1.com'); // ref0 evicted
   });
 
-  it('ignores visit entry with mismatched slug', () => {
+  it('ignores page entry with mismatched slug', () => {
     const atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, url: 'https://a.com', title: 'A' };
-    const entry = { timestamp: 100, url: 'https://b.com', title: 'B' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://b.com', title: 'B' };
     const result = applyLogToAtom(atom, entry);
     expect(result).toBe(atom);
   });
 
-  it('applies visit to atom without slug field (new atom)', () => {
+  it('applies page to atom without slug field (new atom)', () => {
     const atom = { timestamp: 0, highlights: [] };
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'A' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
     const result = applyLogToAtom(atom, entry);
     expect(result.url).toBe('https://a.com');
     expect(result.timestamp).toBe(100);
   });
 
-  it('is idempotent for visit entries', () => {
+  it('is idempotent for page entries', () => {
     const atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: [] };
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'A', referrer: 'https://ref.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://ref.com' };
     const r1 = applyLogToAtom(atom, entry);
     const r2 = applyLogToAtom(r1, entry);
     expect(r2).toEqual(r1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyLogToAtom — title change via attention report
+// ---------------------------------------------------------------------------
+
+describe('applyLogToAtom — title update from attention report', () => {
+  it('attention report with title updates atom title', () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    // Initial visit sets title
+    let atom = { slug, timestamp: 0, url: '', title: '', highlights: [] };
+    const visit = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'Old Title' };
+    atom = applyLogToAtom(atom, visit);
+    expect(atom.title).toBe('Old Title');
+
+    // Attention report carries updated title (title changed after initial visit)
+    const attention = { timestamp: 200, action: 'page', url: 'https://a.com', title: 'New Title', scrollDepth: 80, timeOnPage: 5000 };
+    atom = applyLogToAtom(atom, attention);
+    expect(atom.title).toBe('New Title');
+  });
+
+  it('attention report without title preserves existing title', () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    let atom = { slug, timestamp: 0, url: '', title: '', highlights: [] };
+    const visit = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'Page Title' };
+    atom = applyLogToAtom(atom, visit);
+
+    // Attention report without title field — title should not be wiped
+    const attention = { timestamp: 200, action: 'page', url: 'https://a.com', scrollDepth: 50, timeOnPage: 3000 };
+    atom = applyLogToAtom(atom, attention);
+    expect(atom.title).toBe('Page Title');
   });
 });
 
@@ -191,9 +223,9 @@ describe('applyLogToAtom — visit', () => {
 // ---------------------------------------------------------------------------
 
 describe('applyLogToAtom — children from referrer', () => {
-  it('accumulates child URL on parent atom when visit has referrer', () => {
+  it('accumulates child URL on parent atom when page has referrer', () => {
     const parentAtom = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: [] };
-    const entry = { timestamp: 100, url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
     const result = applyLogToAtom(parentAtom, entry);
     expect(result.children).toHaveLength(1);
     expect(result.children[0]).toBe('https://child.com');
@@ -202,14 +234,14 @@ describe('applyLogToAtom — children from referrer', () => {
 
   it('does not duplicate existing child URL string', () => {
     const parentAtom = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: ['https://child.com'] };
-    const entry = { timestamp: 200, url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+    const entry = { timestamp: 200, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
     const result = applyLogToAtom(parentAtom, entry);
     expect(result.children).toHaveLength(1);
   });
 
   it('does not duplicate existing child {url,title} object', () => {
     const parentAtom = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: [{ url: 'https://child.com', title: 'Child' }] };
-    const entry = { timestamp: 200, url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+    const entry = { timestamp: 200, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
     const result = applyLogToAtom(parentAtom, entry);
     expect(result.children).toHaveLength(1);
   });
@@ -218,30 +250,30 @@ describe('applyLogToAtom — children from referrer', () => {
     const children = [];
     for (let i = 0; i < 50; i++) children.push(`https://child${i}.com`);
     const parentAtom = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children };
-    const entry = { timestamp: 200, url: 'https://new-child.com', title: 'New', referrer: 'https://parent.com' };
+    const entry = { timestamp: 200, action: 'page', url: 'https://new-child.com', title: 'New', referrer: 'https://parent.com' };
     const result = applyLogToAtom(parentAtom, entry);
     expect(result.children).toHaveLength(50);
     expect(result.children[0]).toBe('https://child1.com'); // child0 evicted
     expect(result.children[49]).toBe('https://new-child.com');
   });
 
-  it('ignores visit without referrer (no parent-side effect)', () => {
+  it('ignores page without referrer (no parent-side effect)', () => {
     const parentAtom = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: [] };
-    const entry = { timestamp: 100, url: 'https://child.com', title: 'Child' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child' };
     const result = applyLogToAtom(parentAtom, entry);
     expect(result).toBe(parentAtom); // slug mismatch, no referrer path
   });
 
-  it('ignores visit where referrer does not match parent slug', () => {
+  it('ignores page where referrer does not match parent slug', () => {
     const parentAtom = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: [] };
-    const entry = { timestamp: 100, url: 'https://child.com', title: 'Child', referrer: 'https://other.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://other.com' };
     const result = applyLogToAtom(parentAtom, entry);
     expect(result).toBe(parentAtom);
   });
 
   it('is idempotent', () => {
     const parentAtom = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: [] };
-    const entry = { timestamp: 100, url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
     const r1 = applyLogToAtom(parentAtom, entry);
     const r2 = applyLogToAtom(r1, entry);
     expect(r2).toEqual(r1);
@@ -249,7 +281,7 @@ describe('applyLogToAtom — children from referrer', () => {
 
   it('advances timestamp to max of existing and entry', () => {
     const parentAtom = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 500, children: [] };
-    const entry = { timestamp: 100, url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
     const result = applyLogToAtom(parentAtom, entry);
     expect(result.timestamp).toBe(500); // keeps higher existing
   });
@@ -336,13 +368,14 @@ describe('applyLogToAtom — highlights_replace', () => {
   });
 });
 
-describe('applyLogToAtom — capture', () => {
+describe('applyLogToAtom — capture (via page)', () => {
   it('sets mdPath and htmlPath', () => {
-    const atom = { slug: 'a', timestamp: 0 };
-    const entry = { timestamp: 100, action: 'capture', slug: 'a', mdPath: 'atoms/a/100.md', htmlPath: 'atoms/a/100.html' };
+    const slug = generateSlugFromUrl('https://a.com');
+    const atom = { slug, timestamp: 0 };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', mdPath: 'pages/a/100.md', htmlPath: 'pages/a/100.html' };
     const result = applyLogToAtom(atom, entry);
-    expect(result.mdPath).toBe('atoms/a/100.md');
-    expect(result.htmlPath).toBe('atoms/a/100.html');
+    expect(result.mdPath).toBe('pages/a/100.md');
+    expect(result.htmlPath).toBe('pages/a/100.html');
     expect(result.timestamp).toBe(100);
   });
 });
@@ -353,7 +386,7 @@ describe('applyLogToAtom — capture', () => {
 
 describe('applyLogToPins — list operations', () => {
   it('adds pins and preserves metadata', () => {
-    const entity = { timestamp: 0, id: 'uuid-1', name: 'Rust', query: 'rust', qbTree: null, pins: [{ url: 'https://old.com', title: 'Old', pinnedAt: 50 }] };
+    const entity = { timestamp: 0, id: 'uuid-1', name: 'Rust', qbTrees: [], pins: [{ url: 'https://old.com', title: 'Old', pinnedAt: 50 }] };
     const entry = { timestamp: 100, action: 'list', id: 'user/uuid-1', op: 'add', urls: ['https://new.com'] };
     const result = applyLogToPins(entity, entry);
     expect(result.pins).toHaveLength(2);
@@ -362,7 +395,6 @@ describe('applyLogToPins — list operations', () => {
     expect(result.pins[1].pinnedAt).toBe(100);
     expect(result.timestamp).toBe(100);
     expect(result.name).toBe('Rust');
-    expect(result.query).toBe('rust');
     expect(result.id).toBe('uuid-1');
   });
 
@@ -407,42 +439,40 @@ describe('applyLogToPins — list operations', () => {
 
 describe('applyLogToPins — list_meta', () => {
   it('merges metadata fields and preserves pins', () => {
-    const entity = { timestamp: 0, id: 'uuid-1', name: 'Old Name', query: 'old', qbTree: null, pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 50 }] };
-    const entry = { timestamp: 100, action: 'list_meta', id: 'user/uuid-1', name: 'New Name', query: 'new' };
+    const entity = { timestamp: 0, id: 'uuid-1', name: 'Old Name', qbTrees: [], pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 50 }] };
+    const entry = { timestamp: 100, action: 'list_meta', id: 'user/uuid-1', name: 'New Name' };
     const result = applyLogToPins(entity, entry);
     expect(result.name).toBe('New Name');
-    expect(result.query).toBe('new');
     expect(result.id).toBe('uuid-1');
     expect(result.pins).toEqual(entity.pins);
     expect(result.timestamp).toBe(100);
   });
 
   it('updates only provided fields', () => {
-    const entity = { timestamp: 0, id: 'uuid-1', name: 'Rust', query: 'rust', qbTree: null, pins: [] };
+    const entity = { timestamp: 0, id: 'uuid-1', name: 'Rust', qbTrees: [], pins: [] };
     const entry = { timestamp: 100, action: 'list_meta', id: 'user/uuid-1', name: 'Rust Lang' };
     const result = applyLogToPins(entity, entry);
     expect(result.name).toBe('Rust Lang');
-    expect(result.query).toBe('rust');
-    expect(result.qbTree).toBeNull();
+    expect(result.qbTrees).toEqual([]);
   });
 
-  it('sets qbTree', () => {
-    const entity = { timestamp: 0, id: 'uuid-1', name: 'Test', query: '', qbTree: null, pins: [] };
+  it('sets qbTrees', () => {
+    const entity = { timestamp: 0, id: 'uuid-1', name: 'Test', qbTrees: [], pins: [] };
     const tree = { type: 'AND', children: [{ type: 'keyword', value: 'rust' }] };
-    const entry = { timestamp: 100, action: 'list_meta', id: 'user/uuid-1', qbTree: tree };
+    const entry = { timestamp: 100, action: 'list_meta', id: 'user/uuid-1', name: 'Test', qbTrees: [tree] };
     const result = applyLogToPins(entity, entry);
-    expect(result.qbTree).toEqual(tree);
+    expect(result.qbTrees).toEqual([tree]);
   });
 
   it('ignores wrong id', () => {
-    const entity = { timestamp: 0, id: 'c1', name: 'Test', query: 'test', qbTree: null, pins: [] };
+    const entity = { timestamp: 0, id: 'c1', name: 'Test', qbTrees: [], pins: [] };
     const entry = { timestamp: 100, action: 'list_meta', id: 'user/c2', name: 'Updated' };
     const result = applyLogToPins(entity, entry);
     expect(result).toBe(entity); // No change
   });
 
   it('is idempotent', () => {
-    const entity = { timestamp: 0, id: 'uuid-1', name: 'Test', query: 'test', qbTree: null, pins: [] };
+    const entity = { timestamp: 0, id: 'uuid-1', name: 'Test', qbTrees: [], pins: [] };
     const entry = { timestamp: 100, action: 'list_meta', id: 'user/uuid-1', name: 'Updated' };
     const r1 = applyLogToPins(entity, entry);
     const r2 = applyLogToPins(r1, entry);
@@ -452,7 +482,7 @@ describe('applyLogToPins — list_meta', () => {
 
 describe('applyLogToPins — del_list', () => {
   it('returns deleted entity', () => {
-    const entity = { timestamp: 0, id: 'uuid-1', name: 'Rust', query: 'rust', pins: [{ url: 'https://a.com' }] };
+    const entity = { timestamp: 0, id: 'uuid-1', name: 'Rust', pins: [{ url: 'https://a.com' }] };
     const entry = { timestamp: 100, action: 'del_list', id: 'user/uuid-1' };
     const result = applyLogToPins(entity, entry);
     expect(result.deleted).toBe(true);
@@ -584,10 +614,10 @@ describe('applyLogToAtom — visitDates', () => {
     return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
   }
 
-  it('accumulates visitDates from visit entries', () => {
+  it('accumulates visitDates from page entries', () => {
     const atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, highlights: [], parents: [] };
     const ts1 = new Date(2024, 0, 15, 10, 0, 0).getTime(); // Jan 15 local
-    const result = applyLogToAtom(atom, { timestamp: ts1, url: 'https://a.com', title: 'A' });
+    const result = applyLogToAtom(atom, { timestamp: ts1, action: 'page', url: 'https://a.com', title: 'A' });
     expect(result.visitDates).toEqual([toYMD(ts1)]);
   });
 
@@ -596,7 +626,7 @@ describe('applyLogToAtom — visitDates', () => {
     const ts2 = new Date(2024, 0, 15, 18, 0, 0).getTime();
     const ymd = toYMD(ts1);
     const atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, highlights: [], parents: [], visitDates: [ymd] };
-    const result = applyLogToAtom(atom, { timestamp: ts2, url: 'https://a.com', title: 'A' });
+    const result = applyLogToAtom(atom, { timestamp: ts2, action: 'page', url: 'https://a.com', title: 'A' });
     expect(result.visitDates).toEqual([ymd]);
   });
 
@@ -604,12 +634,12 @@ describe('applyLogToAtom — visitDates', () => {
     let atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, highlights: [], parents: [] };
     const ts1 = new Date(2024, 0, 15, 10, 0, 0).getTime();
     const ts2 = new Date(2024, 0, 16, 10, 0, 0).getTime();
-    atom = applyLogToAtom(atom, { timestamp: ts1, url: 'https://a.com', title: 'A' });
-    atom = applyLogToAtom(atom, { timestamp: ts2, url: 'https://a.com', title: 'A' });
+    atom = applyLogToAtom(atom, { timestamp: ts1, action: 'page', url: 'https://a.com', title: 'A' });
+    atom = applyLogToAtom(atom, { timestamp: ts2, action: 'page', url: 'https://a.com', title: 'A' });
     expect(atom.visitDates).toEqual([toYMD(ts1), toYMD(ts2)]);
   });
 
-  it('does not add visitDates for non-visit entries', () => {
+  it('does not add visitDates for non-page entries', () => {
     const atom = { slug: 'a', timestamp: 0, highlights: [] };
     const result = applyLogToAtom(atom, { timestamp: 100, action: 'highlight', slug: 'a', highlight: { text: 'x', timestamp: 100 } });
     expect(result.visitDates).toBeUndefined();
@@ -617,13 +647,13 @@ describe('applyLogToAtom — visitDates', () => {
 });
 
 // ---------------------------------------------------------------------------
-// applyLogToAtom — create_checkpoint
+// applyLogToAtom — page_checkpoint
 // ---------------------------------------------------------------------------
 
-describe('applyLogToAtom — create_checkpoint', () => {
-  it('creates a minimal atom from create_checkpoint', () => {
+describe('applyLogToAtom — page_checkpoint', () => {
+  it('creates a minimal atom from page_checkpoint', () => {
     const atom = { timestamp: 0 };
-    const entry = { timestamp: 500, action: 'create_checkpoint', url: 'https://ref.com', title: 'Referrer Page' };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://ref.com', title: 'Referrer Page' };
     const result = applyLogToAtom(atom, entry);
     expect(result.url).toBe('https://ref.com');
     expect(result.title).toBe('Referrer Page');
@@ -632,7 +662,7 @@ describe('applyLogToAtom — create_checkpoint', () => {
 
   it('does not overwrite existing url/title', () => {
     const atom = { slug: generateSlugFromUrl('https://ref.com'), timestamp: 100, url: 'https://ref.com', title: 'Original Title' };
-    const entry = { timestamp: 500, action: 'create_checkpoint', url: 'https://ref.com', title: 'New Title' };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://ref.com', title: 'New Title' };
     const result = applyLogToAtom(atom, entry);
     expect(result.url).toBe('https://ref.com');
     expect(result.title).toBe('Original Title');
@@ -641,21 +671,21 @@ describe('applyLogToAtom — create_checkpoint', () => {
 
   it('advances timestamp to max', () => {
     const atom = { slug: generateSlugFromUrl('https://ref.com'), timestamp: 600, url: 'https://ref.com', title: 'X' };
-    const entry = { timestamp: 500, action: 'create_checkpoint', url: 'https://ref.com', title: '' };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://ref.com', title: '' };
     const result = applyLogToAtom(atom, entry);
     expect(result.timestamp).toBe(600); // keeps higher existing timestamp
   });
 
   it('ignores mismatched slug', () => {
     const atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, url: 'https://a.com', title: 'A' };
-    const entry = { timestamp: 500, action: 'create_checkpoint', url: 'https://b.com', title: 'B' };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://b.com', title: 'B' };
     const result = applyLogToAtom(atom, entry);
     expect(result).toBe(atom);
   });
 
   it('is idempotent', () => {
     const atom = { timestamp: 0 };
-    const entry = { timestamp: 500, action: 'create_checkpoint', url: 'https://x.com', title: 'X' };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://x.com', title: 'X' };
     const r1 = applyLogToAtom(atom, entry);
     const r2 = applyLogToAtom(r1, entry);
     expect(r2).toEqual(r1);
@@ -667,11 +697,11 @@ describe('applyLogToAtom — create_checkpoint', () => {
 // ---------------------------------------------------------------------------
 
 describe('sequence replay', () => {
-  it('replaying visit + highlight + unhighlight produces correct atom', () => {
+  it('replaying page + highlight + unhighlight produces correct atom', () => {
     let atom = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, highlights: [], parents: [] };
 
-    // Visit
-    atom = applyLogToAtom(atom, { timestamp: 100, url: 'https://a.com', title: 'A' });
+    // Page (visit)
+    atom = applyLogToAtom(atom, { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' });
     expect(atom.url).toBe('https://a.com');
     expect(atom.timestamp).toBe(100);
 
@@ -726,7 +756,7 @@ describe('sequence replay', () => {
 describe('applyLogToParentIndex', () => {
   it('accumulates parent slugs for a URL', () => {
     const idx = { timestamp: 0, index: {} };
-    const entry = { timestamp: 100, url: 'https://child.com', referrer: 'https://parent.com', title: 'Child' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', referrer: 'https://parent.com', title: 'Child' };
     const result = applyLogToParentIndex(idx, entry);
     expect(Object.keys(result.index)).toHaveLength(1);
     expect(result.index['https://child.com']).toHaveLength(1);
@@ -736,37 +766,37 @@ describe('applyLogToParentIndex', () => {
 
   it('accumulates multiple parents for the same URL', () => {
     let idx = { timestamp: 0, index: {} };
-    idx = applyLogToParentIndex(idx, { timestamp: 100, url: 'https://child.com', referrer: 'https://parent1.com', title: 'C' });
-    idx = applyLogToParentIndex(idx, { timestamp: 200, url: 'https://child.com', referrer: 'https://parent2.com', title: 'C' });
+    idx = applyLogToParentIndex(idx, { timestamp: 100, action: 'page', url: 'https://child.com', referrer: 'https://parent1.com', title: 'C' });
+    idx = applyLogToParentIndex(idx, { timestamp: 200, action: 'page', url: 'https://child.com', referrer: 'https://parent2.com', title: 'C' });
     expect(idx.index['https://child.com']).toHaveLength(2);
     expect(idx.timestamp).toBe(200);
   });
 
   it('is idempotent', () => {
-    const entry = { timestamp: 100, url: 'https://child.com', referrer: 'https://parent.com', title: 'C' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', referrer: 'https://parent.com', title: 'C' };
     let idx = { timestamp: 0, index: {} };
     idx = applyLogToParentIndex(idx, entry);
     const r2 = applyLogToParentIndex(idx, entry);
     expect(r2.index['https://child.com']).toEqual(idx.index['https://child.com']);
   });
 
-  it('ignores entries with action field', () => {
+  it('ignores entries with non-page action', () => {
     const idx = { timestamp: 0, index: {} };
     const entry = { timestamp: 100, action: 'highlight', highlight: {} };
     const result = applyLogToParentIndex(idx, entry);
     expect(result).toBe(idx);
   });
 
-  it('ignores entries without referrer', () => {
+  it('ignores page entries without referrer', () => {
     const idx = { timestamp: 0, index: {} };
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'A' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
     const result = applyLogToParentIndex(idx, entry);
     expect(result).toBe(idx);
   });
 
   it('ignores entries without url', () => {
     const idx = { timestamp: 0, index: {} };
-    const entry = { timestamp: 100, referrer: 'https://ref.com' };
+    const entry = { timestamp: 100, action: 'page', referrer: 'https://ref.com' };
     const result = applyLogToParentIndex(idx, entry);
     expect(result).toBe(idx);
   });
@@ -797,14 +827,14 @@ describe('scopeOf', () => {
     expect(Object.keys(scope)).toEqual(['list:user/c1']);
   });
 
-  it('returns atom key for visit entry without referrer', () => {
-    const scope = scopeOf({ timestamp: 100, url: 'https://a.com', title: 'A' });
+  it('returns atom key for page entry without referrer', () => {
+    const scope = scopeOf({ timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' });
     const slug = generateSlugFromUrl('https://a.com');
     expect(Object.keys(scope)).toEqual([`atom:${slug}`]);
   });
 
-  it('returns atom + parent-index keys for visit with referrer', () => {
-    const scope = scopeOf({ timestamp: 100, url: 'https://child.com', title: 'C', referrer: 'https://parent.com' });
+  it('returns atom + parent-index keys for page with referrer', () => {
+    const scope = scopeOf({ timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrer: 'https://parent.com' });
     const childSlug = generateSlugFromUrl('https://child.com');
     const parentSlug = generateSlugFromUrl('https://parent.com');
     const keys = Object.keys(scope).sort();
@@ -817,8 +847,8 @@ describe('scopeOf', () => {
     expect(Object.keys(scope)).toEqual([`atom:${slug}`]);
   });
 
-  it('returns atom key for create_checkpoint entry', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'create_checkpoint', url: 'https://a.com', title: 'A' });
+  it('returns atom + parent-index keys for page_checkpoint entry', () => {
+    const scope = scopeOf({ timestamp: 100, action: 'page_checkpoint', url: 'https://a.com', title: 'A' });
     const slug = generateSlugFromUrl('https://a.com');
     expect(Object.keys(scope)).toEqual([`atom:${slug}`, 'index:parent-index']);
   });
@@ -850,7 +880,7 @@ describe('defaultEntity', () => {
 
   it('returns collection default with id', () => {
     const e = defaultEntity('list:user/uuid-1');
-    expect(e).toEqual({ timestamp: 0, id: 'uuid-1', name: '', query: '', qbTree: null, pins: [] });
+    expect(e).toEqual({ timestamp: 0, id: 'uuid-1', name: '', qbTrees: [], pins: [] });
   });
 
   it('returns recycle-bin default', () => {
@@ -891,53 +921,53 @@ describe('applyTo', () => {
     expect(result.settings.timestamp).toBe(100);
   });
 
-  it('applies visit to atom', () => {
+  it('applies page to atom', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'A' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
     const scope = { [`atom:${slug}`]: { slug, timestamp: 0, highlights: [], parents: [], children: [] } };
     const result = applyTo(entry, scope);
     expect(result[`atom:${slug}`].url).toBe('https://a.com');
     expect(result[`atom:${slug}`].timestamp).toBe(100);
   });
 
-  it('only create_checkpoint can create atom from null', () => {
+  it('only page_checkpoint can create atom from null', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    const visit = { timestamp: 100, url: 'https://a.com', title: 'A' };
-    const result = applyTo(visit, { [`atom:${slug}`]: null });
+    const page = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
+    const result = applyTo(page, { [`atom:${slug}`]: null });
     expect(result[`atom:${slug}`]).toBeNull();
   });
 
-  it('create_checkpoint creates atom from null', () => {
+  it('page_checkpoint creates atom from null', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    const entry = { timestamp: 100, action: 'create_checkpoint', url: 'https://a.com', title: 'A' };
+    const entry = { timestamp: 100, action: 'page_checkpoint', url: 'https://a.com', title: 'A' };
     const result = applyTo(entry, { [`atom:${slug}`]: null });
     expect(result[`atom:${slug}`]).not.toBeNull();
     expect(result[`atom:${slug}`].url).toBe('https://a.com');
   });
 
-  it('applies visit with referrer to both child and parent atoms', () => {
+  it('applies page with referrer to both child and parent atoms', () => {
     const childSlug = generateSlugFromUrl('https://child.com');
     const parentSlug = generateSlugFromUrl('https://parent.com');
-    const entry = { timestamp: 100, url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
     const scope = {
       [`atom:${childSlug}`]: { slug: childSlug, timestamp: 0, highlights: [], parents: [], children: [] },
       [`atom:${parentSlug}`]: { slug: parentSlug, timestamp: 50, highlights: [], parents: [], children: [] },
       'index:parent-index': { timestamp: 0, index: {} },
     };
     const result = applyTo(entry, scope);
-    // Child gets visit data + parent ref
+    // Child gets visit data + parent ref (resolved to slug since parent atom exists in scope)
     expect(result[`atom:${childSlug}`].url).toBe('https://child.com');
-    expect(result[`atom:${childSlug}`].parents).toContain('https://parent.com');
-    // Parent gets child URL
-    expect(result[`atom:${parentSlug}`].children).toContain('https://child.com');
-    // Parent-index updated
-    expect(result['index:parent-index'].index['https://child.com']).toHaveLength(1);
+    expect(result[`atom:${childSlug}`].parents).toContain(parentSlug);
+    // Parent gets child ref (resolved to slug since child atom exists in scope)
+    expect(result[`atom:${parentSlug}`].children).toContain(childSlug);
+    // Parent-index pruned (child atom exists in scope)
+    expect(result['index:parent-index'].index['https://child.com']).toBeUndefined();
   });
 
   it('skips parent atom update when parent is null (no checkpoint)', () => {
     const childSlug = generateSlugFromUrl('https://child.com');
     const parentSlug = generateSlugFromUrl('https://parent.com');
-    const entry = { timestamp: 100, url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
     const scope = {
       [`atom:${childSlug}`]: { slug: childSlug, timestamp: 0, highlights: [], parents: [], children: [] },
       [`atom:${parentSlug}`]: null,
@@ -950,7 +980,7 @@ describe('applyTo', () => {
 
   it('applies list entry to collection', () => {
     const entry = { timestamp: 100, action: 'list', id: 'user/c1', op: 'add', urls: ['https://a.com'] };
-    const scope = { 'list:user/c1': { timestamp: 0, id: 'c1', name: 'Test', query: '', qbTree: null, pins: [] } };
+    const scope = { 'list:user/c1': { timestamp: 0, id: 'c1', name: 'Test', qbTrees: [], pins: [] } };
     const result = applyTo(entry, scope);
     expect(result['list:user/c1'].pins).toHaveLength(1);
     expect(result['list:user/c1'].pins[0].url).toBe('https://a.com');
@@ -978,9 +1008,9 @@ describe('applyTo', () => {
     expect(result['list:permanent-deletes'].urls).toEqual(['https://a.com']);
   });
 
-  it('applies report entry to atom', () => {
+  it('applies page attention entry to atom', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    const entry = { timestamp: 200, action: 'report', url: 'https://a.com', scrollDepth: 0.5, timeOnPage: 3000 };
+    const entry = { timestamp: 200, action: 'page', url: 'https://a.com', scrollDepth: 0.5, timeOnPage: 3000 };
     const atom = { slug, timestamp: 100, highlights: [], parents: [], children: [] };
     const result = applyTo(entry, { [`atom:${slug}`]: atom });
     const att = JSON.parse(result[`atom:${slug}`].attention);
@@ -997,22 +1027,22 @@ describe('effectOf', () => {
   it('loads entities via closure and applies entry', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = { [`atom:${slug}`]: { slug, timestamp: 0, highlights: [], parents: [], children: [] } };
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'A' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
     const result = await effectOf(entry, async (key) => store[key] ?? null);
     expect(result[`atom:${slug}`].url).toBe('https://a.com');
     expect(result[`atom:${slug}`].timestamp).toBe(100);
   });
 
-  it('returns null for uncached atom on visit (no create)', async () => {
+  it('returns null for uncached atom on page (no create)', async () => {
     const slug = generateSlugFromUrl('https://a.com');
-    const entry = { timestamp: 100, url: 'https://a.com', title: 'A' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
     const result = await effectOf(entry, async () => null);
     expect(result[`atom:${slug}`]).toBeNull();
   });
 
-  it('creates atom from null on create_checkpoint', async () => {
+  it('creates atom from null on page_checkpoint', async () => {
     const slug = generateSlugFromUrl('https://a.com');
-    const entry = { timestamp: 100, action: 'create_checkpoint', url: 'https://a.com', title: 'A' };
+    const entry = { timestamp: 100, action: 'page_checkpoint', url: 'https://a.com', title: 'A' };
     const result = await effectOf(entry, async () => null);
     expect(result[`atom:${slug}`]).not.toBeNull();
     expect(result[`atom:${slug}`].url).toBe('https://a.com');
@@ -1024,24 +1054,24 @@ describe('effectOf', () => {
 
     const load = async (key) => cache.get(key) ?? null;
 
-    // First: create_checkpoint creates the atom
+    // First: page_checkpoint creates the atom
     const r1 = await effectOf(
-      { timestamp: 100, action: 'create_checkpoint', url: 'https://a.com', title: 'A' },
+      { timestamp: 100, action: 'page_checkpoint', url: 'https://a.com', title: 'A' },
       load
     );
     // Write back to cache
     for (const [k, v] of Object.entries(r1)) cache.set(k, v);
 
-    // Second: visit updates the atom (now non-null in cache)
+    // Second: page updates the atom (now non-null in cache)
     const r2 = await effectOf(
-      { timestamp: 200, url: 'https://a.com', title: 'Updated A' },
+      { timestamp: 200, action: 'page', url: 'https://a.com', title: 'Updated A' },
       load
     );
     expect(r2[`atom:${slug}`].title).toBe('Updated A');
     expect(r2[`atom:${slug}`].timestamp).toBe(200);
   });
 
-  it('handles visit with referrer updating both atoms via closure', async () => {
+  it('handles page with referrer updating both atoms via closure', async () => {
     const childSlug = generateSlugFromUrl('https://child.com');
     const parentSlug = generateSlugFromUrl('https://parent.com');
     const store = {
@@ -1049,11 +1079,13 @@ describe('effectOf', () => {
       [`atom:${parentSlug}`]: { slug: parentSlug, timestamp: 50, highlights: [], parents: [], children: [] },
       'index:parent-index': { timestamp: 0, index: {} },
     };
-    const entry = { timestamp: 100, url: 'https://child.com', title: 'C', referrer: 'https://parent.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrer: 'https://parent.com' };
     const result = await effectOf(entry, async (key) => store[key] ?? null);
-    expect(result[`atom:${childSlug}`].parents).toContain('https://parent.com');
-    expect(result[`atom:${parentSlug}`].children).toContain('https://child.com');
-    expect(result['index:parent-index'].index['https://child.com']).toHaveLength(1);
+    // Post-loop resolves URLs to slugs since both atoms exist in scope
+    expect(result[`atom:${childSlug}`].parents).toContain(parentSlug);
+    expect(result[`atom:${parentSlug}`].children).toContain(childSlug);
+    // Parent-index pruned since child atom exists in scope
+    expect(result['index:parent-index'].index['https://child.com']).toBeUndefined();
   });
 
   it('applies settings entry via closure', async () => {
@@ -1063,10 +1095,10 @@ describe('effectOf', () => {
     expect(result.settings.workspace).toEqual({ mode: 'private' });
   });
 
-  it('visit then create_checkpoint preserves parent info for child', async () => {
-    // Simulates offscreen drain: visit(child, referrer=parent) THEN create_checkpoint(child).
-    // The visit can't populate atom.parents (child atom is null).
-    // The create_checkpoint creates the atom but without parents.
+  it('page then page_checkpoint preserves parent info for child', async () => {
+    // Simulates offscreen drain: page(child, referrer=parent) THEN page_checkpoint(child).
+    // The page can't populate atom.parents (child atom is null).
+    // The page_checkpoint creates the atom but without parents.
     // Parent-index must NOT be pruned, because atom.parents is empty.
     const childSlug = generateSlugFromUrl('https://child.com');
     const parentSlug = generateSlugFromUrl('https://parent.com');
@@ -1078,23 +1110,23 @@ describe('effectOf', () => {
 
     const load = async (key) => cache.get(key) ?? null;
 
-    // Entry 1: visit child with referrer=parent — child atom is null, stays null
+    // Entry 1: page child with referrer=parent — child atom is null, stays null
     const r1 = await effectOf(
-      { timestamp: 100, url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' },
+      { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' },
       load
     );
     for (const [k, v] of Object.entries(r1)) cache.set(k, v);
 
-    // Child atom should still be null (visit can't create from null)
+    // Child atom should still be null (page can't create from null)
     expect(cache.get(`atom:${childSlug}`)).toBeNull();
     // Parent-index should have the parent info
     expect(cache.get('index:parent-index').index['https://child.com']).toEqual([parentSlug]);
     // Parent atom should have child in children
     expect(cache.get(`atom:${parentSlug}`).children).toContain('https://child.com');
 
-    // Entry 2: create_checkpoint for child — creates atom, but visit already passed
+    // Entry 2: page_checkpoint for child — creates atom, but page already passed
     const r2 = await effectOf(
-      { timestamp: 101, action: 'create_checkpoint', url: 'https://child.com', title: 'Child' },
+      { timestamp: 101, action: 'page_checkpoint', url: 'https://child.com', title: 'Child' },
       load
     );
     for (const [k, v] of Object.entries(r2)) cache.set(k, v);

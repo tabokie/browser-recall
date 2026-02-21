@@ -352,15 +352,15 @@
       background: #fce8e6;
     }
 
-    /* ── Attention chart ── */
-    .attention-chart {
+    /* ── Time chart ── */
+    .time-chart {
       display: none;
       padding: 12px 24px;
       border-bottom: 1px solid #dadce0;
       position: relative;
     }
 
-    .attention-chart.visible {
+    .time-chart.visible {
       display: block;
     }
 
@@ -2141,8 +2141,8 @@
     </div>
 
 
-    <div class="attention-chart visible" id="attentionChart">
-      <div class="chart-label">Attention over time</div>
+    <div class="time-chart visible" id="timeChart">
+      <div class="chart-label">Visits over time</div>
       <div class="chart-bars" id="chartBars"></div>
       <div class="chart-tooltip" id="chartTooltip"></div>
     </div>
@@ -2172,7 +2172,7 @@
             </div>
             <div class="qb-body" id="collectionQbBody"></div>
           </div>
-          <div class="attention-chart" id="relatedChart">
+          <div class="time-chart" id="relatedChart">
             <div class="chart-label">Explore results</div>
             <div class="chart-bars" id="relatedChartBars"></div>
             <div class="chart-tooltip" id="relatedChartTooltip"></div>

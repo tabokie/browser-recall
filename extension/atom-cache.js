@@ -1,7 +1,13 @@
 // Atom LRU cache — manages chrome.storage.session atom entries
 
 let atomCacheKeys = []; // LRU order, most recent at end
+const atomTimestamps = new Map(); // slug → timestamp for O(1) eviction check
+let persistWatermark = 0;
 const ATOM_CACHE_LIMIT = 500;
+
+export function setAtomCacheWatermark(ts) {
+  persistWatermark = ts;
+}
 
 export async function getCachedAtom(slug) {
   const key = 'atom:' + slug;
@@ -20,9 +26,14 @@ export async function setCachedAtom(slug, atom) {
   await chrome.storage.session.set({ [key]: atom });
   atomCacheKeys = atomCacheKeys.filter(k => k !== slug);
   atomCacheKeys.push(slug);
-  // Evict if over limit
+  atomTimestamps.set(slug, atom?.timestamp || 0);
+  // Evict if over limit — only evict atoms already flushed to disk
   while (atomCacheKeys.length > ATOM_CACHE_LIMIT) {
-    const evict = atomCacheKeys.shift();
-    await chrome.storage.session.remove('atom:' + evict);
+    const candidate = atomCacheKeys[0];
+    const ts = atomTimestamps.get(candidate) || 0;
+    if (ts > persistWatermark) break; // all remaining above watermark, skip
+    atomCacheKeys.shift();
+    atomTimestamps.delete(candidate);
+    await chrome.storage.session.remove('atom:' + candidate);
   }
 }

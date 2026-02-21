@@ -265,7 +265,7 @@ async function renderCollectionChips() {
     const pinned = isPagePinned(allPins, collection.id, currentUrl);
     return `<span class="collection-chip${pinned ? ' selected' : ''}" data-collection-id="${collection.id}">
       <span class="collection-chip-check">${pinned ? '&#10003;' : ''}</span>
-      ${escapeHtml(collection.name || collection.query)}
+      ${escapeHtml(collection.name)}
     </span>`;
   }).join('');
 
@@ -340,14 +340,14 @@ function openCollectionPicker(collections, allPins) {
   function renderPickerRows() {
     const query = input.value.trim().toLowerCase();
     const filtered = query
-      ? collections.filter(c => (c.name || c.query).toLowerCase().includes(query))
+      ? collections.filter(c => (c.name).toLowerCase().includes(query))
       : collections;
 
     let rowsHtml = filtered.map(c => {
       const pinned = isPagePinned(allPins, c.id, currentUrl);
       return `<div class="collection-picker-row${pinned ? ' selected' : ''}" data-collection-id="${c.id}">
         <span class="collection-picker-row-check">${pinned ? '&#10003;' : ''}</span>
-        <span>${escapeHtml(c.name || c.query)}</span>
+        <span>${escapeHtml(c.name)}</span>
       </div>`;
     }).join('');
 
@@ -355,7 +355,7 @@ function openCollectionPicker(collections, allPins) {
     const inputVal = input.value.trim();
     if (inputVal) {
       const exactMatch = collections.some(c =>
-        (c.name || c.query).toLowerCase() === inputVal.toLowerCase()
+        (c.name).toLowerCase() === inputVal.toLowerCase()
       );
       if (!exactMatch) {
         rowsHtml += `<div class="collection-picker-create" id="collectionPickerCreate">Create "${escapeHtml(inputVal)}"</div>`;
@@ -403,7 +403,7 @@ function openCollectionPicker(collections, allPins) {
       const inputVal = input.value.trim();
       if (!inputVal) return;
       const exactMatch = collections.find(c =>
-        (c.name || c.query).toLowerCase() === inputVal.toLowerCase()
+        (c.name).toLowerCase() === inputVal.toLowerCase()
       );
       if (exactMatch) {
         await toggleCollectionPin(exactMatch.id);
@@ -425,12 +425,12 @@ function openCollectionPicker(collections, allPins) {
   }, 0);
 }
 
-async function createCollectionAndPin(query) {
+async function createCollectionAndPin(name) {
   const collections = await loadCollections();
-  if (collections.some(c => c.query === query)) return;
+  if (collections.some(c => c.name === name)) return;
 
-  const collectionId = generateSlugFromTitle(query);
-  await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name: query, query });
+  const collectionId = generateSlugFromTitle(name);
+  await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name });
   const { collectionOrder: order = [] } = await chrome.storage.session.get(['collectionOrder']);
   await saveSettingsValue('collectionOrder', [...order, collectionId]);
 
@@ -486,7 +486,7 @@ async function renderWorkspaceBar() {
   } else {
     collectionsContainer.innerHTML = collections.map(collection => {
       const selected = workspace.collectionIds.includes(collection.id);
-      return `<span class="ws-collection-chip${selected ? ' selected' : ''}" data-collection-id="${collection.id}">${escapeHtml(collection.name || collection.query)}</span>`;
+      return `<span class="ws-collection-chip${selected ? ' selected' : ''}" data-collection-id="${collection.id}">${escapeHtml(collection.name)}</span>`;
     }).join('');
 
     collectionsContainer.querySelectorAll('.ws-collection-chip').forEach(chip => {

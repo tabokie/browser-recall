@@ -1,0 +1,76 @@
+- Let's review the offscreen.js drain implementation.
+- Go deeper into drainQueue implementation, I want to know the details of that function.
+- Can offscreen.js print log for me to see in Chrome terminal?
+- I see it log once: "Drain: chrome.storage.local unavailable: Cannot read properties of undefined (reading 'local')"
+- But gemini tells me the offscreen.js can access chrome.storage. Do you have other hypothesis for this error? Maybe a timing issue?
+- One time. Let's make offscreen.js check log buffer every once 3 seconds in the background, and I will check if it is available sustainably.
+- It says "chrome.storage.local available: false"
+- But why? The chrome.storage exists, why get is not a function type?
+- Great. Let's remove all chrome.storage use in offscreen.js.
+- Now let's rework the drainQueue. We need to push forward the concept of deterministic replay to handle "Phase 3: Entity Checkpoint (lines 448-522)" and "Phase 4: Side Effects & Watermark (lines 524-549)". The difficult part is entity checkpoint, let me explain:
+
+background.js has two responsibilities: convert events to logs, apply logs to cache and offscreen.js. All checkpoints are created explicitly using logs in the first phase. There are two types of page logs: p_visit, p_checkpoint. p_visit updates existing checkpoint, p_checkpoint additionally creates new checkpoint if not exist. Pseudocode:
+
+onVisitEvent(page) {
+  logs = []
+  if shouldCheckpoint(page) && !cache.has(page) && !fs.exists(page) {
+    logs.push(p_checkpoint { .. })
+  } else {
+    logs.push(p_visit { .. })
+  }
+  // references
+  if page.parent && !cache.has(page.parent) && !fs.exists(page.parent) {
+    logs.push(p_checkpoint { page.parent })
+  }
+  for (key, entity) in effectOf(log, (key) -> { readCacheAndFs(key) }) {
+    cache.insert(key, entity)
+  }
+}
+onCapture(page) {
+  let log = if !cache.has(page) {
+    p_checkpoint { .. }
+  } else {
+    p_visit { .. }
+  }
+}
+
+The behavior to update parent's children, is written inside effectOf, and shared by both offscreen.js and background.js. offscreen.js just replay the logs in one pass.
+- There're a few smaller tasks:
+1. background.js cache needs to respect persist watermark. Only cache timestamp smaller than watermark can be evicted. This way the behavior of events is more deterministic.
+2. Change persistent log types (run migration). Use action="page" to record visits, update children, update attention, update title. Use action="page_checkpoint" to ensure checkpoint.
+3. The action="report" is removed in step 2. But the report logic is still in content.js. We need to reduce the frequency of report, only report it when page is closed or 1h after the last report. We also need to reduce the logs of highlights, only send a log after the highlights or notes are saved, don't send log when user is still entering text.
+- In the past, we detect title changes and update page metadata. Is this still working? Do we have tests coverage for it?
+- Add test and fix it
+- Help me purge logs that only update attention in 2026-02-20.jsonl and 2026-02-21.jsonl, there're too many.
+- Move explore.json to lists/, not lists/user
+- Change the attention bar chart to show visit count, not attention sum.
+- The codebase should refer to the old attention chart as time chart.
+- List all persistent log entry types
+- (a) Remove slug from "page_checkpoint". (b) Rename pins to urls in "list", in different context "urls" means different concepts. (c) What is the difference between query and qbTree in "list_meta"? (d) rename "del_list" to "list_del"
+- Actually, revert list_del changes, do other changes
+- Run the migration
+- The name field in `list_meta` is not optional. It should carries an array of qbTrees.
+- Change the code to use entity.name to render collection UI. But before that, let's make sure existing collection files have correct name, and logs are consistent with the name. For each user/* collection file, let me decide the correct name, fix the collection json and logs.
+- Drop the "query", collection name should not automatically becomes the query. If the code has this logic, please remove it as well.
+- No, the slug generation should use `generateSlugFromTitle`
+- Wait, you also need to update AI Core.json, Health.json, Product.json to (a) have correct slug filename, (b) use slug as id.
+- Run migration
+- Let me interrupt you to fix a bug. I reloaded the extension, but now I cannot see anything in Explor UI. The collection list is okay.
+- It printed "Background script loading...", no other logs.
+- I reload again, now have logs:
+
+Background script loading...
+background.js:522 Portal extension installed
+background.js:38 Offscreen document created
+background.js:525 Storage initialized
+background.js:532 Filesystem configured: portal-data
+background.js:376 Gateway domains loaded incrementally: 114 entries
+background.js:349 Cache hydrated
+- The logs I pasted is from options.js, it seems to include all extension logs, no error.
+- Collections with pins work fine. Explore UI has frames but empty list.
+- Explore view should show entire history if there's no query block.
+- It shows pages now, but almost all pages are Untitled (with url)
+- Pages without checkpoint are Untitled with correct URL.
+- The issue persists. At least the latest ten results in history of ~/portal-data are rendered Untitled
+- Show persisten log entry types
+- Finish up

@@ -396,7 +396,7 @@ describe('Progressive loading', () => {
   }
 
   function chartFrameVisible() {
-    return document.getElementById('attentionChart').classList.contains('visible');
+    return document.getElementById('timeChart').classList.contains('visible');
   }
 
   function columnHeaders() {

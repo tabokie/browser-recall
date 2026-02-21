@@ -3,7 +3,7 @@
 import { generateSlugFromUrl } from './utils.js';
 import { effectOf } from './replay.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
-import { getCachedAtom, setCachedAtom } from './atom-cache.js';
+import { getCachedAtom, setCachedAtom, setAtomCacheWatermark } from './atom-cache.js';
 
 console.log('Background script loading...');
 
@@ -61,6 +61,7 @@ async function handleOffscreenResponse(msg) {
     await ensureLogBuffer();
     logBuffer = logBuffer.filter(e => e.timestamp > msg.watermark);
     chrome.storage.local.set({ logBuffer });
+    setAtomCacheWatermark(msg.watermark);
     return;
   }
   const cb = portCallbacks.get(msg.id);
@@ -188,7 +189,7 @@ async function sessionLoad(key) {
     const cid = key.slice('list:user/'.length);
     const { collections = [] } = await chrome.storage.session.get(['collections']);
     const col = collections.find(c => c.id === cid);
-    if (col) return { timestamp: 0, id: cid, name: col.name || '', query: col.query || '', qbTree: col.qbTree || null, pins: [] };
+    if (col) return { timestamp: 0, id: cid, name: col.name || '', qbTrees: col.qbTrees || [], pins: [] };
     return null;
   }
   if (key === 'list:recycle-bin') {
@@ -227,7 +228,7 @@ async function sessionWrite(effects) {
         await chrome.storage.session.set({ collections: collections.filter(c => c.id !== cid) });
       } else {
         const idx = collections.findIndex(c => c.id === cid);
-        const meta = { id: entity.id, name: entity.name, query: entity.query, qbTree: entity.qbTree };
+        const meta = { id: entity.id, name: entity.name, qbTrees: entity.qbTrees };
         if (idx >= 0) collections[idx] = meta;
         else collections.push(meta);
         await chrome.storage.session.set({ collections });
@@ -262,6 +263,7 @@ async function addLog(entry) {
 async function appendVisit(interaction) {
   const entry = {
     timestamp: interaction.timestamp,
+    action: 'page',
     url: interaction.url,
     title: interaction.title,
   };
@@ -552,9 +554,29 @@ chrome.runtime.onStartup.addListener(async () => {
 // ─── Save Page WE Integration ─────────────────────────────────────────
 initSavepageBridge();
 
+// ─── Checkpoint Helper ────────────────────────────────────────────────
+// Ensure an atom checkpoint exists in cache or disk; creates one if missing.
+
+async function ensureCheckpointIfMissing(checkSlug, checkUrl, checkTitle) {
+  const cached = await getCachedAtom(checkSlug);
+  if (!cached) {
+    const existsResp = await requestOffscreen({ action: 'atomExists', slug: checkSlug });
+    if (!existsResp?.exists) {
+      await addLog({
+        timestamp: Date.now(),
+        action: 'page_checkpoint',
+        url: checkUrl,
+        title: checkTitle
+      });
+    }
+  }
+}
+
 // ─── Snapshot Capture ─────────────────────────────────────────────────
 
-async function captureAndLog(tabId, slug, timestamp) {
+async function captureAndLog(tabId, slug, timestamp, url, title) {
+  // Ensure atom exists before capture
+  if (url) await ensureCheckpointIfMissing(slug, url, title || '');
   const mdResp = await chrome.tabs.sendMessage(tabId, { action: 'extractMarkdown' });
   const html = await captureSavePage(tabId);
   await requestOffscreen({
@@ -562,7 +584,7 @@ async function captureAndLog(tabId, slug, timestamp) {
     markdown: mdResp?.markdown || '', html: html || ''
   });
   await addLog({
-    timestamp, action: 'capture', slug,
+    timestamp, action: 'page', url,
     mdPath: `pages/${slug}/${timestamp}.md`,
     htmlPath: `pages/${slug}/${timestamp}.html`
   });
@@ -587,7 +609,7 @@ chrome.commands.onCommand.addListener(async (command) => {
     try {
       const slug = generateSlugFromUrl(tab.url);
       const timestamp = Date.now();
-      await captureAndLog(tab.id, slug, timestamp);
+      await captureAndLog(tab.id, slug, timestamp, tab.url, tab.title);
       chrome.tabs.sendMessage(tab.id, { action: 'showCaptureNotification' }).catch(() => {});
     } catch (error) {
       console.warn('[capture] ERROR:', error.message, error);
@@ -642,7 +664,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             const slug = generateSlugFromUrl(tab.url);
             const timestamp = Date.now();
-            await captureAndLog(tab.id, slug, timestamp);
+            await captureAndLog(tab.id, slug, timestamp, tab.url, tab.title);
             sendResponse({ success: true, timestamp });
           } catch (error) {
             console.warn('[capture-popup] ERROR:', error.message, error);
@@ -701,22 +723,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
             if (referrer) interaction.referrer = referrer;
 
-            // Helper: ensure checkpoint if atom doesn't exist in cache or disk
-            const ensureCheckpointIfMissing = async (checkSlug, checkUrl, checkTitle) => {
-              const cached = await getCachedAtom(checkSlug);
-              if (!cached) {
-                const existsResp = await requestOffscreen({ action: 'atomExists', slug: checkSlug });
-                if (!existsResp?.exists) {
-                  await addLog({
-                    timestamp: Date.now(),
-                    action: 'create_checkpoint',
-                    url: checkUrl,
-                    title: checkTitle
-                  });
-                }
-              }
-            };
-
             // Ensure checkpoints BEFORE appending the visit entry, so log
             // order is deterministic: create_checkpoint precedes visit.
             await ensureLogBuffer();
@@ -731,19 +737,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               isMultiDay = cachedAtom.visitDates.some(ymd => ymd !== todayYMD);
             } else {
               // Check logBuffer for a visit to same URL on a different date
-              isMultiDay = logBuffer.some(e => !e.action && e.url === url && dateKeyFromTimestamp(e.timestamp) !== todayStr);
+              isMultiDay = logBuffer.some(e => e.action === 'page' && e.url === url && dateKeyFromTimestamp(e.timestamp) !== todayStr);
             }
             if (isMultiDay) {
               await ensureCheckpointIfMissing(slug, url, title);
             }
 
-            // Ensure parent checkpoint if parent was visited in current buffer.
+            // Ensure parent checkpoint for referrer.
             if (referrer) {
-              const parentInBuffer = logBuffer.some(e => !e.action && e.url === referrer);
-              if (parentInBuffer) {
-                const refSlug = generateSlugFromUrl(referrer);
-                await ensureCheckpointIfMissing(refSlug, referrer, '');
-              }
+              const refSlug = generateSlugFromUrl(referrer);
+              await ensureCheckpointIfMissing(refSlug, referrer, '');
             }
 
             // appendVisit calls addLog which replays against session cache
@@ -776,7 +779,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
 
                 if (workspace.autoSnapshot && sender.tab) {
-                  captureAndLog(sender.tab.id, slug, timestamp).catch(err => {
+                  captureAndLog(sender.tab.id, slug, timestamp, url, title).catch(err => {
                     console.warn('[auto-snapshot] ERROR:', err.message, err);
                   });
                 }
@@ -815,11 +818,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             const entry = {
               timestamp: Date.now(),
-              action: 'report',
+              action: 'page',
               url,
               scrollDepth: request.scrollDepth,
               timeOnPage: request.timeOnPage
             };
+            if (request.title) entry.title = request.title;
 
             await addLog(entry);
             console.log(`Logged attention report: ${url} (scroll=${request.scrollDepth}, time=${request.timeOnPage}ms)`);
@@ -1108,8 +1112,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               if (cached) {
                 const inPinned = cached.fullPinned?.some(p => p.url === url);
                 const inRelated = cached.related?.some(r => r.url === url);
-                if (inPinned) parentCollections.push({ id: col.id, name: col.name || col.query, type: 'pin' });
-                else if (inRelated) parentCollections.push({ id: col.id, name: col.name || col.query, type: 'appear' });
+                if (inPinned) parentCollections.push({ id: col.id, name: col.name, type: 'pin' });
+                else if (inRelated) parentCollections.push({ id: col.id, name: col.name, type: 'appear' });
               }
             }
 
@@ -1250,10 +1254,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'saveCollectionMeta': {
-          const metaEntry = { timestamp: Date.now(), action: 'list_meta', id: `user/${request.collectionId}` };
-          if (request.name !== undefined) metaEntry.name = request.name;
-          if (request.query !== undefined) metaEntry.query = request.query;
-          if (request.qbTree !== undefined) metaEntry.qbTree = request.qbTree;
+          const metaEntry = { timestamp: Date.now(), action: 'list_meta', id: `user/${request.collectionId}`, name: request.name };
+          if (request.qbTrees !== undefined) metaEntry.qbTrees = request.qbTrees;
           await addLog(metaEntry);
           sendResponse({ success: true });
           notifyMutation('collections');

@@ -860,15 +860,25 @@ class FileSystemStorage {
     return this.#collectionIdToFilename.get(collectionId) || collectionId;
   }
 
+  // Resolve the file path for a collection ID.
+  // Returns 'lists/explore.json' for explore, 'lists/user/${filename}.json' for others.
+  #resolveCollectionPath(collectionId) {
+    if (collectionId === 'explore') {
+      return 'lists/explore.json';
+    }
+    const filename = this.#resolveCollectionFilename(collectionId);
+    return `lists/user/${filename}.json`;
+  }
+
   // Load pins for a single collection.
   // Returns the pins array (unwraps self-describing entity).
   async loadCollectionPinsById(collectionId) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
-    const filename = this.#resolveCollectionFilename(collectionId);
+    const path = this.#resolveCollectionPath(collectionId);
     try {
-      const fh = await this.resolveFile(`lists/user/${filename}.json`);
+      const fh = await this.resolveFile(path);
       const data = await this.readJson(fh);
       if (data && typeof data === 'object' && !Array.isArray(data) && data.pins) {
         return data.pins;
@@ -880,11 +890,11 @@ class FileSystemStorage {
   }
 
   // Load the full self-describing entity for a single collection.
-  // Returns { timestamp, id, name, query, qbTree, pins: [...] }
+  // Returns { timestamp, id, name, qbTrees, pins: [...] }
   async loadCollectionPinsEntity(collectionId) {
-    const filename = this.#resolveCollectionFilename(collectionId);
+    const path = this.#resolveCollectionPath(collectionId);
     try {
-      const fh = await this.resolveFile(`lists/user/${filename}.json`);
+      const fh = await this.resolveFile(path);
       const data = await this.readJson(fh);
       if (data && typeof data === 'object' && !Array.isArray(data) && data.pins) {
         return data;
@@ -896,7 +906,7 @@ class FileSystemStorage {
     }
   }
 
-  // Load all collection pins from lists/user/ files
+  // Load all collection pins from lists/explore.json and lists/user/ files
   // Returns { collectionId: pinsArray } keyed by internal ID (not filename).
   async loadCollectionPins() {
     if (!(await this.verifyPermission())) {
@@ -904,12 +914,24 @@ class FileSystemStorage {
     }
 
     const allPins = {};
+
+    // Load explore.json from lists/
+    try {
+      const fh = await this.resolveFile('lists/explore.json');
+      const data = await this.readJson(fh);
+      if (data && typeof data === 'object' && !Array.isArray(data) && data.pins) {
+        allPins['explore'] = data.pins;
+      } else if (Array.isArray(data)) {
+        allPins['explore'] = data; // legacy bare array
+      }
+    } catch { /* explore.json doesn't exist yet */ }
+
+    // Load user collections from lists/user/
     try {
       const userDir = await this.resolveDir('lists/user');
       for await (const entry of userDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
           const filename = entry.name.replace('.json', '');
-          if (filename === 'explore') continue;
           try {
             const file = await entry.getFile();
             const data = JSON.parse(await file.text());
@@ -933,32 +955,48 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
-    const filename = this.#resolveCollectionFilename(collectionId);
+    const path = this.#resolveCollectionPath(collectionId);
     // Read existing entity to preserve metadata (name, query, qbTree)
     let existing = {};
     try {
-      const fh = await this.resolveFile(`lists/user/${filename}.json`);
+      const fh = await this.resolveFile(path);
       const data = await this.readJson(fh);
       if (data && typeof data === 'object' && !Array.isArray(data)) {
         existing = data;
       }
     } catch { /* file doesn't exist yet */ }
-    const fileHandle = await this.resolveFile(`lists/user/${filename}.json`, { create: true });
+    const fileHandle = await this.resolveFile(path, { create: true });
     await this.writeJson(fileHandle, { ...existing, timestamp, pins });
   }
 
-  // Save collection metadata (name, query, qbTree) without touching pins.
+  // Save collection metadata (name, qbTrees) without touching pins.
   // Read-merge-write to preserve existing pins.
   // If name changes, the file is renamed (old deleted, new created).
   async saveCollectionMeta(collectionId, meta, timestamp = 0) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
+    // Explore collection doesn't support renaming
+    if (collectionId === 'explore') {
+      const path = this.#resolveCollectionPath(collectionId);
+      let existing = { timestamp: 0, pins: [] };
+      try {
+        const fh = await this.resolveFile(path);
+        const data = await this.readJson(fh);
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+          existing = data;
+        }
+      } catch { /* file doesn't exist yet */ }
+      const fileHandle = await this.resolveFile(path, { create: true });
+      await this.writeJson(fileHandle, { ...existing, ...meta, timestamp });
+      return;
+    }
     const oldFilename = this.#resolveCollectionFilename(collectionId);
+    const oldPath = this.#resolveCollectionPath(collectionId);
     // Read existing data from old file
     let existing = { timestamp: 0, pins: [] };
     try {
-      const fh = await this.resolveFile(`lists/user/${oldFilename}.json`);
+      const fh = await this.resolveFile(oldPath);
       const data = await this.readJson(fh);
       if (data && typeof data === 'object' && !Array.isArray(data)) {
         existing = data;
@@ -974,7 +1012,7 @@ class FileSystemStorage {
         const userDir = await this.resolveDir('lists/user');
         await this.softDelete(userDir, `${oldFilename}.json`);
         // Evict stale file cache entry
-        this.#fileCache.delete(`lists/user/${oldFilename}.json`);
+        this.#fileCache.delete(oldPath);
       } catch { /* old file may not exist */ }
     }
     // Write to new filename
@@ -984,22 +1022,28 @@ class FileSystemStorage {
     this.#collectionIdToFilename.set(collectionId, newFilename);
   }
 
-  // Delete a collection file from lists/user/
+  // Delete a collection file (from lists/user/ or lists/ for explore)
   async deleteCollectionFile(collectionId) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
-    const filename = this.#resolveCollectionFilename(collectionId);
+    const path = this.#resolveCollectionPath(collectionId);
     try {
-      const userDir = await this.resolveDir('lists/user');
-      await this.softDelete(userDir, `${filename}.json`);
-      this.#fileCache.delete(`lists/user/${filename}.json`);
+      if (collectionId === 'explore') {
+        const listsDir = await this.resolveDir('lists');
+        await this.softDelete(listsDir, 'explore.json');
+      } else {
+        const userDir = await this.resolveDir('lists/user');
+        const filename = this.#resolveCollectionFilename(collectionId);
+        await this.softDelete(userDir, `${filename}.json`);
+      }
+      this.#fileCache.delete(path);
     } catch { /* file may not exist */ }
     this.#collectionIdToFilename.delete(collectionId);
   }
 
   // Load metadata for all collections from lists/user/ files.
-  // Returns [{ id, name, query, qbTree }] — skips explore.
+  // Returns [{ id, name, qbTrees }] — skips explore.
   // Also rebuilds the #collectionIdToFilename map.
   async loadAllCollectionMetadata() {
     if (!(await this.verifyPermission())) {
@@ -1021,8 +1065,7 @@ class FileSystemStorage {
             result.push({
               id,
               name: data.name || filename,
-              query: data.query || '',
-              qbTree: data.qbTree || null,
+              qbTrees: data.qbTrees || [],
             });
           } catch { /* skip malformed */ }
         }
@@ -1031,7 +1074,7 @@ class FileSystemStorage {
     return result;
   }
 
-  // Save collection pins to lists/user/ files
+  // Save collection pins to lists/ (explore) and lists/user/ (others) files
   // Preserves existing metadata in each file.
   async saveCollectionPins(allPins) {
     if (!(await this.verifyPermission())) {
@@ -1043,26 +1086,31 @@ class FileSystemStorage {
     // Write each collection, preserving metadata
     const activeFilenames = new Set();
     for (const [id, pins] of Object.entries(allPins)) {
-      const filename = this.#resolveCollectionFilename(id);
-      activeFilenames.add(filename);
       const pinsArray = Array.isArray(pins) ? pins : (pins.pins || []);
+      const path = this.#resolveCollectionPath(id);
+
+      // Track active filenames for cleanup (only for user collections)
+      if (id !== 'explore') {
+        const filename = this.#resolveCollectionFilename(id);
+        activeFilenames.add(filename);
+      }
+
       let existing = {};
       try {
-        const fh = await this.resolveFile(`lists/user/${filename}.json`);
+        const fh = await this.resolveFile(path);
         const data = await this.readJson(fh);
         if (data && typeof data === 'object' && !Array.isArray(data)) {
           existing = data;
         }
       } catch { /* file doesn't exist yet */ }
-      const fileHandle = await this.resolveFile(`lists/user/${filename}.json`, { create: true });
+      const fileHandle = await this.resolveFile(path, { create: true });
       await this.writeJson(fileHandle, { ...existing, timestamp: 0, pins: pinsArray });
     }
 
-    // Soft-delete orphaned files (skip explore)
+    // Soft-delete orphaned files in lists/user/ (explore is not in this dir)
     for await (const entry of userDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.json')) {
         const filename = entry.name.replace('.json', '');
-        if (filename === 'explore') continue;
         if (!activeFilenames.has(filename)) {
           await this.softDelete(userDir, entry.name);
         }

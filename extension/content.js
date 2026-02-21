@@ -271,35 +271,9 @@ function showGlobalNoteOverlay(existingNote) {
 
   const slug = getSlugForCurrentPage();
 
-  // Save note on change (debounced)
-  let saveTimeout = null;
-  textarea.addEventListener('input', () => {
-    autoResize();
-    clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(async () => {
-      try {
-        const resp = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
-        const highlights = resp?.highlights || [];
-        const h = highlights.find(h => h.isGlobalNote);
-        if (h) {
-          h.note = textarea.value;
-          await chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
-        } else {
-          await chrome.runtime.sendMessage({
-            action: 'saveHighlight',
-            slug,
-            highlight: { text: '', note: textarea.value, timestamp: Date.now(), isGlobalNote: true }
-          });
-        }
-      } catch (err) {
-        console.error('[content] Failed to save page note:', err);
-      }
-    }, 500);
-  });
+  textarea.addEventListener('input', () => { autoResize(); });
 
   function close() {
-    // Save immediately on close if there are pending changes
-    clearTimeout(saveTimeout);
     const note = textarea.value;
     if (note !== (existingNote || '')) {
       chrome.runtime.sendMessage({ action: 'loadHighlights', slug }).then(resp => {
@@ -690,27 +664,23 @@ function showHighlightEditOverlay(mark, text, timestamp, existingNote, slug) {
 
   textarea.focus();
 
-  // Save note on change (debounced)
-  let saveTimeout = null;
-  textarea.addEventListener('input', () => {
-    autoResize();
-    clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(async () => {
-      try {
-        const resp = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
+  textarea.addEventListener('input', () => { autoResize(); });
+
+  function saveAndClose() {
+    const note = textarea.value;
+    if (note !== existingNote) {
+      chrome.runtime.sendMessage({ action: 'loadHighlights', slug }).then(resp => {
         const highlights = resp?.highlights || [];
-        // Match by timestamp first for grouped highlights
         const h = highlights.find(h => h.timestamp === timestamp)
           || highlights.find(h => h.text === text);
         if (h) {
-          h.note = textarea.value;
-          await chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
+          h.note = note;
+          chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
         }
-      } catch (err) {
-        console.error('[content] Failed to save highlight note:', err);
-      }
-    }, 500);
-  });
+      }).catch(() => {});
+    }
+    host.remove();
+  }
 
   // Delete highlight
   deleteBtn.addEventListener('click', (ev) => {
@@ -725,17 +695,17 @@ function showHighlightEditOverlay(mark, text, timestamp, existingNote, slug) {
     host.remove();
   });
 
-  // Close on Escape
+  // Close on Escape — save and close
   textarea.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      host.remove();
+      saveAndClose();
     }
   });
 
-  // Close on click outside
+  // Close on click outside — save and close
   const handleOutsideClick = (e) => {
     if (!host.contains(e.target)) {
-      host.remove();
+      saveAndClose();
       document.removeEventListener('mousedown', handleOutsideClick);
     }
   };
@@ -759,7 +729,7 @@ function unwrapHighlightMark(mark) {
 
 let visitReported = false;
 let currentTitle = document.title;
-const REPORT_INTERVAL = 10000; // 10 seconds
+const REPORT_INTERVAL = 3600000; // 1 hour
 
 function reportVisit() {
   if (visitReported) return;
@@ -781,6 +751,8 @@ function reportVisit() {
   chrome.runtime.sendMessage(msg).catch(() => {});
 }
 
+let reportTimer = null;
+
 function reportAttention() {
   const url = window.location.href;
   if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return;
@@ -792,18 +764,23 @@ function reportAttention() {
   const msg = {
     action: 'reportAttention',
     url,
+    title: currentTitle,
     scrollDepth: Math.round(maxScrollDepth),
     timeOnPage: incrementalTime
   };
 
   chrome.runtime.sendMessage(msg).catch(() => {});
+
+  // Reschedule timer
+  clearTimeout(reportTimer);
+  reportTimer = setTimeout(reportAttention, REPORT_INTERVAL);
 }
 
 // Send initial visit on page load
 reportVisit();
 
-// Send periodic attention reports
-setInterval(reportAttention, REPORT_INTERVAL);
+// Schedule first attention report
+reportTimer = setTimeout(reportAttention, REPORT_INTERVAL);
 
 // Track title changes locally (no re-report — final visit uses latest title)
 const titleEl = document.querySelector('title');

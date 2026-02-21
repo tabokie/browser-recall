@@ -1,20 +1,18 @@
-// Attention chart — rendering, tooltips, bar click filtering, and highlight sync
-import { parseAttention, attentionStrength } from './attention-utils.js';
+// Time chart — rendering, tooltips, bar click filtering, and highlight sync
 
-function aggregateAttentionByDay(interactions) {
+function aggregateVisitsByDay(interactions) {
   const byDay = new Map();
   for (const i of interactions) {
-    const att = parseAttention(i);
     const dayKey = new Date(i.timestamp).toISOString().slice(0, 10);
     const prev = byDay.get(dayKey) || 0;
-    byDay.set(dayKey, prev + (att ? attentionStrength(att) : 0.1)); // minimal presence even without attention
+    byDay.set(dayKey, prev + 1); // count visits per day
   }
   // Sort by date
   const entries = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  return entries; // [[dateStr, score], ...]
+  return entries; // [[dateStr, count], ...]
 }
 
-export function renderAttentionChartInto(chartEl, barsEl, interactions, label) {
+export function renderTimeChartInto(chartEl, barsEl, interactions, label) {
   if (label !== undefined) {
     const labelEl = chartEl.querySelector('.chart-label');
     if (labelEl) labelEl.textContent = label;
@@ -25,7 +23,7 @@ export function renderAttentionChartInto(chartEl, barsEl, interactions, label) {
     return;
   }
 
-  const data = aggregateAttentionByDay(interactions);
+  const data = aggregateVisitsByDay(interactions);
   if (data.length === 0) {
     chartEl.classList.remove('visible');
     return;
@@ -84,14 +82,14 @@ export function renderAttentionChartInto(chartEl, barsEl, interactions, label) {
   chartEl.classList.add('visible');
 }
 
-export function renderAttentionChart(interactions) {
-  renderAttentionChartInto(
-    document.getElementById('attentionChart'),
+export function renderTimeChart(interactions) {
+  renderTimeChartInto(
+    document.getElementById('timeChart'),
     document.getElementById('chartBars'),
     interactions,
-    'Attention over time'
+    'Visits over time'
   );
-  bindChartBarClick(document.getElementById('attentionChart'), document.getElementById('results'));
+  bindChartBarClick(document.getElementById('timeChart'), document.getElementById('results'));
 }
 
 // Chart tooltip handler (shared for both charts)
@@ -101,7 +99,9 @@ function bindChartTooltip(chartEl) {
   barsEl.addEventListener('mouseover', (e) => {
     const group = e.target.closest('.chart-bar-group.has-data');
     if (!group) { tooltip.style.display = 'none'; return; }
-    tooltip.textContent = `${group.dataset.date}: ${group.dataset.score}`;
+    const count = Math.round(parseFloat(group.dataset.score));
+    const visits = count === 1 ? 'visit' : 'visits';
+    tooltip.textContent = `${group.dataset.date}: ${count} ${visits}`;
     tooltip.style.display = 'block';
     const rect = group.getBoundingClientRect();
     const chartRect = chartEl.getBoundingClientRect();
@@ -196,6 +196,6 @@ export function bindChartBarClick(chartEl, resultsContainer) {
 
 // Initialize chart tooltips — call once at module load
 export function initCharts() {
-  bindChartTooltip(document.getElementById('attentionChart'));
+  bindChartTooltip(document.getElementById('timeChart'));
   bindChartTooltip(document.getElementById('relatedChart'));
 }

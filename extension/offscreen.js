@@ -3,13 +3,12 @@
 // Responds to read requests from background via port channel.
 // Background sends 'drainEntries' messages via port when logBuffer has new entries;
 // offscreen drains them to the filesystem (JSONL append + entity checkpoint).
-// (chrome.storage.onChanged is NOT available in offscreen — only chrome.runtime is.)
+// chrome.storage is NOT available in offscreen — only chrome.runtime is.
 //
 // Why offscreen? MV3 service workers have no document context. The File System
 // Access API requires a document to store FileSystemDirectoryHandle in IndexedDB
 // and call its methods.
 import { FileSystemStorage } from './filesystem-storage.js';
-import { generateSlugFromUrl } from './utils.js';
 import { effectOf, defaultEntity } from './replay.js';
 
 console.log('Offscreen document loaded');
@@ -312,21 +311,13 @@ async function drainQueue() {
       return;
     }
 
-    // Use entries captured from onChanged if available, fall back to storage.local
-    let logBuffer;
-    if (pendingDrainEntries !== null) {
-      logBuffer = pendingDrainEntries;
-      pendingDrainEntries = null;
-    } else {
-      try {
-        const result = await chrome.storage.local.get(['logBuffer']);
-        logBuffer = result.logBuffer || [];
-      } catch (e) {
-        console.warn('Drain: chrome.storage.local unavailable:', e.message);
-        draining = false;
-        return;
-      }
+    // Entries delivered via port from background
+    if (pendingDrainEntries === null) {
+      draining = false;
+      return;
     }
+    let logBuffer = pendingDrainEntries;
+    pendingDrainEntries = null;
     // Skip entries already drained (prevents duplicates across drain cycles)
     logBuffer = logBuffer.filter(e => e.timestamp > lastDrainedTimestamp);
     if (logBuffer.length === 0) {
@@ -335,8 +326,6 @@ async function drainQueue() {
     }
 
     let lastTimestamp = 0;
-    let maxInteractionTimestamp = 0;
-
     // Group entries by date for batch JSONL append
     const entriesByDate = new Map();
 
@@ -346,23 +335,12 @@ async function drainQueue() {
     const roundCache = new Map();   // key → entity | null
     const dirtyKeys = new Set();
 
-    // Filesystem existence cache for atoms (avoids repeated disk checks)
-    const atomExistsCache = new Map();
-    const atomExistsCached = async (slug) => {
-      let v = atomExistsCache.get(slug);
-      if (v === undefined) {
-        v = await fsStorage.atomExists(slug);
-        atomExistsCache.set(slug, v);
-      }
-      return v;
-    };
-
     // Load an entity into roundCache if not already present
     const ensureLoaded = async (key) => {
       if (roundCache.has(key)) return;
       if (key.startsWith('atom:')) {
         const slug = key.slice(5);
-        const exists = await atomExistsCached(slug);
+        const exists = await fsStorage.atomExists(slug);
         if (exists) {
           const atom = (await fsStorage.loadAtom(slug)) || defaultEntity(key);
           if (!atom.slug) atom.slug = slug;
@@ -412,16 +390,9 @@ async function drainQueue() {
         if (entity !== prev) {
           roundCache.set(key, entity);
           if (entity !== null) dirtyKeys.add(key);
-          // Update atomExistsCache when atom transitions null → non-null
-          if (key.startsWith('atom:') && prev === null && entity !== null) {
-            atomExistsCache.set(key.slice(5), true);
-          }
         }
       }
 
-      if (!entry.action && entry.timestamp > maxInteractionTimestamp) {
-        maxInteractionTimestamp = entry.timestamp;
-      }
       lastTimestamp = entry.timestamp;
     }
 
@@ -445,93 +416,34 @@ async function drainQueue() {
       }
     }
 
-    // 2. Flush dirty entities from round cache to disk
-    // Build URL→title map for parent/children resolution
-    const titleByUrl = new Map();
-    for (const entry of logBuffer) {
-      if (entry.url && entry.title) titleByUrl.set(entry.url, entry.title);
-    }
-
-    // Collect all checkpointed atom slugs for parent/children resolution
-    const checkpointedSlugs = new Set();
-    for (const key of dirtyKeys) {
-      if (key.startsWith('atom:')) checkpointedSlugs.add(key.slice(5));
-    }
-
+    // 2. Flush dirty entities from round cache to disk (pure save, no post-processing)
     for (const key of dirtyKeys) {
       const entity = roundCache.get(key);
       if (entity === null) continue;
 
       if (key.startsWith('atom:')) {
         const slug = key.slice(5);
-        await withLock('atoms/' + slug + '.json', async () => {
-          const atom = entity;
-          // Resolve parents/children: URL → slug (checkpointed) or {url,title}
-          for (const field of ['parents', 'children']) {
-            if (atom[field] && atom[field].length > 0) {
-              const resolved = [];
-              for (const ref of atom[field]) {
-                if (typeof ref !== 'string') { resolved.push(ref); continue; }
-                if (!ref.startsWith('http')) { resolved.push(ref); continue; }
-                const refSlug = generateSlugFromUrl(ref);
-                if (checkpointedSlugs.has(refSlug) || await fsStorage.atomExists(refSlug)) {
-                  resolved.push(refSlug);
-                } else {
-                  resolved.push({ url: ref, title: titleByUrl.get(ref) || '' });
-                }
-              }
-              atom[field] = resolved;
-            }
-          }
-          await fsStorage.saveAtom(slug, atom);
-        });
+        await withLock('atoms/' + slug + '.json', () => fsStorage.saveAtom(slug, entity));
       } else if (key === 'settings') {
-        await withLock('settings.json', async () => {
-          await fsStorage.saveSettings(entity);
-        });
+        await withLock('settings.json', () => fsStorage.saveSettings(entity));
       } else if (key.startsWith('list:user/')) {
         const cid = key.slice('list:user/'.length);
         await withLock('lists/user/' + cid + '.json', async () => {
-          if (entity.deleted) {
-            await fsStorage.deleteCollectionFile(cid);
-          } else {
-            await fsStorage.saveCollectionMeta(cid, entity, entity.timestamp);
-          }
+          if (entity.deleted) await fsStorage.deleteCollectionFile(cid);
+          else await fsStorage.saveCollectionMeta(cid, entity, entity.timestamp);
         });
       } else if (key === 'list:recycle-bin') {
-        await withLock('lists/recycle-bin.json', async () => {
-          await fsStorage.saveRecycleBin(entity.items, entity.timestamp);
-        });
+        await withLock('lists/recycle-bin.json', () => fsStorage.saveRecycleBin(entity.items, entity.timestamp));
       } else if (key === 'list:permanent-deletes') {
-        await withLock('lists/permanent-deletes.json', async () => {
-          await fsStorage.savePermanentDeletes(entity.urls, entity.timestamp);
-        });
+        await withLock('lists/permanent-deletes.json', () => fsStorage.savePermanentDeletes(entity.urls, entity.timestamp));
       } else if (key === 'index:parent-index') {
         await withLock('lists/index/parent-index.json', async () => {
-          // Prune entries for URLs whose atoms were just checkpointed
-          const idx = { ...entity, index: { ...entity.index } };
-          for (const url of Object.keys(idx.index)) {
-            const urlSlug = generateSlugFromUrl(url);
-            if (checkpointedSlugs.has(urlSlug)) {
-              delete idx.index[url];
-            }
-          }
           const fh = await fsStorage.resolveFile('lists/index/parent-index.json', { create: true });
-          await fsStorage.writeJson(fh, idx);
+          await fsStorage.writeJson(fh, entity);
         });
       }
     }
 
-    // Piggyback gateway save on interaction drain
-    if (maxInteractionTimestamp > 0) {
-      try {
-        const { gatewayDomains } = await chrome.storage.session.get(['gatewayDomains']);
-        if (gatewayDomains) {
-          const fh = await fsStorage.resolveFile('lists/gateways.json', { create: true });
-          await fsStorage.writeJson(fh, { watermark: maxInteractionTimestamp, domains: gatewayDomains });
-        }
-      } catch {}
-    }
 
     // Advance local watermark so next drain skips these entries
     if (lastTimestamp > 0) {

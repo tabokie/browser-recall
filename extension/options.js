@@ -7,7 +7,7 @@ import { generateSlugFromUrl, generateSlugFromTitle, saveSettingsValue } from '.
 import { findRelatedPages } from './related-scoring.js';
 import { parseAttention, attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
 import { qbCreatePredicate, qbCreateOperator, qbCreatePlaceholder, qbFindNode, qbCollapseTree, qbFlattenSameOp, qbToTree, qbFlatten } from './qb-tree.js';
-import { initCharts, renderAttentionChart, renderAttentionChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './attention-chart.js';
+import { initCharts, renderTimeChart, renderTimeChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './time-chart.js';
 import { VirtualScroller } from './virtual-scroller.js';
 
 const fsStorage = new FileSystemStorage();
@@ -51,7 +51,7 @@ let marqueeActive = false; // suppress click during marquee drag
 let gatewayDomainsCache = {}; // { [origin]: { rootUrl, childCount, fetched } }
 let gatewayDomainsLoaded = false;
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
-let pendingPin = null; // { query, qbTree? } — set during pin naming mode
+let pendingPin = null; // { autoName, qbTrees? } — set during pin naming mode
 // pinnedFilterCtx removed — pinned section no longer has related pages
 const EXPLORE_COLLECTION_ID = 'explore';
 // Collection results and atom data are cached in chrome.storage.session
@@ -257,8 +257,13 @@ async function initHistoryFiles() {
   const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
   const interactionBuffer = extractInteractionBuffer(logBuffer);
   for (const entry of interactionBuffer) {
-    if (!historyByUrl.has(entry.url) || entry.timestamp > historyByUrl.get(entry.url).timestamp) {
+    const existing = historyByUrl.get(entry.url);
+    if (!existing || entry.timestamp > existing.timestamp) {
       historyByUrl.set(entry.url, entry);
+      // Preserve title from older entry if new one lacks it
+      if (existing && existing.title && !entry.title) entry.title = existing.title;
+    } else if (entry.title && !existing.title) {
+      existing.title = entry.title;
     }
     historyAllEntries.push(entry);
   }
@@ -276,11 +281,13 @@ async function loadHistoryBatch() {
     const interactions = resp?.interactions || [];
     const newItems = [];
     for (const item of interactions) {
-      // Skip non-visit entries (set, highlight, pins_replace, etc.) — only visits lack action field
-      if (item.action || !item.url) continue;
+      // Skip non-visit entries (set, highlight, list, etc.)
+      if ((item.action && item.action !== 'page') || !item.url) continue;
       historyAllEntries.push(item);
       if (!historyByUrl.has(item.url)) {
         historyByUrl.set(item.url, item);
+      } else if (item.title && !historyByUrl.get(item.url).title) {
+        historyByUrl.get(item.url).title = item.title;
       }
       newItems.push(item);
     }
@@ -443,7 +450,7 @@ document.getElementById('deleteAllBtn').addEventListener('click', async () => {
 // --- Layout switching (collection vs normal) ---
 function showCollectionLayout() {
   saveExploreQbState();
-  document.getElementById('attentionChart').classList.remove('visible');
+  document.getElementById('timeChart').classList.remove('visible');
   document.getElementById('resultsWrapper').style.display = 'none';
   document.getElementById('collectionLayout').classList.add('visible');
   document.getElementById('queryBuilder').style.display = 'none';
@@ -698,7 +705,7 @@ function isDeletableView() {
 // Show chart frame + column headers immediately (bars and rows fill in after data loads)
 function renderResultsSkeleton(opts = {}) {
   const { showRelevance = false } = opts;
-  const chartEl = document.getElementById('attentionChart');
+  const chartEl = document.getElementById('timeChart');
   chartEl.querySelector('.chart-bars').innerHTML = '';
   chartEl.classList.add('visible');
 
@@ -728,8 +735,8 @@ function renderCollectionSkeleton() {
 function refreshCurrentView() {
   if (activeView.type === 'category') {
     showCategory(activeView.value);
-  } else if (activeView.type === 'collection' && activeView.query) {
-    showCollection({ id: activeView.id, query: activeView.query, qbTree: activeView.qbTree, name: activeView.name });
+  } else if (activeView.type === 'collection') {
+    showCollection({ id: activeView.id, qbTrees: activeView.qbTrees, name: activeView.name });
   } else if (activeView.type === 'explore') {
     showExplore();
   }
@@ -816,7 +823,7 @@ function isGatewayUrl(url) {
   }
 }
 
-// Attention chart tooltips initialized via initCharts() in initialize()
+// Time chart tooltips initialized via initCharts() in initialize()
 
 
 // --- Display ---
@@ -830,7 +837,7 @@ async function showCategory(category) {
 
   if (category === 'recycleBin') {
     showNormalLayout();
-    document.getElementById('attentionChart').classList.remove('visible');
+    document.getElementById('timeChart').classList.remove('visible');
     if (recycleBin.length > 0) {
       document.getElementById('restoreAllBtn').style.display = '';
       document.getElementById('deleteAllBtn').style.display = '';
@@ -850,7 +857,7 @@ async function showCategory(category) {
   const interactions = [...historyAllEntries];
   interactions.sort((a, b) => b.timestamp - a.timestamp);
   const filtered = filterByCategory(interactions, category);
-  renderAttentionChart(filtered);
+  renderTimeChart(filtered);
   await displayInteractionRows(filtered);
 
   // Wire up demand-loading on scroll
@@ -866,7 +873,7 @@ async function showCategory(category) {
       // Re-render chart with all loaded history
       const allInteractions = [...historyAllEntries];
       const allFiltered = filterByCategory(allInteractions, activeView.value);
-      renderAttentionChart(allFiltered);
+      renderTimeChart(allFiltered);
     }
   };
 }
@@ -1134,7 +1141,7 @@ async function runQuery() {
 
   if (!qbRoot || (qbRoot.type === 'predicate' && qbRoot.predicateType === null) || !treeHasConfiguredPredicate(qbRoot)) {
     if (inCollection) {
-      saveCollectionQbTree();
+      saveCollectionQbTrees();
       const relatedContainer = document.getElementById('relatedResults');
       relatedContainer.innerHTML = '<div class="no-results">Add filters to start querying</div>';
       document.getElementById('relatedChart').classList.remove('visible');
@@ -1151,7 +1158,7 @@ async function runQuery() {
 
   if (inCollection) {
     // Save updated qbTree to collection storage
-    saveCollectionQbTree();
+    saveCollectionQbTrees();
     runCollectionExploreQuery(matched);
     return;
   }
@@ -1189,8 +1196,8 @@ async function runQuery() {
     })
   );
 
-  // Render attention chart for matched results
-  renderAttentionChart(matched.map(r => ({ url: r.url, timestamp: r.lastVisit || Date.now(), attention: '' })));
+  // Render time chart for matched results
+  renderTimeChart(matched.map(r => ({ url: r.url, timestamp: r.lastVisit || Date.now(), attention: '' })));
 
   // Show pin button since we have valid results
   if (activeView.type === 'explore') {
@@ -1198,11 +1205,11 @@ async function runQuery() {
   }
 }
 
-async function saveCollectionQbTree() {
+async function saveCollectionQbTrees() {
   if (activeView.type !== 'collection') return;
   const tree = JSON.parse(JSON.stringify(qbRoot));
-  activeView.qbTree = tree;
-  await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId: activeView.id, qbTree: tree });
+  activeView.qbTrees = [tree];
+  await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId: activeView.id, name: activeView.name, qbTrees: [tree] });
 }
 
 function runCollectionExploreQuery(matched) {
@@ -1255,9 +1262,9 @@ function runCollectionExploreQuery(matched) {
   );
   bindPinClicks(relatedContainer, collectionId);
 
-  // Attention chart for explore results — use enriched data directly
+  // Time chart for explore results — use enriched data directly
   const chartData = exploreMatched.map(r => ({ url: r.url, timestamp: r.lastVisit || Date.now(), attention: '' }));
-  renderAttentionChartInto(
+  renderTimeChartInto(
     document.getElementById('relatedChart'),
     document.getElementById('relatedChartBars'),
     chartData,
@@ -1801,7 +1808,7 @@ async function refreshExplorePins() {
 
 async function showCollection(collection) {
   const displayName = collectionDisplayName(collection);
-  activeView = { type: 'collection', query: collection.query, id: collection.id, qbTree: collection.qbTree || null, name: collection.name || null };
+  activeView = { type: 'collection', id: collection.id, qbTrees: collection.qbTrees || [], name: collection.name || null };
   updateSidebarActive();
   updateMainTitle(displayName);
   document.getElementById('pinSearchBtn').style.display = 'none';
@@ -1946,14 +1953,8 @@ async function fetchCollectionResults(collection, collectionId, pins, enrichResu
   try {
     let searchResults = [];
 
-    if (collection.qbTree) {
-      searchResults = await evaluateQueryStream(collection.qbTree);
-    } else if (collection.query) {
-      try {
-        searchResults = await pipelinedSearch(collection.query);
-      } catch (searchErr) {
-        console.warn('Collection search failed:', searchErr.message);
-      }
+    if (collection.qbTrees && collection.qbTrees.length > 0) {
+      searchResults = await evaluateQueryStream(collection.qbTrees[0]);
     }
 
     if (activeView.type !== 'collection' || activeView.id !== collectionId) return;
@@ -1975,7 +1976,7 @@ async function fetchCollectionResults(collection, collectionId, pins, enrichResu
   }
 }
 
-// Render pinned rows (no related pages, no attention chart)
+// Render pinned rows (no related pages, no time chart)
 function renderPinnedSection(allPinned, collectionId) {
   const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
   const sortedPinned = applySortOrder(allPinned, effectivePinnedSort);
@@ -2014,15 +2015,17 @@ async function renderCollectionExplore(collection) {
   // Build auto-blocks from collection pins
   exploreBlocks = pins.length > 0 ? await buildExploreAutoBlocks(pins) : [];
 
-  // Add saved qbTree as a manual block if present
-  if (collection.qbTree) {
-    exploreBlocks.push({
-      id: ++exploreBlockIdCounter,
-      type: 'manual',
-      label: 'Saved query',
-      enabled: true,
-      tree: JSON.parse(JSON.stringify(collection.qbTree)),
-    });
+  // Add saved qbTrees as manual blocks if present
+  if (collection.qbTrees && collection.qbTrees.length > 0) {
+    for (const tree of collection.qbTrees) {
+      exploreBlocks.push({
+        id: ++exploreBlockIdCounter,
+        type: 'manual',
+        label: 'Saved query',
+        enabled: true,
+        tree: JSON.parse(JSON.stringify(tree)),
+      });
+    }
   }
 
   renderExploreBlocks();
@@ -2058,7 +2061,7 @@ function processInteractionsForDisplay(interactions, { globalDedup = false } = {
     const attParsed = parseAttention(item);
     results.push({
       url: item.url,
-      title: item.title,
+      title: item.title || historyByUrl.get(item.url)?.title || '',
       slug: item.slug || '',
       timestamp: item.timestamp,
       day,
@@ -2554,7 +2557,7 @@ function bindPinClicks(container, collectionId) {
     } else if (cid === EXPLORE_COLLECTION_ID) {
       showExplore();
     } else {
-      const collection = { id: cid, query: activeView.query, qbTree: activeView.qbTree, name: activeView.name };
+      const collection = { id: cid, qbTrees: activeView.qbTrees, name: activeView.name };
       showCollection(collection);
     }
   });
@@ -2589,7 +2592,7 @@ function getOrCreateRelatedScroller() {
 }
 
 function displayMessage(msg) {
-  document.getElementById('attentionChart').classList.remove('visible');
+  document.getElementById('timeChart').classList.remove('visible');
   // Reset virtual scroller state so it doesn't re-render over the message
   if (globalVirtualScroller) {
     globalVirtualScroller.data = [];
@@ -2602,7 +2605,7 @@ function displayMessage(msg) {
 }
 
 function collectionDisplayName(collection) {
-  return collection.name || collection.query;
+  return collection.name;
 }
 
 function updateMainTitle(text) {
@@ -2854,8 +2857,8 @@ async function pinCurrentSearch() {
     const autoName = qbSummarize(qbRoot);
 
     pendingPin = {
-      query: autoName,
-      qbTree: JSON.parse(JSON.stringify(qbRoot)), // deep clone
+      autoName,
+      qbTrees: [JSON.parse(JSON.stringify(qbRoot))], // deep clone
     };
 
     enterTitleEditMode(autoName, async (name) => {
@@ -2863,15 +2866,14 @@ async function pinCurrentSearch() {
       pendingPin = null;
       if (!pin) return;
 
-      const collectionName = name !== pin.query ? name : pin.query;
+      const collectionName = name || pin.autoName;
       const collectionId = generateSlugFromTitle(collectionName);
       const collection = {
         id: collectionId,
-        query: pin.query,
         name: collectionName,
-        qbTree: pin.qbTree,
+        qbTrees: pin.qbTrees,
       };
-      await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name: collectionName, query: pin.query, qbTree: pin.qbTree });
+      await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name: collectionName, qbTrees: pin.qbTrees });
       const { collectionOrder: order = [] } = await chrome.storage.session.get(['collectionOrder']);
       await saveSettingsValue('collectionOrder', [...order, collectionId]);
       await renderCollections();
@@ -2886,35 +2888,34 @@ async function pinCurrentSearch() {
     return;
   }
 
-  const query = activeView.query;
-  if (!query) return;
+  const searchQuery = activeView.query;
+  if (!searchQuery) return;
   if (activeView.type !== 'search') return;
 
-  pendingPin = { query };
+  pendingPin = { autoName: searchQuery };
 
-  enterTitleEditMode(query, async (name) => {
+  enterTitleEditMode(searchQuery, async (name) => {
     const pin = pendingPin;
     pendingPin = null;
     if (!pin) return;
 
+    const collectionName = name || pin.autoName;
     const collections = await loadCollections();
-    if (collections.some(t => t.query === pin.query)) return;
+    if (collections.some(t => t.name === collectionName)) return;
 
-    const collectionName = name !== pin.query ? name : pin.query;
     const collectionId = generateSlugFromTitle(collectionName);
     const collection = {
       id: collectionId,
-      query: pin.query,
       name: collectionName,
     };
-    await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name: collectionName, query: pin.query });
+    await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name: collectionName, qbTrees: [] });
     const { collectionOrder: order = [] } = await chrome.storage.session.get(['collectionOrder']);
     await saveSettingsValue('collectionOrder', [...order, collectionId]);
     await renderCollections();
     showCollection(collection);
   }, () => {
     pendingPin = null;
-    updateMainTitle(query);
+    updateMainTitle(searchQuery);
     document.getElementById('pinSearchBtn').style.display = 'flex';
   });
 }
@@ -3535,9 +3536,13 @@ chrome.runtime.onMessage.addListener((request) => {
       const interactionBuffer = extractInteractionBuffer(logBuffer);
       let changed = false;
       for (const entry of interactionBuffer) {
-        if (!historyByUrl.has(entry.url) || entry.timestamp > historyByUrl.get(entry.url).timestamp) {
+        const existing = historyByUrl.get(entry.url);
+        if (!existing || entry.timestamp > existing.timestamp) {
           historyByUrl.set(entry.url, entry);
+          if (existing && existing.title && !entry.title) entry.title = existing.title;
           changed = true;
+        } else if (entry.title && !existing.title) {
+          existing.title = entry.title;
         }
         // Always push to allEntries for date-boundary rendering
         historyAllEntries.push(entry);
@@ -3908,11 +3913,11 @@ async function runExploreBlockQuery() {
   } else {
     collectionId = activeView.id;
     pinnedUrls = new Set((allCollectionPins[collectionId] || []).map(p => p.url));
-    // Auto-save the first manual block's tree back to the collection's qbTree
-    const savedBlock = exploreBlocks.find(b => b.type === 'manual' && b.label === 'Saved query');
-    if (savedBlock && savedBlock.tree) {
-      qbRoot = savedBlock.tree;
-      saveCollectionQbTree();
+    // Auto-save manual blocks' trees back to the collection's qbTrees
+    const savedBlocks = exploreBlocks.filter(b => b.type === 'manual' && b.label === 'Saved query');
+    if (savedBlocks.length > 0) {
+      qbRoot = savedBlocks[0].tree;
+      saveCollectionQbTrees();
     }
   }
 
@@ -4009,9 +4014,9 @@ async function runExploreBlockQuery() {
     };
   }
 
-  // Attention chart for explore results
+  // Time chart for explore results
   const chartData = results.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || Date.now(), attention: '' }));
-  renderAttentionChartInto(
+  renderTimeChartInto(
     document.getElementById('relatedChart'),
     document.getElementById('relatedChartBars'),
     chartData,
@@ -4174,7 +4179,7 @@ function bindFocusContentDelegation(content) {
       if (activeView.type === 'explore') {
         refreshExplorePins();
       } else if (activeView.type === 'collection') {
-        const collection = { id: cid, query: activeView.query, qbTree: activeView.qbTree, name: activeView.name };
+        const collection = { id: cid, qbTrees: activeView.qbTrees, name: activeView.name };
         showCollection(collection);
       }
       return;

@@ -247,8 +247,8 @@ describe('Persistence round-trip', () => {
 
     // Collection metadata in self-describing files
     const collectionMeta = [
-      { id: 'c1', name: 'AI', query: 'AI', qbTree: null },
-      { id: 'c2', name: 'Rust Lang', query: 'Rust', qbTree: null },
+      { id: 'c1', name: 'AI', qbTrees: [] },
+      { id: 'c2', name: 'Rust Lang', qbTrees: [] },
     ];
 
     // Recycle bin in its own file
@@ -493,7 +493,7 @@ describe('Persistence round-trip', () => {
 
   it('collection files are separate from settings', async () => {
     // Save collection with metadata + pins
-    await fs.saveCollectionMeta('c1', { id: 'c1', name: 'Test', query: 'test', qbTree: null });
+    await fs.saveCollectionMeta('c1', { id: 'c1', name: 'Test', qbTrees: [] });
     await fs.saveCollectionPinsById('c1', [{ url: 'https://a.com', title: 'A', pinnedAt: 100 }]);
 
     // Save settings
@@ -506,7 +506,7 @@ describe('Persistence round-trip', () => {
 
     expect(loadedPins).toEqual([{ url: 'https://a.com', title: 'A', pinnedAt: 100 }]);
     expect(loadedSettings.collectionOrder).toEqual(['c1']);
-    expect(meta).toEqual([{ id: 'c1', name: 'Test', query: 'test', qbTree: null }]);
+    expect(meta).toEqual([{ id: 'c1', name: 'Test', qbTrees: [] }]);
   });
 
   // ---- Per-collection pin isolation (regression: lazy pins + bulk save deleted other files) ----
