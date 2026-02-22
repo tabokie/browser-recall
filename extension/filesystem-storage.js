@@ -2,7 +2,7 @@
 // Manages writing interactions to a user-selected directory
 import { generateSlugFromUrl } from './utils.js';
 
-// Sanitize a collection name for use as a filename.
+// Sanitize a list name for use as a filename.
 // Replaces / with -, strips leading/trailing dots/spaces.
 function sanitizeFilename(name) {
   return name.replace(/\//g, '-').replace(/^[.\s]+|[.\s]+$/g, '') || '_';
@@ -12,9 +12,9 @@ class FileSystemStorage {
   #permissionGranted = false;
   #dirCache = new Map();
   #fileCache = new Map();
-  // Maps collection ID → filename (without .json extension).
-  // Built by loadAllCollectionMetadata(), updated by saveCollectionMeta/deleteCollectionFile.
-  #collectionIdToFilename = new Map();
+  // Maps list ID → filename (without .json extension).
+  // Built by loadAllListMetadata(), updated by saveListMeta/deleteListFile.
+  #listIdToFilename = new Map();
 
   constructor() {
     this.directoryHandle = null;
@@ -854,29 +854,29 @@ class FileSystemStorage {
     return match;
   }
 
-  // Resolve the filename for a collection ID.
+  // Resolve the filename for a list ID.
   // Returns the filename (without .json) from the map, or falls back to the ID itself.
-  #resolveCollectionFilename(collectionId) {
-    return this.#collectionIdToFilename.get(collectionId) || collectionId;
+  #resolveListFilename(listId) {
+    return this.#listIdToFilename.get(listId) || listId;
   }
 
-  // Resolve the file path for a collection ID.
+  // Resolve the file path for a list ID.
   // Returns 'lists/explore.json' for explore, 'lists/user/${filename}.json' for others.
-  #resolveCollectionPath(collectionId) {
-    if (collectionId === 'explore') {
+  #resolveListPath(listId) {
+    if (listId === 'explore') {
       return 'lists/explore.json';
     }
-    const filename = this.#resolveCollectionFilename(collectionId);
+    const filename = this.#resolveListFilename(listId);
     return `lists/user/${filename}.json`;
   }
 
-  // Load pins for a single collection.
+  // Load pins for a single list.
   // Returns the pins array (unwraps self-describing entity).
-  async loadCollectionPinsById(collectionId) {
+  async loadListPinsById(listId) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
-    const path = this.#resolveCollectionPath(collectionId);
+    const path = this.#resolveListPath(listId);
     try {
       const fh = await this.resolveFile(path);
       const data = await this.readJson(fh);
@@ -889,10 +889,10 @@ class FileSystemStorage {
     }
   }
 
-  // Load the full self-describing entity for a single collection.
+  // Load the full self-describing entity for a single list.
   // Returns { timestamp, id, name, qbTrees, pins: [...] }
-  async loadCollectionPinsEntity(collectionId) {
-    const path = this.#resolveCollectionPath(collectionId);
+  async loadListPinsEntity(listId) {
+    const path = this.#resolveListPath(listId);
     try {
       const fh = await this.resolveFile(path);
       const data = await this.readJson(fh);
@@ -906,9 +906,9 @@ class FileSystemStorage {
     }
   }
 
-  // Load all collection pins from lists/explore.json and lists/user/ files
-  // Returns { collectionId: pinsArray } keyed by internal ID (not filename).
-  async loadCollectionPins() {
+  // Load all list pins from lists/explore.json and lists/user/ files
+  // Returns { listId: pinsArray } keyed by internal ID (not filename).
+  async loadListPins() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
@@ -926,7 +926,7 @@ class FileSystemStorage {
       }
     } catch { /* explore.json doesn't exist yet */ }
 
-    // Load user collections from lists/user/
+    // Load user lists from lists/user/
     try {
       const userDir = await this.resolveDir('lists/user');
       for await (const entry of userDir.values()) {
@@ -949,13 +949,13 @@ class FileSystemStorage {
     return allPins;
   }
 
-  // Save pins for a single collection.
+  // Save pins for a single list.
   // Preserves existing metadata fields via read-merge-write.
-  async saveCollectionPinsById(collectionId, pins, timestamp = 0) {
+  async saveListPinsById(listId, pins, timestamp = 0) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
-    const path = this.#resolveCollectionPath(collectionId);
+    const path = this.#resolveListPath(listId);
     // Read existing entity to preserve metadata (name, query, qbTree)
     let existing = {};
     try {
@@ -969,16 +969,16 @@ class FileSystemStorage {
     await this.writeJson(fileHandle, { ...existing, timestamp, pins });
   }
 
-  // Save collection metadata (name, qbTrees) without touching pins.
+  // Save list metadata (name, qbTrees) without touching pins.
   // Read-merge-write to preserve existing pins.
   // If name changes, the file is renamed (old deleted, new created).
-  async saveCollectionMeta(collectionId, meta, timestamp = 0) {
+  async saveListMeta(listId, meta, timestamp = 0) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
-    // Explore collection doesn't support renaming
-    if (collectionId === 'explore') {
-      const path = this.#resolveCollectionPath(collectionId);
+    // Explore list doesn't support renaming
+    if (listId === 'explore') {
+      const path = this.#resolveListPath(listId);
       let existing = { timestamp: 0, pins: [] };
       try {
         const fh = await this.resolveFile(path);
@@ -991,8 +991,8 @@ class FileSystemStorage {
       await this.writeJson(fileHandle, { ...existing, ...meta, timestamp });
       return;
     }
-    const oldFilename = this.#resolveCollectionFilename(collectionId);
-    const oldPath = this.#resolveCollectionPath(collectionId);
+    const oldFilename = this.#resolveListFilename(listId);
+    const oldPath = this.#resolveListPath(listId);
     // Read existing data from old file
     let existing = { timestamp: 0, pins: [] };
     try {
@@ -1006,7 +1006,7 @@ class FileSystemStorage {
     // Determine new filename from name
     const newName = updated.name || oldFilename;
     const newFilename = sanitizeFilename(newName);
-    if (newFilename !== oldFilename && oldFilename !== collectionId) {
+    if (newFilename !== oldFilename && oldFilename !== listId) {
       // Name changed — delete old file
       try {
         const userDir = await this.resolveDir('lists/user');
@@ -1019,37 +1019,37 @@ class FileSystemStorage {
     const fileHandle = await this.resolveFile(`lists/user/${newFilename}.json`, { create: true });
     await this.writeJson(fileHandle, updated);
     // Update map
-    this.#collectionIdToFilename.set(collectionId, newFilename);
+    this.#listIdToFilename.set(listId, newFilename);
   }
 
-  // Delete a collection file (from lists/user/ or lists/ for explore)
-  async deleteCollectionFile(collectionId) {
+  // Delete a list file (from lists/user/ or lists/ for explore)
+  async deleteListFile(listId) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
-    const path = this.#resolveCollectionPath(collectionId);
+    const path = this.#resolveListPath(listId);
     try {
-      if (collectionId === 'explore') {
+      if (listId === 'explore') {
         const listsDir = await this.resolveDir('lists');
         await this.softDelete(listsDir, 'explore.json');
       } else {
         const userDir = await this.resolveDir('lists/user');
-        const filename = this.#resolveCollectionFilename(collectionId);
+        const filename = this.#resolveListFilename(listId);
         await this.softDelete(userDir, `${filename}.json`);
       }
       this.#fileCache.delete(path);
     } catch { /* file may not exist */ }
-    this.#collectionIdToFilename.delete(collectionId);
+    this.#listIdToFilename.delete(listId);
   }
 
-  // Load metadata for all collections from lists/user/ files.
+  // Load metadata for all lists from lists/user/ files.
   // Returns [{ id, name, qbTrees }] — skips explore.
-  // Also rebuilds the #collectionIdToFilename map.
-  async loadAllCollectionMetadata() {
+  // Also rebuilds the #listIdToFilename map.
+  async loadAllListMetadata() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
-    this.#collectionIdToFilename.clear();
+    this.#listIdToFilename.clear();
     const result = [];
     try {
       const userDir = await this.resolveDir('lists/user');
@@ -1061,7 +1061,7 @@ class FileSystemStorage {
             const file = await entry.getFile();
             const data = JSON.parse(await file.text());
             const id = data.id || filename;
-            this.#collectionIdToFilename.set(id, filename);
+            this.#listIdToFilename.set(id, filename);
             result.push({
               id,
               name: data.name || filename,
@@ -1074,24 +1074,24 @@ class FileSystemStorage {
     return result;
   }
 
-  // Save collection pins to lists/ (explore) and lists/user/ (others) files
+  // Save list pins to lists/ (explore) and lists/user/ (others) files
   // Preserves existing metadata in each file.
-  async saveCollectionPins(allPins) {
+  async saveListPins(allPins) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
 
     const userDir = await this.resolveDir('lists/user');
 
-    // Write each collection, preserving metadata
+    // Write each list, preserving metadata
     const activeFilenames = new Set();
     for (const [id, pins] of Object.entries(allPins)) {
       const pinsArray = Array.isArray(pins) ? pins : (pins.pins || []);
-      const path = this.#resolveCollectionPath(id);
+      const path = this.#resolveListPath(id);
 
-      // Track active filenames for cleanup (only for user collections)
+      // Track active filenames for cleanup (only for user lists)
       if (id !== 'explore') {
-        const filename = this.#resolveCollectionFilename(id);
+        const filename = this.#resolveListFilename(id);
         activeFilenames.add(filename);
       }
 

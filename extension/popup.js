@@ -222,77 +222,77 @@ document.getElementById('pageNote').addEventListener('input', (e) => {
   }, 500);
 });
 
-// Collections — pin current page to collections
-async function loadCollections() {
-  return await loadSettingsValue('collections', []);
+// Lists — pin current page to lists
+async function loadLists() {
+  return await loadSettingsValue('lists', []);
 }
 
-async function loadCollectionPins() {
+async function loadListPins() {
   try {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadCollectionPins' });
+    const resp = await chrome.runtime.sendMessage({ action: 'loadListPins' });
     return (resp && resp.success) ? (resp.pins || {}) : {};
   } catch { return {}; }
 }
 
-async function saveCollectionPins(allPins) {
+async function saveListPins(allPins) {
   try {
-    await chrome.runtime.sendMessage({ action: 'saveCollectionPins', pins: allPins });
+    await chrome.runtime.sendMessage({ action: 'saveListPins', pins: allPins });
   } catch (error) {
-    console.error('[popup] Failed to save collection pins:', error);
+    console.error('[popup] Failed to save list pins:', error);
   }
 }
 
-function isPagePinned(allPins, collectionId, url) {
-  const pins = allPins[collectionId] || [];
+function isPagePinned(allPins, listId, url) {
+  const pins = allPins[listId] || [];
   return pins.some(p => p.url === url);
 }
 
-async function renderCollectionChips() {
-  const container = document.getElementById('collectionChips');
-  const [collections, allPins] = await Promise.all([loadCollections(), loadCollectionPins()]);
+async function renderListChips() {
+  const container = document.getElementById('listChips');
+  const [lists, allPins] = await Promise.all([loadLists(), loadListPins()]);
 
-  // Compute lastActivity for each collection and sort by most recent
-  const ranked = collections.map(collection => {
-    const pins = allPins[collection.id] || [];
+  // Compute lastActivity for each list and sort by most recent
+  const ranked = lists.map(list => {
+    const pins = allPins[list.id] || [];
     const maxPinnedAt = pins.reduce((max, p) => Math.max(max, p.pinnedAt || 0), 0);
-    const lastActivity = maxPinnedAt || parseInt(collection.id) || 0;
-    return { collection, lastActivity };
+    const lastActivity = maxPinnedAt || parseInt(list.id) || 0;
+    return { list, lastActivity };
   });
   ranked.sort((a, b) => b.lastActivity - a.lastActivity);
-  const topCollections = ranked.slice(0, 5);
+  const topLists = ranked.slice(0, 5);
 
-  let html = topCollections.map(({ collection }) => {
-    const pinned = isPagePinned(allPins, collection.id, currentUrl);
-    return `<span class="collection-chip${pinned ? ' selected' : ''}" data-collection-id="${collection.id}">
-      <span class="collection-chip-check">${pinned ? '&#10003;' : ''}</span>
-      ${escapeHtml(collection.name)}
+  let html = topLists.map(({ list }) => {
+    const pinned = isPagePinned(allPins, list.id, currentUrl);
+    return `<span class="list-chip${pinned ? ' selected' : ''}" data-list-id="${list.id}">
+      <span class="list-chip-check">${pinned ? '&#10003;' : ''}</span>
+      ${escapeHtml(list.name)}
     </span>`;
   }).join('');
 
-  html += `<span class="collection-add-btn" id="collectionAddBtn" title="Add to collection">+</span>`;
+  html += `<span class="list-add-btn" id="listAddBtn" title="Add to list">+</span>`;
 
   container.innerHTML = html;
 
   // Toggle existing chips
-  container.querySelectorAll('.collection-chip').forEach(chip => {
+  container.querySelectorAll('.list-chip').forEach(chip => {
     chip.addEventListener('click', async () => {
-      const collectionId = chip.dataset.collectionId;
-      await toggleCollectionPin(collectionId);
-      renderCollectionChips();
+      const listId = chip.dataset.listId;
+      await toggleListPin(listId);
+      renderListChips();
     });
   });
 
   // + button opens picker dropdown
-  document.getElementById('collectionAddBtn').addEventListener('click', (e) => {
+  document.getElementById('listAddBtn').addEventListener('click', (e) => {
     e.stopPropagation();
-    openCollectionPicker(collections, allPins);
+    openListPicker(lists, allPins);
   });
 }
 
-async function toggleCollectionPin(collectionId) {
-  const freshPins = await loadCollectionPins();
-  if (!freshPins[collectionId]) freshPins[collectionId] = [];
-  const pins = freshPins[collectionId];
+async function toggleListPin(listId) {
+  const freshPins = await loadListPins();
+  if (!freshPins[listId]) freshPins[listId] = [];
+  const pins = freshPins[listId];
   const idx = pins.findIndex(p => p.url === currentUrl);
 
   if (idx !== -1) {
@@ -301,93 +301,93 @@ async function toggleCollectionPin(collectionId) {
     pins.push({ url: currentUrl, title: currentTitle, pinnedAt: Date.now() });
   }
 
-  await saveCollectionPins(freshPins);
+  await saveListPins(freshPins);
 }
 
-function closeCollectionPicker() {
-  const existing = document.getElementById('collectionPicker');
+function closeListPicker() {
+  const existing = document.getElementById('listPicker');
   if (existing) existing.remove();
   document.removeEventListener('click', pickerOutsideClickHandler);
 }
 
 function pickerOutsideClickHandler(e) {
-  const picker = document.getElementById('collectionPicker');
-  if (picker && !picker.contains(e.target) && e.target.id !== 'collectionAddBtn') {
-    closeCollectionPicker();
+  const picker = document.getElementById('listPicker');
+  if (picker && !picker.contains(e.target) && e.target.id !== 'listAddBtn') {
+    closeListPicker();
   }
 }
 
-function openCollectionPicker(collections, allPins) {
+function openListPicker(lists, allPins) {
   // Close if already open
-  if (document.getElementById('collectionPicker')) {
-    closeCollectionPicker();
+  if (document.getElementById('listPicker')) {
+    closeListPicker();
     return;
   }
 
-  const wrap = document.querySelector('.collection-chips-wrap');
+  const wrap = document.querySelector('.list-chips-wrap');
   const picker = document.createElement('div');
-  picker.className = 'collection-picker';
-  picker.id = 'collectionPicker';
+  picker.className = 'list-picker';
+  picker.id = 'listPicker';
   picker.innerHTML = `
-    <input class="collection-picker-input" id="collectionPickerInput" placeholder="Search or create..." />
-    <div class="collection-picker-list" id="collectionPickerList"></div>
+    <input class="list-picker-input" id="listPickerInput" placeholder="Search or create..." />
+    <div class="list-picker-list" id="listPickerList"></div>
   `;
   wrap.appendChild(picker);
 
-  const input = document.getElementById('collectionPickerInput');
-  const list = document.getElementById('collectionPickerList');
+  const input = document.getElementById('listPickerInput');
+  const listEl = document.getElementById('listPickerList');
 
   function renderPickerRows() {
     const query = input.value.trim().toLowerCase();
     const filtered = query
-      ? collections.filter(c => (c.name).toLowerCase().includes(query))
-      : collections;
+      ? lists.filter(c => (c.name).toLowerCase().includes(query))
+      : lists;
 
     let rowsHtml = filtered.map(c => {
       const pinned = isPagePinned(allPins, c.id, currentUrl);
-      return `<div class="collection-picker-row${pinned ? ' selected' : ''}" data-collection-id="${c.id}">
-        <span class="collection-picker-row-check">${pinned ? '&#10003;' : ''}</span>
+      return `<div class="list-picker-row${pinned ? ' selected' : ''}" data-list-id="${c.id}">
+        <span class="list-picker-row-check">${pinned ? '&#10003;' : ''}</span>
         <span>${escapeHtml(c.name)}</span>
       </div>`;
     }).join('');
 
-    // Show create option if input doesn't exactly match any existing collection
+    // Show create option if input doesn't exactly match any existing list
     const inputVal = input.value.trim();
     if (inputVal) {
-      const exactMatch = collections.some(c =>
+      const exactMatch = lists.some(c =>
         (c.name).toLowerCase() === inputVal.toLowerCase()
       );
       if (!exactMatch) {
-        rowsHtml += `<div class="collection-picker-create" id="collectionPickerCreate">Create "${escapeHtml(inputVal)}"</div>`;
+        rowsHtml += `<div class="list-picker-create" id="listPickerCreate">Create "${escapeHtml(inputVal)}"</div>`;
       }
     }
 
     if (!rowsHtml) {
-      rowsHtml = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">No collections</div>`;
+      rowsHtml = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">No lists</div>`;
     }
 
-    list.innerHTML = rowsHtml;
+    listEl.innerHTML = rowsHtml;
 
     // Attach click handlers to rows
-    list.querySelectorAll('.collection-picker-row').forEach(row => {
+    listEl.querySelectorAll('.list-picker-row').forEach(row => {
       row.addEventListener('click', async (e) => {
         e.stopPropagation();
-        const collectionId = row.dataset.collectionId;
-        await toggleCollectionPin(collectionId);
+        const listId = row.dataset.listId;
+        await toggleListPin(listId);
         // Refresh allPins and re-render rows in place
-        const freshPins = await loadCollectionPins();
+        const freshPins = await loadListPins();
         Object.assign(allPins, freshPins);
         renderPickerRows();
       });
     });
 
-    const createBtn = document.getElementById('collectionPickerCreate');
+    const createBtn = document.getElementById('listPickerCreate');
     if (createBtn) {
       createBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        await createCollectionAndPin(inputVal);
-        closeCollectionPicker();
-        renderCollectionChips();
+        await createListAndPin(inputVal);
+        closeListPicker();
+        renderListChips();
       });
     }
   }
@@ -402,20 +402,20 @@ function openCollectionPicker(collections, allPins) {
     if (e.key === 'Enter') {
       const inputVal = input.value.trim();
       if (!inputVal) return;
-      const exactMatch = collections.find(c =>
+      const exactMatch = lists.find(c =>
         (c.name).toLowerCase() === inputVal.toLowerCase()
       );
       if (exactMatch) {
-        await toggleCollectionPin(exactMatch.id);
-        closeCollectionPicker();
-        renderCollectionChips();
+        await toggleListPin(exactMatch.id);
+        closeListPicker();
+        renderListChips();
       } else {
-        await createCollectionAndPin(inputVal);
-        closeCollectionPicker();
-        renderCollectionChips();
+        await createListAndPin(inputVal);
+        closeListPicker();
+        renderListChips();
       }
     } else if (e.key === 'Escape') {
-      closeCollectionPicker();
+      closeListPicker();
     }
   });
 
@@ -425,28 +425,28 @@ function openCollectionPicker(collections, allPins) {
   }, 0);
 }
 
-async function createCollectionAndPin(name) {
-  const collections = await loadCollections();
-  if (collections.some(c => c.name === name)) return;
+async function createListAndPin(name) {
+  const lists = await loadLists();
+  if (lists.some(c => c.name === name)) return;
 
-  const collectionId = generateSlugFromTitle(name);
-  await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name });
-  const { collectionOrder: order = [] } = await chrome.storage.session.get(['collectionOrder']);
-  await saveSettingsValue('collectionOrder', [...order, collectionId]);
+  const listId = generateSlugFromTitle(name);
+  await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name });
+  const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
+  await saveSettingsValue('listOrder', [...order, listId]);
 
   await chrome.runtime.sendMessage({
-    action: 'saveCollectionPinsById',
-    collectionId,
+    action: 'saveListPinsById',
+    listId,
     pins: [{ url: currentUrl, title: currentTitle, pinnedAt: Date.now() }]
   });
 
-  console.log('[popup] Created collection and pinned page:', query);
+  console.log('[popup] Created list and pinned page:', query);
 }
 
 // Workspace mode
 async function loadWorkspace() {
   const ws = await loadSettingsValue('workspace', {});
-  return { mode: 'default', collectionIds: [], autoSnapshot: false, ...ws };
+  return { mode: 'default', listIds: [], autoSnapshot: false, ...ws };
 }
 
 async function saveWorkspace(workspace) {
@@ -455,12 +455,12 @@ async function saveWorkspace(workspace) {
 
 async function renderWorkspaceBar() {
   const workspace = await loadWorkspace();
-  const collections = await loadCollections();
+  const lists = await loadLists();
 
   const bar = document.getElementById('workspaceBar');
   const triToggle = document.getElementById('triToggle');
   const config = document.getElementById('workspaceConfig');
-  const collectionsContainer = document.getElementById('workspaceCollections');
+  const listsContainer = document.getElementById('workspaceLists');
   const autoSnapshotCheckbox = document.getElementById('workspaceAutoSnapshot');
 
   autoSnapshotCheckbox.checked = workspace.autoSnapshot;
@@ -480,24 +480,24 @@ async function renderWorkspaceBar() {
     config.style.display = 'none';
   }
 
-  // Render collection selection chips
-  if (collections.length === 0) {
-    collectionsContainer.innerHTML = '<span class="workspace-empty">No collections yet. Create one in Notes section.</span>';
+  // Render list selection chips
+  if (lists.length === 0) {
+    listsContainer.innerHTML = '<span class="workspace-empty">No lists yet. Create one in Notes section.</span>';
   } else {
-    collectionsContainer.innerHTML = collections.map(collection => {
-      const selected = workspace.collectionIds.includes(collection.id);
-      return `<span class="ws-collection-chip${selected ? ' selected' : ''}" data-collection-id="${collection.id}">${escapeHtml(collection.name)}</span>`;
+    listsContainer.innerHTML = lists.map(list => {
+      const selected = workspace.listIds.includes(list.id);
+      return `<span class="ws-list-chip${selected ? ' selected' : ''}" data-list-id="${list.id}">${escapeHtml(list.name)}</span>`;
     }).join('');
 
-    collectionsContainer.querySelectorAll('.ws-collection-chip').forEach(chip => {
+    listsContainer.querySelectorAll('.ws-list-chip').forEach(chip => {
       chip.addEventListener('click', async () => {
-        const collectionId = chip.dataset.collectionId;
+        const listId = chip.dataset.listId;
         const ws = await loadWorkspace();
-        const idx = ws.collectionIds.indexOf(collectionId);
+        const idx = ws.listIds.indexOf(listId);
         if (idx !== -1) {
-          ws.collectionIds.splice(idx, 1);
+          ws.listIds.splice(idx, 1);
         } else {
-          ws.collectionIds.push(collectionId);
+          ws.listIds.push(listId);
         }
         await saveWorkspace(ws);
         renderWorkspaceBar();
@@ -517,7 +517,7 @@ document.getElementById('triToggle').addEventListener('click', async (e) => {
   if (newMode === ws.mode) newMode = 'default';
   ws.mode = newMode;
   if (newMode !== 'workspace') {
-    ws.collectionIds = [];
+    ws.listIds = [];
     ws.autoSnapshot = false;
   }
   await saveWorkspace(ws);
@@ -685,8 +685,8 @@ async function showDashboard(tab) {
     console.error('[popup] Could not load page info:', error);
   }
 
-  // Render collection chips and workspace bar
-  await Promise.all([renderCollectionChips(), renderWorkspaceBar()]);
+  // Render list chips and workspace bar
+  await Promise.all([renderListChips(), renderWorkspaceBar()]);
 
   document.getElementById('loading').style.display = 'none';
   document.getElementById('blacklisted').style.display = 'none';

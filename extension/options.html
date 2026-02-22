@@ -214,7 +214,7 @@
       flex: 1;
     }
 
-    .sidebar-item .remove-collection {
+    .sidebar-item .remove-list {
       display: flex;
       visibility: hidden;
       width: 20px;
@@ -231,16 +231,16 @@
       line-height: 1;
     }
 
-    .sidebar-item:hover .remove-collection {
+    .sidebar-item:hover .remove-list {
       visibility: visible;
     }
 
-    .sidebar-item .remove-collection:hover {
+    .sidebar-item .remove-list:hover {
       background: #dadce0;
       color: #d93025;
     }
 
-    .collections-empty {
+    .lists-empty {
       padding: 8px 20px;
       font-size: 12px;
       color: #9aa0a6;
@@ -758,7 +758,7 @@
       letter-spacing: 0.3px;
     }
 
-    .detail-collection-tag {
+    .detail-list-tag {
       display: inline-block;
       padding: 1px 8px;
       background: #e8f0fe;
@@ -1374,17 +1374,17 @@
     }
 
 
-    /* ── Collection layout ── */
-    .collection-layout {
+    /* ── List layout ── */
+    .list-layout {
       display: none;
       flex-direction: column;
     }
 
-    .collection-layout.visible {
+    .list-layout.visible {
       display: flex;
     }
 
-    .collection-section {
+    .list-section {
       display: flex;
       flex-direction: column;
     }
@@ -1425,12 +1425,12 @@
       display: none !important;
     }
 
-    .collection-section .section-body {
+    .list-section .section-body {
       display: flex;
       flex-direction: column;
     }
 
-    .collection-qb {
+    .list-qb {
       border-top: none;
     }
 
@@ -2110,9 +2110,9 @@
 
       <hr class="sidebar-separator">
 
-      <div class="sidebar-section-label">Collections</div>
-      <div id="collectionsList">
-        <div class="collections-empty" id="collectionsEmpty">Pin a search to create a collection</div>
+      <div class="sidebar-section-label">Lists</div>
+      <div id="listsList">
+        <div class="lists-empty" id="listsEmpty">Pin a search to create a list</div>
       </div>
     </div>
   </div>
@@ -2125,7 +2125,7 @@
       <button class="confirm-title-btn" id="confirmTitleBtn" style="display:none">&#x2713;</button>
       <button class="recycle-action-btn" id="restoreAllBtn" style="display:none" title="Restore all items">Restore all</button>
       <button class="recycle-action-btn danger" id="deleteAllBtn" style="display:none" title="Permanently delete all items">Delete all</button>
-      <button class="pin-search-btn" id="pinSearchBtn" title="Pin this search as a collection">
+      <button class="pin-search-btn" id="pinSearchBtn" title="Pin this search as a list">
         <svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>
         Pin
       </button>
@@ -2153,9 +2153,9 @@
       </div>
     </div>
 
-    <!-- Collection layout: merged pinned+related, then Explore section -->
-    <div class="collection-layout" id="collectionLayout">
-      <div class="collection-section" data-section="pinned">
+    <!-- List layout: merged pinned+related, then Explore section -->
+    <div class="list-layout" id="listLayout">
+      <div class="list-section" data-section="pinned">
         <div class="section-header" data-collapse="pinned"><span class="section-chevron">&#9654;</span> Pinned</div>
         <div class="section-body">
           <div class="section-results-wrapper" id="pinnedResultsWrapper">
@@ -2163,14 +2163,14 @@
           </div>
         </div>
       </div>
-      <div class="collection-section" data-section="explore">
+      <div class="list-section" data-section="explore">
         <div class="section-header" data-collapse="explore"><span class="section-chevron">&#9654;</span> Explore</div>
         <div class="section-body">
-          <div class="query-builder collection-qb" id="collectionQueryBuilder" style="display:none">
+          <div class="query-builder list-qb" id="listQueryBuilder" style="display:none">
             <div class="qb-header">
               <span class="qb-title">Query</span>
             </div>
-            <div class="qb-body" id="collectionQbBody"></div>
+            <div class="qb-body" id="listQbBody"></div>
           </div>
           <div class="time-chart" id="relatedChart">
             <div class="chart-label">Explore results</div>

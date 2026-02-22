@@ -1,0 +1,3 @@
+- Rename "collection" to "list" in the codebase and UI
+- Finish up
+- n

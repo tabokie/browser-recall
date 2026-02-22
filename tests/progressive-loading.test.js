@@ -59,7 +59,7 @@ function makeFileInteractions(dateStr, startIdx, count, titlePrefix) {
   return result;
 }
 
-// Rust-related pages (will match collection query)
+// Rust-related pages (will match list query)
 function makeRustInteractions() {
   const base = new Date('2026-02-15T10:00:00Z').getTime();
   const result = [];
@@ -83,21 +83,21 @@ const ALL_FILE1 = [...FILE1_INTERACTIONS, ...RUST_INTERACTIONS];
 
 const ALL_INTERACTIONS = [...ALL_FILE1, ...FILE2_INTERACTIONS, ...FILE3_INTERACTIONS];
 
-const TEST_COLLECTION = {
+const TEST_LIST = {
   id: 'col-rust',
   query: 'rust',
   name: 'Rust Lang',
 };
 
-// Collection whose query matches NO interactions in metadata (like "AI Core")
+// List whose query matches NO interactions in metadata (like "AI Core")
 // but whose pins share hostname with loaded history → related pages should still appear
-const TEST_COLLECTION_NOHIT = {
+const TEST_LIST_NOHIT = {
   id: 'col-nohit',
   query: 'xyzzy nonexistent query',
   name: 'No-Hit Query',
 };
 
-const TEST_COLLECTION_PINS = {
+const TEST_LIST_PINS = {
   'col-rust': [
     { url: 'https://rust-lang.org/doc0', title: 'Rust Documentation 0', pinnedAt: NOW - DAY },
     { url: 'https://rust-lang.org/doc1', title: 'Rust Documentation 1', pinnedAt: NOW - DAY },
@@ -109,10 +109,10 @@ const TEST_COLLECTION_PINS = {
   ],
 };
 
-const TEST_COLLECTIONS = [TEST_COLLECTION, TEST_COLLECTION_NOHIT];
+const TEST_LISTS = [TEST_LIST, TEST_LIST_NOHIT];
 
 const TEST_SETTINGS = {
-  collectionOrder: ['col-rust', 'col-nohit'],
+  listOrder: ['col-rust', 'col-nohit'],
   settings: { captureContent: true, captureAttention: true, archiveQuality: 'medium' },
   urlBlacklist: [],
   titleTrimRules: [],
@@ -162,8 +162,8 @@ vi.mock('../extension/filesystem-storage.js', () => ({
     async loadSettings() { return (await mockFsHandler.fn('loadSettings', {})).settings || {}; }
     async listInteractionFiles() { return (await mockFsHandler.fn('listInteractionFiles', {})).files || []; }
     async loadInteractionFiles(files) { return (await mockFsHandler.fn('loadInteractionBatch', { files })).interactions || []; }
-    async loadCollectionPins() { return (await mockFsHandler.fn('loadCollectionPins', {})).pins || {}; }
-    async loadCollectionPinsById(id) { return (await mockFsHandler.fn('loadCollectionPinsById', { collectionId: id })).pins || []; }
+    async loadListPins() { return (await mockFsHandler.fn('loadListPins', {})).pins || {}; }
+    async loadListPinsById(id) { return (await mockFsHandler.fn('loadListPinsById', { listId: id })).pins || []; }
     async loadPermanentDeletes() { return (await mockFsHandler.fn('loadPermanentDeletes', {})).urls || []; }
     async loadHighlights() { return []; }
     async loadAllHighlights() { return {}; }
@@ -288,14 +288,14 @@ describe('Progressive loading', () => {
         return { success: true, interactions };
       }
 
-      case 'loadCollectionPins':
-        if (msg.collectionId) {
-          return { success: true, pins: TEST_COLLECTION_PINS[msg.collectionId] || [] };
+      case 'loadListPins':
+        if (msg.listId) {
+          return { success: true, pins: TEST_LIST_PINS[msg.listId] || [] };
         }
-        return { success: true, pins: TEST_COLLECTION_PINS };
+        return { success: true, pins: TEST_LIST_PINS };
 
-      case 'loadCollectionPinsById':
-        return { success: true, pins: TEST_COLLECTION_PINS[msg.collectionId] || [] };
+      case 'loadListPinsById':
+        return { success: true, pins: TEST_LIST_PINS[msg.listId] || [] };
 
       case 'loadPermanentDeletes':
         return { success: true, urls: [] };
@@ -328,8 +328,8 @@ describe('Progressive loading', () => {
   function populateCache() {
     sessionData = {
       settings: TEST_SETTINGS.settings,
-      collections: TEST_COLLECTIONS,
-      collectionOrder: TEST_SETTINGS.collectionOrder,
+      lists: TEST_LISTS,
+      listOrder: TEST_SETTINGS.listOrder,
       urlBlacklist: TEST_SETTINGS.urlBlacklist,
       titleTrimRules: TEST_SETTINGS.titleTrimRules,
       recycleBin: [],
@@ -386,9 +386,9 @@ describe('Progressive loading', () => {
       .map(el => el.dataset.category);
   }
 
-  function sidebarCollections() {
-    return [...document.querySelectorAll('#collectionsList .sidebar-item')]
-      .map(el => el.dataset.collectionId);
+  function sidebarLists() {
+    return [...document.querySelectorAll('#listsList .sidebar-item')]
+      .map(el => el.dataset.listId);
   }
 
   function mainTitle() {
@@ -408,8 +408,8 @@ describe('Progressive loading', () => {
     return [...document.querySelectorAll('#results .result-item')];
   }
 
-  function collectionLayoutVisible() {
-    return document.getElementById('collectionLayout').classList.contains('visible');
+  function listLayoutVisible() {
+    return document.getElementById('listLayout').classList.contains('visible');
   }
 
   function pinnedOnlyRows() {
@@ -429,10 +429,10 @@ describe('Progressive loading', () => {
   // Tests
   // ---------------------------------------------------------------------------
 
-  it('Test 1: clear cache, pause collection list & interaction list → frames only', async () => {
+  it('Test 1: clear cache, pause sidebar lists & interaction list → frames only', async () => {
     clearCache();
 
-    // Pause: collection list loading (loadSettings slow path blocks renderCollections
+    // Pause: sidebar lists loading (loadSettings slow path blocks renderLists
     // and all other cache-miss settings) AND interaction file listing
     deferreds['loadSettings'] = createDeferred();
     deferreds['listInteractionFiles'] = createDeferred();
@@ -447,8 +447,8 @@ describe('Progressive loading', () => {
     expect(mainTitle()).toBe('Explore'); // static HTML default
     expect(columnHeaders().length).toBeGreaterThan(0); // column headers in static HTML
 
-    // No collection items (loadSettings blocked → renderCollections hasn't completed)
-    expect(sidebarCollections()).toEqual([]);
+    // No list items (loadSettings blocked → renderLists hasn't completed)
+    expect(sidebarLists()).toEqual([]);
 
     // No result rows (initialize stuck before initHistoryFiles → showCategory hasn't run)
     expect(resultRows()).toEqual([]);
@@ -460,18 +460,18 @@ describe('Progressive loading', () => {
     await tick(50);
   });
 
-  it('Test 2: collections absent from cache → sidebar empty, then populated after cache arrival', async () => {
-    // Cache all settings EXCEPT 'collections' — simulates options.js loading
-    // before background has finished hydrating collection metadata from files.
+  it('Test 2: lists absent from cache → sidebar empty, then populated after cache arrival', async () => {
+    // Cache all settings EXCEPT 'lists' — simulates options.js loading
+    // before background has finished hydrating list metadata from files.
     sessionData = {
       settings: TEST_SETTINGS.settings,
-      collectionOrder: TEST_SETTINGS.collectionOrder,
+      listOrder: TEST_SETTINGS.listOrder,
       urlBlacklist: TEST_SETTINGS.urlBlacklist,
       titleTrimRules: TEST_SETTINGS.titleTrimRules,
       recycleBin: [],
       permanentDeletes: TEST_SETTINGS.permanentDeletes,
       gatewayDomains: {},
-      // 'collections' intentionally missing
+      // 'lists' intentionally missing
     };
     localData = { logBuffer: [] };
 
@@ -484,23 +484,23 @@ describe('Progressive loading', () => {
     // Explore view rendered
     expect(mainTitle()).toBe('Explore');
 
-    // Collections still empty (session cache doesn't have 'collections')
-    expect(sidebarCollections()).toEqual([]);
+    // Lists still empty (session cache doesn't have 'lists')
+    expect(sidebarLists()).toEqual([]);
 
     await importDone;
 
     // Now simulate background hydrateCache completing: populate session cache
-    sessionData.collections = TEST_COLLECTIONS;
+    sessionData.lists = TEST_LISTS;
 
     // Simulate mutation notification from background that triggers re-render
     const listener = chrome.runtime.onMessage.addListener.mock.calls[0]?.[0];
-    if (listener) listener({ action: 'mutation', type: 'collections' });
+    if (listener) listener({ action: 'mutation', type: 'lists' });
     await tick(100);
 
-    expect(sidebarCollections()).toContain('col-rust');
+    expect(sidebarLists()).toContain('col-rust');
   });
 
-  it('Test 3: pause interaction list only → frames + collection list visible', async () => {
+  it('Test 3: pause interaction list only → frames + sidebar lists visible', async () => {
     populateCache();
 
     // Pause interaction file listing → loadData() blocks
@@ -509,26 +509,26 @@ describe('Progressive loading', () => {
     const importDone = importOptions();
     await tick(100);
 
-    // Sidebar collections rendered (loadCollections cache hit, fire-and-forget)
-    expect(sidebarCollections()).toContain('col-rust');
+    // Sidebar lists rendered (loadLists cache hit, fire-and-forget)
+    expect(sidebarLists()).toContain('col-rust');
 
     // Frames visible
     expect(sidebarCategories()).toContain('recycleBin');
 
     // initHistoryFiles blocked → Promise.all blocked → showExplore hasn't run yet
-    expect(collectionLayoutVisible()).toBe(false);
+    expect(listLayoutVisible()).toBe(false);
 
     // Unblock
     deferreds['listInteractionFiles'].resolve();
     await importDone;
     await tick(100);
 
-    // Now Explore view should render (collection layout visible)
-    expect(collectionLayoutVisible()).toBe(true);
+    // Now Explore view should render (list layout visible)
+    expect(listLayoutVisible()).toBe(true);
     expect(mainTitle()).toBe('Explore');
   });
 
-  it('Test 4: cache populated, pause pinned results + search → collection shows frames + sidebar', async () => {
+  it('Test 4: cache populated, pause pinned results + search → list shows frames + sidebar', async () => {
     populateCache();
 
     // First: let initialize() complete fully (no pauses)
@@ -538,10 +538,10 @@ describe('Progressive loading', () => {
 
     // Verify initial state: Explore view rendered
     expect(mainTitle()).toBe('Explore');
-    expect(collectionLayoutVisible()).toBe(true);
-    expect(sidebarCollections()).toContain('col-rust');
+    expect(listLayoutVisible()).toBe(true);
+    expect(sidebarLists()).toContain('col-rust');
 
-    // Now inject pauses and open a collection
+    // Now inject pauses and open a list
     // Block searchBatch (Rust-side search) so Phase 2 is deferred while Phase 1 renders instantly
     const searchDeferred = createDeferred();
     mockSearchBatchFn.mockImplementation(async () => {
@@ -549,22 +549,22 @@ describe('Progressive loading', () => {
       return [];
     });
 
-    // Simulate clicking on the collection — call showCollection via its sidebar click handler
-    const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-rust"]');
+    // Simulate clicking on the list — call showList via its sidebar click handler
+    const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-rust"]');
     expect(collItem).not.toBeNull();
     collItem.click();
     await tick(50);
 
-    // Collection layout should be visible
-    expect(collectionLayoutVisible()).toBe(true);
+    // List layout should be visible
+    expect(listLayoutVisible()).toBe(true);
 
-    // Sidebar should still show collections (already rendered, not re-fetched)
-    expect(sidebarCollections()).toContain('col-rust');
+    // Sidebar should still show lists (already rendered, not re-fetched)
+    expect(sidebarLists()).toContain('col-rust');
 
     // Sidebar categories still visible
     expect(sidebarCategories()).toContain('recycleBin');
 
-    // Main title should reflect collection
+    // Main title should reflect list
     expect(mainTitle()).toBe('Rust Lang');
 
     // Phase 1: pinned section renders immediately (lazy-loaded pins enriched
@@ -572,7 +572,7 @@ describe('Progressive loading', () => {
     expect(pinnedOnlyRows().length).toBe(3);
 
     // Explore section renders immediately (decoupled from pinned search)
-    // Collection has no qbTree and no enabled blocks, so shows empty-state prompt
+    // List has no qbTree and no enabled blocks, so shows empty-state prompt
     expect(relatedResultsContent()).toContain('Enable a block or add a query');
 
     // Clean up
@@ -580,7 +580,7 @@ describe('Progressive loading', () => {
     await tick(200);
   });
 
-  it('Test 5: load collection fully, then reopen with search paused → pinned section renders from cache', async () => {
+  it('Test 5: load list fully, then reopen with search paused → pinned section renders from cache', async () => {
     populateCache();
 
     // Configure searchBatch to return rust interactions (matching "rust" query)
@@ -595,16 +595,16 @@ describe('Progressive loading', () => {
     await importDone;
     await tick(100);
 
-    // Open collection normally (no pauses)
-    const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-rust"]');
+    // Open list normally (no pauses)
+    const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-rust"]');
     collItem.click();
     await tick(200);
 
-    // Verify full collection rendered
-    expect(collectionLayoutVisible()).toBe(true);
+    // Verify full list rendered
+    expect(listLayoutVisible()).toBe(true);
     expect(pinnedOnlyRows().length).toBe(3);
 
-    // Phase 2 completed — pinned section is re-rendered from fetchCollectionResults
+    // Phase 2 completed — pinned section is re-rendered from fetchListResults
     // and explore section shows blocks (no loading hint)
     expect(relatedResultsContent()).not.toContain('Computing related pages');
 
@@ -615,27 +615,27 @@ describe('Progressive loading', () => {
       return [];
     });
 
-    // Click the collection again to reopen
+    // Click the list again to reopen
     collItem.click();
     await tick(100);
 
-    // Collection layout visible
-    expect(collectionLayoutVisible()).toBe(true);
+    // List layout visible
+    expect(listLayoutVisible()).toBe(true);
     expect(mainTitle()).toBe('Rust Lang');
 
-    // Phase 1 renders from collectionResultsCache — full pinned, no loading state
+    // Phase 1 renders from listResultsCache — full pinned, no loading state
     expect(pinnedOnlyRows().length).toBe(3);
     expect(relatedResultsContent()).not.toContain('Computing related pages');
 
-    // Sidebar still shows collections
-    expect(sidebarCollections()).toContain('col-rust');
+    // Sidebar still shows lists
+    expect(sidebarLists()).toContain('col-rust');
 
     // Clean up
     searchDeferred.resolve();
     await tick(200);
   });
 
-  it('Test 6: collection with zero-hit query still shows related pages from loaded history', async () => {
+  it('Test 6: list with zero-hit query still shows related pages from loaded history', async () => {
     populateCache();
 
     // searchBatch returns [] (query matches nothing in metadata)
@@ -647,17 +647,17 @@ describe('Progressive loading', () => {
     await tick(100);
 
     // Default view is Explore — verify it rendered
-    expect(collectionLayoutVisible()).toBe(true);
+    expect(listLayoutVisible()).toBe(true);
     expect(mainTitle()).toBe('Explore');
 
-    // Open the no-hit collection
-    const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-nohit"]');
+    // Open the no-hit list
+    const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-nohit"]');
     expect(collItem).not.toBeNull();
     collItem.click();
     await tick(300);
 
-    // Collection layout visible with correct title
-    expect(collectionLayoutVisible()).toBe(true);
+    // List layout visible with correct title
+    expect(listLayoutVisible()).toBe(true);
     expect(mainTitle()).toBe('No-Hit Query');
 
     // Phase 1: the single pin should render

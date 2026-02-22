@@ -60,11 +60,11 @@ const FILE1_INTERACTIONS = makeFileInteractions(FILE1_DATE, 0, 20, 'Today');
 const FILE2_INTERACTIONS = makeFileInteractions(FILE2_DATE, 20, 20, 'Yesterday');
 const FILE3_INTERACTIONS = makeFileInteractions(FILE3_DATE, 40, 20, 'OldDay');
 
-const TEST_COLLECTION = { id: 'col-rust', query: 'rust', name: 'Rust Lang' };
-// Collection with no query — only pinned pages, pins on same domain as history
-const TEST_COLLECTION_NOQUERY = { id: 'col-noq', query: '', name: 'No Query Collection' };
+const TEST_LIST = { id: 'col-rust', query: 'rust', name: 'Rust Lang' };
+// List with no query — only pinned pages, pins on same domain as history
+const TEST_LIST_NOQUERY = { id: 'col-noq', query: '', name: 'No Query List' };
 
-const TEST_COLLECTION_PINS = {
+const TEST_LIST_PINS = {
   'col-rust': [
     { url: 'https://rust-lang.org/doc0', title: 'Rust Documentation 0', pinnedAt: NOW - DAY },
     { url: 'https://rust-lang.org/doc1', title: 'Rust Documentation 1', pinnedAt: NOW - DAY },
@@ -82,10 +82,10 @@ const TEST_COLLECTION_PINS = {
   ],
 };
 
-const TEST_COLLECTIONS = [TEST_COLLECTION, TEST_COLLECTION_NOQUERY];
+const TEST_LISTS = [TEST_LIST, TEST_LIST_NOQUERY];
 
 const TEST_SETTINGS = {
-  collectionOrder: ['col-rust', 'col-noq'],
+  listOrder: ['col-rust', 'col-noq'],
   settings: { captureContent: true, captureAttention: true, archiveQuality: 'medium' },
   urlBlacklist: [],
   titleTrimRules: [],
@@ -129,8 +129,8 @@ vi.mock('../extension/filesystem-storage.js', () => ({
     async loadSettings() { return (await mockFsHandler.fn('loadSettings', {})).settings || {}; }
     async listInteractionFiles() { return (await mockFsHandler.fn('listInteractionFiles', {})).files || []; }
     async loadInteractionFiles(files) { return (await mockFsHandler.fn('loadInteractionBatch', { files })).interactions || []; }
-    async loadCollectionPins() { return (await mockFsHandler.fn('loadCollectionPins', {})).pins || {}; }
-    async loadCollectionPinsById(id) { return (await mockFsHandler.fn('loadCollectionPinsById', { collectionId: id })).pins || []; }
+    async loadListPins() { return (await mockFsHandler.fn('loadListPins', {})).pins || {}; }
+    async loadListPinsById(id) { return (await mockFsHandler.fn('loadListPinsById', { listId: id })).pins || []; }
     async loadPermanentDeletes() { return (await mockFsHandler.fn('loadPermanentDeletes', {})).urls || []; }
     async loadHighlights() { return []; }
     async loadAllHighlights() { return {}; }
@@ -256,14 +256,14 @@ describe('Cache staleness', () => {
         return { success: true, interactions };
       }
 
-      case 'loadCollectionPins':
-        if (msg.collectionId) {
-          return { success: true, pins: TEST_COLLECTION_PINS[msg.collectionId] || [] };
+      case 'loadListPins':
+        if (msg.listId) {
+          return { success: true, pins: TEST_LIST_PINS[msg.listId] || [] };
         }
-        return { success: true, pins: TEST_COLLECTION_PINS };
+        return { success: true, pins: TEST_LIST_PINS };
 
-      case 'loadCollectionPinsById':
-        return { success: true, pins: TEST_COLLECTION_PINS[msg.collectionId] || [] };
+      case 'loadListPinsById':
+        return { success: true, pins: TEST_LIST_PINS[msg.listId] || [] };
 
       case 'loadContentBatch':
         return { success: true, contentMap: {} };
@@ -283,13 +283,13 @@ describe('Cache staleness', () => {
       case 'saveSettingsKey':
         return { success: true };
 
-      case 'saveCollectionPinsById':
+      case 'saveListPinsById':
         return { success: true };
 
-      case 'saveCollectionMeta':
+      case 'saveListMeta':
         return { success: true };
 
-      case 'deleteCollection':
+      case 'deleteList':
         return { success: true };
 
       case 'saveRecycleBin':
@@ -307,11 +307,11 @@ describe('Cache staleness', () => {
   }
 
   function populateCache() {
-    // Session-cached keys (settings, workspace, collections, etc.)
+    // Session-cached keys (settings, workspace, lists, etc.)
     sessionData = {
       settings: TEST_SETTINGS.settings,
-      collections: TEST_COLLECTIONS,
-      collectionOrder: TEST_SETTINGS.collectionOrder,
+      lists: TEST_LISTS,
+      listOrder: TEST_SETTINGS.listOrder,
       urlBlacklist: TEST_SETTINGS.urlBlacklist,
       titleTrimRules: TEST_SETTINGS.titleTrimRules,
       recycleBin: [],
@@ -357,9 +357,9 @@ describe('Cache staleness', () => {
   }
 
   // ---------------------------------------------------------------------------
-  // T1: resetHistory clears atomReadCache + allCollectionPins
+  // T1: resetHistory clears atomReadCache + allListPins
   // ---------------------------------------------------------------------------
-  it('T1: resetHistory clears atomReadCache and allCollectionPins', async () => {
+  it('T1: resetHistory clears atomReadCache and allListPins', async () => {
     populateCache();
 
     // loadAtomBatch returns atoms with watermark 100 initially
@@ -374,8 +374,8 @@ describe('Cache staleness', () => {
     await importOptions();
     await tick(100);
 
-    // Open col-rust — loads pins, triggers refreshCollectionAtoms
-    const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-rust"]');
+    // Open col-rust — loads pins, triggers refreshListAtoms
+    const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-rust"]');
     expect(collItem).not.toBeNull();
     collItem.click();
     await tick(200);
@@ -403,11 +403,11 @@ describe('Cache staleness', () => {
       return { success: true, atoms };
     };
 
-    // Change loadCollectionPins to return an updated list (4 pins)
-    actionOverrides['loadCollectionPinsById'] = actionOverrides['loadCollectionPins'] = (msg) => {
-      if (msg.collectionId === 'col-rust') {
+    // Change loadListPins to return an updated list (4 pins)
+    actionOverrides['loadListPinsById'] = actionOverrides['loadListPins'] = (msg) => {
+      if (msg.listId === 'col-rust') {
         return { success: true, pins: [
-          ...TEST_COLLECTION_PINS['col-rust'],
+          ...TEST_LIST_PINS['col-rust'],
           { url: 'https://rust-lang.org/doc3', title: 'Rust Documentation 3', pinnedAt: NOW },
         ]};
       }
@@ -417,40 +417,40 @@ describe('Cache staleness', () => {
     chrome.runtime.sendMessage.mockClear();
 
     // Re-open col-rust
-    const collItem2 = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-rust"]');
+    const collItem2 = document.querySelector('#listsList .sidebar-item[data-list-id="col-rust"]');
     collItem2.click();
     await tick(200);
 
-    // Assert: pins were re-loaded (allCollectionPins was cleared by resetHistory)
-    // The updated loadCollectionPins returns 4 pins now
+    // Assert: pins were re-loaded (allListPins was cleared by resetHistory)
+    // The updated loadListPins returns 4 pins now
     expect(pinnedOnlyRows().length).toBe(4);
 
-    // Assert: saveCollectionPinsById was called (fresh atoms with watermark 200 > pin watermark 0)
+    // Assert: saveListPinsById was called (fresh atoms with watermark 200 > pin watermark 0)
     const saveCalls = chrome.runtime.sendMessage.mock.calls
-      .filter(c => c[0].action === 'saveCollectionPinsById');
+      .filter(c => c[0].action === 'saveListPinsById');
     expect(saveCalls.length).toBeGreaterThanOrEqual(1);
   });
 
   // ---------------------------------------------------------------------------
-  // T2: visibilitychange invalidates collection pins
+  // T2: visibilitychange invalidates list pins
   // ---------------------------------------------------------------------------
-  it('T2: visibilitychange invalidates collection pins', async () => {
+  it('T2: visibilitychange invalidates list pins', async () => {
     populateCache();
 
     await importOptions();
     await tick(100);
 
     // Open col-rust → 3 pinned rows
-    const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-rust"]');
+    const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-rust"]');
     collItem.click();
     await tick(200);
     expect(pinnedOnlyRows().length).toBe(3);
 
-    // Change loadCollectionPins to return 4 pins
-    actionOverrides['loadCollectionPinsById'] = actionOverrides['loadCollectionPins'] = (msg) => {
-      if (msg.collectionId === 'col-rust') {
+    // Change loadListPins to return 4 pins
+    actionOverrides['loadListPinsById'] = actionOverrides['loadListPins'] = (msg) => {
+      if (msg.listId === 'col-rust') {
         return { success: true, pins: [
-          ...TEST_COLLECTION_PINS['col-rust'],
+          ...TEST_LIST_PINS['col-rust'],
           { url: 'https://rust-lang.org/doc3', title: 'Rust Documentation 3', pinnedAt: NOW },
         ]};
       }
@@ -462,7 +462,7 @@ describe('Cache staleness', () => {
     document.dispatchEvent(new Event('visibilitychange'));
     await tick(300);
 
-    // Re-open col-rust (click again to trigger showCollection with cleared cache)
+    // Re-open col-rust (click again to trigger showList with cleared cache)
     collItem.click();
     await tick(200);
 
@@ -554,7 +554,7 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T5: logBuffer entries → history loads correctly
   // ---------------------------------------------------------------------------
-  it('T5: logBuffer visit entries are merged into history and visible in collection', async () => {
+  it('T5: logBuffer visit entries are merged into history and visible in list', async () => {
     populateCache();
     // Put visit entries (no action) + mutation entries in logBuffer
     localData.logBuffer = [
@@ -563,26 +563,26 @@ describe('Cache staleness', () => {
       { timestamp: Date.now() + 1, url: 'https://buffered.com/page2', title: 'Buffered Page 2', slug: 'buffered-page2',  attention: '' },
     ];
 
-    // Add a collection with pins on buffered.com (same domain as logBuffer entries)
-    sessionData.collections = [
-      ...TEST_COLLECTIONS,
+    // Add a list with pins on buffered.com (same domain as logBuffer entries)
+    sessionData.lists = [
+      ...TEST_LISTS,
       { id: 'col-buf', query: '', name: 'Buffered' },
     ];
-    actionOverrides['loadCollectionPinsById'] = (msg) => {
-      if (msg.collectionId === 'col-buf') {
+    actionOverrides['loadListPinsById'] = (msg) => {
+      if (msg.listId === 'col-buf') {
         return { success: true, pins: [
           { url: 'https://buffered.com/page1', title: 'Buffered Page 1', pinnedAt: NOW },
         ]};
       }
-      return { success: true, pins: TEST_COLLECTION_PINS[msg.collectionId] || [] };
+      return { success: true, pins: TEST_LIST_PINS[msg.listId] || [] };
     };
 
     await importOptions();
     await tick(100);
 
-    // Default view is Explore. Open the buffered collection — its pin is on
+    // Default view is Explore. Open the buffered list — its pin is on
     // buffered.com, same domain as logBuffer entries → related pages should appear.
-    const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-buf"]');
+    const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-buf"]');
     expect(collItem).not.toBeNull();
     collItem.click();
     await tick(300);
@@ -623,16 +623,16 @@ describe('Cache staleness', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // T7: collection with no query still shows related pages from history
+  // T7: list with no query still shows related pages from history
   // ---------------------------------------------------------------------------
-  it('T7: no-query collection shows related pages from loaded history', async () => {
+  it('T7: no-query list shows related pages from loaded history', async () => {
     populateCache();
 
     await importOptions();
     await tick(100);
 
-    // Open no-query collection (col-noq) — pins on example.com, history also on example.com
-    const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-noq"]');
+    // Open no-query list (col-noq) — pins on example.com, history also on example.com
+    const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-noq"]');
     expect(collItem).not.toBeNull();
     collItem.click();
     await tick(300);
@@ -650,7 +650,7 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T8: WASM search crash doesn't prevent related pages from showing
   // ---------------------------------------------------------------------------
-  it('T8: collection shows related pages even when pipelinedSearch throws', async () => {
+  it('T8: list shows related pages even when pipelinedSearch throws', async () => {
     populateCache();
 
     // Make searchBatch throw (simulates WASM RuntimeError: memory access out of bounds)
@@ -664,7 +664,7 @@ describe('Cache staleness', () => {
     // Open col-rust — has query "rust", pins on rust-lang.org
     // pipelinedSearch("rust") will call searchBatch which throws
     // But related pages should still be computed from loaded history
-    const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-rust"]');
+    const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-rust"]');
     expect(collItem).not.toBeNull();
     collItem.click();
     await tick(300);
@@ -685,10 +685,10 @@ describe('Cache staleness', () => {
 
     // col-noq has query '' and pins on example.com (same domain as history)
     // Give it a query so it goes through pipelinedSearch path
-    // Override session cache with modified collection
-    sessionData.collections = [
-      TEST_COLLECTION,
-      { id: 'col-noq', query: 'example', name: 'Example Collection' },
+    // Override session cache with modified list
+    sessionData.lists = [
+      TEST_LIST,
+      { id: 'col-noq', query: 'example', name: 'Example List' },
     ];
 
     mockSearchBatchFn.mockImplementation(async () => {
@@ -699,7 +699,7 @@ describe('Cache staleness', () => {
     await tick(100);
 
     // Open col-noq — pins on example.com, history on example.com
-    const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-noq"]');
+    const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-noq"]');
     expect(collItem).not.toBeNull();
     collItem.click();
     await tick(300);
@@ -728,11 +728,11 @@ describe('Cache staleness', () => {
       },
     ];
 
-    sessionData.collections = [
+    sessionData.lists = [
       { id: 'col-today', query: 'today', name: 'Today Search' },
     ];
-    actionOverrides['loadCollectionPinsById'] = actionOverrides['loadCollectionPins'] = (msg) => {
-      if (msg.collectionId === 'col-today') {
+    actionOverrides['loadListPinsById'] = actionOverrides['loadListPins'] = (msg) => {
+      if (msg.listId === 'col-today') {
         return { success: true, pins: [
           { url: 'https://example.com/today0', title: 'Today Page 0', pinnedAt: NOW - DAY },
         ]};
@@ -744,7 +744,7 @@ describe('Cache staleness', () => {
     await tick(100);
 
     // Open col-today — pipelinedSearch("today") runs; logBuffer entries have object attention
-    const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-today"]');
+    const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-today"]');
     expect(collItem).not.toBeNull();
     collItem.click();
     await tick(300);
@@ -781,7 +781,7 @@ describe('Cache staleness', () => {
       await tick(100);
 
       // Open col-noq which has pins on example.com/today0 and today1
-      const collItem = document.querySelector('#collectionsList .sidebar-item[data-collection-id="col-noq"]');
+      const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-noq"]');
       expect(collItem).not.toBeNull();
       collItem.click();
       await tick(500);
@@ -815,7 +815,7 @@ describe('Cache staleness', () => {
 
     // Default view is Explore — verify pinned section is visible with 2 explore pins
     expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
-    const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
+    const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
     expect(pinnedSection.style.display).not.toBe('none');
     expect(pinnedOnlyRows().length).toBe(2);
 
@@ -870,7 +870,7 @@ describe('Cache staleness', () => {
       return { success: true, interactions };
     };
     // No explore pins → showAllHistory path with onLoadMore
-    actionOverrides['loadCollectionPinsById'] = () => ({ success: true, pins: [] });
+    actionOverrides['loadListPinsById'] = () => ({ success: true, pins: [] });
 
     await importOptions();
     await tick(200);
@@ -961,23 +961,23 @@ describe('Cache staleness', () => {
     expect(pinnedOnlyRows().length).toBe(2);
 
     // Simulate background mutation notification for pins
-    // This is what happens after saveCollectionPinsById resolves:
-    // background sends notifyMutation('pins', { collectionId: 'explore' })
+    // This is what happens after saveListPinsById resolves:
+    // background sends notifyMutation('pins', { listId: 'explore' })
     const listeners = chrome.runtime.onMessage.addListener.mock.calls.map(c => c[0]);
     for (const listener of listeners) {
-      listener({ action: 'mutation', type: 'pins', collectionId: 'explore' });
+      listener({ action: 'mutation', type: 'pins', listId: 'explore' });
     }
     await tick(500);
 
     // The mutation notification should NOT cause the pins to disappear or flicker.
-    // The in-memory allCollectionPins should be preserved for the active explore view.
+    // The in-memory allListPins should be preserved for the active explore view.
     expect(pinnedOnlyRows().length, 'pinned rows should be preserved after mutation notification').toBe(2);
   });
 
   // ---------------------------------------------------------------------------
-  // T15: empty session cache (disable/re-enable) still loads collections and recycle bin
+  // T15: empty session cache (disable/re-enable) still loads lists and recycle bin
   // ---------------------------------------------------------------------------
-  it('T15: empty session cache still loads collections and recycle bin via fallback', async () => {
+  it('T15: empty session cache still loads lists and recycle bin via fallback', async () => {
     // Do NOT call populateCache() — simulate disable/re-enable clearing session
     sessionData = {};
     localData = { logBuffer: [] };
@@ -986,15 +986,15 @@ describe('Cache staleness', () => {
     const TEST_RECYCLE_BIN = [
       { url: 'https://deleted.com', title: 'Deleted Page', deletedAt: Date.now() },
     ];
-    actionOverrides['getCollections'] = () => ({ collections: TEST_COLLECTIONS });
+    actionOverrides['getLists'] = () => ({ lists: TEST_LISTS });
     actionOverrides['getRecycleBin'] = () => ({ items: TEST_RECYCLE_BIN });
 
     await importOptions();
     await tick(200);
 
-    // Collections should render in sidebar
-    const collItems = document.querySelectorAll('#collectionsList .sidebar-item');
-    expect(collItems.length, 'collections sidebar should have items').toBe(TEST_COLLECTIONS.length);
+    // Lists should render in sidebar
+    const collItems = document.querySelectorAll('#listsList .sidebar-item');
+    expect(collItems.length, 'lists sidebar should have items').toBe(TEST_LISTS.length);
 
     // Recycle bin count should show
     const countEl = document.getElementById('recycleSidebarCount');

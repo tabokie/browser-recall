@@ -36,7 +36,7 @@ const ATOM_PREFIX = 'atom:';
  * Keys use prefixed namespaces:
  *   atom:{slug}              — page atom checkpoints
  *   settings                 — global settings
- *   list:user/{collectionId} — collection entity
+ *   list:user/{listId}       — list entity
  *   list:recycle-bin         — recycle bin
  *   list:permanent-deletes   — permanent deletes
  *   index:parent-index       — parent-index for non-checkpointed pages
@@ -369,12 +369,12 @@ export function applyLogToAtom(atom, entry) {
 }
 
 /**
- * Apply a log entry to a collection entity (self-describing file).
+ * Apply a log entry to a list entity (self-describing file).
  * Entity: { timestamp, id, name, qbTrees, pins: [...] }
  * Handles:
- *   - list (id="user/{collectionId}", op=add/del/clear): granular pin operations (URLs only)
- *   - list_meta (id="user/{collectionId}"): collection metadata (name, qbTrees)
- *   - del_list (id="user/{collectionId}"): mark entity as deleted
+ *   - list (id="user/{listId}", op=add/del/clear): granular pin operations (URLs only)
+ *   - list_meta (id="user/{listId}"): list metadata (name, qbTrees)
+ *   - del_list (id="user/{listId}"): mark entity as deleted
  * Returns new entity (or original if entry is irrelevant).
  */
 export function applyLogToPins(pinsEntity, entry) {

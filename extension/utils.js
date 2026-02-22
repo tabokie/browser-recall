@@ -70,7 +70,7 @@ export function generateSlugFromUrl(url) {
   }
 }
 
-// Generate slug from collection title for list file naming
+// Generate slug from list title for list file naming
 export function generateSlugFromTitle(title) {
   // Hash title + timestamp for uniqueness
   const hashInput = title + Date.now();

@@ -187,8 +187,8 @@ async function sessionLoad(key) {
   }
   if (key.startsWith('list:user/')) {
     const cid = key.slice('list:user/'.length);
-    const { collections = [] } = await chrome.storage.session.get(['collections']);
-    const col = collections.find(c => c.id === cid);
+    const { lists = [] } = await chrome.storage.session.get(['lists']);
+    const col = lists.find(c => c.id === cid);
     if (col) return { timestamp: 0, id: cid, name: col.name || '', qbTrees: col.qbTrees || [], pins: [] };
     return null;
   }
@@ -222,16 +222,16 @@ async function sessionWrite(effects) {
         await chrome.storage.session.set(cacheUpdate);
       }
     } else if (key.startsWith('list:user/')) {
-      const { collections = [] } = await chrome.storage.session.get(['collections']);
+      const { lists = [] } = await chrome.storage.session.get(['lists']);
       const cid = key.slice('list:user/'.length);
       if (entity.deleted) {
-        await chrome.storage.session.set({ collections: collections.filter(c => c.id !== cid) });
+        await chrome.storage.session.set({ lists: lists.filter(c => c.id !== cid) });
       } else {
-        const idx = collections.findIndex(c => c.id === cid);
+        const idx = lists.findIndex(c => c.id === cid);
         const meta = { id: entity.id, name: entity.name, qbTrees: entity.qbTrees };
-        if (idx >= 0) collections[idx] = meta;
-        else collections.push(meta);
-        await chrome.storage.session.set({ collections });
+        if (idx >= 0) lists[idx] = meta;
+        else lists.push(meta);
+        await chrome.storage.session.set({ lists });
       }
     } else if (key === 'list:recycle-bin') {
       await chrome.storage.session.set({ recycleBin: entity.items });
@@ -274,7 +274,7 @@ async function appendVisit(interaction) {
 // ─── Settings Keys ───────────────────────────────────────────────────
 // Keys from settings.json that are mirrored in session cache.
 
-const SETTINGS_KEYS = ['workspace', 'collectionOrder', 'urlBlacklist', 'titleTrimRules', 'settings'];
+const SETTINGS_KEYS = ['workspace', 'listOrder', 'urlBlacklist', 'titleTrimRules', 'settings'];
 
 // ─── Cache Hydration ──────────────────────────────────────────────────
 
@@ -294,11 +294,11 @@ async function hydrateCache() {
   } catch (e) { console.warn('Settings load failed:', e.message); }
 
   try {
-    const metaResp = await requestOffscreen({ action: 'loadAllCollectionMetadata' });
-    if (metaResp?.success && metaResp.collections) {
-      await chrome.storage.session.set({ collections: metaResp.collections });
+    const metaResp = await requestOffscreen({ action: 'loadAllListMetadata' });
+    if (metaResp?.success && metaResp.lists) {
+      await chrome.storage.session.set({ lists: metaResp.lists });
     }
-  } catch (e) { console.warn('Collection metadata load failed:', e.message); }
+  } catch (e) { console.warn('List metadata load failed:', e.message); }
 
   try {
     const rbResp = await requestOffscreen({ action: 'loadRecycleBin' });
@@ -327,17 +327,17 @@ async function hydrateCache() {
     } catch (e) { console.warn('Hydration replay failed for entry:', e.message); }
   }
 
-  // Phase 3: Order collections by collectionOrder
-  const { collections = [], collectionOrder = [] } = await chrome.storage.session.get(['collections', 'collectionOrder']);
+  // Phase 3: Order lists by listOrder
+  const { lists = [], listOrder = [] } = await chrome.storage.session.get(['lists', 'listOrder']);
   const ordered = [];
-  for (const id of collectionOrder) {
-    const col = collections.find(c => c.id === id);
+  for (const id of listOrder) {
+    const col = lists.find(c => c.id === id);
     if (col) ordered.push(col);
   }
-  for (const col of collections) {
-    if (!collectionOrder.includes(col.id)) ordered.push(col);
+  for (const col of lists) {
+    if (!listOrder.includes(col.id)) ordered.push(col);
   }
-  await chrome.storage.session.set({ collections: ordered });
+  await chrome.storage.session.set({ lists: ordered });
 
   // Phase 4: Gateways (incremental processing — separate from replay)
   await hydrateIncrementalIndex({
@@ -756,25 +756,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             updateGatewayRegistry(url);
 
             // Workspace mode: auto-pin and optionally snapshot
-            const wsCollectionIds = workspace?.collectionIds || [];
-            if (workspace && workspace.mode === 'workspace' && wsCollectionIds.length > 0) {
+            const wsListIds = workspace?.listIds || [];
+            if (workspace && workspace.mode === 'workspace' && wsListIds.length > 0) {
               try {
-                const pinsResp = await requestOffscreen({ action: 'loadCollectionPins' });
+                const pinsResp = await requestOffscreen({ action: 'loadListPins' });
                 const allPins = (pinsResp && pinsResp.pins) ? pinsResp.pins : {};
 
-                for (const collectionId of wsCollectionIds) {
-                  if (!allPins[collectionId]) allPins[collectionId] = [];
-                  const already = allPins[collectionId].some(p => p.url === url);
+                for (const listId of wsListIds) {
+                  if (!allPins[listId]) allPins[listId] = [];
+                  const already = allPins[listId].some(p => p.url === url);
                   if (!already) {
-                    allPins[collectionId].push({ url, title: request.title || 'Untitled', pinnedAt: timestamp });
+                    allPins[listId].push({ url, title: request.title || 'Untitled', pinnedAt: timestamp });
                     await addLog({
                       timestamp: Date.now(),
                       action: 'list',
-                      id: `user/${collectionId}`,
+                      id: `user/${listId}`,
                       op: 'add',
                       urls: [url]
                     });
-                    console.log(`Workspace: auto-pinned ${url} to collection ${collectionId}`);
+                    console.log(`Workspace: auto-pinned ${url} to list ${listId}`);
                   }
                 }
 
@@ -946,55 +946,55 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'loadCollectionPins': {
+        case 'loadListPins': {
           const t0 = performance.now();
-          if (request.collectionId) {
-            const resp = await requestOffscreen({ action: 'loadCollectionPins', collectionId: request.collectionId });
-            console.debug(`[I/O] loadCollectionPins(${request.collectionId}): ${(performance.now() - t0).toFixed(1)}ms`);
+          if (request.listId) {
+            const resp = await requestOffscreen({ action: 'loadListPins', listId: request.listId });
+            console.debug(`[I/O] loadListPins(${request.listId}): ${(performance.now() - t0).toFixed(1)}ms`);
             sendResponse(resp);
           } else {
-            const resp = await requestOffscreen({ action: 'loadCollectionPins' });
-            console.debug(`[I/O] loadCollectionPins: ${(performance.now() - t0).toFixed(1)}ms`);
+            const resp = await requestOffscreen({ action: 'loadListPins' });
+            console.debug(`[I/O] loadListPins: ${(performance.now() - t0).toFixed(1)}ms`);
             sendResponse(resp);
           }
           break;
         }
 
-        case 'loadCollectionPinsById': {
+        case 'loadListPinsById': {
           const t0 = performance.now();
-          const resp = await requestOffscreen({ action: 'loadCollectionPinsById', collectionId: request.collectionId });
-          console.debug(`[I/O] loadCollectionPinsById(${request.collectionId}): ${(performance.now() - t0).toFixed(1)}ms`);
+          const resp = await requestOffscreen({ action: 'loadListPinsById', listId: request.listId });
+          console.debug(`[I/O] loadListPinsById(${request.listId}): ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse(resp);
           break;
         }
 
-        case 'getCollections': {
+        case 'getLists': {
           await hydrationDone;
-          const cached = await chrome.storage.session.get('collections');
-          if ('collections' in cached) {
-            sendResponse({ collections: cached.collections });
+          const cached = await chrome.storage.session.get('lists');
+          if ('lists' in cached) {
+            sendResponse({ lists: cached.lists });
           } else {
             // Hydration didn't run (e.g., disable/re-enable) — load from filesystem
             try {
-              const metaResp = await requestOffscreen({ action: 'loadAllCollectionMetadata' });
-              let collections = metaResp?.collections || [];
+              const metaResp = await requestOffscreen({ action: 'loadAllListMetadata' });
+              let allLists = metaResp?.lists || [];
               // Apply ordering
-              const { collectionOrder = [] } = await chrome.storage.session.get(['collectionOrder']);
-              if (collectionOrder.length > 0) {
+              const { listOrder = [] } = await chrome.storage.session.get(['listOrder']);
+              if (listOrder.length > 0) {
                 const ordered = [];
-                for (const id of collectionOrder) {
-                  const col = collections.find(c => c.id === id);
+                for (const id of listOrder) {
+                  const col = allLists.find(c => c.id === id);
                   if (col) ordered.push(col);
                 }
-                for (const col of collections) {
-                  if (!collectionOrder.includes(col.id)) ordered.push(col);
+                for (const col of allLists) {
+                  if (!listOrder.includes(col.id)) ordered.push(col);
                 }
-                collections = ordered;
+                allLists = ordered;
               }
-              await chrome.storage.session.set({ collections });
-              sendResponse({ collections });
+              await chrome.storage.session.set({ lists: allLists });
+              sendResponse({ lists: allLists });
             } catch (e) {
-              sendResponse({ collections: [] });
+              sendResponse({ lists: [] });
             }
           }
           break;
@@ -1102,18 +1102,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
             const parentReferrers = await resolveRefs(parentRefs);
 
-            // Parents: collections containing this URL
-            const parentCollections = [];
-            const { collections: colSettings } = await chrome.storage.session.get(['collections']);
-            const allCols = colSettings || [];
-            for (const col of allCols) {
-              const colCacheKey = 'colCache:' + col.id;
-              const cached = (await chrome.storage.session.get(colCacheKey))[colCacheKey];
+            // Parents: lists containing this URL
+            const parentLists = [];
+            const { lists: listSettings } = await chrome.storage.session.get(['lists']);
+            const allLists = listSettings || [];
+            for (const col of allLists) {
+              const listCacheKey = 'listCache:' + col.id;
+              const cached = (await chrome.storage.session.get(listCacheKey))[listCacheKey];
               if (cached) {
                 const inPinned = cached.fullPinned?.some(p => p.url === url);
                 const inRelated = cached.related?.some(r => r.url === url);
-                if (inPinned) parentCollections.push({ id: col.id, name: col.name, type: 'pin' });
-                else if (inRelated) parentCollections.push({ id: col.id, name: col.name, type: 'appear' });
+                if (inPinned) parentLists.push({ id: col.id, name: col.name, type: 'pin' });
+                else if (inRelated) parentLists.push({ id: col.id, name: col.name, type: 'appear' });
               }
             }
 
@@ -1130,7 +1130,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             sendResponse({
               success: true,
-              parents: { referrers: parentReferrers, collections: parentCollections },
+              parents: { referrers: parentReferrers, lists: parentLists },
               children
             });
           } catch (error) {
@@ -1211,28 +1211,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'saveCollectionPins': {
-          await requestOffscreen({ action: 'saveCollectionPins', pins: request.pins });
+        case 'saveListPins': {
+          await requestOffscreen({ action: 'saveListPins', pins: request.pins });
           sendResponse({ success: true });
           notifyMutation('pins');
           break;
         }
 
-        case 'saveCollectionPinsById': {
+        case 'saveListPinsById': {
           const ts = Date.now();
           await addLog({
             timestamp: ts, action: 'list',
-            id: `user/${request.collectionId}`, op: 'clear', urls: []
+            id: `user/${request.listId}`, op: 'clear', urls: []
           });
           if (request.pins && request.pins.length > 0) {
             await addLog({
               timestamp: ts + 1, action: 'list',
-              id: `user/${request.collectionId}`, op: 'add',
+              id: `user/${request.listId}`, op: 'add',
               urls: request.pins.map(p => p.url)
             });
           }
           sendResponse({ success: true });
-          notifyMutation('pins', { collectionId: request.collectionId });
+          notifyMutation('pins', { listId: request.listId });
           break;
         }
 
@@ -1253,22 +1253,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'saveCollectionMeta': {
-          const metaEntry = { timestamp: Date.now(), action: 'list_meta', id: `user/${request.collectionId}`, name: request.name };
+        case 'saveListMeta': {
+          const metaEntry = { timestamp: Date.now(), action: 'list_meta', id: `user/${request.listId}`, name: request.name };
           if (request.qbTrees !== undefined) metaEntry.qbTrees = request.qbTrees;
           await addLog(metaEntry);
           sendResponse({ success: true });
-          notifyMutation('collections');
+          notifyMutation('lists');
           break;
         }
 
-        case 'deleteCollection': {
-          const { collectionOrder: order = [] } = await chrome.storage.session.get(['collectionOrder']);
-          const newOrder = order.filter(id => id !== request.collectionId);
-          await addLog({ timestamp: Date.now(), action: 'set', key: 'collectionOrder', value: newOrder });
-          await addLog({ timestamp: Date.now(), action: 'del_list', id: `user/${request.collectionId}` });
+        case 'deleteList': {
+          const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
+          const newOrder = order.filter(id => id !== request.listId);
+          await addLog({ timestamp: Date.now(), action: 'set', key: 'listOrder', value: newOrder });
+          await addLog({ timestamp: Date.now(), action: 'del_list', id: `user/${request.listId}` });
           sendResponse({ success: true });
-          notifyMutation('collections');
+          notifyMutation('lists');
           break;
         }
 

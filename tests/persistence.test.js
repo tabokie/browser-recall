@@ -140,15 +140,15 @@ async function hydrateCache(fsStorage, chromeStorage) {
   const settings = await fsStorage.loadSettings();
   const cacheUpdate = {};
   if (settings.workspace !== undefined) cacheUpdate.workspace = settings.workspace;
-  if (settings.collectionOrder !== undefined) cacheUpdate.collectionOrder = settings.collectionOrder;
+  if (settings.listOrder !== undefined) cacheUpdate.listOrder = settings.listOrder;
   if (settings.urlBlacklist !== undefined) cacheUpdate.urlBlacklist = settings.urlBlacklist;
   if (settings.titleTrimRules !== undefined) cacheUpdate.titleTrimRules = settings.titleTrimRules;
   if (settings.permanentDeletes !== undefined) cacheUpdate.permanentDeletes = settings.permanentDeletes;
   if (settings.settings !== undefined) cacheUpdate.settings = settings.settings;
 
-  // Load collections from self-describing files
-  const collections = await fsStorage.loadAllCollectionMetadata();
-  cacheUpdate.collections = collections;
+  // Load lists from self-describing files
+  const lists = await fsStorage.loadAllListMetadata();
+  cacheUpdate.lists = lists;
 
   // Load recycle bin from its own file
   const recycleBinItems = await fsStorage.loadRecycleBin();
@@ -186,8 +186,8 @@ describe('Persistence round-trip', () => {
 
   it('saveSettings → loadSettings round-trips correctly', async () => {
     const data = {
-      workspace: { mode: 'workspace', collectionIds: ['c1'], autoSnapshot: true },
-      collectionOrder: ['c1'],
+      workspace: { mode: 'workspace', listIds: ['c1'], autoSnapshot: true },
+      listOrder: ['c1'],
       urlBlacklist: ['chrome://', 'edge://'],
       titleTrimRules: [{ urlPrefix: 'https://github.com', action: 'remove_after_pipe' }],
       permanentDeletes: ['https://gone.com'],
@@ -216,7 +216,7 @@ describe('Persistence round-trip', () => {
 
   it('read-modify-write preserves unrelated keys', async () => {
     await fs.saveSettings({
-      workspace: { mode: 'default', collectionIds: [], autoSnapshot: false },
+      workspace: { mode: 'default', listIds: [], autoSnapshot: false },
       urlBlacklist: ['chrome://'],
     });
 
@@ -234,8 +234,8 @@ describe('Persistence round-trip', () => {
 
   describe('simulated extension reload', () => {
     const initialSettings = {
-      workspace: { mode: 'workspace', collectionIds: ['c1', 'c2'], autoSnapshot: true },
-      collectionOrder: ['c1', 'c2'],
+      workspace: { mode: 'workspace', listIds: ['c1', 'c2'], autoSnapshot: true },
+      listOrder: ['c1', 'c2'],
       urlBlacklist: ['chrome://', 'edge://', 'https://private.example.com/'],
       titleTrimRules: [
         { urlPrefix: 'https://github.com', action: 'remove_after_pipe' },
@@ -245,8 +245,8 @@ describe('Persistence round-trip', () => {
       settings: { captureContent: true, captureAttention: true, archiveQuality: 'medium' },
     };
 
-    // Collection metadata in self-describing files
-    const collectionMeta = [
+    // List metadata in self-describing files
+    const listMeta = [
       { id: 'c1', name: 'AI', qbTrees: [] },
       { id: 'c2', name: 'Rust Lang', qbTrees: [] },
     ];
@@ -257,10 +257,10 @@ describe('Persistence round-trip', () => {
     ];
 
     it('data survives chrome.storage.local.clear() + hydrateCache', async () => {
-      // 1. Persist settings + collection files + recycle bin
+      // 1. Persist settings + list files + recycle bin
       await fs.saveSettings(initialSettings);
-      for (const col of collectionMeta) {
-        await fs.saveCollectionMeta(col.id, col);
+      for (const col of listMeta) {
+        await fs.saveListMeta(col.id, col);
       }
       await fs.saveRecycleBin(recycleBinItems);
 
@@ -286,8 +286,8 @@ describe('Persistence round-trip', () => {
 
     it('individual cache keys match after reload', async () => {
       await fs.saveSettings(initialSettings);
-      for (const col of collectionMeta) {
-        await fs.saveCollectionMeta(col.id, col);
+      for (const col of listMeta) {
+        await fs.saveListMeta(col.id, col);
       }
       await fs.saveRecycleBin(recycleBinItems);
       await hydrateCache(fs, chromeStorage);
@@ -297,13 +297,13 @@ describe('Persistence round-trip', () => {
       await hydrateCache(fs, chromeStorage);
 
       const cached = await chromeStorage.get([
-        'workspace', 'collectionOrder', 'collections', 'urlBlacklist',
+        'workspace', 'listOrder', 'lists', 'urlBlacklist',
         'titleTrimRules', 'recycleBin', 'permanentDeletes', 'settings',
       ]);
 
       expect(cached.workspace).toEqual(initialSettings.workspace);
-      expect(cached.collectionOrder).toEqual(initialSettings.collectionOrder);
-      expect(cached.collections).toEqual(collectionMeta);
+      expect(cached.listOrder).toEqual(initialSettings.listOrder);
+      expect(cached.lists).toEqual(listMeta);
       expect(cached.urlBlacklist).toEqual(initialSettings.urlBlacklist);
       expect(cached.titleTrimRules).toEqual(initialSettings.titleTrimRules);
       expect(cached.recycleBin).toEqual(recycleBinItems);
@@ -489,29 +489,29 @@ describe('Persistence round-trip', () => {
     });
   });
 
-  // ---- Collection pins are independent of settings.json ----
+  // ---- List pins are independent of settings.json ----
 
-  it('collection files are separate from settings', async () => {
-    // Save collection with metadata + pins
-    await fs.saveCollectionMeta('c1', { id: 'c1', name: 'Test', qbTrees: [] });
-    await fs.saveCollectionPinsById('c1', [{ url: 'https://a.com', title: 'A', pinnedAt: 100 }]);
+  it('list files are separate from settings', async () => {
+    // Save list with metadata + pins
+    await fs.saveListMeta('c1', { id: 'c1', name: 'Test', qbTrees: [] });
+    await fs.saveListPinsById('c1', [{ url: 'https://a.com', title: 'A', pinnedAt: 100 }]);
 
     // Save settings
-    await fs.saveSettings({ collectionOrder: ['c1'] });
+    await fs.saveSettings({ listOrder: ['c1'] });
 
     // Both round-trip independently
-    const loadedPins = await fs.loadCollectionPinsById('c1');
+    const loadedPins = await fs.loadListPinsById('c1');
     const loadedSettings = await fs.loadSettings();
-    const meta = await fs.loadAllCollectionMetadata();
+    const meta = await fs.loadAllListMetadata();
 
     expect(loadedPins).toEqual([{ url: 'https://a.com', title: 'A', pinnedAt: 100 }]);
-    expect(loadedSettings.collectionOrder).toEqual(['c1']);
+    expect(loadedSettings.listOrder).toEqual(['c1']);
     expect(meta).toEqual([{ id: 'c1', name: 'Test', qbTrees: [] }]);
   });
 
-  // ---- Per-collection pin isolation (regression: lazy pins + bulk save deleted other files) ----
+  // ---- Per-list pin isolation (regression: lazy pins + bulk save deleted other files) ----
 
-  describe('per-collection pin operations', () => {
+  describe('per-list pin operations', () => {
     const PINS_C1 = [
       { url: 'https://a.com', title: 'A', pinnedAt: 100 },
       { url: 'https://b.com', title: 'B', pinnedAt: 200 },
@@ -526,75 +526,75 @@ describe('Persistence round-trip', () => {
     ];
 
     async function seedAllPins() {
-      await fs.saveCollectionPins({ c1: PINS_C1, c2: PINS_C2, c3: PINS_C3 });
+      await fs.saveListPins({ c1: PINS_C1, c2: PINS_C2, c3: PINS_C3 });
     }
 
-    it('saveCollectionPinsById writes only one file, leaves others intact', async () => {
+    it('saveListPinsById writes only one file, leaves others intact', async () => {
       await seedAllPins();
 
       // Update c1 only
       const updated = [...PINS_C1, { url: 'https://new.com', title: 'New', pinnedAt: 700 }];
-      await fs.saveCollectionPinsById('c1', updated);
+      await fs.saveListPinsById('c1', updated);
 
       // c1 updated
-      const c1 = await fs.loadCollectionPinsById('c1');
+      const c1 = await fs.loadListPinsById('c1');
       expect(c1).toEqual(updated);
 
       // c2 and c3 untouched
-      const c2 = await fs.loadCollectionPinsById('c2');
+      const c2 = await fs.loadListPinsById('c2');
       expect(c2).toEqual(PINS_C2);
-      const c3 = await fs.loadCollectionPinsById('c3');
+      const c3 = await fs.loadListPinsById('c3');
       expect(c3).toEqual(PINS_C3);
     });
 
-    it('saveCollectionPinsById creates new file for unknown collection', async () => {
+    it('saveListPinsById creates new file for unknown list', async () => {
       await seedAllPins();
 
       const newPins = [{ url: 'https://brand-new.com', title: 'Brand New', pinnedAt: 800 }];
-      await fs.saveCollectionPinsById('c4', newPins);
+      await fs.saveListPinsById('c4', newPins);
 
-      // New collection saved
-      const c4 = await fs.loadCollectionPinsById('c4');
+      // New list saved
+      const c4 = await fs.loadListPinsById('c4');
       expect(c4).toEqual(newPins);
 
-      // Existing collections untouched
-      const all = await fs.loadCollectionPins();
+      // Existing lists untouched
+      const all = await fs.loadListPins();
       expect(all.c1).toEqual(PINS_C1);
       expect(all.c2).toEqual(PINS_C2);
       expect(all.c3).toEqual(PINS_C3);
     });
 
-    it('loadCollectionPinsById returns [] for missing collection', async () => {
+    it('loadListPinsById returns [] for missing list', async () => {
       await seedAllPins();
-      const pins = await fs.loadCollectionPinsById('nonexistent');
+      const pins = await fs.loadListPinsById('nonexistent');
       expect(pins).toEqual([]);
     });
 
-    it('loadCollectionPinsById round-trips with saveCollectionPinsById', async () => {
+    it('loadListPinsById round-trips with saveListPinsById', async () => {
       const pins = [{ url: 'https://solo.com', title: 'Solo', pinnedAt: 999 }];
-      await fs.saveCollectionPinsById('solo', pins);
-      const loaded = await fs.loadCollectionPinsById('solo');
+      await fs.saveListPinsById('solo', pins);
+      const loaded = await fs.loadListPinsById('solo');
       expect(loaded).toEqual(pins);
     });
 
-    it('saving empty pins for deleted collection does not affect others', async () => {
+    it('saving empty pins for deleted list does not affect others', async () => {
       await seedAllPins();
 
-      // Simulate delete-collection: save empty pins for c2
-      await fs.saveCollectionPinsById('c2', []);
+      // Simulate delete-list: save empty pins for c2
+      await fs.saveListPinsById('c2', []);
 
       // c2 is now empty
-      const c2 = await fs.loadCollectionPinsById('c2');
+      const c2 = await fs.loadListPinsById('c2');
       expect(c2).toEqual([]);
 
       // c1 and c3 untouched
-      const c1 = await fs.loadCollectionPinsById('c1');
+      const c1 = await fs.loadListPinsById('c1');
       expect(c1).toEqual(PINS_C1);
-      const c3 = await fs.loadCollectionPinsById('c3');
+      const c3 = await fs.loadListPinsById('c3');
       expect(c3).toEqual(PINS_C3);
     });
 
-    it('concurrent per-collection saves do not interfere', async () => {
+    it('concurrent per-list saves do not interfere', async () => {
       await seedAllPins();
 
       const updatedC1 = [{ url: 'https://c1-new.com', title: 'C1 New', pinnedAt: 900 }];
@@ -602,13 +602,13 @@ describe('Persistence round-trip', () => {
 
       // Save c1 and c3 concurrently
       await Promise.all([
-        fs.saveCollectionPinsById('c1', updatedC1),
-        fs.saveCollectionPinsById('c3', updatedC3),
+        fs.saveListPinsById('c1', updatedC1),
+        fs.saveListPinsById('c3', updatedC3),
       ]);
 
-      expect(await fs.loadCollectionPinsById('c1')).toEqual(updatedC1);
-      expect(await fs.loadCollectionPinsById('c2')).toEqual(PINS_C2);
-      expect(await fs.loadCollectionPinsById('c3')).toEqual(updatedC3);
+      expect(await fs.loadListPinsById('c1')).toEqual(updatedC1);
+      expect(await fs.loadListPinsById('c2')).toEqual(PINS_C2);
+      expect(await fs.loadListPinsById('c3')).toEqual(updatedC3);
     });
   });
 });

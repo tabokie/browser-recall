@@ -42,8 +42,8 @@ let historyLoadedCount = 0;        // how many files loaded so far
 let historyByUrl = new Map();      // url → interaction (deduped, newest wins)
 let historyAllEntries = [];        // all loaded entries (not deduped), for date-boundary rendering
 let historyLoading = false;        // guard against concurrent loads
-let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'collection', query: '...', id: '...' } or { type: 'explore', query: '...', filter: '...' }
-let allCollectionPins = {}; // collectionId -> [{ url, title, pinnedAt }]
+let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'list', query: '...', id: '...' } or { type: 'explore', query: '...', filter: '...' }
+let allListPins = {}; // listId -> [{ url, title, pinnedAt }]
 let recycleBin = []; // [{ url, title, deletedAt }] — global recycle bin
 let permanentDeletes = []; // [url, ...] — permanently deleted URLs
 let lastClickedRow = null; // for shift-click range select
@@ -53,17 +53,17 @@ let gatewayDomainsLoaded = false;
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
 let pendingPin = null; // { autoName, qbTrees? } — set during pin naming mode
 // pinnedFilterCtx removed — pinned section no longer has related pages
-const EXPLORE_COLLECTION_ID = 'explore';
-// Collection results and atom data are cached in chrome.storage.session
-// (managed by background for atoms, by options for collection results).
-// Keys: 'atom:{slug}' for atoms, 'colCache:{id}' for collection results.
-let colCacheKeys = []; // tracks which colCache:* keys exist in session
+const EXPLORE_LIST_ID = 'explore';
+// List results and atom data are cached in chrome.storage.session
+// (managed by background for atoms, by options for list results).
+// Keys: 'atom:{slug}' for atoms, 'listCache:{id}' for list results.
+let listCacheKeys = []; // tracks which listCache:* keys exist in session
 
 // --- Query builder state ---
 let qbRoot = null;        // tree root (null = empty)
 let cachedAllHighlights = null; // slug → highlights[], lazy-loaded
 let qbDebounceTimer = null;
-let savedExploreQbRoot = null;  // saved global explore QB state when viewing a collection
+let savedExploreQbRoot = null;  // saved global explore QB state when viewing a list
 
 // --- Explore blocks state ---
 let exploreBlocks = []; // [{ id, type:'auto'|'manual', label, enabled, urls?:Set, tree? }]
@@ -310,58 +310,58 @@ function resetHistory() {
   historyLoading = false;
   cachedFieldRanges = null;
   capturesMatchCache = null;
-  // Invalidate collection results in session
-  if (colCacheKeys.length > 0) {
-    chrome.storage.session.remove(colCacheKeys.map(id => 'colCache:' + id));
-    colCacheKeys = [];
+  // Invalidate list results in session
+  if (listCacheKeys.length > 0) {
+    chrome.storage.session.remove(listCacheKeys.map(id => 'listCache:' + id));
+    listCacheKeys = [];
   }
-  allCollectionPins = {};
+  allListPins = {};
   cachedAllHighlights = null;
   gatewayDomainsCache = {};
   gatewayDomainsLoaded = false;
   bufferContentMap = {};
 }
 
-// --- Collection pins (filesystem) ---
-async function loadAllCollectionPins() {
+// --- List pins (filesystem) ---
+async function loadAllListPins() {
   try {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadCollectionPins' });
-    allCollectionPins = resp?.pins || {};
+    const resp = await chrome.runtime.sendMessage({ action: 'loadListPins' });
+    allListPins = resp?.pins || {};
   } catch (error) {
-    console.log('Could not load collection pins:', error.message);
+    console.log('Could not load list pins:', error.message);
   }
-  return allCollectionPins;
+  return allListPins;
 }
 
-async function saveCollectionPinsById(collectionId) {
+async function saveListPinsById(listId) {
   try {
-    await chrome.runtime.sendMessage({ action: 'saveCollectionPinsById', collectionId, pins: allCollectionPins[collectionId] || [] });
+    await chrome.runtime.sendMessage({ action: 'saveListPinsById', listId, pins: allListPins[listId] || [] });
   } catch (error) {
-    console.log('Could not save collection pins:', error.message);
+    console.log('Could not save list pins:', error.message);
   }
 }
 
-function getActivePinCollectionId() {
-  if (activeView.type === 'explore') return EXPLORE_COLLECTION_ID;
-  if (activeView.type === 'collection') return activeView.id;
-  return EXPLORE_COLLECTION_ID; // default: pin to explore
+function getActivePinListId() {
+  if (activeView.type === 'explore') return EXPLORE_LIST_ID;
+  if (activeView.type === 'list') return activeView.id;
+  return EXPLORE_LIST_ID; // default: pin to explore
 }
 
-function isResultPinned(collectionId, url) {
-  const pins = allCollectionPins[collectionId] || [];
+function isResultPinned(listId, url) {
+  const pins = allListPins[listId] || [];
   return pins.some(p => p.url === url);
 }
 
-async function toggleResultPin(collectionId, url, title) {
-  if (!allCollectionPins[collectionId]) allCollectionPins[collectionId] = [];
-  const pins = allCollectionPins[collectionId];
+async function toggleResultPin(listId, url, title) {
+  if (!allListPins[listId]) allListPins[listId] = [];
+  const pins = allListPins[listId];
   const idx = pins.findIndex(p => p.url === url);
   if (idx !== -1) {
     pins.splice(idx, 1);
   } else {
     pins.push({ url, title, pinnedAt: Date.now() });
   }
-  await saveCollectionPinsById(collectionId);
+  await saveListPinsById(listId);
 }
 
 // --- Recycle bin ---
@@ -447,18 +447,18 @@ document.getElementById('deleteAllBtn').addEventListener('click', async () => {
   showCategory('recycleBin');
 });
 
-// --- Layout switching (collection vs normal) ---
-function showCollectionLayout() {
+// --- Layout switching (list vs normal) ---
+function showListLayout() {
   saveExploreQbState();
   document.getElementById('timeChart').classList.remove('visible');
   document.getElementById('resultsWrapper').style.display = 'none';
-  document.getElementById('collectionLayout').classList.add('visible');
+  document.getElementById('listLayout').classList.add('visible');
   document.getElementById('queryBuilder').style.display = 'none';
 }
 
 function showNormalLayout() {
   document.getElementById('resultsWrapper').style.display = '';
-  document.getElementById('collectionLayout').classList.remove('visible');
+  document.getElementById('listLayout').classList.remove('visible');
   restoreExploreQbState();
 }
 
@@ -714,10 +714,10 @@ function renderResultsSkeleton(opts = {}) {
   vs.setData([], () => '');
 }
 
-// Show collection chart frames + column headers immediately
-function renderCollectionSkeleton() {
+// Show list chart frames + column headers immediately
+function renderListSkeleton() {
   // Pinned section: show column header
-  const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
+  const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
   pinnedSection.style.display = '';
   const pinnedContainer = document.getElementById('pinnedResults');
   pinnedContainer.innerHTML = columnHeaderHtml('pinned', { hasDelete: true, hasPin: true });
@@ -735,8 +735,8 @@ function renderCollectionSkeleton() {
 function refreshCurrentView() {
   if (activeView.type === 'category') {
     showCategory(activeView.value);
-  } else if (activeView.type === 'collection') {
-    showCollection({ id: activeView.id, qbTrees: activeView.qbTrees, name: activeView.name });
+  } else if (activeView.type === 'list') {
+    showList({ id: activeView.id, qbTrees: activeView.qbTrees, name: activeView.name });
   } else if (activeView.type === 'explore') {
     showExplore();
   }
@@ -1137,11 +1137,11 @@ function enrichSingle(item, highlightsMap) {
 
 // --- Query builder: Query execution ---
 async function runQuery() {
-  const inCollection = activeView.type === 'collection';
+  const inList = activeView.type === 'list';
 
   if (!qbRoot || (qbRoot.type === 'predicate' && qbRoot.predicateType === null) || !treeHasConfiguredPredicate(qbRoot)) {
-    if (inCollection) {
-      saveCollectionQbTrees();
+    if (inList) {
+      saveListQbTrees();
       const relatedContainer = document.getElementById('relatedResults');
       relatedContainer.innerHTML = '<div class="no-results">Add filters to start querying</div>';
       document.getElementById('relatedChart').classList.remove('visible');
@@ -1152,14 +1152,14 @@ async function runQuery() {
     return;
   }
 
-  if (!inCollection) renderResultsSkeleton();
+  if (!inList) renderResultsSkeleton();
 
   const matched = await evaluateQueryStream(qbRoot);
 
-  if (inCollection) {
-    // Save updated qbTree to collection storage
-    saveCollectionQbTrees();
-    runCollectionExploreQuery(matched);
+  if (inList) {
+    // Save updated qbTree to list storage
+    saveListQbTrees();
+    runListExploreQuery(matched);
     return;
   }
 
@@ -1205,16 +1205,16 @@ async function runQuery() {
   }
 }
 
-async function saveCollectionQbTrees() {
-  if (activeView.type !== 'collection') return;
+async function saveListQbTrees() {
+  if (activeView.type !== 'list') return;
   const tree = JSON.parse(JSON.stringify(qbRoot));
   activeView.qbTrees = [tree];
-  await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId: activeView.id, name: activeView.name, qbTrees: [tree] });
+  await chrome.runtime.sendMessage({ action: 'saveListMeta', listId: activeView.id, name: activeView.name, qbTrees: [tree] });
 }
 
-function runCollectionExploreQuery(matched) {
-  const collectionId = activeView.id;
-  const pinnedUrls = new Set((allCollectionPins[collectionId] || []).map(p => p.url));
+function runListExploreQuery(matched) {
+  const listId = activeView.id;
+  const pinnedUrls = new Set((allListPins[listId] || []).map(p => p.url));
   const relatedContainer = document.getElementById('relatedResults');
 
   if (!matched || matched.length === 0) {
@@ -1255,12 +1255,12 @@ function runCollectionExploreQuery(matched) {
   vs._headerHtml = columnHeaderHtml('related', { hasDelete: true, hasPin: true, showRelevance: hasKeywords });
   vs.setData(normalized, (r) =>
     resultRowHtml(r.title, r.url, {
-      pinned: isResultPinned(collectionId, r.url),
+      pinned: isResultPinned(listId, r.url),
       deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       highlights: r.highlights, timestamps: r.timestamps, context: 'related', relevance: r.relevance,
     })
   );
-  bindPinClicks(relatedContainer, collectionId);
+  bindPinClicks(relatedContainer, listId);
 
   // Time chart for explore results — use enriched data directly
   const chartData = exploreMatched.map(r => ({ url: r.url, timestamp: r.lastVisit || Date.now(), attention: '' }));
@@ -1276,15 +1276,15 @@ function runCollectionExploreQuery(matched) {
 
 // --- Query builder: Rendering ---
 function getActiveQbBody() {
-  if (activeView.type === 'collection') {
-    return document.getElementById('collectionQbBody');
+  if (activeView.type === 'list') {
+    return document.getElementById('listQbBody');
   }
   return document.getElementById('qbBody');
 }
 
 function renderQueryBuilder() {
-  // In explore/collection view, always use block layout
-  if (activeView.type === 'explore' || activeView.type === 'collection') {
+  // In explore/list view, always use block layout
+  if (activeView.type === 'explore' || activeView.type === 'list') {
     // Copy mutated qbRoot back to active block's tree
     const block = exploreBlocks.find(b => b.id === activeBlockId);
     if (block && block.type === 'manual') block.tree = qbRoot;
@@ -1626,8 +1626,8 @@ function bindQueryBuilderEvents(body) {
 function debouncedRunQuery() {
   if (qbDebounceTimer) clearTimeout(qbDebounceTimer);
   qbDebounceTimer = setTimeout(() => {
-    // In explore/collection view, always use block query
-    if (activeView.type === 'explore' || activeView.type === 'collection') {
+    // In explore/list view, always use block query
+    if (activeView.type === 'explore' || activeView.type === 'list') {
       runExploreBlockQuery();
     } else {
       runQuery();
@@ -1635,7 +1635,7 @@ function debouncedRunQuery() {
   }, 300);
 }
 
-// Summarize a query tree into a short display name for collections
+// Summarize a query tree into a short display name for lists
 function qbSummarize(node) {
   if (!node) return 'Empty query';
   if (node.type === 'predicate') {
@@ -1669,20 +1669,20 @@ async function showExplore() {
   updateMainTitle('Explore');
   document.getElementById('pinSearchBtn').style.display = 'none';
 
-  // Always use collection layout with block-based explore
-  showCollectionLayout();
-  renderCollectionSkeleton();
+  // Always use list layout with block-based explore
+  showListLayout();
+  renderListSkeleton();
 
-  const collectionId = EXPLORE_COLLECTION_ID;
+  const listId = EXPLORE_LIST_ID;
   // Lazy-load explore pins (may have been invalidated by visibilitychange)
-  if (!allCollectionPins[collectionId]) {
-    const pinsResp = await chrome.runtime.sendMessage({ action: 'loadCollectionPinsById', collectionId });
-    allCollectionPins[collectionId] = pinsResp?.pins || [];
+  if (!allListPins[listId]) {
+    const pinsResp = await chrome.runtime.sendMessage({ action: 'loadListPinsById', listId });
+    allListPins[listId] = pinsResp?.pins || [];
   }
   const pins = getExplorePins();
 
   // Hide pinned section when no pins
-  const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
+  const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
   if (pins.length === 0) {
     pinnedSection.style.display = 'none';
   } else {
@@ -1712,7 +1712,7 @@ async function showExplore() {
     }
 
     const fullPinned = pins.map(enrichResult);
-    renderPinnedSection(fullPinned, collectionId);
+    renderPinnedSection(fullPinned, listId);
   }
 
   // Load history for block evaluation and fallback display
@@ -1751,11 +1751,11 @@ async function showExplore() {
 
 // Incremental refresh after pin toggle — preserves scroll position and block selection state
 async function refreshExplorePins() {
-  const collectionId = EXPLORE_COLLECTION_ID;
+  const listId = EXPLORE_LIST_ID;
   const pins = getExplorePins();
 
   // Re-render pinned section
-  const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
+  const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
   if (pins.length === 0) {
     pinnedSection.style.display = 'none';
   } else {
@@ -1782,7 +1782,7 @@ async function refreshExplorePins() {
       };
     }
     const fullPinned = pins.map(enrichResult);
-    renderPinnedSection(fullPinned, collectionId);
+    renderPinnedSection(fullPinned, listId);
   }
 
   updateExploreBadge();
@@ -1806,9 +1806,9 @@ async function refreshExplorePins() {
   runExploreBlockQuery();
 }
 
-async function showCollection(collection) {
-  const displayName = collectionDisplayName(collection);
-  activeView = { type: 'collection', id: collection.id, qbTrees: collection.qbTrees || [], name: collection.name || null };
+async function showList(list) {
+  const displayName = listDisplayName(list);
+  activeView = { type: 'list', id: list.id, qbTrees: list.qbTrees || [], name: list.name || null };
   updateSidebarActive();
   updateMainTitle(displayName);
   document.getElementById('pinSearchBtn').style.display = 'none';
@@ -1818,9 +1818,9 @@ async function showCollection(collection) {
   function attachDblClick(currentName) {
     titleEl.ondblclick = () => {
       enterTitleEditMode(currentName, async (newName) => {
-        collection.name = newName;
-        await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId: collection.id, name: newName });
-        await renderCollections();
+        list.name = newName;
+        await chrome.runtime.sendMessage({ action: 'saveListMeta', listId: list.id, name: newName });
+        await renderLists();
         activeView.name = newName;
         updateMainTitle(newName);
         attachDblClick(newName);
@@ -1831,18 +1831,18 @@ async function showCollection(collection) {
     };
   }
   attachDblClick(displayName);
-  showCollectionLayout();
-  renderCollectionSkeleton();
+  showListLayout();
+  renderListSkeleton();
 
   try {
-    const collectionId = collection.id;
+    const listId = list.id;
 
-    // Lazy-load pins for this collection
-    if (!allCollectionPins[collectionId]) {
-      const pinsResp = await chrome.runtime.sendMessage({ action: 'loadCollectionPinsById', collectionId });
-      allCollectionPins[collectionId] = pinsResp?.pins || [];
+    // Lazy-load pins for this list
+    if (!allListPins[listId]) {
+      const pinsResp = await chrome.runtime.sendMessage({ action: 'loadListPinsById', listId });
+      allListPins[listId] = pinsResp?.pins || [];
     }
-    const pins = allCollectionPins[collectionId] || [];
+    const pins = allListPins[listId] || [];
 
     // Batch-read atoms from session for all pin slugs (one IPC call)
     const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
@@ -1877,28 +1877,28 @@ async function showCollection(collection) {
     }
 
     // --- Pinned+Related section: cache in session or async fetch ---
-    const colCacheKey = 'colCache:' + collectionId;
-    const cachedPinned = (await chrome.storage.session.get(colCacheKey))[colCacheKey] || null;
+    const listCacheKey = 'listCache:' + listId;
+    const cachedPinned = (await chrome.storage.session.get(listCacheKey))[listCacheKey] || null;
     if (cachedPinned) {
-      renderPinnedSection(cachedPinned.fullPinned, collectionId);
+      renderPinnedSection(cachedPinned.fullPinned, listId);
     } else {
-      renderPinnedSection(pins.map(enrichResult), collectionId);
-      fetchCollectionResults(collection, collectionId, pins, enrichResult);
+      renderPinnedSection(pins.map(enrichResult), listId);
+      fetchListResults(list, listId, pins, enrichResult);
     }
 
     // --- Explore section: always immediate ---
-    renderCollectionExplore(collection);
+    renderListExplore(list);
 
     // Fire-and-forget: refresh atoms in background and update pin file
-    refreshCollectionAtoms(collectionId, pins);
+    refreshListAtoms(listId, pins);
   } catch (error) {
-    console.error('Collection load error:', error);
+    console.error('List load error:', error);
     document.getElementById('pinnedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
   }
 }
 
 // Background refresh: load fresh atoms and update pin file + cache
-async function refreshCollectionAtoms(collectionId, pins) {
+async function refreshListAtoms(listId, pins) {
   try {
     const slugs = pins.map(p => generateSlugFromUrl(p.url));
     if (slugs.length === 0) return;
@@ -1936,28 +1936,28 @@ async function refreshCollectionAtoms(collectionId, pins) {
       }
     }
     if (changed) {
-      allCollectionPins[collectionId] = pins;
-      saveCollectionPinsById(collectionId);
+      allListPins[listId] = pins;
+      saveListPinsById(listId);
     }
   } catch (error) {
-    console.debug('refreshCollectionAtoms failed:', error.message);
+    console.debug('refreshListAtoms failed:', error.message);
   }
 }
 
 // Async: fetch search results, compute pinned+related, cache, and render both sections
-async function fetchCollectionResults(collection, collectionId, pins, enrichResult) {
+async function fetchListResults(list, listId, pins, enrichResult) {
   // Yield to browser so Phase 1 paints first
   await new Promise(resolve => setTimeout(resolve, 0));
-  if (activeView.type !== 'collection' || activeView.id !== collectionId) return;
+  if (activeView.type !== 'list' || activeView.id !== listId) return;
 
   try {
     let searchResults = [];
 
-    if (collection.qbTrees && collection.qbTrees.length > 0) {
-      searchResults = await evaluateQueryStream(collection.qbTrees[0]);
+    if (list.qbTrees && list.qbTrees.length > 0) {
+      searchResults = await evaluateQueryStream(list.qbTrees[0]);
     }
 
-    if (activeView.type !== 'collection' || activeView.id !== collectionId) return;
+    if (activeView.type !== 'list' || activeView.id !== listId) return;
 
     // Enrich pinned pages with search result data where available
     const pinnedUrls = new Set(pins.map(p => p.url));
@@ -1967,22 +1967,22 @@ async function fetchCollectionResults(collection, collectionId, pins, enrichResu
     const fullPinned = [...pinnedInResults, ...pinnedOnly];
 
     // Cache pinned in session
-    if (!colCacheKeys.includes(collectionId)) colCacheKeys.push(collectionId);
-    chrome.storage.session.set({ ['colCache:' + collectionId]: { fullPinned } });
+    if (!listCacheKeys.includes(listId)) listCacheKeys.push(listId);
+    chrome.storage.session.set({ ['listCache:' + listId]: { fullPinned } });
 
-    renderPinnedSection(fullPinned, collectionId);
+    renderPinnedSection(fullPinned, listId);
   } catch (error) {
-    console.error('Collection fetch error:', error);
+    console.error('List fetch error:', error);
   }
 }
 
 // Render pinned rows (no related pages, no time chart)
-function renderPinnedSection(allPinned, collectionId) {
+function renderPinnedSection(allPinned, listId) {
   const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
   const sortedPinned = applySortOrder(allPinned, effectivePinnedSort);
   const maxAtt = Math.max(...sortedPinned.map(r => r.attScore), 0.1);
 
-  const pinnedSection = document.querySelector('.collection-section[data-section="pinned"]');
+  const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
   const pinnedContainer = document.getElementById('pinnedResults');
 
   if (sortedPinned.length === 0) {
@@ -1996,7 +1996,7 @@ function renderPinnedSection(allPinned, collectionId) {
     pinnedContainer.innerHTML = html;
     bindColumnHeaderClicks(pinnedContainer);
     bindResultDelegation(pinnedContainer);
-    bindPinClicks(pinnedContainer, collectionId);
+    bindPinClicks(pinnedContainer, listId);
   }
 }
 
@@ -2004,20 +2004,20 @@ function renderPinnedSection(allPinned, collectionId) {
 
 // recalculateRelatedResults removed — pinned section no longer has related pages
 
-async function renderCollectionExplore(collection) {
-  const collectionId = collection.id;
-  const pins = allCollectionPins[collectionId] || [];
+async function renderListExplore(list) {
+  const listId = list.id;
+  const pins = allListPins[listId] || [];
 
   // Load history for block evaluation
   await initHistoryFiles();
   await loadHistoryBatch();
 
-  // Build auto-blocks from collection pins
+  // Build auto-blocks from list pins
   exploreBlocks = pins.length > 0 ? await buildExploreAutoBlocks(pins) : [];
 
   // Add saved qbTrees as manual blocks if present
-  if (collection.qbTrees && collection.qbTrees.length > 0) {
-    for (const tree of collection.qbTrees) {
+  if (list.qbTrees && list.qbTrees.length > 0) {
+    for (const tree of list.qbTrees) {
       exploreBlocks.push({
         id: ++exploreBlockIdCounter,
         type: 'manual',
@@ -2223,7 +2223,7 @@ function buildDetailHtml(url, attDetail, highlights) {
   return html;
 }
 
-// Lazy-load extra detail data (notes, collections, snapshots) when detail is expanded
+// Lazy-load extra detail data (notes, lists, snapshots) when detail is expanded
 async function loadExtraDetail(url) {
   const slug = generateSlugFromUrl(url);
 
@@ -2246,25 +2246,25 @@ async function loadExtraDetail(url) {
     snapshots = snapResp?.snapshots || [];
   } catch (e) { /* filesystem not available */ }
 
-  // Find belonged collections (reverse lookup)
-  const collections = await loadCollections();
-  const belongedCollections = [];
-  for (const collection of collections) {
-    const pins = allCollectionPins[collection.id] || [];
+  // Find belonged lists (reverse lookup)
+  const lists = await loadLists();
+  const belongedLists = [];
+  for (const lst of lists) {
+    const pins = allListPins[lst.id] || [];
     if (pins.some(p => p.url === url)) {
-      belongedCollections.push(collectionDisplayName(collection));
+      belongedLists.push(listDisplayName(lst));
     }
   }
 
-  return { highlights, snapshots, belongedCollections, slug };
+  return { highlights, snapshots, belongedLists, slug };
 }
 
 function renderExtraDetailHtml(extra) {
   let html = '';
 
-  if (extra.belongedCollections.length > 0) {
-    html += '<div class="detail-section"><span class="detail-section-label">Collections:</span> ';
-    html += extra.belongedCollections.map(t => `<span class="detail-collection-tag">${escapeHtml(t)}</span>`).join(' ');
+  if (extra.belongedLists.length > 0) {
+    html += '<div class="detail-section"><span class="detail-section-label">Lists:</span> ';
+    html += extra.belongedLists.map(t => `<span class="detail-list-tag">${escapeHtml(t)}</span>`).join(' ');
     html += '</div>';
   }
 
@@ -2356,7 +2356,7 @@ function resultRowHtml(title, url, opts = {}) {
   const normalized = maxAtt > 0 ? attScore / maxAtt : 0;
   const dotColor = attentionColor(normalized);
 
-  const isPinned = pinned !== undefined ? pinned : isResultPinned(getActivePinCollectionId(), url);
+  const isPinned = pinned !== undefined ? pinned : isResultPinned(getActivePinListId(), url);
   const pinBtn = `<button class="result-pin${isPinned ? ' pinned' : ''}" data-pin-url="${safeUrl}" data-pin-title="${safeTitle}" title="${isPinned ? 'Unpin' : 'Pin'}">${PIN_SVG}</button>`;
 
   const detailHtml = buildDetailHtml(url, attDetail, highlights);
@@ -2538,9 +2538,9 @@ function bindResultDelegation(container) {
   });
 }
 
-function bindPinClicks(container, collectionId) {
-  // Use delegation — store collectionId on container for the handler
-  container._pinCollectionId = collectionId;
+function bindPinClicks(container, listId) {
+  // Use delegation — store listId on container for the handler
+  container._pinListId = listId;
   if (container._pinDelegationBound) return;
   container._pinDelegationBound = true;
 
@@ -2550,20 +2550,20 @@ function bindPinClicks(container, collectionId) {
     e.stopPropagation();
     const url = pinBtn.dataset.pinUrl;
     const title = pinBtn.dataset.pinTitle;
-    const cid = container._pinCollectionId;
+    const cid = container._pinListId;
     await toggleResultPin(cid, url, title);
-    if (cid === EXPLORE_COLLECTION_ID && activeView.type === 'explore') {
+    if (cid === EXPLORE_LIST_ID && activeView.type === 'explore') {
       refreshExplorePins();
-    } else if (cid === EXPLORE_COLLECTION_ID) {
+    } else if (cid === EXPLORE_LIST_ID) {
       showExplore();
     } else {
-      const collection = { id: cid, qbTrees: activeView.qbTrees, name: activeView.name };
-      showCollection(collection);
+      const lst = { id: cid, qbTrees: activeView.qbTrees, name: activeView.name };
+      showList(lst);
     }
   });
 }
 
-// Virtual scroller instances for main results and collection explore results
+// Virtual scroller instances for main results and list explore results
 let globalVirtualScroller = null;
 let relatedVirtualScroller = null;
 
@@ -2576,7 +2576,7 @@ function getOrCreateGlobalScroller() {
     bindColumnHeaderClicks(containerEl);
   }
   // Always refresh pin target for the active view
-  bindPinClicks(containerEl, getActivePinCollectionId());
+  bindPinClicks(containerEl, getActivePinListId());
   return globalVirtualScroller;
 }
 
@@ -2604,8 +2604,8 @@ function displayMessage(msg) {
   container.innerHTML = `<div class="no-results">${escapeHtml(msg)}</div>`;
 }
 
-function collectionDisplayName(collection) {
-  return collection.name;
+function listDisplayName(list) {
+  return list.name;
 }
 
 function updateMainTitle(text) {
@@ -2684,89 +2684,89 @@ function updateSidebarActive() {
   if (activeView.type === 'category') {
     const el = document.querySelector(`.sidebar-item[data-category="${activeView.value}"]`);
     if (el) el.classList.add('active');
-  } else if (activeView.type === 'collection') {
-    const el = document.querySelector(`.sidebar-item[data-collection-id="${activeView.id}"]`);
+  } else if (activeView.type === 'list') {
+    const el = document.querySelector(`.sidebar-item[data-list-id="${activeView.id}"]`);
     if (el) el.classList.add('active');
   } else if (activeView.type === 'explore') {
     document.getElementById('exploreBtn').classList.add('active');
   }
 }
 
-// --- Collections (pinned searches) ---
-async function loadCollections() {
+// --- Lists (pinned searches) ---
+async function loadLists() {
   // Session cache (populated by background hydrateCache)
-  const cached = await chrome.storage.session.get('collections');
-  if ('collections' in cached) return cached.collections;
+  const cached = await chrome.storage.session.get('lists');
+  if ('lists' in cached) return cached.lists;
   // Fallback: ask background (awaits hydration, then reads session cache)
   try {
-    const resp = await chrome.runtime.sendMessage({ action: 'getCollections' });
-    if (resp?.collections) return resp.collections;
+    const resp = await chrome.runtime.sendMessage({ action: 'getLists' });
+    if (resp?.lists) return resp.lists;
   } catch {}
   return [];
 }
 
-// saveCollections removed — use saveCollectionMeta/deleteCollection messages instead
+// saveLists removed — use saveListMeta/deleteList messages instead
 
-async function renderCollections() {
-  const collections = await loadCollections();
-  const list = document.getElementById('collectionsList');
-  const empty = document.getElementById('collectionsEmpty');
+async function renderLists() {
+  const allLists = await loadLists();
+  const listEl = document.getElementById('listsList');
+  const empty = document.getElementById('listsEmpty');
 
-  // Remove existing collection items (keep the empty placeholder)
-  list.querySelectorAll('.sidebar-item').forEach(el => el.remove());
+  // Remove existing list items (keep the empty placeholder)
+  listEl.querySelectorAll('.sidebar-item').forEach(el => el.remove());
 
-  if (collections.length === 0) {
+  if (allLists.length === 0) {
     empty.style.display = 'block';
     return;
   }
 
   empty.style.display = 'none';
-  for (const collection of collections) {
+  for (const lst of allLists) {
     const item = document.createElement('div');
     item.className = 'sidebar-item';
-    item.dataset.collectionId = collection.id;
+    item.dataset.listId = lst.id;
     item.innerHTML = `
       <span class="icon"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg></span>
-      <span class="label">${escapeHtml(collectionDisplayName(collection))}</span>
-      <button class="remove-collection" title="Remove collection">&times;</button>
+      <span class="label">${escapeHtml(listDisplayName(lst))}</span>
+      <button class="remove-list" title="Remove list">&times;</button>
     `;
 
     item.draggable = true;
     item.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('application/x-collection-reorder', collection.id);
+      e.dataTransfer.setData('application/x-list-reorder', lst.id);
       e.dataTransfer.effectAllowed = 'move';
       item.classList.add('dragging');
     });
     item.addEventListener('dragend', () => {
       item.classList.remove('dragging');
-      list.querySelectorAll('.reorder-above, .reorder-below').forEach(el => {
+      listEl.querySelectorAll('.reorder-above, .reorder-below').forEach(el => {
         el.classList.remove('reorder-above', 'reorder-below');
       });
     });
 
     item.addEventListener('click', (e) => {
-      if (e.target.closest('.remove-collection')) return;
-      showCollection(collection);
+      if (e.target.closest('.remove-list')) return;
+      showList(lst);
     });
 
-    item.querySelector('.remove-collection').addEventListener('click', async (e) => {
+    item.querySelector('.remove-list').addEventListener('click', async (e) => {
       e.stopPropagation();
-      await chrome.runtime.sendMessage({ action: 'deleteCollection', collectionId: collection.id });
+      await chrome.runtime.sendMessage({ action: 'deleteList', listId: lst.id });
       // Clean up local state
-      delete allCollectionPins[collection.id];
-      chrome.storage.session.remove('colCache:' + collection.id);
-      colCacheKeys = colCacheKeys.filter(id => id !== collection.id);
-      renderCollections();
-      if (activeView.type === 'collection' && activeView.id === collection.id) {
+      delete allListPins[lst.id];
+      chrome.storage.session.remove('listCache:' + lst.id);
+      listCacheKeys = listCacheKeys.filter(id => id !== lst.id);
+      renderLists();
+      if (activeView.type === 'list' && activeView.id === lst.id) {
         showExplore();
       }
     });
 
-    // Drag-and-drop: collection as drop target (counter prevents child-triggered dragleave)
+    // Drag-and-drop: list as drop target (counter prevents child-triggered dragleave)
     let dragCounter = 0;
     item.addEventListener('dragover', (e) => {
       e.preventDefault();
-      if (e.dataTransfer.types.includes('application/x-collection-reorder')) {
+      if (e.dataTransfer.types.includes('application/x-list-reorder')) {
         e.dataTransfer.dropEffect = 'move';
         const rect = item.getBoundingClientRect();
         const midY = rect.top + rect.height / 2;
@@ -2783,13 +2783,13 @@ async function renderCollections() {
     });
     item.addEventListener('dragenter', (e) => {
       e.preventDefault();
-      if (!e.dataTransfer.types.includes('application/x-collection-reorder')) {
+      if (!e.dataTransfer.types.includes('application/x-list-reorder')) {
         dragCounter++;
         item.classList.add('drag-over');
       }
     });
     item.addEventListener('dragleave', (e) => {
-      if (e.dataTransfer.types.includes('application/x-collection-reorder')) {
+      if (e.dataTransfer.types.includes('application/x-list-reorder')) {
         item.classList.remove('reorder-above', 'reorder-below');
       } else {
         dragCounter--;
@@ -2803,28 +2803,28 @@ async function renderCollections() {
       e.preventDefault();
       item.classList.remove('drag-over', 'reorder-above', 'reorder-below');
 
-      if (e.dataTransfer.types.includes('application/x-collection-reorder')) {
+      if (e.dataTransfer.types.includes('application/x-list-reorder')) {
         // --- Reorder ---
-        const draggedId = e.dataTransfer.getData('application/x-collection-reorder');
-        if (draggedId === collection.id) return;
-        const collections = await loadCollections();
-        const fromIdx = collections.findIndex(c => c.id === draggedId);
+        const draggedId = e.dataTransfer.getData('application/x-list-reorder');
+        if (draggedId === lst.id) return;
+        const allItems = await loadLists();
+        const fromIdx = allItems.findIndex(c => c.id === draggedId);
         if (fromIdx === -1) return;
-        const [moved] = collections.splice(fromIdx, 1);
-        let toIdx = collections.findIndex(c => c.id === collection.id);
+        const [moved] = allItems.splice(fromIdx, 1);
+        let toIdx = allItems.findIndex(c => c.id === lst.id);
         const rect = item.getBoundingClientRect();
         if (e.clientY >= rect.top + rect.height / 2) toIdx++;
-        collections.splice(toIdx, 0, moved);
-        await saveSettingsValue('collectionOrder', collections.map(c => c.id));
-        await renderCollections();
+        allItems.splice(toIdx, 0, moved);
+        await saveSettingsValue('listOrder', allItems.map(c => c.id));
+        await renderLists();
       } else {
         // --- Pin drop (existing logic) ---
         dragCounter = 0;
         try {
           const data = JSON.parse(e.dataTransfer.getData('text/plain'));
           const items = data.items || [{ url: data.url, title: data.title }];
-          if (!allCollectionPins[collection.id]) allCollectionPins[collection.id] = [];
-          const pins = allCollectionPins[collection.id];
+          if (!allListPins[lst.id]) allListPins[lst.id] = [];
+          const pins = allListPins[lst.id];
           let added = 0;
           for (const { url, title } of items) {
             if (url && !pins.some(p => p.url === url)) {
@@ -2833,9 +2833,9 @@ async function renderCollections() {
             }
           }
           if (added > 0) {
-            await saveCollectionPinsById(collection.id);
-            if (activeView.type === 'collection' && activeView.id === collection.id) {
-              showCollection(collection);
+            await saveListPinsById(lst.id);
+            if (activeView.type === 'list' && activeView.id === lst.id) {
+              showList(lst);
             }
           }
         } catch (err) {
@@ -2844,7 +2844,7 @@ async function renderCollections() {
       }
     });
 
-    list.appendChild(item);
+    listEl.appendChild(item);
   }
 
   updateSidebarActive();
@@ -2866,18 +2866,18 @@ async function pinCurrentSearch() {
       pendingPin = null;
       if (!pin) return;
 
-      const collectionName = name || pin.autoName;
-      const collectionId = generateSlugFromTitle(collectionName);
-      const collection = {
-        id: collectionId,
-        name: collectionName,
+      const listName = name || pin.autoName;
+      const listId = generateSlugFromTitle(listName);
+      const newList = {
+        id: listId,
+        name: listName,
         qbTrees: pin.qbTrees,
       };
-      await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name: collectionName, qbTrees: pin.qbTrees });
-      const { collectionOrder: order = [] } = await chrome.storage.session.get(['collectionOrder']);
-      await saveSettingsValue('collectionOrder', [...order, collectionId]);
-      await renderCollections();
-      showCollection(collection);
+      await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name: listName, qbTrees: pin.qbTrees });
+      const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
+      await saveSettingsValue('listOrder', [...order, listId]);
+      await renderLists();
+      showList(newList);
     }, () => {
       // Escape: cancel pin, restore explore view
       pendingPin = null;
@@ -2899,20 +2899,20 @@ async function pinCurrentSearch() {
     pendingPin = null;
     if (!pin) return;
 
-    const collectionName = name || pin.autoName;
-    const collections = await loadCollections();
-    if (collections.some(t => t.name === collectionName)) return;
+    const listName = name || pin.autoName;
+    const existingLists = await loadLists();
+    if (existingLists.some(t => t.name === listName)) return;
 
-    const collectionId = generateSlugFromTitle(collectionName);
-    const collection = {
-      id: collectionId,
-      name: collectionName,
+    const listId = generateSlugFromTitle(listName);
+    const newList = {
+      id: listId,
+      name: listName,
     };
-    await chrome.runtime.sendMessage({ action: 'saveCollectionMeta', collectionId, name: collectionName, qbTrees: [] });
-    const { collectionOrder: order = [] } = await chrome.storage.session.get(['collectionOrder']);
-    await saveSettingsValue('collectionOrder', [...order, collectionId]);
-    await renderCollections();
-    showCollection(collection);
+    await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name: listName, qbTrees: [] });
+    const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
+    await saveSettingsValue('listOrder', [...order, listId]);
+    await renderLists();
+    showList(newList);
   }, () => {
     pendingPin = null;
     updateMainTitle(searchQuery);
@@ -3072,7 +3072,7 @@ initMarqueeForElements(
   document.getElementById('resultsWrapper'),
   document.getElementById('results')
 );
-// Init marquee for collection sections
+// Init marquee for list sections
 initMarqueeForElements(
   document.getElementById('pinnedResultsWrapper'),
   document.getElementById('pinnedResults')
@@ -3163,7 +3163,7 @@ function formatBytes(bytes) {
 const SESSION_CACHE_KEYS = [
   { key: 'settings', label: 'Settings' },
   { key: 'workspace', label: 'Workspace' },
-  { key: 'collections', label: 'Collections' },
+  { key: 'lists', label: 'Lists' },
   { key: 'urlBlacklist', label: 'URL Blacklist' },
   { key: 'titleTrimRules', label: 'Title Trim Rules' },
   { key: 'recycleBin', label: 'Recycle Bin' },
@@ -3548,7 +3548,7 @@ chrome.runtime.onMessage.addListener((request) => {
         historyAllEntries.push(entry);
       }
       if (changed) {
-        if (activeView.type === 'explore' || activeView.type === 'collection') {
+        if (activeView.type === 'explore' || activeView.type === 'list') {
           runExploreBlockQuery();
         } else {
           refreshCurrentView();
@@ -3556,29 +3556,29 @@ chrome.runtime.onMessage.addListener((request) => {
       }
     }, 500);
   } else if (type === 'pins') {
-    // Collection pins changed — invalidate caches for other collections only.
-    // The active collection/explore view already has up-to-date in-memory pins
+    // List pins changed — invalidate caches for other lists only.
+    // The active list/explore view already has up-to-date in-memory pins
     // from toggleResultPin; reloading from disk would revert to stale data.
-    const activeCollectionId = activeView.type === 'explore' ? EXPLORE_COLLECTION_ID
-      : (activeView.type === 'collection' ? activeView.id : null);
-    if (request.collectionId) {
-      if (request.collectionId !== activeCollectionId) {
-        delete allCollectionPins[request.collectionId];
+    const activeListId = activeView.type === 'explore' ? EXPLORE_LIST_ID
+      : (activeView.type === 'list' ? activeView.id : null);
+    if (request.listId) {
+      if (request.listId !== activeListId) {
+        delete allListPins[request.listId];
       }
-      chrome.storage.session.remove('colCache:' + request.collectionId);
-      colCacheKeys = colCacheKeys.filter(id => id !== request.collectionId);
+      chrome.storage.session.remove('listCache:' + request.listId);
+      listCacheKeys = listCacheKeys.filter(id => id !== request.listId);
     } else {
-      // Invalidate all except the active collection
-      for (const id of Object.keys(allCollectionPins)) {
-        if (id !== activeCollectionId) delete allCollectionPins[id];
+      // Invalidate all except the active list
+      for (const id of Object.keys(allListPins)) {
+        if (id !== activeListId) delete allListPins[id];
       }
-      if (colCacheKeys.length > 0) {
-        chrome.storage.session.remove(colCacheKeys.map(id => 'colCache:' + id));
-        colCacheKeys = [];
+      if (listCacheKeys.length > 0) {
+        chrome.storage.session.remove(listCacheKeys.map(id => 'listCache:' + id));
+        listCacheKeys = [];
       }
     }
-  } else if (type === 'collections') {
-    renderCollections();
+  } else if (type === 'lists') {
+    renderLists();
   } else if (type === 'recycleBin') {
     // Reload recycle bin from session cache
     chrome.storage.session.get(['recycleBin']).then(({ recycleBin: rb = [] }) => {
@@ -3586,8 +3586,8 @@ chrome.runtime.onMessage.addListener((request) => {
       updateRecycleSidebarCount();
     });
   } else if (type === 'settings') {
-    if (request.key === 'collectionOrder') {
-      renderCollections();
+    if (request.key === 'listOrder') {
+      renderLists();
     }
   }
   // highlight, snapshot, permanentDeletes: session cache is already updated by background
@@ -3597,15 +3597,15 @@ chrome.runtime.onMessage.addListener((request) => {
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible') return;
 
-  // Invalidate pin and collection caches (may have been modified in popup)
-  allCollectionPins = {};
-  if (colCacheKeys.length > 0) {
-    chrome.storage.session.remove(colCacheKeys.map(id => 'colCache:' + id));
-    colCacheKeys = [];
+  // Invalidate pin and list caches (may have been modified in popup)
+  allListPins = {};
+  if (listCacheKeys.length > 0) {
+    chrome.storage.session.remove(listCacheKeys.map(id => 'listCache:' + id));
+    listCacheKeys = [];
   }
 
-  // Refresh sidebar collections (may have been created/deleted in popup)
-  renderCollections();
+  // Refresh sidebar lists (may have been created/deleted in popup)
+  renderLists();
 
   // Re-list history files and load any new ones
   let historyChanged = false;
@@ -3629,14 +3629,14 @@ document.addEventListener('visibilitychange', async () => {
   }
 
   // Don't refreshCurrentView() here — mutation notifications from background already
-  // handle re-rendering for pin/collection/interaction changes. A full re-render would
+  // handle re-rendering for pin/list/interaction changes. A full re-render would
   // destroy scroll position, block enable/disable state, and expanded details.
 });
 
 // --- Explore Pins ---
 
 function getExplorePins() {
-  return allCollectionPins[EXPLORE_COLLECTION_ID] || [];
+  return allListPins[EXPLORE_LIST_ID] || [];
 }
 
 function updateExploreBadge() {
@@ -3775,7 +3775,7 @@ function saveExploreBlockState() {
 }
 
 function renderExploreBlocks() {
-  const container = document.getElementById('collectionQueryBuilder');
+  const container = document.getElementById('listQueryBuilder');
   container.style.display = 'block';
 
   let html = '<div class="explore-blocks">';
@@ -3903,21 +3903,21 @@ function debouncedRunExploreBlockQuery() {
 }
 
 async function runExploreBlockQuery() {
-  if (activeView.type !== 'explore' && activeView.type !== 'collection') return;
+  if (activeView.type !== 'explore' && activeView.type !== 'list') return;
 
-  // Derive pinned URLs and collectionId from active view
-  let pinnedUrls, collectionId;
+  // Derive pinned URLs and listId from active view
+  let pinnedUrls, listId;
   if (activeView.type === 'explore') {
-    collectionId = EXPLORE_COLLECTION_ID;
+    listId = EXPLORE_LIST_ID;
     pinnedUrls = new Set(getExplorePins().map(p => p.url));
   } else {
-    collectionId = activeView.id;
-    pinnedUrls = new Set((allCollectionPins[collectionId] || []).map(p => p.url));
-    // Auto-save manual blocks' trees back to the collection's qbTrees
+    listId = activeView.id;
+    pinnedUrls = new Set((allListPins[listId] || []).map(p => p.url));
+    // Auto-save manual blocks' trees back to the list's qbTrees
     const savedBlocks = exploreBlocks.filter(b => b.type === 'manual' && b.label === 'Saved query');
     if (savedBlocks.length > 0) {
       qbRoot = savedBlocks[0].tree;
-      saveCollectionQbTrees();
+      saveListQbTrees();
     }
   }
 
@@ -3933,7 +3933,7 @@ async function runExploreBlockQuery() {
         historyAllEntries.filter(item => item.url && !pinnedUrls.has(item.url) && !isPermanentlyDeleted(item.url) && !isRecycled(item.url))
       ).map(item => ({ ...item, relevance: 0 }));
     } else {
-      // Collection: show empty state when no blocks enabled
+      // List: show empty state when no blocks enabled
       const relatedContainer = document.getElementById('relatedResults');
       relatedContainer.innerHTML = '<div class="no-results">Enable a block or add a query</div>';
       document.getElementById('relatedChart').classList.remove('visible');
@@ -3992,12 +3992,12 @@ async function runExploreBlockQuery() {
   vs._headerHtml = columnHeaderHtml('related', { hasDelete: true, hasPin: true, showRelevance: false });
   vs.updateData(sorted, (r) =>
     resultRowHtml(r.title, r.url, {
-      pinned: isResultPinned(collectionId, r.url),
+      pinned: isResultPinned(listId, r.url),
       deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       highlights: r.highlights, timestamps: r.timestamps, context: 'related',
     })
   );
-  bindPinClicks(relatedContainer, collectionId);
+  bindPinClicks(relatedContainer, listId);
 
   // Demand-load more history when scrolling (for all-history mode)
   if (showAllHistory) {
@@ -4058,7 +4058,7 @@ async function openFocusPanel(url, title) {
   }
 }
 
-async function openCollectionFocusPanel(collectionId, collectionName) {
+async function openListFocusPanel(listId, listName) {
   const overlay = document.getElementById('focusOverlay');
   const content = document.getElementById('focusContent');
 
@@ -4066,11 +4066,11 @@ async function openCollectionFocusPanel(collectionId, collectionName) {
   overlay.classList.add('visible');
 
   try {
-    let pins = allCollectionPins[collectionId];
+    let pins = allListPins[listId];
     if (!pins) {
-      const fpResp = await chrome.runtime.sendMessage({ action: 'loadCollectionPinsById', collectionId });
+      const fpResp = await chrome.runtime.sendMessage({ action: 'loadListPinsById', listId });
       pins = fpResp?.pins || [];
-      allCollectionPins[collectionId] = pins;
+      allListPins[listId] = pins;
     }
 
     let html = '';
@@ -4117,7 +4117,7 @@ function renderFocusWaterfall(content, url, title, parents, children, similar) {
 
   // Parents section
   html += '<div class="focus-section"><div class="focus-section-label">Parents</div><div class="focus-section-cards">';
-  const hasParents = (parents.referrers.length + parents.collections.length) > 0;
+  const hasParents = (parents.referrers.length + parents.lists.length) > 0;
   if (!hasParents) {
     html += '<div class="focus-empty">No known parents</div>';
   } else {
@@ -4171,16 +4171,16 @@ function bindFocusContentDelegation(content) {
       e.stopPropagation();
       const url = pinBtn.dataset.pinUrl;
       const title = pinBtn.dataset.pinTitle;
-      const cid = getActivePinCollectionId();
+      const cid = getActivePinListId();
       await toggleResultPin(cid, url, title);
       // Update pin button appearance
       pinBtn.classList.toggle('pinned');
       // Refresh background UI
       if (activeView.type === 'explore') {
         refreshExplorePins();
-      } else if (activeView.type === 'collection') {
-        const collection = { id: cid, qbTrees: activeView.qbTrees, name: activeView.name };
-        showCollection(collection);
+      } else if (activeView.type === 'list') {
+        const lst = { id: cid, qbTrees: activeView.qbTrees, name: activeView.name };
+        showList(lst);
       }
       return;
     }
@@ -4218,14 +4218,14 @@ async function initialize() {
   initCharts();
 
   // Render sidebar concurrently with heavy data (don't block on sidebar)
-  renderCollections(); // fire-and-forget: updates sidebar when ready
+  renderLists(); // fire-and-forget: updates sidebar when ready
   renderBlacklist();
   renderTrimRules();
 
-  // Load metadata in parallel (history is demand-loaded in showCategory, pins loaded per-collection)
+  // Load metadata in parallel (history is demand-loaded in showCategory, pins loaded per-list)
   await Promise.all([
     initHistoryFiles(), loadRecycleBin(), loadGatewayDomains(),
-    chrome.runtime.sendMessage({ action: 'loadCollectionPinsById', collectionId: EXPLORE_COLLECTION_ID }).then(resp => { allCollectionPins[EXPLORE_COLLECTION_ID] = resp?.pins || []; }).catch(() => { allCollectionPins[EXPLORE_COLLECTION_ID] = []; }),
+    chrome.runtime.sendMessage({ action: 'loadListPinsById', listId: EXPLORE_LIST_ID }).then(resp => { allListPins[EXPLORE_LIST_ID] = resp?.pins || []; }).catch(() => { allListPins[EXPLORE_LIST_ID] = []; }),
   ]);
   updateRecycleSidebarCount();
   updateExploreBadge();
@@ -4258,8 +4258,8 @@ async function initialize() {
     try {
       const data = JSON.parse(e.dataTransfer.getData('text/plain'));
       if (data.items) {
-        if (!allCollectionPins[EXPLORE_COLLECTION_ID]) allCollectionPins[EXPLORE_COLLECTION_ID] = [];
-        const pins = allCollectionPins[EXPLORE_COLLECTION_ID];
+        if (!allListPins[EXPLORE_LIST_ID]) allListPins[EXPLORE_LIST_ID] = [];
+        const pins = allListPins[EXPLORE_LIST_ID];
         let added = 0;
         for (const item of data.items) {
           if (!pins.some(p => p.url === item.url)) {
@@ -4268,7 +4268,7 @@ async function initialize() {
           }
         }
         if (added > 0) {
-          await saveCollectionPinsById(EXPLORE_COLLECTION_ID);
+          await saveListPinsById(EXPLORE_LIST_ID);
           updateExploreBadge();
           if (activeView.type === 'explore') showExplore();
         }

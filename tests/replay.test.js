@@ -92,17 +92,17 @@ describe('applyLogToSettings', () => {
 
   it('is idempotent', () => {
     const settings = { timestamp: 0 };
-    const entry = { timestamp: 100, action: 'set', key: 'collections', value: [{ id: 'c1' }] };
+    const entry = { timestamp: 100, action: 'set', key: 'lists', value: [{ id: 'c1' }] };
     const r1 = applyLogToSettings(settings, entry);
     const r2 = applyLogToSettings(r1, entry);
     expect(r2).toEqual(r1);
   });
 
   it('preserves unrelated keys', () => {
-    const settings = { timestamp: 0, workspace: { mode: 'default' }, collections: [{ id: 'c1' }] };
+    const settings = { timestamp: 0, workspace: { mode: 'default' }, lists: [{ id: 'c1' }] };
     const entry = { timestamp: 100, action: 'set', key: 'workspace', value: { mode: 'private' } };
     const result = applyLogToSettings(settings, entry);
-    expect(result.collections).toEqual([{ id: 'c1' }]);
+    expect(result.lists).toEqual([{ id: 'c1' }]);
   });
 });
 
@@ -724,11 +724,11 @@ describe('sequence replay', () => {
     let settings = { timestamp: 0 };
 
     settings = applyLogToSettings(settings, { timestamp: 100, action: 'set', key: 'workspace', value: { mode: 'default' } });
-    settings = applyLogToSettings(settings, { timestamp: 200, action: 'set', key: 'collections', value: [{ id: 'c1' }] });
+    settings = applyLogToSettings(settings, { timestamp: 200, action: 'set', key: 'lists', value: [{ id: 'c1' }] });
     settings = applyLogToSettings(settings, { timestamp: 300, action: 'set', key: 'workspace', value: { mode: 'private' } });
 
     expect(settings.workspace).toEqual({ mode: 'private' });
-    expect(settings.collections).toEqual([{ id: 'c1' }]);
+    expect(settings.lists).toEqual([{ id: 'c1' }]);
     expect(settings.timestamp).toBe(300);
   });
 
@@ -878,7 +878,7 @@ describe('defaultEntity', () => {
     expect(defaultEntity('settings')).toEqual({ timestamp: 0 });
   });
 
-  it('returns collection default with id', () => {
+  it('returns list default with id', () => {
     const e = defaultEntity('list:user/uuid-1');
     expect(e).toEqual({ timestamp: 0, id: 'uuid-1', name: '', qbTrees: [], pins: [] });
   });
@@ -978,7 +978,7 @@ describe('applyTo', () => {
     expect(result[`atom:${childSlug}`].parents).toContain('https://parent.com');
   });
 
-  it('applies list entry to collection', () => {
+  it('applies list entry to list entity', () => {
     const entry = { timestamp: 100, action: 'list', id: 'user/c1', op: 'add', urls: ['https://a.com'] };
     const scope = { 'list:user/c1': { timestamp: 0, id: 'c1', name: 'Test', qbTrees: [], pins: [] } };
     const result = applyTo(entry, scope);
@@ -986,7 +986,7 @@ describe('applyTo', () => {
     expect(result['list:user/c1'].pins[0].url).toBe('https://a.com');
   });
 
-  it('creates collection from null on first list entry', () => {
+  it('creates list entity from null on first list entry', () => {
     const entry = { timestamp: 100, action: 'list', id: 'user/c1', op: 'add', urls: ['https://a.com'] };
     const scope = { 'list:user/c1': null };
     const result = applyTo(entry, scope);

@@ -141,29 +141,29 @@ async function handleRequest(request) {
         return { success: true, ...detail };
       }
 
-      case 'loadCollectionPins': {
+      case 'loadListPins': {
         const t0 = performance.now();
-        if (request.collectionId) {
-          const pins = await fsStorage.loadCollectionPinsById(request.collectionId);
-          console.debug(`[I/O] loadCollectionPins(${request.collectionId}): ${pins.length} pins in ${(performance.now() - t0).toFixed(1)}ms`);
+        if (request.listId) {
+          const pins = await fsStorage.loadListPinsById(request.listId);
+          console.debug(`[I/O] loadListPins(${request.listId}): ${pins.length} pins in ${(performance.now() - t0).toFixed(1)}ms`);
           return { success: true, pins };
         } else {
-          const allPins = await fsStorage.loadCollectionPins();
-          console.debug(`[I/O] loadCollectionPins: ${Object.keys(allPins).length} collections in ${(performance.now() - t0).toFixed(1)}ms`);
+          const allPins = await fsStorage.loadListPins();
+          console.debug(`[I/O] loadListPins: ${Object.keys(allPins).length} lists in ${(performance.now() - t0).toFixed(1)}ms`);
           return { success: true, pins: allPins };
         }
       }
 
-      case 'loadCollectionPinsById': {
+      case 'loadListPinsById': {
         const t0 = performance.now();
-        const pins = await fsStorage.loadCollectionPinsById(request.collectionId);
-        console.debug(`[I/O] loadCollectionPinsById(${request.collectionId}): ${pins.length} pins in ${(performance.now() - t0).toFixed(1)}ms`);
+        const pins = await fsStorage.loadListPinsById(request.listId);
+        console.debug(`[I/O] loadListPinsById(${request.listId}): ${pins.length} pins in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, pins };
       }
 
-      case 'saveCollectionPins': {
-        await withLock('collectionPins', () =>
-          fsStorage.saveCollectionPins(request.pins)
+      case 'saveListPins': {
+        await withLock('listPins', () =>
+          fsStorage.saveListPins(request.pins)
         );
         return { success: true };
       }
@@ -215,8 +215,8 @@ async function handleRequest(request) {
         return { success: true, interactions };
       }
 
-      // List collection file IDs from lists/user/
-      case 'listCollectionFiles': {
+      // List list file IDs from lists/user/
+      case 'listListFiles': {
         const files = [];
         try {
           const userDir = await fsStorage.resolveDir('lists/user');
@@ -229,11 +229,11 @@ async function handleRequest(request) {
         return { success: true, files };
       }
 
-      case 'loadAllCollectionMetadata': {
+      case 'loadAllListMetadata': {
         const t0 = performance.now();
-        const collections = await fsStorage.loadAllCollectionMetadata();
-        console.debug(`[I/O] loadAllCollectionMetadata: ${collections.length} collections in ${(performance.now() - t0).toFixed(1)}ms`);
-        return { success: true, collections };
+        const lists = await fsStorage.loadAllListMetadata();
+        console.debug(`[I/O] loadAllListMetadata: ${lists.length} lists in ${(performance.now() - t0).toFixed(1)}ms`);
+        return { success: true, lists };
       }
 
       case 'loadRecycleBin': {
@@ -354,7 +354,7 @@ async function drainQueue() {
         roundCache.set(key, s);
       } else if (key.startsWith('list:user/')) {
         const cid = key.slice('list:user/'.length);
-        roundCache.set(key, await fsStorage.loadCollectionPinsEntity(cid));
+        roundCache.set(key, await fsStorage.loadListPinsEntity(cid));
       } else if (key === 'list:recycle-bin') {
         roundCache.set(key, await fsStorage.loadRecycleBinEntity());
       } else if (key === 'list:permanent-deletes') {
@@ -429,8 +429,8 @@ async function drainQueue() {
       } else if (key.startsWith('list:user/')) {
         const cid = key.slice('list:user/'.length);
         await withLock('lists/user/' + cid + '.json', async () => {
-          if (entity.deleted) await fsStorage.deleteCollectionFile(cid);
-          else await fsStorage.saveCollectionMeta(cid, entity, entity.timestamp);
+          if (entity.deleted) await fsStorage.deleteListFile(cid);
+          else await fsStorage.saveListMeta(cid, entity, entity.timestamp);
         });
       } else if (key === 'list:recycle-bin') {
         await withLock('lists/recycle-bin.json', () => fsStorage.saveRecycleBin(entity.items, entity.timestamp));

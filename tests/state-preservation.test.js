@@ -104,7 +104,7 @@ describe('state preservation across re-renders', () => {
     expect(body, 'runExploreBlockQuery should NOT use vs.setData').not.toContain('vs.setData(');
   });
 
-  it('interaction mutation uses runExploreBlockQuery for explore/collection views', () => {
+  it('interaction mutation uses runExploreBlockQuery for explore/list views', () => {
     const branch = extractMutationBranch('interaction');
     expect(branch, 'interaction branch should call runExploreBlockQuery').toContain('runExploreBlockQuery()');
   });
