@@ -1188,8 +1188,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const timestamp = Date.now();
           const noteSlug = generateNoteSlug(timestamp, request.quote);
 
-          // Ensure parent page is cached so addLog's effectOf can find it
-          await ensurePageCached(pageSlug);
+          // Ensure parent page has a checkpoint so drain can update its children
+          // (same pattern as referrer handling in the visit flow)
+          await ensureCheckpointIfMissing(pageSlug, sender?.tab?.url || '', sender?.tab?.title || '');
           const effects = await addLog({
             timestamp,
             action: 'note',

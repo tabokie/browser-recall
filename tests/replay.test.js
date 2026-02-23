@@ -1010,6 +1010,15 @@ describe('applyTo', () => {
     expect(result['page:p1'].children).toContain('note:n1');
   });
 
+  it('note action leaves parent page null when parent has no checkpoint', () => {
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', quote: 'hello', parents: ['page:p1'] };
+    const scope = { 'note:n1': null, 'page:p1': null };
+    const result = applyTo(entry, scope);
+    expect(result['note:n1']).not.toBeNull();
+    // Parent stays null — orchestration must create page_checkpoint before note
+    expect(result['page:p1']).toBeNull();
+  });
+
   it('applies page with referrer to both child and parent pages', () => {
     const childSlug = generateSlugFromUrl('https://child.com');
     const parentSlug = generateSlugFromUrl('https://parent.com');
@@ -1120,6 +1129,35 @@ describe('effectOf', () => {
     expect(result['note:n1']).not.toBeNull();
     expect(result['note:n1'].quote).toBe('hello');
     expect(result['page:p1'].children).toContain('note:n1');
+  });
+
+  it('page_checkpoint before note wires note into parent children (drain simulation)', async () => {
+    // Simulates the correct drain sequence: page_checkpoint creates the page,
+    // then note entry adds to its children. This is the pattern background.js
+    // must follow — ensureCheckpointIfMissing before createNote.
+    const cache = new Map();
+    const load = async (key) => cache.get(key) ?? null;
+
+    // 1. page_checkpoint creates the page from null
+    const r1 = await effectOf(
+      { timestamp: 50, action: 'page_checkpoint', url: 'https://example.com/article', title: 'Article' },
+      load
+    );
+    for (const [k, v] of Object.entries(r1)) cache.set(k, v);
+
+    const slug = generateSlugFromUrl('https://example.com/article');
+    expect(cache.get(`page:${slug}`)).not.toBeNull();
+
+    // 2. note entry references that page as parent
+    const r2 = await effectOf(
+      { timestamp: 100, action: 'note', slug: 'n1', quote: 'hello', parents: [`page:${slug}`] },
+      load
+    );
+    for (const [k, v] of Object.entries(r2)) cache.set(k, v);
+
+    // Note created and wired into page children
+    expect(cache.get('note:n1')).not.toBeNull();
+    expect(cache.get(`page:${slug}`).children).toContain('note:n1');
   });
 
   it('updates mutable round cache across sequential calls', async () => {

@@ -1,0 +1,4 @@
+- When I add a highlight, the page's childen are not updated to include that note
+- No, you should look at how "referer" is handled by creating new page_checkpoint log
+- Highlight cannot be deleted
+- Finish up
