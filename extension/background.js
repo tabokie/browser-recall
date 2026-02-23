@@ -7,6 +7,8 @@ import { getCachedEntity, setCachedEntity, setEntityCacheWatermark } from './ent
 
 console.log('Background script loading...');
 
+const DRAIN_INTERVAL_MS = 5000; // 5 seconds — data is safe in chrome.storage.local until drained
+
 // Session storage: in-memory IPC, survives SW termination, cleared on browser restart.
 // hydrateCache() re-populates from filesystem on every startup.
 chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
@@ -150,18 +152,20 @@ let drainNotifyTimer = null;
 
 function scheduleDrainNotify() {
   if (drainNotifyTimer) return;
-  drainNotifyTimer = setTimeout(async () => {
-    drainNotifyTimer = null;
-    if (!offscreenPort) return; // Port not ready; connectToOffscreen will retry
-    try {
-      await ensureLogBuffer();
-      if (logBuffer.length > 0) {
-        offscreenPort.postMessage({ action: 'drainEntries', entries: logBuffer });
-      }
-    } catch (e) {
-      console.warn('drainNotify error:', e.message);
+  drainNotifyTimer = setTimeout(drainNow, DRAIN_INTERVAL_MS);
+}
+
+async function drainNow() {
+  if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
+  if (!offscreenPort) return; // Port not ready; connectToOffscreen will retry
+  try {
+    await ensureLogBuffer();
+    if (logBuffer.length > 0) {
+      offscreenPort.postMessage({ action: 'drainEntries', entries: logBuffer });
     }
-  }, 500);
+  } catch (e) {
+    console.warn('drainNotify error:', e.message);
+  }
 }
 
 // Low-level: append to logBuffer + persist, no cache update.
@@ -624,6 +628,16 @@ chrome.commands.onCommand.addListener(async (command) => {
     } catch (error) {
       console.warn('[background] Could not highlight selection:', error.message);
     }
+  } else if (command === 'like-page') {
+    try {
+      const slug = generateSlugFromUrl(tab.url);
+      await ensureCheckpointIfMissing(slug, tab.url, tab.title || '');
+      await addLog({ timestamp: Date.now(), action: 'page', url: tab.url, likes: 1 });
+      notifyMutation('interaction', { url: tab.url });
+      chrome.tabs.sendMessage(tab.id, { action: 'showLikeNotification' }).catch(() => {});
+    } catch (error) {
+      console.warn('[like-page] ERROR:', error.message, error);
+    }
   }
 });
 
@@ -827,9 +841,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               scrollDepth: request.scrollDepth,
               timeOnPage: request.timeOnPage
             };
-            if (request.title) entry.title = request.title;
+            if (request.title) {
+              const slug = generateSlugFromUrl(url);
+              const cached = await getCachedEntity('page:' + slug);
+              if (!cached || cached.title !== request.title) {
+                entry.title = request.title;
+              }
+            }
 
             await addLog(entry);
+            // timeOnPage signals tab switch / page close — flush to disk immediately
+            if (request.timeOnPage) drainNow();
             console.log(`Logged attention report: ${url} (scroll=${request.scrollDepth}, time=${request.timeOnPage}ms)`);
             sendResponse({ success: true });
           } catch (error) {
@@ -858,7 +880,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'flushLogBuffer': {
           await ensureOffscreenPort();
-          await ensureLogBuffer();
+          await drainNow();
           // Send entries via port (avoids chrome.storage.local in offscreen)
           await requestOffscreen({ action: 'flushLogBuffer', entries: logBuffer });
           // Drain sends watermark via port; give it time to arrive and prune logBuffer

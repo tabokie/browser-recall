@@ -3,7 +3,7 @@
 import { FileSystemStorage } from './filesystem-storage.js';
 import init, { Interaction, SearchEngine, searchBatch } from './pkg/portal_extension.js';
 import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine, extractInteractionBuffer } from './search-helpers.js';
-import { generateSlugFromUrl, generateSlugFromTitle, saveSettingsValue } from './utils.js';
+import { generateSlugFromUrl, generateSlugFromTitle, saveSettingsValue, collectQbTrees, qbTreesChanged } from './utils.js';
 import { findRelatedPages } from './related-scoring.js';
 import { parseAttention, attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
 import { qbCreatePredicate, qbCreateOperator, qbCreatePlaceholder, qbFindNode, qbCollapseTree, qbFlattenSameOp, qbToTree, qbFlatten } from './qb-tree.js';
@@ -1207,9 +1207,10 @@ async function runQuery() {
 
 async function saveListQbTrees() {
   if (activeView.type !== 'list') return;
-  const tree = JSON.parse(JSON.stringify(qbRoot));
-  activeView.qbTrees = [tree];
-  await chrome.runtime.sendMessage({ action: 'saveListMeta', listId: activeView.id, name: activeView.name, qbTrees: [tree] });
+  const trees = collectQbTrees(exploreBlocks);
+  if (!qbTreesChanged(activeView.qbTrees, trees)) return;
+  activeView.qbTrees = trees;
+  await chrome.runtime.sendMessage({ action: 'saveListMeta', listId: activeView.id, name: activeView.name, qbTrees: trees });
 }
 
 function runListExploreQuery(matched) {
@@ -3868,12 +3869,8 @@ async function runExploreBlockQuery() {
   } else {
     listId = activeView.id;
     pinnedUrls = new Set((allListPins[listId] || []).map(p => p.url));
-    // Auto-save manual blocks' trees back to the list's qbTrees
-    const savedBlocks = exploreBlocks.filter(b => b.type === 'manual' && b.label === 'Saved query');
-    if (savedBlocks.length > 0) {
-      qbRoot = savedBlocks[0].tree;
-      saveListQbTrees();
-    }
+    // Sync manual block trees to list's qbTrees (skips save if unchanged)
+    saveListQbTrees();
   }
 
   const enabledBlocks = exploreBlocks.filter(b => b.enabled);

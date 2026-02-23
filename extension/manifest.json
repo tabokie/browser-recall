@@ -63,6 +63,10 @@
     "highlight-selection": {
       "suggested_key": { "default": "Alt+H" },
       "description": "Highlight selected text"
+    },
+    "like-page": {
+      "suggested_key": { "default": "Alt+L" },
+      "description": "Like the current page"
     }
   }
 }

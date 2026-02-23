@@ -362,13 +362,13 @@ describe('Cache staleness', () => {
   it('T1: resetHistory clears atomReadCache and allListPins', async () => {
     populateCache();
 
-    // loadAtomBatch returns atoms with watermark 100 initially
-    actionOverrides['loadAtomBatch'] = (msg) => {
-      const atoms = {};
+    // loadPageBatch returns pages with watermark 100 initially
+    actionOverrides['loadPageBatch'] = (msg) => {
+      const pages = {};
       for (const slug of (msg.slugs || [])) {
-        atoms[slug] = { watermark: 100, attention: '', highlights: [] };
+        pages[slug] = { watermark: 100, attention: '', highlights: [] };
       }
-      return { success: true, atoms };
+      return { success: true, pages };
     };
 
     await importOptions();
@@ -394,13 +394,13 @@ describe('Cache staleness', () => {
     selectDirBtn.click();
     await tick(200);
 
-    // Now change loadAtomBatch to return watermark 200 (higher than 100 cached)
-    actionOverrides['loadAtomBatch'] = (msg) => {
-      const atoms = {};
+    // Now change loadPageBatch to return watermark 200 (higher than 100 cached)
+    actionOverrides['loadPageBatch'] = (msg) => {
+      const pages = {};
       for (const slug of (msg.slugs || [])) {
-        atoms[slug] = { watermark: 200, attention: '', highlights: [] };
+        pages[slug] = { watermark: 200, attention: '', highlights: [] };
       }
-      return { success: true, atoms };
+      return { success: true, pages };
     };
 
     // Change loadListPins to return an updated list (4 pins)
@@ -767,13 +767,13 @@ describe('Cache staleness', () => {
     FILE1_INTERACTIONS[0] = { ...FILE1_INTERACTIONS[0], attention: attentionJson };
     FILE1_INTERACTIONS[1] = { ...FILE1_INTERACTIONS[1], attention: attentionJson };
 
-    // loadAtomBatch returns atoms WITHOUT attention (simulates old-format atoms)
-    actionOverrides['loadAtomBatch'] = (msg) => {
-      const atoms = {};
+    // loadPageBatch returns pages WITHOUT attention (simulates old-format atoms)
+    actionOverrides['loadPageBatch'] = (msg) => {
+      const pages = {};
       for (const slug of (msg.slugs || [])) {
-        atoms[slug] = { watermark: NOW, attention: '', highlights: [] };
+        pages[slug] = { watermark: NOW, attention: '', highlights: [] };
       }
-      return { success: true, atoms };
+      return { success: true, pages };
     };
 
     try {

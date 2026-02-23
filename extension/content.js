@@ -837,6 +837,40 @@ function showCaptureNotification() {
   setTimeout(() => host.remove(), 1700);
 }
 
+// ─── Like notification bubble ─────────────────────────────────────────
+function showLikeNotification() {
+  const host = document.createElement('div');
+  const shadow = host.attachShadow({ mode: 'closed' });
+  shadow.innerHTML = `
+    <style>
+      .bubble {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0.92);
+        z-index: 2147483647;
+        background: rgba(0, 0, 0, 0.78);
+        color: #fff;
+        font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        padding: 10px 20px;
+        border-radius: 8px;
+        pointer-events: none;
+        opacity: 0;
+        animation: fadeInOut 1.6s ease forwards;
+      }
+      @keyframes fadeInOut {
+        0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
+        12%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        75%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+      }
+    </style>
+    <div class="bubble">\uD83D\uDC4D Liked</div>
+  `;
+  document.documentElement.appendChild(host);
+  setTimeout(() => host.remove(), 1700);
+}
+
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Skip Save Page WE messages (use `type` field, handled by savepage/content.js)
@@ -946,6 +980,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ success: true });
   } else if (request.action === 'showCaptureNotification') {
     showCaptureNotification();
+    sendResponse({ success: true });
+  } else if (request.action === 'showLikeNotification') {
+    showLikeNotification();
     sendResponse({ success: true });
   }
 

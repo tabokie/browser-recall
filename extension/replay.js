@@ -359,7 +359,7 @@ export function applyLogToPage(page, entry) {
     }
 
     // Attention (guard with prevTimestamp for idempotency)
-    if ((entry.scrollDepth !== undefined || entry.timeOnPage !== undefined)
+    if ((entry.scrollDepth !== undefined || entry.timeOnPage !== undefined || entry.likes !== undefined)
         && entry.timestamp > prevTimestamp) {
       let att = { scrollDepth: 0, timeOnPage: 0 };
       if (updated.attention && updated.attention !== '') {
@@ -370,6 +370,9 @@ export function applyLogToPage(page, entry) {
       }
       if (entry.timeOnPage !== undefined) {
         att.timeOnPage = (att.timeOnPage || 0) + entry.timeOnPage;
+      }
+      if (entry.likes !== undefined) {
+        att.likes = (att.likes || 0) + entry.likes;
       }
       updated.attention = JSON.stringify(att);
     }

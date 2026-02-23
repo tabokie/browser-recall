@@ -1,0 +1,9 @@
+- The list metadata change is flaky. When I visit a list without changing its queries, no log should be generated. When I visit a list and add multiple queries, all queries should be saved. Add failing tests first.
+- Fix pre-existing test failures
+- The logs count is too much. Let's do two things: (a) increase the automatic save interval (use a shared variable globally), but make sure the changes are saved when user exits or switch pages, (b) run a scan over data at ~/portal-data, remove useless logs that provide no new information
+- Have you run it over ~/portal-data/history? I can still see a lot of duplicate list_meta logs
+- Add a new interaction during page visit. Alt+L means like. Show a bubble thumbs up when user press it. Record the total like count of each page. If a page is liked, it should be checkpointed.
+- One more thing: Like count should be considered when calculating the attention strength.
+- When we update attention using `page` log, do not carry title with it when title is the same as before
+- Finish up
+- Save the second one
