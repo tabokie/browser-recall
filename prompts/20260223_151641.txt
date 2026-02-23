@@ -1,0 +1,20 @@
+- Go over the list functionality. Make sure filename of list checkpoint is id, id is slug generated using user-provided list name, and UI displays name instead id.
+- Why `jandan-3ohvjd.json` is not generated using the name 'Daily Bread'? How is the initial name determined?
+- Is there any logic that uses 'query' keyword as initial name?
+- Remove this logic. There are only two ways to create a list: (1) popup UI add new list, (2) change an explore list into a list, the Explore UI title bar has a button on the right to "Save" this explore, user must enter a name explicitly.
+- I don't see a "Save" button
+- I cannot see Save button when queries completed or when there're pinned pages
+- Let's remove the visibility conditions alltogether. We show the button even for empty Explore view.
+- Make sure when there are multiple query blocks, they are saved as multiple qbTrees, no one is missed
+- If auto blocks can't be saved or deleted, we should not render a "delete" button for them
+- I want to do a refactor of highlight and note-taking. Notes and highlights are children of a page. We replace the old highlight logs with: { action='note', quote: string?, note: string?, parents: [string], children: [string] }. To render the detail of a page, we traverse its children of note type, and pull their content.
+
+For ease of filtering and referencing, we unify the concept of page, note, list under one key schema. Page with checkpoint is "page:<page_slug>" (stored in `pages/<slug>.json`), note is "note:<note_slug>" (stored in `notes/<slug>.json`), list is "list:<list_slug>" (stored in `lists/<slug>.json`), admin lists including explore, recycle bin is "list:system/<name>" (stored in `lists/system/<name>.json`).
+- Check again, those actions are all errors
+- Try again, I increased CLAUDE_CODE_MAX_OUTPUT_TOKENS
+- Grab the original plan and clear context and resume the plan
+- Resume
+- Run migration
+- The parent of a note is "page:undefined"
+- The "Gateways" filter shows up empty in Exlore
+- Finish up

@@ -44,14 +44,13 @@ let historyAllEntries = [];        // all loaded entries (not deduped), for date
 let historyLoading = false;        // guard against concurrent loads
 let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'list', query: '...', id: '...' } or { type: 'explore', query: '...', filter: '...' }
 let allListPins = {}; // listId -> [{ url, title, pinnedAt }]
-let recycleBin = []; // [{ url, title, deletedAt }] — global recycle bin
-let permanentDeletes = []; // [url, ...] — permanently deleted URLs
+let recycleBin = []; // [{ key, title, deletedAt }] — global recycle bin (key = 'page:slug' or 'note:slug')
+let permanentDeletes = []; // [key, ...] — permanently deleted keys ('page:slug' or 'note:slug')
 let lastClickedRow = null; // for shift-click range select
 let marqueeActive = false; // suppress click during marquee drag
 let gatewayDomainsCache = {}; // { [origin]: { rootUrl, childCount, fetched } }
 let gatewayDomainsLoaded = false;
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
-let pendingPin = null; // { autoName, qbTrees? } — set during pin naming mode
 // pinnedFilterCtx removed — pinned section no longer has related pages
 const EXPLORE_LIST_ID = 'explore';
 // List results and atom data are cached in chrome.storage.session
@@ -61,7 +60,7 @@ let listCacheKeys = []; // tracks which listCache:* keys exist in session
 
 // --- Query builder state ---
 let qbRoot = null;        // tree root (null = empty)
-let cachedAllHighlights = null; // slug → highlights[], lazy-loaded
+let cachedAllNotes = null; // slug → [noteEntity, ...], lazy-loaded
 let qbDebounceTimer = null;
 let savedExploreQbRoot = null;  // saved global explore QB state when viewing a list
 
@@ -316,7 +315,7 @@ function resetHistory() {
     listCacheKeys = [];
   }
   allListPins = {};
-  cachedAllHighlights = null;
+  cachedAllNotes = null;
   gatewayDomainsCache = {};
   gatewayDomainsLoaded = false;
   bufferContentMap = {};
@@ -385,7 +384,7 @@ async function loadRecycleBin() {
   } else {
     try {
       const resp = await chrome.runtime.sendMessage({ action: 'loadPermanentDeletes' });
-      permanentDeletes = resp?.urls || [];
+      permanentDeletes = resp?.keys || [];
     } catch { permanentDeletes = []; }
   }
   return recycleBin;
@@ -393,33 +392,36 @@ async function loadRecycleBin() {
 
 async function saveRecycleBin() {
   await chrome.runtime.sendMessage({ action: 'saveRecycleBin', items: recycleBin });
-  await chrome.runtime.sendMessage({ action: 'savePermanentDeletes', urls: permanentDeletes });
+  await chrome.runtime.sendMessage({ action: 'savePermanentDeletes', keys: permanentDeletes });
   await chrome.storage.session.set({ permanentDeletes });
   updateRecycleSidebarCount();
 }
 
 function isRecycled(url) {
-  return recycleBin.some(item => item.url === url);
+  const key = 'page:' + generateSlugFromUrl(url);
+  return recycleBin.some(item => item.key === key);
 }
 
 function isPermanentlyDeleted(url) {
-  return permanentDeletes.includes(url);
+  const key = 'page:' + generateSlugFromUrl(url);
+  return permanentDeletes.includes(key);
 }
 
 async function recycleItem(url, title) {
-  if (isRecycled(url)) return;
-  recycleBin.push({ url, title, deletedAt: Date.now() });
+  const key = 'page:' + generateSlugFromUrl(url);
+  if (recycleBin.some(item => item.key === key)) return;
+  recycleBin.push({ key, title, deletedAt: Date.now() });
   await saveRecycleBin();
 }
 
-async function restoreItem(url) {
-  recycleBin = recycleBin.filter(item => item.url !== url);
+async function restoreItem(key) {
+  recycleBin = recycleBin.filter(item => item.key !== key);
   await saveRecycleBin();
 }
 
-async function permanentlyDeleteItem(url) {
-  recycleBin = recycleBin.filter(item => item.url !== url);
-  if (!permanentDeletes.includes(url)) permanentDeletes.push(url);
+async function permanentlyDeleteItem(key) {
+  recycleBin = recycleBin.filter(item => item.key !== key);
+  if (!permanentDeletes.includes(key)) permanentDeletes.push(key);
   await saveRecycleBin();
 }
 
@@ -439,7 +441,7 @@ document.getElementById('restoreAllBtn').addEventListener('click', async () => {
 document.getElementById('deleteAllBtn').addEventListener('click', async () => {
   if (recycleBin.length === 0) return;
   for (const item of recycleBin) {
-    if (!permanentDeletes.includes(item.url)) permanentDeletes.push(item.url);
+    if (!permanentDeletes.includes(item.key)) permanentDeletes.push(item.key);
   }
   recycleBin = [];
   await saveRecycleBin();
@@ -906,11 +908,12 @@ function matchKeyword(item, field, value) {
       if (capturesMatchCache.get(trimmed).has(item.url)) return true;
     }
   }
-  if (fields.includes('highlights') && item.highlights.some(h => {
-    const texts = Array.isArray(h.text) ? h.text : [h.text || ''];
-    return texts.some(t => textMatches(t, q, exact));
+  if (fields.includes('highlights') && item.notes && item.notes.some(n => {
+    if (n.quote === null) return false; // skip global notes
+    const quotes = Array.isArray(n.quote) ? n.quote : [n.quote || ''];
+    return quotes.some(t => textMatches(t, q, exact));
   })) return true;
-  if (fields.includes('notes') && item.highlights.some(h => textMatches(h.note, q, exact))) return true;
+  if (fields.includes('notes') && item.notes && item.notes.some(n => textMatches(n.note, q, exact))) return true;
   return false;
 }
 
@@ -968,11 +971,12 @@ function keywordRelevance(item, field, value) {
       if (capturesMatchCache.get(trimmed).has(item.url)) score += 1.0;
     }
   }
-  if (fields.includes('highlights') && item.highlights.some(h => {
-    const texts = Array.isArray(h.text) ? h.text : [h.text || ''];
-    return texts.some(t => textMatches(t, q, exact));
+  if (fields.includes('highlights') && item.notes && item.notes.some(n => {
+    if (n.quote === null) return false; // skip global notes
+    const quotes = Array.isArray(n.quote) ? n.quote : [n.quote || ''];
+    return quotes.some(t => textMatches(t, q, exact));
   })) score += 1.5;
-  if (fields.includes('notes') && item.highlights.some(h => textMatches(h.note, q, exact))) score += 1.5;
+  if (fields.includes('notes') && item.notes && item.notes.some(n => textMatches(n.note, q, exact))) score += 1.5;
   return score;
 }
 
@@ -1069,11 +1073,11 @@ function qbUpdateNode(nodeId, updates) {
 async function evaluateQueryStream(qbTree) {
   const filesResp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
   const files = filesResp?.files || [];
-  let highlightsMap = {};
+  let notesMap = {};
   if (treeNeedsHighlights(qbTree)) {
-    const hlResp = await chrome.runtime.sendMessage({ action: 'loadAllHighlights' });
-    highlightsMap = hlResp?.highlightsMap || {};
-    cachedAllHighlights = highlightsMap;
+    const notesResp = await chrome.runtime.sendMessage({ action: 'loadAllNotes' });
+    notesMap = notesResp?.notesMap || {};
+    cachedAllNotes = notesMap;
   }
   await loadGatewayDomains();
 
@@ -1101,7 +1105,7 @@ async function evaluateQueryStream(qbTree) {
     const daySet = seenByDay.get(day);
     if (daySet.has(item.url)) return;
     daySet.add(item.url);
-    const enriched = enrichSingle(item, highlightsMap);
+    const enriched = enrichSingle(item, notesMap);
     if (!isPermanentlyDeleted(enriched.url) && !isRecycled(enriched.url) && evaluateNode(qbTree, enriched)) results.push(enriched);
   }
 
@@ -1117,14 +1121,14 @@ async function evaluateQueryStream(qbTree) {
 }
 
 // Enrich a single interaction for QB evaluation
-function enrichSingle(item, highlightsMap) {
+function enrichSingle(item, notesMap) {
   const slug = item.slug || '';
-  const highlights = (slug && highlightsMap && highlightsMap[slug]) || [];
+  const notes = (slug && notesMap && notesMap[slug]) || [];
   const attParsed = parseAttention(item);
   return {
     url: item.url, title: item.title, slug, timestamps: [item.timestamp],
     attScore: attParsed ? attentionStrength(attParsed) : 0, attDetail: attParsed,
-    highlights,
+    notes,
     visitCount: 1,
     lastVisit: item.timestamp,
     firstVisit: item.timestamp,
@@ -1172,7 +1176,7 @@ async function runQuery() {
   const results = matched.map(item => ({
     ...item,
     relevance: hasKeywords ? computeRelevance(qbRoot, item) : 0,
-    highlights: [], // will lazy-load on expand
+    notes: [], // will lazy-load on expand
   }));
 
   const effectiveSort = currentSortState.column ? currentSortState
@@ -1192,17 +1196,13 @@ async function runQuery() {
   vs.setData(normalized, (r) =>
     resultRowHtml(r.title, r.url, {
       deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
-      highlights: r.highlights, timestamps: r.timestamps, context: 'global', relevance: r.relevance
+      notes: r.notes, timestamps: r.timestamps, context: 'global', relevance: r.relevance
     })
   );
 
   // Render time chart for matched results
   renderTimeChart(matched.map(r => ({ url: r.url, timestamp: r.lastVisit || Date.now(), attention: '' })));
 
-  // Show pin button since we have valid results
-  if (activeView.type === 'explore') {
-    document.getElementById('pinSearchBtn').style.display = 'flex';
-  }
 }
 
 async function saveListQbTrees() {
@@ -1236,7 +1236,7 @@ function runListExploreQuery(matched) {
   const results = exploreMatched.map(item => ({
     ...item,
     relevance: hasKeywords ? computeRelevance(qbRoot, item) : 0,
-    highlights: item.highlights || [],
+    notes: item.notes || [],
   }));
 
   const effectiveSort = relatedSortState.column ? relatedSortState
@@ -1257,7 +1257,7 @@ function runListExploreQuery(matched) {
     resultRowHtml(r.title, r.url, {
       pinned: isResultPinned(listId, r.url),
       deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
-      highlights: r.highlights, timestamps: r.timestamps, context: 'related', relevance: r.relevance,
+      notes: r.notes, timestamps: r.timestamps, context: 'related', relevance: r.relevance,
     })
   );
   bindPinClicks(relatedContainer, listId);
@@ -1491,7 +1491,7 @@ function bindQueryBuilderEvents(body) {
       allCheckbox.checked = isAll;
       toggle.textContent = isAll ? 'All' : (selected.length === 0 ? 'None' : selected.map(f => KEYWORD_FIELD_LABELS[f] || f).join(', '));
       qbUpdateNode(nodeId, { field: isAll ? [...KEYWORD_FIELDS] : selected });
-      cachedAllHighlights = null;
+      cachedAllNotes = null;
       debouncedRunQuery();
     }
 
@@ -1667,7 +1667,7 @@ async function showExplore() {
   activeView = { type: 'explore' };
   updateSidebarActive();
   updateMainTitle('Explore');
-  document.getElementById('pinSearchBtn').style.display = 'none';
+  document.getElementById('pinSearchBtn').style.display = 'flex';
 
   // Always use list layout with block-based explore
   showListLayout();
@@ -1688,24 +1688,24 @@ async function showExplore() {
   } else {
     // Enrich pins with atom data from session
     const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
-    const atomKeys = pinSlugs.map(s => 'atom:' + s);
-    const atomData = atomKeys.length > 0 ? await chrome.storage.session.get(atomKeys) : {};
-    const atomSnap = new Map();
+    const pageKeys = pinSlugs.map(s => 'page:' + s);
+    const pageData = pageKeys.length > 0 ? await chrome.storage.session.get(pageKeys) : {};
+    const pageSnap = new Map();
     for (const slug of pinSlugs) {
-      const atom = atomData['atom:' + slug];
-      if (atom) atomSnap.set(slug, atom);
+      const page = pageData['page:' + slug];
+      if (page) pageSnap.set(slug, page);
     }
 
     function enrichResult(r) {
       const slug = generateSlugFromUrl(r.url);
-      const cached = atomSnap.get(slug);
+      const cached = pageSnap.get(slug);
       const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
       const attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
       const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
       const pin = pins.find(p => p.url === r.url);
       return {
         ...r, slug, attScore, attDetail: attParsed,
-        highlights: source.highlights || r.highlights || [],
+        notes: source.notes || r.notes || [],
         timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
         pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
       };
@@ -1760,23 +1760,23 @@ async function refreshExplorePins() {
     pinnedSection.style.display = 'none';
   } else {
     const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
-    const atomKeys = pinSlugs.map(s => 'atom:' + s);
-    const atomData = atomKeys.length > 0 ? await chrome.storage.session.get(atomKeys) : {};
-    const atomSnap = new Map();
+    const pageKeys = pinSlugs.map(s => 'page:' + s);
+    const pageData = pageKeys.length > 0 ? await chrome.storage.session.get(pageKeys) : {};
+    const pageSnap = new Map();
     for (const slug of pinSlugs) {
-      const atom = atomData['atom:' + slug];
-      if (atom) atomSnap.set(slug, atom);
+      const page = pageData['page:' + slug];
+      if (page) pageSnap.set(slug, page);
     }
     function enrichResult(r) {
       const slug = generateSlugFromUrl(r.url);
-      const cached = atomSnap.get(slug);
+      const cached = pageSnap.get(slug);
       const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
       const attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
       const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
       const pin = pins.find(p => p.url === r.url);
       return {
         ...r, slug, attScore, attDetail: attParsed,
-        highlights: source.highlights || r.highlights || [],
+        notes: source.notes || r.notes || [],
         timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
         pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
       };
@@ -1846,18 +1846,18 @@ async function showList(list) {
 
     // Batch-read atoms from session for all pin slugs (one IPC call)
     const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
-    const atomKeys = pinSlugs.map(s => 'atom:' + s);
-    const atomData = atomKeys.length > 0 ? await chrome.storage.session.get(atomKeys) : {};
-    const atomSnap = new Map();
+    const pageKeys = pinSlugs.map(s => 'page:' + s);
+    const pageData = pageKeys.length > 0 ? await chrome.storage.session.get(pageKeys) : {};
+    const pageSnap = new Map();
     for (const slug of pinSlugs) {
-      const atom = atomData['atom:' + slug];
-      if (atom) atomSnap.set(slug, atom);
+      const page = pageData['page:' + slug];
+      if (page) pageSnap.set(slug, page);
     }
 
     // Enrich from cached pin fields + session atom cache (no further I/O)
     function enrichResult(r) {
       const slug = generateSlugFromUrl(r.url);
-      const cached = atomSnap.get(slug);
+      const cached = pageSnap.get(slug);
       // Use session atom if available and newer than pin's watermark, else use pin's cached fields
       const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
       let attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
@@ -1870,7 +1870,7 @@ async function showList(list) {
       const pin = pins.find(p => p.url === r.url);
       return {
         ...r, slug, attScore, attDetail: attParsed,
-        highlights: source.highlights || r.highlights || [],
+        notes: source.notes || r.notes || [],
         timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
         pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
       };
@@ -1902,36 +1902,36 @@ async function refreshListAtoms(listId, pins) {
   try {
     const slugs = pins.map(p => generateSlugFromUrl(p.url));
     if (slugs.length === 0) return;
-    // Read atoms: session cache (dirty/recent) → filesystem (cold)
-    const atoms = {};
+    // Read pages: session cache (dirty/recent) → filesystem (cold)
+    const pages = {};
     const uncachedSlugs = [];
-    const atomKeys = slugs.map(s => 'atom:' + s);
-    const sessionAtoms = atomKeys.length > 0 ? await chrome.storage.session.get(atomKeys) : {};
+    const pageKeys = slugs.map(s => 'page:' + s);
+    const sessionPages = pageKeys.length > 0 ? await chrome.storage.session.get(pageKeys) : {};
     for (const slug of slugs) {
-      const cached = sessionAtoms['atom:' + slug];
-      if (cached) atoms[slug] = cached;
+      const cached = sessionPages['page:' + slug];
+      if (cached) pages[slug] = cached;
       else uncachedSlugs.push(slug);
     }
     if (uncachedSlugs.length > 0) {
-      const atomResp = await chrome.runtime.sendMessage({ action: 'loadAtomBatch', slugs: uncachedSlugs });
-      Object.assign(atoms, atomResp?.atoms || {});
+      const pageResp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs: uncachedSlugs });
+      Object.assign(pages, pageResp?.pages || {});
     }
     let changed = false;
     for (const pin of pins) {
       const slug = generateSlugFromUrl(pin.url);
-      const atom = atoms[slug];
-      if (!atom) continue;
-      if ((atom.watermark || 0) > (pin.watermark || 0)) {
-        let attParsed = atom.attention ? parseAttention({ attention: atom.attention }) : null;
-        // Fallback: use attention from loaded history when atom lacks it
+      const page = pages[slug];
+      if (!page) continue;
+      if ((page.watermark || 0) > (pin.watermark || 0)) {
+        let attParsed = page.attention ? parseAttention({ attention: page.attention }) : null;
+        // Fallback: use attention from loaded history when page lacks it
         if (!attParsed) {
           const histEntry = historyByUrl.get(pin.url);
           if (histEntry) attParsed = parseAttention(histEntry);
         }
         pin.attScore = attParsed ? attentionStrength(attParsed) : 0;
         pin.attDetail = attParsed;
-        pin.highlights = atom.highlights || [];
-        pin.watermark = atom.watermark;
+        pin.notes = []; // Notes loaded separately when needed for search
+        pin.watermark = page.watermark;
         changed = true;
       }
     }
@@ -1991,7 +1991,7 @@ function renderPinnedSection(allPinned, listId) {
     pinnedSection.style.display = '';
     let html = columnHeaderHtml('pinned', { hasDelete: true, hasPin: true });
     html += sortedPinned.map(r =>
-      resultRowHtml(r.title, r.url, { pinned: true, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, highlights: r.highlights, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt })
+      resultRowHtml(r.title, r.url, { pinned: true, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, notes: r.notes, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt })
     ).join('');
     pinnedContainer.innerHTML = html;
     bindColumnHeaderClicks(pinnedContainer);
@@ -2067,7 +2067,7 @@ function processInteractionsForDisplay(interactions, { globalDedup = false } = {
       day,
       attScore: attParsed ? attentionStrength(attParsed) : 0,
       attDetail: attParsed,
-      highlights: [],
+      notes: [],
       timestamps: [item.timestamp],
       latestTs: item.timestamp,
     });
@@ -2083,15 +2083,15 @@ async function displayInteractionRows(interactions) {
 
   const entries = processInteractionsForDisplay(interactions);
 
-  // Atom-based title enrichment: batch-load atoms for slugs and use authoritative titles
+  // Page-based title enrichment: batch-load pages for slugs and use authoritative titles
   const slugs = [...new Set(entries.map(r => r.slug).filter(Boolean))];
   if (slugs.length > 0) {
     try {
-      const atomResp = await chrome.runtime.sendMessage({ action: 'loadAtomBatch', slugs });
-      const atoms = atomResp?.atoms || {};
+      const pageResp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs });
+      const pages = pageResp?.pages || {};
       for (const entry of entries) {
-        if (entry.slug && atoms[entry.slug]?.title) {
-          entry.title = atoms[entry.slug].title;
+        if (entry.slug && pages[entry.slug]?.title) {
+          entry.title = pages[entry.slug].title;
         }
       }
     } catch {}
@@ -2106,7 +2106,7 @@ async function displayInteractionRows(interactions) {
   const vs = getOrCreateGlobalScroller();
   vs._headerHtml = columnHeaderHtml('global', { hasDelete: deletable, hasPin: false });
   vs.setData(sorted, (e) =>
-    resultRowHtml(e.title, e.url, { deletable, attScore: e.attScore, maxAtt, attDetail: e.attDetail, highlights: e.highlights, timestamps: e.timestamps, context: 'global' })
+    resultRowHtml(e.title, e.url, { deletable, attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global' })
   );
 }
 
@@ -2192,7 +2192,7 @@ function groupInteractionsByUrl(interactions) {
   return map;
 }
 
-function buildDetailHtml(url, attDetail, highlights) {
+function buildDetailHtml(url, attDetail, notes) {
   let html = `<div class="detail-url"><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a></div>`;
 
   if (attDetail) {
@@ -2210,12 +2210,13 @@ function buildDetailHtml(url, attDetail, highlights) {
     html += '</div>';
   }
 
-  if (highlights && highlights.length > 0) {
-    html += '<div class="detail-highlights">';
-    for (const h of highlights.slice(0, 5)) {
-      const raw = typeof h === 'string' ? h : h.text;
+  if (notes && notes.length > 0) {
+    html += '<div class="detail-notes">';
+    for (const n of notes.slice(0, 5)) {
+      if (n.quote === null) continue; // skip global notes
+      const raw = n.quote || '';
       const text = Array.isArray(raw) ? raw.join(' ') : (raw || '');
-      if (text) html += `<div class="detail-highlight-item">${escapeHtml(text)}</div>`;
+      if (text) html += `<div class="detail-note-item">${escapeHtml(text)}</div>`;
     }
     html += '</div>';
   }
@@ -2227,17 +2228,11 @@ function buildDetailHtml(url, attDetail, highlights) {
 async function loadExtraDetail(url) {
   const slug = generateSlugFromUrl(url);
 
-  // Load all highlights
-  // Session atom cache has dirty highlights; filesystem has cold data
-  let highlights = [];
+  // Load notes for this page
+  let notes = [];
   try {
-    const cached = (await chrome.storage.session.get('atom:' + slug))['atom:' + slug];
-    if (cached) {
-      highlights = cached.highlights || [];
-    } else {
-      const hlResp = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
-      highlights = hlResp?.highlights || [];
-    }
+    const notesResp = await chrome.runtime.sendMessage({ action: 'loadPageNotes', slug });
+    notes = notesResp?.notes || [];
   } catch (e) { /* not available */ }
 
   let snapshots = [];
@@ -2256,7 +2251,7 @@ async function loadExtraDetail(url) {
     }
   }
 
-  return { highlights, snapshots, belongedLists, slug };
+  return { notes, snapshots, belongedLists, slug };
 }
 
 function renderExtraDetailHtml(extra) {
@@ -2268,18 +2263,18 @@ function renderExtraDetailHtml(extra) {
     html += '</div>';
   }
 
-  if (extra.highlights.length > 0) {
-    html += `<div class="detail-section detail-highlights-section" data-slug="${escapeHtml(extra.slug)}"><span class="detail-section-label">Highlights:</span>`;
-    for (const h of extra.highlights.slice(0, 20)) {
-      const rawText = Array.isArray(h.text) ? h.text.join(' ') : (h.text || '');
-      const note = h.note || '';
-      const ts = h.timestamp || 0;
-      const isGlobal = h.isGlobalNote;
-      const label = isGlobal ? 'Page note' : escapeHtml(rawText.substring(0, 100)) + (rawText.length > 100 ? '...' : '');
-      const noteHtml = note ? ` <span class="detail-note-text">${escapeHtml(note)}</span>` : '';
-      html += `<div class="detail-highlight-entry" data-text="${escapeHtml(rawText)}" data-timestamp="${ts}">
-        <span class="detail-highlight-content">${isGlobal ? '<em>Page note</em>' : `"${label}"`}${noteHtml}</span>
-        <button class="detail-highlight-delete" title="Delete">&times;</button>
+  if (extra.notes.length > 0) {
+    html += `<div class="detail-section detail-notes-section" data-slug="${escapeHtml(extra.slug)}"><span class="detail-section-label">Notes:</span>`;
+    for (const n of extra.notes.slice(0, 20)) {
+      const rawQuote = Array.isArray(n.quote) ? n.quote.join(' ') : (n.quote || '');
+      const noteText = n.note || '';
+      const noteSlug = n.slug || '';
+      const isGlobal = n.quote === null;
+      const label = isGlobal ? 'Page note' : escapeHtml(rawQuote.substring(0, 100)) + (rawQuote.length > 100 ? '...' : '');
+      const noteHtml = noteText ? ` <span class="detail-note-text">${escapeHtml(noteText)}</span>` : '';
+      html += `<div class="detail-note-entry" data-note-slug="${escapeHtml(noteSlug)}">
+        <span class="detail-note-content">${isGlobal ? '<em>Page note</em>' : `"${label}"`}${noteHtml}</span>
+        <button class="detail-note-delete" title="Delete">&times;</button>
       </div>`;
     }
     html += '</div>';
@@ -2299,33 +2294,29 @@ function renderExtraDetailHtml(extra) {
   return html;
 }
 
-function bindHighlightDeleteButtons(container) {
-  container.querySelectorAll('.detail-highlight-delete').forEach(btn => {
+function bindNoteDeleteButtons(container) {
+  container.querySelectorAll('.detail-note-delete').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const entry = btn.closest('.detail-highlight-entry');
-      const section = btn.closest('.detail-highlights-section');
-      const slug = section?.dataset.slug;
-      const text = entry?.dataset.text || '';
-      const timestamp = parseInt(entry?.dataset.timestamp) || 0;
+      const entry = btn.closest('.detail-note-entry');
+      const section = btn.closest('.detail-notes-section');
+      const noteSlug = entry?.dataset.noteSlug;
 
-      if (!slug) return;
+      if (!noteSlug) return;
 
       try {
         await chrome.runtime.sendMessage({
-          action: 'deleteHighlight',
-          slug,
-          text,
-          timestamp
+          action: 'deleteNote',
+          noteSlug
         });
       } catch (err) {
-        console.error('Delete highlight error:', err);
+        console.error('Delete note error:', err);
         return;
       }
 
       entry.remove();
-      // If no more highlights, remove the section
-      if (section && section.querySelectorAll('.detail-highlight-entry').length === 0) {
+      // If no more notes, remove the section
+      if (section && section.querySelectorAll('.detail-note-entry').length === 0) {
         section.remove();
       }
     });
@@ -2345,11 +2336,11 @@ function bindSnapshotClickHandlers(container) {
   });
 }
 
-// opts: { pinned, deletable, attScore, maxAtt, attDetail, highlights, timestamps, context, pinnedAt, relevance, noFocusButton }
+// opts: { pinned, deletable, attScore, maxAtt, attDetail, notes, timestamps, context, pinnedAt, relevance, noFocusButton }
 function resultRowHtml(title, url, opts = {}) {
   const safeTitle = escapeHtml(title || 'Untitled');
   const safeUrl = escapeHtml(url || '');
-  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, highlights = [], timestamps = [], context = 'global', pinnedAt, relevance, cssClass, noFocusButton = false } = opts;
+  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, relevance, cssClass, noFocusButton = false } = opts;
   const extraCols = getExtraColumns(context);
 
   const lastVisit = timestamps.length > 0 ? formatTime(Math.max(...timestamps)) : '';
@@ -2359,7 +2350,7 @@ function resultRowHtml(title, url, opts = {}) {
   const isPinned = pinned !== undefined ? pinned : isResultPinned(getActivePinListId(), url);
   const pinBtn = `<button class="result-pin${isPinned ? ' pinned' : ''}" data-pin-url="${safeUrl}" data-pin-title="${safeTitle}" title="${isPinned ? 'Unpin' : 'Pin'}">${PIN_SVG}</button>`;
 
-  const detailHtml = buildDetailHtml(url, attDetail, highlights);
+  const detailHtml = buildDetailHtml(url, attDetail, notes);
 
   let relevanceCell = '';
   if (relevance != null) {
@@ -2424,7 +2415,7 @@ function bindResultDelegation(container) {
             extraDiv.className = 'detail-extra';
             extraDiv.innerHTML = extraHtml;
             detail.appendChild(extraDiv);
-            bindHighlightDeleteButtons(extraDiv);
+            bindNoteDeleteButtons(extraDiv);
             bindSnapshotClickHandlers(extraDiv);
           }
         }
@@ -2850,72 +2841,32 @@ async function renderLists() {
   updateSidebarActive();
 }
 
-async function pinCurrentSearch() {
-  if (activeView.type === 'explore') {
-    // Pin explore query tree — enter naming mode
-    if (!qbRoot || !treeHasConfiguredPredicate(qbRoot)) return;
-    const autoName = qbSummarize(qbRoot);
+async function saveExploreAsList() {
+  if (activeView.type !== 'explore') return;
+  const pins = getExplorePins();
 
-    pendingPin = {
-      autoName,
-      qbTrees: [JSON.parse(JSON.stringify(qbRoot))], // deep clone
-    };
+  // Collect manual block trees as qbTrees for the new list
+  const qbTrees = exploreBlocks
+    .filter(b => b.type === 'manual' && b.tree && treeHasConfiguredPredicate(b.tree))
+    .map(b => JSON.parse(JSON.stringify(b.tree)));
 
-    enterTitleEditMode(autoName, async (name) => {
-      const pin = pendingPin;
-      pendingPin = null;
-      if (!pin) return;
-
-      const listName = name || pin.autoName;
-      const listId = generateSlugFromTitle(listName);
-      const newList = {
-        id: listId,
-        name: listName,
-        qbTrees: pin.qbTrees,
-      };
-      await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name: listName, qbTrees: pin.qbTrees });
-      const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
-      await saveSettingsValue('listOrder', [...order, listId]);
-      await renderLists();
-      showList(newList);
-    }, () => {
-      // Escape: cancel pin, restore explore view
-      pendingPin = null;
-      updateMainTitle('Explore');
-      document.getElementById('pinSearchBtn').style.display =
-        treeHasConfiguredPredicate(qbRoot) ? 'flex' : 'none';
-    });
-    return;
-  }
-
-  const searchQuery = activeView.query;
-  if (!searchQuery) return;
-  if (activeView.type !== 'search') return;
-
-  pendingPin = { autoName: searchQuery };
-
-  enterTitleEditMode(searchQuery, async (name) => {
-    const pin = pendingPin;
-    pendingPin = null;
-    if (!pin) return;
-
-    const listName = name || pin.autoName;
-    const existingLists = await loadLists();
-    if (existingLists.some(t => t.name === listName)) return;
-
-    const listId = generateSlugFromTitle(listName);
-    const newList = {
-      id: listId,
-      name: listName,
-    };
-    await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name: listName, qbTrees: [] });
+  enterTitleEditMode('', async (name) => {
+    if (!name) return;
+    const listId = generateSlugFromTitle(name);
+    const newList = { id: listId, name, qbTrees };
+    await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, qbTrees });
     const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
     await saveSettingsValue('listOrder', [...order, listId]);
+    // Copy explore pins to the new list (if any)
+    if (pins.length > 0) {
+      await chrome.runtime.sendMessage({
+        action: 'saveListPinsById', listId, pins: JSON.parse(JSON.stringify(pins)),
+      });
+    }
     await renderLists();
     showList(newList);
   }, () => {
-    pendingPin = null;
-    updateMainTitle(searchQuery);
+    updateMainTitle('Explore');
     document.getElementById('pinSearchBtn').style.display = 'flex';
   });
 }
@@ -2957,7 +2908,7 @@ document.getElementById('exploreBtn').addEventListener('click', () => {
 
 
 // --- Event listeners: Pin search ---
-document.getElementById('pinSearchBtn').addEventListener('click', pinCurrentSearch);
+document.getElementById('pinSearchBtn').addEventListener('click', saveExploreAsList);
 
 // --- Event listeners: Del key to delete selected rows ---
 document.addEventListener('keydown', async (e) => {
@@ -3657,14 +3608,14 @@ function updateExploreBadge() {
 async function buildExploreAutoBlocks(pins) {
   const pinnedUrls = new Set(pins.map(p => p.url));
 
-  // Load atoms for all pins via background (checks cache + disk)
+  // Load pages for all pins via background (checks cache + disk)
   const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
-  const atomData = {};
+  const pageData = {};
   if (pinSlugs.length > 0) {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadAtomBatch', slugs: pinSlugs });
-    if (resp?.success && resp.atoms) {
-      for (const [slug, atom] of Object.entries(resp.atoms)) {
-        atomData['atom:' + slug] = atom;
+    const resp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs: pinSlugs });
+    if (resp?.success && resp.pages) {
+      for (const [slug, page] of Object.entries(resp.pages)) {
+        pageData['page:' + slug] = page;
       }
     }
   }
@@ -3679,23 +3630,25 @@ async function buildExploreAutoBlocks(pins) {
       slugs.push(ref);
     }
     if (slugs.length > 0) {
-      const resp = await chrome.runtime.sendMessage({ action: 'loadAtomBatch', slugs });
-      if (resp?.success && resp.atoms) {
+      const resp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs });
+      if (resp?.success && resp.pages) {
         for (const s of slugs) {
-          const a = resp.atoms[s];
-          if (a && a.url) urls.push(a.url);
+          const p = resp.pages[s];
+          if (p && p.url) urls.push(p.url);
         }
       }
     }
     return urls;
   }
 
-  // Children of pins: from atom.children (mixed format) + parentIndex inverse
+  // Children of pins: from page.children (mixed format, filter out notes) + parentIndex inverse
   const allChildRefs = [];
   for (const slug of pinSlugs) {
-    const atom = atomData['atom:' + slug];
-    if (atom && atom.children) {
-      for (const c of atom.children) allChildRefs.push(c);
+    const page = pageData['page:' + slug];
+    if (page && page.children) {
+      for (const c of page.children) {
+        if (!c.startsWith('note:')) allChildRefs.push(c); // Skip note children
+      }
     }
   }
   const resolvedChildUrls = await resolveMixedRefs(allChildRefs);
@@ -3708,12 +3661,12 @@ async function buildExploreAutoBlocks(pins) {
     if (pSlugs.some(ps => pinSlugSet.has(ps))) childrenUrls.add(childUrl);
   }
 
-  // Parents of pins: from atom.parents (mixed format) + parentIndex fallback
+  // Parents of pins: from page.parents (mixed format) + parentIndex fallback
   const allParentRefs = [];
   for (let i = 0; i < pinSlugs.length; i++) {
-    const atom = atomData['atom:' + pinSlugs[i]];
-    if (atom && atom.parents && atom.parents.length > 0) {
-      for (const p of atom.parents) allParentRefs.push(p);
+    const page = pageData['page:' + pinSlugs[i]];
+    if (page && page.parents && page.parents.length > 0) {
+      for (const p of page.parents) allParentRefs.push(p);
     } else {
       // Non-checkpointed pin: check parentIndex for its parents
       const pinUrl = pins[i].url;
@@ -3728,7 +3681,7 @@ async function buildExploreAutoBlocks(pins) {
 
   // Similar to pins: use findRelatedPages
   const allEnriched = Array.from(historyByUrl.values()).map(r => ({
-    ...r, timestamps: [r.timestamp || Date.now()], attScore: 0, attDetail: null, highlights: [],
+    ...r, timestamps: [r.timestamp || Date.now()], attScore: 0, attDetail: null, notes: [],
   }));
   const seedEnriched = allEnriched.filter(e => pinnedUrls.has(e.url));
   const candidateEnriched = allEnriched.filter(e => !pinnedUrls.has(e.url));
@@ -3806,8 +3759,10 @@ function renderExploreBlocks() {
     }
     html += `</div>`;
 
-    // Right: full-height remove
-    html += `<button class="explore-block-remove" data-block-id="${block.id}" title="Remove">${removeSvg}</button>`;
+    // Right: full-height remove (manual blocks only; auto blocks are derived from pins)
+    if (block.type === 'manual') {
+      html += `<button class="explore-block-remove" data-block-id="${block.id}" title="Remove">${removeSvg}</button>`;
+    }
 
     html += `</div>`;
   }
@@ -3994,7 +3949,7 @@ async function runExploreBlockQuery() {
     resultRowHtml(r.title, r.url, {
       pinned: isResultPinned(listId, r.url),
       deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
-      highlights: r.highlights, timestamps: r.timestamps, context: 'related',
+      notes: r.notes, timestamps: r.timestamps, context: 'related',
     })
   );
   bindPinClicks(relatedContainer, listId);
@@ -4045,10 +4000,10 @@ async function openFocusPanel(url, title) {
     const seedInteraction = historyByUrl.get(url);
     let similar = [];
     if (seedInteraction) {
-      const seed = { ...seedInteraction, timestamps: [seedInteraction.timestamp || Date.now()], attScore: 0, attDetail: null, highlights: [] };
+      const seed = { ...seedInteraction, timestamps: [seedInteraction.timestamp || Date.now()], attScore: 0, attDetail: null, notes: [] };
       const candidates = Array.from(historyByUrl.values())
         .filter(i => i.url !== url)
-        .map(i => ({ ...i, timestamps: [i.timestamp || Date.now()], attScore: 0, attDetail: null, highlights: [] }));
+        .map(i => ({ ...i, timestamps: [i.timestamp || Date.now()], attScore: 0, attDetail: null, notes: [] }));
       similar = findRelatedPages([seed], candidates, 20);
     }
 

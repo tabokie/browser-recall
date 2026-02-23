@@ -1,9 +1,9 @@
 // Background service worker for Portal extension
 // Central authority for reads and mutations. Offscreen is a pure filesystem I/O worker.
-import { generateSlugFromUrl } from './utils.js';
+import { generateSlugFromUrl, generateNoteSlug } from './utils.js';
 import { effectOf } from './replay.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
-import { getCachedAtom, setCachedAtom, setAtomCacheWatermark } from './atom-cache.js';
+import { getCachedEntity, setCachedEntity, setEntityCacheWatermark } from './entity-cache.js';
 
 console.log('Background script loading...');
 
@@ -61,7 +61,7 @@ async function handleOffscreenResponse(msg) {
     await ensureLogBuffer();
     logBuffer = logBuffer.filter(e => e.timestamp > msg.watermark);
     chrome.storage.local.set({ logBuffer });
-    setAtomCacheWatermark(msg.watermark);
+    setEntityCacheWatermark(msg.watermark);
     return;
   }
   const cb = portCallbacks.get(msg.id);
@@ -88,7 +88,7 @@ async function requestOffscreen(params) {
 
 // ─── R-M-W Lock ──────────────────────────────────────────────────────
 // Serializes read-modify-write on session cache. Keys like 'settings.json'
-// and 'atoms/{slug}.json' match the buffer write paths for clarity but
+// and 'pages/{slug}.json' match the buffer write paths for clarity but
 // these are logical locks, not file locks — files live in offscreen only.
 
 const rwLocks = new Map();
@@ -103,18 +103,19 @@ function withLock(key, fn) {
   return next;
 }
 
-// ─── Atom Cache Helper ───────────────────────────────────────────────
-// Ensure an atom is in session cache; loads from offscreen if missing.
-// Returns the atom (or empty object if not found anywhere).
+// ─── Page Cache Helper ───────────────────────────────────────────────
+// Ensure a page is in session cache; loads from offscreen if missing.
+// Returns the page (or empty object if not found anywhere).
 
-async function ensureAtomCached(slug) {
-  let atom = await getCachedAtom(slug);
-  if (!atom) {
-    const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [slug] });
-    atom = resp?.atoms?.[slug] || {};
-    await setCachedAtom(slug, atom);
+async function ensurePageCached(slug) {
+  const key = 'page:' + slug;
+  let page = await getCachedEntity(key);
+  if (!page) {
+    const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
+    page = resp?.pages?.[slug] || {};
+    await setCachedEntity(key, page);
   }
-  return atom;
+  return page;
 }
 
 // ─── Mutation Notifications ───────────────────────────────────────────
@@ -177,30 +178,30 @@ async function appendLog(entry) {
 // Read an entity from session cache by replay key.
 // Returns entity or null (null = not cached / doesn't exist).
 async function sessionLoad(key) {
-  if (key.startsWith('atom:')) {
-    return await getCachedAtom(key.slice(5));
+  if (key.startsWith('page:') || key.startsWith('note:')) {
+    return await getCachedEntity(key);
   }
   if (key === 'settings') {
     const data = await chrome.storage.session.get(SETTINGS_KEYS);
     // Assemble entity from individual session keys
     return { timestamp: 0, ...data };
   }
-  if (key.startsWith('list:user/')) {
-    const cid = key.slice('list:user/'.length);
+  if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
+    const listId = key.slice('list:'.length);
     const { lists = [] } = await chrome.storage.session.get(['lists']);
-    const col = lists.find(c => c.id === cid);
-    if (col) return { timestamp: 0, id: cid, name: col.name || '', qbTrees: col.qbTrees || [], pins: [] };
+    const list = lists.find(c => c.id === listId);
+    if (list) return { timestamp: 0, id: listId, name: list.name || '', qbTrees: list.qbTrees || [], pins: [] };
     return null;
   }
-  if (key === 'list:recycle-bin') {
+  if (key === 'list:system/recycle-bin') {
     const { recycleBin } = await chrome.storage.session.get(['recycleBin']);
     return recycleBin ? { timestamp: 0, items: recycleBin } : null;
   }
-  if (key === 'list:permanent-deletes') {
+  if (key === 'list:system/permanent-deletes') {
     const { permanentDeletes } = await chrome.storage.session.get(['permanentDeletes']);
-    return permanentDeletes ? { timestamp: 0, urls: permanentDeletes } : null;
+    return permanentDeletes ? { timestamp: 0, keys: permanentDeletes } : null;
   }
-  if (key === 'index:parent-index') {
+  if (key === 'list:index/parent') {
     const { parentIndex } = await chrome.storage.session.get(['parentIndex']);
     return parentIndex || null;
   }
@@ -211,8 +212,8 @@ async function sessionLoad(key) {
 async function sessionWrite(effects) {
   for (const [key, entity] of Object.entries(effects)) {
     if (entity === null) continue;
-    if (key.startsWith('atom:')) {
-      await setCachedAtom(key.slice(5), entity);
+    if (key.startsWith('page:') || key.startsWith('note:')) {
+      await setCachedEntity(key, entity);
     } else if (key === 'settings') {
       const cacheUpdate = {};
       for (const k of SETTINGS_KEYS) {
@@ -221,23 +222,23 @@ async function sessionWrite(effects) {
       if (Object.keys(cacheUpdate).length > 0) {
         await chrome.storage.session.set(cacheUpdate);
       }
-    } else if (key.startsWith('list:user/')) {
+    } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
       const { lists = [] } = await chrome.storage.session.get(['lists']);
-      const cid = key.slice('list:user/'.length);
+      const listId = key.slice('list:'.length);
       if (entity.deleted) {
-        await chrome.storage.session.set({ lists: lists.filter(c => c.id !== cid) });
+        await chrome.storage.session.set({ lists: lists.filter(c => c.id !== listId) });
       } else {
-        const idx = lists.findIndex(c => c.id === cid);
+        const idx = lists.findIndex(c => c.id === listId);
         const meta = { id: entity.id, name: entity.name, qbTrees: entity.qbTrees };
         if (idx >= 0) lists[idx] = meta;
         else lists.push(meta);
         await chrome.storage.session.set({ lists });
       }
-    } else if (key === 'list:recycle-bin') {
+    } else if (key === 'list:system/recycle-bin') {
       await chrome.storage.session.set({ recycleBin: entity.items });
-    } else if (key === 'list:permanent-deletes') {
-      await chrome.storage.session.set({ permanentDeletes: entity.urls });
-    } else if (key === 'index:parent-index') {
+    } else if (key === 'list:system/permanent-deletes') {
+      await chrome.storage.session.set({ permanentDeletes: entity.keys });
+    } else if (key === 'list:index/parent') {
       await chrome.storage.session.set({ parentIndex: entity });
     }
   }
@@ -307,7 +308,7 @@ async function hydrateCache() {
 
   try {
     const pdResp = await requestOffscreen({ action: 'loadPermanentDeletes' });
-    if (pdResp?.success) await chrome.storage.session.set({ permanentDeletes: pdResp.urls || [] });
+    if (pdResp?.success) await chrome.storage.session.set({ permanentDeletes: pdResp.keys || [] });
   } catch (e) { console.warn('Permanent deletes load failed:', e.message); }
 
   try {
@@ -555,12 +556,13 @@ chrome.runtime.onStartup.addListener(async () => {
 initSavepageBridge();
 
 // ─── Checkpoint Helper ────────────────────────────────────────────────
-// Ensure an atom checkpoint exists in cache or disk; creates one if missing.
+// Ensure a page checkpoint exists in cache or disk; creates one if missing.
 
 async function ensureCheckpointIfMissing(checkSlug, checkUrl, checkTitle) {
-  const cached = await getCachedAtom(checkSlug);
+  const key = 'page:' + checkSlug;
+  const cached = await getCachedEntity(key);
   if (!cached) {
-    const existsResp = await requestOffscreen({ action: 'atomExists', slug: checkSlug });
+    const existsResp = await requestOffscreen({ action: 'pageExists', slug: checkSlug });
     if (!existsResp?.exists) {
       await addLog({
         timestamp: Date.now(),
@@ -575,7 +577,7 @@ async function ensureCheckpointIfMissing(checkSlug, checkUrl, checkTitle) {
 // ─── Snapshot Capture ─────────────────────────────────────────────────
 
 async function captureAndLog(tabId, slug, timestamp, url, title) {
-  // Ensure atom exists before capture
+  // Ensure page exists before capture
   if (url) await ensureCheckpointIfMissing(slug, url, title || '');
   const mdResp = await chrome.tabs.sendMessage(tabId, { action: 'extractMarkdown' });
   const html = await captureSavePage(tabId);
@@ -639,20 +641,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'getPageInfo': {
           const slug = generateSlugFromUrl(request.url);
-          const [detailResp, snapshotsResp] = await Promise.all([
+          const [detailResp, snapshotsResp, notesResp] = await Promise.all([
             requestOffscreen({ action: 'loadPageDetail', slug, url: request.url }),
-            requestOffscreen({ action: 'listSnapshots', slug })
+            requestOffscreen({ action: 'listSnapshots', slug }),
+            requestOffscreen({ action: 'loadPageNotes', slug })
           ]);
-          // Cache the atom if loadPageDetail returned one
-          if (detailResp?.atom) {
-            await setCachedAtom(slug, detailResp.atom);
+          // Cache the page if loadPageDetail returned one
+          if (detailResp?.page) {
+            await setCachedEntity('page:' + slug, detailResp.page);
           }
           sendResponse({
             success: true,
             slug,
             interaction: detailResp?.interaction || null,
             snapshots: snapshotsResp?.snapshots || [],
-            highlights: detailResp?.atom?.highlights || []
+            notes: notesResp?.notes || []
           });
           break;
         }
@@ -730,11 +733,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             // Multi-day visit: if this URL was visited on a previous day,
             // ensure it gets a checkpoint.
-            const cachedAtom = await getCachedAtom(slug);
+            const key = 'page:' + slug;
+            const cachedPage = await getCachedEntity(key);
             let isMultiDay = false;
-            if (cachedAtom && cachedAtom.visitDates) {
+            if (cachedPage && cachedPage.visitDates) {
               const todayYMD = (() => { const d = new Date(); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); })();
-              isMultiDay = cachedAtom.visitDates.some(ymd => ymd !== todayYMD);
+              isMultiDay = cachedPage.visitDates.some(ymd => ymd !== todayYMD);
             } else {
               // Check logBuffer for a visit to same URL on a different date
               isMultiDay = logBuffer.some(e => e.action === 'page' && e.url === url && dateKeyFromTimestamp(e.timestamp) !== todayStr);
@@ -873,25 +877,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'loadHighlights': {
+        case 'loadPageNotes': {
           const t0 = performance.now();
-          // Check atom cache
-          const cachedAtom = await getCachedAtom(request.slug);
-          if (cachedAtom) {
-            console.debug(`[I/O] loadHighlights(${request.slug}): cache hit`);
-            sendResponse({ success: true, highlights: cachedAtom.highlights || [] });
-            break;
-          }
-          const resp = await requestOffscreen({ action: 'loadHighlights', slug: request.slug });
-          console.debug(`[I/O] loadHighlights(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
+          const resp = await requestOffscreen({ action: 'loadPageNotes', slug: request.slug });
+          console.debug(`[I/O] loadPageNotes(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse(resp);
           break;
         }
 
-        case 'loadAllHighlights': {
+        case 'loadAllNotes': {
           const t0 = performance.now();
-          const resp = await requestOffscreen({ action: 'loadAllHighlights' });
-          console.debug(`[I/O] loadAllHighlights: ${(performance.now() - t0).toFixed(1)}ms`);
+          const resp = await requestOffscreen({ action: 'loadAllNotes' });
+          console.debug(`[I/O] loadAllNotes: ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse(resp);
           break;
         }
@@ -904,14 +901,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'loadAtomBatch': {
+        case 'loadPageBatch': {
           const t0 = performance.now();
           const result = {};
           const uncachedSlugs = [];
 
-          // Check atom cache for each slug
+          // Check page cache for each slug
           for (const slug of request.slugs) {
-            const cached = await getCachedAtom(slug);
+            const key = 'page:' + slug;
+            const cached = await getCachedEntity(key);
             if (cached) {
               result[slug] = cached;
             } else {
@@ -921,25 +919,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
           // Fetch uncached from offscreen
           if (uncachedSlugs.length > 0) {
-            const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: uncachedSlugs });
-            if (resp?.success && resp.atoms) {
-              for (const [slug, atom] of Object.entries(resp.atoms)) {
-                result[slug] = atom;
-                await setCachedAtom(slug, atom);
+            const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: uncachedSlugs });
+            if (resp?.success && resp.pages) {
+              for (const [slug, page] of Object.entries(resp.pages)) {
+                result[slug] = page;
+                await setCachedEntity('page:' + slug, page);
               }
             }
           }
 
-          console.debug(`[I/O] loadAtomBatch: ${request.slugs.length} slugs (${request.slugs.length - uncachedSlugs.length} cached) in ${(performance.now() - t0).toFixed(1)}ms`);
-          sendResponse({ success: true, atoms: result });
+          console.debug(`[I/O] loadPageBatch: ${request.slugs.length} slugs (${request.slugs.length - uncachedSlugs.length} cached) in ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse({ success: true, pages: result });
           break;
         }
 
         case 'loadPageDetail': {
           const t0 = performance.now();
           const resp = await requestOffscreen({ action: 'loadPageDetail', slug: request.slug, url: request.url });
-          if (resp?.atom) {
-            await setCachedAtom(request.slug, resp.atom);
+          if (resp?.page) {
+            await setCachedEntity('page:' + request.slug, resp.page);
           }
           console.debug(`[I/O] loadPageDetail(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse(resp);
@@ -1068,37 +1066,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const url = request.url;
             const slug = generateSlugFromUrl(url);
 
-            // Load atom
-            let atom = await getCachedAtom(slug);
-            if (!atom) {
-              const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: [slug] });
-              atom = resp?.atoms?.[slug] || {};
+            // Load page
+            const key = 'page:' + slug;
+            let page = await getCachedEntity(key);
+            if (!page) {
+              const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
+              page = resp?.pages?.[slug] || {};
             }
 
-            // Resolve mixed-format refs: slug → URL via loadAtomBatch, URL/{url,title} → use directly
+            // Resolve mixed-format refs: page:slug / bare slug → URL via loadPageBatch, URL/{url,title} → use directly
             async function resolveRefs(refs) {
               const urls = [];
               const slugsToLoad = [];
               for (const ref of refs) {
                 if (typeof ref === 'object') { urls.push(ref.url); continue; }
                 if (ref.startsWith('http')) { urls.push(ref); continue; }
-                slugsToLoad.push(ref); // slug
+                if (ref.startsWith('page:')) { slugsToLoad.push(ref.slice(5)); continue; }
+                slugsToLoad.push(ref); // bare slug
               }
               if (slugsToLoad.length > 0) {
-                const resp = await requestOffscreen({ action: 'loadAtomBatch', slugs: slugsToLoad });
+                const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: slugsToLoad });
                 for (const s of slugsToLoad) {
-                  const a = resp?.atoms?.[s];
-                  if (a && a.url) urls.push(a.url);
+                  const p = resp?.pages?.[s];
+                  if (p && p.url) urls.push(p.url);
                 }
               }
               return urls;
             }
 
-            // Parents: from atom.parents, fallback to parentIndex for non-checkpointed pages
-            let parentRefs = atom.parents || [];
+            // Parents: from page.parents, fallback to parentIndex for non-checkpointed pages
+            let parentRefs = page.parents || [];
             if (parentRefs.length === 0) {
               const { parentIndex = { index: {} } } = await chrome.storage.session.get(['parentIndex']);
-              parentRefs = parentIndex.index[url] || []; // parentIndex stores slugs
+              parentRefs = (parentIndex.index[url] || []).map(ps => 'page:' + ps); // convert bare slugs to page: keys
             }
             const parentReferrers = await resolveRefs(parentRefs);
 
@@ -1106,19 +1106,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const parentLists = [];
             const { lists: listSettings } = await chrome.storage.session.get(['lists']);
             const allLists = listSettings || [];
-            for (const col of allLists) {
-              const listCacheKey = 'listCache:' + col.id;
+            for (const list of allLists) {
+              const listCacheKey = 'listCache:' + list.id;
               const cached = (await chrome.storage.session.get(listCacheKey))[listCacheKey];
               if (cached) {
                 const inPinned = cached.fullPinned?.some(p => p.url === url);
                 const inRelated = cached.related?.some(r => r.url === url);
-                if (inPinned) parentLists.push({ id: col.id, name: col.name, type: 'pin' });
-                else if (inRelated) parentLists.push({ id: col.id, name: col.name, type: 'appear' });
+                if (inPinned) parentLists.push({ id: list.id, name: list.name, type: 'pin' });
+                else if (inRelated) parentLists.push({ id: list.id, name: list.name, type: 'appear' });
               }
             }
 
-            // Children: from atom.children + parentIndex inverse lookup
-            const childRefs = atom.children || [];
+            // Children: from page.children (filter out notes, keep only pages) + parentIndex inverse lookup
+            const childRefs = (page.children || []).filter(c => !c.startsWith('note:'));
             let children = await resolveRefs(childRefs);
             // Also check parentIndex for non-checkpointed children
             const { parentIndex: piForChildren = { index: {} } } = await chrome.storage.session.get(['parentIndex']);
@@ -1161,53 +1161,55 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'saveHighlight': {
-          const hlSlug = request.slug;
-          // Ensure atom is cached so addLog's effectOf can find it
-          await ensureAtomCached(hlSlug);
+        case 'createNote': {
+          const pageSlug = request.pageSlug;
+          const timestamp = Date.now();
+          const noteSlug = generateNoteSlug(timestamp, request.quote);
+
+          // Ensure parent page is cached so addLog's effectOf can find it
+          await ensurePageCached(pageSlug);
           const effects = await addLog({
-            timestamp: Date.now(), action: 'highlight', slug: hlSlug,
-            highlight: request.highlight
+            timestamp,
+            action: 'note',
+            slug: noteSlug,
+            quote: request.quote,
+            note: request.note || '',
+            cssPath: request.cssPath || null,
+            parents: [`page:${pageSlug}`],
+            children: []
           });
-          const highlights = effects[`atom:${hlSlug}`]?.highlights || [];
-          sendResponse({ success: true, highlights });
-          notifyMutation('highlight', { slug: hlSlug });
+          const notes = await requestOffscreen({ action: 'loadPageNotes', slug: pageSlug });
+          sendResponse({ success: true, notes: notes.notes || [], noteSlug });
+          notifyMutation('note', { pageSlug, noteSlug });
           break;
         }
 
-        case 'deleteHighlight': {
-          const dhSlug = request.slug;
-          // Read atom to find matchTimestamp before constructing log entry
-          const dhAtom = await ensureAtomCached(dhSlug);
-          const hl = dhAtom?.highlights || [];
-          let matchTimestamp = request.timestamp || 0;
-          if (!matchTimestamp && request.text) {
-            const found = hl.find(h => {
-              if (Array.isArray(h.text) && Array.isArray(request.text)) {
-                return JSON.stringify(h.text) === JSON.stringify(request.text);
-              }
-              return h.text === request.text;
-            });
-            if (found) matchTimestamp = found.timestamp || 0;
-          }
-          const effects = await addLog({
-            timestamp: Date.now(), action: 'unhighlight', slug: dhSlug, matchTimestamp
-          });
-          const remaining = effects[`atom:${dhSlug}`]?.highlights || [];
-          sendResponse({ success: true, highlights: remaining });
-          notifyMutation('highlight', { slug: dhSlug });
-          break;
-        }
-
-        case 'saveHighlights': {
-          const shSlug = request.slug;
-          await ensureAtomCached(shSlug);
+        case 'deleteNote': {
+          const noteSlug = request.noteSlug;
+          // Move to recycle bin via list operation
           await addLog({
-            timestamp: Date.now(), action: 'highlights_replace', slug: shSlug,
-            highlights: request.highlights
+            timestamp: Date.now(),
+            action: 'list',
+            id: 'system/recycle-bin',
+            op: 'add',
+            keys: [`note:${noteSlug}`]
           });
           sendResponse({ success: true });
-          notifyMutation('highlight', { slug: shSlug });
+          notifyMutation('note', { noteSlug });
+          break;
+        }
+
+        case 'updateNote': {
+          const noteSlug = request.noteSlug;
+          const timestamp = Date.now();
+          await addLog({
+            timestamp,
+            action: 'note',
+            slug: noteSlug,
+            note: request.note
+          });
+          sendResponse({ success: true });
+          notifyMutation('note', { noteSlug });
           break;
         }
 
@@ -1222,12 +1224,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const ts = Date.now();
           await addLog({
             timestamp: ts, action: 'list',
-            id: `user/${request.listId}`, op: 'clear', urls: []
+            id: request.listId, op: 'clear', urls: []
           });
           if (request.pins && request.pins.length > 0) {
             await addLog({
               timestamp: ts + 1, action: 'list',
-              id: `user/${request.listId}`, op: 'add',
+              id: request.listId, op: 'add',
               urls: request.pins.map(p => p.url)
             });
           }
@@ -1240,12 +1242,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const ts = Date.now();
           await addLog({
             timestamp: ts, action: 'list',
-            id: 'permanent-deletes', op: 'clear', urls: []
+            id: 'system/permanent-deletes', op: 'clear', keys: []
           });
-          if (request.urls && request.urls.length > 0) {
+          if (request.keys && request.keys.length > 0) {
             await addLog({
               timestamp: ts + 1, action: 'list',
-              id: 'permanent-deletes', op: 'add', urls: request.urls
+              id: 'system/permanent-deletes', op: 'add', keys: request.keys
             });
           }
           sendResponse({ success: true });
@@ -1254,7 +1256,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'saveListMeta': {
-          const metaEntry = { timestamp: Date.now(), action: 'list_meta', id: `user/${request.listId}`, name: request.name };
+          const metaEntry = { timestamp: Date.now(), action: 'list_meta', id: request.listId, name: request.name };
           if (request.qbTrees !== undefined) metaEntry.qbTrees = request.qbTrees;
           await addLog(metaEntry);
           sendResponse({ success: true });
@@ -1276,13 +1278,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const ts = Date.now();
           await addLog({
             timestamp: ts, action: 'list',
-            id: 'recycle-bin', op: 'clear', urls: []
+            id: 'system/recycle-bin', op: 'clear', keys: []
           });
           if (request.items && request.items.length > 0) {
             await addLog({
               timestamp: ts + 1, action: 'list',
-              id: 'recycle-bin', op: 'add',
-              urls: request.items.map(item => item.url)
+              id: 'system/recycle-bin', op: 'add',
+              keys: request.items.map(item => item.key)
             });
           }
           sendResponse({ success: true });

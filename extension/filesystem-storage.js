@@ -2,19 +2,10 @@
 // Manages writing interactions to a user-selected directory
 import { generateSlugFromUrl } from './utils.js';
 
-// Sanitize a list name for use as a filename.
-// Replaces / with -, strips leading/trailing dots/spaces.
-function sanitizeFilename(name) {
-  return name.replace(/\//g, '-').replace(/^[.\s]+|[.\s]+$/g, '') || '_';
-}
-
 class FileSystemStorage {
   #permissionGranted = false;
   #dirCache = new Map();
   #fileCache = new Map();
-  // Maps list ID → filename (without .json extension).
-  // Built by loadAllListMetadata(), updated by saveListMeta/deleteListFile.
-  #listIdToFilename = new Map();
 
   constructor() {
     this.directoryHandle = null;
@@ -324,10 +315,15 @@ class FileSystemStorage {
     content += `Last updated: ${new Date().toISOString()}\n`;
     content += `Total interactions: ${interactions.length}\n\n`;
     content += '## Files\n\n';
-    content += '- `YYYY-MM-DD.jsonl` - Daily interaction logs in JSON Lines format (metadata only)\n';
+    content += '- `history/YYYY-MM-DD.jsonl` - Daily interaction logs in JSON Lines format (metadata only)\n';
+    content += '- `pages/{slug}.json` - Page entity checkpoint (metadata, parents, children)\n';
     content += '- `pages/{slug}/{timestamp}.md` - Markdown extract of page content (versioned)\n';
     content += '- `pages/{slug}/{timestamp}.html` - HTML snapshot of page content (versioned)\n';
-    content += '- `pages/{slug}/highlights.json` - User highlights and notes\n\n';
+    content += '- `notes/{slug}.json` - Note entity (highlights and annotations)\n';
+    content += '- `lists/{id}.json` - User list entity (pins, metadata)\n';
+    content += '- `lists/system/recycle-bin.json` - Deleted items\n';
+    content += '- `lists/system/permanent-deletes.json` - Permanently deleted items\n';
+    content += '- `lists/index/parent.json` - Parent-child relationships for non-checkpointed pages\n\n';
     content += '## Metadata Format\n\n';
     content += '```json\n';
     content += JSON.stringify({
@@ -442,9 +438,9 @@ class FileSystemStorage {
     const contentMap = {};
 
     try {
-      const atomsDir = await this.resolveDir('atoms');
+      const pagesDir = await this.resolveDir('pages');
 
-      for await (const entry of atomsDir.values()) {
+      for await (const entry of pagesDir.values()) {
         if (entry.kind === 'directory') {
           const slug = entry.name;
           let latestTs = 0;
@@ -461,8 +457,8 @@ class FileSystemStorage {
         }
       }
     } catch (error) {
-      // atoms/ directory may not exist yet
-      console.log('No atoms directory found:', error.message);
+      // pages/ directory may not exist yet
+      console.log('No pages directory found:', error.message);
     }
 
     return contentMap;
@@ -555,49 +551,53 @@ class FileSystemStorage {
     return { domains, newWatermark };
   }
 
-  // Load parent-index from lists/index/parent-index.json
+  // Load parent-index from lists/index/parent.json
   async loadParentIndex() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
     try {
-      const fileHandle = await this.resolveFile('lists/index/parent-index.json');
+      const fileHandle = await this.resolveFile('lists/index/parent.json');
       return this.readJson(fileHandle);
     } catch {
       return { timestamp: 0, index: {} };
     }
   }
 
-  // Load all highlights from atoms/{slug}.json for every slug
-  async loadAllHighlights() {
+  // Load all notes from notes/ directory
+  async loadAllNotes() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
 
-    const highlightsMap = {};
+    const notesMap = {}; // pageSlug → [noteEntity, ...]
 
     try {
-      const atomsDir = await this.resolveDir('atoms');
-      for await (const entry of atomsDir.values()) {
+      const notesDir = await this.resolveDir('notes');
+      for await (const entry of notesDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
           try {
             const file = await entry.getFile();
-            const atom = JSON.parse(await file.text());
-            if (atom.highlights && atom.highlights.length > 0) {
-              const slug = entry.name.replace('.json', '');
-              highlightsMap[slug] = atom.highlights;
+            const note = JSON.parse(await file.text());
+            // Group by parent page slug
+            for (const parentKey of (note.parents || [])) {
+              if (parentKey.startsWith('page:')) {
+                const pageSlug = parentKey.slice(5);
+                if (!notesMap[pageSlug]) notesMap[pageSlug] = [];
+                notesMap[pageSlug].push(note);
+              }
             }
-          } catch { /* skip malformed atom files */ }
+          } catch { /* skip malformed note files */ }
         }
       }
-    } catch { /* no atoms dir */ }
+    } catch { /* no notes dir */ }
 
-    return highlightsMap;
+    return notesMap;
   }
 
-  // Capture a versioned snapshot: atoms/{slug}/{timestamp}.md and .html
+  // Capture a versioned snapshot: pages/{slug}/{timestamp}.md and .html
   async captureSnapshot(slug, timestamp, markdown, html) {
-    const slugDir = await this.resolveDir('atoms/' + slug);
+    const slugDir = await this.resolveDir('pages/' + slug);
 
     if (markdown) {
       const mdHandle = await slugDir.getFileHandle(`${timestamp}.md`, { create: true });
@@ -623,8 +623,8 @@ class FileSystemStorage {
     const snapshots = [];
 
     try {
-      const atomsDir = await this.resolveDir('atoms');
-      const slugDir = await atomsDir.getDirectoryHandle(slug);
+      const pagesDir = await this.resolveDir('pages');
+      const slugDir = await pagesDir.getDirectoryHandle(slug);
       const tsSet = new Map();
 
       for await (const entry of slugDir.values()) {
@@ -646,7 +646,7 @@ class FileSystemStorage {
         snapshots.push(snap);
       }
     } catch (error) {
-      // atoms/ directory or slug directory may not exist
+      // pages/ directory or slug directory may not exist
     }
 
     snapshots.sort((a, b) => b.timestamp - a.timestamp);
@@ -655,8 +655,8 @@ class FileSystemStorage {
 
   // Get a blob URL for a snapshot file (html preferred, falls back to md)
   async getSnapshotBlobUrl(slug, timestamp) {
-    const atomsDir = await this.resolveDir('atoms');
-    const slugDir = await atomsDir.getDirectoryHandle(slug);
+    const pagesDir = await this.resolveDir('pages');
+    const slugDir = await pagesDir.getDirectoryHandle(slug);
     for (const ext of ['html', 'md']) {
       try {
         const handle = await slugDir.getFileHandle(`${timestamp}.${ext}`);
@@ -673,30 +673,42 @@ class FileSystemStorage {
       throw new Error('No permission to delete');
     }
 
-    const atomsDir = await this.resolveDir('atoms');
-    const slugDir = await atomsDir.getDirectoryHandle(slug);
+    const pagesDir = await this.resolveDir('pages');
+    const slugDir = await pagesDir.getDirectoryHandle(slug);
     try { await this.softDelete(slugDir, `${timestamp}.md`); } catch (e) {}
     try { await this.softDelete(slugDir, `${timestamp}.html`); } catch (e) {}
   }
 
-  // Load highlights for a slug from atoms/{slug}.json
-  async loadHighlights(slug) {
+  // Load notes for a page slug from page entity's children + notes/ directory
+  async loadPageNotes(slug) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
 
     try {
-      const atom = await this.loadAtom(slug);
-      return atom ? (atom.highlights || []) : [];
+      const page = await this.loadPage(slug);
+      if (!page || !page.children) return [];
+
+      const notes = [];
+      for (const childKey of page.children) {
+        if (childKey.startsWith('note:')) {
+          const noteSlug = childKey.slice(5);
+          try {
+            const note = await this.loadNote(noteSlug);
+            if (note) notes.push(note);
+          } catch { /* skip missing notes */ }
+        }
+      }
+      return notes;
     } catch (error) {
       return [];
     }
   }
 
-  // Check if an atom file exists on disk
-  async atomExists(slug) {
+  // Check if a page file exists on disk
+  async pageExists(slug) {
     try {
-      await this.resolveFile('atoms/' + slug + '.json');
+      await this.resolveFile('pages/' + slug + '.json');
       return true;
     } catch {
       return false;
@@ -740,43 +752,59 @@ class FileSystemStorage {
     return result;
   }
 
-  // Load atom metadata from atoms/{slug}.json
-  async loadAtom(slug) {
+  // Load page metadata from pages/{slug}.json
+  async loadPage(slug) {
     try {
-      const fileHandle = await this.resolveFile(`atoms/${slug}.json`);
+      const fileHandle = await this.resolveFile(`pages/${slug}.json`);
       return this.readJson(fileHandle);
     } catch {
       return null;
     }
   }
 
-  // Load multiple atoms in one call
-  async loadAtomBatch(slugs) {
+  // Load multiple pages in one call
+  async loadPageBatch(slugs) {
     const result = {};
     for (const slug of slugs) {
       try {
-        const fh = await this.resolveFile(`atoms/${slug}.json`);
+        const fh = await this.resolveFile(`pages/${slug}.json`);
         result[slug] = await this.readJson(fh);
-      } catch { /* atom doesn't exist */ }
+      } catch { /* page doesn't exist */ }
     }
     return result;
   }
 
-  // Save atom metadata to atoms/{slug}.json
-  async saveAtom(slug, data) {
-    const fileHandle = await this.resolveFile(`atoms/${slug}.json`, { create: true });
+  // Save page metadata to pages/{slug}.json
+  async savePage(slug, data) {
+    const fileHandle = await this.resolveFile(`pages/${slug}.json`, { create: true });
     await this.writeJson(fileHandle, data);
   }
 
-  // Load page detail: merge atom with history entries after watermark
-  // Returns { atom, interaction } where interaction has the freshest metadata
+  // Load note metadata from notes/{slug}.json
+  async loadNote(slug) {
+    try {
+      const fileHandle = await this.resolveFile(`notes/${slug}.json`);
+      return this.readJson(fileHandle);
+    } catch {
+      return null;
+    }
+  }
+
+  // Save note metadata to notes/{slug}.json
+  async saveNote(slug, data) {
+    const fileHandle = await this.resolveFile(`notes/${slug}.json`, { create: true });
+    await this.writeJson(fileHandle, data);
+  }
+
+  // Load page detail: merge page with history entries after watermark
+  // Returns { page, interaction } where interaction has the freshest metadata
   async loadPageDetail(slug, url) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
 
-    const atom = (await this.loadAtom(slug)) || { highlights: [], timestamp: 0 };
-    const watermark = atom.timestamp || 0;
+    const page = (await this.loadPage(slug)) || { timestamp: 0, children: [], parents: [] };
+    const watermark = page.timestamp || 0;
 
     // Scan JSONL files after watermark for this URL
     let freshInteraction = null;
@@ -805,23 +833,23 @@ class FileSystemStorage {
       }
     }
 
-    // Merge: use atom's cached metadata, overlay with fresher JSONL if available
+    // Merge: use page's cached metadata, overlay with fresher JSONL if available
     let interaction;
     if (freshInteraction) {
       interaction = freshInteraction;
-      // Update atom with fresh metadata and advance timestamp
-      atom.url = interaction.url;
-      atom.title = interaction.title;
-      atom.attention = interaction.attention || '';
-      atom.timestamp = interaction.timestamp;
-      await this.saveAtom(slug, atom);
-    } else if (atom.url) {
-      interaction = { url: atom.url, title: atom.title, attention: atom.attention || '', timestamp: atom.timestamp, slug };
+      // Update page with fresh metadata and advance timestamp
+      page.url = interaction.url;
+      page.title = interaction.title;
+      page.attention = interaction.attention || '';
+      page.timestamp = interaction.timestamp;
+      await this.savePage(slug, page);
+    } else if (page.url) {
+      interaction = { url: page.url, title: page.title, attention: page.attention || '', timestamp: page.timestamp, slug };
     } else {
       interaction = null;
     }
 
-    return { atom, interaction };
+    return { page, interaction };
   }
 
   // Load a single interaction metadata by URL from JSONL files
@@ -854,20 +882,16 @@ class FileSystemStorage {
     return match;
   }
 
-  // Resolve the filename for a list ID.
-  // Returns the filename (without .json) from the map, or falls back to the ID itself.
-  #resolveListFilename(listId) {
-    return this.#listIdToFilename.get(listId) || listId;
-  }
-
   // Resolve the file path for a list ID.
-  // Returns 'lists/explore.json' for explore, 'lists/user/${filename}.json' for others.
+  // Filename is always the list ID itself (slug).
   #resolveListPath(listId) {
     if (listId === 'explore') {
       return 'lists/explore.json';
     }
-    const filename = this.#resolveListFilename(listId);
-    return `lists/user/${filename}.json`;
+    if (listId.startsWith('system/') || listId.startsWith('index/')) {
+      return `lists/${listId}.json`;
+    }
+    return `lists/${listId}.json`;
   }
 
   // Load pins for a single list.
@@ -906,7 +930,7 @@ class FileSystemStorage {
     }
   }
 
-  // Load all list pins from lists/explore.json and lists/user/ files
+  // Load all list pins from lists/{id}.json files (excluding system/ and index/)
   // Returns { listId: pinsArray } keyed by internal ID (not filename).
   async loadListPins() {
     if (!(await this.verifyPermission())) {
@@ -926,17 +950,17 @@ class FileSystemStorage {
       }
     } catch { /* explore.json doesn't exist yet */ }
 
-    // Load user lists from lists/user/
+    // Load user lists from lists/ — filename is the list ID
     try {
-      const userDir = await this.resolveDir('lists/user');
-      for await (const entry of userDir.values()) {
+      const listsDir = await this.resolveDir('lists');
+      for await (const entry of listsDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
-          const filename = entry.name.replace('.json', '');
+          const id = entry.name.replace('.json', '');
+          // Skip system and index files
+          if (id === 'explore' || id === 'gateways' || id.startsWith('system') || id.startsWith('index')) continue;
           try {
             const file = await entry.getFile();
             const data = JSON.parse(await file.text());
-            // Use internal ID from file, fall back to filename
-            const id = (data && data.id) || filename;
             if (data && typeof data === 'object' && !Array.isArray(data) && data.pins) {
               allPins[id] = data.pins;
             } else {
@@ -945,7 +969,7 @@ class FileSystemStorage {
           } catch { /* skip malformed files */ }
         }
       }
-    } catch { /* user dir doesn't exist yet */ }
+    } catch { /* lists dir doesn't exist yet */ }
     return allPins;
   }
 
@@ -976,112 +1000,71 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
-    // Explore list doesn't support renaming
-    if (listId === 'explore') {
-      const path = this.#resolveListPath(listId);
-      let existing = { timestamp: 0, pins: [] };
-      try {
-        const fh = await this.resolveFile(path);
-        const data = await this.readJson(fh);
-        if (data && typeof data === 'object' && !Array.isArray(data)) {
-          existing = data;
-        }
-      } catch { /* file doesn't exist yet */ }
-      const fileHandle = await this.resolveFile(path, { create: true });
-      await this.writeJson(fileHandle, { ...existing, ...meta, timestamp });
-      return;
-    }
-    const oldFilename = this.#resolveListFilename(listId);
-    const oldPath = this.#resolveListPath(listId);
-    // Read existing data from old file
+    const path = this.#resolveListPath(listId);
+    // Read-merge-write: preserve existing pins
     let existing = { timestamp: 0, pins: [] };
     try {
-      const fh = await this.resolveFile(oldPath);
+      const fh = await this.resolveFile(path);
       const data = await this.readJson(fh);
       if (data && typeof data === 'object' && !Array.isArray(data)) {
         existing = data;
       }
     } catch { /* file doesn't exist yet */ }
-    const updated = { ...existing, ...meta, timestamp };
-    // Determine new filename from name
-    const newName = updated.name || oldFilename;
-    const newFilename = sanitizeFilename(newName);
-    if (newFilename !== oldFilename && oldFilename !== listId) {
-      // Name changed — delete old file
-      try {
-        const userDir = await this.resolveDir('lists/user');
-        await this.softDelete(userDir, `${oldFilename}.json`);
-        // Evict stale file cache entry
-        this.#fileCache.delete(oldPath);
-      } catch { /* old file may not exist */ }
-    }
-    // Write to new filename
-    const fileHandle = await this.resolveFile(`lists/user/${newFilename}.json`, { create: true });
-    await this.writeJson(fileHandle, updated);
-    // Update map
-    this.#listIdToFilename.set(listId, newFilename);
+    const fileHandle = await this.resolveFile(path, { create: true });
+    await this.writeJson(fileHandle, { ...existing, ...meta, timestamp });
   }
 
-  // Delete a list file (from lists/user/ or lists/ for explore)
+  // Delete a list file (from lists/{id}.json)
   async deleteListFile(listId) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
     const path = this.#resolveListPath(listId);
     try {
-      if (listId === 'explore') {
-        const listsDir = await this.resolveDir('lists');
-        await this.softDelete(listsDir, 'explore.json');
-      } else {
-        const userDir = await this.resolveDir('lists/user');
-        const filename = this.#resolveListFilename(listId);
-        await this.softDelete(userDir, `${filename}.json`);
-      }
+      const listsDir = await this.resolveDir('lists');
+      await this.softDelete(listsDir, `${listId}.json`);
       this.#fileCache.delete(path);
     } catch { /* file may not exist */ }
-    this.#listIdToFilename.delete(listId);
   }
 
-  // Load metadata for all lists from lists/user/ files.
-  // Returns [{ id, name, qbTrees }] — skips explore.
-  // Also rebuilds the #listIdToFilename map.
+  // Load metadata for all lists from lists/ files.
+  // Returns [{ id, name, qbTrees }] — skips explore, system/, and index/ files.
+  // Filenames are always the list ID (slug).
   async loadAllListMetadata() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
-    this.#listIdToFilename.clear();
     const result = [];
     try {
-      const userDir = await this.resolveDir('lists/user');
-      for await (const entry of userDir.values()) {
+      const listsDir = await this.resolveDir('lists');
+      for await (const entry of listsDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
-          const filename = entry.name.replace('.json', '');
-          if (filename === 'explore') continue;
+          const id = entry.name.replace('.json', '');
+          // Skip system and special files
+          if (id === 'explore' || id === 'gateways' || id.startsWith('system') || id.startsWith('index')) continue;
           try {
             const file = await entry.getFile();
             const data = JSON.parse(await file.text());
-            const id = data.id || filename;
-            this.#listIdToFilename.set(id, filename);
             result.push({
               id,
-              name: data.name || filename,
+              name: data.name || id,
               qbTrees: data.qbTrees || [],
             });
           } catch { /* skip malformed */ }
         }
       }
-    } catch { /* lists/user/ doesn't exist */ }
+    } catch { /* lists/ doesn't exist */ }
     return result;
   }
 
-  // Save list pins to lists/ (explore) and lists/user/ (others) files
+  // Save list pins to lists/{id}.json files
   // Preserves existing metadata in each file.
   async saveListPins(allPins) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
 
-    const userDir = await this.resolveDir('lists/user');
+    const listsDir = await this.resolveDir('lists');
 
     // Write each list, preserving metadata
     const activeFilenames = new Set();
@@ -1089,10 +1072,9 @@ class FileSystemStorage {
       const pinsArray = Array.isArray(pins) ? pins : (pins.pins || []);
       const path = this.#resolveListPath(id);
 
-      // Track active filenames for cleanup (only for user lists)
-      if (id !== 'explore') {
-        const filename = this.#resolveListFilename(id);
-        activeFilenames.add(filename);
+      // Track active IDs for cleanup (only for user lists)
+      if (id !== 'explore' && !id.startsWith('system') && !id.startsWith('index')) {
+        activeFilenames.add(id);
       }
 
       let existing = {};
@@ -1107,25 +1089,25 @@ class FileSystemStorage {
       await this.writeJson(fileHandle, { ...existing, timestamp: 0, pins: pinsArray });
     }
 
-    // Soft-delete orphaned files in lists/user/ (explore is not in this dir)
-    for await (const entry of userDir.values()) {
+    // Soft-delete orphaned files in lists/ (skip system and special files)
+    for await (const entry of listsDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.json')) {
         const filename = entry.name.replace('.json', '');
-        if (!activeFilenames.has(filename)) {
-          await this.softDelete(userDir, entry.name);
+        if (filename !== 'explore' && filename !== 'gateways' && !filename.startsWith('system') && !filename.startsWith('index') && !activeFilenames.has(filename)) {
+          await this.softDelete(listsDir, entry.name);
         }
       }
     }
   }
 
-  // Load recycle bin from lists/recycle-bin.json
+  // Load recycle bin from lists/system/recycle-bin.json
   // Returns the items array.
   async loadRecycleBin() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
     try {
-      const fh = await this.resolveFile('lists/recycle-bin.json');
+      const fh = await this.resolveFile('lists/system/recycle-bin.json');
       const data = await this.readJson(fh);
       if (data && typeof data === 'object' && data.items) {
         return data.items;
@@ -1139,7 +1121,7 @@ class FileSystemStorage {
   // Load the full recycle-bin entity (includes timestamp).
   async loadRecycleBinEntity() {
     try {
-      const fh = await this.resolveFile('lists/recycle-bin.json');
+      const fh = await this.resolveFile('lists/system/recycle-bin.json');
       const data = await this.readJson(fh);
       if (data && typeof data === 'object' && data.items) {
         return data;
@@ -1150,27 +1132,27 @@ class FileSystemStorage {
     }
   }
 
-  // Save recycle bin to lists/recycle-bin.json
+  // Save recycle bin to lists/system/recycle-bin.json
   async saveRecycleBin(items, timestamp = 0) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
-    const fh = await this.resolveFile('lists/recycle-bin.json', { create: true });
+    const fh = await this.resolveFile('lists/system/recycle-bin.json', { create: true });
     await this.writeJson(fh, { timestamp, items });
   }
 
-  // Load permanent deletes from lists/permanent-deletes.json
-  // Returns the urls array (unwraps { timestamp, urls } wrapper).
+  // Load permanent deletes from lists/system/permanent-deletes.json
+  // Returns the keys array (unwraps { timestamp, keys } wrapper).
   async loadPermanentDeletes() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
     try {
-      const fileHandle = await this.resolveFile('lists/permanent-deletes.json');
+      const fileHandle = await this.resolveFile('lists/system/permanent-deletes.json');
       const data = await this.readJson(fileHandle);
-      // New format: { timestamp, urls: [...] }
-      if (data && typeof data === 'object' && !Array.isArray(data) && data.urls) {
-        return data.urls;
+      // New format: { timestamp, keys: [...] }
+      if (data && typeof data === 'object' && !Array.isArray(data) && data.keys) {
+        return data.keys;
       }
       return data; // legacy bare array
     } catch {
@@ -1181,24 +1163,24 @@ class FileSystemStorage {
   // Load the raw wrapped entity for permanent deletes (includes timestamp).
   async loadPermanentDeletesEntity() {
     try {
-      const fileHandle = await this.resolveFile('lists/permanent-deletes.json');
+      const fileHandle = await this.resolveFile('lists/system/permanent-deletes.json');
       const data = await this.readJson(fileHandle);
-      if (data && typeof data === 'object' && !Array.isArray(data) && data.urls) {
+      if (data && typeof data === 'object' && !Array.isArray(data) && data.keys) {
         return data;
       }
-      return { timestamp: 0, urls: Array.isArray(data) ? data : [] };
+      return { timestamp: 0, keys: Array.isArray(data) ? data : [] };
     } catch {
-      return { timestamp: 0, urls: [] };
+      return { timestamp: 0, keys: [] };
     }
   }
 
-  // Save permanent deletes to lists/permanent-deletes.json (wrapped format)
-  async savePermanentDeletes(urls, timestamp = 0) {
+  // Save permanent deletes to lists/system/permanent-deletes.json (wrapped format)
+  async savePermanentDeletes(keys, timestamp = 0) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write directory');
     }
-    const fileHandle = await this.resolveFile('lists/permanent-deletes.json', { create: true });
-    await this.writeJson(fileHandle, { timestamp, urls });
+    const fileHandle = await this.resolveFile('lists/system/permanent-deletes.json', { create: true });
+    await this.writeJson(fileHandle, { timestamp, keys });
   }
 
   // Load settings.json — returns {} if missing or unreadable

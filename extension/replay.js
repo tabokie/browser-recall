@@ -5,23 +5,36 @@ import { generateSlugFromUrl } from './utils.js';
 
 const REFERRER_CAP = 50;
 
-/**
- * Return the set of atom slugs that an entry affects.
- * A visit entry with a referrer affects both its own slug (child-side: parents, visitDates)
- * and the referrer's slug (parent-side: children accumulation).
- * All other entry types affect only the entry's own slug.
- */
-export function getAffectedSlugs(entry) {
-  const slugs = new Set();
-  const entrySlug = entry.slug || (entry.url ? generateSlugFromUrl(entry.url) : null);
-  if (entrySlug) slugs.add(entrySlug);
+const PAGE_PREFIX = 'page:';
+const NOTE_PREFIX = 'note:';
 
-  // Page entries with referrers also affect the parent atom
+/**
+ * Return the set of page keys that an entry affects.
+ * A visit entry with a referrer affects both its own key (child-side: parents, visitDates)
+ * and the referrer's key (parent-side: children accumulation).
+ * All other entry types affect only the entry's own key.
+ */
+export function getAffectedKeys(entry) {
+  const keys = new Set();
+  const entrySlug = entry.slug || (entry.url ? generateSlugFromUrl(entry.url) : null);
+  if (entrySlug) keys.add(PAGE_PREFIX + entrySlug);
+
+  // Page entries with referrers also affect the parent page
   if (entry.action === 'page' && entry.referrer) {
     const parentSlug = generateSlugFromUrl(entry.referrer);
-    if (parentSlug && parentSlug !== entrySlug) slugs.add(parentSlug);
+    const parentKey = PAGE_PREFIX + parentSlug;
+    if (parentKey !== PAGE_PREFIX + entrySlug) keys.add(parentKey);
   }
 
+  return keys;
+}
+
+// Legacy alias
+export function getAffectedSlugs(entry) {
+  const slugs = new Set();
+  for (const key of getAffectedKeys(entry)) {
+    if (key.startsWith(PAGE_PREFIX)) slugs.add(key.slice(PAGE_PREFIX.length));
+  }
   return slugs;
 }
 
@@ -29,17 +42,16 @@ export function getAffectedSlugs(entry) {
 // Unified replay interface: scopeOf + applyTo
 // ---------------------------------------------------------------------------
 
-const ATOM_PREFIX = 'atom:';
-
 /**
  * Return the set of entity keys that an entry affects.
  * Keys use prefixed namespaces:
- *   atom:{slug}              — page atom checkpoints
- *   settings                 — global settings
- *   list:user/{listId}       — list entity
- *   list:recycle-bin         — recycle bin
- *   list:permanent-deletes   — permanent deletes
- *   index:parent-index       — parent-index for non-checkpointed pages
+ *   page:{slug}                — page entity checkpoints
+ *   note:{slug}                — note entity
+ *   settings                   — global settings
+ *   list:{listId}              — user list entity
+ *   list:system/recycle-bin    — recycle bin
+ *   list:system/permanent-deletes — permanent deletes
+ *   list:index/parent          — parent-index for non-checkpointed pages
  */
 export function scopeOf(entry) {
   const scope = {};
@@ -54,19 +66,30 @@ export function scopeOf(entry) {
     return scope;
   }
 
-  // Atom-affecting entries (page, page_checkpoint, highlight, etc.)
-  for (const slug of getAffectedSlugs(entry)) {
-    scope[`${ATOM_PREFIX}${slug}`] = null;
+  // Note action: affects the note entity + parent page entities
+  if (entry.action === 'note') {
+    scope[`${NOTE_PREFIX}${entry.slug}`] = null;
+    if (entry.parents) {
+      for (const parentKey of entry.parents) {
+        scope[parentKey] = null;
+      }
+    }
+    return scope;
+  }
+
+  // Page-affecting entries (page, page_checkpoint)
+  for (const key of getAffectedKeys(entry)) {
+    scope[key] = null;
   }
 
   // Page entries with referrer also affect parent-index
   if (entry.action === 'page' && entry.referrer) {
-    scope['index:parent-index'] = null;
+    scope['list:index/parent'] = null;
   }
 
-  // page_checkpoint may need to absorb parent-index entries into new atom
+  // page_checkpoint may need to absorb parent-index entries into new page
   if (entry.action === 'page_checkpoint') {
-    scope['index:parent-index'] = null;
+    scope['list:index/parent'] = null;
   }
 
   return scope;
@@ -76,18 +99,22 @@ export function scopeOf(entry) {
  * Default empty entity for a given key. Used when creating entities from null.
  */
 export function defaultEntity(key) {
-  if (key.startsWith(ATOM_PREFIX)) {
-    const slug = key.slice(ATOM_PREFIX.length);
-    return { slug, timestamp: 0, highlights: [], parents: [], children: [] };
+  if (key.startsWith(PAGE_PREFIX)) {
+    const slug = key.slice(PAGE_PREFIX.length);
+    return { slug, timestamp: 0, parents: [], children: [] };
+  }
+  if (key.startsWith(NOTE_PREFIX)) {
+    const slug = key.slice(NOTE_PREFIX.length);
+    return { slug, timestamp: 0, quote: null, note: null, cssPath: null, parents: [], children: [] };
   }
   if (key === 'settings') return { timestamp: 0 };
-  if (key.startsWith('list:user/')) {
-    const id = key.slice('list:user/'.length);
+  if (key === 'list:system/recycle-bin') return { timestamp: 0, items: [] };
+  if (key === 'list:system/permanent-deletes') return { timestamp: 0, keys: [] };
+  if (key === 'list:index/parent') return { timestamp: 0, index: {} };
+  if (key.startsWith('list:')) {
+    const id = key.slice('list:'.length);
     return { timestamp: 0, id, name: '', qbTrees: [], pins: [] };
   }
-  if (key === 'list:recycle-bin') return { timestamp: 0, items: [] };
-  if (key === 'list:permanent-deletes') return { timestamp: 0, urls: [] };
-  if (key === 'index:parent-index') return { timestamp: 0, index: {} };
   return null;
 }
 
@@ -112,7 +139,8 @@ export async function effectOf(entry, load) {
  * scope: { key: entity | null } — null means entity doesn't exist.
  *
  * Rules for null entities:
- *   - atom keys: only page_checkpoint can create from null
+ *   - page keys: only page_checkpoint can create from null
+ *   - note keys: note action can create from null
  *   - all other keys: create from defaultEntity on first write
  * Returns new scope object with updated entities.
  */
@@ -120,65 +148,92 @@ export function applyTo(entry, scope) {
   const result = {};
   for (const [key, entity] of Object.entries(scope)) {
     if (entity === null) {
-      // Atom: only page_checkpoint can create from null
-      if (key.startsWith(ATOM_PREFIX)) {
+      // Page: only page_checkpoint can create from null
+      if (key.startsWith(PAGE_PREFIX)) {
         if (entry.action === 'page_checkpoint') {
-          result[key] = applyLogToAtom(defaultEntity(key), entry);
+          result[key] = applyLogToPage(defaultEntity(key), entry);
         } else {
           result[key] = null;
         }
         continue;
       }
-      // Non-atom: create default entity and apply
+      // Note: note action can create from null
+      if (key.startsWith(NOTE_PREFIX)) {
+        if (entry.action === 'note') {
+          result[key] = applyLogToNote(defaultEntity(key), entry);
+        } else {
+          result[key] = null;
+        }
+        continue;
+      }
+      // Non-page/note: create default entity and apply
       result[key] = applyEntry(key, defaultEntity(key), entry);
       continue;
     }
     result[key] = applyEntry(key, entity, entry);
   }
 
-  // Cross-entity: when page_checkpoint creates atom from null, absorb parent-index entries
+  // Cross-entity: when page_checkpoint creates page from null, absorb parent-index entries
   if (entry.action === 'page_checkpoint' && entry.url) {
     const slug = generateSlugFromUrl(entry.url);
-    const atomKey = `${ATOM_PREFIX}${slug}`;
-    const atom = result[atomKey];
-    const pIdx = result['index:parent-index'];
-    if (atom && pIdx && pIdx.index && pIdx.index[entry.url]) {
+    const pageKey = `${PAGE_PREFIX}${slug}`;
+    const page = result[pageKey];
+    const pIdx = result['list:index/parent'];
+    if (page && pIdx && pIdx.index && pIdx.index[entry.url]) {
       const parentSlugs = pIdx.index[entry.url];
       if (parentSlugs.length > 0) {
-        // Absorb into atom.parents (slugs)
-        const updated = { ...atom };
+        // Absorb into page.parents (as page:slug keys)
+        const updated = { ...page };
         const parents = [...(updated.parents || [])];
         for (const ps of parentSlugs) {
-          if (!parents.includes(ps)) parents.push(ps);
+          const parentKey = PAGE_PREFIX + ps;
+          if (!parents.includes(parentKey)) parents.push(parentKey);
         }
         updated.parents = parents;
-        result[atomKey] = updated;
+        result[pageKey] = updated;
         // Remove absorbed entry from parent-index
         const updatedIdx = { ...pIdx, index: { ...pIdx.index } };
         delete updatedIdx.index[entry.url];
-        result['index:parent-index'] = updatedIdx;
+        result['list:index/parent'] = updatedIdx;
       }
     }
   }
 
-  // Post-loop: prune parent-index entries for URLs whose atoms exist in scope
-  const pIdx = result['index:parent-index'];
+  // Cross-entity: when note action creates/updates a note, add to parent page's children
+  if (entry.action === 'note' && entry.slug) {
+    const noteKey = NOTE_PREFIX + entry.slug;
+    if (result[noteKey] && entry.parents) {
+      for (const parentKey of entry.parents) {
+        if (parentKey.startsWith(PAGE_PREFIX) && result[parentKey]) {
+          const parentPage = result[parentKey];
+          const children = [...(parentPage.children || [])];
+          if (!children.includes(noteKey)) {
+            children.push(noteKey);
+            result[parentKey] = { ...parentPage, children };
+          }
+        }
+      }
+    }
+  }
+
+  // Post-loop: prune parent-index entries for URLs whose pages exist in scope
+  const pIdx = result['list:index/parent'];
   if (pIdx && pIdx.index) {
     let pruned = false;
     const index = { ...pIdx.index };
     for (const url of Object.keys(index)) {
-      const atomKey = ATOM_PREFIX + generateSlugFromUrl(url);
-      if (result[atomKey] !== undefined && result[atomKey] !== null) {
+      const pageKey = PAGE_PREFIX + generateSlugFromUrl(url);
+      if (result[pageKey] !== undefined && result[pageKey] !== null) {
         delete index[url];
         pruned = true;
       }
     }
-    if (pruned) result['index:parent-index'] = { ...pIdx, index };
+    if (pruned) result['list:index/parent'] = { ...pIdx, index };
   }
 
-  // Post-loop: resolve URL references in parents/children to slugs when atom exists in scope
+  // Post-loop: resolve URL references in parents/children to page:slug keys when page exists in scope
   for (const [key, entity] of Object.entries(result)) {
-    if (!key.startsWith(ATOM_PREFIX) || !entity) continue;
+    if (!key.startsWith(PAGE_PREFIX) || !entity) continue;
     let updated = entity;
     for (const field of ['parents', 'children']) {
       if (!updated[field] || updated[field].length === 0) continue;
@@ -186,10 +241,10 @@ export function applyTo(entry, scope) {
       const resolved = updated[field].map(ref => {
         if (typeof ref !== 'string' || !ref.startsWith('http')) return ref;
         const refSlug = generateSlugFromUrl(ref);
-        const refKey = ATOM_PREFIX + refSlug;
+        const refKey = PAGE_PREFIX + refSlug;
         if (result[refKey] !== undefined && result[refKey] !== null) {
           changed = true;
-          return refSlug;
+          return refKey;
         }
         return ref;
       });
@@ -202,12 +257,13 @@ export function applyTo(entry, scope) {
 }
 
 function applyEntry(key, entity, entry) {
-  if (key.startsWith(ATOM_PREFIX)) return applyLogToAtom(entity, entry);
+  if (key.startsWith(PAGE_PREFIX)) return applyLogToPage(entity, entry);
+  if (key.startsWith(NOTE_PREFIX)) return applyLogToNote(entity, entry);
   if (key === 'settings') return applyLogToSettings(entity, entry);
-  if (key.startsWith('list:user/')) return applyLogToPins(entity, entry);
-  if (key === 'list:recycle-bin') return applyLogToRecycleBin(entity, entry);
-  if (key === 'list:permanent-deletes') return applyLogToDeletes(entity, entry);
-  if (key === 'index:parent-index') return applyLogToParentIndex(entity, entry);
+  if (key === 'list:system/recycle-bin') return applyLogToRecycleBin(entity, entry);
+  if (key === 'list:system/permanent-deletes') return applyLogToDeletes(entity, entry);
+  if (key === 'list:index/parent') return applyLogToParentIndex(entity, entry);
+  if (key.startsWith('list:')) return applyLogToPins(entity, entry);
   return entity;
 }
 
@@ -226,24 +282,21 @@ export function applyLogToSettings(settings, entry) {
 }
 
 /**
- * Apply a log entry to an atom.
+ * Apply a log entry to a page entity.
  * Handles:
- *   - page_checkpoint: create/update atom watermark
+ *   - page_checkpoint: create/update page watermark
  *   - page: unified visit + attention + capture (url, title, referrer, scrollDepth, timeOnPage, mdPath, htmlPath)
- *     - On parent atom (referrer slug match): accumulate child URL in children[]
- *   - highlight: push to highlights
- *   - unhighlight: remove by matchTimestamp
- *   - highlights_replace: replace highlights array
- * Returns new atom object (or original if entry is irrelevant).
+ *     - On parent page (referrer slug match): accumulate child URL in children[]
+ * Returns new page object (or original if entry is irrelevant).
  */
-export function applyLogToAtom(atom, entry) {
+export function applyLogToPage(page, entry) {
   // Derive slug from entry URL (slug field removed from log entries)
   const entrySlug = entry.url ? generateSlugFromUrl(entry.url) : null;
 
-  // page_checkpoint: passthrough that creates/updates atom watermark
+  // page_checkpoint: passthrough that creates/updates page watermark
   if (entry.action === 'page_checkpoint') {
-    if (entrySlug !== atom.slug && atom.slug !== undefined) return atom;
-    const updated = { ...atom };
+    if (entrySlug !== page.slug && page.slug !== undefined) return page;
+    const updated = { ...page };
     if (!updated.url && entry.url) updated.url = entry.url;
     if (!updated.title && entry.title) updated.title = entry.title;
     updated.timestamp = Math.max(updated.timestamp || 0, entry.timestamp);
@@ -252,14 +305,14 @@ export function applyLogToAtom(atom, entry) {
 
   // Unified page entry: visit + attention + capture
   if (entry.action === 'page') {
-    // Parent-side: if this page's referrer matches this atom, accumulate child URL
-    if (entry.referrer && atom.slug !== undefined) {
+    // Parent-side: if this page's referrer matches this page, accumulate child URL
+    if (entry.referrer && page.slug !== undefined) {
       const referrerSlug = generateSlugFromUrl(entry.referrer);
-      if (referrerSlug === atom.slug && entrySlug !== atom.slug) {
-        const updated = { ...atom };
+      if (referrerSlug === page.slug && entrySlug !== page.slug) {
+        const updated = { ...page };
         const children = [...(updated.children || [])];
-        const childSlug = entrySlug;
-        if (!children.some(c => typeof c === 'string' ? (c === entry.url || c === childSlug) : c.url === entry.url)) {
+        const childRef = entry.url;
+        if (!children.some(c => typeof c === 'string' ? (c === entry.url || c === entrySlug || c === PAGE_PREFIX + entrySlug) : c.url === entry.url)) {
           children.push(entry.url);
           if (children.length > REFERRER_CAP) children.shift();
         }
@@ -271,10 +324,10 @@ export function applyLogToAtom(atom, entry) {
 
     // Child-side slug check
     const matchSlug = entrySlug || entry.slug;
-    if (matchSlug !== atom.slug && atom.slug !== undefined) return atom;
+    if (matchSlug !== page.slug && page.slug !== undefined) return page;
 
-    const prevTimestamp = atom.timestamp || 0; // save before mutation for attention idempotency
-    const updated = { ...atom };
+    const prevTimestamp = page.timestamp || 0; // save before mutation for attention idempotency
+    const updated = { ...page };
 
     // Visit fields
     if (entry.url) updated.url = entry.url;
@@ -290,12 +343,13 @@ export function applyLogToAtom(atom, entry) {
       if (!updated.visitDates.includes(yyyymmdd)) updated.visitDates.push(yyyymmdd);
     }
 
-    // Parents from referrer
+    // Parents from referrer (store as page:slug keys)
     if (entry.referrer) {
       const parentSlug = generateSlugFromUrl(entry.referrer);
+      const parentKey = PAGE_PREFIX + parentSlug;
       const parents = [...(updated.parents || [])];
       const already = parents.some(p =>
-        typeof p === 'string' ? (p === entry.referrer || p === parentSlug) : p.url === entry.referrer
+        typeof p === 'string' ? (p === entry.referrer || p === parentSlug || p === parentKey) : p.url === entry.referrer
       );
       if (!already) {
         parents.push(entry.referrer);
@@ -327,58 +381,40 @@ export function applyLogToAtom(atom, entry) {
     return updated;
   }
 
-  if (entry.action === 'highlight') {
-    // Support both old logs (entry.slug) and new logs (derive from entry.url)
-    const matchSlug = entrySlug || entry.slug;
-    if (matchSlug !== atom.slug && atom.slug !== undefined) return atom;
-    const updated = { ...atom };
-    const hl = [...(updated.highlights || [])];
-    if (entry.highlight.isGlobalNote) {
-      const idx = hl.findIndex(h => h.isGlobalNote);
-      if (idx >= 0) hl[idx] = entry.highlight;
-      else hl.unshift(entry.highlight);
-    } else {
-      hl.push(entry.highlight);
-    }
-    updated.highlights = hl;
-    updated.timestamp = entry.timestamp;
-    return updated;
-  }
+  return page;
+}
 
-  if (entry.action === 'unhighlight') {
-    const matchSlug = entrySlug || entry.slug;
-    if (matchSlug !== atom.slug && atom.slug !== undefined) return atom;
-    const updated = { ...atom };
-    let hl = [...(updated.highlights || [])];
-    hl = hl.filter(h => h.timestamp !== entry.matchTimestamp);
-    updated.highlights = hl;
-    updated.timestamp = entry.timestamp;
-    return updated;
-  }
+/**
+ * Apply a log entry to a note entity.
+ * Handles:
+ *   - note: create/update note (quote, note text, cssPath, parents, children)
+ * Returns new note object (or original if entry is irrelevant).
+ */
+export function applyLogToNote(noteEntity, entry) {
+  if (entry.action !== 'note') return noteEntity;
+  if (entry.slug !== noteEntity.slug) return noteEntity;
 
-  if (entry.action === 'highlights_replace') {
-    const matchSlug = entrySlug || entry.slug;
-    if (matchSlug !== atom.slug && atom.slug !== undefined) return atom;
-    const updated = { ...atom };
-    updated.highlights = entry.highlights;
-    updated.timestamp = entry.timestamp;
-    return updated;
-  }
-
-  return atom;
+  const updated = { ...noteEntity };
+  if (entry.quote !== undefined) updated.quote = entry.quote;
+  if (entry.note !== undefined) updated.note = entry.note;
+  if (entry.cssPath !== undefined) updated.cssPath = entry.cssPath;
+  if (entry.parents !== undefined) updated.parents = entry.parents;
+  if (entry.children !== undefined) updated.children = entry.children;
+  updated.timestamp = entry.timestamp;
+  return updated;
 }
 
 /**
  * Apply a log entry to a list entity (self-describing file).
  * Entity: { timestamp, id, name, qbTrees, pins: [...] }
  * Handles:
- *   - list (id="user/{listId}", op=add/del/clear): granular pin operations (URLs only)
- *   - list_meta (id="user/{listId}"): list metadata (name, qbTrees)
- *   - del_list (id="user/{listId}"): mark entity as deleted
+ *   - list (id="{listId}", op=add/del/clear): granular pin operations (URLs only)
+ *   - list_meta (id="{listId}"): list metadata (name, qbTrees)
+ *   - del_list (id="{listId}"): mark entity as deleted
  * Returns new entity (or original if entry is irrelevant).
  */
 export function applyLogToPins(pinsEntity, entry) {
-  if (entry.action === 'list' && entry.id === `user/${pinsEntity.id}`) {
+  if (entry.action === 'list' && entry.id === pinsEntity.id) {
     const updated = { ...pinsEntity, timestamp: entry.timestamp };
     let pins = [...(pinsEntity.pins || [])];
 
@@ -398,13 +434,13 @@ export function applyLogToPins(pinsEntity, entry) {
 
     return updated;
   }
-  if (entry.action === 'list_meta' && entry.id === `user/${pinsEntity.id}`) {
+  if (entry.action === 'list_meta' && entry.id === pinsEntity.id) {
     const updated = { ...pinsEntity, timestamp: entry.timestamp };
     updated.name = entry.name;
     if (entry.qbTrees !== undefined) updated.qbTrees = entry.qbTrees;
     return updated;
   }
-  if (entry.action === 'del_list' && entry.id === `user/${pinsEntity.id}`) {
+  if (entry.action === 'del_list' && entry.id === pinsEntity.id) {
     return { timestamp: entry.timestamp, deleted: true };
   }
   return pinsEntity;
@@ -413,26 +449,26 @@ export function applyLogToPins(pinsEntity, entry) {
 /**
  * Apply a log entry to a recycle-bin entity.
  * Entity: { timestamp, items: [...] }
- * Entry: { timestamp, action: 'list', id: 'recycle-bin', op: 'add'|'del'|'clear', urls: [...] }
+ * Entry: { timestamp, action: 'list', id: 'system/recycle-bin', op: 'add'|'del'|'clear', keys: [...] }
  * Returns new entity (or original if entry is irrelevant).
  */
 export function applyLogToRecycleBin(recycleBinEntity, entry) {
-  if (entry.action !== 'list' || entry.id !== 'recycle-bin') return recycleBinEntity;
+  if (entry.action !== 'list' || entry.id !== 'system/recycle-bin') return recycleBinEntity;
 
   const updated = { timestamp: entry.timestamp };
   let items = [...(recycleBinEntity.items || [])];
 
   if (entry.op === 'clear') {
     updated.items = [];
-  } else if (entry.op === 'add' && entry.urls) {
-    for (const url of entry.urls) {
-      if (!items.some(item => item.url === url)) {
-        items.push({ url, title: 'Untitled', deletedAt: entry.timestamp });
+  } else if (entry.op === 'add' && entry.keys) {
+    for (const key of entry.keys) {
+      if (!items.some(item => item.key === key)) {
+        items.push({ key, title: 'Untitled', deletedAt: entry.timestamp });
       }
     }
     updated.items = items;
-  } else if (entry.op === 'del' && entry.urls) {
-    items = items.filter(item => !entry.urls.includes(item.url));
+  } else if (entry.op === 'del' && entry.keys) {
+    items = items.filter(item => !entry.keys.includes(item.key));
     updated.items = items;
   } else {
     updated.items = items;
@@ -462,30 +498,30 @@ export function applyLogToParentIndex(parentIndex, entry) {
 
 /**
  * Apply a log entry to a permanent-deletes entity.
- * Entity: { timestamp, urls: [...] }
- * Entry: { timestamp, action: 'list', id: 'permanent-deletes', op: 'add'|'del'|'clear', urls: [...] }
+ * Entity: { timestamp, keys: [...] }
+ * Entry: { timestamp, action: 'list', id: 'system/permanent-deletes', op: 'add'|'del'|'clear', keys: [...] }
  * Returns new entity (or original if entry is irrelevant).
  */
 export function applyLogToDeletes(deletesEntity, entry) {
-  if (entry.action !== 'list' || entry.id !== 'permanent-deletes') return deletesEntity;
+  if (entry.action !== 'list' || entry.id !== 'system/permanent-deletes') return deletesEntity;
 
   const updated = { timestamp: entry.timestamp };
-  let urls = [...(deletesEntity.urls || [])];
+  let keys = [...(deletesEntity.keys || [])];
 
   if (entry.op === 'clear') {
-    updated.urls = [];
-  } else if (entry.op === 'add' && entry.urls) {
-    for (const url of entry.urls) {
-      if (!urls.includes(url)) {
-        urls.push(url);
+    updated.keys = [];
+  } else if (entry.op === 'add' && entry.keys) {
+    for (const key of entry.keys) {
+      if (!keys.includes(key)) {
+        keys.push(key);
       }
     }
-    updated.urls = urls;
-  } else if (entry.op === 'del' && entry.urls) {
-    urls = urls.filter(u => !entry.urls.includes(u));
-    updated.urls = urls;
+    updated.keys = keys;
+  } else if (entry.op === 'del' && entry.keys) {
+    keys = keys.filter(k => !entry.keys.includes(k));
+    updated.keys = keys;
   } else {
-    updated.urls = urls;
+    updated.keys = keys;
   }
 
   return updated;

@@ -33,7 +33,7 @@ export async function saveSettingsValue(key, value) {
 }
 
 // Generic slug generation: normalize text + hash for uniqueness
-function generateSlug(text, hashInput) {
+export function generateSlug(text, hashInput) {
   if (!text || text.trim() === '') {
     text = 'untitled';
   }
@@ -75,4 +75,15 @@ export function generateSlugFromTitle(title) {
   // Hash title + timestamp for uniqueness
   const hashInput = title + Date.now();
   return generateSlug(title, hashInput);
+}
+
+// Generate deterministic slug for a note entity
+export function generateNoteSlug(timestamp, quote) {
+  const d = new Date(timestamp);
+  const yy = String(d.getFullYear()).slice(2);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const text = (Array.isArray(quote) ? quote.join(' ') : quote) || 'note';
+  const hashInput = text + String(timestamp);
+  return `${yy}${mm}${dd}-${generateSlug(text, hashInput)}`;
 }

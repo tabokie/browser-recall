@@ -214,7 +214,7 @@ function getCssPath(el) {
 }
 
 // Show overlay for global page note (no text selection required)
-function showGlobalNoteOverlay(existingNote) {
+function showGlobalNoteOverlay(existingNote, existingNoteSlug, pageSlug) {
   const existing = document.getElementById('portal-highlight-overlay');
   if (existing) existing.remove();
 
@@ -269,27 +269,28 @@ function showGlobalNoteOverlay(existingNote) {
 
   textarea.focus();
 
-  const slug = getSlugForCurrentPage();
-
   textarea.addEventListener('input', () => { autoResize(); });
 
   function close() {
     const note = textarea.value;
     if (note !== (existingNote || '')) {
-      chrome.runtime.sendMessage({ action: 'loadHighlights', slug }).then(resp => {
-        const highlights = resp?.highlights || [];
-        const h = highlights.find(h => h.isGlobalNote);
-        if (h) {
-          h.note = note;
-          chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
-        } else {
-          chrome.runtime.sendMessage({
-            action: 'saveHighlight',
-            slug,
-            highlight: { text: '', note, timestamp: Date.now(), isGlobalNote: true }
-          });
-        }
-      }).catch(() => {});
+      if (existingNoteSlug) {
+        // Update existing note
+        chrome.runtime.sendMessage({
+          action: 'updateNote',
+          noteSlug: existingNoteSlug,
+          note
+        }).catch(() => {});
+      } else {
+        // Create new global note (quote: null)
+        chrome.runtime.sendMessage({
+          action: 'createNote',
+          pageSlug,
+          quote: null,
+          note,
+          cssPath: null
+        }).catch(() => {});
+      }
     }
     host.remove();
   }
@@ -529,39 +530,44 @@ function attachMarkClickHandler(mark) {
     const existingOverlay = document.getElementById('portal-highlight-overlay');
     if (existingOverlay) existingOverlay.remove();
 
+    const noteSlug = mark.dataset.noteSlug;
     const text = mark.dataset.highlightText || mark.textContent;
-    const timestamp = mark.dataset.highlightTimestamp ? parseInt(mark.dataset.highlightTimestamp) : 0;
-    const slug = getSlugForCurrentPage();
+    const pageSlug = getSlugForCurrentPage();
 
-    chrome.runtime.sendMessage({ action: 'loadHighlights', slug }).then(resp => {
-      const highlights = resp?.highlights || [];
-      // Match by timestamp first (works for grouped array highlights), fall back to text
-      const match = highlights.find(h => h.timestamp === timestamp)
-        || highlights.find(h => h.text === text);
-      const displayText = match ? (Array.isArray(match.text) ? match.text.join(' ') : match.text) : text;
-      showHighlightEditOverlay(mark, displayText, timestamp, match?.note || '', slug);
+    if (!noteSlug) {
+      showHighlightEditOverlay(mark, text, null, '', pageSlug);
+      return;
+    }
+
+    chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: pageSlug }).then(resp => {
+      const notes = resp?.notes || [];
+      const match = notes.find(n => n.slug === noteSlug);
+      const displayText = match ? (Array.isArray(match.quote) ? match.quote.join(' ') : match.quote) : text;
+      showHighlightEditOverlay(mark, displayText, noteSlug, match?.note || '', pageSlug);
     }).catch(() => {
-      showHighlightEditOverlay(mark, text, timestamp, '', slug);
+      showHighlightEditOverlay(mark, text, noteSlug, '', pageSlug);
     });
   });
 }
 
-// Re-apply saved highlights on page load
+// Re-apply saved notes on page load
 async function reapplyHighlights() {
   const slug = getSlugForCurrentPage();
   if (slug === 'untitled') return;
 
   try {
-    const response = await chrome.runtime.sendMessage({ action: 'loadHighlights', slug });
-    if (!response || !response.success || !response.highlights) return;
+    const response = await chrome.runtime.sendMessage({ action: 'loadPageNotes', slug });
+    if (!response || !response.success || !response.notes) return;
 
-    for (const highlight of response.highlights) {
-      if (!highlight.text) continue;
+    for (const note of response.notes) {
+      if (note.quote === null) continue; // Skip global page notes
       // Normalize to array for Case 3 grouped highlights
-      const texts = Array.isArray(highlight.text) ? highlight.text : [highlight.text];
-      for (const text of texts) {
+      const quotes = Array.isArray(note.quote) ? note.quote : [note.quote];
+      for (const text of quotes) {
         const mark = highlightTextInPage(text);
-        if (mark) mark.dataset.highlightTimestamp = String(highlight.timestamp || '');
+        if (mark && note.slug) {
+          mark.dataset.noteSlug = note.slug;
+        }
       }
     }
   } catch (e) {
@@ -569,7 +575,7 @@ async function reapplyHighlights() {
   }
 }
 
-function showHighlightEditOverlay(mark, text, timestamp, existingNote, slug) {
+function showHighlightEditOverlay(mark, text, noteSlug, existingNote, pageSlug) {
   const existing = document.getElementById('portal-highlight-overlay');
   if (existing) existing.remove();
 
@@ -637,7 +643,7 @@ function showHighlightEditOverlay(mark, text, timestamp, existingNote, slug) {
       textarea:focus { outline: none; border-color: #4285f4; }
     </style>
     <div class="overlay">
-      <button class="delete-btn" title="Delete highlight">
+      <button class="delete-btn" title="Delete note">
         <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
       </button>
       <div style="flex:1;min-width:0">
@@ -668,30 +674,24 @@ function showHighlightEditOverlay(mark, text, timestamp, existingNote, slug) {
 
   function saveAndClose() {
     const note = textarea.value;
-    if (note !== existingNote) {
-      chrome.runtime.sendMessage({ action: 'loadHighlights', slug }).then(resp => {
-        const highlights = resp?.highlights || [];
-        const h = highlights.find(h => h.timestamp === timestamp)
-          || highlights.find(h => h.text === text);
-        if (h) {
-          h.note = note;
-          chrome.runtime.sendMessage({ action: 'saveHighlights', slug, highlights });
-        }
+    if (note !== existingNote && noteSlug) {
+      chrome.runtime.sendMessage({
+        action: 'updateNote',
+        noteSlug,
+        note
       }).catch(() => {});
     }
     host.remove();
   }
 
-  // Delete highlight
+  // Delete note
   deleteBtn.addEventListener('click', (ev) => {
     ev.stopPropagation();
-    // For grouped highlights (Case 3), unwrap all marks with same timestamp
-    if (timestamp) {
-      unwrapGroupedMarks(timestamp);
-    } else {
-      unwrapHighlightMark(mark);
+    // Unwrap mark from DOM
+    unwrapHighlightMark(mark);
+    if (noteSlug) {
+      chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug });
     }
-    chrome.runtime.sendMessage({ action: 'deleteHighlight', slug, text, timestamp });
     host.remove();
   });
 
@@ -869,56 +869,63 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // Store as array if multiple chunks, string if single
           const storedText = texts.length === 1 ? texts[0] : texts;
           chrome.runtime.sendMessage({
-            action: 'saveHighlight',
-            slug,
-            highlight: { text: storedText, note: '', timestamp, cssPath }
-          });
-
-          // Highlight each chunk scoped to its block element
-          const marks = [];
-          for (const { text, block } of chunkInfos) {
-            const m = highlightTextInBlock(block, text);
-            if (m) {
-              m.dataset.highlightTimestamp = String(timestamp);
-              marks.push(m);
+            action: 'createNote',
+            pageSlug: slug,
+            quote: storedText,
+            note: '',
+            cssPath
+          }).then(resp => {
+            const noteSlug = resp?.noteSlug;
+            // Highlight each chunk scoped to its block element
+            const marks = [];
+            for (const { text, block } of chunkInfos) {
+              const m = highlightTextInBlock(block, text);
+              if (m && noteSlug) {
+                m.dataset.noteSlug = noteSlug;
+                marks.push(m);
+              }
             }
-          }
-          if (marks.length > 0) {
-            showHighlightEditOverlay(marks[0], texts.join(' '), timestamp, '', slug);
-          }
+            if (marks.length > 0) {
+              showHighlightEditOverlay(marks[0], texts.join(' '), noteSlug, '', slug);
+            }
+          });
         }
       } else {
         // Case 1 & 2: same-block selection
-        console.log(`[content] Saving highlight: slug=${slug}, text="${selectedText.substring(0, 50)}"`);
+        console.log(`[content] Saving note: slug=${slug}, text="${selectedText.substring(0, 50)}"`);
         chrome.runtime.sendMessage({
-          action: 'saveHighlight',
-          slug,
-          highlight: { text: selectedText, note: '', timestamp, cssPath }
+          action: 'createNote',
+          pageSlug: slug,
+          quote: selectedText,
+          note: '',
+          cssPath
+        }).then(resp => {
+          const noteSlug = resp?.noteSlug;
+          // Try browser's selection range first, fall back to text search
+          let mark = wrapRangeWithMark(range, selectedText, timestamp);
+          if (mark) {
+            if (noteSlug) mark.dataset.noteSlug = noteSlug;
+            attachMarkClickHandler(mark);
+          } else {
+            mark = highlightTextInPage(selectedText);
+            if (mark && noteSlug) mark.dataset.noteSlug = noteSlug;
+          }
+          if (mark) {
+            showHighlightEditOverlay(mark, selectedText, noteSlug, '', slug);
+          }
         });
-
-        // Try browser's selection range first, fall back to text search
-        let mark = wrapRangeWithMark(range, selectedText, timestamp);
-        if (mark) {
-          attachMarkClickHandler(mark);
-        } else {
-          mark = highlightTextInPage(selectedText);
-          if (mark) mark.dataset.highlightTimestamp = String(timestamp);
-        }
-        if (mark) {
-          showHighlightEditOverlay(mark, selectedText, timestamp, '', slug);
-        }
       }
       sendResponse({ success: true });
     } else {
       // No selection — open global page note
       console.log('[content] No text selected, opening global note');
       const slug = getSlugForCurrentPage();
-      chrome.runtime.sendMessage({ action: 'loadHighlights', slug }).then(resp => {
-        const highlights = resp?.highlights || [];
-        const globalNote = highlights.find(h => h.isGlobalNote);
-        showGlobalNoteOverlay(globalNote?.note || '');
+      chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }).then(resp => {
+        const notes = resp?.notes || [];
+        const globalNote = notes.find(n => n.quote === null);
+        showGlobalNoteOverlay(globalNote?.note || '', globalNote?.slug || null, slug);
       }).catch(() => {
-        showGlobalNoteOverlay('');
+        showGlobalNoteOverlay('', null, slug);
       });
       sendResponse({ success: true });
     }

@@ -2,7 +2,7 @@
 import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue } from './utils.js';
 
 let currentSlug = '';
-let currentHighlights = [];
+let currentNotes = [];
 let currentInteraction = null;
 let currentUrl = '';
 let currentTitle = '';
@@ -108,62 +108,59 @@ function renderAttention(interaction) {
     : '<div class="empty-state">No data</div>';
 }
 
-// Render highlights section
-function renderHighlights(highlights) {
+// Render notes section
+function renderNotes(notes) {
   const container = document.getElementById('highlightList');
-  currentHighlights = highlights || [];
+  currentNotes = notes || [];
 
-  // Populate the dedicated page-note input from global note entry
+  // Populate the dedicated page-note input from global note entry (quote: null)
   const pageNoteEl = document.getElementById('pageNote');
-  const globalNote = currentHighlights.find(h => h.isGlobalNote);
+  const globalNote = currentNotes.find(n => n.quote === null);
   pageNoteEl.value = globalNote?.note || '';
+  pageNoteEl.dataset.noteSlug = globalNote?.slug || '';
 
-  // Only show non-global highlights in the list
-  const textHighlights = currentHighlights.filter(h => !h.isGlobalNote);
+  // Only show non-global notes in the list
+  const textNotes = currentNotes.filter(n => n.quote !== null);
 
-  if (textHighlights.length === 0) {
-    container.innerHTML = '<div class="empty-state">No highlights</div>';
+  if (textNotes.length === 0) {
+    container.innerHTML = '<div class="empty-state">No notes</div>';
     return;
   }
 
-  container.innerHTML = textHighlights.map(h => {
-    const i = currentHighlights.indexOf(h);
-    const displayText = Array.isArray(h.text) ? h.text.join(' ') : h.text;
+  container.innerHTML = textNotes.map((n, i) => {
+    const displayText = Array.isArray(n.quote) ? n.quote.join(' ') : n.quote;
     return `
-      <div class="highlight-item" data-index="${i}">
+      <div class="highlight-item" data-note-slug="${escapeHtml(n.slug)}">
         <div class="highlight-header">
           <div class="highlight-text">"${escapeHtml(displayText)}"</div>
-          <button class="highlight-delete" data-index="${i}" title="Delete">&times;</button>
+          <button class="highlight-delete" data-note-slug="${escapeHtml(n.slug)}" title="Delete">&times;</button>
         </div>
-        <textarea class="highlight-note" placeholder="Add a note..." data-index="${i}">${escapeHtml(h.note || '')}</textarea>
+        <textarea class="highlight-note" placeholder="Add a note..." data-note-slug="${escapeHtml(n.slug)}">${escapeHtml(n.note || '')}</textarea>
       </div>`;
   }).join('');
 
-  // Delete highlight
+  // Delete note
   container.querySelectorAll('.highlight-delete').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const idx = parseInt(btn.dataset.index, 10);
-      const h = currentHighlights[idx];
-      if (!h) return;
+      const noteSlug = btn.dataset.noteSlug;
+      if (!noteSlug) return;
 
       try {
         await chrome.runtime.sendMessage({
-          action: 'deleteHighlight',
-          slug: currentSlug,
-          text: h.text || '',
-          timestamp: h.timestamp || 0
+          action: 'deleteNote',
+          noteSlug
         });
         // Tell content script to remove the visual mark(s)
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tab?.id && h.text) {
-          chrome.tabs.sendMessage(tab.id, { action: 'removeHighlightMark', text: h.text, timestamp: h.timestamp }).catch(() => {});
+        if (tab?.id) {
+          chrome.tabs.sendMessage(tab.id, { action: 'removeHighlightMark', noteSlug }).catch(() => {});
         }
       } catch (e) {
-        console.error('[popup] Delete highlight error:', e);
+        console.error('[popup] Delete note error:', e);
       }
 
-      currentHighlights.splice(idx, 1);
-      renderHighlights(currentHighlights);
+      currentNotes = currentNotes.filter(n => n.slug !== noteSlug);
+      renderNotes(currentNotes);
     });
   });
 
@@ -172,25 +169,21 @@ function renderHighlights(highlights) {
   container.querySelectorAll('.highlight-note').forEach(textarea => {
     textarea.addEventListener('input', () => {
       autoResizeTextarea(textarea);
-      const idx = parseInt(textarea.dataset.index, 10);
-      currentHighlights[idx].note = textarea.value;
+      const noteSlug = textarea.dataset.noteSlug;
+      const note = currentNotes.find(n => n.slug === noteSlug);
+      if (note) note.note = textarea.value;
 
       clearTimeout(saveTimeout);
       saveTimeout = setTimeout(async () => {
-        console.log(`[popup] Saving ${currentHighlights.length} highlights for slug=${currentSlug}`);
+        console.log(`[popup] Saving note for slug=${noteSlug}`);
         try {
-          const resp = await chrome.runtime.sendMessage({
-            action: 'saveHighlights',
-            slug: currentSlug,
-            highlights: currentHighlights
+          await chrome.runtime.sendMessage({
+            action: 'updateNote',
+            noteSlug,
+            note: textarea.value
           });
-          if (resp && resp.success) {
-            console.log('[popup] Highlights saved successfully');
-          } else {
-            console.error('[popup] Highlight save failed:', resp);
-          }
         } catch (error) {
-          console.error('[popup] Highlight save error:', error);
+          console.error('[popup] Note save error:', error);
         }
       }, 500);
     });
@@ -199,23 +192,34 @@ function renderHighlights(highlights) {
 
 // Page-note auto-save (debounced)
 let pageNoteSaveTimeout = null;
+let currentGlobalNoteSlug = null;
 document.getElementById('pageNote').addEventListener('input', (e) => {
   autoResizeTextarea(e.target);
   clearTimeout(pageNoteSaveTimeout);
   pageNoteSaveTimeout = setTimeout(async () => {
     const note = document.getElementById('pageNote').value;
-    const globalIdx = currentHighlights.findIndex(h => h.isGlobalNote);
-    if (globalIdx !== -1) {
-      currentHighlights[globalIdx].note = note;
-    } else {
-      currentHighlights.push({ text: '', note, timestamp: Date.now(), isGlobalNote: true });
-    }
+    const noteSlug = document.getElementById('pageNote').dataset.noteSlug;
     try {
-      await chrome.runtime.sendMessage({
-        action: 'saveHighlights',
-        slug: currentSlug,
-        highlights: currentHighlights
-      });
+      if (noteSlug) {
+        // Update existing global note
+        await chrome.runtime.sendMessage({
+          action: 'updateNote',
+          noteSlug,
+          note
+        });
+      } else if (note) {
+        // Create new global note
+        const resp = await chrome.runtime.sendMessage({
+          action: 'createNote',
+          pageSlug: currentSlug,
+          quote: null,
+          note,
+          cssPath: null
+        });
+        if (resp?.noteSlug) {
+          document.getElementById('pageNote').dataset.noteSlug = resp.noteSlug;
+        }
+      }
     } catch (error) {
       console.error('[popup] Page note save error:', error);
     }
@@ -255,7 +259,7 @@ async function renderListChips() {
   const ranked = lists.map(list => {
     const pins = allPins[list.id] || [];
     const maxPinnedAt = pins.reduce((max, p) => Math.max(max, p.pinnedAt || 0), 0);
-    const lastActivity = maxPinnedAt || parseInt(list.id) || 0;
+    const lastActivity = maxPinnedAt || 0;
     return { list, lastActivity };
   });
   ranked.sort((a, b) => b.lastActivity - a.lastActivity);
@@ -440,7 +444,7 @@ async function createListAndPin(name) {
     pins: [{ url: currentUrl, title: currentTitle, pinnedAt: Date.now() }]
   });
 
-  console.log('[popup] Created list and pinned page:', query);
+  console.log('[popup] Created list and pinned page:', name);
 }
 
 // Workspace mode
@@ -676,8 +680,8 @@ async function showDashboard(tab) {
       }
       renderSnapshots(info.snapshots);
       renderAttention(info.interaction);
-      renderHighlights(info.highlights);
-      console.log(`[popup] Loaded ${info.highlights?.length || 0} highlights, ${info.snapshots?.length || 0} snapshots`);
+      renderNotes(info.notes);
+      console.log(`[popup] Loaded ${info.notes?.length || 0} notes, ${info.snapshots?.length || 0} snapshots`);
     } else {
       console.warn('[popup] getPageInfo returned failure:', info);
     }

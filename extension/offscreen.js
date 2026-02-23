@@ -10,6 +10,7 @@
 // and call its methods.
 import { FileSystemStorage } from './filesystem-storage.js';
 import { effectOf, defaultEntity } from './replay.js';
+import { generateNoteSlug } from './utils.js';
 
 console.log('Offscreen document loaded');
 
@@ -101,18 +102,18 @@ async function handleRequest(request) {
         return { success: true };
       }
 
-      case 'loadHighlights': {
+      case 'loadPageNotes': {
         const t0 = performance.now();
-        const highlights = await fsStorage.loadHighlights(request.slug);
-        console.debug(`[I/O] loadHighlights(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
-        return { success: true, highlights };
+        const notes = await fsStorage.loadPageNotes(request.slug);
+        console.debug(`[I/O] loadPageNotes(${request.slug}): ${notes.length} notes in ${(performance.now() - t0).toFixed(1)}ms`);
+        return { success: true, notes };
       }
 
-      case 'loadAllHighlights': {
+      case 'loadAllNotes': {
         const t0 = performance.now();
-        const highlightsMap = await fsStorage.loadAllHighlights();
-        console.debug(`[I/O] loadAllHighlights: ${Object.keys(highlightsMap).length} pages in ${(performance.now() - t0).toFixed(1)}ms`);
-        return { success: true, highlightsMap };
+        const notesMap = await fsStorage.loadAllNotes();
+        console.debug(`[I/O] loadAllNotes: ${Object.keys(notesMap).length} pages in ${(performance.now() - t0).toFixed(1)}ms`);
+        return { success: true, notesMap };
       }
 
       case 'loadInteractionByUrl': {
@@ -122,15 +123,15 @@ async function handleRequest(request) {
         return { success: true, interaction };
       }
 
-      case 'loadAtomBatch': {
+      case 'loadPageBatch': {
         const t0 = performance.now();
-        const atoms = await fsStorage.loadAtomBatch(request.slugs);
-        console.debug(`[I/O] loadAtomBatch: ${request.slugs.length} slugs in ${(performance.now() - t0).toFixed(1)}ms`);
-        return { success: true, atoms };
+        const pages = await fsStorage.loadPageBatch(request.slugs);
+        console.debug(`[I/O] loadPageBatch: ${request.slugs.length} slugs in ${(performance.now() - t0).toFixed(1)}ms`);
+        return { success: true, pages };
       }
 
-      case 'atomExists': {
-        const exists = await fsStorage.atomExists(request.slug);
+      case 'pageExists': {
+        const exists = await fsStorage.pageExists(request.slug);
         return { success: true, exists };
       }
 
@@ -215,17 +216,21 @@ async function handleRequest(request) {
         return { success: true, interactions };
       }
 
-      // List list file IDs from lists/user/
+      // List list file IDs from lists/ (excluding system/)
       case 'listListFiles': {
         const files = [];
         try {
-          const userDir = await fsStorage.resolveDir('lists/user');
-          for await (const entry of userDir.values()) {
+          const listsDir = await fsStorage.resolveDir('lists');
+          for await (const entry of listsDir.values()) {
             if (entry.kind === 'file' && entry.name.endsWith('.json')) {
-              files.push(entry.name.replace('.json', ''));
+              const id = entry.name.replace('.json', '');
+              // Skip system files
+              if (id !== 'explore' && id !== 'gateways' && !id.startsWith('system') && !id.startsWith('index')) {
+                files.push(id);
+              }
             }
           }
-        } catch { /* lists/user/ may not exist */ }
+        } catch { /* lists/ may not exist */ }
         return { success: true, files };
       }
 
@@ -329,7 +334,7 @@ async function drainQueue() {
     // Group entries by date for batch JSONL append
     const entriesByDate = new Map();
 
-    // ── Round cache: entity key → entity (or null for non-existent atoms) ──
+    // ── Round cache: entity key → entity (or null for non-existent pages/notes) ──
     // Populated lazily from filesystem on first access per key.
     // After processing all entries, dirty keys are flushed back to disk.
     const roundCache = new Map();   // key → entity | null
@@ -338,28 +343,40 @@ async function drainQueue() {
     // Load an entity into roundCache if not already present
     const ensureLoaded = async (key) => {
       if (roundCache.has(key)) return;
-      if (key.startsWith('atom:')) {
+      if (key.startsWith('page:')) {
         const slug = key.slice(5);
-        const exists = await fsStorage.atomExists(slug);
+        const exists = await fsStorage.pageExists(slug);
         if (exists) {
-          const atom = (await fsStorage.loadAtom(slug)) || defaultEntity(key);
-          if (!atom.slug) atom.slug = slug;
-          roundCache.set(key, atom);
+          const page = (await fsStorage.loadPage(slug)) || defaultEntity(key);
+          if (!page.slug) page.slug = slug;
+          roundCache.set(key, page);
         } else {
+          roundCache.set(key, null);
+        }
+      } else if (key.startsWith('note:')) {
+        const slug = key.slice(5);
+        try {
+          const note = await fsStorage.loadNote(slug);
+          if (note) {
+            roundCache.set(key, note);
+          } else {
+            roundCache.set(key, null);
+          }
+        } catch {
           roundCache.set(key, null);
         }
       } else if (key === 'settings') {
         let s = await fsStorage.loadSettings();
         if (!s.timestamp) s.timestamp = 0;
         roundCache.set(key, s);
-      } else if (key.startsWith('list:user/')) {
-        const cid = key.slice('list:user/'.length);
-        roundCache.set(key, await fsStorage.loadListPinsEntity(cid));
-      } else if (key === 'list:recycle-bin') {
+      } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
+        const listId = key.slice('list:'.length);
+        roundCache.set(key, await fsStorage.loadListPinsEntity(listId));
+      } else if (key === 'list:system/recycle-bin') {
         roundCache.set(key, await fsStorage.loadRecycleBinEntity());
-      } else if (key === 'list:permanent-deletes') {
+      } else if (key === 'list:system/permanent-deletes') {
         roundCache.set(key, await fsStorage.loadPermanentDeletesEntity());
-      } else if (key === 'index:parent-index') {
+      } else if (key === 'list:index/parent') {
         try {
           roundCache.set(key, await fsStorage.loadParentIndex());
         } catch {
@@ -421,24 +438,27 @@ async function drainQueue() {
       const entity = roundCache.get(key);
       if (entity === null) continue;
 
-      if (key.startsWith('atom:')) {
+      if (key.startsWith('page:')) {
         const slug = key.slice(5);
-        await withLock('atoms/' + slug + '.json', () => fsStorage.saveAtom(slug, entity));
+        await withLock('pages/' + slug + '.json', () => fsStorage.savePage(slug, entity));
+      } else if (key.startsWith('note:')) {
+        const slug = key.slice(5);
+        await withLock('notes/' + slug + '.json', () => fsStorage.saveNote(slug, entity));
       } else if (key === 'settings') {
         await withLock('settings.json', () => fsStorage.saveSettings(entity));
-      } else if (key.startsWith('list:user/')) {
-        const cid = key.slice('list:user/'.length);
-        await withLock('lists/user/' + cid + '.json', async () => {
-          if (entity.deleted) await fsStorage.deleteListFile(cid);
-          else await fsStorage.saveListMeta(cid, entity, entity.timestamp);
+      } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
+        const listId = key.slice('list:'.length);
+        await withLock('lists/' + listId + '.json', async () => {
+          if (entity.deleted) await fsStorage.deleteListFile(listId);
+          else await fsStorage.saveListMeta(listId, entity, entity.timestamp);
         });
-      } else if (key === 'list:recycle-bin') {
-        await withLock('lists/recycle-bin.json', () => fsStorage.saveRecycleBin(entity.items, entity.timestamp));
-      } else if (key === 'list:permanent-deletes') {
-        await withLock('lists/permanent-deletes.json', () => fsStorage.savePermanentDeletes(entity.urls, entity.timestamp));
-      } else if (key === 'index:parent-index') {
-        await withLock('lists/index/parent-index.json', async () => {
-          const fh = await fsStorage.resolveFile('lists/index/parent-index.json', { create: true });
+      } else if (key === 'list:system/recycle-bin') {
+        await withLock('lists/system/recycle-bin.json', () => fsStorage.saveRecycleBin(entity.items, entity.timestamp));
+      } else if (key === 'list:system/permanent-deletes') {
+        await withLock('lists/system/permanent-deletes.json', () => fsStorage.savePermanentDeletes(entity.keys, entity.timestamp));
+      } else if (key === 'list:index/parent') {
+        await withLock('lists/index/parent.json', async () => {
+          const fh = await fsStorage.resolveFile('lists/index/parent.json', { create: true });
           await fsStorage.writeJson(fh, entity);
         });
       }
