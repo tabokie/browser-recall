@@ -225,6 +225,27 @@ describe('applyLogToPage — title update from attention report', () => {
     page = applyLogToPage(page, attention);
     expect(page.title).toBe('Page Title');
   });
+
+  it('user_title is stored independently from title', () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    let page = { slug, timestamp: 0, url: '', title: '', parents: [], children: [] };
+    const visit = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'Auto Title' };
+    page = applyLogToPage(page, visit);
+
+    const userEdit = { timestamp: 200, action: 'page', url: 'https://a.com', user_title: 'My Custom Name' };
+    page = applyLogToPage(page, userEdit);
+    expect(page.title).toBe('Auto Title');
+    expect(page.user_title).toBe('My Custom Name');
+  });
+
+  it('title update does not overwrite user_title', () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    let page = { slug, timestamp: 0, url: '', title: '', user_title: 'Custom', parents: [], children: [] };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'New Auto Title' };
+    page = applyLogToPage(page, entry);
+    expect(page.title).toBe('New Auto Title');
+    expect(page.user_title).toBe('Custom');
+  });
 });
 
 // ---------------------------------------------------------------------------

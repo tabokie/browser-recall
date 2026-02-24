@@ -529,22 +529,12 @@ document.getElementById('triToggle').addEventListener('click', async (e) => {
 
   // Exiting private mode: record the current page visit and show details
   if (wasPrivate && newMode !== 'private' && currentTab) {
-    const slug = generateSlugFromUrl(currentTab.url);
-    const timestamp = Date.now();
     await chrome.runtime.sendMessage({
-      action: 'enqueueInteraction',
-      entry: {
-        interaction: {
-          timestamp,
-          url: currentTab.url,
-          title: currentTab.title || 'Untitled',
-          intent: '',
-          attention: '',
-          slug
-        },
-        markdown: '',
-        html: ''
-      }
+      action: 'reportPage',
+      url: currentTab.url,
+      title: currentTab.title || 'Untitled',
+      slug: generateSlugFromUrl(currentTab.url),
+      isInitialLoad: true
     });
     await showDashboard(currentTab);
   }
@@ -590,16 +580,16 @@ function startEditingTitle() {
     input.replaceWith(newTitleEl);
 
     if (newTitle !== currentTitle && currentInteraction) {
-      currentInteraction.title = newTitle;
-      currentInteraction.timestamp = Date.now();
+      currentInteraction.user_title = newTitle;
       try {
         await chrome.runtime.sendMessage({
-          action: 'enqueueInteraction',
-          entry: { interaction: currentInteraction, markdown: '', html: '' }
+          action: 'reportPage',
+          url: currentInteraction.url,
+          user_title: newTitle
         });
-        console.log('[popup] Title updated to:', newTitle);
+        console.log('[popup] User title updated to:', newTitle);
       } catch (error) {
-        console.error('[popup] Failed to save title:', error);
+        console.error('[popup] Failed to save user title:', error);
       }
     }
   }
@@ -674,8 +664,8 @@ async function showDashboard(tab) {
     if (info && info.success) {
       if (info.interaction) {
         currentInteraction = info.interaction;
-        // Use stored title if available
-        currentTitle = info.interaction.title || tab.title || 'Untitled';
+        // Use user_title if set, otherwise auto-detected title
+        currentTitle = info.interaction.user_title || info.interaction.title || tab.title || 'Untitled';
         document.getElementById('pageTitle').textContent = currentTitle;
       }
       renderSnapshots(info.snapshots);
@@ -704,45 +694,38 @@ async function showDashboard(tab) {
   });
 
   // Re-check tab title after 1s — some sites set a generic title initially
+  // Skip if user has set a custom title (user_title takes precedence)
   const initialTitle = tab.title || 'Untitled';
-  setTimeout(async () => {
-    try {
-      const [freshTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!freshTab || freshTab.id !== tab.id) return;
+  const hasUserTitle = currentInteraction?.user_title;
+  if (!hasUserTitle) {
+    setTimeout(async () => {
+      try {
+        const [freshTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!freshTab || freshTab.id !== tab.id) return;
 
-      const freshTitle = freshTab.title || 'Untitled';
-      if (freshTitle === initialTitle) return;
+        const freshTitle = freshTab.title || 'Untitled';
+        if (freshTitle === initialTitle) return;
 
-      // Only auto-update if the displayed title still matches the initial tab title
-      const titleEl = document.getElementById('pageTitle');
-      if (!titleEl || titleEl.textContent !== initialTitle) return;
+        // Only auto-update if the displayed title still matches the initial tab title
+        const titleEl = document.getElementById('pageTitle');
+        if (!titleEl || titleEl.textContent !== initialTitle) return;
 
-      titleEl.textContent = freshTitle;
+        titleEl.textContent = freshTitle;
 
-      // Load stored interaction to preserve existing fields, or build a fresh one
-      const resp = await chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url });
-      const interaction = (resp && resp.interaction) || {
-        url: tab.url,
-        intent: '',
-        attention: '',
-        slug: currentSlug
-      };
-      interaction.title = freshTitle;
-      interaction.timestamp = Date.now();
-
-      await chrome.runtime.sendMessage({
-        action: 'enqueueInteraction',
-        entry: { interaction, markdown: '', html: '' }
-      });
-      // Keep currentInteraction in sync if it exists
-      if (currentInteraction) {
-        currentInteraction.title = freshTitle;
+        await chrome.runtime.sendMessage({
+          action: 'reportPage',
+          url: tab.url,
+          title: freshTitle
+        });
+        if (currentInteraction) {
+          currentInteraction.title = freshTitle;
+        }
+        console.log('[popup] Auto-updated title to:', freshTitle);
+      } catch (error) {
+        console.warn('[popup] Title re-check failed:', error);
       }
-      console.log('[popup] Auto-updated title to:', freshTitle);
-    } catch (error) {
-      console.warn('[popup] Title re-check failed:', error);
-    }
-  }, 1000);
+    }, 1000);
+  }
 }
 
 // Initialize dashboard
@@ -799,20 +782,14 @@ async function showDashboard(tab) {
 
       try {
         const slug = generateSlugFromUrl(tab.url);
-        const timestamp = Date.now();
 
-        // Write interaction record
-        const interaction = {
-          timestamp,
+        // Record page visit
+        await chrome.runtime.sendMessage({
+          action: 'reportPage',
           url: tab.url,
           title: tab.title || 'Untitled',
-          intent: '',
-          attention: '',
-          slug
-        };
-        await chrome.runtime.sendMessage({
-          action: 'enqueueInteraction',
-          entry: { interaction, markdown: '', html: '' }
+          slug,
+          isInitialLoad: true
         });
 
         // Capture snapshot (content script extracts page, background forwards to offscreen)

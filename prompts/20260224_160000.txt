@@ -1,0 +1,29 @@
+- claude
+- There is a problem with title trimming. When attention is updated, the original title is also sent to background.rs untrimmed.
+- The two paths should be handled in one unified function, and we perform title trimming inside. The function is also responsible for comparing changes and sending only changes to backend. A UI event updates in-memory variables first, then it calls this function to aggregate changes of all variables.
+- Initially, there is an in-memory page entity with all fields == null. During the page loading (the old reportPageVisit), extra work is still needed but done outside, content.js should fill available information into these fields and call report.
+- I have question: is it possible to move the "extra work" to content.js?
+- Another question, does popup UI getting states from content.js or from background.js?
+- Fair enough. Then there is no need to maintain in-memory state in content.js. Content.js report() should send partial data to background.js, and background.js performs post-process and difference-check over that delta (i.e. trim delta.title if exists, compare delta.field_x against cache.field_x), if all checks pass, we apply that delta to cached state and append a delta log.
+
+To handle the "extra work", we let report() pass a boolean flag is_initial_load=true.
+- Two questions: (a) does title changes still monitored and triggered an event? (b) What do you mean by "If timeOnPage: drainNow()" and "Remove appendVisit()"?
+- > to flush the log buffer to disk on tab switch / page close
+
+This is not intuitive. We should explicitly set is_terminating=true in content.js calling report().
+
+> the next attention tick (or visibility hidden) would pick it up
+
+No, I want to (a) make sure attention tick is the same as the global auto save interval (I remember it is 5s), and (b) explicitly save title in MutationObserver in order to be responsive and be intentional.
+- Great. Do you have a better name to replace isTerminating?
+- Use it and implement
+- You added variable isFirstVisit, but I don't see it being used
+- We need to handle user edits of title differently: (a) add a new optional field to page entity `user_title`, (b) user edits of title goes in `user_title`, it is handled in parallel to `title`, they don't interfere with each other, (c) when rendering pages, we use user_title if available
+- How does popup communicate with background in the current implementation? Tell me messages and types
+- Yes, use reportPage, the rest of the plan looks good
+- Is enqueueInteraction dead code now?
+- Yes
+- Finish up
+- y
+- n
+- n

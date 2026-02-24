@@ -405,6 +405,69 @@ async function trimTitle(rawTitle, url) {
   return title.trim();
 }
 
+// ─── Page Report Processing ──────────────────────────────────────────
+
+/**
+ * Process a page report delta against cached state.
+ * Trims title, compares each field, returns only diffs.
+ *
+ * @param {Object} delta - { url, title?, slug?, referrer?, scrollDepth?, timeOnPage?, isInitialLoad?, isLeaving? }
+ * @returns {{ entry: Object|null }}
+ */
+async function processPageReport(delta) {
+  const url = delta.url;
+  const slug = delta.slug || generateSlugFromUrl(url);
+  const cached = await getCachedEntity('page:' + slug);
+
+  const entry = {
+    timestamp: Date.now(),
+    action: 'page',
+    url,
+  };
+  let hasChange = false;
+
+  // Title: trim then compare
+  if (delta.title != null) {
+    const trimmed = await trimTitle(delta.title, url);
+    if (!cached || cached.title !== trimmed) {
+      entry.title = trimmed;
+      hasChange = true;
+    }
+  }
+
+  // Referrer: include if absent or changed
+  if (delta.referrer != null) {
+    if (!cached || cached.referrer !== delta.referrer) {
+      entry.referrer = delta.referrer;
+      hasChange = true;
+    }
+  }
+
+  // scrollDepth: include if higher than cached
+  if (delta.scrollDepth != null) {
+    if (!cached || (cached.scrollDepth ?? -1) < delta.scrollDepth) {
+      entry.scrollDepth = delta.scrollDepth;
+      hasChange = true;
+    }
+  }
+
+  // timeOnPage: always include when > 0 (incremental delta)
+  if (delta.timeOnPage != null && delta.timeOnPage > 0) {
+    entry.timeOnPage = delta.timeOnPage;
+    hasChange = true;
+  }
+
+  // user_title: independent from auto-detected title
+  if (delta.user_title != null) {
+    if (!cached || cached.user_title !== delta.user_title) {
+      entry.user_title = delta.user_title;
+      hasChange = true;
+    }
+  }
+
+  return { entry: hasChange ? entry : null };
+}
+
 // ─── Gateway Domain Registry ──────────────────────────────────────────
 
 async function updateGatewayRegistry(url) {
@@ -698,7 +761,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'reportPageVisit': {
+        case 'reportPage': {
           try {
             const url = request.url;
 
@@ -712,164 +775,120 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const { urlBlacklist } = await chrome.storage.session.get(['urlBlacklist']);
             const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
             if (blacklist.some(prefix => url.startsWith(prefix))) {
-              const existing = await requestOffscreen({ action: 'loadInteractionByUrl', url });
-              if (!existing || !existing.interaction) {
-                console.log(`Skipping blacklisted URL (not in database): ${url}`);
+              if (request.isInitialLoad) {
+                const existing = await requestOffscreen({ action: 'loadInteractionByUrl', url });
+                if (!existing || !existing.interaction) {
+                  console.log(`Skipping blacklisted URL (not in database): ${url}`);
+                  sendResponse({ success: true });
+                  return;
+                }
+                console.log(`Blacklisted URL but already in database, continuing: ${url}`);
+              } else {
                 sendResponse({ success: true });
                 return;
               }
-              console.log(`Blacklisted URL but already in database, continuing: ${url}`);
             }
 
-            const timestamp = Date.now();
-            const title = await trimTitle(request.title, url);
-            const slug = request.slug;
-
-            const interaction = {
-              timestamp,
-              url,
-              title,
-              // intent removed: not very useful
-              // attention removed: logged separately via reportAttention action
-              slug
-            };
-            let referrer = request.referrer;
-            if (!referrer && sender.tab?.id != null) {
+            // Augment referrer from webNavigation fallback
+            const delta = { ...request };
+            delete delta.action;
+            delete delta.isInitialLoad;
+            delete delta.isLeaving;
+            if (!delta.referrer && request.isInitialLoad && sender.tab?.id != null) {
               const bgRef = getReferrer(sender.tab.id);
-              if (bgRef) referrer = bgRef;
-            }
-            if (referrer) interaction.referrer = referrer;
-
-            // Ensure checkpoints BEFORE appending the visit entry, so log
-            // order is deterministic: create_checkpoint precedes visit.
-            await ensureLogBuffer();
-            const todayStr = new Date().toISOString().slice(0, 10);
-
-            // Multi-day visit: if this URL was visited on a previous day,
-            // ensure it gets a checkpoint.
-            const key = 'page:' + slug;
-            const cachedPage = await getCachedEntity(key);
-            let isMultiDay = false;
-            if (cachedPage && cachedPage.visitDates) {
-              const todayYMD = (() => { const d = new Date(); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); })();
-              isMultiDay = cachedPage.visitDates.some(ymd => ymd !== todayYMD);
-            } else {
-              // Check logBuffer for a visit to same URL on a different date
-              isMultiDay = logBuffer.some(e => e.action === 'page' && e.url === url && dateKeyFromTimestamp(e.timestamp) !== todayStr);
-            }
-            if (isMultiDay) {
-              await ensureCheckpointIfMissing(slug, url, title);
+              if (bgRef) delta.referrer = bgRef;
             }
 
-            // Ensure parent checkpoint for referrer.
-            if (referrer) {
-              const refSlug = generateSlugFromUrl(referrer);
-              await ensureCheckpointIfMissing(refSlug, referrer, '');
-            }
+            // Diff against cached state — only log changed fields
+            const { entry } = await processPageReport(delta);
 
-            // appendVisit calls addLog which replays against session cache
-            await appendVisit(interaction);
+            if (entry) {
+              // First-visit extras: checkpoints before the visit entry
+              if (request.isInitialLoad) {
+                const slug = delta.slug || generateSlugFromUrl(url);
+                const title = entry.title || '';
+                await ensureLogBuffer();
 
-            // Update gateway domain registry (non-blocking)
-            updateGatewayRegistry(url);
+                // Multi-day visit checkpoint
+                const todayStr = new Date().toISOString().slice(0, 10);
+                const key = 'page:' + slug;
+                const cachedPage = await getCachedEntity(key);
+                let isMultiDay = false;
+                if (cachedPage && cachedPage.visitDates) {
+                  const todayYMD = (() => { const d = new Date(); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); })();
+                  isMultiDay = cachedPage.visitDates.some(ymd => ymd !== todayYMD);
+                } else {
+                  isMultiDay = logBuffer.some(e => e.action === 'page' && e.url === url && dateKeyFromTimestamp(e.timestamp) !== todayStr);
+                }
+                if (isMultiDay) {
+                  await ensureCheckpointIfMissing(slug, url, title);
+                }
 
-            // Workspace mode: auto-pin and optionally snapshot
-            const wsListIds = workspace?.listIds || [];
-            if (workspace && workspace.mode === 'workspace' && wsListIds.length > 0) {
-              try {
-                const pinsResp = await requestOffscreen({ action: 'loadListPins' });
-                const allPins = (pinsResp && pinsResp.pins) ? pinsResp.pins : {};
+                // Parent checkpoint for referrer
+                if (entry.referrer) {
+                  const refSlug = generateSlugFromUrl(entry.referrer);
+                  await ensureCheckpointIfMissing(refSlug, entry.referrer, '');
+                }
+              }
 
-                for (const listId of wsListIds) {
-                  if (!allPins[listId]) allPins[listId] = [];
-                  const already = allPins[listId].some(p => p.url === url);
-                  if (!already) {
-                    allPins[listId].push({ url, title: request.title || 'Untitled', pinnedAt: timestamp });
-                    await addLog({
-                      timestamp: Date.now(),
-                      action: 'list',
-                      id: `user/${listId}`,
-                      op: 'add',
-                      urls: [url]
-                    });
-                    console.log(`Workspace: auto-pinned ${url} to list ${listId}`);
+              await addLog(entry);
+
+              // First-visit extras: gateway + workspace
+              if (request.isInitialLoad) {
+                const slug = delta.slug || generateSlugFromUrl(url);
+                const title = entry.title || '';
+                const timestamp = entry.timestamp;
+
+                updateGatewayRegistry(url);
+
+                const wsListIds = workspace?.listIds || [];
+                if (workspace && workspace.mode === 'workspace' && wsListIds.length > 0) {
+                  try {
+                    const pinsResp = await requestOffscreen({ action: 'loadListPins' });
+                    const allPins = (pinsResp && pinsResp.pins) ? pinsResp.pins : {};
+
+                    for (const listId of wsListIds) {
+                      if (!allPins[listId]) allPins[listId] = [];
+                      const already = allPins[listId].some(p => p.url === url);
+                      if (!already) {
+                        allPins[listId].push({ url, title: title || 'Untitled', pinnedAt: timestamp });
+                        await addLog({
+                          timestamp: Date.now(),
+                          action: 'list',
+                          id: `user/${listId}`,
+                          op: 'add',
+                          urls: [url]
+                        });
+                        console.log(`Workspace: auto-pinned ${url} to list ${listId}`);
+                      }
+                    }
+
+                    if (workspace.autoSnapshot && sender.tab) {
+                      captureAndLog(sender.tab.id, slug, timestamp, url, title).catch(err => {
+                        console.warn('[auto-snapshot] ERROR:', err.message, err);
+                      });
+                    }
+                  } catch (err) {
+                    console.warn('Workspace: auto-pin/snapshot error:', err.message);
                   }
                 }
 
-                if (workspace.autoSnapshot && sender.tab) {
-                  captureAndLog(sender.tab.id, slug, timestamp, url, title).catch(err => {
-                    console.warn('[auto-snapshot] ERROR:', err.message, err);
-                  });
-                }
-              } catch (err) {
-                console.warn('Workspace: auto-pin/snapshot error:', err.message);
+                notifyMutation('interaction', { url });
               }
             }
 
-            console.log(`Processed page visit: ${url}`);
-            sendResponse({ success: true });
-            notifyMutation('interaction', { url });
-          } catch (error) {
-            console.error('Error processing reportPageVisit:', error);
-            sendResponse({ success: false, error: error.message });
-          }
-          break;
-        }
-
-        case 'reportAttention': {
-          try {
-            const url = request.url;
-
-            const { workspace } = await chrome.storage.session.get(['workspace']);
-            if (workspace && workspace.mode === 'private') {
-              sendResponse({ success: true });
-              return;
-            }
-
-            // Check blacklist
-            const { urlBlacklist } = await chrome.storage.session.get(['urlBlacklist']);
-            const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
-            if (blacklist.some(prefix => url.startsWith(prefix))) {
-              sendResponse({ success: true });
-              return;
-            }
-
-            const entry = {
-              timestamp: Date.now(),
-              action: 'page',
-              url,
-              scrollDepth: request.scrollDepth,
-              timeOnPage: request.timeOnPage
-            };
-            if (request.title) {
-              const slug = generateSlugFromUrl(url);
-              const cached = await getCachedEntity('page:' + slug);
-              if (!cached || cached.title !== request.title) {
-                entry.title = request.title;
-              }
-            }
-
-            await addLog(entry);
-            // timeOnPage signals tab switch / page close — flush to disk immediately
-            if (request.timeOnPage) drainNow();
-            console.log(`Logged attention report: ${url} (scroll=${request.scrollDepth}, time=${request.timeOnPage}ms)`);
+            // Explicit drain on page leave
+            if (request.isLeaving) drainNow();
+            console.log(`Processed page report: ${url} (initial=${!!request.isInitialLoad}, leaving=${!!request.isLeaving})`);
             sendResponse({ success: true });
           } catch (error) {
-            console.error('Error processing reportAttention:', error);
+            console.error('Error processing reportPage:', error);
             sendResponse({ success: false, error: error.message });
           }
           break;
         }
 
         // ── Queue Operations ──
-
-        case 'enqueueInteraction': {
-          // Legacy action: flatten interaction into a visit log entry
-          await appendVisit(request.entry.interaction);
-          sendResponse({ success: true });
-          notifyMutation('interaction', { url: request.entry?.interaction?.url });
-          break;
-        }
 
         case 'clearWriteQueue': {
           logBuffer = [];

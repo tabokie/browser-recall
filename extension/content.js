@@ -723,84 +723,74 @@ function unwrapHighlightMark(mark) {
   parent.normalize();
 }
 
-// ─── Page Visit Reporting ──────────────────────────────────────────────
-// Send initial visit immediately (so page appears in history).
-// Split reporting: immediate visit (no attention), periodic attention reports
+// ─── Page Reporting ───────────────────────────────────────────────────
+// Unified report(delta) sends partial updates to background's reportPage handler.
+// Background trims title, diffs against cache, and logs only changes.
 
-let visitReported = false;
-let currentTitle = document.title;
-const REPORT_INTERVAL = 3600000; // 1 hour
+const REPORT_INTERVAL = 5000; // 5s — matches background DRAIN_INTERVAL_MS
 
-function reportVisit() {
-  if (visitReported) return;
-  visitReported = true;
-
+function report(delta) {
   const url = window.location.href;
   if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return;
-
-  currentInteractionId = url;
-  const msg = {
-    action: 'reportPageVisit',
-    url,
-    title: currentTitle,
-    slug: getSlugForCurrentPage()
-  };
-  const ref = document.referrer;
-  if (ref) msg.referrer = ref;
-
-  chrome.runtime.sendMessage(msg).catch(() => {});
+  chrome.runtime.sendMessage({ action: 'reportPage', url, ...delta }).catch(() => {});
 }
 
 let reportTimer = null;
 
-function reportAttention() {
-  const url = window.location.href;
-  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return;
-
+function reportAttention(isLeaving) {
   const now = Date.now();
   const incrementalTime = now - lastReportTime;
   lastReportTime = now;
 
-  const msg = {
-    action: 'reportAttention',
-    url,
-    title: currentTitle,
+  const delta = {
+    title: document.title,
     scrollDepth: Math.round(maxScrollDepth),
-    timeOnPage: incrementalTime
+    timeOnPage: incrementalTime,
   };
+  if (isLeaving) delta.isLeaving = true;
 
-  chrome.runtime.sendMessage(msg).catch(() => {});
+  report(delta);
 
-  // Reschedule timer
+  // Reschedule timer (unless leaving)
   clearTimeout(reportTimer);
-  reportTimer = setTimeout(reportAttention, REPORT_INTERVAL);
+  if (!isLeaving) {
+    reportTimer = setTimeout(() => reportAttention(false), REPORT_INTERVAL);
+  }
 }
 
-// Send initial visit on page load
-reportVisit();
+// Initial visit report
+currentInteractionId = window.location.href;
+const initialDelta = {
+  title: document.title,
+  slug: getSlugForCurrentPage(),
+  isInitialLoad: true,
+};
+const ref = document.referrer;
+if (ref) initialDelta.referrer = ref;
+report(initialDelta);
 
-// Schedule first attention report
-reportTimer = setTimeout(reportAttention, REPORT_INTERVAL);
+// Schedule periodic attention reports
+reportTimer = setTimeout(() => reportAttention(false), REPORT_INTERVAL);
 
-// Track title changes locally (no re-report — final visit uses latest title)
+// Title changes: report immediately
 const titleEl = document.querySelector('title');
 if (titleEl) {
   new MutationObserver(() => {
-    currentTitle = document.title;
+    report({ title: document.title });
   }).observe(titleEl, {
     childList: true, characterData: true, subtree: true
   });
 }
 
-// Send final attention report on page close/freeze
+// Page leave: visibility hidden / freeze
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
-    reportAttention();
+    reportAttention(true);
   }
 });
 
 document.addEventListener('freeze', () => {
-  reportAttention();
+  reportAttention(true);
 });
 
 // ─── Capture notification bubble ──────────────────────────────────────
@@ -994,6 +984,6 @@ reapplyHighlights();
 
 // Before unload, send final attention report
 window.addEventListener('beforeunload', () => {
-  reportAttention();
+  reportAttention(true);
 });
 } // end initContentScript

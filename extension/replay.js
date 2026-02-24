@@ -332,6 +332,7 @@ export function applyLogToPage(page, entry) {
     // Visit fields
     if (entry.url) updated.url = entry.url;
     if (entry.title) updated.title = entry.title;
+    if (entry.user_title) updated.user_title = entry.user_title;
     updated.timestamp = entry.timestamp;
 
     // visitDates (only when url present = visit entry)

@@ -53,13 +53,13 @@ Background handles ALL actions in its `onMessage` listener (line ~646).
 Offscreen is port-only — responds via `chrome.runtime.connect({ name: 'bg-offscreen' })`.
 
 ### background.js handles ALL actions (line ~646):
-**Tab-dependent:** `getPageInfo`, `captureCurrentPageFromPopup`, `hydrateCache`, `reportPageVisit`
+**Tab-dependent:** `getPageInfo`, `captureCurrentPageFromPopup`, `hydrateCache`, `reportPage`
 **Pure reads (relay to offscreen via port, cache pages):** `loadSettings`, `loadInteractionByUrl`, `loadPageBatch`, `loadPageDetail`, `loadPageNotes`, `loadAllNotes`, `loadListPins`, `loadListPinsById`, `loadPermanentDeletes`, `loadGateways`, `listSnapshots`, `getDirectoryInfo`, `getSnapshotUrl`, `listInteractionFiles`, `loadInteractionBatch`
 **Hydration-aware reads (await hydrationDone, then session cache):** `getLists`, `getRecycleBin`
 **Page relations:** `getPageRelations` (returns parents {referrers (URLs resolved from page.parents slugs + parentIndex fallback), lists} + children (URLs resolved from page.children slugs))
 **Writes (all via `addLog` — append + effectOf session replay):** `saveSettings`, `saveSettingsKey`, `createNote`, `deleteNote`, `updateNote`, `saveListPinsById`, `saveListMeta`, `deleteList`, `saveRecycleBin`, `savePermanentDeletes`
 **Pass-through (complex FS ops via port):** `saveListPins` (orphan cleanup), `deleteSnapshot`, `initializeFilesystem`
-**Buffer management:** `enqueueInteraction`, `clearWriteQueue`, `flushLogBuffer`
+**Buffer management:** `clearWriteQueue`, `flushLogBuffer`
 
 ### offscreen.js handles via port (line ~68):
 Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllListMetadata` + `loadRecycleBin` + `pageExists` + `listListFiles` + `saveJson` (direct saves) + `loadParentIndex` + log buffer drain via port `drainEntries` messages (appends to history JSONL + checkpoints entities via replay.js, handles list_meta/del_list/recycle_replace, checkpoints parent-index, piggybacks gateway saves)
@@ -76,8 +76,8 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 ## Feature → Code Map
 
 ### Page Visit Tracking (Event-Sourced)
-- **Entry**: `content.js` — sends `reportPageVisit` to background: initial visit on page load (title, referrer), final visit with accumulated attention on `visibilitychange` hidden / `freeze` / `beforeunload`; title changes tracked locally (no re-report)
-- **Background handler**: `background.js` `reportPageVisit` — checks private mode, blacklist, trims title, calls `appendVisit()` + referrer tracking + gateway update + workspace auto-pin/snapshot
+- **Entry**: `content.js` — unified `report(delta)` sends `reportPage` to background; initial load (title, slug, referrer, `isInitialLoad`), periodic attention (title, scrollDepth, timeOnPage every 5s), title-only on mutation, `isLeaving` on visibility hidden / freeze / beforeunload
+- **Background handler**: `background.js` `reportPage` → `processPageReport(delta)` trims title, diffs all fields against cached entity, logs only changes; `isInitialLoad` triggers referrer tracking + checkpoints + gateway update + workspace auto-pin/snapshot; `isLeaving` triggers `drainNow()`
 - **Blacklist check**: skips URLs matching `urlBlacklist` prefixes (unless already in DB)
 - **Title trimming**: applies `titleTrimRules` (remove_after_pipe, remove_brackets, remove_parens)
 - **Log buffer**: background holds `logBuffer` array (lazy-loaded from `chrome.storage.local['logBuffer']` via `ensureLogBuffer()`); all mutations via `addLog(entry)` which appends to buffer AND replays against session cache via `effectOf(entry, sessionLoad)` + `sessionWrite(effects)` — serialized via `withLock('logBuffer')`
@@ -167,7 +167,7 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 ### Workspace / Private Mode
 - **State**: `settings.json` key `workspace` `{mode: 'default'|'workspace'|'private', listIds, autoSnapshot}`; cached in chrome.storage.session
 - **Popup UI**: three-way toggle (Workspace / default / Private), list chips, auto-snapshot checkbox (no ignore-gateways)
-- **Private mode guards**: content.js (init gate skips all tracking), background.js (reportPageVisit handler, commands), popup.js (toggle-only view)
+- **Private mode guards**: content.js (init gate skips all tracking), background.js (reportPage handler, commands), popup.js (toggle-only view)
 - **Auto-pin**: on page visit, auto-pins to workspace lists (mode=workspace only)
 - **Auto-snapshot**: if workspace.autoSnapshot, captures snapshot on visit
 

@@ -259,10 +259,14 @@ async function initHistoryFiles() {
     const existing = historyByUrl.get(entry.url);
     if (!existing || entry.timestamp > existing.timestamp) {
       historyByUrl.set(entry.url, entry);
-      // Preserve title from older entry if new one lacks it
+      // Preserve title/user_title from older entry if new one lacks it
       if (existing && existing.title && !entry.title) entry.title = existing.title;
+      if (existing && existing.user_title && !entry.user_title) entry.user_title = existing.user_title;
     } else if (entry.title && !existing.title) {
       existing.title = entry.title;
+    }
+    if (entry.user_title && (!existing || !existing.user_title)) {
+      if (existing) existing.user_title = entry.user_title;
     }
     historyAllEntries.push(entry);
   }
@@ -285,8 +289,13 @@ async function loadHistoryBatch() {
       historyAllEntries.push(item);
       if (!historyByUrl.has(item.url)) {
         historyByUrl.set(item.url, item);
-      } else if (item.title && !historyByUrl.get(item.url).title) {
-        historyByUrl.get(item.url).title = item.title;
+      } else {
+        if (item.title && !historyByUrl.get(item.url).title) {
+          historyByUrl.get(item.url).title = item.title;
+        }
+        if (item.user_title && !historyByUrl.get(item.url).user_title) {
+          historyByUrl.get(item.url).user_title = item.user_title;
+        }
       }
       newItems.push(item);
     }
@@ -525,8 +534,8 @@ function applySortOrder(items, sortState) {
     let av, bv;
     switch (column) {
       case 'title':
-        av = (a.title || '').toLowerCase();
-        bv = (b.title || '').toLowerCase();
+        av = (a.user_title || a.title || '').toLowerCase();
+        bv = (b.user_title || b.title || '').toLowerCase();
         return dir * av.localeCompare(bv);
       case 'lastVisit':
         av = Math.max(...(a.timestamps || [a.latestTs || 0]));
@@ -900,7 +909,7 @@ function matchKeyword(item, field, value) {
   if (!value) return false;
   const { q, exact } = parseKeywordQuery(value);
   const fields = normalizeFieldToArray(field);
-  if (fields.includes('title') && textMatches(item.title, q, exact)) return true;
+  if (fields.includes('title') && (textMatches(item.user_title, q, exact) || textMatches(item.title, q, exact))) return true;
   if (fields.includes('url') && textMatches(item.url, q, exact)) return true;
   if (fields.includes('captures')) {
     const trimmed = value.trim();
@@ -963,7 +972,7 @@ function keywordRelevance(item, field, value) {
   const { q, exact } = parseKeywordQuery(value);
   const fields = normalizeFieldToArray(field);
   let score = 0;
-  if (fields.includes('title') && textMatches(item.title, q, exact)) score += 2.0;
+  if (fields.includes('title') && (textMatches(item.user_title, q, exact) || textMatches(item.title, q, exact))) score += 2.0;
   if (fields.includes('url') && textMatches(item.url, q, exact)) score += 1.0;
   if (fields.includes('captures')) {
     const trimmed = value.trim();
@@ -1126,7 +1135,7 @@ function enrichSingle(item, notesMap) {
   const notes = (slug && notesMap && notesMap[slug]) || [];
   const attParsed = parseAttention(item);
   return {
-    url: item.url, title: item.title, slug, timestamps: [item.timestamp],
+    url: item.url, title: item.title, user_title: item.user_title, slug, timestamps: [item.timestamp],
     attScore: attParsed ? attentionStrength(attParsed) : 0, attDetail: attParsed,
     notes,
     visitCount: 1,
@@ -1194,7 +1203,7 @@ async function runQuery() {
   const vs = getOrCreateGlobalScroller();
   vs._headerHtml = columnHeaderHtml('global', { hasDelete: true, hasPin: false, showRelevance: hasKeywords });
   vs.setData(normalized, (r) =>
-    resultRowHtml(r.title, r.url, {
+    resultRowHtml(r.user_title || r.title, r.url, {
       deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'global', relevance: r.relevance
     })
@@ -1255,7 +1264,7 @@ function runListExploreQuery(matched) {
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = columnHeaderHtml('related', { hasDelete: true, hasPin: true, showRelevance: hasKeywords });
   vs.setData(normalized, (r) =>
-    resultRowHtml(r.title, r.url, {
+    resultRowHtml(r.user_title || r.title, r.url, {
       pinned: isResultPinned(listId, r.url),
       deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'related', relevance: r.relevance,
@@ -1704,12 +1713,14 @@ async function showExplore() {
       const attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
       const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
       const pin = pins.find(p => p.url === r.url);
-      return {
+      const enriched = {
         ...r, slug, attScore, attDetail: attParsed,
         notes: source.notes || r.notes || [],
         timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
         pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
       };
+      if (source.user_title) enriched.user_title = source.user_title;
+      return enriched;
     }
 
     const fullPinned = pins.map(enrichResult);
@@ -1775,12 +1786,14 @@ async function refreshExplorePins() {
       const attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
       const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
       const pin = pins.find(p => p.url === r.url);
-      return {
+      const enriched = {
         ...r, slug, attScore, attDetail: attParsed,
         notes: source.notes || r.notes || [],
         timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
         pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
       };
+      if (source.user_title) enriched.user_title = source.user_title;
+      return enriched;
     }
     const fullPinned = pins.map(enrichResult);
     renderPinnedSection(fullPinned, listId);
@@ -1869,12 +1882,14 @@ async function showList(list) {
       }
       const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
       const pin = pins.find(p => p.url === r.url);
-      return {
+      const enriched = {
         ...r, slug, attScore, attDetail: attParsed,
         notes: source.notes || r.notes || [],
         timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
         pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
       };
+      if (source.user_title) enriched.user_title = source.user_title;
+      return enriched;
     }
 
     // --- Pinned+Related section: cache in session or async fetch ---
@@ -1992,7 +2007,7 @@ function renderPinnedSection(allPinned, listId) {
     pinnedSection.style.display = '';
     let html = columnHeaderHtml('pinned', { hasDelete: true, hasPin: true });
     html += sortedPinned.map(r =>
-      resultRowHtml(r.title, r.url, { pinned: true, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, notes: r.notes, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt })
+      resultRowHtml(r.user_title || r.title, r.url, { pinned: true, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, notes: r.notes, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt })
     ).join('');
     pinnedContainer.innerHTML = html;
     bindColumnHeaderClicks(pinnedContainer);
@@ -2063,6 +2078,7 @@ function processInteractionsForDisplay(interactions, { globalDedup = false } = {
     results.push({
       url: item.url,
       title: item.title || historyByUrl.get(item.url)?.title || '',
+      user_title: item.user_title || historyByUrl.get(item.url)?.user_title,
       slug: item.slug || '',
       timestamp: item.timestamp,
       day,
@@ -2091,8 +2107,9 @@ async function displayInteractionRows(interactions) {
       const pageResp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs });
       const pages = pageResp?.pages || {};
       for (const entry of entries) {
-        if (entry.slug && pages[entry.slug]?.title) {
-          entry.title = pages[entry.slug].title;
+        if (entry.slug && pages[entry.slug]) {
+          if (pages[entry.slug].title) entry.title = pages[entry.slug].title;
+          if (pages[entry.slug].user_title) entry.user_title = pages[entry.slug].user_title;
         }
       }
     } catch {}
@@ -2107,7 +2124,7 @@ async function displayInteractionRows(interactions) {
   const vs = getOrCreateGlobalScroller();
   vs._headerHtml = columnHeaderHtml('global', { hasDelete: deletable, hasPin: false });
   vs.setData(sorted, (e) =>
-    resultRowHtml(e.title, e.url, { deletable, attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global' })
+    resultRowHtml(e.user_title || e.title, e.url, { deletable, attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global' })
   );
 }
 
@@ -3492,9 +3509,13 @@ chrome.runtime.onMessage.addListener((request) => {
         if (!existing || entry.timestamp > existing.timestamp) {
           historyByUrl.set(entry.url, entry);
           if (existing && existing.title && !entry.title) entry.title = existing.title;
+          if (existing && existing.user_title && !entry.user_title) entry.user_title = existing.user_title;
           changed = true;
         } else if (entry.title && !existing.title) {
           existing.title = entry.title;
+        }
+        if (entry.user_title && (!existing || !existing.user_title)) {
+          if (existing) existing.user_title = entry.user_title;
         }
         // Always push to allEntries for date-boundary rendering
         historyAllEntries.push(entry);
@@ -3943,7 +3964,7 @@ async function runExploreBlockQuery() {
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = columnHeaderHtml('related', { hasDelete: true, hasPin: true, showRelevance: false });
   vs.updateData(sorted, (r) =>
-    resultRowHtml(r.title, r.url, {
+    resultRowHtml(r.user_title || r.title, r.url, {
       pinned: isResultPinned(listId, r.url),
       deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'related',
@@ -4034,7 +4055,7 @@ async function openListFocusPanel(listId, listName) {
     } else {
       const maxAtt = 0.1;
       html += pins.map(p =>
-        resultRowHtml(p.title || 'Untitled', p.url, {
+        resultRowHtml(p.user_title || p.title || 'Untitled', p.url, {
           deletable: false, attScore: 0, maxAtt, timestamps: [p.pinnedAt || Date.now()], context: 'global', noFocusButton: true
         })
       ).join('');
@@ -4056,7 +4077,7 @@ function renderFocusWaterfall(content, url, title, parents, children, similar) {
 
   function makeCard(cardUrl, cardTitle, opts = {}) {
     const hist = historyByUrl.get(cardUrl);
-    let resolvedTitle = cardTitle || (hist ? hist.title : null);
+    let resolvedTitle = cardTitle || (hist ? (hist.user_title || hist.title) : null);
     if (!resolvedTitle) {
       try { resolvedTitle = new URL(cardUrl).hostname + new URL(cardUrl).pathname; } catch { resolvedTitle = cardUrl; }
     }

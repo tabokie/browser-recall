@@ -25,7 +25,7 @@ describe('referrer tracking via webNavigation', () => {
     expect(bgSource).toMatch(/chrome\.webNavigation\.onCommitted\.addListener/);
   });
 
-  it('background.js uses tabReferrers for fallback in reportPageVisit', () => {
+  it('background.js uses tabReferrers for fallback in reportPage', () => {
     expect(bgSource).toMatch(/tabReferrers/);
   });
 });
