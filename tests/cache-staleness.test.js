@@ -60,9 +60,9 @@ const FILE1_INTERACTIONS = makeFileInteractions(FILE1_DATE, 0, 20, 'Today');
 const FILE2_INTERACTIONS = makeFileInteractions(FILE2_DATE, 20, 20, 'Yesterday');
 const FILE3_INTERACTIONS = makeFileInteractions(FILE3_DATE, 40, 20, 'OldDay');
 
-const TEST_LIST = { id: 'col-rust', query: 'rust', name: 'Rust Lang' };
+const TEST_LIST = { slug: 'col-rust', query: 'rust', name: 'Rust Lang' };
 // List with no query — only pinned pages, pins on same domain as history
-const TEST_LIST_NOQUERY = { id: 'col-noq', query: '', name: 'No Query List' };
+const TEST_LIST_NOQUERY = { slug: 'col-noq', query: '', name: 'No Query List' };
 
 const TEST_LIST_PINS = {
   'col-rust': [
@@ -85,7 +85,7 @@ const TEST_LIST_PINS = {
 const TEST_LISTS = [TEST_LIST, TEST_LIST_NOQUERY];
 
 const TEST_SETTINGS = {
-  listOrder: ['col-rust', 'col-noq'],
+  listOrder: ['list:col-rust', 'list:col-noq'],
   settings: { captureContent: true, captureAttention: true, archiveQuality: 'medium' },
   urlBlacklist: [],
   titleTrimRules: [],
@@ -566,7 +566,7 @@ describe('Cache staleness', () => {
     // Add a list with pins on buffered.com (same domain as logBuffer entries)
     sessionData.lists = [
       ...TEST_LISTS,
-      { id: 'col-buf', query: '', name: 'Buffered' },
+      { slug: 'col-buf', query: '', name: 'Buffered' },
     ];
     actionOverrides['loadListPinsById'] = (msg) => {
       if (msg.listId === 'col-buf') {
@@ -688,7 +688,7 @@ describe('Cache staleness', () => {
     // Override session cache with modified list
     sessionData.lists = [
       TEST_LIST,
-      { id: 'col-noq', query: 'example', name: 'Example List' },
+      { slug: 'col-noq', query: 'example', name: 'Example List' },
     ];
 
     mockSearchBatchFn.mockImplementation(async () => {
@@ -729,7 +729,7 @@ describe('Cache staleness', () => {
     ];
 
     sessionData.lists = [
-      { id: 'col-today', query: 'today', name: 'Today Search' },
+      { slug: 'col-today', query: 'today', name: 'Today Search' },
     ];
     actionOverrides['loadListPinsById'] = actionOverrides['loadListPins'] = (msg) => {
       if (msg.listId === 'col-today') {

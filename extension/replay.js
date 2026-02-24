@@ -112,8 +112,8 @@ export function defaultEntity(key) {
   if (key === 'list:system/permanent-deletes') return { timestamp: 0, keys: [] };
   if (key === 'list:index/parent') return { timestamp: 0, index: {} };
   if (key.startsWith('list:')) {
-    const id = key.slice('list:'.length);
-    return { timestamp: 0, id, name: '', qbTrees: [], pins: [] };
+    const slug = key.slice('list:'.length);
+    return { timestamp: 0, slug, name: '', qbTrees: [], pins: [] };
   }
   return null;
 }
@@ -418,7 +418,7 @@ export function applyLogToNote(noteEntity, entry) {
  * Returns new entity (or original if entry is irrelevant).
  */
 export function applyLogToPins(pinsEntity, entry) {
-  if (entry.action === 'list' && entry.id === pinsEntity.id) {
+  if (entry.action === 'list' && entry.id === pinsEntity.slug) {
     const updated = { ...pinsEntity, timestamp: entry.timestamp };
     let pins = [...(pinsEntity.pins || [])];
 
@@ -438,13 +438,13 @@ export function applyLogToPins(pinsEntity, entry) {
 
     return updated;
   }
-  if (entry.action === 'list_meta' && entry.id === pinsEntity.id) {
+  if (entry.action === 'list_meta' && entry.id === pinsEntity.slug) {
     const updated = { ...pinsEntity, timestamp: entry.timestamp };
     updated.name = entry.name;
     if (entry.qbTrees !== undefined) updated.qbTrees = entry.qbTrees;
     return updated;
   }
-  if (entry.action === 'del_list' && entry.id === pinsEntity.id) {
+  if (entry.action === 'del_list' && entry.id === pinsEntity.slug) {
     return { timestamp: entry.timestamp, deleted: true };
   }
   return pinsEntity;

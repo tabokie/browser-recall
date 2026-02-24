@@ -410,7 +410,7 @@ describe('applyLogToPage — capture (via page)', () => {
 
 describe('applyLogToPins — list operations', () => {
   it('adds pins and preserves metadata', () => {
-    const entity = { timestamp: 0, id: 'uuid-1', name: 'Rust', qbTrees: [], pins: [{ url: 'https://old.com', title: 'Old', pinnedAt: 50 }] };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Rust', qbTrees: [], pins: [{ url: 'https://old.com', title: 'Old', pinnedAt: 50 }] };
     const entry = { timestamp: 100, action: 'list', id: 'uuid-1', op: 'add', urls: ['https://new.com'] };
     const result = applyLogToPins(entity, entry);
     expect(result.pins).toHaveLength(2);
@@ -419,11 +419,11 @@ describe('applyLogToPins — list operations', () => {
     expect(result.pins[1].pinnedAt).toBe(100);
     expect(result.timestamp).toBe(100);
     expect(result.name).toBe('Rust');
-    expect(result.id).toBe('uuid-1');
+    expect(result.slug).toBe('uuid-1');
   });
 
   it('removes pins', () => {
-    const entity = { timestamp: 0, id: 'c1', pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 50 }, { url: 'https://b.com', title: 'B', pinnedAt: 60 }] };
+    const entity = { timestamp: 0, slug: 'c1', pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 50 }, { url: 'https://b.com', title: 'B', pinnedAt: 60 }] };
     const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'del', urls: ['https://a.com'] };
     const result = applyLogToPins(entity, entry);
     expect(result.pins).toHaveLength(1);
@@ -431,7 +431,7 @@ describe('applyLogToPins — list operations', () => {
   });
 
   it('clears pins', () => {
-    const entity = { timestamp: 0, id: 'c1', pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 50 }] };
+    const entity = { timestamp: 0, slug: 'c1', pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 50 }] };
     const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'clear', urls: [] };
     const result = applyLogToPins(entity, entry);
     expect(result.pins).toEqual([]);
@@ -439,21 +439,21 @@ describe('applyLogToPins — list operations', () => {
   });
 
   it('ignores irrelevant entries', () => {
-    const entity = { timestamp: 0, id: 'c1', pins: [] };
+    const entity = { timestamp: 0, slug: 'c1', pins: [] };
     const entry = { timestamp: 100, action: 'set', key: 'workspace', value: {} };
     const result = applyLogToPins(entity, entry);
     expect(result).toBe(entity);
   });
 
   it('ignores wrong id', () => {
-    const entity = { timestamp: 0, id: 'c1', pins: [] };
+    const entity = { timestamp: 0, slug: 'c1', pins: [] };
     const entry = { timestamp: 100, action: 'list', id: 'c2', op: 'add', urls: ['https://a.com'] };
     const result = applyLogToPins(entity, entry);
     expect(result).toBe(entity);
   });
 
   it('is idempotent for add', () => {
-    const entity = { timestamp: 0, id: 'c1', pins: [] };
+    const entity = { timestamp: 0, slug: 'c1', pins: [] };
     const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'add', urls: ['https://a.com'] };
     const r1 = applyLogToPins(entity, entry);
     const r2 = applyLogToPins(r1, entry);
@@ -463,17 +463,17 @@ describe('applyLogToPins — list operations', () => {
 
 describe('applyLogToPins — list_meta', () => {
   it('merges metadata fields and preserves pins', () => {
-    const entity = { timestamp: 0, id: 'uuid-1', name: 'Old Name', qbTrees: [], pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 50 }] };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Old Name', qbTrees: [], pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 50 }] };
     const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', name: 'New Name' };
     const result = applyLogToPins(entity, entry);
     expect(result.name).toBe('New Name');
-    expect(result.id).toBe('uuid-1');
+    expect(result.slug).toBe('uuid-1');
     expect(result.pins).toEqual(entity.pins);
     expect(result.timestamp).toBe(100);
   });
 
   it('sets qbTrees', () => {
-    const entity = { timestamp: 0, id: 'uuid-1', name: 'Test', qbTrees: [], pins: [] };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Test', qbTrees: [], pins: [] };
     const tree = { type: 'AND', children: [{ type: 'keyword', value: 'rust' }] };
     const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', name: 'Test', qbTrees: [tree] };
     const result = applyLogToPins(entity, entry);
@@ -481,14 +481,14 @@ describe('applyLogToPins — list_meta', () => {
   });
 
   it('ignores wrong id', () => {
-    const entity = { timestamp: 0, id: 'c1', name: 'Test', qbTrees: [], pins: [] };
+    const entity = { timestamp: 0, slug: 'c1', name: 'Test', qbTrees: [], pins: [] };
     const entry = { timestamp: 100, action: 'list_meta', id: 'c2', name: 'Updated' };
     const result = applyLogToPins(entity, entry);
     expect(result).toBe(entity);
   });
 
   it('is idempotent', () => {
-    const entity = { timestamp: 0, id: 'uuid-1', name: 'Test', qbTrees: [], pins: [] };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Test', qbTrees: [], pins: [] };
     const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', name: 'Updated' };
     const r1 = applyLogToPins(entity, entry);
     const r2 = applyLogToPins(r1, entry);
@@ -498,7 +498,7 @@ describe('applyLogToPins — list_meta', () => {
 
 describe('applyLogToPins — del_list', () => {
   it('returns deleted entity', () => {
-    const entity = { timestamp: 0, id: 'uuid-1', name: 'Rust', pins: [{ url: 'https://a.com' }] };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Rust', pins: [{ url: 'https://a.com' }] };
     const entry = { timestamp: 100, action: 'del_list', id: 'uuid-1' };
     const result = applyLogToPins(entity, entry);
     expect(result.deleted).toBe(true);
@@ -506,7 +506,7 @@ describe('applyLogToPins — del_list', () => {
   });
 
   it('is idempotent', () => {
-    const entity = { timestamp: 0, id: 'c1', pins: [] };
+    const entity = { timestamp: 0, slug: 'c1', pins: [] };
     const entry = { timestamp: 100, action: 'del_list', id: 'c1' };
     const r1 = applyLogToPins(entity, entry);
     const r2 = applyLogToPins(r1, entry);
@@ -956,7 +956,7 @@ describe('defaultEntity', () => {
 
   it('returns list default with id', () => {
     const e = defaultEntity('list:uuid-1');
-    expect(e).toEqual({ timestamp: 0, id: 'uuid-1', name: '', qbTrees: [], pins: [] });
+    expect(e).toEqual({ timestamp: 0, slug: 'uuid-1', name: '', qbTrees: [], pins: [] });
   });
 
   it('returns recycle-bin default', () => {
@@ -1075,7 +1075,7 @@ describe('applyTo', () => {
 
   it('applies list entry to list entity', () => {
     const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'add', urls: ['https://a.com'] };
-    const scope = { 'list:c1': { timestamp: 0, id: 'c1', name: 'Test', qbTrees: [], pins: [] } };
+    const scope = { 'list:c1': { timestamp: 0, slug: 'c1', name: 'Test', qbTrees: [], pins: [] } };
     const result = applyTo(entry, scope);
     expect(result['list:c1'].pins).toHaveLength(1);
     expect(result['list:c1'].pins[0].url).toBe('https://a.com');
@@ -1086,7 +1086,7 @@ describe('applyTo', () => {
     const scope = { 'list:c1': null };
     const result = applyTo(entry, scope);
     expect(result['list:c1'].pins).toHaveLength(1);
-    expect(result['list:c1'].id).toBe('c1');
+    expect(result['list:c1'].slug).toBe('c1');
   });
 
   it('applies list entry to recycle-bin', () => {

@@ -186,8 +186,8 @@ describe('Persistence round-trip', () => {
 
   it('saveSettings → loadSettings round-trips correctly', async () => {
     const data = {
-      workspace: { mode: 'workspace', listIds: ['c1'], autoSnapshot: true },
-      listOrder: ['c1'],
+      workspace: { mode: 'workspace', listIds: ['list:c1'], autoSnapshot: true },
+      listOrder: ['list:c1'],
       urlBlacklist: ['chrome://', 'edge://'],
       titleTrimRules: [{ urlPrefix: 'https://github.com', action: 'remove_after_pipe' }],
       permanentDeletes: ['https://gone.com'],
@@ -234,8 +234,8 @@ describe('Persistence round-trip', () => {
 
   describe('simulated extension reload', () => {
     const initialSettings = {
-      workspace: { mode: 'workspace', listIds: ['c1', 'c2'], autoSnapshot: true },
-      listOrder: ['c1', 'c2'],
+      workspace: { mode: 'workspace', listIds: ['list:c1', 'list:c2'], autoSnapshot: true },
+      listOrder: ['list:c1', 'list:c2'],
       urlBlacklist: ['chrome://', 'edge://', 'https://private.example.com/'],
       titleTrimRules: [
         { urlPrefix: 'https://github.com', action: 'remove_after_pipe' },
@@ -247,8 +247,8 @@ describe('Persistence round-trip', () => {
 
     // List metadata in self-describing files
     const listMeta = [
-      { id: 'c1', name: 'AI', qbTrees: [] },
-      { id: 'c2', name: 'Rust Lang', qbTrees: [] },
+      { slug: 'c1', name: 'AI', qbTrees: [], pins: [] },
+      { slug: 'c2', name: 'Rust Lang', qbTrees: [], pins: [] },
     ];
 
     // Recycle bin in its own file
@@ -260,7 +260,7 @@ describe('Persistence round-trip', () => {
       // 1. Persist settings + list files + recycle bin
       await fs.saveSettings(initialSettings);
       for (const col of listMeta) {
-        await fs.saveListMeta(col.id, col);
+        await fs.saveListMeta(col.slug, col);
       }
       await fs.saveRecycleBin(recycleBinItems);
 
@@ -287,7 +287,7 @@ describe('Persistence round-trip', () => {
     it('individual cache keys match after reload', async () => {
       await fs.saveSettings(initialSettings);
       for (const col of listMeta) {
-        await fs.saveListMeta(col.id, col);
+        await fs.saveListMeta(col.slug, col);
       }
       await fs.saveRecycleBin(recycleBinItems);
       await hydrateCache(fs, chromeStorage);
@@ -493,11 +493,11 @@ describe('Persistence round-trip', () => {
 
   it('list files are separate from settings', async () => {
     // Save list with metadata + pins
-    await fs.saveListMeta('c1', { id: 'c1', name: 'Test', qbTrees: [] });
+    await fs.saveListMeta('c1', { slug: 'c1', name: 'Test', qbTrees: [] });
     await fs.saveListPinsById('c1', [{ url: 'https://a.com', title: 'A', pinnedAt: 100 }]);
 
     // Save settings
-    await fs.saveSettings({ listOrder: ['c1'] });
+    await fs.saveSettings({ listOrder: ['list:c1'] });
 
     // Both round-trip independently
     const loadedPins = await fs.loadListPinsById('c1');
@@ -505,8 +505,8 @@ describe('Persistence round-trip', () => {
     const meta = await fs.loadAllListMetadata();
 
     expect(loadedPins).toEqual([{ url: 'https://a.com', title: 'A', pinnedAt: 100 }]);
-    expect(loadedSettings.listOrder).toEqual(['c1']);
-    expect(meta).toEqual([{ id: 'c1', name: 'Test', qbTrees: [] }]);
+    expect(loadedSettings.listOrder).toEqual(['list:c1']);
+    expect(meta).toEqual([{ slug: 'c1', name: 'Test', qbTrees: [], pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 100 }] }]);
   });
 
   // ---- Per-list pin isolation (regression: lazy pins + bulk save deleted other files) ----

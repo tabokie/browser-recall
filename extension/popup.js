@@ -233,17 +233,13 @@ async function loadLists() {
 
 async function loadListPins() {
   try {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadListPins' });
-    return (resp && resp.success) ? (resp.pins || {}) : {};
+    const { lists = [] } = await chrome.storage.session.get(['lists']);
+    const allPins = {};
+    for (const list of lists) {
+      if (list.pins && list.pins.length > 0) allPins[list.slug] = list.pins;
+    }
+    return allPins;
   } catch { return {}; }
-}
-
-async function saveListPins(allPins) {
-  try {
-    await chrome.runtime.sendMessage({ action: 'saveListPins', pins: allPins });
-  } catch (error) {
-    console.error('[popup] Failed to save list pins:', error);
-  }
 }
 
 function isPagePinned(allPins, listId, url) {
@@ -257,7 +253,7 @@ async function renderListChips() {
 
   // Compute lastActivity for each list and sort by most recent
   const ranked = lists.map(list => {
-    const pins = allPins[list.id] || [];
+    const pins = allPins[list.slug] || [];
     const maxPinnedAt = pins.reduce((max, p) => Math.max(max, p.pinnedAt || 0), 0);
     const lastActivity = maxPinnedAt || 0;
     return { list, lastActivity };
@@ -266,8 +262,8 @@ async function renderListChips() {
   const topLists = ranked.slice(0, 5);
 
   let html = topLists.map(({ list }) => {
-    const pinned = isPagePinned(allPins, list.id, currentUrl);
-    return `<span class="list-chip${pinned ? ' selected' : ''}" data-list-id="${list.id}">
+    const pinned = isPagePinned(allPins, list.slug, currentUrl);
+    return `<span class="list-chip${pinned ? ' selected' : ''}" data-list-id="${list.slug}">
       <span class="list-chip-check">${pinned ? '&#10003;' : ''}</span>
       ${escapeHtml(list.name)}
     </span>`;
@@ -294,18 +290,7 @@ async function renderListChips() {
 }
 
 async function toggleListPin(listId) {
-  const freshPins = await loadListPins();
-  if (!freshPins[listId]) freshPins[listId] = [];
-  const pins = freshPins[listId];
-  const idx = pins.findIndex(p => p.url === currentUrl);
-
-  if (idx !== -1) {
-    pins.splice(idx, 1);
-  } else {
-    pins.push({ url: currentUrl, title: currentTitle, pinnedAt: Date.now() });
-  }
-
-  await saveListPins(freshPins);
+  await chrome.runtime.sendMessage({ action: 'toggleListPin', listId, url: currentUrl, title: currentTitle });
 }
 
 function closeListPicker() {
@@ -348,8 +333,8 @@ function openListPicker(lists, allPins) {
       : lists;
 
     let rowsHtml = filtered.map(c => {
-      const pinned = isPagePinned(allPins, c.id, currentUrl);
-      return `<div class="list-picker-row${pinned ? ' selected' : ''}" data-list-id="${c.id}">
+      const pinned = isPagePinned(allPins, c.slug, currentUrl);
+      return `<div class="list-picker-row${pinned ? ' selected' : ''}" data-list-id="${c.slug}">
         <span class="list-picker-row-check">${pinned ? '&#10003;' : ''}</span>
         <span>${escapeHtml(c.name)}</span>
       </div>`;
@@ -410,7 +395,7 @@ function openListPicker(lists, allPins) {
         (c.name).toLowerCase() === inputVal.toLowerCase()
       );
       if (exactMatch) {
-        await toggleListPin(exactMatch.id);
+        await toggleListPin(exactMatch.slug);
         closeListPicker();
         renderListChips();
       } else {
@@ -436,7 +421,7 @@ async function createListAndPin(name) {
   const listId = generateSlugFromTitle(name);
   await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name });
   const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
-  await saveSettingsValue('listOrder', [...order, listId]);
+  await saveSettingsValue('listOrder', [...order, 'list:' + listId]);
 
   await chrome.runtime.sendMessage({
     action: 'saveListPinsById',
@@ -489,19 +474,20 @@ async function renderWorkspaceBar() {
     listsContainer.innerHTML = '<span class="workspace-empty">No lists yet. Create one in Notes section.</span>';
   } else {
     listsContainer.innerHTML = lists.map(list => {
-      const selected = workspace.listIds.includes(list.id);
-      return `<span class="ws-list-chip${selected ? ' selected' : ''}" data-list-id="${list.id}">${escapeHtml(list.name)}</span>`;
+      const selected = workspace.listIds.includes('list:' + list.slug);
+      return `<span class="ws-list-chip${selected ? ' selected' : ''}" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
     }).join('');
 
     listsContainer.querySelectorAll('.ws-list-chip').forEach(chip => {
       chip.addEventListener('click', async () => {
-        const listId = chip.dataset.listId;
+        const slug = chip.dataset.listId;
+        const listKey = 'list:' + slug;
         const ws = await loadWorkspace();
-        const idx = ws.listIds.indexOf(listId);
+        const idx = ws.listIds.indexOf(listKey);
         if (idx !== -1) {
           ws.listIds.splice(idx, 1);
         } else {
-          ws.listIds.push(listId);
+          ws.listIds.push(listKey);
         }
         await saveWorkspace(ws);
         renderWorkspaceBar();

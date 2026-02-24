@@ -55,7 +55,7 @@ let bufferContentMap = {}; // slug → markdown from write buffer (small, kept i
 const EXPLORE_LIST_ID = 'explore';
 // List results and page data are cached in chrome.storage.session
 // (managed by background for pages, by options for list results).
-// Keys: 'page:{slug}' for pages, 'listCache:{id}' for list results.
+// Keys: 'page:{slug}' for pages, 'listCache:{slug}' for list results.
 let listCacheKeys = []; // tracks which listCache:* keys exist in session
 
 // --- Query builder state ---
@@ -747,7 +747,7 @@ function refreshCurrentView() {
   if (activeView.type === 'category') {
     showCategory(activeView.value);
   } else if (activeView.type === 'list') {
-    showList({ id: activeView.id, qbTrees: activeView.qbTrees, name: activeView.name });
+    showList({ slug: activeView.id, qbTrees: activeView.qbTrees, name: activeView.name });
   } else if (activeView.type === 'explore') {
     showExplore();
   }
@@ -1829,7 +1829,7 @@ async function refreshExplorePins() {
 
 async function showList(list) {
   const displayName = listDisplayName(list);
-  activeView = { type: 'list', id: list.id, qbTrees: list.qbTrees || [], name: list.name || null };
+  activeView = { type: 'list', id: list.slug, qbTrees: list.qbTrees || [], name: list.name || null };
   updateSidebarActive();
   updateMainTitle(displayName);
   document.getElementById('pinSearchBtn').style.display = 'none';
@@ -1840,7 +1840,7 @@ async function showList(list) {
     titleEl.ondblclick = () => {
       enterTitleEditMode(currentName, async (newName) => {
         list.name = newName;
-        await chrome.runtime.sendMessage({ action: 'saveListMeta', listId: list.id, name: newName });
+        await chrome.runtime.sendMessage({ action: 'saveListMeta', listId: list.slug, name: newName });
         await renderLists();
         activeView.name = newName;
         updateMainTitle(newName);
@@ -1856,7 +1856,7 @@ async function showList(list) {
   renderListSkeleton();
 
   try {
-    const listId = list.id;
+    const listId = list.slug;
 
     // Lazy-load pins for this list
     if (!allListPins[listId]) {
@@ -2028,7 +2028,7 @@ function renderPinnedSection(allPinned, listId) {
 // recalculateRelatedResults removed — pinned section no longer has related pages
 
 async function renderListExplore(list) {
-  const listId = list.id;
+  const listId = list.slug;
   const pins = allListPins[listId] || [];
 
   // Load history for block evaluation
@@ -2270,7 +2270,7 @@ async function loadExtraDetail(url) {
   const lists = await loadLists();
   const belongedLists = [];
   for (const lst of lists) {
-    const pins = allListPins[lst.id] || [];
+    const pins = allListPins[lst.slug] || [];
     if (pins.some(p => p.url === url)) {
       belongedLists.push(listDisplayName(lst));
     }
@@ -2740,7 +2740,7 @@ async function renderLists() {
   for (const lst of allLists) {
     const item = document.createElement('div');
     item.className = 'sidebar-item';
-    item.dataset.listId = lst.id;
+    item.dataset.listId = lst.slug;
     item.innerHTML = `
       <span class="icon"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg></span>
       <span class="label">${escapeHtml(listDisplayName(lst))}</span>
@@ -2749,7 +2749,7 @@ async function renderLists() {
 
     item.draggable = true;
     item.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('application/x-list-reorder', lst.id);
+      e.dataTransfer.setData('application/x-list-reorder', lst.slug);
       e.dataTransfer.effectAllowed = 'move';
       item.classList.add('dragging');
     });
@@ -2767,13 +2767,13 @@ async function renderLists() {
 
     item.querySelector('.remove-list').addEventListener('click', async (e) => {
       e.stopPropagation();
-      await chrome.runtime.sendMessage({ action: 'deleteList', listId: lst.id });
+      await chrome.runtime.sendMessage({ action: 'deleteList', listId: lst.slug });
       // Clean up local state
-      delete allListPins[lst.id];
-      chrome.storage.session.remove('listCache:' + lst.id);
-      listCacheKeys = listCacheKeys.filter(id => id !== lst.id);
+      delete allListPins[lst.slug];
+      chrome.storage.session.remove('listCache:' + lst.slug);
+      listCacheKeys = listCacheKeys.filter(id => id !== lst.slug);
       renderLists();
-      if (activeView.type === 'list' && activeView.id === lst.id) {
+      if (activeView.type === 'list' && activeView.id === lst.slug) {
         showExplore();
       }
     });
@@ -2822,16 +2822,16 @@ async function renderLists() {
       if (e.dataTransfer.types.includes('application/x-list-reorder')) {
         // --- Reorder ---
         const draggedId = e.dataTransfer.getData('application/x-list-reorder');
-        if (draggedId === lst.id) return;
+        if (draggedId === lst.slug) return;
         const allItems = await loadLists();
-        const fromIdx = allItems.findIndex(c => c.id === draggedId);
+        const fromIdx = allItems.findIndex(c => c.slug === draggedId);
         if (fromIdx === -1) return;
         const [moved] = allItems.splice(fromIdx, 1);
-        let toIdx = allItems.findIndex(c => c.id === lst.id);
+        let toIdx = allItems.findIndex(c => c.slug === lst.slug);
         const rect = item.getBoundingClientRect();
         if (e.clientY >= rect.top + rect.height / 2) toIdx++;
         allItems.splice(toIdx, 0, moved);
-        await saveSettingsValue('listOrder', allItems.map(c => c.id));
+        await saveSettingsValue('listOrder', allItems.map(c => 'list:' + c.slug));
         await renderLists();
       } else {
         // --- Pin drop (existing logic) ---
@@ -2839,8 +2839,8 @@ async function renderLists() {
         try {
           const data = JSON.parse(e.dataTransfer.getData('text/plain'));
           const items = data.items || [{ url: data.url, title: data.title }];
-          if (!allListPins[lst.id]) allListPins[lst.id] = [];
-          const pins = allListPins[lst.id];
+          if (!allListPins[lst.slug]) allListPins[lst.slug] = [];
+          const pins = allListPins[lst.slug];
           let added = 0;
           for (const { url, title } of items) {
             if (url && !pins.some(p => p.url === url)) {
@@ -2849,8 +2849,8 @@ async function renderLists() {
             }
           }
           if (added > 0) {
-            await saveListPinsById(lst.id);
-            if (activeView.type === 'list' && activeView.id === lst.id) {
+            await saveListPinsById(lst.slug);
+            if (activeView.type === 'list' && activeView.id === lst.slug) {
               showList(lst);
             }
           }
@@ -2878,10 +2878,10 @@ async function saveExploreAsList() {
   enterTitleEditMode('', async (name) => {
     if (!name) return;
     const listId = generateSlugFromTitle(name);
-    const newList = { id: listId, name, qbTrees };
+    const newList = { slug: listId, name, qbTrees };
     await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, qbTrees });
     const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
-    await saveSettingsValue('listOrder', [...order, listId]);
+    await saveSettingsValue('listOrder', [...order, 'list:' + listId]);
     // Copy explore pins to the new list (if any)
     if (pins.length > 0) {
       await chrome.runtime.sendMessage({

@@ -193,8 +193,8 @@ async function sessionLoad(key) {
   if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
     const listId = key.slice('list:'.length);
     const { lists = [] } = await chrome.storage.session.get(['lists']);
-    const list = lists.find(c => c.id === listId);
-    if (list) return { timestamp: 0, id: listId, name: list.name || '', qbTrees: list.qbTrees || [], pins: [] };
+    const list = lists.find(c => c.slug === listId);
+    if (list) return { timestamp: 0, slug: listId, name: list.name || '', qbTrees: list.qbTrees || [], pins: list.pins || [] };
     return null;
   }
   if (key === 'list:system/recycle-bin') {
@@ -230,10 +230,10 @@ async function sessionWrite(effects) {
       const { lists = [] } = await chrome.storage.session.get(['lists']);
       const listId = key.slice('list:'.length);
       if (entity.deleted) {
-        await chrome.storage.session.set({ lists: lists.filter(c => c.id !== listId) });
+        await chrome.storage.session.set({ lists: lists.filter(c => c.slug !== listId) });
       } else {
-        const idx = lists.findIndex(c => c.id === listId);
-        const meta = { id: entity.id, name: entity.name, qbTrees: entity.qbTrees };
+        const idx = lists.findIndex(c => c.slug === listId);
+        const meta = { slug: entity.slug, name: entity.name, qbTrees: entity.qbTrees, pins: entity.pins || [] };
         if (idx >= 0) lists[idx] = meta;
         else lists.push(meta);
         await chrome.storage.session.set({ lists });
@@ -312,8 +312,12 @@ async function readFs(key) {
       const listOrder = (await readCacheable('listOrder')) || [];
       if (listOrder.length > 0) {
         const ordered = [];
-        for (const id of listOrder) { const c = allLists.find(x => x.id === id); if (c) ordered.push(c); }
-        for (const c of allLists) { if (!listOrder.includes(c.id)) ordered.push(c); }
+        for (const key of listOrder) {
+          const slug = key.startsWith('list:') ? key.slice(5) : key;
+          const c = allLists.find(x => x.slug === slug);
+          if (c) ordered.push(c);
+        }
+        for (const c of allLists) { if (!listOrder.includes('list:' + c.slug)) ordered.push(c); }
         allLists = ordered;
       }
       value = allLists; break;
@@ -394,19 +398,20 @@ async function hydrateCache() {
   // Phase 3: Order lists by listOrder
   const { lists = [], listOrder = [] } = await chrome.storage.session.get(['lists', 'listOrder']);
   const ordered = [];
-  for (const id of listOrder) {
-    const col = lists.find(c => c.id === id);
+  for (const key of listOrder) {
+    const slug = key.startsWith('list:') ? key.slice(5) : key;
+    const col = lists.find(c => c.slug === slug);
     if (col) ordered.push(col);
   }
   for (const col of lists) {
-    if (!listOrder.includes(col.id)) ordered.push(col);
+    if (!listOrder.includes('list:' + col.slug)) ordered.push(col);
   }
   await chrome.storage.session.set({ lists: ordered });
 
   // Phase 4: Gateways (incremental processing — separate from replay)
   await hydrateIncrementalIndex({
     loadAction: 'loadGateways', processAction: 'processGatewaysIncremental',
-    sessionKey: 'gatewayDomains', savePath: 'lists/gateways.json', dataKey: 'domains',
+    sessionKey: 'gatewayDomains', savePath: 'lists/system/gateways.json', dataKey: 'domains',
     existingKey: 'existingDomains', label: 'Gateway domains'
   });
 
@@ -903,22 +908,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const wsListIds = workspace?.listIds || [];
                 if (workspace && workspace.mode === 'workspace' && wsListIds.length > 0) {
                   try {
-                    const pinsResp = await requestOffscreen({ action: 'loadListPins' });
-                    const allPins = (pinsResp && pinsResp.pins) ? pinsResp.pins : {};
+                    const { lists: cachedLists = [] } = await chrome.storage.session.get(['lists']);
 
-                    for (const listId of wsListIds) {
-                      if (!allPins[listId]) allPins[listId] = [];
-                      const already = allPins[listId].some(p => p.url === url);
+                    for (const listKey of wsListIds) {
+                      const listSlug = listKey.startsWith('list:') ? listKey.slice(5) : listKey;
+                      const listEntry = cachedLists.find(c => c.slug === listSlug);
+                      const listPins = listEntry?.pins || [];
+                      const already = listPins.some(p => p.url === url);
                       if (!already) {
-                        allPins[listId].push({ url, title: title || 'Untitled', pinnedAt: timestamp });
                         await addLog({
                           timestamp: Date.now(),
                           action: 'list',
-                          id: `user/${listId}`,
+                          id: listSlug,
                           op: 'add',
                           urls: [url]
                         });
-                        console.log(`Workspace: auto-pinned ${url} to list ${listId}`);
+                        console.log(`Workspace: auto-pinned ${url} to list ${listSlug}`);
                       }
                     }
 
@@ -1171,13 +1176,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const parentLists = [];
             const allLists = (await readCacheable('lists')) || [];
             for (const list of allLists) {
-              const listCacheKey = 'listCache:' + list.id;
+              const listCacheKey = 'listCache:' + list.slug;
               const cached = (await chrome.storage.session.get(listCacheKey))[listCacheKey];
               if (cached) {
                 const inPinned = cached.fullPinned?.some(p => p.url === url);
                 const inRelated = cached.related?.some(r => r.url === url);
-                if (inPinned) parentLists.push({ id: list.id, name: list.name, type: 'pin' });
-                else if (inRelated) parentLists.push({ id: list.id, name: list.name, type: 'appear' });
+                if (inPinned) parentLists.push({ slug: list.slug, name: list.name, type: 'pin' });
+                else if (inRelated) parentLists.push({ slug: list.slug, name: list.name, type: 'appear' });
               }
             }
 
@@ -1278,10 +1283,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'saveListPins': {
-          await requestOffscreen({ action: 'saveListPins', pins: request.pins });
-          sendResponse({ success: true });
-          notifyMutation('pins');
+        case 'toggleListPin': {
+          const { listId, url } = request;
+          const { lists = [] } = await chrome.storage.session.get(['lists']);
+          const list = lists.find(c => c.slug === listId);
+          const isPinned = (list?.pins || []).some(p => p.url === url);
+          await addLog({
+            timestamp: Date.now(), action: 'list', id: listId,
+            op: isPinned ? 'del' : 'add', urls: [url]
+          });
+          sendResponse({ success: true, pinned: !isPinned });
+          notifyMutation('pins', { listId });
           break;
         }
 
@@ -1331,9 +1343,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'deleteList': {
           const order = (await readCacheable('listOrder')) || [];
-          const newOrder = order.filter(id => id !== request.listId);
+          const newOrder = order.filter(key => key !== 'list:' + request.listId);
           await addLog({ timestamp: Date.now(), action: 'set', key: 'listOrder', value: newOrder });
-          await addLog({ timestamp: Date.now(), action: 'del_list', id: `user/${request.listId}` });
+          await addLog({ timestamp: Date.now(), action: 'del_list', id: request.listId });
           sendResponse({ success: true });
           notifyMutation('lists');
           break;

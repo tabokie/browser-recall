@@ -162,13 +162,6 @@ async function handleRequest(request) {
         return { success: true, pins };
       }
 
-      case 'saveListPins': {
-        await withLock('listPins', () =>
-          fsStorage.saveListPins(request.pins)
-        );
-        return { success: true };
-      }
-
       case 'loadPermanentDeletes': {
         const t0 = performance.now();
         const keys = await fsStorage.loadPermanentDeletes();
@@ -225,7 +218,7 @@ async function handleRequest(request) {
             if (entry.kind === 'file' && entry.name.endsWith('.json')) {
               const id = entry.name.replace('.json', '');
               // Skip system files
-              if (id !== 'explore' && id !== 'gateways' && !id.startsWith('system') && !id.startsWith('index')) {
+              if (!id.startsWith('system') && !id.startsWith('index')) {
                 files.push(id);
               }
             }

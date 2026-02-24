@@ -464,25 +464,25 @@ class FileSystemStorage {
     return contentMap;
   }
 
-  // Load gateway domains from lists/gateways.json
+  // Load gateway domains from lists/system/gateways.json
   async loadGateways() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
     try {
-      const fileHandle = await this.resolveFile('lists/gateways.json');
+      const fileHandle = await this.resolveFile('lists/system/gateways.json');
       return this.readJson(fileHandle);
     } catch {
       return { watermark: 0, domains: {} };
     }
   }
 
-  // Save gateway domains to lists/gateways.json
+  // Save gateway domains to lists/system/gateways.json
   async saveGateways(data) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write directory');
     }
-    const fileHandle = await this.resolveFile('lists/gateways.json', { create: true });
+    const fileHandle = await this.resolveFile('lists/system/gateways.json', { create: true });
     await this.writeJson(fileHandle, data);
   }
 
@@ -886,7 +886,7 @@ class FileSystemStorage {
   // Filename is always the list ID itself (slug).
   #resolveListPath(listId) {
     if (listId === 'explore') {
-      return 'lists/explore.json';
+      return 'lists/system/explore.json';
     }
     if (listId.startsWith('system/') || listId.startsWith('index/')) {
       return `lists/${listId}.json`;
@@ -939,9 +939,9 @@ class FileSystemStorage {
 
     const allPins = {};
 
-    // Load explore.json from lists/
+    // Load explore.json from lists/system/
     try {
-      const fh = await this.resolveFile('lists/explore.json');
+      const fh = await this.resolveFile('lists/system/explore.json');
       const data = await this.readJson(fh);
       if (data && typeof data === 'object' && !Array.isArray(data) && data.pins) {
         allPins['explore'] = data.pins;
@@ -950,14 +950,14 @@ class FileSystemStorage {
       }
     } catch { /* explore.json doesn't exist yet */ }
 
-    // Load user lists from lists/ — filename is the list ID
+    // Load user lists from lists/ — filename is the list slug
     try {
       const listsDir = await this.resolveDir('lists');
       for await (const entry of listsDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
           const id = entry.name.replace('.json', '');
-          // Skip system and index files
-          if (id === 'explore' || id === 'gateways' || id.startsWith('system') || id.startsWith('index')) continue;
+          // Skip system, index, and special files
+          if (id.startsWith('system') || id.startsWith('index')) continue;
           try {
             const file = await entry.getFile();
             const data = JSON.parse(await file.text());
@@ -1028,8 +1028,8 @@ class FileSystemStorage {
   }
 
   // Load metadata for all lists from lists/ files.
-  // Returns [{ id, name, qbTrees }] — skips explore, system/, and index/ files.
-  // Filenames are always the list ID (slug).
+  // Returns [{ slug, name, qbTrees, pins }] — skips explore, system/, and index/ files.
+  // Filenames are always the list slug.
   async loadAllListMetadata() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
@@ -1039,16 +1039,17 @@ class FileSystemStorage {
       const listsDir = await this.resolveDir('lists');
       for await (const entry of listsDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
-          const id = entry.name.replace('.json', '');
+          const slug = entry.name.replace('.json', '');
           // Skip system and special files
-          if (id === 'explore' || id === 'gateways' || id.startsWith('system') || id.startsWith('index')) continue;
+          if (slug === 'gateways' || slug.startsWith('system') || slug.startsWith('index')) continue;
           try {
             const file = await entry.getFile();
             const data = JSON.parse(await file.text());
             result.push({
-              id,
-              name: data.name || id,
+              slug,
+              name: data.name || slug,
               qbTrees: data.qbTrees || [],
+              pins: data.pins || [],
             });
           } catch { /* skip malformed */ }
         }
@@ -1073,7 +1074,7 @@ class FileSystemStorage {
       const path = this.#resolveListPath(id);
 
       // Track active IDs for cleanup (only for user lists)
-      if (id !== 'explore' && !id.startsWith('system') && !id.startsWith('index')) {
+      if (!id.startsWith('system') && !id.startsWith('index') && id !== 'explore') {
         activeFilenames.add(id);
       }
 
@@ -1093,7 +1094,7 @@ class FileSystemStorage {
     for await (const entry of listsDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.json')) {
         const filename = entry.name.replace('.json', '');
-        if (filename !== 'explore' && filename !== 'gateways' && !filename.startsWith('system') && !filename.startsWith('index') && !activeFilenames.has(filename)) {
+        if (!filename.startsWith('system') && !filename.startsWith('index') && !activeFilenames.has(filename)) {
           await this.softDelete(listsDir, entry.name);
         }
       }

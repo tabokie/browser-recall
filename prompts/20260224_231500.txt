@@ -1,0 +1,19 @@
+- There is a bug, the first visit of a page logs trimmed title, but the second log uses original title:
+
+2026-02-24.jsonl:{"timestamp":1771938473284,"action":"page","url":"https://zhuanlan.zhihu.com/p/2009594680099222822","title":"用AI的这三年，想跟你分享这9条心得。 - 知乎"}
+2026-02-24.jsonl:{"timestamp":1771938473703,"action":"page","url":"https://zhuanlan.zhihu.com/p/2009594680099222822","title":"(99+ 封私信 / 40 条消息) 用AI的这三年，想跟你分享这9条心得。 - 知乎"}
+- The duplication is okay, we can optimize it later (leave a TODO comment). The important issue is why title trimming doesn't work for subsequent logs.
+- The popup UI has issues. (a) When I try to create a new list and press enter, the page is not pinned to it automatically, and the popup UI doesn't immediately show the new list, I have to reopen the popup to add current page to the list; (b) When I add list in popup UI, the portal UI renders both the new list and a mysterious list with empty name; (c) In workspace mode, page is not automatically pinned as I wanted
+- Add the TODO comment I asked earlier
+- Remember, all access goes through the unified path which includes entity cache and file system. Popup UI should reads cache, and that cache should reflect latest changes. For prefix, I prefer we use fully qualified key universally (list:user/slug). You should look at the codebase to make sure not only lists, other entities are referenced using fully qualified key.
+- I was wrong, the correct naming is "list:<slug>". What I want is, all references to list uses fully qualified key "list:<slug>", "list:system/<system_list>", "list:index:parent.json". Similarly, all references to pages use "page:<slug>", all references to notes use "note:<slug>". Additionally, I want to move gateways.json to "list:system/gateways.json".
+- run migration
+- Move explore.json to system/ as well
+- Are you sure all references of list, page, note are using fully qualified key?
+- The list I created in popup UI, I look at the file cognition-rjhge3.json, it doesn't name and slug field. Is this a known issue that has been fixed?
+- Clean up
+- /finish 
+- y
+- n
+- n
+- n

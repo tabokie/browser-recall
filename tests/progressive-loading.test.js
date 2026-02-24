@@ -84,7 +84,7 @@ const ALL_FILE1 = [...FILE1_INTERACTIONS, ...RUST_INTERACTIONS];
 const ALL_INTERACTIONS = [...ALL_FILE1, ...FILE2_INTERACTIONS, ...FILE3_INTERACTIONS];
 
 const TEST_LIST = {
-  id: 'col-rust',
+  slug: 'col-rust',
   query: 'rust',
   name: 'Rust Lang',
 };
@@ -92,7 +92,7 @@ const TEST_LIST = {
 // List whose query matches NO interactions in metadata (like "AI Core")
 // but whose pins share hostname with loaded history → related pages should still appear
 const TEST_LIST_NOHIT = {
-  id: 'col-nohit',
+  slug: 'col-nohit',
   query: 'xyzzy nonexistent query',
   name: 'No-Hit Query',
 };
@@ -112,7 +112,7 @@ const TEST_LIST_PINS = {
 const TEST_LISTS = [TEST_LIST, TEST_LIST_NOHIT];
 
 const TEST_SETTINGS = {
-  listOrder: ['col-rust', 'col-nohit'],
+  listOrder: ['list:col-rust', 'list:col-nohit'],
   settings: { captureContent: true, captureAttention: true, archiveQuality: 'medium' },
   urlBlacklist: [],
   titleTrimRules: [],
