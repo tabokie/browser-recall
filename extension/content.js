@@ -727,35 +727,23 @@ function unwrapHighlightMark(mark) {
 // Unified report(delta) sends partial updates to background's reportPage handler.
 // Background trims title, diffs against cache, and logs only changes.
 
-const REPORT_INTERVAL = 5000; // 5s — matches background DRAIN_INTERVAL_MS
-
 function report(delta) {
   const url = window.location.href;
   if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return;
   chrome.runtime.sendMessage({ action: 'reportPage', url, ...delta }).catch(() => {});
 }
 
-let reportTimer = null;
-
-function reportAttention(isLeaving) {
+function reportAttention() {
   const now = Date.now();
   const incrementalTime = now - lastReportTime;
   lastReportTime = now;
 
-  const delta = {
+  report({
     title: document.title,
     scrollDepth: Math.round(maxScrollDepth),
     timeOnPage: incrementalTime,
-  };
-  if (isLeaving) delta.isLeaving = true;
-
-  report(delta);
-
-  // Reschedule timer (unless leaving)
-  clearTimeout(reportTimer);
-  if (!isLeaving) {
-    reportTimer = setTimeout(() => reportAttention(false), REPORT_INTERVAL);
-  }
+    isLeaving: true,
+  });
 }
 
 // Initial visit report
@@ -768,9 +756,6 @@ const initialDelta = {
 const ref = document.referrer;
 if (ref) initialDelta.referrer = ref;
 report(initialDelta);
-
-// Schedule periodic attention reports
-reportTimer = setTimeout(() => reportAttention(false), REPORT_INTERVAL);
 
 // Title changes: report immediately
 const titleEl = document.querySelector('title');
@@ -785,12 +770,12 @@ if (titleEl) {
 // Page leave: visibility hidden / freeze
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
-    reportAttention(true);
+    reportAttention();
   }
 });
 
 document.addEventListener('freeze', () => {
-  reportAttention(true);
+  reportAttention();
 });
 
 // ─── Capture notification bubble ──────────────────────────────────────
@@ -984,6 +969,6 @@ reapplyHighlights();
 
 // Before unload, send final attention report
 window.addEventListener('beforeunload', () => {
-  reportAttention(true);
+  reportAttention();
 });
 } // end initContentScript

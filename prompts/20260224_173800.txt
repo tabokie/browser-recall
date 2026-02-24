@@ -1,0 +1,14 @@
+- Gateways are not loaded properly. The files `lists/gateways.json` is correct, but in the UI the gateways is empty. Notably I disable and re-enable the extension, not sure if this is an issue
+- All access to cacheable data (in storage.session) should go through the same code. Which is to read storage.session first, if miss go read the files. The file reading logic should be unified too. Looks like this:
+
+fn readCacheable(key) {
+  if session.contains(key) {
+    return session.get(key)
+  }
+  return readFs(key);
+}
+fn readFs(key) {
+  match key.schema() { .. }
+}
+- Remove the periodic attention report, only report when leaving the page
+- /finish 

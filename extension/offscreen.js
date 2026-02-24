@@ -171,9 +171,9 @@ async function handleRequest(request) {
 
       case 'loadPermanentDeletes': {
         const t0 = performance.now();
-        const urls = await fsStorage.loadPermanentDeletes();
-        console.debug(`[I/O] loadPermanentDeletes: ${urls.length} urls in ${(performance.now() - t0).toFixed(1)}ms`);
-        return { success: true, urls };
+        const keys = await fsStorage.loadPermanentDeletes();
+        console.debug(`[I/O] loadPermanentDeletes: ${keys.length} keys in ${(performance.now() - t0).toFixed(1)}ms`);
+        return { success: true, keys };
       }
 
       case 'loadSettings': {

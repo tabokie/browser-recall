@@ -7,7 +7,7 @@
 | File | Lines | Role |
 |------|-------|------|
 | `extension/manifest.json` | 72 | MV3 manifest: permissions (incl. scripting, webNavigation), commands (Alt+S, Alt+H, Alt+L), CSP for WASM, content-fontface.js (document_start, all_frames), web_accessible_resources for fontface-intercept |
-| `extension/background.js` | ~940 | Service worker: central authority — handles ALL actions, `addLog(entry)` (appends to logBuffer + replays via `effectOf` + `sessionLoad`/`sessionWrite`), port channel to offscreen, unified `hydrateCache()` (loads base entities from offscreen then replays logBuffer via `effectOf`), gateway registry, referrer tracking (webNavigation closure: `getReferrer(tabId)`, always emits page_checkpoint for referrer pages), multi-day checkpoint detection, page relations (parents/children from page entity + parentIndex), keyboard commands, `captureAndLog(tabId, slug, timestamp, url, title)` (checkpoints page before capture), `ensureCheckpointIfMissing(slug, url, title)` (module-level helper), `ensurePageCached()`, `setEntityCacheWatermark` on offscreen persist |
+| `extension/background.js` | ~980 | Service worker: central authority — handles ALL actions, `addLog(entry)` (appends to logBuffer + replays via `effectOf` + `sessionLoad`/`sessionWrite`), port channel to offscreen, unified `hydrateCache()` (loads base entities from offscreen then replays logBuffer via `effectOf`), `readCacheable(key)`/`readFs(key)` (session→filesystem fallback for all cacheable keys — awaits hydrationDone, batch-loads settings, applies listOrder), gateway registry, referrer tracking (webNavigation closure: `getReferrer(tabId)`, always emits page_checkpoint for referrer pages), multi-day checkpoint detection, page relations (parents/children from page entity + parentIndex), keyboard commands, `captureAndLog(tabId, slug, timestamp, url, title)` (checkpoints page before capture), `ensureCheckpointIfMissing(slug, url, title)` (module-level helper), `ensurePageCached()`, `setEntityCacheWatermark` on offscreen persist |
 | `extension/savepage-bridge.js` | ~170 | Save Page WE integration: `initSavepageBridge()` (registers `type`-based onMessage listener), `captureSavePage(tabId)` (injects SPWE scripts, returns Promise\<html\>), `loadSavepageResource()` (internal) — only Chrome APIs |
 | `extension/entity-cache.js` | ~40 | Entity LRU cache: `getCachedEntity(key)`, `setCachedEntity(key, entity)` — wraps `chrome.storage.session` with 500-entry LRU; `setEntityCacheWatermark(ts)` gates eviction to only flush entities with `timestamp <= persistWatermark` |
 | `extension/replay.js` | ~530 | Shared pure replay: unified interface `effectOf(entry, load)` → `scopeOf` + `applyTo`; `defaultEntity(key)` creates empty entities; per-entity: `applyLogToPage` (action='page' with parents/children accumulation, visitDates, attention, capture fields; action='page_checkpoint'), `applyLogToNote` (action='note' with excerpt/note/cssPath/parents/children), `applyLogToSettings`, `applyLogToPins` (list add/del/clear, list_meta, del_list), `applyLogToRecycleBin`, `applyLogToDeletes`, `applyLogToParentIndex`; `applyTo` post-loop: wires note parents into page children, prunes parent-index entries for URLs whose pages exist in scope, resolves URL refs in parents/children to slugs when referenced page exists; entity key namespaces: `page:{slug}`, `note:{slug}`, `settings`, `list:user/{id}`, `list:system/recycle-bin`, `list:system/permanent-deletes`, `list:index/parent` |
@@ -41,6 +41,7 @@
 | `tests/persistence.test.js` | ~410 | Vitest: settings round-trip, gateway incremental processing, list pins (wrapped entity format) |
 | `tests/referrer-focus.test.js` | ~55 | Vitest: static analysis — webNavigation permission, onCommitted listener, getReferrer closure, focus panel parent title delegation to makeCard |
 | `tests/message-routing.test.js` | 49 | Vitest: static analysis — every action sent by options/popup has a case handler in background.js |
+| `tests/read-cacheable.test.js` | ~200 | Vitest: structural + behavioral tests for readCacheable/readFs — session hit, FS fallback, settings batch-load, list ordering, hydrationDone blocking, offscreen field mismatch, options.js gateway fallback |
 | `tests/mutation-refresh.test.js` | ~105 | Vitest: static analysis — mutation listener + visibilitychange handler refresh all view types, not just category |
 | `vitest.config.js` | 7 | Test config |
 | `package.json` | 25 | Build: `wasm-pack`, test: `vitest` |
@@ -54,8 +55,8 @@ Offscreen is port-only — responds via `chrome.runtime.connect({ name: 'bg-offs
 
 ### background.js handles ALL actions (line ~646):
 **Tab-dependent:** `getPageInfo`, `captureCurrentPageFromPopup`, `hydrateCache`, `reportPage`
-**Pure reads (relay to offscreen via port, cache pages):** `loadSettings`, `loadInteractionByUrl`, `loadPageBatch`, `loadPageDetail`, `loadPageNotes`, `loadAllNotes`, `loadListPins`, `loadListPinsById`, `loadPermanentDeletes`, `loadGateways`, `listSnapshots`, `getDirectoryInfo`, `getSnapshotUrl`, `listInteractionFiles`, `loadInteractionBatch`
-**Hydration-aware reads (await hydrationDone, then session cache):** `getLists`, `getRecycleBin`
+**Pure reads (relay to offscreen via port, cache pages):** `loadSettings`, `loadInteractionByUrl`, `loadPageBatch`, `loadPageDetail`, `loadPageNotes`, `loadAllNotes`, `loadListPins`, `loadListPinsById`, `loadGateways`, `listSnapshots`, `getDirectoryInfo`, `getSnapshotUrl`, `listInteractionFiles`, `loadInteractionBatch`
+**Cacheable reads (via `readCacheable` — session→filesystem fallback):** `getLists`, `getRecycleBin`, `loadPermanentDeletes`, `getGatewayDomains`
 **Page relations:** `getPageRelations` (returns parents {referrers (URLs resolved from page.parents slugs + parentIndex fallback), lists} + children (URLs resolved from page.children slugs))
 **Writes (all via `addLog` — append + effectOf session replay):** `saveSettings`, `saveSettingsKey`, `createNote`, `deleteNote`, `updateNote`, `saveListPinsById`, `saveListMeta`, `deleteList`, `saveRecycleBin`, `savePermanentDeletes`
 **Pass-through (complex FS ops via port):** `saveListPins` (orphan cleanup), `deleteSnapshot`, `initializeFilesystem`
@@ -178,7 +179,7 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **Hydration**: `background.js` `hydrateCache()` — loads `gateways.json`, incrementally processes new entries, saves updated watermark
 - **Drain piggyback**: `offscreen.js` `drainQueue()` — after successful drain, saves current gatewayDomains to `gateways.json` with watermark = max drained timestamp
 - **Registry update**: `background.js` `updateGatewayRegistry()` — increments `childCount` (no childUrls array); auto-promotes when `childCount >= 2`
-- **Options cache**: `options.js` `gatewayDomainsCache` — loaded via `loadGatewayDomains()` on init
+- **Options cache**: `options.js` `gatewayDomainsCache` — loaded via `loadGatewayDomains()` on init (session cache → `getGatewayDomains` background fallback)
 - **Gateway filter**: `options.js` `isGatewayUrl()` — root URL with `childCount >= 2`
 
 ### Options Page Views
@@ -250,7 +251,7 @@ Lists                 ← section label
 - **Durable backup**: `chrome.storage.local['logBuffer']` — log buffer only; all other cache keys in session
 - **Hydration**: `background.js` `hydrateCache()` — Phase 1: loads base entities from offscreen into session; Phase 2: replays ALL `logBuffer` entries via `effectOf(entry, sessionLoad)` + `sessionWrite`; Phase 3: orders lists by `listOrder`; Phase 4: incremental gateway processing
 - **Write-through**: `utils.js` `saveSettingsValue(key, value)` sends `saveSettingsKey` to background, which calls `addLog` (append + `effectOf` session replay)
-- **Hot-path reads**: background.js reads workspace, urlBlacklist, titleTrimRules, gatewayDomains from session; popup.js/content.js/options.js read cached keys from session directly (access level: TRUSTED_AND_UNTRUSTED_CONTEXTS)
+- **Hot-path reads**: background.js uses `readCacheable(key)` for workspace, urlBlacklist, titleTrimRules, gatewayDomains, parentIndex, lists, listOrder (awaits hydrationDone, then session→readFs fallback); popup.js/content.js/options.js read cached keys from session directly with sendMessage fallback (access level: TRUSTED_AND_UNTRUSTED_CONTEXTS)
 - **Entity LRU cache**: `entity-cache.js` caches entities in session as `page:{slug}` / `note:{slug}` keys (500 limit); `getCachedEntity`/`setCachedEntity` with watermark-gated LRU eviction (only evicts entities with `timestamp <= persistWatermark`); `setEntityCacheWatermark(ts)` called by background on offscreen persist; imported by background.js; checked on loadPageBatch, loadPageNotes, createNote/deleteNote
 - **Log buffer**: background holds `logBuffer` array (lazy-loaded via `ensureLogBuffer()`), synced to `chrome.storage.local['logBuffer']`; offscreen drains via port `drainEntries`; all mutations via `addLog(entry)` — immutable, no dedup, serialized via `withLock('logBuffer')`
 - **Unified replay path**: both `addLog` (runtime) and `hydrateCache` (startup) use `effectOf(entry, sessionLoad)` + `sessionWrite` — identical replay logic for all entity types
@@ -293,15 +294,15 @@ Lists                 ← section label
 - **Text selection**: records selected text > 10 chars
 - **Intent extraction**: search params (q, query, s, etc.) + input fields
 - **Time on page**: elapsed since script load
-- **Accumulation**: all attention data tracked internally in content script; reported on page close or 1h timer (setTimeout-based, reschedules after each report)
-- **Initial visit**: `reportVisit()` on page load — sends page metadata (url, title, slug, referrer) without attention; ensures page appears in history immediately
-- **Attention report**: `reportAttention()` on `visibilitychange` (hidden) / `freeze` / `beforeunload` / 1h timer — sends incremental attention
-- **Title changes**: tracked locally via MutationObserver; no re-report to background
+- **Accumulation**: all attention data tracked internally in content script; reported only on page leave (no periodic timer)
+- **Initial visit**: `report(initialDelta)` on page load — sends page metadata (url, title, slug, referrer) without attention; ensures page appears in history immediately
+- **Attention report**: `reportAttention()` on `visibilitychange` (hidden) / `freeze` / `beforeunload` — sends incremental attention with `isLeaving: true`, triggers `drainNow()` in background
+- **Title changes**: tracked locally via MutationObserver; reported immediately via `report({ title })`
 
 ## Build & Test
 - **Build WASM**: `npm run build` → `wasm-pack build --target web --out-dir extension/pkg`
 - **Run tests**: `npm test` → `vitest run`
-- **Test files**: `tests/utils.test.js`, `tests/search-helpers.test.js`, `tests/replay.test.js`, `tests/log-buffer.test.js`, `tests/persistence.test.js`, `tests/cache-staleness.test.js`, `tests/highlight-helpers.test.js`, `tests/virtual-scroller.test.js`, `tests/progressive-loading.test.js`, `tests/message-routing.test.js`, `tests/mutation-refresh.test.js`, `tests/referrer-focus.test.js`, `tests/attention-utils.test.js`, `tests/auto-blocks.test.js`, `tests/state-preservation.test.js`
+- **Test files**: `tests/utils.test.js`, `tests/search-helpers.test.js`, `tests/replay.test.js`, `tests/log-buffer.test.js`, `tests/persistence.test.js`, `tests/cache-staleness.test.js`, `tests/highlight-helpers.test.js`, `tests/virtual-scroller.test.js`, `tests/progressive-loading.test.js`, `tests/message-routing.test.js`, `tests/mutation-refresh.test.js`, `tests/referrer-focus.test.js`, `tests/attention-utils.test.js`, `tests/auto-blocks.test.js`, `tests/state-preservation.test.js`, `tests/read-cacheable.test.js`
 - **Migration scripts**: `scripts/migrate-keys-and-notes.js` (atoms→pages, highlights→notes), `scripts/migrate-quote-to-excerpt.js` (quote→excerpt field rename); utility: `scripts/check-gateways.js`, `scripts/check-gateway-filtering.js`
 
 ## Key Data Schemas

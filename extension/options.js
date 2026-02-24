@@ -820,7 +820,14 @@ function filterByCategory(interactions, category) {
 async function loadGatewayDomains() {
   if (gatewayDomainsLoaded) return;
   const result = await chrome.storage.session.get(['gatewayDomains']);
-  gatewayDomainsCache = result.gatewayDomains || {};
+  if ('gatewayDomains' in result) {
+    gatewayDomainsCache = result.gatewayDomains;
+  } else {
+    try {
+      const resp = await chrome.runtime.sendMessage({ action: 'getGatewayDomains' });
+      gatewayDomainsCache = resp?.domains || {};
+    } catch { gatewayDomainsCache = {}; }
+  }
   gatewayDomainsLoaded = true;
 }
 

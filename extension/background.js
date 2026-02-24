@@ -281,6 +281,65 @@ async function appendVisit(interaction) {
 
 const SETTINGS_KEYS = ['workspace', 'listOrder', 'urlBlacklist', 'titleTrimRules', 'settings'];
 
+// ─── Session → Filesystem Fallback ───────────────────────────────────
+// readCacheable(key): await hydration, then session cache → readFs fallback.
+// readFs(key): load from filesystem via offscreen, cache into session.
+
+async function readCacheable(key) {
+  await hydrationDone;
+  const cached = await chrome.storage.session.get([key]);
+  if (key in cached) return cached[key];
+  return readFs(key);
+}
+
+async function readFs(key) {
+  if (SETTINGS_KEYS.includes(key)) {
+    // Batch-load all settings keys from settings.json
+    const resp = await requestOffscreen({ action: 'loadSettings' });
+    const settings = resp?.settings || {};
+    const toCache = {};
+    for (const k of SETTINGS_KEYS) {
+      if (settings[k] !== undefined) toCache[k] = settings[k];
+    }
+    if (Object.keys(toCache).length > 0) await chrome.storage.session.set(toCache);
+    return settings[key];
+  }
+  let value;
+  switch (key) {
+    case 'lists': {
+      const metaResp = await requestOffscreen({ action: 'loadAllListMetadata' });
+      let allLists = metaResp?.lists || [];
+      const listOrder = (await readCacheable('listOrder')) || [];
+      if (listOrder.length > 0) {
+        const ordered = [];
+        for (const id of listOrder) { const c = allLists.find(x => x.id === id); if (c) ordered.push(c); }
+        for (const c of allLists) { if (!listOrder.includes(c.id)) ordered.push(c); }
+        allLists = ordered;
+      }
+      value = allLists; break;
+    }
+    case 'recycleBin': {
+      const r = await requestOffscreen({ action: 'loadRecycleBin' });
+      value = r?.items || []; break;
+    }
+    case 'permanentDeletes': {
+      const r = await requestOffscreen({ action: 'loadPermanentDeletes' });
+      value = r?.keys || []; break;
+    }
+    case 'parentIndex': {
+      const r = await requestOffscreen({ action: 'loadParentIndex' });
+      value = r?.success ? { timestamp: r.timestamp || 0, index: r.index || {} } : { timestamp: 0, index: {} }; break;
+    }
+    case 'gatewayDomains': {
+      const r = await requestOffscreen({ action: 'loadGateways' });
+      value = r?.domains || {}; break;
+    }
+    default: return undefined;
+  }
+  await chrome.storage.session.set({ [key]: value });
+  return value;
+}
+
 // ─── Cache Hydration ──────────────────────────────────────────────────
 
 async function hydrateCache() {
@@ -389,7 +448,7 @@ async function hydrateIncrementalIndex({ loadAction, processAction, sessionKey, 
 
 async function trimTitle(rawTitle, url) {
   let title = rawTitle || 'Untitled';
-  const { titleTrimRules = [] } = await chrome.storage.session.get(['titleTrimRules']);
+  const titleTrimRules = (await readCacheable('titleTrimRules')) || [];
   for (const rule of titleTrimRules) {
     if (url.startsWith(rule.urlPrefix)) {
       if (rule.action === 'remove_after_pipe') {
@@ -477,7 +536,7 @@ async function updateGatewayRegistry(url) {
     const isSearchQuery = parsed.searchParams.has('q') || parsed.searchParams.has('query') || parsed.searchParams.has('search');
     const isRoot = parsed.pathname === '/' || parsed.pathname === '' || parsed.pathname === '/index.html' || parsed.pathname === '/index.htm';
 
-    const { gatewayDomains = {} } = await chrome.storage.session.get(['gatewayDomains']);
+    const gatewayDomains = (await readCacheable('gatewayDomains')) || {};
     if (!gatewayDomains[origin]) {
       gatewayDomains[origin] = { rootUrl: null, childCount: 0, fetched: false };
     }
@@ -507,7 +566,7 @@ async function updateGatewayRegistry(url) {
 }
 
 async function fetchAndCreateGatewayRoot(origin) {
-  const { gatewayDomains = {} } = await chrome.storage.session.get(['gatewayDomains']);
+  const gatewayDomains = (await readCacheable('gatewayDomains')) || {};
   if (!gatewayDomains[origin]) return;
   gatewayDomains[origin].fetched = true;
   await chrome.storage.session.set({ gatewayDomains });
@@ -539,7 +598,7 @@ async function fetchAndCreateGatewayRoot(origin) {
     await appendVisit(interaction);
 
     // Update registry with rootUrl
-    const updated = (await chrome.storage.session.get(['gatewayDomains'])).gatewayDomains || {};
+    const updated = (await readCacheable('gatewayDomains')) || {};
     if (updated[origin]) {
       updated[origin].rootUrl = rootUrl;
       await chrome.storage.session.set({ gatewayDomains: updated });
@@ -665,7 +724,7 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
 chrome.commands.onCommand.addListener(async (command) => {
   console.log(`[background] Command received: ${command}`);
 
-  const { workspace } = await chrome.storage.session.get(['workspace']);
+  const workspace = await readCacheable('workspace');
   if (workspace && workspace.mode === 'private') return;
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -765,14 +824,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           try {
             const url = request.url;
 
-            const { workspace } = await chrome.storage.session.get(['workspace']);
+            const workspace = await readCacheable('workspace');
             if (workspace && workspace.mode === 'private') {
               sendResponse({ success: true });
               return;
             }
 
             // Check blacklist
-            const { urlBlacklist } = await chrome.storage.session.get(['urlBlacklist']);
+            const urlBlacklist = await readCacheable('urlBlacklist');
             const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
             if (blacklist.some(prefix => url.startsWith(prefix))) {
               if (request.isInitialLoad) {
@@ -1008,61 +1067,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'getLists': {
-          await hydrationDone;
-          const cached = await chrome.storage.session.get('lists');
-          if ('lists' in cached) {
-            sendResponse({ lists: cached.lists });
-          } else {
-            // Hydration didn't run (e.g., disable/re-enable) — load from filesystem
-            try {
-              const metaResp = await requestOffscreen({ action: 'loadAllListMetadata' });
-              let allLists = metaResp?.lists || [];
-              // Apply ordering
-              const { listOrder = [] } = await chrome.storage.session.get(['listOrder']);
-              if (listOrder.length > 0) {
-                const ordered = [];
-                for (const id of listOrder) {
-                  const col = allLists.find(c => c.id === id);
-                  if (col) ordered.push(col);
-                }
-                for (const col of allLists) {
-                  if (!listOrder.includes(col.id)) ordered.push(col);
-                }
-                allLists = ordered;
-              }
-              await chrome.storage.session.set({ lists: allLists });
-              sendResponse({ lists: allLists });
-            } catch (e) {
-              sendResponse({ lists: [] });
-            }
-          }
+          const lists = await readCacheable('lists') || [];
+          sendResponse({ lists });
           break;
         }
 
         case 'getRecycleBin': {
-          await hydrationDone;
-          const cached = await chrome.storage.session.get('recycleBin');
-          if ('recycleBin' in cached) {
-            sendResponse({ items: cached.recycleBin });
-          } else {
-            // Hydration didn't run — load from filesystem
-            try {
-              const rbResp = await requestOffscreen({ action: 'loadRecycleBin' });
-              const items = rbResp?.items || [];
-              await chrome.storage.session.set({ recycleBin: items });
-              sendResponse({ items });
-            } catch (e) {
-              sendResponse({ items: [] });
-            }
-          }
+          const items = await readCacheable('recycleBin') || [];
+          sendResponse({ items });
           break;
         }
 
         case 'loadPermanentDeletes': {
-          const t0 = performance.now();
-          const resp = await requestOffscreen({ action: 'loadPermanentDeletes' });
-          console.debug(`[I/O] loadPermanentDeletes: ${(performance.now() - t0).toFixed(1)}ms`);
-          sendResponse(resp);
+          const keys = await readCacheable('permanentDeletes') || [];
+          sendResponse({ success: true, keys });
+          break;
+        }
+
+        case 'getGatewayDomains': {
+          const domains = await readCacheable('gatewayDomains') || {};
+          sendResponse({ success: true, domains });
           break;
         }
 
@@ -1138,15 +1162,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             // Parents: from page.parents, fallback to parentIndex for non-checkpointed pages
             let parentRefs = page.parents || [];
             if (parentRefs.length === 0) {
-              const { parentIndex = { index: {} } } = await chrome.storage.session.get(['parentIndex']);
+              const parentIndex = (await readCacheable('parentIndex')) || { timestamp: 0, index: {} };
               parentRefs = (parentIndex.index[url] || []).map(ps => 'page:' + ps); // convert bare slugs to page: keys
             }
             const parentReferrers = await resolveRefs(parentRefs);
 
             // Parents: lists containing this URL
             const parentLists = [];
-            const { lists: listSettings } = await chrome.storage.session.get(['lists']);
-            const allLists = listSettings || [];
+            const allLists = (await readCacheable('lists')) || [];
             for (const list of allLists) {
               const listCacheKey = 'listCache:' + list.id;
               const cached = (await chrome.storage.session.get(listCacheKey))[listCacheKey];
@@ -1162,7 +1185,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const childRefs = (page.children || []).filter(c => !c.startsWith('note:'));
             let children = await resolveRefs(childRefs);
             // Also check parentIndex for non-checkpointed children
-            const { parentIndex: piForChildren = { index: {} } } = await chrome.storage.session.get(['parentIndex']);
+            const piForChildren = (await readCacheable('parentIndex')) || { timestamp: 0, index: {} };
             for (const [childUrl, pSlugs] of Object.entries(piForChildren.index)) {
               if (pSlugs.includes(slug) && !children.includes(childUrl)) {
                 children.push(childUrl);
@@ -1307,7 +1330,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'deleteList': {
-          const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
+          const order = (await readCacheable('listOrder')) || [];
           const newOrder = order.filter(id => id !== request.listId);
           await addLog({ timestamp: Date.now(), action: 'set', key: 'listOrder', value: newOrder });
           await addLog({ timestamp: Date.now(), action: 'del_list', id: `user/${request.listId}` });
