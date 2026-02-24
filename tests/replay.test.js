@@ -309,58 +309,58 @@ describe('applyLogToPage — children from referrer', () => {
 // ---------------------------------------------------------------------------
 
 describe('applyLogToNote', () => {
-  it('creates note with quote, note text, cssPath, parents', () => {
-    const noteEntity = { slug: '260223-hello-abc', timestamp: 0, quote: null, note: null, cssPath: null, parents: [], children: [] };
-    const entry = { timestamp: 100, action: 'note', slug: '260223-hello-abc', quote: 'hello world', note: 'my note', cssPath: 'body > p', parents: ['page:some-slug'] };
+  it('creates note with excerpt, note text, cssPath, parents', () => {
+    const noteEntity = { slug: '260223-hello-abc', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
+    const entry = { timestamp: 100, action: 'note', slug: '260223-hello-abc', excerpt: 'hello world', note: 'my note', cssPath: 'body > p', parents: ['page:some-slug'] };
     const result = applyLogToNote(noteEntity, entry);
-    expect(result.quote).toBe('hello world');
+    expect(result.excerpt).toBe('hello world');
     expect(result.note).toBe('my note');
     expect(result.cssPath).toBe('body > p');
     expect(result.parents).toEqual(['page:some-slug']);
     expect(result.timestamp).toBe(100);
   });
 
-  it('updates note text without changing quote', () => {
-    const noteEntity = { slug: 'n1', timestamp: 100, quote: 'text', note: 'old', cssPath: 'p', parents: ['page:p1'], children: [] };
+  it('updates note text without changing excerpt', () => {
+    const noteEntity = { slug: 'n1', timestamp: 100, excerpt: 'text', note: 'old', cssPath: 'p', parents: ['page:p1'], children: [] };
     const entry = { timestamp: 200, action: 'note', slug: 'n1', note: 'updated' };
     const result = applyLogToNote(noteEntity, entry);
     expect(result.note).toBe('updated');
-    expect(result.quote).toBe('text'); // unchanged
+    expect(result.excerpt).toBe('text'); // unchanged
     expect(result.timestamp).toBe(200);
   });
 
-  it('supports array quotes (cross-block highlights)', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, quote: null, note: null, cssPath: null, parents: [], children: [] };
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', quote: ['block1', 'block2'], parents: ['page:p1'] };
+  it('supports array excerpts (cross-block highlights)', () => {
+    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: ['block1', 'block2'], parents: ['page:p1'] };
     const result = applyLogToNote(noteEntity, entry);
-    expect(result.quote).toEqual(['block1', 'block2']);
+    expect(result.excerpt).toEqual(['block1', 'block2']);
   });
 
-  it('supports null quote (page-level note)', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, quote: null, note: null, cssPath: null, parents: [], children: [] };
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', quote: null, note: 'Page level note', parents: ['page:p1'] };
+  it('supports null excerpt (page-level note)', () => {
+    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: null, note: 'Page level note', parents: ['page:p1'] };
     const result = applyLogToNote(noteEntity, entry);
-    expect(result.quote).toBeNull();
+    expect(result.excerpt).toBeNull();
     expect(result.note).toBe('Page level note');
   });
 
   it('ignores non-note entries', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, quote: null, note: null, cssPath: null, parents: [], children: [] };
+    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
     const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
     const result = applyLogToNote(noteEntity, entry);
     expect(result).toBe(noteEntity);
   });
 
   it('ignores mismatched slug', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, quote: null, note: null, cssPath: null, parents: [], children: [] };
-    const entry = { timestamp: 100, action: 'note', slug: 'n2', quote: 'text', parents: ['page:p1'] };
+    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
+    const entry = { timestamp: 100, action: 'note', slug: 'n2', excerpt: 'text', parents: ['page:p1'] };
     const result = applyLogToNote(noteEntity, entry);
     expect(result).toBe(noteEntity);
   });
 
   it('is idempotent', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, quote: null, note: null, cssPath: null, parents: [], children: [] };
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', quote: 'hello', note: 'world', parents: ['page:p1'] };
+    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', note: 'world', parents: ['page:p1'] };
     const r1 = applyLogToNote(noteEntity, entry);
     const r2 = applyLogToNote(r1, entry);
     expect(r2).toEqual(r1);
@@ -643,7 +643,7 @@ describe('applyLogToPage — visitDates', () => {
 
   it('does not add visitDates for non-page entries', () => {
     const page = { slug: 'a', timestamp: 0 };
-    const result = applyLogToPage(page, { timestamp: 100, action: 'note', slug: 'a', quote: 'x' });
+    const result = applyLogToPage(page, { timestamp: 100, action: 'note', slug: 'a', excerpt: 'x' });
     expect(result.visitDates).toBeUndefined();
   });
 });
@@ -790,7 +790,7 @@ describe('applyLogToParentIndex', () => {
 
   it('ignores entries with non-page action', () => {
     const idx = { timestamp: 0, index: {} };
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', quote: 'x' };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'x' };
     const result = applyLogToParentIndex(idx, entry);
     expect(result).toBe(idx);
   });
@@ -898,7 +898,7 @@ describe('scopeOf', () => {
   });
 
   it('returns note + parent keys for note entry', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'note', slug: 'n1', quote: 'text', parents: ['page:p1'] });
+    const scope = scopeOf({ timestamp: 100, action: 'note', slug: 'n1', excerpt: 'text', parents: ['page:p1'] });
     const keys = Object.keys(scope).sort();
     expect(keys).toEqual(['note:n1', 'page:p1'].sort());
   });
@@ -926,7 +926,7 @@ describe('defaultEntity', () => {
 
   it('returns note default with slug', () => {
     const e = defaultEntity('note:my-note');
-    expect(e).toEqual({ slug: 'my-note', timestamp: 0, quote: null, note: null, cssPath: null, parents: [], children: [] });
+    expect(e).toEqual({ slug: 'my-note', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] });
   });
 
   it('returns settings default', () => {
@@ -1001,17 +1001,17 @@ describe('applyTo', () => {
   });
 
   it('note action creates note from null', () => {
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', quote: 'hello', parents: ['page:p1'] };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parents: ['page:p1'] };
     const scope = { 'note:n1': null, 'page:p1': { slug: 'p1', timestamp: 50, parents: [], children: [] } };
     const result = applyTo(entry, scope);
     expect(result['note:n1']).not.toBeNull();
-    expect(result['note:n1'].quote).toBe('hello');
+    expect(result['note:n1'].excerpt).toBe('hello');
     // Cross-entity: note key added to parent's children
     expect(result['page:p1'].children).toContain('note:n1');
   });
 
   it('note action leaves parent page null when parent has no checkpoint', () => {
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', quote: 'hello', parents: ['page:p1'] };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parents: ['page:p1'] };
     const scope = { 'note:n1': null, 'page:p1': null };
     const result = applyTo(entry, scope);
     expect(result['note:n1']).not.toBeNull();
@@ -1123,11 +1123,11 @@ describe('effectOf', () => {
   });
 
   it('creates note from null on note action', async () => {
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', quote: 'hello', parents: ['page:p1'] };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parents: ['page:p1'] };
     const store = { 'page:p1': { slug: 'p1', timestamp: 50, parents: [], children: [] } };
     const result = await effectOf(entry, async (key) => store[key] ?? null);
     expect(result['note:n1']).not.toBeNull();
-    expect(result['note:n1'].quote).toBe('hello');
+    expect(result['note:n1'].excerpt).toBe('hello');
     expect(result['page:p1'].children).toContain('note:n1');
   });
 
@@ -1150,7 +1150,7 @@ describe('effectOf', () => {
 
     // 2. note entry references that page as parent
     const r2 = await effectOf(
-      { timestamp: 100, action: 'note', slug: 'n1', quote: 'hello', parents: [`page:${slug}`] },
+      { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parents: [`page:${slug}`] },
       load
     );
     for (const [k, v] of Object.entries(r2)) cache.set(k, v);

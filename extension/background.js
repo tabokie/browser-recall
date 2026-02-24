@@ -889,7 +889,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        // ── Pure Reads (relay to offscreen, cache atoms) ──
+        // ── Pure Reads (relay to offscreen, cache pages) ──
 
         case 'loadSettings': {
           const t0 = performance.now();
@@ -1186,7 +1186,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'createNote': {
           const pageSlug = request.pageSlug;
           const timestamp = Date.now();
-          const noteSlug = generateNoteSlug(timestamp, request.quote);
+          const noteSlug = generateNoteSlug(timestamp, request.excerpt);
 
           // Ensure parent page has a checkpoint so drain can update its children
           // (same pattern as referrer handling in the visit flow)
@@ -1195,7 +1195,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             timestamp,
             action: 'note',
             slug: noteSlug,
-            quote: request.quote,
+            excerpt: request.excerpt,
             note: request.note || '',
             cssPath: request.cssPath || null,
             parents: [`page:${pageSlug}`],

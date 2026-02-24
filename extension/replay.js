@@ -105,7 +105,7 @@ export function defaultEntity(key) {
   }
   if (key.startsWith(NOTE_PREFIX)) {
     const slug = key.slice(NOTE_PREFIX.length);
-    return { slug, timestamp: 0, quote: null, note: null, cssPath: null, parents: [], children: [] };
+    return { slug, timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
   }
   if (key === 'settings') return { timestamp: 0 };
   if (key === 'list:system/recycle-bin') return { timestamp: 0, items: [] };
@@ -390,7 +390,7 @@ export function applyLogToPage(page, entry) {
 /**
  * Apply a log entry to a note entity.
  * Handles:
- *   - note: create/update note (quote, note text, cssPath, parents, children)
+ *   - note: create/update note (excerpt, note text, cssPath, parents, children)
  * Returns new note object (or original if entry is irrelevant).
  */
 export function applyLogToNote(noteEntity, entry) {
@@ -398,7 +398,7 @@ export function applyLogToNote(noteEntity, entry) {
   if (entry.slug !== noteEntity.slug) return noteEntity;
 
   const updated = { ...noteEntity };
-  if (entry.quote !== undefined) updated.quote = entry.quote;
+  if (entry.excerpt !== undefined) updated.excerpt = entry.excerpt;
   if (entry.note !== undefined) updated.note = entry.note;
   if (entry.cssPath !== undefined) updated.cssPath = entry.cssPath;
   if (entry.parents !== undefined) updated.parents = entry.parents;

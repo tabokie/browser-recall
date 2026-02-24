@@ -259,12 +259,12 @@ async fn read_latest_md(slug_dir: &FileSystemDirectoryHandle) -> Result<String, 
 #[wasm_bindgen(js_name = "searchBatch")]
 pub async fn search_batch(
     history_dir: JsValue,
-    atoms_dir: JsValue,
+    pages_dir: JsValue,
     query: String,
     file_names: Vec<String>,
 ) -> Result<JsValue, JsValue> {
     let history: &FileSystemDirectoryHandle = history_dir.unchecked_ref();
-    let atoms: &FileSystemDirectoryHandle = atoms_dir.unchecked_ref();
+    let pages: &FileSystemDirectoryHandle = pages_dir.unchecked_ref();
 
     let mut seen_urls = HashSet::new();
     let mut interactions: Vec<InteractionData> = Vec::new();
@@ -297,7 +297,7 @@ pub async fn search_batch(
         .collect();
 
     for slug in slugs {
-        if let Ok(slug_dir_val) = atoms.get_directory_handle(slug).await {
+        if let Ok(slug_dir_val) = pages.get_directory_handle(slug).await {
             let slug_dir: &FileSystemDirectoryHandle = slug_dir_val.unchecked_ref();
             if let Ok(md) = read_latest_md(slug_dir).await {
                 if !md.is_empty() {

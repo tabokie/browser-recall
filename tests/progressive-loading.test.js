@@ -167,7 +167,7 @@ vi.mock('../extension/filesystem-storage.js', () => ({
     async loadPermanentDeletes() { return (await mockFsHandler.fn('loadPermanentDeletes', {})).urls || []; }
     async loadHighlights() { return []; }
     async loadAllHighlights() { return {}; }
-    async loadAtomBatch(slugs) { return (await mockFsHandler.fn('loadAtomBatch', { slugs })).atoms || {}; }
+    async loadPageBatch(slugs) { return (await mockFsHandler.fn('loadPageBatch', { slugs })).pages || {}; }
     async listSnapshots() { return []; }
   },
 }));
@@ -313,8 +313,8 @@ describe('Progressive loading', () => {
       case 'loadAllHighlights':
         return { success: true, highlightsMap: {} };
 
-      case 'loadAtomBatch':
-        return { success: true, atoms: {} };
+      case 'loadPageBatch':
+        return { success: true, pages: {} };
 
       case 'saveSettingsKey':
         return { success: true };
@@ -568,7 +568,7 @@ describe('Progressive loading', () => {
     expect(mainTitle()).toBe('Rust Lang');
 
     // Phase 1: pinned section renders immediately (lazy-loaded pins enriched
-    // from cached fields + atomReadCache, no blocking I/O).
+    // from cached fields + pageReadCache, no blocking I/O).
     expect(pinnedOnlyRows().length).toBe(3);
 
     // Explore section renders immediately (decoupled from pinned search)

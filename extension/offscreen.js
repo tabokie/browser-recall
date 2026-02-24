@@ -261,7 +261,7 @@ async function handleRequest(request) {
         return { success: true };
       }
 
-      // Direct JSON save — for derived data (gateways, referrer-index, atoms)
+      // Direct JSON save — for derived data (gateways, referrer-index, pages)
       case 'saveJson': {
         await withLock(request.path, async () => {
           const fh = await fsStorage.resolveFile(request.path, { create: true });

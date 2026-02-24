@@ -282,11 +282,11 @@ function showGlobalNoteOverlay(existingNote, existingNoteSlug, pageSlug) {
           note
         }).catch(() => {});
       } else {
-        // Create new global note (quote: null)
+        // Create new global note (excerpt: null)
         chrome.runtime.sendMessage({
           action: 'createNote',
           pageSlug,
-          quote: null,
+          excerpt: null,
           note,
           cssPath: null
         }).catch(() => {});
@@ -542,7 +542,7 @@ function attachMarkClickHandler(mark) {
     chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: pageSlug }).then(resp => {
       const notes = resp?.notes || [];
       const match = notes.find(n => n.slug === noteSlug);
-      const displayText = match ? (Array.isArray(match.quote) ? match.quote.join(' ') : match.quote) : text;
+      const displayText = match ? (Array.isArray(match.excerpt) ? match.excerpt.join(' ') : match.excerpt) : text;
       showHighlightEditOverlay(mark, displayText, noteSlug, match?.note || '', pageSlug);
     }).catch(() => {
       showHighlightEditOverlay(mark, text, noteSlug, '', pageSlug);
@@ -560,9 +560,9 @@ async function reapplyHighlights() {
     if (!response || !response.success || !response.notes) return;
 
     for (const note of response.notes) {
-      if (note.quote === null) continue; // Skip global page notes
+      if (note.excerpt === null) continue; // Skip global page notes
       // Normalize to array for Case 3 grouped highlights
-      const quotes = Array.isArray(note.quote) ? note.quote : [note.quote];
+      const quotes = Array.isArray(note.excerpt) ? note.excerpt : [note.excerpt];
       for (const text of quotes) {
         const mark = highlightTextInPage(text);
         if (mark && note.slug) {
@@ -905,7 +905,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           chrome.runtime.sendMessage({
             action: 'createNote',
             pageSlug: slug,
-            quote: storedText,
+            excerpt: storedText,
             note: '',
             cssPath
           }).then(resp => {
@@ -930,7 +930,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         chrome.runtime.sendMessage({
           action: 'createNote',
           pageSlug: slug,
-          quote: selectedText,
+          excerpt: selectedText,
           note: '',
           cssPath
         }).then(resp => {
@@ -956,7 +956,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const slug = getSlugForCurrentPage();
       chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }).then(resp => {
         const notes = resp?.notes || [];
-        const globalNote = notes.find(n => n.quote === null);
+        const globalNote = notes.find(n => n.excerpt === null);
         showGlobalNoteOverlay(globalNote?.note || '', globalNote?.slug || null, slug);
       }).catch(() => {
         showGlobalNoteOverlay('', null, slug);

@@ -134,7 +134,7 @@ vi.mock('../extension/filesystem-storage.js', () => ({
     async loadPermanentDeletes() { return (await mockFsHandler.fn('loadPermanentDeletes', {})).urls || []; }
     async loadHighlights() { return []; }
     async loadAllHighlights() { return {}; }
-    async loadAtomBatch(slugs) { return (await mockFsHandler.fn('loadAtomBatch', { slugs })).atoms || {}; }
+    async loadPageBatch(slugs) { return (await mockFsHandler.fn('loadPageBatch', { slugs })).pages || {}; }
     async listSnapshots() { return []; }
   },
 }));
@@ -277,8 +277,8 @@ describe('Cache staleness', () => {
       case 'loadAllHighlights':
         return { success: true, highlightsMap: {} };
 
-      case 'loadAtomBatch':
-        return { success: true, atoms: {} };
+      case 'loadPageBatch':
+        return { success: true, pages: {} };
 
       case 'saveSettingsKey':
         return { success: true };
@@ -357,9 +357,9 @@ describe('Cache staleness', () => {
   }
 
   // ---------------------------------------------------------------------------
-  // T1: resetHistory clears atomReadCache + allListPins
+  // T1: resetHistory clears pageReadCache + allListPins
   // ---------------------------------------------------------------------------
-  it('T1: resetHistory clears atomReadCache and allListPins', async () => {
+  it('T1: resetHistory clears pageReadCache and allListPins', async () => {
     populateCache();
 
     // loadPageBatch returns pages with watermark 100 initially
@@ -425,7 +425,7 @@ describe('Cache staleness', () => {
     // The updated loadListPins returns 4 pins now
     expect(pinnedOnlyRows().length).toBe(4);
 
-    // Assert: saveListPinsById was called (fresh atoms with watermark 200 > pin watermark 0)
+    // Assert: saveListPinsById was called (fresh pages with watermark 200 > pin watermark 0)
     const saveCalls = chrome.runtime.sendMessage.mock.calls
       .filter(c => c[0].action === 'saveListPinsById');
     expect(saveCalls.length).toBeGreaterThanOrEqual(1);
@@ -538,7 +538,7 @@ describe('Cache staleness', () => {
     selectDirBtn.click();
     await tick(200);
 
-    // resetHistory clears all caches atomically. Verify historyFiles was cleared
+    // resetHistory clears all caches. Verify historyFiles was cleared
     // by checking initHistoryFiles re-ran (reads logBuffer from storage.local).
     // Since all caches are cleared in the same function, this proves
     // gatewayDomainsLoaded was also reset.
@@ -754,9 +754,9 @@ describe('Cache staleness', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // T11: pin enrichment uses history attention when atom lacks it
+  // T11: pin enrichment uses history attention when page lacks it
   // ---------------------------------------------------------------------------
-  it('T11: pinned rows show attention from history when atom has no attention', async () => {
+  it('T11: pinned rows show attention from history when page has no attention', async () => {
     populateCache();
 
     // col-noq pins are on example.com/today0 and today1 — same URLs as FILE1_INTERACTIONS
@@ -767,7 +767,7 @@ describe('Cache staleness', () => {
     FILE1_INTERACTIONS[0] = { ...FILE1_INTERACTIONS[0], attention: attentionJson };
     FILE1_INTERACTIONS[1] = { ...FILE1_INTERACTIONS[1], attention: attentionJson };
 
-    // loadPageBatch returns pages WITHOUT attention (simulates old-format atoms)
+    // loadPageBatch returns pages WITHOUT attention (simulates pages with no attention data)
     actionOverrides['loadPageBatch'] = (msg) => {
       const pages = {};
       for (const slug of (msg.slugs || [])) {
@@ -786,7 +786,7 @@ describe('Cache staleness', () => {
       collItem.click();
       await tick(500);
 
-      // The pinned rows should have non-zero attention despite atoms lacking it
+      // The pinned rows should have non-zero attention despite pages lacking it
       // because historyByUrl has the attention data from JSONL interactions
       const rows = pinnedOnlyRows();
       expect(rows.length).toBe(2);

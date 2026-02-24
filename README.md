@@ -12,22 +12,23 @@ A Chrome extension for tracking and searching your interaction history with exte
 
 ## Architecture
 
-**Storage**: File system as primary storage, IndexedDB as fast write buffer
+Chrome MV3 extension with event-sourced storage. Background service worker holds business logic; offscreen document handles filesystem I/O only.
 
-- **Rust/WASM Core** (`src/lib.rs`): Search engine, ranking algorithms, data structures
-- **Chrome Extension** (`extension/`): UI, browser integration, data capture
-  - `background.js`: Service worker managing interactions and write buffer
-  - `offscreen.js`: Filesystem I/O handler (flush buffer to files)
-  - `content.js`: Captures user intent, attention, and page content
-  - `popup.html/js`: Search interface (reads from filesystem)
-  - `options.html/js`: Settings and storage configuration
+- **Rust/WASM Core** (`src/lib.rs`): Search engine, ranking algorithms
+- **Chrome Extension** (`extension/`):
+  - `background.js`: Service worker — all message routing, business logic, write buffer
+  - `offscreen.js`: Filesystem I/O worker (port-only, minimal)
+  - `content.js`: Page capture, attention tracking, highlights
+  - `popup.html/js`: Quick search + page actions
+  - `options.html/js`: Dashboard, explore view, settings
+  - `replay.js`: Shared replay module for idempotent log replay
   - `filesystem-storage.js`: File System Access API wrapper
 
-**Data Flow**:
-1. Content script captures → Background worker buffers → Offscreen flushes to files
-2. Popup/Search reads from files + merges with buffer
+**Storage**: Event-sourced JSONL logs (`history/YYYY-MM-DD.jsonl`) are source of truth. Entity checkpoints (`pages/`, `lists/`, `notes/`) are derived state. Cache hierarchy: `chrome.storage.session` (hot) → `chrome.storage.local` (log buffer) → filesystem (cold).
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed documentation.
+**Data Flow**:
+1. Content script captures → Background worker creates log entries → Offscreen flushes to filesystem
+2. Options/Popup reads entity checkpoints + replays recent log entries
 
 ## Features
 
@@ -40,36 +41,17 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed documentation.
   - Page content (text extraction)
   - Attention patterns (scroll depth, time on page, highlights, clicks)
 
-- ✅ **Search Engine**: Multiple ranking algorithms
-  - Content-based ranking
-  - Context-based ranking (temporal)
-  - Lineage-based ranking (TODO: implement graph traversal)
-  - Attention-based ranking (TODO: weight by engagement)
-  - Hybrid ranking (TODO: combine multiple signals)
+- ✅ **Search Engine**: WASM-powered with content and attention ranking
 
 - ✅ **User Interface**:
-  - Popup for quick search
-  - Options page for settings and data management
-  - Export/import functionality
+  - Popup for quick search and page actions
+  - Options page with dashboard, explore view, and settings
 
-### Roadmap (from DESIGN.md)
+- ✅ **Notes**: Highlights extracted as first-class note entities
 
-- [ ] **Lineage Tracking**:
-  - Native hyperlink tracking
-  - Temporal proximity heuristics
-  - SLM confidence rating
+- ✅ **Lists**: Curated collections with query-builder explore views
 
-- [ ] **Notes and Ideas**: Integration with note-taking
-
-- [ ] **Advanced Search**:
-  - Materialized views (pinned searches → topics)
-  - Change subscriptions
-  - Built-in categorization searches
-
-- [ ] **Additional Portals**:
-  - PDF reader with annotations
-  - Text import with timestamp extraction
-  - LLM chat integration
+- ✅ **Lineage Tracking**: Parent/child page relationships, referrer graphs
 
 ## Setup
 
@@ -100,7 +82,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed documentation.
 3. **Configure storage location:**
    - Extension will open options page automatically
    - Click "Select Directory"
-   - Choose where to store your data (e.g., `~/Documents/PortalHistory/`)
+   - Choose where to store your data (e.g., `~/portal-data/`)
    - Grant permission
 
 ### Development
@@ -125,73 +107,36 @@ npm run watch
 
 ### Searching
 
-1. Click the extension icon
-2. Enter a search query
-3. Select a ranking algorithm (Content, Context, Lineage, Attention, Hybrid)
-4. Click on results to revisit pages
-
-### File Format
-
-Your data is stored in daily JSONL files:
-
-```
-PortalHistory/
-├── README.md              # Auto-generated documentation
-├── 2026-02-08.jsonl      # Previous day
-├── 2026-02-09.jsonl      # Today
-└── 2026-02-10.jsonl      # Tomorrow
-```
-
-Each line is a complete JSON object:
-```json
-{"id":"...","timestamp":1707523200000,"url":"https://example.com","title":"Example","intent":"","content":"...","attention":"..."}
-```
-
-### Working with Your Data
-
-**Command line**:
-```bash
-# Count interactions
-wc -l *.jsonl
-
-# Search for specific URL
-grep "github.com" *.jsonl
-
-# Extract all URLs
-jq -r '.url' 2026-02-09.jsonl
-
-# Analyze attention patterns
-jq '.attention | fromjson | .scrollDepth' 2026-02-09.jsonl
-```
-
-**Python**:
-```python
-import json
-
-with open('2026-02-09.jsonl', 'r') as f:
-    interactions = [json.loads(line) for line in f]
-
-# Your analysis here
-```
-
-See [FILESYSTEM_STORAGE.md](./FILESYSTEM_STORAGE.md) for more examples.
+1. Click the extension icon for quick search
+2. Use the options page explore view for advanced query-builder filtering
 
 ## Project Structure
 
 ```
 .
 ├── src/
-│   └── lib.rs              # Rust/WASM core (search engine, data structures)
+│   └── lib.rs                # Rust/WASM core (search engine)
 ├── extension/
-│   ├── manifest.json       # Chrome extension configuration
-│   ├── background.js       # Service worker (WASM integration, storage)
-│   ├── content.js          # Page interaction capture
-│   ├── popup.html/js       # Search UI
-│   ├── options.html/js     # Settings UI
-│   └── pkg/                # Generated WASM output (git-ignored)
-├── Cargo.toml              # Rust dependencies
-├── package.json            # Build scripts
-└── DESIGN.md               # System design document
+│   ├── manifest.json         # Chrome MV3 manifest
+│   ├── background.js         # Service worker (business logic, message routing)
+│   ├── content.js            # Page capture, attention, highlights
+│   ├── offscreen.js/html     # Filesystem I/O worker
+│   ├── popup.html/js         # Quick search UI
+│   ├── options.html/js       # Dashboard, explore, settings
+│   ├── replay.js             # Event-sourced log replay
+│   ├── utils.js              # Shared utilities
+│   ├── filesystem-storage.js # File System Access API wrapper
+│   ├── entity-cache.js       # Entity caching
+│   ├── search-helpers.js     # Search utilities
+│   ├── qb-tree.js            # Query builder trees
+│   ├── virtual-scroller.js   # Virtual scrolling
+│   ├── savepage/             # SavePage WE integration (HTML snapshots)
+│   └── pkg/                  # Generated WASM output
+├── scripts/                  # Data migration scripts
+├── tests/                    # Vitest test suite
+├── Cargo.toml                # Rust dependencies
+├── package.json              # Build scripts
+└── DESIGN.md                 # System design document
 ```
 
 ## Technology Stack

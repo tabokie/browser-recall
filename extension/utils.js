@@ -92,12 +92,12 @@ export function qbTreesChanged(oldTrees, newTrees) {
 }
 
 // Generate deterministic slug for a note entity
-export function generateNoteSlug(timestamp, quote) {
+export function generateNoteSlug(timestamp, excerpt) {
   const d = new Date(timestamp);
   const yy = String(d.getFullYear()).slice(2);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
-  const text = (Array.isArray(quote) ? quote.join(' ') : quote) || 'note';
+  const text = (Array.isArray(excerpt) ? excerpt.join(' ') : excerpt) || 'note';
   const hashInput = text + String(timestamp);
   return `${yy}${mm}${dd}-${generateSlug(text, hashInput)}`;
 }

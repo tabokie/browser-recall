@@ -53,9 +53,9 @@ let gatewayDomainsLoaded = false;
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
 // pinnedFilterCtx removed — pinned section no longer has related pages
 const EXPLORE_LIST_ID = 'explore';
-// List results and atom data are cached in chrome.storage.session
-// (managed by background for atoms, by options for list results).
-// Keys: 'atom:{slug}' for atoms, 'listCache:{id}' for list results.
+// List results and page data are cached in chrome.storage.session
+// (managed by background for pages, by options for list results).
+// Keys: 'page:{slug}' for pages, 'listCache:{id}' for list results.
 let listCacheKeys = []; // tracks which listCache:* keys exist in session
 
 // --- Query builder state ---
@@ -169,7 +169,7 @@ async function pipelinedSearch(query) {
   const rootDir = fsStorage.directoryHandle;
   if (!rootDir) throw new Error('No storage directory configured');
   const historyDir = await rootDir.getDirectoryHandle('history');
-  const atomsDir = await rootDir.getDirectoryHandle('atoms');
+  const pagesDir = await rootDir.getDirectoryHandle('pages');
 
   const filesResp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
   const files = filesResp?.files || [];
@@ -188,7 +188,7 @@ async function pipelinedSearch(query) {
 
   const byUrl = new Map();
   const batchResults = await Promise.all(
-    chunks.map(chunk => searchBatch(historyDir, atomsDir, query, chunk))
+    chunks.map(chunk => searchBatch(historyDir, pagesDir, query, chunk))
   );
   for (const results of batchResults) {
     for (const r of results) {
@@ -909,8 +909,8 @@ function matchKeyword(item, field, value) {
     }
   }
   if (fields.includes('highlights') && item.notes && item.notes.some(n => {
-    if (n.quote === null) return false; // skip global notes
-    const quotes = Array.isArray(n.quote) ? n.quote : [n.quote || ''];
+    if (n.excerpt === null) return false; // skip global notes
+    const quotes = Array.isArray(n.excerpt) ? n.excerpt : [n.excerpt || ''];
     return quotes.some(t => textMatches(t, q, exact));
   })) return true;
   if (fields.includes('notes') && item.notes && item.notes.some(n => textMatches(n.note, q, exact))) return true;
@@ -972,8 +972,8 @@ function keywordRelevance(item, field, value) {
     }
   }
   if (fields.includes('highlights') && item.notes && item.notes.some(n => {
-    if (n.quote === null) return false; // skip global notes
-    const quotes = Array.isArray(n.quote) ? n.quote : [n.quote || ''];
+    if (n.excerpt === null) return false; // skip global notes
+    const quotes = Array.isArray(n.excerpt) ? n.excerpt : [n.excerpt || ''];
     return quotes.some(t => textMatches(t, q, exact));
   })) score += 1.5;
   if (fields.includes('notes') && item.notes && item.notes.some(n => textMatches(n.note, q, exact))) score += 1.5;
@@ -1687,7 +1687,7 @@ async function showExplore() {
   if (pins.length === 0) {
     pinnedSection.style.display = 'none';
   } else {
-    // Enrich pins with atom data from session
+    // Enrich pins with page data from session
     const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
     const pageKeys = pinSlugs.map(s => 'page:' + s);
     const pageData = pageKeys.length > 0 ? await chrome.storage.session.get(pageKeys) : {};
@@ -1845,7 +1845,7 @@ async function showList(list) {
     }
     const pins = allListPins[listId] || [];
 
-    // Batch-read atoms from session for all pin slugs (one IPC call)
+    // Batch-read pages from session for all pin slugs (one IPC call)
     const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
     const pageKeys = pinSlugs.map(s => 'page:' + s);
     const pageData = pageKeys.length > 0 ? await chrome.storage.session.get(pageKeys) : {};
@@ -1855,14 +1855,14 @@ async function showList(list) {
       if (page) pageSnap.set(slug, page);
     }
 
-    // Enrich from cached pin fields + session atom cache (no further I/O)
+    // Enrich from cached pin fields + session page cache (no further I/O)
     function enrichResult(r) {
       const slug = generateSlugFromUrl(r.url);
       const cached = pageSnap.get(slug);
-      // Use session atom if available and newer than pin's watermark, else use pin's cached fields
+      // Use session page if available and newer than pin's watermark, else use pin's cached fields
       const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
       let attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
-      // Fallback: use attention from loaded history when atom lacks it
+      // Fallback: use attention from loaded history when page lacks it
       if (!attParsed) {
         const histEntry = historyByUrl.get(r.url);
         if (histEntry) attParsed = parseAttention(histEntry);
@@ -1890,16 +1890,16 @@ async function showList(list) {
     // --- Explore section: always immediate ---
     renderListExplore(list);
 
-    // Fire-and-forget: refresh atoms in background and update pin file
-    refreshListAtoms(listId, pins);
+    // Fire-and-forget: refresh pages in background and update pin file
+    refreshListPages(listId, pins);
   } catch (error) {
     console.error('List load error:', error);
     document.getElementById('pinnedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
   }
 }
 
-// Background refresh: load fresh atoms and update pin file + cache
-async function refreshListAtoms(listId, pins) {
+// Background refresh: load fresh pages and update pin file + cache
+async function refreshListPages(listId, pins) {
   try {
     const slugs = pins.map(p => generateSlugFromUrl(p.url));
     if (slugs.length === 0) return;
@@ -1941,7 +1941,7 @@ async function refreshListAtoms(listId, pins) {
       saveListPinsById(listId);
     }
   } catch (error) {
-    console.debug('refreshListAtoms failed:', error.message);
+    console.debug('refreshListPages failed:', error.message);
   }
 }
 
@@ -2214,8 +2214,8 @@ function buildDetailHtml(url, attDetail, notes) {
   if (notes && notes.length > 0) {
     html += '<div class="detail-notes">';
     for (const n of notes.slice(0, 5)) {
-      if (n.quote === null) continue; // skip global notes
-      const raw = n.quote || '';
+      if (n.excerpt === null) continue; // skip global notes
+      const raw = n.excerpt || '';
       const text = Array.isArray(raw) ? raw.join(' ') : (raw || '');
       if (text) html += `<div class="detail-note-item">${escapeHtml(text)}</div>`;
     }
@@ -2267,10 +2267,10 @@ function renderExtraDetailHtml(extra) {
   if (extra.notes.length > 0) {
     html += `<div class="detail-section detail-notes-section" data-slug="${escapeHtml(extra.slug)}"><span class="detail-section-label">Notes:</span>`;
     for (const n of extra.notes.slice(0, 20)) {
-      const rawQuote = Array.isArray(n.quote) ? n.quote.join(' ') : (n.quote || '');
+      const rawQuote = Array.isArray(n.excerpt) ? n.excerpt.join(' ') : (n.excerpt || '');
       const noteText = n.note || '';
       const noteSlug = n.slug || '';
-      const isGlobal = n.quote === null;
+      const isGlobal = n.excerpt === null;
       const label = isGlobal ? 'Page note' : escapeHtml(rawQuote.substring(0, 100)) + (rawQuote.length > 100 ? '...' : '');
       const noteHtml = noteText ? ` <span class="detail-note-text">${escapeHtml(noteText)}</span>` : '';
       html += `<div class="detail-note-entry" data-note-slug="${escapeHtml(noteSlug)}">

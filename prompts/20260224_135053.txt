@@ -1,0 +1,6 @@
+- Rename the "quote" field in note entity and logs to "excerpt"
+- Analyze the codebase, remove outdated documentation, outdated migration scripts, inconsistent naming and conventions. If you are not certain, ask me to clarify anytime.
+- Scan the codebase, make sure there is no mention of "atom". We have logs and entities, entities include page, note, list. Entities are referenced using a unified key schema.
+- Fact-check CODEBASE_MAP.md thoroughly
+- Finish up
+- skip

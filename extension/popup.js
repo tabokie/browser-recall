@@ -113,14 +113,14 @@ function renderNotes(notes) {
   const container = document.getElementById('highlightList');
   currentNotes = notes || [];
 
-  // Populate the dedicated page-note input from global note entry (quote: null)
+  // Populate the dedicated page-note input from global note entry (excerpt: null)
   const pageNoteEl = document.getElementById('pageNote');
-  const globalNote = currentNotes.find(n => n.quote === null);
+  const globalNote = currentNotes.find(n => n.excerpt === null);
   pageNoteEl.value = globalNote?.note || '';
   pageNoteEl.dataset.noteSlug = globalNote?.slug || '';
 
   // Only show non-global notes in the list
-  const textNotes = currentNotes.filter(n => n.quote !== null);
+  const textNotes = currentNotes.filter(n => n.excerpt !== null);
 
   if (textNotes.length === 0) {
     container.innerHTML = '<div class="empty-state">No notes</div>';
@@ -128,7 +128,7 @@ function renderNotes(notes) {
   }
 
   container.innerHTML = textNotes.map((n, i) => {
-    const displayText = Array.isArray(n.quote) ? n.quote.join(' ') : n.quote;
+    const displayText = Array.isArray(n.excerpt) ? n.excerpt.join(' ') : n.excerpt;
     return `
       <div class="highlight-item" data-note-slug="${escapeHtml(n.slug)}">
         <div class="highlight-header">
@@ -212,7 +212,7 @@ document.getElementById('pageNote').addEventListener('input', (e) => {
         const resp = await chrome.runtime.sendMessage({
           action: 'createNote',
           pageSlug: currentSlug,
-          quote: null,
+          excerpt: null,
           note,
           cssPath: null
         });
