@@ -244,7 +244,10 @@ async function loadListPins() {
 
 function isPagePinned(allPins, listId, url) {
   const pins = allPins[listId] || [];
-  return pins.some(p => p.url === url);
+  const slug = generateSlugFromUrl(url);
+  const pageId = `page:${slug}`;
+  const shallowId = `shallow:${url}`;
+  return pins.some(p => p.id === pageId || p.id === shallowId || p.url === url);
 }
 
 async function renderListChips() {
@@ -289,8 +292,14 @@ async function renderListChips() {
   });
 }
 
+// TODO: currentUrl comes from tab.url, which may differ from the URL the content
+// script reported (e.g. YouTube SPA adds &pp= after load). This causes slug
+// mismatches — background computes a different slug than the checkpoint's.
+// Fix: ask the content script for the canonical URL it reported, or maintain a
+// url→slug reverse index in background so slug lookups survive URL mutations.
+// Same issue affects getPageInfo and ensureCheckpointIfMissing.
 async function toggleListPin(listId) {
-  await chrome.runtime.sendMessage({ action: 'toggleListPin', listId, url: currentUrl, title: currentTitle });
+  await chrome.runtime.sendMessage({ action: 'toggleListPin', listId, url: currentUrl });
 }
 
 function closeListPicker() {
@@ -423,10 +432,12 @@ async function createListAndPin(name) {
   const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
   await saveSettingsValue('listOrder', [...order, 'list:' + listId]);
 
+  const slug = generateSlugFromUrl(currentUrl);
+  const pinId = `page:${slug}`;
   await chrome.runtime.sendMessage({
     action: 'saveListPinsById',
     listId,
-    pins: [{ url: currentUrl, title: currentTitle, pinnedAt: Date.now() }]
+    pins: [{ id: pinId, pinnedAt: Date.now() }]
   });
 
   console.log('[popup] Created list and pinned page:', name);

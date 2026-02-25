@@ -8,6 +8,7 @@
  * FileSystemStorage methods operate against a virtual directory tree.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { generateSlugFromUrl } from '../extension/utils.js';
 
 // ---------------------------------------------------------------------------
 // In-memory File System Access API mock
@@ -130,6 +131,10 @@ function makeChromeStorageMock() {
     },
     _raw() { return store; },
   };
+}
+
+function pinFromUrl(url, pinnedAt) {
+  return { id: 'page:' + generateSlugFromUrl(url), pinnedAt };
 }
 
 // ---------------------------------------------------------------------------
@@ -494,7 +499,7 @@ describe('Persistence round-trip', () => {
   it('list files are separate from settings', async () => {
     // Save list with metadata + pins
     await fs.saveListMeta('c1', { slug: 'c1', name: 'Test', qbTrees: [] });
-    await fs.saveListPinsById('c1', [{ url: 'https://a.com', title: 'A', pinnedAt: 100 }]);
+    await fs.saveListPinsById('c1', [pinFromUrl('https://a.com', 100)]);
 
     // Save settings
     await fs.saveSettings({ listOrder: ['list:c1'] });
@@ -504,25 +509,25 @@ describe('Persistence round-trip', () => {
     const loadedSettings = await fs.loadSettings();
     const meta = await fs.loadAllListMetadata();
 
-    expect(loadedPins).toEqual([{ url: 'https://a.com', title: 'A', pinnedAt: 100 }]);
+    expect(loadedPins).toEqual([pinFromUrl('https://a.com', 100)]);
     expect(loadedSettings.listOrder).toEqual(['list:c1']);
-    expect(meta).toEqual([{ slug: 'c1', name: 'Test', qbTrees: [], pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 100 }] }]);
+    expect(meta).toEqual([{ slug: 'c1', name: 'Test', qbTrees: [], pins: [pinFromUrl('https://a.com', 100)] }]);
   });
 
   // ---- Per-list pin isolation (regression: lazy pins + bulk save deleted other files) ----
 
   describe('per-list pin operations', () => {
     const PINS_C1 = [
-      { url: 'https://a.com', title: 'A', pinnedAt: 100 },
-      { url: 'https://b.com', title: 'B', pinnedAt: 200 },
+      pinFromUrl('https://a.com', 100),
+      pinFromUrl('https://b.com', 200),
     ];
     const PINS_C2 = [
-      { url: 'https://x.com', title: 'X', pinnedAt: 300 },
+      pinFromUrl('https://x.com', 300),
     ];
     const PINS_C3 = [
-      { url: 'https://y.com', title: 'Y', pinnedAt: 400 },
-      { url: 'https://z.com', title: 'Z', pinnedAt: 500 },
-      { url: 'https://w.com', title: 'W', pinnedAt: 600 },
+      pinFromUrl('https://y.com', 400),
+      pinFromUrl('https://z.com', 500),
+      pinFromUrl('https://w.com', 600),
     ];
 
     async function seedAllPins() {
@@ -533,7 +538,7 @@ describe('Persistence round-trip', () => {
       await seedAllPins();
 
       // Update c1 only
-      const updated = [...PINS_C1, { url: 'https://new.com', title: 'New', pinnedAt: 700 }];
+      const updated = [...PINS_C1, pinFromUrl('https://new.com', 700)];
       await fs.saveListPinsById('c1', updated);
 
       // c1 updated
@@ -550,7 +555,7 @@ describe('Persistence round-trip', () => {
     it('saveListPinsById creates new file for unknown list', async () => {
       await seedAllPins();
 
-      const newPins = [{ url: 'https://brand-new.com', title: 'Brand New', pinnedAt: 800 }];
+      const newPins = [pinFromUrl('https://brand-new.com', 800)];
       await fs.saveListPinsById('c4', newPins);
 
       // New list saved
@@ -571,7 +576,7 @@ describe('Persistence round-trip', () => {
     });
 
     it('loadListPinsById round-trips with saveListPinsById', async () => {
-      const pins = [{ url: 'https://solo.com', title: 'Solo', pinnedAt: 999 }];
+      const pins = [pinFromUrl('https://solo.com', 999)];
       await fs.saveListPinsById('solo', pins);
       const loaded = await fs.loadListPinsById('solo');
       expect(loaded).toEqual(pins);
@@ -597,8 +602,8 @@ describe('Persistence round-trip', () => {
     it('concurrent per-list saves do not interfere', async () => {
       await seedAllPins();
 
-      const updatedC1 = [{ url: 'https://c1-new.com', title: 'C1 New', pinnedAt: 900 }];
-      const updatedC3 = [{ url: 'https://c3-new.com', title: 'C3 New', pinnedAt: 1000 }];
+      const updatedC1 = [pinFromUrl('https://c1-new.com', 900)];
+      const updatedC3 = [pinFromUrl('https://c3-new.com', 1000)];
 
       // Save c1 and c3 concurrently
       await Promise.all([

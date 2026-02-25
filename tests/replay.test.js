@@ -18,7 +18,7 @@ import {
   applyLogToPins,
   applyLogToDeletes,
   applyLogToRecycleBin,
-  applyLogToParentIndex,
+  applyLogToShallowPage,
 } from '../extension/replay.js';
 import { generateSlugFromUrl } from '../extension/utils.js';
 
@@ -33,15 +33,17 @@ describe('getAffectedSlugs', () => {
     expect(slugs.has(generateSlugFromUrl('https://a.com'))).toBe(true);
   });
 
-  it('returns both child and parent slugs for page with referrer', () => {
-    const slugs = getAffectedSlugs({ timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrer: 'https://parent.com' });
+  it('returns both child and parent slugs for page with referrerId', () => {
+    const parentSlug = generateSlugFromUrl('https://parent.com');
+    const slugs = getAffectedSlugs({ timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrerId: `page:${parentSlug}` });
     expect(slugs.size).toBe(2);
     expect(slugs.has(generateSlugFromUrl('https://child.com'))).toBe(true);
-    expect(slugs.has(generateSlugFromUrl('https://parent.com'))).toBe(true);
+    expect(slugs.has(parentSlug)).toBe(true);
   });
 
-  it('returns single slug when referrer is same as url', () => {
-    const slugs = getAffectedSlugs({ timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://a.com' });
+  it('returns single slug when referrerId points to same page', () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const slugs = getAffectedSlugs({ timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrerId: `page:${slug}` });
     expect(slugs.size).toBe(1);
   });
 
@@ -59,11 +61,12 @@ describe('getAffectedKeys', () => {
     expect(keys.has(`page:${slug}`)).toBe(true);
   });
 
-  it('returns both child and parent page keys for referrer', () => {
-    const keys = getAffectedKeys({ timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrer: 'https://parent.com' });
+  it('returns both child and parent page keys for referrerId', () => {
+    const parentSlug = generateSlugFromUrl('https://parent.com');
+    const keys = getAffectedKeys({ timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrerId: `page:${parentSlug}` });
     expect(keys.size).toBe(2);
     expect(keys.has(`page:${generateSlugFromUrl('https://child.com')}`)).toBe(true);
-    expect(keys.has(`page:${generateSlugFromUrl('https://parent.com')}`)).toBe(true);
+    expect(keys.has(`page:${parentSlug}`)).toBe(true);
   });
 });
 
@@ -117,7 +120,7 @@ describe('applyLogToSettings', () => {
 
 describe('applyLogToPage — page (visit)', () => {
   it('updates url, title, timestamp from page entry', () => {
-    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, url: '', title: '', parents: [], children: [] };
+    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, url: '', title: '', parentIds: [], childIds: [] };
     const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'Page A' };
     const result = applyLogToPage(page, entry);
     expect(result.url).toBe('https://a.com');
@@ -125,53 +128,33 @@ describe('applyLogToPage — page (visit)', () => {
     expect(result.timestamp).toBe(100);
   });
 
-  it('accumulates parent URLs from referrer', () => {
-    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: ['old-slug-abc'] };
-    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
-    const result = applyLogToPage(page, entry);
-    expect(result.parents).toHaveLength(2);
-    expect(result.parents[0]).toBe('old-slug-abc');
-    expect(result.parents[1]).toBe('https://google.com'); // stored as URL initially
-  });
-
-  it('does not duplicate existing parent URL', () => {
-    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: ['https://google.com'] };
-    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
-    const result = applyLogToPage(page, entry);
-    expect(result.parents).toEqual(['https://google.com']);
-  });
-
-  it('does not duplicate when existing parent is a slug matching the referrer', () => {
-    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
+  it('accumulates parentIds from referrerId', () => {
     const googleSlug = generateSlugFromUrl('https://google.com');
-    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: [googleSlug] };
+    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parentIds: ['page:old-slug-abc'] };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrerId: `page:${googleSlug}` };
     const result = applyLogToPage(page, entry);
-    expect(result.parents).toHaveLength(1);
+    expect(result.parentIds).toHaveLength(2);
+    expect(result.parentIds[0]).toBe('page:old-slug-abc');
+    expect(result.parentIds[1]).toBe(`page:${googleSlug}`);
   });
 
-  it('does not duplicate when existing parent is page:slug key', () => {
-    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
+  it('does not duplicate existing parentId', () => {
     const googleSlug = generateSlugFromUrl('https://google.com');
-    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: [`page:${googleSlug}`] };
+    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parentIds: [`page:${googleSlug}`] };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrerId: `page:${googleSlug}` };
     const result = applyLogToPage(page, entry);
-    expect(result.parents).toHaveLength(1);
+    expect(result.parentIds).toEqual([`page:${googleSlug}`]);
   });
 
-  it('does not duplicate when existing parent is {url,title} object', () => {
-    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: [{ url: 'https://google.com', title: 'Google' }] };
-    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://google.com' };
+  it('caps parentIds at 50', () => {
+    const parentIds = [];
+    for (let i = 0; i < 50; i++) parentIds.push(`page:ref${i}`);
+    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parentIds };
+    const newRefSlug = generateSlugFromUrl('https://new-ref.com');
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrerId: `page:${newRefSlug}` };
     const result = applyLogToPage(page, entry);
-    expect(result.parents).toHaveLength(1);
-  });
-
-  it('caps parents at 50', () => {
-    const parents = [];
-    for (let i = 0; i < 50; i++) parents.push(`https://ref${i}.com`);
-    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents };
-    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://new-ref.com' };
-    const result = applyLogToPage(page, entry);
-    expect(result.parents).toHaveLength(50);
-    expect(result.parents[0]).toBe('https://ref1.com'); // ref0 evicted
+    expect(result.parentIds).toHaveLength(50);
+    expect(result.parentIds[0]).toBe('page:ref1'); // ref0 evicted
   });
 
   it('ignores page entry with mismatched slug', () => {
@@ -190,8 +173,9 @@ describe('applyLogToPage — page (visit)', () => {
   });
 
   it('is idempotent for page entries', () => {
-    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: [] };
-    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrer: 'https://ref.com' };
+    const refSlug = generateSlugFromUrl('https://ref.com');
+    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parentIds: [] };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrerId: `page:${refSlug}` };
     const r1 = applyLogToPage(page, entry);
     const r2 = applyLogToPage(r1, entry);
     expect(r2).toEqual(r1);
@@ -205,7 +189,7 @@ describe('applyLogToPage — page (visit)', () => {
 describe('applyLogToPage — title update from attention report', () => {
   it('attention report with title updates page title', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    let page = { slug, timestamp: 0, url: '', title: '', parents: [], children: [] };
+    let page = { slug, timestamp: 0, url: '', title: '', parentIds: [], childIds: [] };
     const visit = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'Old Title' };
     page = applyLogToPage(page, visit);
     expect(page.title).toBe('Old Title');
@@ -217,7 +201,7 @@ describe('applyLogToPage — title update from attention report', () => {
 
   it('attention report without title preserves existing title', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    let page = { slug, timestamp: 0, url: '', title: '', parents: [], children: [] };
+    let page = { slug, timestamp: 0, url: '', title: '', parentIds: [], childIds: [] };
     const visit = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'Page Title' };
     page = applyLogToPage(page, visit);
 
@@ -228,7 +212,7 @@ describe('applyLogToPage — title update from attention report', () => {
 
   it('user_title is stored independently from title', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    let page = { slug, timestamp: 0, url: '', title: '', parents: [], children: [] };
+    let page = { slug, timestamp: 0, url: '', title: '', parentIds: [], childIds: [] };
     const visit = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'Auto Title' };
     page = applyLogToPage(page, visit);
 
@@ -240,7 +224,7 @@ describe('applyLogToPage — title update from attention report', () => {
 
   it('title update does not overwrite user_title', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    let page = { slug, timestamp: 0, url: '', title: '', user_title: 'Custom', parents: [], children: [] };
+    let page = { slug, timestamp: 0, url: '', title: '', user_title: 'Custom', parentIds: [], childIds: [] };
     const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'New Auto Title' };
     page = applyLogToPage(page, entry);
     expect(page.title).toBe('New Auto Title');
@@ -252,74 +236,74 @@ describe('applyLogToPage — title update from attention report', () => {
 // applyLogToPage — parent-side children accumulation
 // ---------------------------------------------------------------------------
 
-describe('applyLogToPage — children from referrer', () => {
-  it('accumulates child URL on parent page when page has referrer', () => {
-    const parentPage = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: [] };
-    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+describe('applyLogToPage — childIds from referrerId', () => {
+  it('accumulates shallow child on parent page when page has referrerId', () => {
+    const parentSlug = generateSlugFromUrl('https://parent.com');
+    const parentPage = { slug: parentSlug, timestamp: 0, childIds: [] };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrerId: `page:${parentSlug}` };
     const result = applyLogToPage(parentPage, entry);
-    expect(result.children).toHaveLength(1);
-    expect(result.children[0]).toBe('https://child.com');
+    expect(result.childIds).toHaveLength(1);
+    expect(result.childIds[0]).toBe('shallow:https://child.com');
     expect(result.timestamp).toBe(100);
   });
 
-  it('does not duplicate existing child URL string', () => {
-    const parentPage = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: ['https://child.com'] };
-    const entry = { timestamp: 200, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+  it('does not duplicate existing shallow child', () => {
+    const parentSlug = generateSlugFromUrl('https://parent.com');
+    const parentPage = { slug: parentSlug, timestamp: 0, childIds: ['shallow:https://child.com'] };
+    const entry = { timestamp: 200, action: 'page', url: 'https://child.com', title: 'Child', referrerId: `page:${parentSlug}` };
     const result = applyLogToPage(parentPage, entry);
-    expect(result.children).toHaveLength(1);
+    expect(result.childIds).toHaveLength(1);
   });
 
-  it('does not duplicate existing child {url,title} object', () => {
-    const parentPage = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: [{ url: 'https://child.com', title: 'Child' }] };
-    const entry = { timestamp: 200, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
-    const result = applyLogToPage(parentPage, entry);
-    expect(result.children).toHaveLength(1);
-  });
-
-  it('does not duplicate existing child page:slug key', () => {
+  it('does not duplicate existing page:slug child', () => {
     const childSlug = generateSlugFromUrl('https://child.com');
-    const parentPage = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: [`page:${childSlug}`] };
-    const entry = { timestamp: 200, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+    const parentSlug = generateSlugFromUrl('https://parent.com');
+    const parentPage = { slug: parentSlug, timestamp: 0, childIds: [`page:${childSlug}`] };
+    const entry = { timestamp: 200, action: 'page', url: 'https://child.com', title: 'Child', referrerId: `page:${parentSlug}` };
     const result = applyLogToPage(parentPage, entry);
-    expect(result.children).toHaveLength(1);
+    expect(result.childIds).toHaveLength(1);
   });
 
-  it('caps children at REFERRER_CAP (50)', () => {
-    const children = [];
-    for (let i = 0; i < 50; i++) children.push(`https://child${i}.com`);
-    const parentPage = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children };
-    const entry = { timestamp: 200, action: 'page', url: 'https://new-child.com', title: 'New', referrer: 'https://parent.com' };
+  it('caps childIds at REFERRER_CAP (50)', () => {
+    const parentSlug = generateSlugFromUrl('https://parent.com');
+    const childIds = [];
+    for (let i = 0; i < 50; i++) childIds.push(`shallow:https://child${i}.com`);
+    const parentPage = { slug: parentSlug, timestamp: 0, childIds };
+    const entry = { timestamp: 200, action: 'page', url: 'https://new-child.com', title: 'New', referrerId: `page:${parentSlug}` };
     const result = applyLogToPage(parentPage, entry);
-    expect(result.children).toHaveLength(50);
-    expect(result.children[0]).toBe('https://child1.com'); // child0 evicted
-    expect(result.children[49]).toBe('https://new-child.com');
+    expect(result.childIds).toHaveLength(50);
+    expect(result.childIds[0]).toBe('shallow:https://child1.com'); // child0 evicted
+    expect(result.childIds[49]).toBe('shallow:https://new-child.com');
   });
 
-  it('ignores page without referrer (no parent-side effect)', () => {
-    const parentPage = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: [] };
+  it('ignores page without referrerId (no parent-side effect)', () => {
+    const parentPage = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, childIds: [] };
     const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child' };
     const result = applyLogToPage(parentPage, entry);
     expect(result).toBe(parentPage);
   });
 
-  it('ignores page where referrer does not match parent slug', () => {
-    const parentPage = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: [] };
-    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://other.com' };
+  it('ignores page where referrerId does not match parent slug', () => {
+    const parentPage = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, childIds: [] };
+    const otherSlug = generateSlugFromUrl('https://other.com');
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrerId: `page:${otherSlug}` };
     const result = applyLogToPage(parentPage, entry);
     expect(result).toBe(parentPage);
   });
 
   it('is idempotent', () => {
-    const parentPage = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 0, children: [] };
-    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+    const parentSlug = generateSlugFromUrl('https://parent.com');
+    const parentPage = { slug: parentSlug, timestamp: 0, childIds: [] };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrerId: `page:${parentSlug}` };
     const r1 = applyLogToPage(parentPage, entry);
     const r2 = applyLogToPage(r1, entry);
     expect(r2).toEqual(r1);
   });
 
   it('advances timestamp to max of existing and entry', () => {
-    const parentPage = { slug: generateSlugFromUrl('https://parent.com'), timestamp: 500, children: [] };
-    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+    const parentSlug = generateSlugFromUrl('https://parent.com');
+    const parentPage = { slug: parentSlug, timestamp: 500, childIds: [] };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrerId: `page:${parentSlug}` };
     const result = applyLogToPage(parentPage, entry);
     expect(result.timestamp).toBe(500);
   });
@@ -330,19 +314,19 @@ describe('applyLogToPage — children from referrer', () => {
 // ---------------------------------------------------------------------------
 
 describe('applyLogToNote', () => {
-  it('creates note with excerpt, note text, cssPath, parents', () => {
-    const noteEntity = { slug: '260223-hello-abc', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
-    const entry = { timestamp: 100, action: 'note', slug: '260223-hello-abc', excerpt: 'hello world', note: 'my note', cssPath: 'body > p', parents: ['page:some-slug'] };
+  it('creates note with excerpt, note text, cssPath, parentIds', () => {
+    const noteEntity = { slug: '260223-hello-abc', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
+    const entry = { timestamp: 100, action: 'note', slug: '260223-hello-abc', excerpt: 'hello world', note: 'my note', cssPath: 'body > p', parentIds: ['page:some-slug'] };
     const result = applyLogToNote(noteEntity, entry);
     expect(result.excerpt).toBe('hello world');
     expect(result.note).toBe('my note');
     expect(result.cssPath).toBe('body > p');
-    expect(result.parents).toEqual(['page:some-slug']);
+    expect(result.parentIds).toEqual(['page:some-slug']);
     expect(result.timestamp).toBe(100);
   });
 
   it('updates note text without changing excerpt', () => {
-    const noteEntity = { slug: 'n1', timestamp: 100, excerpt: 'text', note: 'old', cssPath: 'p', parents: ['page:p1'], children: [] };
+    const noteEntity = { slug: 'n1', timestamp: 100, excerpt: 'text', note: 'old', cssPath: 'p', parentIds: ['page:p1'], childIds: [] };
     const entry = { timestamp: 200, action: 'note', slug: 'n1', note: 'updated' };
     const result = applyLogToNote(noteEntity, entry);
     expect(result.note).toBe('updated');
@@ -351,37 +335,37 @@ describe('applyLogToNote', () => {
   });
 
   it('supports array excerpts (cross-block highlights)', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: ['block1', 'block2'], parents: ['page:p1'] };
+    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: ['block1', 'block2'], parentIds: ['page:p1'] };
     const result = applyLogToNote(noteEntity, entry);
     expect(result.excerpt).toEqual(['block1', 'block2']);
   });
 
   it('supports null excerpt (page-level note)', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: null, note: 'Page level note', parents: ['page:p1'] };
+    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: null, note: 'Page level note', parentIds: ['page:p1'] };
     const result = applyLogToNote(noteEntity, entry);
     expect(result.excerpt).toBeNull();
     expect(result.note).toBe('Page level note');
   });
 
   it('ignores non-note entries', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
+    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
     const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
     const result = applyLogToNote(noteEntity, entry);
     expect(result).toBe(noteEntity);
   });
 
   it('ignores mismatched slug', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
-    const entry = { timestamp: 100, action: 'note', slug: 'n2', excerpt: 'text', parents: ['page:p1'] };
+    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
+    const entry = { timestamp: 100, action: 'note', slug: 'n2', excerpt: 'text', parentIds: ['page:p1'] };
     const result = applyLogToNote(noteEntity, entry);
     expect(result).toBe(noteEntity);
   });
 
   it('is idempotent', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', note: 'world', parents: ['page:p1'] };
+    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', note: 'world', parentIds: ['page:p1'] };
     const r1 = applyLogToNote(noteEntity, entry);
     const r2 = applyLogToNote(r1, entry);
     expect(r2).toEqual(r1);
@@ -410,29 +394,28 @@ describe('applyLogToPage — capture (via page)', () => {
 
 describe('applyLogToPins — list operations', () => {
   it('adds pins and preserves metadata', () => {
-    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Rust', qbTrees: [], pins: [{ url: 'https://old.com', title: 'Old', pinnedAt: 50 }] };
-    const entry = { timestamp: 100, action: 'list', id: 'uuid-1', op: 'add', urls: ['https://new.com'] };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Rust', qbTrees: [], pins: [{ id: 'page:old-slug', pinnedAt: 50 }] };
+    const entry = { timestamp: 100, action: 'list', id: 'uuid-1', op: 'add', ids: ['shallow:https://new.com'] };
     const result = applyLogToPins(entity, entry);
     expect(result.pins).toHaveLength(2);
-    expect(result.pins[1].url).toBe('https://new.com');
-    expect(result.pins[1].title).toBe('Untitled');
+    expect(result.pins[1].id).toBe('shallow:https://new.com');
     expect(result.pins[1].pinnedAt).toBe(100);
     expect(result.timestamp).toBe(100);
     expect(result.name).toBe('Rust');
     expect(result.slug).toBe('uuid-1');
   });
 
-  it('removes pins', () => {
-    const entity = { timestamp: 0, slug: 'c1', pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 50 }, { url: 'https://b.com', title: 'B', pinnedAt: 60 }] };
-    const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'del', urls: ['https://a.com'] };
+  it('removes pins by id', () => {
+    const entity = { timestamp: 0, slug: 'c1', pins: [{ id: 'page:a-slug', pinnedAt: 50 }, { id: 'shallow:https://b.com', pinnedAt: 60 }] };
+    const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'del', ids: ['page:a-slug'] };
     const result = applyLogToPins(entity, entry);
     expect(result.pins).toHaveLength(1);
-    expect(result.pins[0].url).toBe('https://b.com');
+    expect(result.pins[0].id).toBe('shallow:https://b.com');
   });
 
   it('clears pins', () => {
-    const entity = { timestamp: 0, slug: 'c1', pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 50 }] };
-    const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'clear', urls: [] };
+    const entity = { timestamp: 0, slug: 'c1', pins: [{ id: 'page:a-slug', pinnedAt: 50 }] };
+    const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'clear', ids: [] };
     const result = applyLogToPins(entity, entry);
     expect(result.pins).toEqual([]);
     expect(result.timestamp).toBe(100);
@@ -447,14 +430,14 @@ describe('applyLogToPins — list operations', () => {
 
   it('ignores wrong id', () => {
     const entity = { timestamp: 0, slug: 'c1', pins: [] };
-    const entry = { timestamp: 100, action: 'list', id: 'c2', op: 'add', urls: ['https://a.com'] };
+    const entry = { timestamp: 100, action: 'list', id: 'c2', op: 'add', ids: ['page:a-slug'] };
     const result = applyLogToPins(entity, entry);
     expect(result).toBe(entity);
   });
 
   it('is idempotent for add', () => {
     const entity = { timestamp: 0, slug: 'c1', pins: [] };
-    const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'add', urls: ['https://a.com'] };
+    const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['page:a-slug'] };
     const r1 = applyLogToPins(entity, entry);
     const r2 = applyLogToPins(r1, entry);
     expect(r2.pins).toHaveLength(1);
@@ -463,7 +446,7 @@ describe('applyLogToPins — list operations', () => {
 
 describe('applyLogToPins — list_meta', () => {
   it('merges metadata fields and preserves pins', () => {
-    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Old Name', qbTrees: [], pins: [{ url: 'https://a.com', title: 'A', pinnedAt: 50 }] };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Old Name', qbTrees: [], pins: [{ id: 'page:a-slug', pinnedAt: 50 }] };
     const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', name: 'New Name' };
     const result = applyLogToPins(entity, entry);
     expect(result.name).toBe('New Name');
@@ -498,7 +481,7 @@ describe('applyLogToPins — list_meta', () => {
 
 describe('applyLogToPins — del_list', () => {
   it('returns deleted entity', () => {
-    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Rust', pins: [{ url: 'https://a.com' }] };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Rust', pins: [{ id: 'page:a-slug' }] };
     const entry = { timestamp: 100, action: 'del_list', id: 'uuid-1' };
     const result = applyLogToPins(entity, entry);
     expect(result.deleted).toBe(true);
@@ -638,7 +621,7 @@ describe('applyLogToPage — visitDates', () => {
   }
 
   it('accumulates visitDates from page entries', () => {
-    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: [] };
+    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parentIds: [] };
     const ts1 = new Date(2024, 0, 15, 10, 0, 0).getTime();
     const result = applyLogToPage(page, { timestamp: ts1, action: 'page', url: 'https://a.com', title: 'A' });
     expect(result.visitDates).toEqual([toYMD(ts1)]);
@@ -648,13 +631,13 @@ describe('applyLogToPage — visitDates', () => {
     const ts1 = new Date(2024, 0, 15, 10, 0, 0).getTime();
     const ts2 = new Date(2024, 0, 15, 18, 0, 0).getTime();
     const ymd = toYMD(ts1);
-    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: [], visitDates: [ymd] };
+    const page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parentIds: [], visitDates: [ymd] };
     const result = applyLogToPage(page, { timestamp: ts2, action: 'page', url: 'https://a.com', title: 'A' });
     expect(result.visitDates).toEqual([ymd]);
   });
 
   it('accumulates multiple distinct days', () => {
-    let page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: [] };
+    let page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parentIds: [] };
     const ts1 = new Date(2024, 0, 15, 10, 0, 0).getTime();
     const ts2 = new Date(2024, 0, 16, 10, 0, 0).getTime();
     page = applyLogToPage(page, { timestamp: ts1, action: 'page', url: 'https://a.com', title: 'A' });
@@ -676,7 +659,7 @@ describe('applyLogToPage — visitDates', () => {
 describe('applyLogToPage — likes', () => {
   it('accumulates likes in attention JSON', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    const page = { slug, timestamp: 0, parents: [], children: [] };
+    const page = { slug, timestamp: 0, parentIds: [], childIds: [] };
     const entry = { timestamp: 100, action: 'page', url: 'https://a.com', likes: 1 };
     const result = applyLogToPage(page, entry);
     const att = JSON.parse(result.attention);
@@ -685,7 +668,7 @@ describe('applyLogToPage — likes', () => {
 
   it('accumulates multiple likes', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    let page = { slug, timestamp: 0, parents: [], children: [] };
+    let page = { slug, timestamp: 0, parentIds: [], childIds: [] };
     page = applyLogToPage(page, { timestamp: 100, action: 'page', url: 'https://a.com', likes: 1 });
     page = applyLogToPage(page, { timestamp: 200, action: 'page', url: 'https://a.com', likes: 1 });
     page = applyLogToPage(page, { timestamp: 300, action: 'page', url: 'https://a.com', likes: 1 });
@@ -695,7 +678,7 @@ describe('applyLogToPage — likes', () => {
 
   it('preserves other attention fields when adding likes', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    let page = { slug, timestamp: 0, parents: [], children: [] };
+    let page = { slug, timestamp: 0, parentIds: [], childIds: [] };
     page = applyLogToPage(page, { timestamp: 100, action: 'page', url: 'https://a.com', scrollDepth: 80, timeOnPage: 5000 });
     page = applyLogToPage(page, { timestamp: 200, action: 'page', url: 'https://a.com', likes: 1 });
     const att = JSON.parse(page.attention);
@@ -706,7 +689,7 @@ describe('applyLogToPage — likes', () => {
 
   it('idempotent: same timestamp replay does not double-count likes', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    let page = { slug, timestamp: 0, parents: [], children: [] };
+    let page = { slug, timestamp: 0, parentIds: [], childIds: [] };
     const entry = { timestamp: 100, action: 'page', url: 'https://a.com', likes: 1 };
     page = applyLogToPage(page, entry);
     page = applyLogToPage(page, entry); // replay same timestamp
@@ -716,7 +699,7 @@ describe('applyLogToPage — likes', () => {
 
   it('ignores likes entry with mismatched slug', () => {
     const slug = generateSlugFromUrl('https://a.com');
-    const page = { slug, timestamp: 0, parents: [], children: [] };
+    const page = { slug, timestamp: 0, parentIds: [], childIds: [] };
     const entry = { timestamp: 100, action: 'page', url: 'https://b.com', likes: 1 };
     const result = applyLogToPage(page, entry);
     expect(result).toBe(page);
@@ -725,7 +708,7 @@ describe('applyLogToPage — likes', () => {
   it('applyTo integration: likes entry updates page attention', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const entry = { timestamp: 200, action: 'page', url: 'https://a.com', likes: 1 };
-    const page = { slug, timestamp: 100, parents: [], children: [] };
+    const page = { slug, timestamp: 100, parentIds: [], childIds: [] };
     const result = applyTo(entry, { [`page:${slug}`]: page });
     const att = JSON.parse(result[`page:${slug}`].attention);
     expect(att.likes).toBe(1);
@@ -779,54 +762,87 @@ describe('applyLogToPage — page_checkpoint', () => {
 });
 
 // ---------------------------------------------------------------------------
-// applyLogToParentIndex
+// applyLogToShallowPage
 // ---------------------------------------------------------------------------
 
-describe('applyLogToParentIndex', () => {
-  it('accumulates parent slugs for a URL', () => {
+describe('applyLogToShallowPage', () => {
+  it('records parent from page entry with referrerId', () => {
     const idx = { timestamp: 0, index: {} };
-    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', referrer: 'https://parent.com', title: 'Child' };
-    const result = applyLogToParentIndex(idx, entry);
+    const parentSlug = generateSlugFromUrl('https://parent.com');
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', referrerId: `page:${parentSlug}`, title: 'Child' };
+    const result = applyLogToShallowPage(idx, entry);
     expect(Object.keys(result.index)).toHaveLength(1);
-    expect(result.index['https://child.com']).toHaveLength(1);
-    expect(typeof result.index['https://child.com'][0]).toBe('string');
+    expect(result.index['https://child.com'].parents).toEqual([`page:${parentSlug}`]);
+    expect(result.index['https://child.com'].title).toBe('Child');
     expect(result.timestamp).toBe(100);
+  });
+
+  it('records title from page entry', () => {
+    const idx = { timestamp: 0, index: {} };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'My Title' };
+    const result = applyLogToShallowPage(idx, entry);
+    expect(result.index['https://child.com'].title).toBe('My Title');
+  });
+
+  it('records user_title from page entry', () => {
+    const idx = { timestamp: 0, index: {} };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', user_title: 'Custom' };
+    const result = applyLogToShallowPage(idx, entry);
+    expect(result.index['https://child.com'].user_title).toBe('Custom');
   });
 
   it('accumulates multiple parents for the same URL', () => {
     let idx = { timestamp: 0, index: {} };
-    idx = applyLogToParentIndex(idx, { timestamp: 100, action: 'page', url: 'https://child.com', referrer: 'https://parent1.com', title: 'C' });
-    idx = applyLogToParentIndex(idx, { timestamp: 200, action: 'page', url: 'https://child.com', referrer: 'https://parent2.com', title: 'C' });
-    expect(idx.index['https://child.com']).toHaveLength(2);
+    const p1Slug = generateSlugFromUrl('https://parent1.com');
+    const p2Slug = generateSlugFromUrl('https://parent2.com');
+    idx = applyLogToShallowPage(idx, { timestamp: 100, action: 'page', url: 'https://child.com', referrerId: `page:${p1Slug}`, title: 'C' });
+    idx = applyLogToShallowPage(idx, { timestamp: 200, action: 'page', url: 'https://child.com', referrerId: `page:${p2Slug}`, title: 'C' });
+    expect(idx.index['https://child.com'].parents).toHaveLength(2);
     expect(idx.timestamp).toBe(200);
   });
 
-  it('is idempotent', () => {
-    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', referrer: 'https://parent.com', title: 'C' };
-    let idx = { timestamp: 0, index: {} };
-    idx = applyLogToParentIndex(idx, entry);
-    const r2 = applyLogToParentIndex(idx, entry);
-    expect(r2.index['https://child.com']).toEqual(idx.index['https://child.com']);
+  it('records list membership from list entry with shallow: ids', () => {
+    const idx = { timestamp: 0, index: {} };
+    const entry = { timestamp: 100, action: 'list', id: 'my-list', op: 'add', ids: ['shallow:https://child.com'] };
+    const result = applyLogToShallowPage(idx, entry);
+    expect(result.index['https://child.com'].lists).toEqual(['list:my-list']);
   });
 
-  it('ignores entries with non-page action', () => {
+  it('removes list membership on list del', () => {
+    const idx = { timestamp: 0, index: { 'https://child.com': { parents: [], lists: ['list:my-list'], title: null, user_title: null } } };
+    const entry = { timestamp: 100, action: 'list', id: 'my-list', op: 'del', ids: ['shallow:https://child.com'] };
+    const result = applyLogToShallowPage(idx, entry);
+    expect(result.index['https://child.com'].lists).toEqual([]);
+  });
+
+  it('is idempotent', () => {
+    const parentSlug = generateSlugFromUrl('https://parent.com');
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', referrerId: `page:${parentSlug}`, title: 'C' };
+    let idx = { timestamp: 0, index: {} };
+    idx = applyLogToShallowPage(idx, entry);
+    const r2 = applyLogToShallowPage(idx, entry);
+    expect(r2.index['https://child.com'].parents).toEqual(idx.index['https://child.com'].parents);
+  });
+
+  it('ignores entries with non-page/list action', () => {
     const idx = { timestamp: 0, index: {} };
     const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'x' };
-    const result = applyLogToParentIndex(idx, entry);
+    const result = applyLogToShallowPage(idx, entry);
     expect(result).toBe(idx);
   });
 
-  it('ignores page entries without referrer', () => {
+  it('ignores page entries without referrerId or title', () => {
     const idx = { timestamp: 0, index: {} };
-    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
-    const result = applyLogToParentIndex(idx, entry);
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', scrollDepth: 50 };
+    const result = applyLogToShallowPage(idx, entry);
     expect(result).toBe(idx);
   });
 
   it('ignores entries without url', () => {
     const idx = { timestamp: 0, index: {} };
-    const entry = { timestamp: 100, action: 'page', referrer: 'https://ref.com' };
-    const result = applyLogToParentIndex(idx, entry);
+    const parentSlug = generateSlugFromUrl('https://ref.com');
+    const entry = { timestamp: 100, action: 'page', referrerId: `page:${parentSlug}` };
+    const result = applyLogToShallowPage(idx, entry);
     expect(result).toBe(idx);
   });
 });
@@ -837,7 +853,7 @@ describe('applyLogToParentIndex', () => {
 
 describe('sequence replay', () => {
   it('replaying page + note creation produces correct state', () => {
-    let page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parents: [], children: [] };
+    let page = { slug: generateSlugFromUrl('https://a.com'), timestamp: 0, parentIds: [], childIds: [] };
 
     page = applyLogToPage(page, { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' });
     expect(page.url).toBe('https://a.com');
@@ -864,7 +880,7 @@ describe('sequence replay', () => {
     expect(r1).toBe(page);
 
     // List entry should not affect page
-    const r2 = applyLogToPage(page, { timestamp: 200, action: 'list', id: 'c1', op: 'clear', urls: [] });
+    const r2 = applyLogToPage(page, { timestamp: 200, action: 'list', id: 'c1', op: 'clear', ids: [] });
     expect(r2).toBe(page);
 
     // Deletes list entry should not affect page
@@ -884,8 +900,14 @@ describe('scopeOf', () => {
   });
 
   it('returns list key for list entries (bare id)', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'list', id: 'c1', op: 'add', urls: ['https://a.com'] });
+    const scope = scopeOf({ timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['page:a-slug'] });
     expect(Object.keys(scope)).toEqual(['list:c1']);
+  });
+
+  it('returns list + shallow_page keys for list entries with shallow ids', () => {
+    const scope = scopeOf({ timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['shallow:https://a.com'] });
+    const keys = Object.keys(scope).sort();
+    expect(keys).toEqual(['list:c1', 'list:system/shallow-page'].sort());
   });
 
   it('returns list key for list_meta entries', () => {
@@ -898,28 +920,34 @@ describe('scopeOf', () => {
     expect(Object.keys(scope)).toEqual(['list:c1']);
   });
 
-  it('returns page key for page entry without referrer', () => {
+  it('returns page + shallow_page keys for page entry with title but no referrerId', () => {
     const scope = scopeOf({ timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' });
+    const slug = generateSlugFromUrl('https://a.com');
+    expect(Object.keys(scope)).toEqual([`page:${slug}`, 'list:system/shallow-page']);
+  });
+
+  it('returns page key only for page entry without title or referrerId', () => {
+    const scope = scopeOf({ timestamp: 100, action: 'page', url: 'https://a.com', scrollDepth: 50 });
     const slug = generateSlugFromUrl('https://a.com');
     expect(Object.keys(scope)).toEqual([`page:${slug}`]);
   });
 
-  it('returns page + parent-index keys for page with referrer', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrer: 'https://parent.com' });
-    const childSlug = generateSlugFromUrl('https://child.com');
+  it('returns page + shallow_page keys for page with referrerId', () => {
     const parentSlug = generateSlugFromUrl('https://parent.com');
+    const scope = scopeOf({ timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrerId: `page:${parentSlug}` });
+    const childSlug = generateSlugFromUrl('https://child.com');
     const keys = Object.keys(scope).sort();
-    expect(keys).toEqual([`list:index/parent`, `page:${childSlug}`, `page:${parentSlug}`].sort());
+    expect(keys).toEqual([`list:system/shallow-page`, `page:${childSlug}`, `page:${parentSlug}`].sort());
   });
 
-  it('returns page + parent-index keys for page_checkpoint entry', () => {
+  it('returns page + shallow_page keys for page_checkpoint entry', () => {
     const scope = scopeOf({ timestamp: 100, action: 'page_checkpoint', url: 'https://a.com', title: 'A' });
     const slug = generateSlugFromUrl('https://a.com');
-    expect(Object.keys(scope).sort()).toEqual([`list:index/parent`, `page:${slug}`].sort());
+    expect(Object.keys(scope).sort()).toEqual([`list:system/shallow-page`, `page:${slug}`].sort());
   });
 
   it('returns note + parent keys for note entry', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'note', slug: 'n1', excerpt: 'text', parents: ['page:p1'] });
+    const scope = scopeOf({ timestamp: 100, action: 'note', slug: 'n1', excerpt: 'text', parentIds: ['page:p1'] });
     const keys = Object.keys(scope).sort();
     expect(keys).toEqual(['note:n1', 'page:p1'].sort());
   });
@@ -942,12 +970,12 @@ describe('scopeOf', () => {
 describe('defaultEntity', () => {
   it('returns page default with slug', () => {
     const e = defaultEntity('page:my-slug');
-    expect(e).toEqual({ slug: 'my-slug', timestamp: 0, parents: [], children: [] });
+    expect(e).toEqual({ slug: 'my-slug', timestamp: 0, parentIds: [], childIds: [] });
   });
 
   it('returns note default with slug', () => {
     const e = defaultEntity('note:my-note');
-    expect(e).toEqual({ slug: 'my-note', timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] });
+    expect(e).toEqual({ slug: 'my-note', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] });
   });
 
   it('returns settings default', () => {
@@ -967,8 +995,8 @@ describe('defaultEntity', () => {
     expect(defaultEntity('list:system/permanent-deletes')).toEqual({ timestamp: 0, keys: [] });
   });
 
-  it('returns parent-index default', () => {
-    expect(defaultEntity('list:index/parent')).toEqual({ timestamp: 0, index: {} });
+  it('returns shallow_page default', () => {
+    expect(defaultEntity('list:system/shallow-page')).toEqual({ timestamp: 0, index: {} });
   });
 
   it('returns null for unknown key', () => {
@@ -1000,7 +1028,7 @@ describe('applyTo', () => {
   it('applies page to page entity', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
-    const scope = { [`page:${slug}`]: { slug, timestamp: 0, parents: [], children: [] } };
+    const scope = { [`page:${slug}`]: { slug, timestamp: 0, parentIds: [], childIds: [] } };
     const result = applyTo(entry, scope);
     expect(result[`page:${slug}`].url).toBe('https://a.com');
     expect(result[`page:${slug}`].timestamp).toBe(100);
@@ -1022,17 +1050,17 @@ describe('applyTo', () => {
   });
 
   it('note action creates note from null', () => {
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parents: ['page:p1'] };
-    const scope = { 'note:n1': null, 'page:p1': { slug: 'p1', timestamp: 50, parents: [], children: [] } };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parentIds: ['page:p1'] };
+    const scope = { 'note:n1': null, 'page:p1': { slug: 'p1', timestamp: 50, parentIds: [], childIds: [] } };
     const result = applyTo(entry, scope);
     expect(result['note:n1']).not.toBeNull();
     expect(result['note:n1'].excerpt).toBe('hello');
-    // Cross-entity: note key added to parent's children
-    expect(result['page:p1'].children).toContain('note:n1');
+    // Cross-entity: note key added to parent's childIds
+    expect(result['page:p1'].childIds).toContain('note:n1');
   });
 
   it('note action leaves parent page null when parent has no checkpoint', () => {
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parents: ['page:p1'] };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parentIds: ['page:p1'] };
     const scope = { 'note:n1': null, 'page:p1': null };
     const result = applyTo(entry, scope);
     expect(result['note:n1']).not.toBeNull();
@@ -1040,49 +1068,50 @@ describe('applyTo', () => {
     expect(result['page:p1']).toBeNull();
   });
 
-  it('applies page with referrer to both child and parent pages', () => {
+  it('applies page with referrerId to both child and parent pages', () => {
     const childSlug = generateSlugFromUrl('https://child.com');
     const parentSlug = generateSlugFromUrl('https://parent.com');
-    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrerId: `page:${parentSlug}` };
     const scope = {
-      [`page:${childSlug}`]: { slug: childSlug, timestamp: 0, parents: [], children: [] },
-      [`page:${parentSlug}`]: { slug: parentSlug, timestamp: 50, parents: [], children: [] },
-      'list:index/parent': { timestamp: 0, index: {} },
+      [`page:${childSlug}`]: { slug: childSlug, timestamp: 0, parentIds: [], childIds: [] },
+      [`page:${parentSlug}`]: { slug: parentSlug, timestamp: 50, parentIds: [], childIds: [] },
+      'list:system/shallow-page': { timestamp: 0, index: {} },
     };
     const result = applyTo(entry, scope);
-    // Child gets visit data + parent ref (resolved to page:slug since parent exists in scope)
+    // Child gets visit data + parent ref
     expect(result[`page:${childSlug}`].url).toBe('https://child.com');
-    expect(result[`page:${childSlug}`].parents).toContain(`page:${parentSlug}`);
+    expect(result[`page:${childSlug}`].parentIds).toContain(`page:${parentSlug}`);
     // Parent gets child ref (resolved to page:slug since child exists in scope)
-    expect(result[`page:${parentSlug}`].children).toContain(`page:${childSlug}`);
-    // Parent-index pruned (child page exists in scope)
-    expect(result['list:index/parent'].index['https://child.com']).toBeUndefined();
+    expect(result[`page:${parentSlug}`].childIds).toContain(`page:${childSlug}`);
+    // Shallow page index pruned (child page exists in scope)
+    expect(result['list:system/shallow-page'].index['https://child.com']).toBeUndefined();
   });
 
   it('skips parent page update when parent is null (no checkpoint)', () => {
     const childSlug = generateSlugFromUrl('https://child.com');
     const parentSlug = generateSlugFromUrl('https://parent.com');
-    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrerId: `page:${parentSlug}` };
     const scope = {
-      [`page:${childSlug}`]: { slug: childSlug, timestamp: 0, parents: [], children: [] },
+      [`page:${childSlug}`]: { slug: childSlug, timestamp: 0, parentIds: [], childIds: [] },
       [`page:${parentSlug}`]: null,
-      'list:index/parent': { timestamp: 0, index: {} },
+      'list:system/shallow-page': { timestamp: 0, index: {} },
     };
     const result = applyTo(entry, scope);
     expect(result[`page:${parentSlug}`]).toBeNull();
-    expect(result[`page:${childSlug}`].parents).toContain('https://parent.com');
+    // referrerId is kept as-is when parent is null
+    expect(result[`page:${childSlug}`].parentIds).toContain(`page:${parentSlug}`);
   });
 
   it('applies list entry to list entity', () => {
-    const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'add', urls: ['https://a.com'] };
+    const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['page:a-slug'] };
     const scope = { 'list:c1': { timestamp: 0, slug: 'c1', name: 'Test', qbTrees: [], pins: [] } };
     const result = applyTo(entry, scope);
     expect(result['list:c1'].pins).toHaveLength(1);
-    expect(result['list:c1'].pins[0].url).toBe('https://a.com');
+    expect(result['list:c1'].pins[0].id).toBe('page:a-slug');
   });
 
   it('creates list entity from null on first list entry', () => {
-    const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'add', urls: ['https://a.com'] };
+    const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['shallow:https://a.com'] };
     const scope = { 'list:c1': null };
     const result = applyTo(entry, scope);
     expect(result['list:c1'].pins).toHaveLength(1);
@@ -1106,7 +1135,7 @@ describe('applyTo', () => {
   it('applies page attention entry to page', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const entry = { timestamp: 200, action: 'page', url: 'https://a.com', scrollDepth: 0.5, timeOnPage: 3000 };
-    const page = { slug, timestamp: 100, parents: [], children: [] };
+    const page = { slug, timestamp: 100, parentIds: [], childIds: [] };
     const result = applyTo(entry, { [`page:${slug}`]: page });
     const att = JSON.parse(result[`page:${slug}`].attention);
     expect(att.scrollDepth).toBe(0.5);
@@ -1121,7 +1150,7 @@ describe('applyTo', () => {
 describe('effectOf', () => {
   it('loads entities via closure and applies entry', async () => {
     const slug = generateSlugFromUrl('https://a.com');
-    const store = { [`page:${slug}`]: { slug, timestamp: 0, parents: [], children: [] } };
+    const store = { [`page:${slug}`]: { slug, timestamp: 0, parentIds: [], childIds: [] } };
     const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
     const result = await effectOf(entry, async (key) => store[key] ?? null);
     expect(result[`page:${slug}`].url).toBe('https://a.com');
@@ -1144,17 +1173,17 @@ describe('effectOf', () => {
   });
 
   it('creates note from null on note action', async () => {
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parents: ['page:p1'] };
-    const store = { 'page:p1': { slug: 'p1', timestamp: 50, parents: [], children: [] } };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parentIds: ['page:p1'] };
+    const store = { 'page:p1': { slug: 'p1', timestamp: 50, parentIds: [], childIds: [] } };
     const result = await effectOf(entry, async (key) => store[key] ?? null);
     expect(result['note:n1']).not.toBeNull();
     expect(result['note:n1'].excerpt).toBe('hello');
-    expect(result['page:p1'].children).toContain('note:n1');
+    expect(result['page:p1'].childIds).toContain('note:n1');
   });
 
-  it('page_checkpoint before note wires note into parent children (drain simulation)', async () => {
+  it('page_checkpoint before note wires note into parent childIds (drain simulation)', async () => {
     // Simulates the correct drain sequence: page_checkpoint creates the page,
-    // then note entry adds to its children. This is the pattern background.js
+    // then note entry adds to its childIds. This is the pattern background.js
     // must follow — ensureCheckpointIfMissing before createNote.
     const cache = new Map();
     const load = async (key) => cache.get(key) ?? null;
@@ -1171,14 +1200,14 @@ describe('effectOf', () => {
 
     // 2. note entry references that page as parent
     const r2 = await effectOf(
-      { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parents: [`page:${slug}`] },
+      { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parentIds: [`page:${slug}`] },
       load
     );
     for (const [k, v] of Object.entries(r2)) cache.set(k, v);
 
-    // Note created and wired into page children
+    // Note created and wired into page childIds
     expect(cache.get('note:n1')).not.toBeNull();
-    expect(cache.get(`page:${slug}`).children).toContain('note:n1');
+    expect(cache.get(`page:${slug}`).childIds).toContain('note:n1');
   });
 
   it('updates mutable round cache across sequential calls', async () => {
@@ -1201,19 +1230,19 @@ describe('effectOf', () => {
     expect(r2[`page:${slug}`].timestamp).toBe(200);
   });
 
-  it('handles page with referrer updating both pages via closure', async () => {
+  it('handles page with referrerId updating both pages via closure', async () => {
     const childSlug = generateSlugFromUrl('https://child.com');
     const parentSlug = generateSlugFromUrl('https://parent.com');
     const store = {
-      [`page:${childSlug}`]: { slug: childSlug, timestamp: 0, parents: [], children: [] },
-      [`page:${parentSlug}`]: { slug: parentSlug, timestamp: 50, parents: [], children: [] },
-      'list:index/parent': { timestamp: 0, index: {} },
+      [`page:${childSlug}`]: { slug: childSlug, timestamp: 0, parentIds: [], childIds: [] },
+      [`page:${parentSlug}`]: { slug: parentSlug, timestamp: 50, parentIds: [], childIds: [] },
+      'list:system/shallow-page': { timestamp: 0, index: {} },
     };
-    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrer: 'https://parent.com' };
+    const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrerId: `page:${parentSlug}` };
     const result = await effectOf(entry, async (key) => store[key] ?? null);
-    expect(result[`page:${childSlug}`].parents).toContain(`page:${parentSlug}`);
-    expect(result[`page:${parentSlug}`].children).toContain(`page:${childSlug}`);
-    expect(result['list:index/parent'].index['https://child.com']).toBeUndefined();
+    expect(result[`page:${childSlug}`].parentIds).toContain(`page:${parentSlug}`);
+    expect(result[`page:${parentSlug}`].childIds).toContain(`page:${childSlug}`);
+    expect(result['list:system/shallow-page'].index['https://child.com']).toBeUndefined();
   });
 
   it('applies settings entry via closure', async () => {
@@ -1228,22 +1257,22 @@ describe('effectOf', () => {
     const parentSlug = generateSlugFromUrl('https://parent.com');
     const cache = new Map();
 
-    cache.set(`page:${parentSlug}`, { slug: parentSlug, timestamp: 50, parents: [], children: [] });
+    cache.set(`page:${parentSlug}`, { slug: parentSlug, timestamp: 50, parentIds: [], childIds: [] });
 
     const load = async (key) => cache.get(key) ?? null;
 
-    // Entry 1: page child with referrer=parent — child page is null, stays null
+    // Entry 1: page child with referrerId=parent — child page is null, stays null
     const r1 = await effectOf(
-      { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrer: 'https://parent.com' },
+      { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrerId: `page:${parentSlug}` },
       load
     );
     for (const [k, v] of Object.entries(r1)) cache.set(k, v);
 
     expect(cache.get(`page:${childSlug}`)).toBeNull();
-    expect(cache.get('list:index/parent').index['https://child.com']).toEqual([parentSlug]);
-    expect(cache.get(`page:${parentSlug}`).children).toContain('https://child.com');
+    expect(cache.get('list:system/shallow-page').index['https://child.com'].parents).toEqual([`page:${parentSlug}`]);
+    expect(cache.get(`page:${parentSlug}`).childIds).toContain('shallow:https://child.com');
 
-    // Entry 2: page_checkpoint for child — creates page, absorbs parent-index
+    // Entry 2: page_checkpoint for child — creates page, absorbs shallow_page index
     const r2 = await effectOf(
       { timestamp: 101, action: 'page_checkpoint', url: 'https://child.com', title: 'Child' },
       load
@@ -1252,12 +1281,12 @@ describe('effectOf', () => {
 
     const childPage = cache.get(`page:${childSlug}`);
     expect(childPage).not.toBeNull();
-    // Absorption converts bare slugs from parent-index to page:slug keys
-    expect(childPage.parents).toEqual([`page:${parentSlug}`]);
+    // Absorption converts from shallow_page index to page:slug keys
+    expect(childPage.parentIds).toEqual([`page:${parentSlug}`]);
 
-    // Parent-index entry absorbed into page — should be removed
-    const parentIndex = cache.get('list:index/parent');
-    expect(parentIndex.index['https://child.com']).toBeUndefined();
+    // Shallow page index entry absorbed into page — should be removed
+    const shallowPageIndex = cache.get('list:system/shallow-page');
+    expect(shallowPageIndex.index['https://child.com']).toBeUndefined();
   });
 
   it('note deletion via recycle bin', async () => {
@@ -1266,5 +1295,89 @@ describe('effectOf', () => {
     const result = await effectOf(entry, async (key) => store[key] ?? null);
     expect(result['list:system/recycle-bin'].items).toHaveLength(1);
     expect(result['list:system/recycle-bin'].items[0].key).toBe('note:n1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Entity storage correctness: title resolution via replay
+// ---------------------------------------------------------------------------
+
+describe('entity storage title resolution', () => {
+  const url = 'https://example.com/page';
+  const slug = generateSlugFromUrl(url);
+
+  it('applyLogToPage uses last-write-wins for title', () => {
+    // Simulate a checkpointed page with initial generic title
+    const page = { slug, url, title: 'Generic Site Title', timestamp: 100 };
+
+    // Later visit entry with updated title
+    const entry = { timestamp: 200, action: 'page', url, title: 'Specific Page Title - Generic Site Title' };
+    const updated = applyLogToPage(page, entry);
+
+    expect(updated.title).toBe('Specific Page Title - Generic Site Title');
+    expect(updated.timestamp).toBe(200);
+  });
+
+  it('sequential page entries update title to latest value', () => {
+    let page = { slug, url, title: 'Title A', timestamp: 100 };
+
+    page = applyLogToPage(page, { timestamp: 200, action: 'page', url, title: 'Title B' });
+    expect(page.title).toBe('Title B');
+
+    page = applyLogToPage(page, { timestamp: 300, action: 'page', url, title: 'Title C' });
+    expect(page.title).toBe('Title C');
+  });
+
+  it('replaying logBuffer entries over a checkpoint produces correct title', () => {
+    // Checkpoint has old title
+    const checkpoint = { slug, url, title: 'Old Title', timestamp: 100 };
+
+    // Buffer has newer entries
+    const logBuffer = [
+      { timestamp: 200, action: 'page', url, title: 'Intermediate Title' },
+      { timestamp: 300, action: 'page', url, title: 'Final Title' },
+    ];
+
+    // Simulate replayBufferOver (same logic as the helper we'll add to background.js)
+    let current = checkpoint;
+    for (const entry of logBuffer) {
+      current = applyLogToPage(current, entry);
+    }
+
+    expect(current.title).toBe('Final Title');
+    expect(current.timestamp).toBe(300);
+  });
+
+  it('buffer entries for other URLs do not affect the page', () => {
+    const checkpoint = { slug, url, title: 'My Title', timestamp: 100 };
+
+    const logBuffer = [
+      { timestamp: 200, action: 'page', url: 'https://other.com', title: 'Other Title' },
+      { timestamp: 300, action: 'set', key: 'workspace', value: {} },
+    ];
+
+    let current = checkpoint;
+    for (const entry of logBuffer) {
+      current = applyLogToPage(current, entry);
+    }
+
+    expect(current.title).toBe('My Title');
+    expect(current.timestamp).toBe(100);
+  });
+
+  it('user_title is preserved through replay', () => {
+    const checkpoint = { slug, url, title: 'Auto Title', timestamp: 100 };
+
+    const logBuffer = [
+      { timestamp: 200, action: 'page', url, title: 'Auto Title', user_title: 'My Custom Title' },
+    ];
+
+    let current = checkpoint;
+    for (const entry of logBuffer) {
+      current = applyLogToPage(current, entry);
+    }
+
+    expect(current.user_title).toBe('My Custom Title');
+    expect(current.title).toBe('Auto Title');
   });
 });

@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { generateSlugFromUrl } from '../extension/utils.js';
 
 // ---------------------------------------------------------------------------
 // Deferred promise helper
@@ -24,6 +25,10 @@ function createDeferred() {
 
 function tick(ms = 0) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function pinFromUrl(url, pinnedAt) {
+  return { id: 'page:' + generateSlugFromUrl(url), pinnedAt };
 }
 
 // ---------------------------------------------------------------------------
@@ -66,23 +71,31 @@ const TEST_LIST_NOQUERY = { slug: 'col-noq', query: '', name: 'No Query List' };
 
 const TEST_LIST_PINS = {
   'col-rust': [
-    { url: 'https://rust-lang.org/doc0', title: 'Rust Documentation 0', pinnedAt: NOW - DAY },
-    { url: 'https://rust-lang.org/doc1', title: 'Rust Documentation 1', pinnedAt: NOW - DAY },
-    { url: 'https://rust-lang.org/doc2', title: 'Rust Documentation 2', pinnedAt: NOW - DAY },
+    pinFromUrl('https://rust-lang.org/doc0', NOW - DAY),
+    pinFromUrl('https://rust-lang.org/doc1', NOW - DAY),
+    pinFromUrl('https://rust-lang.org/doc2', NOW - DAY),
   ],
   // Pins on example.com — same domain as FILE1_INTERACTIONS, enabling hostname-based related pages
   'col-noq': [
-    { url: 'https://example.com/today0', title: 'Today Page 0', pinnedAt: NOW - DAY },
-    { url: 'https://example.com/today1', title: 'Today Page 1', pinnedAt: NOW - DAY },
+    pinFromUrl('https://example.com/today0', NOW - DAY),
+    pinFromUrl('https://example.com/today1', NOW - DAY),
   ],
   // Explore pins — used by T12
   'explore': [
-    { url: 'https://explore.example.com/a', title: 'Explore Pin A', pinnedAt: NOW - DAY },
-    { url: 'https://explore.example.com/b', title: 'Explore Pin B', pinnedAt: NOW - DAY },
+    pinFromUrl('https://explore.example.com/a', NOW - DAY),
+    pinFromUrl('https://explore.example.com/b', NOW - DAY),
   ],
 };
 
 const TEST_LISTS = [TEST_LIST, TEST_LIST_NOQUERY];
+
+// Build slug→URL mapping for all pinned URLs (needed to populate page entities in session cache)
+const KNOWN_PIN_URLS = [
+  'https://rust-lang.org/doc0', 'https://rust-lang.org/doc1', 'https://rust-lang.org/doc2',
+  'https://example.com/today0', 'https://example.com/today1',
+  'https://explore.example.com/a', 'https://explore.example.com/b',
+];
+const SLUG_TO_URL = new Map(KNOWN_PIN_URLS.map(url => [generateSlugFromUrl(url), url]));
 
 const TEST_SETTINGS = {
   listOrder: ['list:col-rust', 'list:col-noq'],
@@ -318,6 +331,10 @@ describe('Cache staleness', () => {
       permanentDeletes: TEST_SETTINGS.permanentDeletes,
       gatewayDomains: {},
     };
+    // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
+    for (const [slug, url] of SLUG_TO_URL) {
+      sessionData['page:' + slug] = { slug, url, watermark: 0 };
+    }
     // Local-only keys (logBuffer is durably backed up here)
     localData = {
       logBuffer: [],
@@ -366,7 +383,7 @@ describe('Cache staleness', () => {
     actionOverrides['loadPageBatch'] = (msg) => {
       const pages = {};
       for (const slug of (msg.slugs || [])) {
-        pages[slug] = { watermark: 100, attention: '', highlights: [] };
+        pages[slug] = { watermark: 100, attention: '', highlights: [], url: SLUG_TO_URL.get(slug) || '' };
       }
       return { success: true, pages };
     };
@@ -398,7 +415,7 @@ describe('Cache staleness', () => {
     actionOverrides['loadPageBatch'] = (msg) => {
       const pages = {};
       for (const slug of (msg.slugs || [])) {
-        pages[slug] = { watermark: 200, attention: '', highlights: [] };
+        pages[slug] = { watermark: 200, attention: '', highlights: [], url: SLUG_TO_URL.get(slug) || '' };
       }
       return { success: true, pages };
     };
@@ -408,7 +425,7 @@ describe('Cache staleness', () => {
       if (msg.listId === 'col-rust') {
         return { success: true, pins: [
           ...TEST_LIST_PINS['col-rust'],
-          { url: 'https://rust-lang.org/doc3', title: 'Rust Documentation 3', pinnedAt: NOW },
+          pinFromUrl('https://rust-lang.org/doc3', NOW),
         ]};
       }
       return { success: true, pins: [] };
@@ -451,7 +468,7 @@ describe('Cache staleness', () => {
       if (msg.listId === 'col-rust') {
         return { success: true, pins: [
           ...TEST_LIST_PINS['col-rust'],
-          { url: 'https://rust-lang.org/doc3', title: 'Rust Documentation 3', pinnedAt: NOW },
+          pinFromUrl('https://rust-lang.org/doc3', NOW),
         ]};
       }
       return { success: true, pins: [] };
@@ -571,7 +588,7 @@ describe('Cache staleness', () => {
     actionOverrides['loadListPinsById'] = (msg) => {
       if (msg.listId === 'col-buf') {
         return { success: true, pins: [
-          { url: 'https://buffered.com/page1', title: 'Buffered Page 1', pinnedAt: NOW },
+          pinFromUrl('https://buffered.com/page1', NOW),
         ]};
       }
       return { success: true, pins: TEST_LIST_PINS[msg.listId] || [] };
@@ -734,7 +751,7 @@ describe('Cache staleness', () => {
     actionOverrides['loadListPinsById'] = actionOverrides['loadListPins'] = (msg) => {
       if (msg.listId === 'col-today') {
         return { success: true, pins: [
-          { url: 'https://example.com/today0', title: 'Today Page 0', pinnedAt: NOW - DAY },
+          pinFromUrl('https://example.com/today0', NOW - DAY),
         ]};
       }
       return { success: true, pins: [] };
@@ -771,7 +788,7 @@ describe('Cache staleness', () => {
     actionOverrides['loadPageBatch'] = (msg) => {
       const pages = {};
       for (const slug of (msg.slugs || [])) {
-        pages[slug] = { watermark: NOW, attention: '', highlights: [] };
+        pages[slug] = { watermark: NOW, attention: '', highlights: [], url: SLUG_TO_URL.get(slug) || '' };
       }
       return { success: true, pages };
     };
@@ -999,5 +1016,157 @@ describe('Cache staleness', () => {
     // Recycle bin count should show
     const countEl = document.getElementById('recycleSidebarCount');
     expect(countEl.textContent, 'recycle bin count should show 1').toBe('1');
+  });
+
+  // ---------------------------------------------------------------------------
+  // T17: shallow pins show title from shallowPageIndex, not "Untitled"
+  // ---------------------------------------------------------------------------
+  it('T17: shallow pins show title from shallowPageIndex', async () => {
+    populateCache();
+
+    const SHALLOW_URL = 'https://shallow.example.com/article';
+    const SHALLOW_TITLE = 'Shallow Article Title';
+
+    // Add a list with one shallow pin
+    const TEST_LIST_WITH_SHALLOW = { slug: 'col-shallow', query: '', name: 'Shallow List' };
+    const shallowPins = {
+      ...TEST_LIST_PINS,
+      'col-shallow': [
+        { id: 'shallow:' + SHALLOW_URL, pinnedAt: NOW - DAY },
+      ],
+    };
+    actionOverrides['loadListPinsById'] = (msg) => ({
+      success: true, pins: shallowPins[msg.listId] || [],
+    });
+    actionOverrides['loadListPins'] = (msg) => {
+      if (msg.listId) return { success: true, pins: shallowPins[msg.listId] || [] };
+      return { success: true, pins: shallowPins };
+    };
+
+    // Put shallowPageIndex in session cache with the title
+    sessionData.shallowPageIndex = {
+      timestamp: 0,
+      index: {
+        [SHALLOW_URL]: { parents: [], lists: ['list:col-shallow'], title: SHALLOW_TITLE, user_title: null },
+      },
+    };
+
+    // Add the shallow list to lists and listOrder
+    sessionData.lists = [...TEST_LISTS, TEST_LIST_WITH_SHALLOW];
+    sessionData.listOrder = [...TEST_SETTINGS.listOrder, 'list:col-shallow'];
+    actionOverrides['getLists'] = () => ({ lists: sessionData.lists });
+
+    await importOptions();
+    await tick(200);
+
+    // Click on the shallow list in sidebar
+    const sidebarItems = document.querySelectorAll('#listsList .sidebar-item');
+    const shallowListItem = [...sidebarItems].find(el => el.textContent.includes('Shallow List'));
+    expect(shallowListItem, 'shallow list sidebar item should exist').toBeTruthy();
+    shallowListItem.click();
+    await tick(300);
+
+    // Check pinned rows — the shallow pin should show the title, not "Untitled"
+    const rows = pinnedOnlyRows();
+    expect(rows.length, 'should have 1 pinned row').toBe(1);
+    const titleEl = rows[0].querySelector('.result-title');
+    expect(titleEl.textContent, 'shallow pin should show title from shallowPageIndex').toBe(SHALLOW_TITLE);
+  });
+
+  // ---------------------------------------------------------------------------
+  // T18: page: pin resolves via loadPageBatch when not in session cache
+  // ---------------------------------------------------------------------------
+  it('T18: page pin falls back to loadPageBatch when not in session', async () => {
+    populateCache();
+
+    const PAGE_URL = 'https://uncached.example.com/page';
+    const PAGE_TITLE = 'Uncached Page Title';
+    const PAGE_SLUG = generateSlugFromUrl(PAGE_URL);
+
+    // List with one page: pin whose entity is NOT in session cache
+    const TEST_LIST_UNCACHED = { slug: 'col-uncached', query: '', name: 'Uncached List' };
+    const uncachedPins = {
+      ...TEST_LIST_PINS,
+      'col-uncached': [
+        { id: 'page:' + PAGE_SLUG, pinnedAt: NOW - DAY },
+      ],
+    };
+    actionOverrides['loadListPinsById'] = (msg) => ({
+      success: true, pins: uncachedPins[msg.listId] || [],
+    });
+    actionOverrides['getLists'] = () => ({ lists: [...TEST_LISTS, TEST_LIST_UNCACHED] });
+    // loadPageBatch returns the page entity (filesystem fallback)
+    actionOverrides['loadPageBatch'] = (msg) => ({
+      success: true,
+      pages: Object.fromEntries(msg.slugs.map(s => [s, s === PAGE_SLUG
+        ? { slug: PAGE_SLUG, url: PAGE_URL, title: PAGE_TITLE, watermark: 1 }
+        : null
+      ]).filter(([, v]) => v)),
+    });
+
+    // Do NOT put 'page:<slug>' in sessionData — simulating empty session cache
+    sessionData.lists = [...TEST_LISTS, TEST_LIST_UNCACHED];
+    sessionData.listOrder = [...TEST_SETTINGS.listOrder, 'list:col-uncached'];
+
+    await importOptions();
+    await tick(200);
+
+    const sidebarItems = document.querySelectorAll('#listsList .sidebar-item');
+    const listItem = [...sidebarItems].find(el => el.textContent.includes('Uncached List'));
+    expect(listItem, 'uncached list sidebar item should exist').toBeTruthy();
+    listItem.click();
+    await tick(300);
+
+    const rows = pinnedOnlyRows();
+    expect(rows.length, 'should have 1 pinned row').toBe(1);
+    const titleEl = rows[0].querySelector('.result-title');
+    expect(titleEl.textContent, 'page pin should resolve title via loadPageBatch fallback').toBe(PAGE_TITLE);
+  });
+
+  // ---------------------------------------------------------------------------
+  // T19: shallow pin resolves via getShallowPageIndex when SPI not in session
+  // ---------------------------------------------------------------------------
+  it('T19: shallow pin falls back to getShallowPageIndex when SPI not in session', async () => {
+    populateCache();
+
+    const SHALLOW_URL = 'https://shallow-fallback.example.com/page';
+    const SHALLOW_TITLE = 'Shallow Fallback Title';
+
+    const TEST_LIST_SPI = { slug: 'col-spi', query: '', name: 'SPI Fallback List' };
+    const spiPins = {
+      ...TEST_LIST_PINS,
+      'col-spi': [
+        { id: 'shallow:' + SHALLOW_URL, pinnedAt: NOW - DAY },
+      ],
+    };
+    actionOverrides['loadListPinsById'] = (msg) => ({
+      success: true, pins: spiPins[msg.listId] || [],
+    });
+    actionOverrides['getLists'] = () => ({ lists: [...TEST_LISTS, TEST_LIST_SPI] });
+    // getShallowPageIndex handler returns SPI (filesystem fallback via background)
+    actionOverrides['getShallowPageIndex'] = () => ({
+      timestamp: 0,
+      index: {
+        [SHALLOW_URL]: { parents: [], lists: ['list:col-spi'], title: SHALLOW_TITLE, user_title: null },
+      },
+    });
+
+    // Do NOT put shallowPageIndex in sessionData — simulating pre-hydration state
+    sessionData.lists = [...TEST_LISTS, TEST_LIST_SPI];
+    sessionData.listOrder = [...TEST_SETTINGS.listOrder, 'list:col-spi'];
+
+    await importOptions();
+    await tick(200);
+
+    const sidebarItems = document.querySelectorAll('#listsList .sidebar-item');
+    const listItem = [...sidebarItems].find(el => el.textContent.includes('SPI Fallback List'));
+    expect(listItem, 'SPI fallback list sidebar item should exist').toBeTruthy();
+    listItem.click();
+    await tick(300);
+
+    const rows = pinnedOnlyRows();
+    expect(rows.length, 'should have 1 pinned row').toBe(1);
+    const titleEl = rows[0].querySelector('.result-title');
+    expect(titleEl.textContent, 'shallow pin should resolve via getShallowPageIndex fallback').toBe(SHALLOW_TITLE);
   });
 });

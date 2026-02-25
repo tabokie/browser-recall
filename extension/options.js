@@ -355,19 +355,87 @@ function getActivePinListId() {
   return EXPLORE_LIST_ID; // default: pin to explore
 }
 
+function urlToPinId(url) {
+  // Derive typed pin id from URL: page:<slug> if we have a page entity reference, shallow:<url> otherwise
+  // In options.js we can check allListPins or just use URL-based approach
+  const slug = generateSlugFromUrl(url);
+  return `page:${slug}`;
+}
+
+function pinIdToUrl(id) {
+  if (id.startsWith('shallow:')) return id.slice(8);
+  // page:<slug> — need to resolve via page entity. Return null if can't resolve here.
+  return null;
+}
+
+function slugFromPinId(id) {
+  if (id.startsWith('page:')) return id.slice(5);
+  if (id.startsWith('shallow:')) return generateSlugFromUrl(id.slice(8));
+  return generateSlugFromUrl(id); // legacy: treat as URL
+}
+
+// Resolve a typed page reference to entity-like data, or null.
+// page:<slug> → page entity from pageSnap. shallow:<url> → metadata from shallowPageIndex.
+// Unreferenced shallow pages return null.
+function resolvePageRef(refId, pageSnap, spi) {
+  if (!refId) return null;
+  if (refId.startsWith('page:')) {
+    return pageSnap?.get(refId.slice(5)) || null;
+  }
+  if (refId.startsWith('shallow:')) {
+    const url = refId.slice(8);
+    const entry = spi?.index?.[url];
+    if (!entry) return null;
+    return { url, title: entry.title || null, user_title: entry.user_title || null, parentIds: entry.parents || [], lists: entry.lists || [] };
+  }
+  return null;
+}
+
+// Load page entities + shallowPageIndex for a set of pins.
+// Session cache first, filesystem fallback for page: slugs not in session.
+async function loadPinContext(pins) {
+  const pagePinSlugs = [];
+  for (const p of pins) {
+    if (p.id?.startsWith('page:')) pagePinSlugs.push(p.id.slice(5));
+  }
+  const sessionKeys = [...pagePinSlugs.map(s => 'page:' + s), 'shallowPageIndex'];
+  const sessionBatch = sessionKeys.length > 0 ? await chrome.storage.session.get(sessionKeys) : {};
+  let spi = sessionBatch.shallowPageIndex;
+  if (!spi) {
+    spi = await chrome.runtime.sendMessage({ action: 'getShallowPageIndex' }) || { index: {} };
+  }
+  const pageSnap = new Map();
+  const missingSlugs = [];
+  for (const slug of pagePinSlugs) {
+    const page = sessionBatch['page:' + slug];
+    if (page) pageSnap.set(slug, page);
+    else missingSlugs.push(slug);
+  }
+  if (missingSlugs.length > 0) {
+    const resp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs: missingSlugs });
+    if (resp?.pages) {
+      for (const [slug, page] of Object.entries(resp.pages)) pageSnap.set(slug, page);
+    }
+  }
+  return { pageSnap, spi };
+}
+
 function isResultPinned(listId, url) {
   const pins = allListPins[listId] || [];
-  return pins.some(p => p.url === url);
+  const pageId = urlToPinId(url);
+  const shallowId = 'shallow:' + url;
+  return pins.some(p => p.id === pageId || p.id === shallowId || p.url === url);
 }
 
 async function toggleResultPin(listId, url, title) {
   if (!allListPins[listId]) allListPins[listId] = [];
   const pins = allListPins[listId];
-  const idx = pins.findIndex(p => p.url === url);
+  const pinId = urlToPinId(url);
+  const idx = pins.findIndex(p => p.id === pinId || p.id === 'shallow:' + url || p.url === url);
   if (idx !== -1) {
     pins.splice(idx, 1);
   } else {
-    pins.push({ url, title, pinnedAt: Date.now() });
+    pins.push({ id: pinId, pinnedAt: Date.now() });
   }
   await saveListPinsById(listId);
 }
@@ -1231,7 +1299,7 @@ async function saveListQbTrees() {
 
 function runListExploreQuery(matched) {
   const listId = activeView.id;
-  const pinnedUrls = new Set((allListPins[listId] || []).map(p => p.url));
+  const pinnedSlugs = new Set((allListPins[listId] || []).map(p => slugFromPinId(p.id)));
   const relatedContainer = document.getElementById('relatedResults');
 
   if (!matched || matched.length === 0) {
@@ -1241,7 +1309,7 @@ function runListExploreQuery(matched) {
   }
 
   // Filter out pinned results from explore
-  const exploreMatched = matched.filter(r => !pinnedUrls.has(r.url));
+  const exploreMatched = matched.filter(r => !pinnedSlugs.has(generateSlugFromUrl(r.url)));
 
   if (exploreMatched.length === 0) {
     relatedContainer.innerHTML = '<div class="no-results">All matching results are already pinned</div>';
@@ -1703,23 +1771,20 @@ async function showExplore() {
   if (pins.length === 0) {
     pinnedSection.style.display = 'none';
   } else {
-    // Enrich pins with page data from session
-    const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
-    const pageKeys = pinSlugs.map(s => 'page:' + s);
-    const pageData = pageKeys.length > 0 ? await chrome.storage.session.get(pageKeys) : {};
-    const pageSnap = new Map();
-    for (const slug of pinSlugs) {
-      const page = pageData['page:' + slug];
-      if (page) pageSnap.set(slug, page);
-    }
+    const { pageSnap, spi } = await loadPinContext(pins);
+    const pinsResolved = pins.map(p => {
+      const ref = resolvePageRef(p.id, pageSnap, spi);
+      return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null };
+    });
 
     function enrichResult(r) {
-      const slug = generateSlugFromUrl(r.url);
+      const slug = r.slug || generateSlugFromUrl(r.url);
       const cached = pageSnap.get(slug);
       const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
       const attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
       const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
-      const pin = pins.find(p => p.url === r.url);
+      const rSlug = slug;
+      const pin = pins.find(p => slugFromPinId(p.id) === rSlug);
       const enriched = {
         ...r, slug, attScore, attDetail: attParsed,
         notes: source.notes || r.notes || [],
@@ -1730,7 +1795,7 @@ async function showExplore() {
       return enriched;
     }
 
-    const fullPinned = pins.map(enrichResult);
+    const fullPinned = pinsResolved.map(enrichResult);
     renderPinnedSection(fullPinned, listId);
   }
 
@@ -1778,21 +1843,19 @@ async function refreshExplorePins() {
   if (pins.length === 0) {
     pinnedSection.style.display = 'none';
   } else {
-    const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
-    const pageKeys = pinSlugs.map(s => 'page:' + s);
-    const pageData = pageKeys.length > 0 ? await chrome.storage.session.get(pageKeys) : {};
-    const pageSnap = new Map();
-    for (const slug of pinSlugs) {
-      const page = pageData['page:' + slug];
-      if (page) pageSnap.set(slug, page);
-    }
+    const { pageSnap, spi } = await loadPinContext(pins);
+    const pinsResolved = pins.map(p => {
+      const ref = resolvePageRef(p.id, pageSnap, spi);
+      return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null };
+    });
     function enrichResult(r) {
-      const slug = generateSlugFromUrl(r.url);
+      const slug = r.slug || generateSlugFromUrl(r.url);
       const cached = pageSnap.get(slug);
       const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
       const attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
       const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
-      const pin = pins.find(p => p.url === r.url);
+      const rSlug = slug;
+      const pin = pins.find(p => slugFromPinId(p.id) === rSlug);
       const enriched = {
         ...r, slug, attScore, attDetail: attParsed,
         notes: source.notes || r.notes || [],
@@ -1802,7 +1865,7 @@ async function refreshExplorePins() {
       if (source.user_title) enriched.user_title = source.user_title;
       return enriched;
     }
-    const fullPinned = pins.map(enrichResult);
+    const fullPinned = pinsResolved.map(enrichResult);
     renderPinnedSection(fullPinned, listId);
   }
 
@@ -1865,19 +1928,15 @@ async function showList(list) {
     }
     const pins = allListPins[listId] || [];
 
-    // Batch-read pages from session for all pin slugs (one IPC call)
-    const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
-    const pageKeys = pinSlugs.map(s => 'page:' + s);
-    const pageData = pageKeys.length > 0 ? await chrome.storage.session.get(pageKeys) : {};
-    const pageSnap = new Map();
-    for (const slug of pinSlugs) {
-      const page = pageData['page:' + slug];
-      if (page) pageSnap.set(slug, page);
-    }
+    const { pageSnap, spi } = await loadPinContext(pins);
+    const pinsResolved = pins.map(p => {
+      const ref = resolvePageRef(p.id, pageSnap, spi);
+      return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null };
+    });
 
     // Enrich from cached pin fields + session page cache (no further I/O)
     function enrichResult(r) {
-      const slug = generateSlugFromUrl(r.url);
+      const slug = r.slug || generateSlugFromUrl(r.url);
       const cached = pageSnap.get(slug);
       // Use session page if available and newer than pin's watermark, else use pin's cached fields
       const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
@@ -1888,7 +1947,8 @@ async function showList(list) {
         if (histEntry) attParsed = parseAttention(histEntry);
       }
       const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
-      const pin = pins.find(p => p.url === r.url);
+      const rSlug = slug;
+      const pin = pins.find(p => slugFromPinId(p.id) === rSlug);
       const enriched = {
         ...r, slug, attScore, attDetail: attParsed,
         notes: source.notes || r.notes || [],
@@ -1905,8 +1965,8 @@ async function showList(list) {
     if (cachedPinned) {
       renderPinnedSection(cachedPinned.fullPinned, listId);
     } else {
-      renderPinnedSection(pins.map(enrichResult), listId);
-      fetchListResults(list, listId, pins, enrichResult);
+      renderPinnedSection(pinsResolved.map(enrichResult), listId);
+      fetchListResults(list, listId, pinsResolved, enrichResult);
     }
 
     // --- Explore section: always immediate ---
@@ -1923,7 +1983,7 @@ async function showList(list) {
 // Background refresh: load fresh pages and update pin file + cache
 async function refreshListPages(listId, pins) {
   try {
-    const slugs = pins.map(p => generateSlugFromUrl(p.url));
+    const slugs = pins.map(p => slugFromPinId(p.id));
     if (slugs.length === 0) return;
     // Read pages: session cache (dirty/recent) → filesystem (cold)
     const pages = {};
@@ -1941,14 +2001,15 @@ async function refreshListPages(listId, pins) {
     }
     let changed = false;
     for (const pin of pins) {
-      const slug = generateSlugFromUrl(pin.url);
+      const slug = slugFromPinId(pin.id);
       const page = pages[slug];
       if (!page) continue;
       if ((page.watermark || 0) > (pin.watermark || 0)) {
         let attParsed = page.attention ? parseAttention({ attention: page.attention }) : null;
         // Fallback: use attention from loaded history when page lacks it
         if (!attParsed) {
-          const histEntry = historyByUrl.get(pin.url);
+          const pinUrl = pin.id.startsWith('shallow:') ? pin.id.slice(8) : (page.url || '');
+          const histEntry = historyByUrl.get(pinUrl);
           if (histEntry) attParsed = parseAttention(histEntry);
         }
         pin.attScore = attParsed ? attentionStrength(attParsed) : 0;
@@ -1983,10 +2044,10 @@ async function fetchListResults(list, listId, pins, enrichResult) {
     if (activeView.type !== 'list' || activeView.id !== listId) return;
 
     // Enrich pinned pages with search result data where available
-    const pinnedUrls = new Set(pins.map(p => p.url));
-    const searchResultUrls = new Set(searchResults.map(r => r.url));
-    const pinnedInResults = searchResults.filter(r => pinnedUrls.has(r.url)).map(enrichResult);
-    const pinnedOnly = pins.filter(p => !searchResultUrls.has(p.url)).map(enrichResult);
+    const pinnedSlugs = new Set(pins.map(p => p.slug || generateSlugFromUrl(p.url)));
+    const searchResultSlugs = new Set(searchResults.map(r => generateSlugFromUrl(r.url)));
+    const pinnedInResults = searchResults.filter(r => pinnedSlugs.has(generateSlugFromUrl(r.url))).map(enrichResult);
+    const pinnedOnly = pins.filter(p => !searchResultSlugs.has(p.slug || generateSlugFromUrl(p.url))).map(enrichResult);
     const fullPinned = [...pinnedInResults, ...pinnedOnly];
 
     // Cache pinned in session
@@ -2086,7 +2147,7 @@ function processInteractionsForDisplay(interactions, { globalDedup = false } = {
       url: item.url,
       title: item.title || historyByUrl.get(item.url)?.title || '',
       user_title: item.user_title || historyByUrl.get(item.url)?.user_title,
-      slug: item.slug || '',
+      slug: item.slug || generateSlugFromUrl(item.url),
       timestamp: item.timestamp,
       day,
       attScore: attParsed ? attentionStrength(attParsed) : 0,
@@ -2099,6 +2160,23 @@ function processInteractionsForDisplay(interactions, { globalDedup = false } = {
   return results;
 }
 
+// Batch-fetch page entities for all unique slugs in entries, enrich with entity titles.
+// Shallow pages (no checkpoint) are skipped — entries keep their JSONL titles.
+async function enrichFromEntityStorage(entries) {
+  const slugs = [...new Set(entries.map(r => r.slug).filter(Boolean))];
+  if (slugs.length === 0) return;
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs });
+    const pages = resp?.pages || {};
+    for (const entry of entries) {
+      const page = pages[entry.slug];
+      if (!page) continue;  // shallow page — keep JSONL title
+      if (page.title) entry.title = page.title;
+      if (page.user_title) entry.user_title = page.user_title;
+    }
+  } catch {}
+}
+
 async function displayInteractionRows(interactions) {
   if (!interactions || interactions.length === 0) {
     displayMessage('No interactions found');
@@ -2106,21 +2184,7 @@ async function displayInteractionRows(interactions) {
   }
 
   const entries = processInteractionsForDisplay(interactions);
-
-  // Page-based title enrichment: batch-load pages for slugs and use authoritative titles
-  const slugs = [...new Set(entries.map(r => r.slug).filter(Boolean))];
-  if (slugs.length > 0) {
-    try {
-      const pageResp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs });
-      const pages = pageResp?.pages || {};
-      for (const entry of entries) {
-        if (entry.slug && pages[entry.slug]) {
-          if (pages[entry.slug].title) entry.title = pages[entry.slug].title;
-          if (pages[entry.slug].user_title) entry.user_title = pages[entry.slug].user_title;
-        }
-      }
-    } catch {}
-  }
+  await enrichFromEntityStorage(entries);
 
   // When sort is null, default to lastVisit desc
   const effectiveSort = currentSortState.column ? currentSortState : { column: 'lastVisit', direction: 'desc' };
@@ -2271,7 +2335,9 @@ async function loadExtraDetail(url) {
   const belongedLists = [];
   for (const lst of lists) {
     const pins = allListPins[lst.slug] || [];
-    if (pins.some(p => p.url === url)) {
+    const pageId = urlToPinId(url);
+    const shallowId = 'shallow:' + url;
+    if (pins.some(p => p.id === pageId || p.id === shallowId)) {
       belongedLists.push(listDisplayName(lst));
     }
   }
@@ -2842,9 +2908,10 @@ async function renderLists() {
           if (!allListPins[lst.slug]) allListPins[lst.slug] = [];
           const pins = allListPins[lst.slug];
           let added = 0;
-          for (const { url, title } of items) {
-            if (url && !pins.some(p => p.url === url)) {
-              pins.push({ url, title, pinnedAt: Date.now() });
+          for (const { url } of items) {
+            const pinId = urlToPinId(url);
+            if (url && !pins.some(p => p.id === pinId || p.id === 'shallow:' + url)) {
+              pins.push({ id: pinId, pinnedAt: Date.now() });
               added++;
             }
           }
@@ -3635,10 +3702,10 @@ function updateExploreBadge() {
 // --- Explore Blocks ---
 
 async function buildExploreAutoBlocks(pins) {
-  const pinnedUrls = new Set(pins.map(p => p.url));
+  const pinnedSlugs = new Set(pins.map(p => slugFromPinId(p.id)));
 
   // Load pages for all pins via background (checks cache + disk)
-  const pinSlugs = pins.map(p => generateSlugFromUrl(p.url));
+  const pinSlugs = pins.map(p => slugFromPinId(p.id));
   const pageData = {};
   if (pinSlugs.length > 0) {
     const resp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs: pinSlugs });
@@ -3649,12 +3716,14 @@ async function buildExploreAutoBlocks(pins) {
     }
   }
 
-  // Helper: resolve mixed-format refs (slug | URL | {url,title}) → URLs
-  async function resolveMixedRefs(refs) {
+  // Helper: resolve typed refs (page:<slug> | shallow:<url>) → URLs
+  async function resolveTypedRefs(refs) {
     const urls = [];
     const slugs = [];
     for (const ref of refs) {
-      if (typeof ref === 'object') { urls.push(ref.url); continue; }
+      if (ref.startsWith('shallow:')) { urls.push(ref.slice(8)); continue; }
+      if (ref.startsWith('page:')) { slugs.push(ref.slice(5)); continue; }
+      // Legacy: bare slug or URL
       if (ref.startsWith('http')) { urls.push(ref); continue; }
       slugs.push(ref);
     }
@@ -3670,50 +3739,51 @@ async function buildExploreAutoBlocks(pins) {
     return urls;
   }
 
-  // Children of pins: from page.children (mixed format, filter out notes) + parentIndex inverse
+  // Children of pins: from page.childIds (typed keys, filter out notes) + shallowPageIndex inverse
   const allChildRefs = [];
   for (const slug of pinSlugs) {
     const page = pageData['page:' + slug];
-    if (page && page.children) {
-      for (const c of page.children) {
+    if (page && page.childIds) {
+      for (const c of page.childIds) {
         if (!c.startsWith('note:')) allChildRefs.push(c); // Skip note children
       }
     }
   }
-  const resolvedChildUrls = await resolveMixedRefs(allChildRefs);
-  const childrenUrls = new Set(resolvedChildUrls.filter(u => !pinnedUrls.has(u)));
-  // Also check parentIndex for non-checkpointed children
-  const { parentIndex: piData = { index: {} } } = await chrome.storage.session.get(['parentIndex']);
+  const resolvedChildUrls = await resolveTypedRefs(allChildRefs);
+  const childrenUrls = new Set(resolvedChildUrls.filter(u => !pinnedSlugs.has(generateSlugFromUrl(u))));
+  // Also check shallowPageIndex for non-checkpointed children
+  const { shallowPageIndex: spiData = { index: {} } } = await chrome.storage.session.get(['shallowPageIndex']);
   const pinSlugSet = new Set(pinSlugs);
-  for (const [childUrl, pSlugs] of Object.entries(piData.index)) {
-    if (pinnedUrls.has(childUrl)) continue;
-    if (pSlugs.some(ps => pinSlugSet.has(ps))) childrenUrls.add(childUrl);
+  for (const [childUrl, entry] of Object.entries(spiData.index)) {
+    if (pinnedSlugs.has(generateSlugFromUrl(childUrl))) continue;
+    const parents = entry.parents || [];
+    if (parents.some(p => pinSlugSet.has(p.startsWith('page:') ? p.slice(5) : p))) childrenUrls.add(childUrl);
   }
 
-  // Parents of pins: from page.parents (mixed format) + parentIndex fallback
+  // Parents of pins: from page.parentIds (typed keys) + shallowPageIndex fallback
   const allParentRefs = [];
   for (let i = 0; i < pinSlugs.length; i++) {
     const page = pageData['page:' + pinSlugs[i]];
-    if (page && page.parents && page.parents.length > 0) {
-      for (const p of page.parents) allParentRefs.push(p);
+    if (page && page.parentIds && page.parentIds.length > 0) {
+      for (const p of page.parentIds) allParentRefs.push(p);
     } else {
-      // Non-checkpointed pin: check parentIndex for its parents
-      const pinUrl = pins[i].url;
-      const piParents = piData.index[pinUrl];
-      if (piParents) {
-        for (const ps of piParents) allParentRefs.push(ps);
+      // Non-checkpointed pin: check shallowPageIndex for its parents
+      const pinUrl = pins[i].id.startsWith('shallow:') ? pins[i].id.slice(8) : (pageData['page:' + pinSlugs[i]]?.url || '');
+      const spiEntry = spiData.index[pinUrl];
+      if (spiEntry && spiEntry.parents) {
+        for (const ps of spiEntry.parents) allParentRefs.push(ps);
       }
     }
   }
-  const resolvedParentUrls = await resolveMixedRefs(allParentRefs);
-  const parentUrls = new Set(resolvedParentUrls.filter(u => !pinnedUrls.has(u)));
+  const resolvedParentUrls = await resolveTypedRefs(allParentRefs);
+  const parentUrls = new Set(resolvedParentUrls.filter(u => !pinnedSlugs.has(generateSlugFromUrl(u))));
 
   // Similar to pins: use findRelatedPages
   const allEnriched = Array.from(historyByUrl.values()).map(r => ({
     ...r, timestamps: [r.timestamp || Date.now()], attScore: 0, attDetail: null, notes: [],
   }));
-  const seedEnriched = allEnriched.filter(e => pinnedUrls.has(e.url));
-  const candidateEnriched = allEnriched.filter(e => !pinnedUrls.has(e.url));
+  const seedEnriched = allEnriched.filter(e => pinnedSlugs.has(generateSlugFromUrl(e.url)));
+  const candidateEnriched = allEnriched.filter(e => !pinnedSlugs.has(generateSlugFromUrl(e.url)));
   const similarResults = findRelatedPages(seedEnriched, candidateEnriched, relatedPagesLimit);
   const similarUrls = new Set(similarResults.map(r => r.url));
 
@@ -3889,14 +3959,14 @@ function debouncedRunExploreBlockQuery() {
 async function runExploreBlockQuery() {
   if (activeView.type !== 'explore' && activeView.type !== 'list') return;
 
-  // Derive pinned URLs and listId from active view
-  let pinnedUrls, listId;
+  // Derive pinned slugs and listId from active view
+  let pinnedSlugs, listId;
   if (activeView.type === 'explore') {
     listId = EXPLORE_LIST_ID;
-    pinnedUrls = new Set(getExplorePins().map(p => p.url));
+    pinnedSlugs = new Set(getExplorePins().map(p => slugFromPinId(p.id)));
   } else {
     listId = activeView.id;
-    pinnedUrls = new Set((allListPins[listId] || []).map(p => p.url));
+    pinnedSlugs = new Set((allListPins[listId] || []).map(p => slugFromPinId(p.id)));
     // Sync manual block trees to list's qbTrees (skips save if unchanged)
     saveListQbTrees();
   }
@@ -3910,7 +3980,7 @@ async function runExploreBlockQuery() {
       // Explore: show entire history when no blocks enabled (date-boundary dedup)
       showAllHistory = true;
       results = processInteractionsForDisplay(
-        historyAllEntries.filter(item => item.url && !pinnedUrls.has(item.url) && !isPermanentlyDeleted(item.url) && !isRecycled(item.url))
+        historyAllEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)) && !isPermanentlyDeleted(item.url) && !isRecycled(item.url))
       ).map(item => ({ ...item, relevance: 0 }));
     } else {
       // List: show empty state when no blocks enabled
@@ -3926,7 +3996,7 @@ async function runExploreBlockQuery() {
     for (const block of enabledBlocks) {
       if (block.type === 'auto' && block.urls) {
         for (const url of block.urls) {
-          if (!pinnedUrls.has(url)) mergedUrls.add(url);
+          if (!pinnedSlugs.has(generateSlugFromUrl(url))) mergedUrls.add(url);
         }
       }
     }
@@ -3943,18 +4013,19 @@ async function runExploreBlockQuery() {
         }
         const matched = await evaluateQueryStream(block.tree);
         for (const item of matched) {
-          if (!pinnedUrls.has(item.url)) mergedUrls.add(item.url);
+          if (!pinnedSlugs.has(generateSlugFromUrl(item.url))) mergedUrls.add(item.url);
         }
       }
     }
 
     // Build result items — global dedup for filtered results, day-wise for all-history
     const filteredEntries = historyAllEntries.filter(item => {
-      if (!item.url || pinnedUrls.has(item.url)) return false;
+      if (!item.url || pinnedSlugs.has(generateSlugFromUrl(item.url))) return false;
       if (isPermanentlyDeleted(item.url) || isRecycled(item.url)) return false;
       return matchAll || mergedUrls.has(item.url);
     });
     results = processInteractionsForDisplay(filteredEntries, { globalDedup: !showAllHistory }).map(item => ({ ...item, relevance: 0 }));
+    await enrichFromEntityStorage(results);
   }
 
   const relatedContainer = document.getElementById('relatedResults');
@@ -3984,8 +4055,9 @@ async function runExploreBlockQuery() {
     vs.onLoadMore = async () => {
       const newItems = await loadHistoryBatch();
       if (newItems.length > 0) {
-        const filtered = newItems.filter(item => item.url && !pinnedUrls.has(item.url) && !isPermanentlyDeleted(item.url) && !isRecycled(item.url));
+        const filtered = newItems.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)) && !isPermanentlyDeleted(item.url) && !isRecycled(item.url));
         const newResults = processInteractionsForDisplay(filtered).map(item => ({ ...item, relevance: 0 }));
+        await enrichFromEntityStorage(newResults);
         if (newResults.length > 0) {
           const sort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
           vs.appendData(applySortOrder(newResults, sort));
@@ -4061,11 +4133,15 @@ async function openListFocusPanel(listId, listName) {
       html += '<div class="focus-empty">No pinned pages</div>';
     } else {
       const maxAtt = 0.1;
-      html += pins.map(p =>
-        resultRowHtml(p.user_title || p.title || 'Untitled', p.url, {
+      const { pageSnap: fpSnap, spi: fpSpi } = await loadPinContext(pins);
+      html += pins.map(p => {
+        const ref = resolvePageRef(p.id, fpSnap, fpSpi);
+        const title = ref?.user_title || ref?.title || 'Untitled';
+        const url = ref?.url || '';
+        return resultRowHtml(title, url, {
           deletable: false, attScore: 0, maxAtt, timestamps: [p.pinnedAt || Date.now()], context: 'global', noFocusButton: true
-        })
-      ).join('');
+        });
+      }).join('');
     }
     html += '</div></div>';
 
@@ -4242,8 +4318,9 @@ async function initialize() {
         const pins = allListPins[EXPLORE_LIST_ID];
         let added = 0;
         for (const item of data.items) {
-          if (!pins.some(p => p.url === item.url)) {
-            pins.push({ url: item.url, title: item.title, pinnedAt: Date.now() });
+          const pinId = urlToPinId(item.url);
+          if (!pins.some(p => p.id === pinId || p.id === 'shallow:' + item.url)) {
+            pins.push({ id: pinId, pinnedAt: Date.now() });
             added++;
           }
         }

@@ -135,13 +135,6 @@ async function handleRequest(request) {
         return { success: true, exists };
       }
 
-      case 'loadPageDetail': {
-        const t0 = performance.now();
-        const detail = await fsStorage.loadPageDetail(request.slug, request.url);
-        console.debug(`[I/O] loadPageDetail(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
-        return { success: true, ...detail };
-      }
-
       case 'loadListPins': {
         const t0 = performance.now();
         if (request.listId) {
@@ -190,10 +183,10 @@ async function handleRequest(request) {
         return { success: true, ...result };
       }
 
-      case 'loadParentIndex': {
+      case 'loadShallowPageIndex': {
         const t0 = performance.now();
-        const data = await fsStorage.loadParentIndex();
-        console.debug(`[I/O] loadParentIndex: ${(performance.now() - t0).toFixed(1)}ms`);
+        const data = await fsStorage.loadShallowPageIndex();
+        console.debug(`[I/O] loadShallowPageIndex: ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, ...data };
       }
 
@@ -369,9 +362,9 @@ async function drainQueue() {
         roundCache.set(key, await fsStorage.loadRecycleBinEntity());
       } else if (key === 'list:system/permanent-deletes') {
         roundCache.set(key, await fsStorage.loadPermanentDeletesEntity());
-      } else if (key === 'list:index/parent') {
+      } else if (key === 'list:system/shallow-page') {
         try {
-          roundCache.set(key, await fsStorage.loadParentIndex());
+          roundCache.set(key, await fsStorage.loadShallowPageIndex());
         } catch {
           roundCache.set(key, defaultEntity(key));
         }
@@ -449,9 +442,9 @@ async function drainQueue() {
         await withLock('lists/system/recycle-bin.json', () => fsStorage.saveRecycleBin(entity.items, entity.timestamp));
       } else if (key === 'list:system/permanent-deletes') {
         await withLock('lists/system/permanent-deletes.json', () => fsStorage.savePermanentDeletes(entity.keys, entity.timestamp));
-      } else if (key === 'list:index/parent') {
-        await withLock('lists/index/parent.json', async () => {
-          const fh = await fsStorage.resolveFile('lists/index/parent.json', { create: true });
+      } else if (key === 'list:system/shallow-page') {
+        await withLock('lists/system/shallow-page.json', async () => {
+          const fh = await fsStorage.resolveFile('lists/system/shallow-page.json', { create: true });
           await fsStorage.writeJson(fh, entity);
         });
       }

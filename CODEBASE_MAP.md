@@ -7,22 +7,22 @@
 | File | Lines | Role |
 |------|-------|------|
 | `extension/manifest.json` | 72 | MV3 manifest: permissions (incl. scripting, webNavigation), commands (Alt+S, Alt+H, Alt+L), CSP for WASM, content-fontface.js (document_start, all_frames), web_accessible_resources for fontface-intercept |
-| `extension/background.js` | ~980 | Service worker: central authority — handles ALL actions, `addLog(entry)` (appends to logBuffer + replays via `effectOf` + `sessionLoad`/`sessionWrite`), port channel to offscreen, unified `hydrateCache()` (loads base entities from offscreen then replays logBuffer via `effectOf`), `readCacheable(key)`/`readFs(key)` (session→filesystem fallback for all cacheable keys — awaits hydrationDone, batch-loads settings, applies listOrder), gateway registry, referrer tracking (webNavigation closure: `getReferrer(tabId)`, always emits page_checkpoint for referrer pages), multi-day checkpoint detection, page relations (parents/children from page entity + parentIndex), keyboard commands, `captureAndLog(tabId, slug, timestamp, url, title)` (checkpoints page before capture), `ensureCheckpointIfMissing(slug, url, title)` (module-level helper), `ensurePageCached()`, `setEntityCacheWatermark` on offscreen persist |
+| `extension/background.js` | ~1442 | Service worker: central authority — handles ALL actions, `addLog(entry)` (appends to logBuffer + replays via `effectOf` + `sessionLoad`/`sessionWrite`), port channel to offscreen, unified `hydrateCache()` (loads base entities from offscreen then replays logBuffer via `effectOf`), `readCacheable(key)`/`readFs(key)` (session→filesystem fallback for all cacheable keys — awaits hydrationDone, batch-loads settings, applies listOrder), gateway registry, referrer tracking (webNavigation closure: `getReferrer(tabId)`, always emits page_checkpoint for referrer pages, stores `referrerId: 'page:<slug>'` in log entries), multi-day checkpoint detection, page relations (parentIds/childIds from page entity + shallowPageIndex fallback, resolves typed refs `page:<slug>`/`shallow:<url>`), keyboard commands, `captureAndLog(tabId, slug, timestamp, url, title)` (checkpoints page before capture), `ensureCheckpointIfMissing(slug, url, title)` (module-level helper), `replayBufferOver(page)` (replays logBuffer over a filesystem page entity), `setEntityCacheWatermark` on offscreen persist |
 | `extension/savepage-bridge.js` | ~170 | Save Page WE integration: `initSavepageBridge()` (registers `type`-based onMessage listener), `captureSavePage(tabId)` (injects SPWE scripts, returns Promise\<html\>), `loadSavepageResource()` (internal) — only Chrome APIs |
 | `extension/entity-cache.js` | ~40 | Entity LRU cache: `getCachedEntity(key)`, `setCachedEntity(key, entity)` — wraps `chrome.storage.session` with 500-entry LRU; `setEntityCacheWatermark(ts)` gates eviction to only flush entities with `timestamp <= persistWatermark` |
-| `extension/replay.js` | ~530 | Shared pure replay: unified interface `effectOf(entry, load)` → `scopeOf` + `applyTo`; `defaultEntity(key)` creates empty entities; per-entity: `applyLogToPage` (action='page' with parents/children accumulation, visitDates, attention, capture fields; action='page_checkpoint'), `applyLogToNote` (action='note' with excerpt/note/cssPath/parents/children), `applyLogToSettings`, `applyLogToPins` (list add/del/clear, list_meta, del_list), `applyLogToRecycleBin`, `applyLogToDeletes`, `applyLogToParentIndex`; `applyTo` post-loop: wires note parents into page children, prunes parent-index entries for URLs whose pages exist in scope, resolves URL refs in parents/children to slugs when referenced page exists; entity key namespaces: `page:{slug}`, `note:{slug}`, `settings`, `list:user/{id}`, `list:system/recycle-bin`, `list:system/permanent-deletes`, `list:index/parent` |
-| `extension/offscreen.js` | ~490 | Offscreen doc: port-only FS I/O worker — drains logBuffer via round-cache + sequential `effectOf(entry, load)` replay (load closure over roundCache + filesystem), flushes dirty entities to disk (pure save, no post-processing — resolution/pruning done in replay.js applyTo), appends to history JSONL, per-file locks |
+| `extension/replay.js` | ~585 | Shared pure replay: unified interface `effectOf(entry, load)` → `scopeOf` + `applyTo`; `SHALLOW_PREFIX = 'shallow:'`; `defaultEntity(key)` creates empty entities; per-entity: `applyLogToPage` (action='page' with parentIds/childIds accumulation using typed refs `page:<slug>`/`shallow:<url>`, visitDates, attention, capture fields; action='page_checkpoint'), `applyLogToNote` (action='note' with excerpt/note/cssPath/parentIds/childIds), `applyLogToSettings`, `applyLogToPins` (list add/del/clear using `entry.ids` with typed refs, list_meta, del_list; pin format `{id, pinnedAt}`), `applyLogToRecycleBin`, `applyLogToDeletes`, `applyLogToShallowPage` (tracks parents/lists/title for non-checkpointed URLs); `applyTo` post-loop: wires note parentIds into page childIds, absorbs shallow-page index data into newly-checkpointed pages, resolves `shallow:<url>` refs to `page:<slug>` when referenced page exists in scope, prunes shallow-page entries for checkpointed pages; entity key namespaces: `page:{slug}`, `note:{slug}`, `settings`, `list:{id}`, `list:system/recycle-bin`, `list:system/permanent-deletes`, `list:system/shallow-page` |
+| `extension/offscreen.js` | ~495 | Offscreen doc: port-only FS I/O worker — drains logBuffer via round-cache + sequential `effectOf(entry, load)` replay (load closure over roundCache + filesystem), flushes dirty entities to disk (pure save, no post-processing — resolution/pruning done in replay.js applyTo), appends to history JSONL, per-file locks; routes `list:system/shallow-page` to `lists/system/shallow-page.json` |
 | `extension/offscreen.html` | 10 | Minimal host for offscreen.js (module script) |
-| `extension/filesystem-storage.js` | ~1210 | `FileSystemStorage` class: `#permissionGranted` cache, `#dirCache`/`#fileCache` Maps, `resolveDir(path)`, `resolveFile(path, {create})`, `readJson(handle)`, `writeJson(handle, data)`, `clearCache()`, `pageExists(slug)`, `checkMultiDayVisits(slugs, days)` (scans JSONL for multi-day visitors), `loadParentIndex()` (from `lists/index/parent-index.json`); all File System Access API operations, settings.json, gateway persistence, per-list pin loading; entity methods return wrapped `{timestamp, ...}` format |
+| `extension/filesystem-storage.js` | ~1157 | `FileSystemStorage` class: `#permissionGranted` cache, `#dirCache`/`#fileCache` Maps, `resolveDir(path)`, `resolveFile(path, {create})`, `readJson(handle)`, `writeJson(handle, data)`, `clearCache()`, `pageExists(slug)`, `checkMultiDayVisits(slugs, days)` (scans JSONL for multi-day visitors), `loadShallowPageIndex()` (from `lists/system/shallow-page.json`); all File System Access API operations, settings.json, gateway persistence, per-list pin loading; entity methods return wrapped `{timestamp, ...}` format |
 | `extension/content.js` | ~950 | Content script: accumulated attention tracking (1h timer + page close), highlight system (save-on-close for notes), markdown extraction (HTML capture moved to Save Page WE) |
 | `extension/savepage/content.js` | ~4300 | Adapted Save Page WE v33.9 — self-contained HTML capture with data URIs for all resources |
 | `extension/savepage/content-frame.js` | 286 | SPWE frame handler (upstream, unchanged) |
 | `extension/savepage/content-fontface.js` | 57 | SPWE font-face intercept loader (path updated for savepage/ subdir) |
 | `extension/savepage/content-fontface-intercept.js` | 74 | SPWE font-face intercept script (upstream, unchanged) |
 | `extension/savepage/shadowloader.js` | 69 | SPWE shadow DOM loader (upstream, unchanged) |
-| `extension/popup.js` | ~830 | Popup: per-page dashboard (title, snapshots, notes, lists, workspace) |
+| `extension/popup.js` | ~804 | Popup: per-page dashboard (title, snapshots, notes, lists, workspace); pin operations use typed ids (`page:<slug>`, `shallow:<url>`) |
 | `extension/popup.html` | ~630 | Popup HTML + all popup CSS (inline) |
-| `extension/options.js` | ~4230 | Options page: sidebar nav, explore view (landing page, block-based queries with auto-blocks), lists, settings modal; Rust-side parallel WASM search (searchBatch), lazy list pins, page read cache, event delegation, focus panel (centered overlay with resultRowHtml cards), explore-pin + focus buttons on every row; date-boundary dedup rendering (historyAllEntries), page-based title enrichment, ensureCheckpoint on portal-open |
+| `extension/options.js` | ~4325 | Options page: sidebar nav, explore view (landing page, block-based queries with auto-blocks), lists, settings modal; Rust-side parallel WASM search (searchBatch), lazy list pins, page read cache, event delegation, focus panel (centered overlay with resultRowHtml cards), explore-pin + focus buttons on every row; date-boundary dedup rendering (historyAllEntries), `enrichFromEntityStorage(entries)` batch title enrichment via `loadPageBatch`, ensureCheckpoint on portal-open; `slugFromPinId(id)` for cache-key derivation, `resolvePageRef(refId, pageSnap, spi)` unified typed-ref resolution (page entity or shallow-page index metadata) |
 | `extension/virtual-scroller.js` | ~260 | `VirtualScroller` class: viewport-only rendering, `appendData`/`removeItems`/`applyFilter`, `onLoadMore` callback, saved-node restoration — DOM APIs only via constructor |
 | `extension/related-scoring.js` | ~90 | `findRelatedPages(seeds, candidates, poolLimit)` — pure: pool-based scoring with hostname/title/temporal/intent weights; internal: `STOP_WORDS`, `titleWords`, `jaccardSimilarity`, `scoreTemporalProximity`, `prepareSeed`, `scorePair` |
 | `extension/attention-utils.js` | ~50 | Pure attention functions: `parseAttention(interaction)`, `attentionStrength(att)`, `attentionColor(normalizedScore)`, `aggregateAttention(interactions)` |
@@ -35,7 +35,7 @@
 | `src/lib.rs` | ~336 | WASM: `Interaction` struct, `InteractionData` (JSONL deser), `SearchResult`, `SearchEngine` with 5 ranking algorithms, `searchBatch` async fn (File System Access API bindings, reads JSONL + content directly, parallel search) |
 | `Cargo.toml` | 23 | Rust deps: wasm-bindgen, wasm-bindgen-futures, serde, js-sys, web-sys (console only) |
 | `tests/utils.test.js` | 42 | Vitest: slug generation tests |
-| `tests/replay.test.js` | ~1250 | Vitest: 131 tests for replay.js — unified interface (effectOf, scopeOf, applyTo, defaultEntity), per-entity (settings, page parents/children/visitDates/capture/page_checkpoint/attention, note creation/parents/children, pins, recycleBin, deletes, parentIndex); idempotency + sequence replay |
+| `tests/replay.test.js` | ~1377 | Vitest: 138 tests for replay.js — unified interface (effectOf, scopeOf, applyTo, defaultEntity), per-entity (settings, page parentIds/childIds/visitDates/capture/page_checkpoint/attention with typed refs, note creation/parentIds/childIds, pins with `{id, pinnedAt}` format and `entry.ids`, recycleBin, deletes, shallowPage index tracking parents/lists/title); idempotency + sequence replay; entity storage title resolution (last-write-wins, buffer replay, user_title); shallow→checkpointed absorption and pruning |
 | `tests/log-buffer.test.js` | ~160 | Vitest: 10 tests for background.js log buffer — appendLog, appendVisit, watermark pruning, SW restart recovery, mixed entry types |
 | `tests/search-helpers.test.js` | 144 | Vitest: merge + engine-builder tests (flat log entry format) |
 | `tests/persistence.test.js` | ~410 | Vitest: settings round-trip, gateway incremental processing, list pins (wrapped entity format) |
@@ -54,16 +54,16 @@ Background handles ALL actions in its `onMessage` listener (line ~646).
 Offscreen is port-only — responds via `chrome.runtime.connect({ name: 'bg-offscreen' })`.
 
 ### background.js handles ALL actions (line ~646):
-**Tab-dependent:** `getPageInfo`, `captureCurrentPageFromPopup`, `hydrateCache`, `reportPage`
-**Pure reads (relay to offscreen via port, cache pages):** `loadSettings`, `loadInteractionByUrl`, `loadPageBatch`, `loadPageDetail`, `loadPageNotes`, `loadAllNotes`, `loadListPins`, `loadListPinsById`, `loadGateways`, `listSnapshots`, `getDirectoryInfo`, `getSnapshotUrl`, `listInteractionFiles`, `loadInteractionBatch`
+**Tab-dependent:** `getPageInfo` (entity storage: session cache → filesystem + buffer replay; null for shallow pages), `captureCurrentPageFromPopup`, `hydrateCache`, `reportPage`
+**Pure reads (relay to offscreen via port, cache pages):** `loadSettings`, `loadInteractionByUrl`, `loadPageBatch`, `loadPageNotes`, `loadAllNotes`, `loadListPins`, `loadListPinsById`, `loadGateways`, `listSnapshots`, `getDirectoryInfo`, `getSnapshotUrl`, `listInteractionFiles`, `loadInteractionBatch`
 **Cacheable reads (via `readCacheable` — session→filesystem fallback):** `getLists`, `getRecycleBin`, `loadPermanentDeletes`, `getGatewayDomains`
-**Page relations:** `getPageRelations` (returns parents {referrers (URLs resolved from page.parents slugs + parentIndex fallback), lists} + children (URLs resolved from page.children slugs))
+**Page relations:** `getPageRelations` (returns parents {referrers resolved from `page.parentIds` typed refs + shallowPageIndex fallback, lists} + children {resolved from `page.childIds` typed refs — `page:<slug>` via loadPageBatch, `shallow:<url>` extracted directly})
 **Writes (all via `addLog` — append + effectOf session replay):** `saveSettings`, `saveSettingsKey`, `createNote`, `deleteNote`, `updateNote`, `saveListPinsById`, `saveListMeta`, `deleteList`, `saveRecycleBin`, `savePermanentDeletes`
 **Pass-through (complex FS ops via port):** `saveListPins` (orphan cleanup), `deleteSnapshot`, `initializeFilesystem`
 **Buffer management:** `clearWriteQueue`, `flushLogBuffer`
 
 ### offscreen.js handles via port (line ~68):
-Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllListMetadata` + `loadRecycleBin` + `pageExists` + `listListFiles` + `saveJson` (direct saves) + `loadParentIndex` + log buffer drain via port `drainEntries` messages (appends to history JSONL + checkpoints entities via replay.js, handles list_meta/del_list/recycle_replace, checkpoints parent-index, piggybacks gateway saves)
+Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllListMetadata` + `loadRecycleBin` + `pageExists` + `listListFiles` + `saveJson` (direct saves) + `loadShallowPageIndex` + log buffer drain via port `drainEntries` messages (appends to history JSONL + checkpoints entities via replay.js, handles list_meta/del_list/recycle_replace, checkpoints shallow-page index, piggybacks gateway saves)
 
 ### content.js handles (line ~875):
 `extractMarkdown`, `highlightSelection`, `removeHighlightMark`, `showCaptureNotification`, `showLikeNotification`
@@ -82,10 +82,10 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **Blacklist check**: skips URLs matching `urlBlacklist` prefixes (unless already in DB)
 - **Title trimming**: applies `titleTrimRules` (remove_after_pipe, remove_brackets, remove_parens)
 - **Log buffer**: background holds `logBuffer` array (lazy-loaded from `chrome.storage.local['logBuffer']` via `ensureLogBuffer()`); all mutations via `addLog(entry)` which appends to buffer AND replays against session cache via `effectOf(entry, sessionLoad)` + `sessionWrite(effects)` — serialized via `withLock('logBuffer')`
-- **Log entry format**: all entries have `action` field — `page` (visit + attention + capture: `{timestamp, action:'page', url, title?, referrer?, scrollDepth?, timeOnPage?, mdPath?, htmlPath?}`), `page_checkpoint` (ensures page entity exists), `set`, `note` (create/update note entity), `list` (op: add/del/clear), `list_meta`, `del_list`
+- **Log entry format**: all entries have `action` field — `page` (visit + attention + capture: `{timestamp, action:'page', url, title?, referrerId?: 'page:<slug>', scrollDepth?, timeOnPage?, mdPath?, htmlPath?}`), `page_checkpoint` (ensures page entity exists), `set`, `note` (create/update note entity: `parentIds`, `childIds`), `list` (op: add/del/clear, `ids: ['page:<slug>', 'shallow:<url>', ...]`), `list_meta`, `del_list`
 - **Drain**: offscreen receives `drainEntries` via port, replays sequentially via `effectOf(entry, load)` with round-cache over filesystem, flushes dirty entities to disk, appends to `history/YYYY-MM-DD.jsonl`; sends `{ action: 'persisted', watermark }` back to background for pruning
 - **Per-file locks**: background serializes all cache updates via `withLock('logBuffer')` inside `addLog`; offscreen keeps per-file locks for checkpoint writes and read operations
-- **Note ops**: `createNote`/`deleteNote`/`updateNote` in background — `ensurePageCached(slug)` loads page into session cache, `ensureCheckpointIfMissing` ensures parent page exists, then `addLog` replays via `effectOf`; notes are first-class entities with `note:{slug}` keys
+- **Note ops**: `createNote`/`deleteNote`/`updateNote` in background — `ensureCheckpointIfMissing` ensures parent page exists, then `addLog` replays via `effectOf`; notes are first-class entities with `note:{slug}` keys; log entries use `parentIds`/`childIds` with typed refs
 - **Hydration replay**: `hydrateCache()` loads base entities from offscreen into session cache, then replays ALL pending `logBuffer` entries via `effectOf(entry, sessionLoad)` + `sessionWrite` — same replay path as `addLog`
 
 ### Snapshot Capture
@@ -99,14 +99,14 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **Auto-snapshot**: workspace mode with `autoSnapshot` flag
 
 ### Highlight / Note System
-- **Create note**: Alt+H with text selected → content.js → background `createNote` (ensurePageCached + ensureCheckpointIfMissing + addLog)
+- **Create note**: Alt+H with text selected → content.js → background `createNote` (ensureCheckpointIfMissing + addLog)
 - **Cross-node support**: `getClosestBlock()` determines if selection is same-block (inline spans) vs cross-block (divs, lis); same-block uses `extractContents` via `wrapRangeWithMark()`; cross-block uses `splitSelectionByBlock()` to create per-block chunks
 - **Data model**: note entity with `excerpt` (string | string[]) + `note` (annotation text); `excerpt` is single string for same-block, array of trimmed chunks for cross-block; `excerpt: null` for global page notes
 - **Global page note**: Alt+H with no selection → `showGlobalNoteOverlay()`
 - **Overlay UI**: Shadow DOM for style isolation; matches highlight by timestamp (primary), falls back to text
 - **Visual marks**: wraps text in `<mark class="portal-highlight">`; grouped marks share `data-highlight-timestamp`; delete unwraps all marks in group
 - **Reapply on load**: reads notes via `loadPageNotes`; normalizes excerpt to array, highlights each chunk via `findTextRange()` cross-node search
-- **Storage**: note entities in `notes/{slug}.json`; notes linked to parent pages via `page.children` containing `note:{slug}` keys
+- **Storage**: note entities in `notes/{slug}.json`; notes linked to parent pages via `page.childIds` containing `note:{slug}` keys
 
 ### Search & Ranking (WASM)
 - **Engine**: `src/lib.rs` — `SearchEngine` with 5 algorithms; returns `SearchResult` with `score` field
@@ -122,7 +122,7 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **Buffer merge**: `search-helpers.js` `mergeBufferIntoInteractions()` — dedup by URL, sort by timestamp; `getBufferContentMap()` extracts buffer content separately
 
 ### Lists (Pinned Searches) — formerly "Collections" / "Topics"
-- **Storage**: Self-describing files `lists/user/{id}.json` — each file contains `{id, timestamp, name, qbTrees: [...], pins: [...]}`. Ordering in `settings.json` key `listOrder` (array of UUIDs). Session cache `lists` array hydrated from files by background.
+- **Storage**: Self-describing files `lists/{id}.json` — each file contains `{id, timestamp, name, qbTrees: [...], pins: [{id, pinnedAt}, ...]}`. Pin `id` is typed ref (`page:<slug>` or `shallow:<url>`). Ordering in `settings.json` key `listOrder` (array of UUIDs). Session cache `lists` array hydrated from files by background.
 - **Display name**: `listDisplayName(list)` → `name || query`; `name` always present in self-describing files
 - **Create/update**: `options.js` sends `saveListMeta` message to background (which updates session cache + appends `list_meta` log entry); ordering via `saveSettingsValue('listOrder', ...)`
 - **Delete**: `options.js` sends `deleteList` message to background (which removes from session cache + listOrder + appends `del_list` log entry; offscreen drain deletes the file)
@@ -156,8 +156,8 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 ### Explore Block-Based Queries
 - **Data model**: `exploreBlocks = [{ id, type: 'auto'|'manual', label, enabled, tree, urlSet }]`
 - **Auto-blocks**: generated by `buildExploreAutoBlocks(pins)` from explore pins:
-  - "Children of pins": slugs from each pin's `page.children`, resolved to URLs via `loadPageBatch`
-  - "Parents of pins": slugs from each pin's `page.parents`, resolved to URLs via `loadPageBatch`
+  - "Children of pins": from each pin's `page.childIds` typed refs — `page:<slug>` resolved via `loadPageBatch`, `shallow:<url>` resolved via `shallowPageIndex`
+  - "Parents of pins": from each pin's `page.parentIds` typed refs — same resolution pattern
   - "Similar to pins": URLs from `findRelatedPages()` with pins as seeds
 - **Manual blocks**: user-added, each with its own QB tree; edited via `renderQueryBuilder()` scoped per-block
 - **Rendering**: `renderExploreBlocks()` — block list with toggle (blue=enabled, gray=disabled), label, count badge, remove button; manual blocks show QB tree
@@ -234,8 +234,8 @@ Lists                 ← section label
 - **Metadata**: JSONL files `YYYY-MM-DD.jsonl` — one JSON line per interaction
 - **Content**: `pages/{slug}/{timestamp}.md|.html` (versioned snapshots)
 - **Legacy**: `pages/{slug}.md` flat files coexist via fallback reads
-- **Notes**: `notes/{slug}.json` — per-note entity `{ slug, timestamp, excerpt, note, cssPath, parents, children }`; `loadPageNotes(pageSlug)` returns all notes whose parent is the given page
-- **List files**: `lists/user/{listId}.json` — self-describing entity `{ id, timestamp, name, qbTrees: [...], pins: [...] }`; `loadListPinsById(id)` returns just pins, `loadListPinsEntity(id)` returns full entity; `saveListPinsById(id, pins, timestamp)` preserves metadata (read-merge-write); `saveListMeta(id, meta, timestamp)` preserves pins; `loadAllListMetadata()` scans all files; `deleteListFile(id)` removes file
+- **Notes**: `notes/{slug}.json` — per-note entity `{ slug, timestamp, excerpt, note, cssPath, parentIds, childIds }`; `loadPageNotes(pageSlug)` returns all notes whose parent is the given page
+- **List files**: `lists/{listId}.json` — self-describing entity `{ id, timestamp, name, qbTrees: [...], pins: [{id, pinnedAt}, ...] }`; pin `id` is typed ref (`page:<slug>` or `shallow:<url>`); `loadListPinsById(id)` returns just pins, `loadListPinsEntity(id)` returns full entity; `saveListPinsById(id, pins, timestamp)` preserves metadata (read-merge-write); `saveListMeta(id, meta, timestamp)` preserves pins; `loadAllListMetadata()` scans all files; `deleteListFile(id)` removes file
 - **Recycle bin**: `lists/system/recycle-bin.json` — `{ timestamp, items: [...] }`; `loadRecycleBin()` returns items, `loadRecycleBinEntity()` returns full entity, `saveRecycleBin(items, timestamp)` writes file
 - **Permanent deletes**: `lists/system/permanent-deletes.json` — wrapped entity `{ timestamp, keys: [...] }`; `loadPermanentDeletes()` returns just keys, `loadPermanentDeletesEntity()` returns wrapped
 - **Settings**: `settings.json` — derived checkpoint with `timestamp` watermark
@@ -249,9 +249,9 @@ Lists                 ← section label
 - **Source of truth**: log files (`history/YYYY-MM-DD.jsonl`) — entity files are derived checkpoints
 - **Hot cache**: `chrome.storage.session` — in-memory IPC, survives SW termination, cleared on browser restart; hydrated on every startup
 - **Durable backup**: `chrome.storage.local['logBuffer']` — log buffer only; all other cache keys in session
-- **Hydration**: `background.js` `hydrateCache()` — Phase 1: loads base entities from offscreen into session; Phase 2: replays ALL `logBuffer` entries via `effectOf(entry, sessionLoad)` + `sessionWrite`; Phase 3: orders lists by `listOrder`; Phase 4: incremental gateway processing
+- **Hydration**: `background.js` `hydrateCache()` — Phase 1: loads base entities from offscreen into session; Phase 1.5: pre-loads page entities referenced by logBuffer from filesystem (so Phase 2 replay has them available); Phase 2: replays ALL `logBuffer` entries via `effectOf(entry, sessionLoad)` + `sessionWrite`; Phase 3: orders lists by `listOrder`; Phase 4: incremental gateway processing
 - **Write-through**: `utils.js` `saveSettingsValue(key, value)` sends `saveSettingsKey` to background, which calls `addLog` (append + `effectOf` session replay)
-- **Hot-path reads**: background.js uses `readCacheable(key)` for workspace, urlBlacklist, titleTrimRules, gatewayDomains, parentIndex, lists, listOrder (awaits hydrationDone, then session→readFs fallback); popup.js/content.js/options.js read cached keys from session directly with sendMessage fallback (access level: TRUSTED_AND_UNTRUSTED_CONTEXTS)
+- **Hot-path reads**: background.js uses `readCacheable(key)` for workspace, urlBlacklist, titleTrimRules, gatewayDomains, shallowPageIndex, lists, listOrder (awaits hydrationDone, then session→readFs fallback); popup.js/content.js/options.js read cached keys from session directly with sendMessage fallback (access level: TRUSTED_AND_UNTRUSTED_CONTEXTS)
 - **Entity LRU cache**: `entity-cache.js` caches entities in session as `page:{slug}` / `note:{slug}` keys (500 limit); `getCachedEntity`/`setCachedEntity` with watermark-gated LRU eviction (only evicts entities with `timestamp <= persistWatermark`); `setEntityCacheWatermark(ts)` called by background on offscreen persist; imported by background.js; checked on loadPageBatch, loadPageNotes, createNote/deleteNote
 - **Log buffer**: background holds `logBuffer` array (lazy-loaded via `ensureLogBuffer()`), synced to `chrome.storage.local['logBuffer']`; offscreen drains via port `drainEntries`; all mutations via `addLog(entry)` — immutable, no dedup, serialized via `withLock('logBuffer')`
 - **Unified replay path**: both `addLog` (runtime) and `hydrateCache` (startup) use `effectOf(entry, sessionLoad)` + `sessionWrite` — identical replay logic for all entity types
@@ -264,15 +264,16 @@ Lists                 ← section label
 - **Capture**: `content.js` — includes `document.referrer` in visit message (all origins); `background.js` supplements via `webNavigation` API (`tabUrls`/`tabReferrers` Maps) for sites that strip `document.referrer` via Referrer-Policy
 - **webNavigation fallback**: IIFE closure exposing `getReferrer(tabId)` — `onCommitted` (link transitions → record previous URL as referrer), `onCreatedNavigationTarget` (new-tab links → inherit source tab's URL); `tabs.onRemoved` cleans up
 - **Pre-visit checkpoints**: background always ensures `page_checkpoint` for parent slug (referrer) BEFORE appending the page entry — deterministic log ordering; also checkpoints before capture
-- **Unified replay**: visit entry with referrer affects both child page (parents accumulation) and parent page (children accumulation) via `applyLogToPage` in `effectOf`; `addLog` in background replays against session cache, offscreen drain replays against filesystem
-- **Page storage**: `page.parents` (URL/slug array, cap 50) — accumulated on visit entries with referrer; `page.children` (URL/slug array, cap 50) — accumulated when referrer slug matches parent page; resolved to slugs by replay.js `applyTo` post-loop when referenced page exists in scope
-- **Parent-index**: `lists/index/parent-index.json` — `{ timestamp, index: { childUrl: [parentSlug, ...] } }` — for non-checkpointed pages; pruned when child becomes checkpointed
+- **Log format**: visit entry stores `referrerId: 'page:<slug>'` (derived from referrer URL via `generateSlugFromUrl`); `entry.url` remains raw URL
+- **Unified replay**: visit entry with `referrerId` affects both child page (`parentIds` accumulation with the referrerId) and parent page (`childIds` accumulation with `shallow:<entry.url>`) via `applyLogToPage` in `effectOf`; `addLog` in background replays against session cache, offscreen drain replays against filesystem
+- **Page storage**: `page.parentIds` (typed ref array `['page:<slug>', ...]`, cap 50) — accumulated on visit entries with referrerId; `page.childIds` (typed ref array `['page:<slug>', 'note:<slug>', 'shallow:<url>', ...]`, cap 50) — accumulated when referrer slug matches parent page; `shallow:<url>` refs resolved to `page:<slug>` by replay.js `applyTo` post-loop when referenced page exists in scope
+- **Shallow-page index**: `lists/system/shallow-page.json` — `{ timestamp, index: { url: { parents: ['page:<slug>'], lists: ['list:<id>'], title, user_title } } }` — tracks parents, list membership, and title for non-checkpointed pages; pruned when page becomes checkpointed (data absorbed into page entity)
 - **Multi-day visits**: background detects multi-day visits (from cached page `visitDates` or logBuffer) and emits `page_checkpoint` before the visit
-- **Focus panel / getPageRelations**: parents from `page.parents` (slugs, resolved to URLs via loadPageBatch), fallback to `parentIndex.index[url]`; children from `page.children` (slugs, resolved to URLs)
+- **Focus panel / getPageRelations**: parents from `page.parentIds` (typed refs — `page:<slug>` resolved via loadPageBatch, `shallow:<url>` URL extracted directly), fallback to `shallowPageIndex.index[url]`; children from `page.childIds` (same resolution pattern)
 
 ### Explore as Special List
 - **List ID**: `EXPLORE_LIST_ID = 'explore'` — Explore is a regular list with a well-known ID
-- **Storage**: `lists/user/explore.json` — same `[{url, title, pinnedAt}]` format as any list; uses `saveListPinsById`/`loadListPinsById`
+- **Storage**: `lists/user/explore.json` — same `[{id, pinnedAt}]` format as any list; uses `saveListPinsById`/`loadListPinsById`
 - **Unified pin button**: one `.result-pin` button on all result rows; pins to active list (`getActivePinListId()` — Explore when in explore/other views, list ID when in list view)
 - **Badge**: `updateExploreBadge()` reads `allListPins[EXPLORE_LIST_ID]`
 - **Drag-to-explore**: drop result rows on Explore button to pin via `toggleResultPin(EXPLORE_LIST_ID, ...)`
@@ -303,27 +304,28 @@ Lists                 ← section label
 - **Build WASM**: `npm run build` → `wasm-pack build --target web --out-dir extension/pkg`
 - **Run tests**: `npm test` → `vitest run`
 - **Test files**: `tests/utils.test.js`, `tests/search-helpers.test.js`, `tests/replay.test.js`, `tests/log-buffer.test.js`, `tests/persistence.test.js`, `tests/cache-staleness.test.js`, `tests/highlight-helpers.test.js`, `tests/virtual-scroller.test.js`, `tests/progressive-loading.test.js`, `tests/message-routing.test.js`, `tests/mutation-refresh.test.js`, `tests/referrer-focus.test.js`, `tests/attention-utils.test.js`, `tests/auto-blocks.test.js`, `tests/state-preservation.test.js`, `tests/read-cacheable.test.js`
-- **Migration scripts**: `scripts/migrate-keys-and-notes.js` (atoms→pages, highlights→notes), `scripts/migrate-quote-to-excerpt.js` (quote→excerpt field rename); utility: `scripts/check-gateways.js`, `scripts/check-gateway-filtering.js`
+- **Migration scripts**: `scripts/migrate-keys-and-notes.js` (atoms→pages, highlights→notes), `scripts/migrate-quote-to-excerpt.js` (quote→excerpt field rename), `scripts/migrate-shallow-refs.js` (parents→parentIds, children→childIds, referrer→referrerId, urls→ids, pins url→id, parent.json→shallow-page.json), `scripts/fix-raw-refs.js` (converts remaining raw URLs/{url,title} objects to typed refs, backfills shallow-page.json); utility: `scripts/check-gateways.js`, `scripts/check-gateway-filtering.js`
 
 ## Key Data Schemas
 
 ### Interaction (metadata in JSONL)
 ```json
-{ "timestamp": 1234, "action": "page", "url": "https://...", "title": "...", "slug": "...", "referrer": "..." }
+{ "timestamp": 1234, "action": "page", "url": "https://...", "title": "...", "slug": "...", "referrerId": "page:parent-slug" }
 ```
-Visit entries contain url/title/slug/referrer. Attention data (scrollDepth, timeOnPage) logged in separate page entries. Capture paths (mdPath, htmlPath) also in separate entries. Slugs use compact format: strip `www.` prefix and TLD from hostname.
+Visit entries contain url/title/slug/referrerId (typed ref, always `page:<slug>`). Attention data (scrollDepth, timeOnPage) logged in separate page entries. Capture paths (mdPath, htmlPath) also in separate entries. Slugs use compact format: strip `www.` prefix and TLD from hostname.
 
 ### Note (in notes/{slug}.json — first-class entity)
 ```json
-{ "slug": "note-slug", "timestamp": 1234, "excerpt": "selected text", "note": "user annotation", "cssPath": "body > ...", "parents": ["page:parent-slug"], "children": [] }
-{ "slug": "note-slug", "timestamp": 1234, "excerpt": ["chunk1", "chunk2"], "note": "", "cssPath": "body > ...", "parents": ["page:parent-slug"], "children": [] }
+{ "slug": "note-slug", "timestamp": 1234, "excerpt": "selected text", "note": "user annotation", "cssPath": "body > ...", "parentIds": ["page:parent-slug"], "childIds": [] }
+{ "slug": "note-slug", "timestamp": 1234, "excerpt": ["chunk1", "chunk2"], "note": "", "cssPath": "body > ...", "parentIds": ["page:parent-slug"], "childIds": [] }
 ```
 `excerpt` is `string` (same-block selection), `string[]` (cross-block chunks), or `null` (global page note). `note` is the user annotation text.
 
-### List (in lists/user/{listId}.json — self-describing entity)
+### List (in lists/{listId}.json — self-describing entity)
 ```json
-{ "id": "uuid", "timestamp": 0, "name": "Rust Lang", "qbTrees": [], "pins": [{ "url": "https://...", "title": "...", "pinnedAt": 1234 }] }
+{ "id": "uuid", "timestamp": 0, "name": "Rust Lang", "qbTrees": [], "pins": [{ "id": "page:slug", "pinnedAt": 1234 }, { "id": "shallow:https://...", "pinnedAt": 1234 }] }
 ```
+Pin `id` is a typed reference: `page:<slug>` for checkpointed pages, `shallow:<url>` for non-checkpointed pages.
 
 ### Recycle bin (in lists/system/recycle-bin.json)
 ```json
@@ -337,14 +339,14 @@ Visit entries contain url/title/slug/referrer. Attention data (scrollDepth, time
 
 ### Page (in pages/{slug}.json — selective checkpoint)
 ```json
-{ "slug": "...", "timestamp": 1234, "url": "...", "title": "...", "parents": ["page:parent-slug", ...], "children": ["note:child-slug", "page:child-slug", ...], "visitDates": [20240115, 20240116], "scrollDepth": 0.75, "timeOnPage": 45000, "mdPath": "...", "htmlPath": "..." }
+{ "slug": "...", "timestamp": 1234, "url": "...", "title": "...", "parentIds": ["page:parent-slug", ...], "childIds": ["note:child-slug", "page:child-slug", "shallow:https://...", ...], "visitDates": [20240115, 20240116], "scrollDepth": 0.75, "timeOnPage": 45000, "mdPath": "...", "htmlPath": "..." }
 ```
-Only checkpointed for pages with: rich data (notes/snapshots/reports), multi-day visits (2+), or explicit `page_checkpoint`. `parents` and `children` are `page:{slug}` or `note:{slug}` key arrays (cap 50 each); URLs resolved to slugs at checkpoint flush if the referenced page has a checkpoint.
+Only checkpointed for pages with: rich data (notes/snapshots/reports), multi-day visits (2+), or explicit `page_checkpoint`. `parentIds` and `childIds` are typed ref arrays (cap 50 each): `page:<slug>` for checkpointed pages, `note:<slug>` for notes, `shallow:<url>` for non-checkpointed pages. `shallow:<url>` refs are resolved to `page:<slug>` by replay.js when the referenced page becomes checkpointed.
 
 ### Log buffer entries (chrome.storage.local['logBuffer'])
 ```jsonl
-// Page visit
-{"timestamp":1234,"action":"page","url":"...","title":"...","referrer":"..."}
+// Page visit (referrerId is typed ref, always page:<slug>)
+{"timestamp":1234,"action":"page","url":"...","title":"...","referrerId":"page:parent-slug"}
 // Page attention report (on page close / 1h timer)
 {"timestamp":1234,"action":"page","url":"...","scrollDepth":0.75,"timeOnPage":45000}
 // Page capture (files written first, then logged)
@@ -353,16 +355,16 @@ Only checkpointed for pages with: rich data (notes/snapshots/reports), multi-day
 {"timestamp":1234,"action":"page_checkpoint","url":"...","title":"..."}
 // Settings mutation
 {"timestamp":1234,"action":"set","key":"workspace","value":{...}}
-// Note ops (first-class entities)
-{"timestamp":1234,"action":"note","slug":"note-slug","excerpt":"selected text","note":"annotation","cssPath":"body > ...","parents":["page:parent-slug"],"children":[]}
-// List pins (granular operations)
-{"timestamp":1234,"action":"list","id":"user/uuid","op":"add","urls":["..."]}
-{"timestamp":1234,"action":"list","id":"user/uuid","op":"del","urls":["..."]}
-{"timestamp":1234,"action":"list","id":"user/uuid","op":"clear","urls":[]}
+// Note ops (first-class entities, typed refs)
+{"timestamp":1234,"action":"note","slug":"note-slug","excerpt":"selected text","note":"annotation","cssPath":"body > ...","parentIds":["page:parent-slug"],"childIds":[]}
+// List pins (granular operations, ids are typed refs)
+{"timestamp":1234,"action":"list","id":"uuid","op":"add","ids":["page:slug","shallow:https://..."]}
+{"timestamp":1234,"action":"list","id":"uuid","op":"del","ids":["page:slug"]}
+{"timestamp":1234,"action":"list","id":"uuid","op":"clear","ids":[]}
 // List metadata
-{"timestamp":1234,"action":"list_meta","id":"user/uuid","name":"...","qbTrees":[]}
+{"timestamp":1234,"action":"list_meta","id":"uuid","name":"...","qbTrees":[]}
 // List delete
-{"timestamp":1234,"action":"del_list","id":"user/uuid"}
+{"timestamp":1234,"action":"del_list","id":"uuid"}
 // Recycle bin (same list ops with id="system/recycle-bin")
 {"timestamp":1234,"action":"list","id":"system/recycle-bin","op":"add","keys":["page:slug"]}
 // Permanent deletes (same list ops with id="system/permanent-deletes")

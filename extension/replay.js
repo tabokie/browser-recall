@@ -7,11 +7,12 @@ const REFERRER_CAP = 50;
 
 const PAGE_PREFIX = 'page:';
 const NOTE_PREFIX = 'note:';
+const SHALLOW_PREFIX = 'shallow:';
 
 /**
  * Return the set of page keys that an entry affects.
- * A visit entry with a referrer affects both its own key (child-side: parents, visitDates)
- * and the referrer's key (parent-side: children accumulation).
+ * A visit entry with a referrerId affects both its own key (child-side: parentIds, visitDates)
+ * and the referrer's key (parent-side: childIds accumulation).
  * All other entry types affect only the entry's own key.
  */
 export function getAffectedKeys(entry) {
@@ -19,10 +20,9 @@ export function getAffectedKeys(entry) {
   const entrySlug = entry.slug || (entry.url ? generateSlugFromUrl(entry.url) : null);
   if (entrySlug) keys.add(PAGE_PREFIX + entrySlug);
 
-  // Page entries with referrers also affect the parent page
-  if (entry.action === 'page' && entry.referrer) {
-    const parentSlug = generateSlugFromUrl(entry.referrer);
-    const parentKey = PAGE_PREFIX + parentSlug;
+  // Page entries with referrerId also affect the parent page
+  if (entry.action === 'page' && entry.referrerId) {
+    const parentKey = entry.referrerId; // already page:slug format
     if (parentKey !== PAGE_PREFIX + entrySlug) keys.add(parentKey);
   }
 
@@ -51,7 +51,7 @@ export function getAffectedSlugs(entry) {
  *   list:{listId}              — user list entity
  *   list:system/recycle-bin    — recycle bin
  *   list:system/permanent-deletes — permanent deletes
- *   list:index/parent          — parent-index for non-checkpointed pages
+ *   list:system/shallow-page    — shallow page index for non-checkpointed pages
  */
 export function scopeOf(entry) {
   const scope = {};
@@ -63,14 +63,18 @@ export function scopeOf(entry) {
 
   if (entry.action === 'list' || entry.action === 'list_meta' || entry.action === 'del_list') {
     if (entry.id) scope[`list:${entry.id}`] = null;
+    // List entries with shallow: ids also affect shallow_page index
+    if (entry.action === 'list' && entry.ids && entry.ids.some(id => id.startsWith(SHALLOW_PREFIX))) {
+      scope['list:system/shallow-page'] = null;
+    }
     return scope;
   }
 
   // Note action: affects the note entity + parent page entities
   if (entry.action === 'note') {
     scope[`${NOTE_PREFIX}${entry.slug}`] = null;
-    if (entry.parents) {
-      for (const parentKey of entry.parents) {
+    if (entry.parentIds) {
+      for (const parentKey of entry.parentIds) {
         scope[parentKey] = null;
       }
     }
@@ -82,14 +86,14 @@ export function scopeOf(entry) {
     scope[key] = null;
   }
 
-  // Page entries with referrer also affect parent-index
-  if (entry.action === 'page' && entry.referrer) {
-    scope['list:index/parent'] = null;
+  // Page entries with referrer/title also affect shallow_page index
+  if (entry.action === 'page' && (entry.referrerId || entry.title || entry.user_title)) {
+    scope['list:system/shallow-page'] = null;
   }
 
-  // page_checkpoint may need to absorb parent-index entries into new page
+  // page_checkpoint may need to absorb shallow_page index entries into new page
   if (entry.action === 'page_checkpoint') {
-    scope['list:index/parent'] = null;
+    scope['list:system/shallow-page'] = null;
   }
 
   return scope;
@@ -101,16 +105,16 @@ export function scopeOf(entry) {
 export function defaultEntity(key) {
   if (key.startsWith(PAGE_PREFIX)) {
     const slug = key.slice(PAGE_PREFIX.length);
-    return { slug, timestamp: 0, parents: [], children: [] };
+    return { slug, timestamp: 0, parentIds: [], childIds: [] };
   }
   if (key.startsWith(NOTE_PREFIX)) {
     const slug = key.slice(NOTE_PREFIX.length);
-    return { slug, timestamp: 0, excerpt: null, note: null, cssPath: null, parents: [], children: [] };
+    return { slug, timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
   }
   if (key === 'settings') return { timestamp: 0 };
   if (key === 'list:system/recycle-bin') return { timestamp: 0, items: [] };
   if (key === 'list:system/permanent-deletes') return { timestamp: 0, keys: [] };
-  if (key === 'list:index/parent') return { timestamp: 0, index: {} };
+  if (key === 'list:system/shallow-page') return { timestamp: 0, index: {} };
   if (key.startsWith('list:')) {
     const slug = key.slice('list:'.length);
     return { timestamp: 0, slug, name: '', qbTrees: [], pins: [] };
@@ -173,54 +177,54 @@ export function applyTo(entry, scope) {
     result[key] = applyEntry(key, entity, entry);
   }
 
-  // Cross-entity: when page_checkpoint creates page from null, absorb parent-index entries
+  // Cross-entity: when page_checkpoint creates page from null, absorb shallow_page index entries
   if (entry.action === 'page_checkpoint' && entry.url) {
     const slug = generateSlugFromUrl(entry.url);
     const pageKey = `${PAGE_PREFIX}${slug}`;
     const page = result[pageKey];
-    const pIdx = result['list:index/parent'];
-    if (page && pIdx && pIdx.index && pIdx.index[entry.url]) {
-      const parentSlugs = pIdx.index[entry.url];
-      if (parentSlugs.length > 0) {
-        // Absorb into page.parents (as page:slug keys)
+    const spIdx = result['list:system/shallow-page'];
+    if (page && spIdx && spIdx.index && spIdx.index[entry.url]) {
+      const shallowEntry = spIdx.index[entry.url];
+      const parentRefs = shallowEntry.parents || [];
+      if (parentRefs.length > 0) {
+        // Absorb into page.parentIds
         const updated = { ...page };
-        const parents = [...(updated.parents || [])];
-        for (const ps of parentSlugs) {
-          const parentKey = PAGE_PREFIX + ps;
-          if (!parents.includes(parentKey)) parents.push(parentKey);
+        const parentIds = [...(updated.parentIds || [])];
+        for (const parentRef of parentRefs) {
+          if (!parentIds.includes(parentRef)) parentIds.push(parentRef);
         }
-        updated.parents = parents;
+        updated.parentIds = parentIds;
         result[pageKey] = updated;
-        // Remove absorbed entry from parent-index
-        const updatedIdx = { ...pIdx, index: { ...pIdx.index } };
-        delete updatedIdx.index[entry.url];
-        result['list:index/parent'] = updatedIdx;
       }
+      // Remove absorbed entry from shallow_page index
+      const updatedIdx = { ...spIdx, index: { ...spIdx.index } };
+      delete updatedIdx.index[entry.url];
+      result['list:system/shallow-page'] = updatedIdx;
     }
   }
 
-  // Cross-entity: when note action creates/updates a note, add to parent page's children
+  // Cross-entity: when note action creates/updates a note, add to parent page's childIds
   if (entry.action === 'note' && entry.slug) {
     const noteKey = NOTE_PREFIX + entry.slug;
-    if (result[noteKey] && entry.parents) {
-      for (const parentKey of entry.parents) {
+    if (result[noteKey] && entry.parentIds) {
+      for (const parentKey of entry.parentIds) {
         if (parentKey.startsWith(PAGE_PREFIX) && result[parentKey]) {
           const parentPage = result[parentKey];
-          const children = [...(parentPage.children || [])];
-          if (!children.includes(noteKey)) {
-            children.push(noteKey);
-            result[parentKey] = { ...parentPage, children };
+          const childIds = [...(parentPage.childIds || [])];
+          if (!childIds.includes(noteKey)) {
+            childIds.push(noteKey);
+            result[parentKey] = { ...parentPage, childIds };
           }
         }
       }
     }
   }
 
-  // Post-loop: prune parent-index entries for URLs whose pages exist in scope
-  const pIdx = result['list:index/parent'];
-  if (pIdx && pIdx.index) {
+  // Post-loop: prune shallow_page index entries for URLs whose pages exist in scope
+  const spIdx = result['list:system/shallow-page'];
+  if (spIdx && spIdx.index) {
     let pruned = false;
-    const index = { ...pIdx.index };
+    const index = { ...spIdx.index };
     for (const url of Object.keys(index)) {
       const pageKey = PAGE_PREFIX + generateSlugFromUrl(url);
       if (result[pageKey] !== undefined && result[pageKey] !== null) {
@@ -228,19 +232,20 @@ export function applyTo(entry, scope) {
         pruned = true;
       }
     }
-    if (pruned) result['list:index/parent'] = { ...pIdx, index };
+    if (pruned) result['list:system/shallow-page'] = { ...spIdx, index };
   }
 
-  // Post-loop: resolve URL references in parents/children to page:slug keys when page exists in scope
+  // Post-loop: resolve shallow:<url> references in parentIds/childIds to page:<slug> keys when page exists in scope
   for (const [key, entity] of Object.entries(result)) {
     if (!key.startsWith(PAGE_PREFIX) || !entity) continue;
     let updated = entity;
-    for (const field of ['parents', 'children']) {
+    for (const field of ['parentIds', 'childIds']) {
       if (!updated[field] || updated[field].length === 0) continue;
       let changed = false;
       const resolved = updated[field].map(ref => {
-        if (typeof ref !== 'string' || !ref.startsWith('http')) return ref;
-        const refSlug = generateSlugFromUrl(ref);
+        if (typeof ref !== 'string' || !ref.startsWith(SHALLOW_PREFIX)) return ref;
+        const url = ref.slice(SHALLOW_PREFIX.length);
+        const refSlug = generateSlugFromUrl(url);
         const refKey = PAGE_PREFIX + refSlug;
         if (result[refKey] !== undefined && result[refKey] !== null) {
           changed = true;
@@ -262,7 +267,7 @@ function applyEntry(key, entity, entry) {
   if (key === 'settings') return applyLogToSettings(entity, entry);
   if (key === 'list:system/recycle-bin') return applyLogToRecycleBin(entity, entry);
   if (key === 'list:system/permanent-deletes') return applyLogToDeletes(entity, entry);
-  if (key === 'list:index/parent') return applyLogToParentIndex(entity, entry);
+  if (key === 'list:system/shallow-page') return applyLogToShallowPage(entity, entry);
   if (key.startsWith('list:')) return applyLogToPins(entity, entry);
   return entity;
 }
@@ -285,8 +290,8 @@ export function applyLogToSettings(settings, entry) {
  * Apply a log entry to a page entity.
  * Handles:
  *   - page_checkpoint: create/update page watermark
- *   - page: unified visit + attention + capture (url, title, referrer, scrollDepth, timeOnPage, mdPath, htmlPath)
- *     - On parent page (referrer slug match): accumulate child URL in children[]
+ *   - page: unified visit + attention + capture (url, title, referrerId, scrollDepth, timeOnPage, mdPath, htmlPath)
+ *     - On parent page (referrerId match): accumulate shallow child ref in childIds[]
  * Returns new page object (or original if entry is irrelevant).
  */
 export function applyLogToPage(page, entry) {
@@ -305,18 +310,20 @@ export function applyLogToPage(page, entry) {
 
   // Unified page entry: visit + attention + capture
   if (entry.action === 'page') {
-    // Parent-side: if this page's referrer matches this page, accumulate child URL
-    if (entry.referrer && page.slug !== undefined) {
-      const referrerSlug = generateSlugFromUrl(entry.referrer);
+    // Parent-side: if this page's referrerId matches this page, accumulate shallow child ref
+    if (entry.referrerId && page.slug !== undefined) {
+      const referrerSlug = entry.referrerId.startsWith(PAGE_PREFIX)
+        ? entry.referrerId.slice(PAGE_PREFIX.length) : entry.referrerId;
       if (referrerSlug === page.slug && entrySlug !== page.slug) {
         const updated = { ...page };
-        const children = [...(updated.children || [])];
-        const childRef = entry.url;
-        if (!children.some(c => typeof c === 'string' ? (c === entry.url || c === entrySlug || c === PAGE_PREFIX + entrySlug) : c.url === entry.url)) {
-          children.push(entry.url);
-          if (children.length > REFERRER_CAP) children.shift();
+        const childIds = [...(updated.childIds || [])];
+        const shallowRef = SHALLOW_PREFIX + entry.url;
+        const pageRef = PAGE_PREFIX + entrySlug;
+        if (!childIds.some(c => c === shallowRef || c === pageRef)) {
+          childIds.push(shallowRef);
+          if (childIds.length > REFERRER_CAP) childIds.shift();
         }
-        updated.children = children;
+        updated.childIds = childIds;
         updated.timestamp = Math.max(updated.timestamp || 0, entry.timestamp);
         return updated;
       }
@@ -344,19 +351,14 @@ export function applyLogToPage(page, entry) {
       if (!updated.visitDates.includes(yyyymmdd)) updated.visitDates.push(yyyymmdd);
     }
 
-    // Parents from referrer (store as page:slug keys)
-    if (entry.referrer) {
-      const parentSlug = generateSlugFromUrl(entry.referrer);
-      const parentKey = PAGE_PREFIX + parentSlug;
-      const parents = [...(updated.parents || [])];
-      const already = parents.some(p =>
-        typeof p === 'string' ? (p === entry.referrer || p === parentSlug || p === parentKey) : p.url === entry.referrer
-      );
-      if (!already) {
-        parents.push(entry.referrer);
-        if (parents.length > REFERRER_CAP) parents.shift();
+    // parentIds from referrerId (already in page:slug format)
+    if (entry.referrerId) {
+      const parentIds = [...(updated.parentIds || [])];
+      if (!parentIds.includes(entry.referrerId)) {
+        parentIds.push(entry.referrerId);
+        if (parentIds.length > REFERRER_CAP) parentIds.shift();
       }
-      updated.parents = parents;
+      updated.parentIds = parentIds;
     }
 
     // Attention (guard with prevTimestamp for idempotency)
@@ -391,7 +393,7 @@ export function applyLogToPage(page, entry) {
 /**
  * Apply a log entry to a note entity.
  * Handles:
- *   - note: create/update note (excerpt, note text, cssPath, parents, children)
+ *   - note: create/update note (excerpt, note text, cssPath, parentIds, childIds)
  * Returns new note object (or original if entry is irrelevant).
  */
 export function applyLogToNote(noteEntity, entry) {
@@ -402,8 +404,8 @@ export function applyLogToNote(noteEntity, entry) {
   if (entry.excerpt !== undefined) updated.excerpt = entry.excerpt;
   if (entry.note !== undefined) updated.note = entry.note;
   if (entry.cssPath !== undefined) updated.cssPath = entry.cssPath;
-  if (entry.parents !== undefined) updated.parents = entry.parents;
-  if (entry.children !== undefined) updated.children = entry.children;
+  if (entry.parentIds !== undefined) updated.parentIds = entry.parentIds;
+  if (entry.childIds !== undefined) updated.childIds = entry.childIds;
   updated.timestamp = entry.timestamp;
   return updated;
 }
@@ -412,7 +414,7 @@ export function applyLogToNote(noteEntity, entry) {
  * Apply a log entry to a list entity (self-describing file).
  * Entity: { timestamp, id, name, qbTrees, pins: [...] }
  * Handles:
- *   - list (id="{listId}", op=add/del/clear): granular pin operations (URLs only)
+ *   - list (id="{listId}", op=add/del/clear): granular pin operations (typed ids)
  *   - list_meta (id="{listId}"): list metadata (name, qbTrees)
  *   - del_list (id="{listId}"): mark entity as deleted
  * Returns new entity (or original if entry is irrelevant).
@@ -424,15 +426,15 @@ export function applyLogToPins(pinsEntity, entry) {
 
     if (entry.op === 'clear') {
       updated.pins = [];
-    } else if (entry.op === 'add' && entry.urls) {
-      for (const url of entry.urls) {
-        if (!pins.some(p => p.url === url)) {
-          pins.push({ url, title: 'Untitled', pinnedAt: entry.timestamp });
+    } else if (entry.op === 'add' && entry.ids) {
+      for (const id of entry.ids) {
+        if (!pins.some(p => p.id === id)) {
+          pins.push({ id, pinnedAt: entry.timestamp });
         }
       }
       updated.pins = pins;
-    } else if (entry.op === 'del' && entry.urls) {
-      pins = pins.filter(p => !entry.urls.includes(p.url));
+    } else if (entry.op === 'del' && entry.ids) {
+      pins = pins.filter(p => !entry.ids.includes(p.id));
       updated.pins = pins;
     }
 
@@ -482,22 +484,73 @@ export function applyLogToRecycleBin(recycleBinEntity, entry) {
 }
 
 /**
- * Apply a log entry to the parent-index (for non-checkpointed pages).
- * Index: { timestamp, index: { url: [parentSlug, ...] } }
- * Only processes page entries (action='page') that have a referrer.
+ * Apply a log entry to the shallow page index (for non-checkpointed pages).
+ * Index: { timestamp, index: { url: { parents: [...], lists: [...], title, user_title } } }
+ * Processes:
+ *   - page entries with referrerId: records parent in index[url].parents
+ *   - page entries with title/user_title: updates index[url].title/user_title
+ *   - list entries with shallow: ids: records list membership in index[url].lists
  * Returns new index (or original if entry is irrelevant).
  */
-export function applyLogToParentIndex(parentIndex, entry) {
-  if (entry.action !== 'page' || !entry.referrer || !entry.url) return parentIndex;
-  const parentSlug = generateSlugFromUrl(entry.referrer);
-  const updated = { ...parentIndex };
-  const index = { ...updated.index };
-  const parents = [...(index[entry.url] || [])];
-  if (!parents.includes(parentSlug)) parents.push(parentSlug);
-  index[entry.url] = parents;
-  updated.index = index;
-  updated.timestamp = entry.timestamp;
-  return updated;
+export function applyLogToShallowPage(shallowPageIndex, entry) {
+  // Page entry: record parents and title info
+  if (entry.action === 'page' && entry.url) {
+    const hasReferrer = !!entry.referrerId;
+    const hasTitle = !!entry.title;
+    const hasUserTitle = !!entry.user_title;
+    if (!hasReferrer && !hasTitle && !hasUserTitle) return shallowPageIndex;
+
+    const updated = { ...shallowPageIndex };
+    const index = { ...updated.index };
+    const existing = index[entry.url] || { parents: [], lists: [], title: null, user_title: null };
+    const rec = { ...existing };
+
+    if (hasReferrer) {
+      const parents = [...rec.parents];
+      if (!parents.includes(entry.referrerId)) parents.push(entry.referrerId);
+      rec.parents = parents;
+    }
+    if (hasTitle) rec.title = entry.title;
+    if (hasUserTitle) rec.user_title = entry.user_title;
+
+    index[entry.url] = rec;
+    updated.index = index;
+    updated.timestamp = entry.timestamp;
+    return updated;
+  }
+
+  // List entry with shallow: ids: record list membership
+  if (entry.action === 'list' && entry.ids && entry.id) {
+    const shallowUrls = entry.ids
+      .filter(id => id.startsWith(SHALLOW_PREFIX))
+      .map(id => id.slice(SHALLOW_PREFIX.length));
+    if (shallowUrls.length === 0) return shallowPageIndex;
+
+    const listKey = `list:${entry.id}`;
+    const updated = { ...shallowPageIndex };
+    const index = { ...updated.index };
+
+    for (const url of shallowUrls) {
+      const existing = index[url] || { parents: [], lists: [], title: null, user_title: null };
+      const rec = { ...existing };
+
+      if (entry.op === 'add') {
+        const lists = [...rec.lists];
+        if (!lists.includes(listKey)) lists.push(listKey);
+        rec.lists = lists;
+      } else if (entry.op === 'del') {
+        rec.lists = rec.lists.filter(l => l !== listKey);
+      }
+
+      index[url] = rec;
+    }
+
+    updated.index = index;
+    updated.timestamp = entry.timestamp;
+    return updated;
+  }
+
+  return shallowPageIndex;
 }
 
 /**

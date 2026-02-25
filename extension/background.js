@@ -1,7 +1,7 @@
 // Background service worker for Portal extension
 // Central authority for reads and mutations. Offscreen is a pure filesystem I/O worker.
 import { generateSlugFromUrl, generateNoteSlug } from './utils.js';
-import { effectOf } from './replay.js';
+import { effectOf, applyLogToPage } from './replay.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { getCachedEntity, setCachedEntity, setEntityCacheWatermark } from './entity-cache.js';
 
@@ -105,19 +105,16 @@ function withLock(key, fn) {
   return next;
 }
 
-// ─── Page Cache Helper ───────────────────────────────────────────────
-// Ensure a page is in session cache; loads from offscreen if missing.
-// Returns the page (or empty object if not found anywhere).
+// ─── Log Buffer Replay Helper ─────────────────────────────────────────
+// Replays pending logBuffer entries against a page entity to bring it up-to-date.
+// Pure function: non-matching entries are no-ops (applyLogToPage handles slug matching).
 
-async function ensurePageCached(slug) {
-  const key = 'page:' + slug;
-  let page = await getCachedEntity(key);
-  if (!page) {
-    const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
-    page = resp?.pages?.[slug] || {};
-    await setCachedEntity(key, page);
+function replayBufferOver(page) {
+  let current = page;
+  for (const entry of logBuffer) {
+    current = applyLogToPage(current, entry);
   }
-  return page;
+  return current;
 }
 
 // ─── Mutation Notifications ───────────────────────────────────────────
@@ -205,9 +202,9 @@ async function sessionLoad(key) {
     const { permanentDeletes } = await chrome.storage.session.get(['permanentDeletes']);
     return permanentDeletes ? { timestamp: 0, keys: permanentDeletes } : null;
   }
-  if (key === 'list:index/parent') {
-    const { parentIndex } = await chrome.storage.session.get(['parentIndex']);
-    return parentIndex || null;
+  if (key === 'list:system/shallow-page') {
+    const { shallowPageIndex } = await chrome.storage.session.get(['shallowPageIndex']);
+    return shallowPageIndex || null;
   }
   return null;
 }
@@ -242,8 +239,8 @@ async function sessionWrite(effects) {
       await chrome.storage.session.set({ recycleBin: entity.items });
     } else if (key === 'list:system/permanent-deletes') {
       await chrome.storage.session.set({ permanentDeletes: entity.keys });
-    } else if (key === 'list:index/parent') {
-      await chrome.storage.session.set({ parentIndex: entity });
+    } else if (key === 'list:system/shallow-page') {
+      await chrome.storage.session.set({ shallowPageIndex: entity });
     }
   }
 }
@@ -272,7 +269,7 @@ async function appendVisit(interaction) {
     url: interaction.url,
     title: interaction.title,
   };
-  if (interaction.referrer) entry.referrer = interaction.referrer;
+  if (interaction.referrerId) entry.referrerId = interaction.referrerId;
   await addLog(entry);
 }
 
@@ -330,8 +327,8 @@ async function readFs(key) {
       const r = await requestOffscreen({ action: 'loadPermanentDeletes' });
       value = r?.keys || []; break;
     }
-    case 'parentIndex': {
-      const r = await requestOffscreen({ action: 'loadParentIndex' });
+    case 'shallowPageIndex': {
+      const r = await requestOffscreen({ action: 'loadShallowPageIndex' });
       value = r?.success ? { timestamp: r.timestamp || 0, index: r.index || {} } : { timestamp: 0, index: {} }; break;
     }
     case 'gatewayDomains': {
@@ -379,15 +376,41 @@ async function hydrateCache() {
   } catch (e) { console.warn('Permanent deletes load failed:', e.message); }
 
   try {
-    const piResp = await requestOffscreen({ action: 'loadParentIndex' });
-    const parentIndex = piResp?.success
-      ? { timestamp: piResp.timestamp || 0, index: piResp.index || {} }
+    const spResp = await requestOffscreen({ action: 'loadShallowPageIndex' });
+    const shallowPageIndex = spResp?.success
+      ? { timestamp: spResp.timestamp || 0, index: spResp.index || {} }
       : { timestamp: 0, index: {} };
-    await chrome.storage.session.set({ parentIndex });
-  } catch (e) { console.warn('Parent-index load failed:', e.message); }
+    await chrome.storage.session.set({ shallowPageIndex });
+  } catch (e) { console.warn('Shallow page index load failed:', e.message); }
+
+  // Phase 1.5: Pre-load page entities referenced by logBuffer from filesystem
+  await ensureLogBuffer();
+  const bufferPageSlugs = new Set();
+  for (const entry of logBuffer) {
+    if (entry.url) bufferPageSlugs.add(generateSlugFromUrl(entry.url));
+    if (entry.referrerId) {
+      const refSlug = entry.referrerId.startsWith('page:') ? entry.referrerId.slice(5) : entry.referrerId;
+      bufferPageSlugs.add(refSlug);
+    }
+  }
+  if (bufferPageSlugs.size > 0) {
+    const slugsToLoad = [];
+    for (const slug of bufferPageSlugs) {
+      if (!(await getCachedEntity('page:' + slug))) slugsToLoad.push(slug);
+    }
+    if (slugsToLoad.length > 0) {
+      try {
+        const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: slugsToLoad });
+        if (resp?.success && resp.pages) {
+          for (const [slug, page] of Object.entries(resp.pages)) {
+            await setCachedEntity('page:' + slug, page);
+          }
+        }
+      } catch (e) { console.warn('Page pre-load failed:', e.message); }
+    }
+  }
 
   // Phase 2: Replay pending logBuffer entries via effectOf
-  await ensureLogBuffer();
   for (const entry of logBuffer) {
     try {
       const effects = await effectOf(entry, sessionLoad);
@@ -499,11 +522,15 @@ async function processPageReport(delta) {
     }
   }
 
-  // Referrer: include if absent or changed
+  // Referrer: convert to referrerId (page:<slug> format), skip self-referential
   if (delta.referrer != null) {
-    if (!cached || cached.referrer !== delta.referrer) {
-      entry.referrer = delta.referrer;
-      hasChange = true;
+    const refSlug = generateSlugFromUrl(delta.referrer);
+    if (refSlug !== slug) {
+      const referrerId = 'page:' + refSlug;
+      if (!cached || cached.referrerId !== referrerId) {
+        entry.referrerId = referrerId;
+        hasChange = true;
+      }
     }
   }
 
@@ -782,19 +809,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'getPageInfo': {
           const slug = generateSlugFromUrl(request.url);
-          const [detailResp, snapshotsResp, notesResp] = await Promise.all([
-            requestOffscreen({ action: 'loadPageDetail', slug, url: request.url }),
+          const key = 'page:' + slug;
+
+          // Entity storage: session cache → filesystem fallback
+          let page = await getCachedEntity(key);
+          if (!page) {
+            const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
+            if (resp?.pages?.[slug]) {
+              await ensureLogBuffer();
+              page = replayBufferOver(resp.pages[slug]);
+              await setCachedEntity(key, page);
+            }
+          }
+
+          const [snapshotsResp, notesResp] = await Promise.all([
             requestOffscreen({ action: 'listSnapshots', slug }),
             requestOffscreen({ action: 'loadPageNotes', slug })
           ]);
-          // Cache the page if loadPageDetail returned one
-          if (detailResp?.page) {
-            await setCachedEntity('page:' + slug, detailResp.page);
-          }
+
+          // page is null for shallow pages (no checkpoint) — popup uses tab.title as fallback
           sendResponse({
-            success: true,
-            slug,
-            interaction: detailResp?.interaction || null,
+            success: true, slug,
+            interaction: page ? { url: page.url, title: page.title, user_title: page.user_title,
+              attention: page.attention || '', timestamp: page.timestamp, slug } : null,
             snapshots: snapshotsResp?.snapshots || [],
             notes: notesResp?.notes || []
           });
@@ -889,9 +926,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
 
                 // Parent checkpoint for referrer
-                if (entry.referrer) {
-                  const refSlug = generateSlugFromUrl(entry.referrer);
-                  await ensureCheckpointIfMissing(refSlug, entry.referrer, '');
+                if (entry.referrerId) {
+                  const refSlug = entry.referrerId.startsWith('page:') ? entry.referrerId.slice(5) : entry.referrerId;
+                  await ensureCheckpointIfMissing(refSlug, delta.referrer || '', '');
                 }
               }
 
@@ -914,16 +951,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                       const listSlug = listKey.startsWith('list:') ? listKey.slice(5) : listKey;
                       const listEntry = cachedLists.find(c => c.slug === listSlug);
                       const listPins = listEntry?.pins || [];
-                      const already = listPins.some(p => p.url === url);
+                      // Derive typed pin id: page:<slug> if checkpointed, shallow:<url> otherwise
+                      const pinSlug = delta.slug || generateSlugFromUrl(url);
+                      const cachedPage = await getCachedEntity('page:' + pinSlug);
+                      const pinId = cachedPage ? 'page:' + pinSlug : 'shallow:' + url;
+                      const already = listPins.some(p => p.id === pinId);
                       if (!already) {
                         await addLog({
                           timestamp: Date.now(),
                           action: 'list',
                           id: listSlug,
                           op: 'add',
-                          urls: [url]
+                          ids: [pinId]
                         });
-                        console.log(`Workspace: auto-pinned ${url} to list ${listSlug}`);
+                        console.log(`Workspace: auto-pinned ${pinId} to list ${listSlug}`);
                       }
                     }
 
@@ -1006,6 +1047,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
+        case 'getShallowPageIndex': {
+          const spi = await readCacheable('shallowPageIndex');
+          sendResponse(spi || { timestamp: 0, index: {} });
+          break;
+        }
+
         case 'loadPageBatch': {
           const t0 = performance.now();
           const result = {};
@@ -1022,30 +1069,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
           }
 
-          // Fetch uncached from offscreen
+          // Fetch uncached from offscreen, replay logBuffer to bring up-to-date
           if (uncachedSlugs.length > 0) {
+            await ensureLogBuffer();
             const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: uncachedSlugs });
             if (resp?.success && resp.pages) {
               for (const [slug, page] of Object.entries(resp.pages)) {
-                result[slug] = page;
-                await setCachedEntity('page:' + slug, page);
+                const upToDate = replayBufferOver(page);
+                result[slug] = upToDate;
+                await setCachedEntity('page:' + slug, upToDate);
               }
             }
           }
 
           console.debug(`[I/O] loadPageBatch: ${request.slugs.length} slugs (${request.slugs.length - uncachedSlugs.length} cached) in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, pages: result });
-          break;
-        }
-
-        case 'loadPageDetail': {
-          const t0 = performance.now();
-          const resp = await requestOffscreen({ action: 'loadPageDetail', slug: request.slug, url: request.url });
-          if (resp?.page) {
-            await setCachedEntity('page:' + request.slug, resp.page);
-          }
-          console.debug(`[I/O] loadPageDetail(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
-          sendResponse(resp);
           break;
         }
 
@@ -1144,15 +1182,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               page = resp?.pages?.[slug] || {};
             }
 
-            // Resolve mixed-format refs: page:slug / bare slug → URL via loadPageBatch, URL/{url,title} → use directly
+            // Resolve typed refs: page:<slug> → URL via loadPageBatch, shallow:<url> → extract URL
             async function resolveRefs(refs) {
               const urls = [];
               const slugsToLoad = [];
               for (const ref of refs) {
-                if (typeof ref === 'object') { urls.push(ref.url); continue; }
-                if (ref.startsWith('http')) { urls.push(ref); continue; }
+                if (ref.startsWith('shallow:')) { urls.push(ref.slice(8)); continue; }
                 if (ref.startsWith('page:')) { slugsToLoad.push(ref.slice(5)); continue; }
-                slugsToLoad.push(ref); // bare slug
+                if (ref.startsWith('http')) { urls.push(ref); continue; }
+                slugsToLoad.push(ref); // bare slug (legacy)
               }
               if (slugsToLoad.length > 0) {
                 const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: slugsToLoad });
@@ -1164,11 +1202,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               return urls;
             }
 
-            // Parents: from page.parents, fallback to parentIndex for non-checkpointed pages
-            let parentRefs = page.parents || [];
+            // Parents: from page.parentIds, fallback to shallowPageIndex for non-checkpointed pages
+            let parentRefs = page.parentIds || [];
             if (parentRefs.length === 0) {
-              const parentIndex = (await readCacheable('parentIndex')) || { timestamp: 0, index: {} };
-              parentRefs = (parentIndex.index[url] || []).map(ps => 'page:' + ps); // convert bare slugs to page: keys
+              const spIndex = (await readCacheable('shallowPageIndex')) || { timestamp: 0, index: {} };
+              const shallowEntry = spIndex.index[url];
+              if (shallowEntry) parentRefs = shallowEntry.parents || [];
             }
             const parentReferrers = await resolveRefs(parentRefs);
 
@@ -1179,20 +1218,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               const listCacheKey = 'listCache:' + list.slug;
               const cached = (await chrome.storage.session.get(listCacheKey))[listCacheKey];
               if (cached) {
-                const inPinned = cached.fullPinned?.some(p => p.url === url);
+                const pageId = 'page:' + slug;
+                const shallowId = 'shallow:' + url;
+                const inPinned = cached.fullPinned?.some(p => p.url === url || p.id === pageId || p.id === shallowId);
                 const inRelated = cached.related?.some(r => r.url === url);
                 if (inPinned) parentLists.push({ slug: list.slug, name: list.name, type: 'pin' });
                 else if (inRelated) parentLists.push({ slug: list.slug, name: list.name, type: 'appear' });
               }
             }
 
-            // Children: from page.children (filter out notes, keep only pages) + parentIndex inverse lookup
-            const childRefs = (page.children || []).filter(c => !c.startsWith('note:'));
+            // Children: from page.childIds (filter out notes, keep only pages/shallow) + shallowPageIndex inverse lookup
+            const childRefs = (page.childIds || []).filter(c => !c.startsWith('note:'));
             let children = await resolveRefs(childRefs);
-            // Also check parentIndex for non-checkpointed children
-            const piForChildren = (await readCacheable('parentIndex')) || { timestamp: 0, index: {} };
-            for (const [childUrl, pSlugs] of Object.entries(piForChildren.index)) {
-              if (pSlugs.includes(slug) && !children.includes(childUrl)) {
+            // Also check shallowPageIndex for non-checkpointed children
+            const spForChildren = (await readCacheable('shallowPageIndex')) || { timestamp: 0, index: {} };
+            for (const [childUrl, shallowEntry] of Object.entries(spForChildren.index)) {
+              const parentKey = 'page:' + slug;
+              if ((shallowEntry.parents || []).includes(parentKey) && !children.includes(childUrl)) {
                 children.push(childUrl);
               }
             }
@@ -1245,8 +1287,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             excerpt: request.excerpt,
             note: request.note || '',
             cssPath: request.cssPath || null,
-            parents: [`page:${pageSlug}`],
-            children: []
+            parentIds: [`page:${pageSlug}`],
+            childIds: []
           });
           const notes = await requestOffscreen({ action: 'loadPageNotes', slug: pageSlug });
           sendResponse({ success: true, notes: notes.notes || [], noteSlug });
@@ -1284,13 +1326,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'toggleListPin': {
-          const { listId, url } = request;
+          const { listId, url, id: requestId } = request;
+          // Derive typed pin id: use provided id, or compute from url
+          let pinId = requestId;
+          if (!pinId && url) {
+            const pinSlug = generateSlugFromUrl(url);
+            const cachedPage = await getCachedEntity('page:' + pinSlug);
+            pinId = cachedPage ? 'page:' + pinSlug : 'shallow:' + url;
+          }
           const { lists = [] } = await chrome.storage.session.get(['lists']);
           const list = lists.find(c => c.slug === listId);
-          const isPinned = (list?.pins || []).some(p => p.url === url);
+          const isPinned = (list?.pins || []).some(p => p.id === pinId);
           await addLog({
             timestamp: Date.now(), action: 'list', id: listId,
-            op: isPinned ? 'del' : 'add', urls: [url]
+            op: isPinned ? 'del' : 'add', ids: [pinId]
           });
           sendResponse({ success: true, pinned: !isPinned });
           notifyMutation('pins', { listId });
@@ -1301,13 +1350,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const ts = Date.now();
           await addLog({
             timestamp: ts, action: 'list',
-            id: request.listId, op: 'clear', urls: []
+            id: request.listId, op: 'clear', ids: []
           });
           if (request.pins && request.pins.length > 0) {
             await addLog({
               timestamp: ts + 1, action: 'list',
               id: request.listId, op: 'add',
-              urls: request.pins.map(p => p.url)
+              ids: request.pins.map(p => p.id)
             });
           }
           sendResponse({ success: true });

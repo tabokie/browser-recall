@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { generateSlugFromUrl } from '../extension/utils.js';
 
 // ---------------------------------------------------------------------------
 // Deferred promise helper
@@ -26,6 +27,10 @@ function createDeferred() {
 // Flush microtasks + one macrotask (for setTimeout(0) yields)
 function tick(ms = 0) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function pinFromUrl(url, pinnedAt) {
+  return { id: 'page:' + generateSlugFromUrl(url), pinnedAt };
 }
 
 // ---------------------------------------------------------------------------
@@ -99,17 +104,24 @@ const TEST_LIST_NOHIT = {
 
 const TEST_LIST_PINS = {
   'col-rust': [
-    { url: 'https://rust-lang.org/doc0', title: 'Rust Documentation 0', pinnedAt: NOW - DAY },
-    { url: 'https://rust-lang.org/doc1', title: 'Rust Documentation 1', pinnedAt: NOW - DAY },
-    { url: 'https://rust-lang.org/doc2', title: 'Rust Documentation 2', pinnedAt: NOW - DAY },
+    pinFromUrl('https://rust-lang.org/doc0', NOW - DAY),
+    pinFromUrl('https://rust-lang.org/doc1', NOW - DAY),
+    pinFromUrl('https://rust-lang.org/doc2', NOW - DAY),
   ],
   'col-nohit': [
     // Pin from example.com — shares hostname with FILE1_INTERACTIONS (Today Page 0..19)
-    { url: 'https://example.com/today0', title: 'Today Page 0', pinnedAt: NOW - DAY },
+    pinFromUrl('https://example.com/today0', NOW - DAY),
   ],
 };
 
 const TEST_LISTS = [TEST_LIST, TEST_LIST_NOHIT];
+
+// Build slug→URL mapping for all pinned URLs (needed to populate page entities in session cache)
+const KNOWN_PIN_URLS = [
+  'https://rust-lang.org/doc0', 'https://rust-lang.org/doc1', 'https://rust-lang.org/doc2',
+  'https://example.com/today0',
+];
+const SLUG_TO_URL = new Map(KNOWN_PIN_URLS.map(url => [generateSlugFromUrl(url), url]));
 
 const TEST_SETTINGS = {
   listOrder: ['list:col-rust', 'list:col-nohit'],
@@ -336,6 +348,10 @@ describe('Progressive loading', () => {
       permanentDeletes: TEST_SETTINGS.permanentDeletes,
       gatewayDomains: {},
     };
+    // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
+    for (const [slug, url] of SLUG_TO_URL) {
+      sessionData['page:' + slug] = { slug, url, watermark: 0 };
+    }
     localData = {
       logBuffer: [],
     };

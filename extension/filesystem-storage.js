@@ -323,7 +323,7 @@ class FileSystemStorage {
     content += '- `lists/{id}.json` - User list entity (pins, metadata)\n';
     content += '- `lists/system/recycle-bin.json` - Deleted items\n';
     content += '- `lists/system/permanent-deletes.json` - Permanently deleted items\n';
-    content += '- `lists/index/parent.json` - Parent-child relationships for non-checkpointed pages\n\n';
+    content += '- `lists/system/shallow-page.json` - Shallow page index for non-checkpointed pages\n\n';
     content += '## Metadata Format\n\n';
     content += '```json\n';
     content += JSON.stringify({
@@ -551,13 +551,13 @@ class FileSystemStorage {
     return { domains, newWatermark };
   }
 
-  // Load parent-index from lists/index/parent.json
-  async loadParentIndex() {
+  // Load shallow page index from lists/system/shallow-page.json
+  async loadShallowPageIndex() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
     try {
-      const fileHandle = await this.resolveFile('lists/index/parent.json');
+      const fileHandle = await this.resolveFile('lists/system/shallow-page.json');
       return this.readJson(fileHandle);
     } catch {
       return { timestamp: 0, index: {} };
@@ -580,7 +580,7 @@ class FileSystemStorage {
             const file = await entry.getFile();
             const note = JSON.parse(await file.text());
             // Group by parent page slug
-            for (const parentKey of (note.parents || [])) {
+            for (const parentKey of (note.parentIds || [])) {
               if (parentKey.startsWith('page:')) {
                 const pageSlug = parentKey.slice(5);
                 if (!notesMap[pageSlug]) notesMap[pageSlug] = [];
@@ -687,10 +687,10 @@ class FileSystemStorage {
 
     try {
       const page = await this.loadPage(slug);
-      if (!page || !page.children) return [];
+      if (!page || !page.childIds) return [];
 
       const notes = [];
-      for (const childKey of page.children) {
+      for (const childKey of page.childIds) {
         if (childKey.startsWith('note:')) {
           const noteSlug = childKey.slice(5);
           try {
@@ -794,62 +794,6 @@ class FileSystemStorage {
   async saveNote(slug, data) {
     const fileHandle = await this.resolveFile(`notes/${slug}.json`, { create: true });
     await this.writeJson(fileHandle, data);
-  }
-
-  // Load page detail: merge page with history entries after watermark
-  // Returns { page, interaction } where interaction has the freshest metadata
-  async loadPageDetail(slug, url) {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to read directory');
-    }
-
-    const page = (await this.loadPage(slug)) || { timestamp: 0, children: [], parents: [] };
-    const watermark = page.timestamp || 0;
-
-    // Scan JSONL files after watermark for this URL
-    let freshInteraction = null;
-    const historyDir = await this.resolveDir('history');
-    for await (const entry of historyDir.values()) {
-      if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
-        if (watermark > 0) {
-          const dateMatch = entry.name.match(/^(\d{4}-\d{2}-\d{2})\.jsonl$/);
-          if (dateMatch) {
-            const fileEndOfDay = new Date(dateMatch[1] + 'T23:59:59.999Z').getTime();
-            if (fileEndOfDay < watermark) continue;
-          }
-        }
-
-        const file = await entry.getFile();
-        const text = await file.text();
-        for (const line of text.split('\n')) {
-          if (!line.trim()) continue;
-          try {
-            const interaction = JSON.parse(line);
-            if (interaction.url === url && interaction.timestamp > watermark) {
-              freshInteraction = interaction;
-            }
-          } catch {}
-        }
-      }
-    }
-
-    // Merge: use page's cached metadata, overlay with fresher JSONL if available
-    let interaction;
-    if (freshInteraction) {
-      interaction = freshInteraction;
-      // Update page with fresh metadata and advance timestamp
-      page.url = interaction.url;
-      page.title = interaction.title;
-      page.attention = interaction.attention || '';
-      page.timestamp = interaction.timestamp;
-      await this.savePage(slug, page);
-    } else if (page.url) {
-      interaction = { url: page.url, title: page.title, attention: page.attention || '', timestamp: page.timestamp, slug };
-    } else {
-      interaction = null;
-    }
-
-    return { page, interaction };
   }
 
   // Load a single interaction metadata by URL from JSONL files

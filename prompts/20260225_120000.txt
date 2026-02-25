@@ -1,0 +1,48 @@
+- Tell me more about ensureCheckpointIfMissing
+- There is a page has title updated after loading, and the history logs is correct, but on the portal UI, the title is still the outdated one from the first load:
+- But why? They are both replaying and should share the same code.
+- Access to checkpoints of non-history data should be one unified layer. This is a recurring issue that has caused many bugs, I want to fix it thoroughly. Let me explain:
+
+storage.session is a cache of *volatile checkpoint*, the volatile checkpoint always reflects the latest state. File system stores the *persistent checkpoint*, may lag behind the volatile checkpoint. During log append or extension startup, we are responsible to keep storage.session up-to-date, that means applying logs to a lagging persistent checkpoint. This is the unified layer of entity storage.
+
+In other parts of the code, including history explore UI, we first check if the entity exists (asking entity storage to fetch from cache or file), this fetch is guaranteed to represent the true state of the entity, we don't need to replay logs over it. If it doesn't, then it is a shallow page -- page without checkpoints. We will reconstruct it to appear like a page entity using the limited information available in the context. But we will not save that reconstructed entity back to entity storage. In fact, we should make enough of an distinction in the code so that there's no misunderstanding in the future.
+- Good. Now let's work on shallow page. Let's go over the code and enumerate exhaustively the locations that a shallow page is instantiated
+- Summarize what you learned in this session about entity storage and shallow page. What do you think is the right filename to document them?
+- Let's write to ARCHITECTURE.md, and memorize to keep it up-to-date after changes, like CODEBASE_MAP.md. And while we are at this, have you updated CODEBASE_MAP.md in your earlier changes.
+- How do we reference page in the codebase or in the persistent files? E.g. url, id, slug, etc
+- Let's unify references. page.parents, page.children, pins.url, they can reference both shallow entity and materialized entity. We want to make sure (a) some information is stored even for shallow entity, (b) we can tell if an entity is shallow from its reference key. We accomplish this by:
+1. a new key format "shallow:<url>", all references to shallow page must use this format, and the field name of a reference is "id" or "ids", never use url or slug to reference.
+2. extend the function of "index/parent.json". Rename it to "index/shallow_page.json", in it, we store all referenced shallow pages and their information. The schema is url -> { parents: ["page:<slug>", ..], lists: ["list:<slug>"], title: string, user_title: string }. When a page becomes checkpointed, we remove it from "shallow_page.json".
+3. whenever we tries to display a page, we first check if its materialized (using the entity storage), if not, we will use the information stored in "shallow_page.json" to recover it.
+- I see in portal-data/lists/index it is still "parent.json"?
+- Actually, let's move it to "lists/system/shallow-page.json"
+- I can still see some of the page checkpoints uses raw url in its "childIds" field. Let's run a complete scan of all files under "pages/", "notes/", "lists/". Make sure they are using the correct references. And after we gathered all references to shallow pages, make sure they have entries in "shallow-page.json".
+- Update CODEBASE_MAP.md and ARCHITECTURE.md
+- I ran `grep -a -v "action" history/*`, there are some legacy log entries that have no action and are not properly migrated. Let's check them
+- Use `grep -a ..` for history log file
+- One more thing. Right now the list UI display pinned shallow pages as "Untitled", there is something wrong either with (a) shallow-page.json lacks the title information, or (b) list UI doesn't use the shallow-page.json to render
+- Let me double check. There are three types of pages: materialized/checkpointed pages (page:<slug>), referenced shallow pages, and unreferenced shallow pages. The read of a reference should share one single implementation:
+
+if (page_id == shallow) {
+  if (entity_storage.get(shallow-page).contains(page_url)) {
+    return { title: .., parents: .. };
+  }
+  return null
+} {
+  return entity_storage.get(page_id)
+}
+- Yes
+- The lists in ~/portal-data whose name is Live, Health, Procuct, Cognition still shows pins with no title and URL
+- Let's fix the data issues proper. Scan all page checkpoints and shallow-page entries under ~/portal-data, find out those without valid title. For each of them, check if its related history logs has issues, if the history logs are valid, reconstruct title
+- Fair. There is a capture directory "zhuanlan-zhihu-p-1991457265618-s5guyw", but there is no page checkpoint, why?
+- No need, just check the data and try to fix it. The status quo might have been caused by earilier version of implementation
+- For the "unfixable entries" you mentioned earlier, let's purge them from the data, that includes deleting logs and deleting any records that references them. For example, If a page visit use them as referrer, let's remove them from the referrer list.
+- For the "unfixable entries" you mentioned earlier, let's purge them from the data, that includes deleting logs and deleting any records that references them. For example, If a page visit use them as referrer, let's remove them from the referrer list.
+- health-ie863v.json still shows up pin with no title and url, the file shallow-page.json is correct (has entry for https://jandan.net/p/122112
+- After reload it works. But then I added a new page to 'Product' list. A few issues occured: (a) youtube-watch-ttyedk.json has itself as the parentIds (b) a mysterious page "page:youtube-watch-gcibx0" is added to the list but no checkpoint or log exists for it
+- Tell me more about the latent issue
+- Leave a TODO in popup.js
+- After I disable and re-enable the extension, the list still shows some empty pin (Health list), then after I reload the extension, the list becomes okay
+- I added another pin to list 'Product', now the shallow-page.json is wrong, entry for "liquidskateboard.com" has no title
+- For the recent fixes, do you added tests?
+- /finish 
