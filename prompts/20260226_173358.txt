@@ -1,0 +1,4 @@
+- I added a few pins to a list, the logs and list checkpoints all seem correct, but the list UI only shows the first of these additions. The list is located in "ai-core-ffnyqr.json"
+- We should always fetch from entity storage when rendering a list
+- /finish 
+- y

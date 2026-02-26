@@ -1914,12 +1914,10 @@ async function showList(list) {
   try {
     const listId = list.slug;
 
-    // Lazy-load pins for this list
-    if (!allListPins[listId]) {
-      const pinsResp = await chrome.runtime.sendMessage({ action: 'loadListPinsById', listId });
-      allListPins[listId] = pinsResp?.pins || [];
-    }
-    const pins = allListPins[listId] || [];
+    // Always fetch pins from entity storage
+    const pinsResp = await chrome.runtime.sendMessage({ action: 'loadListPinsById', listId });
+    allListPins[listId] = pinsResp?.pins || [];
+    const pins = allListPins[listId];
 
     const { pageSnap, spi } = await loadPinContext(pins);
     const pinsResolved = pins.map(p => {
@@ -3595,26 +3593,21 @@ chrome.runtime.onMessage.addListener((request) => {
       }
     }, 500);
   } else if (type === 'pins') {
-    // List pins changed — invalidate caches for other lists only.
-    // The active list/explore view already has up-to-date in-memory pins
-    // from toggleResultPin; reloading from disk would revert to stale data.
+    // List pins changed — invalidate caches and re-render active list.
     const activeListId = activeView.type === 'explore' ? EXPLORE_LIST_ID
       : (activeView.type === 'list' ? activeView.id : null);
     if (request.listId) {
-      if (request.listId !== activeListId) {
-        delete allListPins[request.listId];
-      }
+      delete allListPins[request.listId];
       chrome.storage.session.remove('listCache:' + request.listId);
       listCacheKeys = listCacheKeys.filter(id => id !== request.listId);
+      if (request.listId === activeListId) refreshCurrentView();
     } else {
-      // Invalidate all except the active list
-      for (const id of Object.keys(allListPins)) {
-        if (id !== activeListId) delete allListPins[id];
-      }
+      allListPins = {};
       if (listCacheKeys.length > 0) {
         chrome.storage.session.remove(listCacheKeys.map(id => 'listCache:' + id));
         listCacheKeys = [];
       }
+      if (activeListId) refreshCurrentView();
     }
   } else if (type === 'lists') {
     renderLists();
