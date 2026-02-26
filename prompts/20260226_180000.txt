@@ -1,0 +1,60 @@
+- Does the channel between content.js and background.js automatically recover itself when, background.js is shutdown due to inactivity, or extension is reloaded, or extension is disabled and re-enabled?
+- Is it easy to recover the latter two cases?
+- Let's make this a todo item in TODO.md
+- Could you draw a graph of all functions in the extension javascript codebase? Make it interactive if possible
+- The graph is empty
+- Errors:
+
+Unchecked runtime.lastError: Access to storage is not allowed from this context.
+function_graph.html:435  Uncaught TypeError: nameToNodes[fn.name].push is not a function
+    at function_graph.html:435:26
+    at Array.forEach (<anonymous>)
+    at function_graph.html:429:9
+    at Array.forEach (<anonymous>)
+    at function_graph.html:427:11
+- There is a bug, I created a list in popup UI and pins a page. But, (a) the pin event first appends a "clear" log, then appends a "add" log. The clear log seems redundant. (b) The "add" log is correctly written to history files, but no list checkpoint is created, and the portal UI shows a list without any pins.
+- For (a): We don't need atomic replacement. Each "add" log is responsible for the changes only, not the full list. Logs are the source of truth, and we can always recover the truth by accumulating all incremental "add" logs.
+For (b): background.js and filesystem-storage.js should be consistent in behavior. They share the same replay (applyLogs) code, and they should provide a entity getter that behaves the same. In our case, both of them should return "null" for non-existent list, and both of them use the same "defaultEntity()" to initialize entity for the first time.
+- Let's create the correct list checkpoint manually. Because the extension won't replay the logs after reload.
+- When I unpin a page from list, there are issues (a) two logs are generated: clear and add, (b) the UI flickers and shows empty pins, then I refresh the page, the UI shows pins including the one I just unpined.
+
+For (a), make sure all list operations are using the simple approach: no more clear log and atomic update
+- The list UI is pretty flaky. I constantly see shallow page in the pins appears as Untitled with no URL (shallow:https://liquidskateboard.com/ in product-30lw2q.json). I also see shallow page that is mistakenly written to checkpoint file as "page:<slug>" (this is written by you during the manual fix, fashion-7azmls.json).
+- Did you know why the logs use "page:news-ycombinator-item-h98xfy"?
+- For "Health" and "Daily Bread", I can still see Untitled pin with no URL.
+- For the fix, let's just inline all of scopeOf and applyTo inside effectOf. No need to export the sub-functions and force a two passes code flow. This makes it easier for them to share information.
+- No, make tests call effectOf. Don't keep the old functions just for testing's sake.
+- Update CODEBASE_MAP.md and ARCHITECTURE.md
+- Why did you still keep the "scopeOf" function? Isn't cleaner to immediately apply the effect instead of setting a key to null and then modify it?
+- Yes
+- The replay logic is vital to the data consistency. We need to guarantee these two states are byte-wise equal:
+1. Replay full history and fully persist to file storage, then load memory states solely from fs
+2. Start from a version of file storage at any point in time, replay the rest of history onto memory states
+
+Are there any existing tests to ensure this constraint?
+- yes
+- Do you think this is worth testing? Because theoretically, by sharing `effectOf` we already guarantees it, unless the getter is buggy
+- No need. Let's run the check on my real data at ~/portal-data. Let's store the persistent states after replay to a different location on fs, and compare this version with existing checkpoints in ~/portal-data. There could be many inconsistencies due to bugs from older implementations, let's discuss them together
+- 1: For these 88 pages, should they be checkpointed? For those that should, let's go back in time and create the missing page_checkpoint log. For those that shouldn't, let's make them shallow page and update references.
+2: This is runtime issue. The context for "page_checkpoint" is deduced using the information available at that moment. We need to implement logics to find more information in runtime. Make this a todo item in TODO.md.
+3: page_checkpoint should always be appended first, before a "page" with capture paths is appended. Make sure the code is implemented this way, and then re-order the logs to fit this constraint.
+4: Make sure in the current implementation, all settings writes use logs. And go back in time and fix the logs.
+5: Make sure in the current implementation, name edits use logs, and go back in time to fix the logs.
+6(pinnedAt timestamp uses different source): Use entry.timestamp consistently.
+6(Existing-only notes (18): pre-history or non-logged): Go back in time and add the missing logs.
+7(Pre-history notes not in JSONL): Go back in time and add the missing logs.
+7(Self-referencing parentId): Remove self references.
+- Let me check the diffs of childIds, visitDates, note childIds 
+- I have questions, "parent doesn't exist when log of child is replayed" should not happen unless the data is corrupted. We should fix the data so that every parents are properly checkpointed, instead of removing the children. And we should make sure "page_checkpoint" is generated properly in the current implementation
+- yes
+- health-ie863v.json references shallow:https://jandan.net/p/122112, but that is not in shallow-page.json. Why?
+- For the code fix, in the current implementation, where do we determine whether to use shallow or page id when generating the "list" log?
+- Default or silent fallback is evil. Let's remember that. We should always get the "true" information regardless of the cost.
+
+For this particular case, we should unify the pinning logic to use the same message, that message contains url, background.js is responsible for determining if it is a shallow page or a checkpointed page.
+- Option b is wrong. IDs can change midway because of a race condition between e.g. page capture and the pin update message. Let's do this: In the message to background.js, we send ids, but when background.js is processing them, it needs to check again those shallow ids and make sure they are indeed shallow. And it needs code comment to explain why this is necessary.
+- Now, let's check the entire codebase for other evil fallback or default logic
+- I don't have enough tokens, put them to TODO.md
+- update CODEBASE_MAP.md and ARCHITECTURE.md
+- /finish 
+- Save 2 3 4, but drop the reference to TODO.md

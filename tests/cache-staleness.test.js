@@ -296,8 +296,11 @@ describe('Cache staleness', () => {
       case 'saveSettingsKey':
         return { success: true };
 
-      case 'saveListPinsById':
+      case 'addListPins':
         return { success: true };
+
+      case 'toggleListPin':
+        return { success: true, pinned: true };
 
       case 'saveListMeta':
         return { success: true };
@@ -442,10 +445,8 @@ describe('Cache staleness', () => {
     // The updated loadListPins returns 4 pins now
     expect(pinnedOnlyRows().length).toBe(4);
 
-    // Assert: saveListPinsById was called (fresh pages with watermark 200 > pin watermark 0)
-    const saveCalls = chrome.runtime.sendMessage.mock.calls
-      .filter(c => c[0].action === 'saveListPinsById');
-    expect(saveCalls.length).toBeGreaterThanOrEqual(1);
+    // refreshListPages no longer persists enrichment — it only updates in-memory pin fields.
+    // The assertion above (pinnedOnlyRows().length === 4) verifies the UI is correct.
   });
 
   // ---------------------------------------------------------------------------
@@ -978,7 +979,7 @@ describe('Cache staleness', () => {
     expect(pinnedOnlyRows().length).toBe(2);
 
     // Simulate background mutation notification for pins
-    // This is what happens after saveListPinsById resolves:
+    // This is what happens after toggleListPin/addListPins resolves:
     // background sends notifyMutation('pins', { listId: 'explore' })
     const listeners = chrome.runtime.onMessage.addListener.mock.calls.map(c => c[0]);
     for (const listener of listeners) {

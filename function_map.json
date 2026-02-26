@@ -1,0 +1,2625 @@
+{
+  "utils.js": [
+    {
+      "name": "loadSettingsValue",
+      "line": 4,
+      "calls": []
+    },
+    {
+      "name": "saveSettingsValue",
+      "line": 27,
+      "calls": []
+    },
+    {
+      "name": "generateSlug",
+      "line": 36,
+      "calls": []
+    },
+    {
+      "name": "generateSlugFromUrl",
+      "line": 58,
+      "calls": [
+        "generateSlug"
+      ]
+    },
+    {
+      "name": "generateSlugFromTitle",
+      "line": 74,
+      "calls": [
+        "generateSlug"
+      ]
+    },
+    {
+      "name": "collectQbTrees",
+      "line": 82,
+      "calls": []
+    },
+    {
+      "name": "qbTreesChanged",
+      "line": 90,
+      "calls": []
+    },
+    {
+      "name": "generateNoteSlug",
+      "line": 95,
+      "calls": [
+        "generateSlug"
+      ]
+    }
+  ],
+  "replay.js": [
+    {
+      "name": "getAffectedKeys",
+      "line": 18,
+      "calls": [
+        "generateSlugFromUrl [utils.js]"
+      ]
+    },
+    {
+      "name": "getAffectedSlugs",
+      "line": 33,
+      "calls": [
+        "getAffectedKeys"
+      ]
+    },
+    {
+      "name": "scopeOf",
+      "line": 56,
+      "calls": [
+        "getAffectedKeys"
+      ]
+    },
+    {
+      "name": "defaultEntity",
+      "line": 105,
+      "calls": [
+        "scopeOf"
+      ]
+    },
+    {
+      "name": "effectOf",
+      "line": 133,
+      "calls": [
+        "applyTo",
+        "scopeOf"
+      ]
+    },
+    {
+      "name": "applyTo",
+      "line": 151,
+      "calls": [
+        "applyEntry",
+        "applyLogToNote",
+        "applyLogToPage",
+        "defaultEntity",
+        "generateSlugFromUrl [utils.js]"
+      ]
+    },
+    {
+      "name": "applyEntry",
+      "line": 264,
+      "calls": [
+        "applyLogToDeletes",
+        "applyLogToNote",
+        "applyLogToPage",
+        "applyLogToPins",
+        "applyLogToRecycleBin",
+        "applyLogToSettings",
+        "applyLogToShallowPage"
+      ]
+    },
+    {
+      "name": "applyLogToSettings",
+      "line": 284,
+      "calls": []
+    },
+    {
+      "name": "applyLogToPage",
+      "line": 297,
+      "calls": [
+        "generateSlugFromUrl [utils.js]"
+      ]
+    },
+    {
+      "name": "applyLogToNote",
+      "line": 399,
+      "calls": []
+    },
+    {
+      "name": "applyLogToPins",
+      "line": 422,
+      "calls": []
+    },
+    {
+      "name": "applyLogToRecycleBin",
+      "line": 461,
+      "calls": []
+    },
+    {
+      "name": "applyLogToShallowPage",
+      "line": 495,
+      "calls": []
+    },
+    {
+      "name": "applyLogToDeletes",
+      "line": 562,
+      "calls": []
+    }
+  ],
+  "entity-cache.js": [
+    {
+      "name": "setEntityCacheWatermark",
+      "line": 9,
+      "calls": []
+    },
+    {
+      "name": "getCachedEntity",
+      "line": 13,
+      "calls": []
+    },
+    {
+      "name": "setCachedEntity",
+      "line": 24,
+      "calls": []
+    }
+  ],
+  "attention-utils.js": [
+    {
+      "name": "parseAttention",
+      "line": 3,
+      "calls": []
+    },
+    {
+      "name": "attentionStrength",
+      "line": 12,
+      "calls": []
+    },
+    {
+      "name": "attentionColor",
+      "line": 22,
+      "calls": []
+    },
+    {
+      "name": "aggregateAttention",
+      "line": 41,
+      "calls": [
+        "attentionStrength",
+        "parseAttention"
+      ]
+    }
+  ],
+  "qb-tree.js": [
+    {
+      "name": "qbCreatePredicate",
+      "line": 5,
+      "calls": []
+    },
+    {
+      "name": "qbCreateOperator",
+      "line": 9,
+      "calls": []
+    },
+    {
+      "name": "qbCreatePlaceholder",
+      "line": 13,
+      "calls": []
+    },
+    {
+      "name": "qbFindNode",
+      "line": 17,
+      "calls": []
+    },
+    {
+      "name": "qbCollapseTree",
+      "line": 33,
+      "calls": []
+    },
+    {
+      "name": "qbFlattenSameOp",
+      "line": 42,
+      "calls": []
+    },
+    {
+      "name": "qbToTree",
+      "line": 58,
+      "calls": [
+        "qbCreateOperator",
+        "qbCreatePlaceholder"
+      ]
+    },
+    {
+      "name": "qbFlatten",
+      "line": 64,
+      "calls": []
+    }
+  ],
+  "virtual-scroller.js": [
+    {
+      "name": "constructor",
+      "line": 4,
+      "calls": []
+    },
+    {
+      "name": "setData",
+      "line": 23,
+      "calls": []
+    },
+    {
+      "name": "updateData",
+      "line": 35,
+      "calls": [
+        "_render"
+      ]
+    },
+    {
+      "name": "applyFilter",
+      "line": 55,
+      "calls": []
+    },
+    {
+      "name": "appendData",
+      "line": 67,
+      "calls": []
+    },
+    {
+      "name": "removeItems",
+      "line": 77,
+      "calls": []
+    },
+    {
+      "name": "onExpandToggle",
+      "line": 94,
+      "calls": []
+    },
+    {
+      "name": "_totalHeight",
+      "line": 121,
+      "calls": []
+    },
+    {
+      "name": "_saveOrDiscard",
+      "line": 127,
+      "calls": []
+    },
+    {
+      "name": "_insertRow",
+      "line": 138,
+      "calls": []
+    },
+    {
+      "name": "_render",
+      "line": 148,
+      "calls": []
+    }
+  ],
+  "background.js": [
+    {
+      "name": "dateKeyFromTimestamp",
+      "line": 19,
+      "calls": []
+    },
+    {
+      "name": "setupOffscreenDocument",
+      "line": 29,
+      "calls": []
+    },
+    {
+      "name": "connectToOffscreen",
+      "line": 49,
+      "calls": [
+        "scheduleDrainNotify"
+      ]
+    },
+    {
+      "name": "handleOffscreenResponse",
+      "line": 60,
+      "calls": [
+        "ensureLogBuffer",
+        "setEntityCacheWatermark [entity-cache.js]"
+      ]
+    },
+    {
+      "name": "ensureOffscreenPort",
+      "line": 76,
+      "calls": [
+        "connectToOffscreen",
+        "setupOffscreenDocument"
+      ]
+    },
+    {
+      "name": "requestOffscreen",
+      "line": 82,
+      "calls": [
+        "ensureOffscreenPort"
+      ]
+    },
+    {
+      "name": "withLock",
+      "line": 98,
+      "calls": []
+    },
+    {
+      "name": "replayBufferOver",
+      "line": 112,
+      "calls": [
+        "applyLogToPage [replay.js]"
+      ]
+    },
+    {
+      "name": "notifyMutation",
+      "line": 123,
+      "calls": []
+    },
+    {
+      "name": "ensureLogBuffer",
+      "line": 136,
+      "calls": []
+    },
+    {
+      "name": "scheduleDrainNotify",
+      "line": 150,
+      "calls": []
+    },
+    {
+      "name": "drainNow",
+      "line": 155,
+      "calls": [
+        "ensureLogBuffer"
+      ]
+    },
+    {
+      "name": "appendLog",
+      "line": 169,
+      "calls": [
+        "ensureLogBuffer",
+        "ensureOffscreenPort",
+        "scheduleDrainNotify",
+        "withLock"
+      ]
+    },
+    {
+      "name": "sessionLoad",
+      "line": 181,
+      "calls": [
+        "getCachedEntity [entity-cache.js]"
+      ]
+    },
+    {
+      "name": "sessionWrite",
+      "line": 213,
+      "calls": [
+        "setCachedEntity [entity-cache.js]"
+      ]
+    },
+    {
+      "name": "addLog",
+      "line": 251,
+      "calls": [
+        "effectOf [replay.js]",
+        "ensureLogBuffer",
+        "ensureOffscreenPort",
+        "scheduleDrainNotify",
+        "sessionWrite",
+        "withLock"
+      ]
+    },
+    {
+      "name": "appendVisit",
+      "line": 265,
+      "calls": [
+        "addLog",
+        "readCacheable",
+        "readFs"
+      ]
+    },
+    {
+      "name": "readCacheable",
+      "line": 285,
+      "calls": [
+        "readFs"
+      ]
+    },
+    {
+      "name": "readFs",
+      "line": 292,
+      "calls": [
+        "readCacheable",
+        "requestOffscreen"
+      ]
+    },
+    {
+      "name": "hydrateCache",
+      "line": 346,
+      "calls": [
+        "effectOf [replay.js]",
+        "ensureLogBuffer",
+        "generateSlugFromUrl [utils.js]",
+        "getCachedEntity [entity-cache.js]",
+        "hydrateIncrementalIndex",
+        "requestOffscreen",
+        "sessionWrite",
+        "setCachedEntity [entity-cache.js]"
+      ]
+    },
+    {
+      "name": "hydrateIncrementalIndex",
+      "line": 444,
+      "calls": [
+        "requestOffscreen"
+      ]
+    },
+    {
+      "name": "trimTitle",
+      "line": 477,
+      "calls": [
+        "readCacheable"
+      ]
+    },
+    {
+      "name": "processPageReport",
+      "line": 504,
+      "calls": [
+        "generateSlugFromUrl [utils.js]",
+        "getCachedEntity [entity-cache.js]",
+        "trimTitle"
+      ]
+    },
+    {
+      "name": "updateGatewayRegistry",
+      "line": 564,
+      "calls": [
+        "fetchAndCreateGatewayRoot",
+        "readCacheable"
+      ]
+    },
+    {
+      "name": "fetchAndCreateGatewayRoot",
+      "line": 600,
+      "calls": [
+        "appendVisit",
+        "generateSlugFromUrl [utils.js]",
+        "readCacheable",
+        "trimTitle"
+      ]
+    },
+    {
+      "name": "getReferrer",
+      "line": 648,
+      "calls": [
+        "ensureLogBuffer",
+        "ensureOffscreenPort",
+        "hydrateCache",
+        "initSavepageBridge [savepage-bridge.js]",
+        "requestOffscreen"
+      ]
+    },
+    {
+      "name": "ensureCheckpointIfMissing",
+      "line": 719,
+      "calls": [
+        "addLog",
+        "getCachedEntity [entity-cache.js]",
+        "requestOffscreen"
+      ]
+    },
+    {
+      "name": "captureAndLog",
+      "line": 737,
+      "calls": [
+        "addLog",
+        "captureSavePage [savepage-bridge.js]",
+        "connectToOffscreen",
+        "dateKeyFromTimestamp",
+        "drainNow",
+        "ensureCheckpointIfMissing",
+        "ensureLogBuffer",
+        "ensureOffscreenPort",
+        "generateNoteSlug [utils.js]",
+        "generateSlugFromUrl [utils.js]",
+        "getCachedEntity [entity-cache.js]",
+        "getReferrer",
+        "hydrateCache",
+        "listSnapshots [filesystem-storage.js]",
+        "loadListPins [popup.js]",
+        "loadListPinsById [filesystem-storage.js]",
+        "loadPageNotes [filesystem-storage.js]",
+        "notifyMutation",
+        "processPageReport",
+        "readCacheable",
+        "replayBufferOver",
+        "requestOffscreen",
+        "setCachedEntity [entity-cache.js]",
+        "setupOffscreenDocument",
+        "updateGatewayRegistry"
+      ]
+    }
+  ],
+  "content.js": [
+    {
+      "name": "initContentScript",
+      "line": 13,
+      "calls": []
+    },
+    {
+      "name": "extractMarkdown",
+      "line": 28,
+      "calls": []
+    },
+    {
+      "name": "getSlugForCurrentPage",
+      "line": 170,
+      "calls": []
+    },
+    {
+      "name": "getCssPath",
+      "line": 193,
+      "calls": []
+    },
+    {
+      "name": "showGlobalNoteOverlay",
+      "line": 217,
+      "calls": []
+    },
+    {
+      "name": "wrapRangeWithMark",
+      "line": 317,
+      "calls": [
+        "unwrapHighlightMark"
+      ]
+    },
+    {
+      "name": "collectTextNodes",
+      "line": 345,
+      "calls": []
+    },
+    {
+      "name": "findTextRange",
+      "line": 373,
+      "calls": [
+        "collectTextNodes"
+      ]
+    },
+    {
+      "name": "highlightTextInPage",
+      "line": 401,
+      "calls": [
+        "attachMarkClickHandler",
+        "findTextRange",
+        "wrapRangeWithMark"
+      ]
+    },
+    {
+      "name": "isBlockElement",
+      "line": 422,
+      "calls": []
+    },
+    {
+      "name": "getClosestBlock",
+      "line": 426,
+      "calls": [
+        "isBlockElement"
+      ]
+    },
+    {
+      "name": "isCrossBlock",
+      "line": 434,
+      "calls": [
+        "getClosestBlock"
+      ]
+    },
+    {
+      "name": "splitSelectionByBlock",
+      "line": 441,
+      "calls": [
+        "getClosestBlock"
+      ]
+    },
+    {
+      "name": "highlightTextInBlock",
+      "line": 494,
+      "calls": [
+        "attachMarkClickHandler",
+        "findTextRange",
+        "highlightTextInPage",
+        "wrapRangeWithMark"
+      ]
+    },
+    {
+      "name": "unwrapGroupedMarks",
+      "line": 509,
+      "calls": [
+        "unwrapHighlightMark"
+      ]
+    },
+    {
+      "name": "attachMarkClickHandler",
+      "line": 527,
+      "calls": [
+        "getSlugForCurrentPage",
+        "showHighlightEditOverlay"
+      ]
+    },
+    {
+      "name": "reapplyHighlights",
+      "line": 554,
+      "calls": [
+        "getSlugForCurrentPage",
+        "highlightTextInPage"
+      ]
+    },
+    {
+      "name": "showHighlightEditOverlay",
+      "line": 578,
+      "calls": [
+        "unwrapHighlightMark"
+      ]
+    },
+    {
+      "name": "unwrapHighlightMark",
+      "line": 716,
+      "calls": [
+        "report"
+      ]
+    },
+    {
+      "name": "report",
+      "line": 730,
+      "calls": []
+    },
+    {
+      "name": "reportAttention",
+      "line": 736,
+      "calls": [
+        "getSlugForCurrentPage",
+        "report"
+      ]
+    },
+    {
+      "name": "showCaptureNotification",
+      "line": 782,
+      "calls": []
+    },
+    {
+      "name": "showLikeNotification",
+      "line": 816,
+      "calls": [
+        "attachMarkClickHandler",
+        "extractMarkdown",
+        "getCssPath",
+        "getSlugForCurrentPage",
+        "highlightTextInBlock",
+        "highlightTextInPage",
+        "isCrossBlock",
+        "reapplyHighlights",
+        "reportAttention",
+        "showCaptureNotification",
+        "showGlobalNoteOverlay",
+        "showHighlightEditOverlay",
+        "splitSelectionByBlock",
+        "unwrapGroupedMarks",
+        "unwrapHighlightMark",
+        "wrapRangeWithMark"
+      ]
+    }
+  ],
+  "popup.js": [
+    {
+      "name": "escapeHtml",
+      "line": 12,
+      "calls": []
+    },
+    {
+      "name": "autoResizeTextarea",
+      "line": 18,
+      "calls": []
+    },
+    {
+      "name": "formatTimestamp",
+      "line": 23,
+      "calls": []
+    },
+    {
+      "name": "formatDuration",
+      "line": 31,
+      "calls": []
+    },
+    {
+      "name": "renderSnapshots",
+      "line": 39,
+      "calls": [
+        "escapeHtml",
+        "formatTimestamp"
+      ]
+    },
+    {
+      "name": "renderAttention",
+      "line": 80,
+      "calls": [
+        "formatDuration"
+      ]
+    },
+    {
+      "name": "renderNotes",
+      "line": 112,
+      "calls": [
+        "autoResizeTextarea",
+        "escapeHtml"
+      ]
+    },
+    {
+      "name": "loadLists",
+      "line": 230,
+      "calls": [
+        "loadSettingsValue [utils.js]"
+      ]
+    },
+    {
+      "name": "loadListPins",
+      "line": 234,
+      "calls": []
+    },
+    {
+      "name": "isPagePinned",
+      "line": 245,
+      "calls": [
+        "generateSlugFromUrl [utils.js]"
+      ]
+    },
+    {
+      "name": "renderListChips",
+      "line": 253,
+      "calls": [
+        "escapeHtml",
+        "isPagePinned",
+        "loadListPins",
+        "loadLists",
+        "openListPicker",
+        "toggleListPin"
+      ]
+    },
+    {
+      "name": "toggleListPin",
+      "line": 301,
+      "calls": []
+    },
+    {
+      "name": "closeListPicker",
+      "line": 305,
+      "calls": []
+    },
+    {
+      "name": "pickerOutsideClickHandler",
+      "line": 311,
+      "calls": [
+        "closeListPicker"
+      ]
+    },
+    {
+      "name": "openListPicker",
+      "line": 318,
+      "calls": [
+        "closeListPicker",
+        "createListAndPin",
+        "escapeHtml",
+        "isPagePinned",
+        "loadListPins",
+        "renderListChips",
+        "toggleListPin"
+      ]
+    },
+    {
+      "name": "createListAndPin",
+      "line": 426,
+      "calls": [
+        "generateSlugFromTitle [utils.js]",
+        "generateSlugFromUrl [utils.js]",
+        "loadLists",
+        "saveSettingsValue [utils.js]"
+      ]
+    },
+    {
+      "name": "loadWorkspace",
+      "line": 447,
+      "calls": [
+        "loadSettingsValue [utils.js]"
+      ]
+    },
+    {
+      "name": "saveWorkspace",
+      "line": 452,
+      "calls": [
+        "saveSettingsValue [utils.js]"
+      ]
+    },
+    {
+      "name": "renderWorkspaceBar",
+      "line": 456,
+      "calls": [
+        "escapeHtml",
+        "generateSlugFromUrl [utils.js]",
+        "loadLists",
+        "loadWorkspace",
+        "saveWorkspace",
+        "showDashboard"
+      ]
+    },
+    {
+      "name": "startEditingTitle",
+      "line": 557,
+      "calls": [
+        "renderSnapshots"
+      ]
+    },
+    {
+      "name": "showDashboard",
+      "line": 632,
+      "calls": [
+        "autoResizeTextarea",
+        "generateSlugFromUrl [utils.js]",
+        "loadWorkspace",
+        "renderAttention",
+        "renderListChips",
+        "renderNotes",
+        "renderSnapshots",
+        "renderWorkspaceBar"
+      ]
+    }
+  ],
+  "options.js": [
+    {
+      "name": "loadSettingsValue",
+      "line": 17,
+      "calls": []
+    },
+    {
+      "name": "normalizeFieldToArray",
+      "line": 75,
+      "calls": []
+    },
+    {
+      "name": "computeFieldRanges",
+      "line": 94,
+      "calls": [
+        "parseAttention [attention-utils.js]"
+      ]
+    },
+    {
+      "name": "getFieldRanges",
+      "line": 132,
+      "calls": [
+        "computeFieldRanges"
+      ]
+    },
+    {
+      "name": "getRangeConfig",
+      "line": 140,
+      "calls": [
+        "getFieldRanges"
+      ]
+    },
+    {
+      "name": "initWasm",
+      "line": 152,
+      "calls": []
+    },
+    {
+      "name": "pipelinedSearch",
+      "line": 166,
+      "calls": [
+        "buildInteractionsForEngine [search-helpers.js]",
+        "extractInteractionBuffer [search-helpers.js]",
+        "getBufferContentMap [search-helpers.js]",
+        "initWasm"
+      ]
+    },
+    {
+      "name": "extractCapturesQueries",
+      "line": 217,
+      "calls": [
+        "normalizeFieldToArray"
+      ]
+    },
+    {
+      "name": "precomputeCapturesMatches",
+      "line": 235,
+      "calls": [
+        "pipelinedSearch"
+      ]
+    },
+    {
+      "name": "initHistoryFiles",
+      "line": 247,
+      "calls": [
+        "extractInteractionBuffer [search-helpers.js]",
+        "getBufferContentMap [search-helpers.js]"
+      ]
+    },
+    {
+      "name": "loadHistoryBatch",
+      "line": 276,
+      "calls": []
+    },
+    {
+      "name": "resetHistory",
+      "line": 313,
+      "calls": []
+    },
+    {
+      "name": "loadAllListPins",
+      "line": 334,
+      "calls": []
+    },
+    {
+      "name": "saveListPinsById",
+      "line": 344,
+      "calls": []
+    },
+    {
+      "name": "getActivePinListId",
+      "line": 352,
+      "calls": []
+    },
+    {
+      "name": "urlToPinId",
+      "line": 358,
+      "calls": [
+        "generateSlugFromUrl [utils.js]"
+      ]
+    },
+    {
+      "name": "pinIdToUrl",
+      "line": 365,
+      "calls": []
+    },
+    {
+      "name": "slugFromPinId",
+      "line": 371,
+      "calls": [
+        "generateSlugFromUrl [utils.js]"
+      ]
+    },
+    {
+      "name": "resolvePageRef",
+      "line": 380,
+      "calls": []
+    },
+    {
+      "name": "loadPinContext",
+      "line": 396,
+      "calls": []
+    },
+    {
+      "name": "isResultPinned",
+      "line": 423,
+      "calls": [
+        "urlToPinId"
+      ]
+    },
+    {
+      "name": "toggleResultPin",
+      "line": 430,
+      "calls": [
+        "saveListPinsById",
+        "urlToPinId"
+      ]
+    },
+    {
+      "name": "loadRecycleBin",
+      "line": 447,
+      "calls": []
+    },
+    {
+      "name": "saveRecycleBin",
+      "line": 470,
+      "calls": [
+        "updateRecycleSidebarCount"
+      ]
+    },
+    {
+      "name": "isRecycled",
+      "line": 477,
+      "calls": [
+        "generateSlugFromUrl [utils.js]"
+      ]
+    },
+    {
+      "name": "isPermanentlyDeleted",
+      "line": 482,
+      "calls": [
+        "generateSlugFromUrl [utils.js]"
+      ]
+    },
+    {
+      "name": "recycleItem",
+      "line": 487,
+      "calls": [
+        "generateSlugFromUrl [utils.js]",
+        "saveRecycleBin"
+      ]
+    },
+    {
+      "name": "restoreItem",
+      "line": 494,
+      "calls": [
+        "saveRecycleBin"
+      ]
+    },
+    {
+      "name": "permanentlyDeleteItem",
+      "line": 499,
+      "calls": [
+        "saveRecycleBin"
+      ]
+    },
+    {
+      "name": "updateRecycleSidebarCount",
+      "line": 505,
+      "calls": [
+        "saveRecycleBin",
+        "showCategory"
+      ]
+    },
+    {
+      "name": "showListLayout",
+      "line": 530,
+      "calls": [
+        "saveExploreQbState"
+      ]
+    },
+    {
+      "name": "showNormalLayout",
+      "line": 538,
+      "calls": [
+        "restoreExploreQbState"
+      ]
+    },
+    {
+      "name": "saveExploreQbState",
+      "line": 544,
+      "calls": []
+    },
+    {
+      "name": "restoreExploreQbState",
+      "line": 550,
+      "calls": []
+    },
+    {
+      "name": "getSortState",
+      "line": 558,
+      "calls": []
+    },
+    {
+      "name": "setSortState",
+      "line": 564,
+      "calls": []
+    },
+    {
+      "name": "getExtraColumns",
+      "line": 570,
+      "calls": []
+    },
+    {
+      "name": "setExtraColumns",
+      "line": 576,
+      "calls": []
+    },
+    {
+      "name": "getAvailableExtras",
+      "line": 582,
+      "calls": []
+    },
+    {
+      "name": "applySortOrder",
+      "line": 596,
+      "calls": []
+    },
+    {
+      "name": "columnHeaderHtml",
+      "line": 635,
+      "calls": [
+        "getAvailableExtras",
+        "getExtraColumns",
+        "getSortState"
+      ]
+    },
+    {
+      "name": "bindColumnHeaderClicks",
+      "line": 681,
+      "calls": [
+        "getSortState",
+        "resortActiveScroller",
+        "setSortState",
+        "showColumnPopover"
+      ]
+    },
+    {
+      "name": "showColumnPopover",
+      "line": 720,
+      "calls": [
+        "getAvailableExtras",
+        "getExtraColumns",
+        "getSortState",
+        "refreshCurrentView",
+        "setExtraColumns",
+        "setSortState"
+      ]
+    },
+    {
+      "name": "isDeletableView",
+      "line": 779,
+      "calls": []
+    },
+    {
+      "name": "renderResultsSkeleton",
+      "line": 785,
+      "calls": [
+        "columnHeaderHtml",
+        "getOrCreateGlobalScroller",
+        "isDeletableView"
+      ]
+    },
+    {
+      "name": "renderListSkeleton",
+      "line": 797,
+      "calls": [
+        "bindColumnHeaderClicks",
+        "columnHeaderHtml",
+        "getOrCreateRelatedScroller"
+      ]
+    },
+    {
+      "name": "refreshCurrentView",
+      "line": 814,
+      "calls": [
+        "showCategory",
+        "showExplore",
+        "showList"
+      ]
+    },
+    {
+      "name": "resortActiveScroller",
+      "line": 824,
+      "calls": [
+        "applySortOrder",
+        "columnHeaderHtml",
+        "getSortState",
+        "refreshCurrentView"
+      ]
+    },
+    {
+      "name": "removeDeletedRows",
+      "line": 844,
+      "calls": [
+        "displayMessage"
+      ]
+    },
+    {
+      "name": "filterByCategory",
+      "line": 862,
+      "calls": [
+        "isGatewayUrl",
+        "isPermanentlyDeleted",
+        "isRecycled"
+      ]
+    },
+    {
+      "name": "loadGatewayDomains",
+      "line": 888,
+      "calls": []
+    },
+    {
+      "name": "isGatewayUrl",
+      "line": 902,
+      "calls": [
+        "initCharts [time-chart.js]",
+        "initialize"
+      ]
+    },
+    {
+      "name": "showCategory",
+      "line": 916,
+      "calls": [
+        "applySortOrder",
+        "displayInteractionRows",
+        "displayRecycleBinRows",
+        "filterByCategory",
+        "getOrCreateGlobalScroller",
+        "initHistoryFiles",
+        "loadGatewayDomains",
+        "loadHistoryBatch",
+        "processInteractionsForDisplay",
+        "renderResultsSkeleton",
+        "renderTimeChart [time-chart.js]",
+        "showNormalLayout",
+        "updateMainTitle",
+        "updateSidebarActive"
+      ]
+    },
+    {
+      "name": "parseKeywordQuery",
+      "line": 968,
+      "calls": []
+    },
+    {
+      "name": "textMatches",
+      "line": 977,
+      "calls": []
+    },
+    {
+      "name": "matchKeyword",
+      "line": 983,
+      "calls": [
+        "normalizeFieldToArray",
+        "parseKeywordQuery",
+        "textMatches"
+      ]
+    },
+    {
+      "name": "matchSmartFilter",
+      "line": 1004,
+      "calls": [
+        "isGatewayUrl"
+      ]
+    },
+    {
+      "name": "matchRange",
+      "line": 1009,
+      "calls": []
+    },
+    {
+      "name": "isNodeConfigured",
+      "line": 1020,
+      "calls": []
+    },
+    {
+      "name": "evaluateNode",
+      "line": 1028,
+      "calls": [
+        "isNodeConfigured",
+        "matchKeyword",
+        "matchRange",
+        "matchSmartFilter"
+      ]
+    },
+    {
+      "name": "keywordRelevance",
+      "line": 1045,
+      "calls": [
+        "normalizeFieldToArray",
+        "parseKeywordQuery",
+        "textMatches"
+      ]
+    },
+    {
+      "name": "computeRelevance",
+      "line": 1067,
+      "calls": [
+        "keywordRelevance"
+      ]
+    },
+    {
+      "name": "treeNeedsHighlights",
+      "line": 1075,
+      "calls": [
+        "normalizeFieldToArray"
+      ]
+    },
+    {
+      "name": "treeHasKeyword",
+      "line": 1085,
+      "calls": []
+    },
+    {
+      "name": "treeHasConfiguredPredicate",
+      "line": 1091,
+      "calls": []
+    },
+    {
+      "name": "qbInsertOnEdge",
+      "line": 1100,
+      "calls": [
+        "qbCreateOperator [qb-tree.js]",
+        "qbCreatePlaceholder [qb-tree.js]",
+        "qbFindNode [qb-tree.js]",
+        "renderQueryBuilder"
+      ]
+    },
+    {
+      "name": "qbAddChild",
+      "line": 1126,
+      "calls": [
+        "qbCreatePlaceholder [qb-tree.js]",
+        "qbFindNode [qb-tree.js]",
+        "renderQueryBuilder"
+      ]
+    },
+    {
+      "name": "qbRemoveLeaf",
+      "line": 1135,
+      "calls": [
+        "qbCollapseTree [qb-tree.js]",
+        "qbCreatePlaceholder [qb-tree.js]",
+        "qbFindNode [qb-tree.js]",
+        "renderQueryBuilder"
+      ]
+    },
+    {
+      "name": "qbUpdateNode",
+      "line": 1151,
+      "calls": [
+        "qbFindNode [qb-tree.js]"
+      ]
+    },
+    {
+      "name": "evaluateQueryStream",
+      "line": 1157,
+      "calls": [
+        "enrichSingle",
+        "evaluateNode",
+        "extractCapturesQueries",
+        "extractInteractionBuffer [search-helpers.js]",
+        "isPermanentlyDeleted",
+        "isRecycled",
+        "loadGatewayDomains",
+        "precomputeCapturesMatches",
+        "treeNeedsHighlights"
+      ]
+    },
+    {
+      "name": "enrichSingle",
+      "line": 1208,
+      "calls": [
+        "attentionStrength [attention-utils.js]",
+        "parseAttention [attention-utils.js]"
+      ]
+    },
+    {
+      "name": "runQuery",
+      "line": 1227,
+      "calls": [
+        "applySortOrder",
+        "columnHeaderHtml",
+        "computeRelevance",
+        "displayMessage",
+        "evaluateQueryStream",
+        "getOrCreateGlobalScroller",
+        "renderResultsSkeleton",
+        "renderTimeChart [time-chart.js]",
+        "resultRowHtml",
+        "runListExploreQuery",
+        "saveListQbTrees",
+        "treeHasConfiguredPredicate",
+        "treeHasKeyword"
+      ]
+    },
+    {
+      "name": "saveListQbTrees",
+      "line": 1292,
+      "calls": [
+        "collectQbTrees [utils.js]",
+        "qbTreesChanged [utils.js]"
+      ]
+    },
+    {
+      "name": "runListExploreQuery",
+      "line": 1300,
+      "calls": [
+        "applySortOrder",
+        "bindChartBarClick [time-chart.js]",
+        "bindPinClicks",
+        "columnHeaderHtml",
+        "computeRelevance",
+        "generateSlugFromUrl [utils.js]",
+        "getOrCreateRelatedScroller",
+        "isResultPinned",
+        "renderTimeChartInto [time-chart.js]",
+        "resultRowHtml",
+        "slugFromPinId",
+        "treeHasKeyword"
+      ]
+    },
+    {
+      "name": "getActiveQbBody",
+      "line": 1363,
+      "calls": []
+    },
+    {
+      "name": "renderQueryBuilder",
+      "line": 1370,
+      "calls": [
+        "bindQueryBuilderEvents",
+        "getActiveQbBody",
+        "renderExploreBlocks",
+        "renderTreeNodePro",
+        "saveExploreBlockState"
+      ]
+    },
+    {
+      "name": "renderPredicateInputs",
+      "line": 1389,
+      "calls": [
+        "escapeHtml [popup.js]",
+        "getRangeConfig",
+        "normalizeFieldToArray"
+      ]
+    },
+    {
+      "name": "qbCountLeaves",
+      "line": 1448,
+      "calls": []
+    },
+    {
+      "name": "qbLeafButtons",
+      "line": 1455,
+      "calls": []
+    },
+    {
+      "name": "renderTreeNodePro",
+      "line": 1466,
+      "calls": [
+        "qbCountLeaves",
+        "qbLeafButtons",
+        "renderPredicateInputs"
+      ]
+    },
+    {
+      "name": "bindQueryBuilderEvents",
+      "line": 1518,
+      "calls": [
+        "debouncedRunQuery",
+        "getRangeConfig",
+        "qbFindNode [qb-tree.js]",
+        "renderQueryBuilder"
+      ]
+    },
+    {
+      "name": "syncFromCheckboxes",
+      "line": 1573,
+      "calls": [
+        "debouncedRunQuery",
+        "getRangeConfig",
+        "qbUpdateNode",
+        "renderQueryBuilder"
+      ]
+    },
+    {
+      "name": "updateSlider",
+      "line": 1646,
+      "calls": [
+        "debouncedRunQuery",
+        "qbAddChild",
+        "qbFindNode [qb-tree.js]",
+        "qbInsertOnEdge",
+        "qbRemoveLeaf",
+        "qbUpdateNode"
+      ]
+    },
+    {
+      "name": "debouncedRunQuery",
+      "line": 1711,
+      "calls": [
+        "runExploreBlockQuery",
+        "runQuery"
+      ]
+    },
+    {
+      "name": "qbSummarize",
+      "line": 1724,
+      "calls": [
+        "normalizeFieldToArray"
+      ]
+    },
+    {
+      "name": "showExplore",
+      "line": 1751,
+      "calls": [
+        "getExplorePins",
+        "loadPinContext",
+        "renderListSkeleton",
+        "resolvePageRef",
+        "showListLayout",
+        "updateMainTitle",
+        "updateSidebarActive"
+      ]
+    },
+    {
+      "name": "enrichResult",
+      "line": 1780,
+      "calls": [
+        "attentionStrength [attention-utils.js]",
+        "buildExploreAutoBlocks",
+        "generateSlugFromUrl [utils.js]",
+        "initHistoryFiles",
+        "loadHistoryBatch",
+        "parseAttention [attention-utils.js]",
+        "renderExploreBlocks",
+        "renderPinnedSection",
+        "runExploreBlockQuery",
+        "slugFromPinId"
+      ]
+    },
+    {
+      "name": "refreshExplorePins",
+      "line": 1837,
+      "calls": [
+        "getExplorePins",
+        "loadPinContext",
+        "resolvePageRef"
+      ]
+    },
+    {
+      "name": "enrichResult",
+      "line": 1851,
+      "calls": [
+        "attentionStrength [attention-utils.js]",
+        "buildExploreAutoBlocks",
+        "generateSlugFromUrl [utils.js]",
+        "parseAttention [attention-utils.js]",
+        "renderExploreBlocks",
+        "renderPinnedSection",
+        "runExploreBlockQuery",
+        "slugFromPinId",
+        "updateExploreBadge"
+      ]
+    },
+    {
+      "name": "showList",
+      "line": 1893,
+      "calls": [
+        "enterTitleEditMode",
+        "listDisplayName",
+        "loadPinContext",
+        "renderListSkeleton",
+        "renderLists",
+        "resolvePageRef",
+        "showListLayout",
+        "updateMainTitle",
+        "updateSidebarActive"
+      ]
+    },
+    {
+      "name": "enrichResult",
+      "line": 1938,
+      "calls": [
+        "attentionStrength [attention-utils.js]",
+        "escapeHtml [popup.js]",
+        "fetchListResults",
+        "generateSlugFromUrl [utils.js]",
+        "parseAttention [attention-utils.js]",
+        "refreshListPages",
+        "renderListExplore",
+        "renderPinnedSection",
+        "slugFromPinId"
+      ]
+    },
+    {
+      "name": "refreshListPages",
+      "line": 1984,
+      "calls": [
+        "attentionStrength [attention-utils.js]",
+        "parseAttention [attention-utils.js]",
+        "saveListPinsById",
+        "slugFromPinId"
+      ]
+    },
+    {
+      "name": "fetchListResults",
+      "line": 2032,
+      "calls": [
+        "evaluateQueryStream",
+        "generateSlugFromUrl [utils.js]",
+        "renderPinnedSection"
+      ]
+    },
+    {
+      "name": "renderPinnedSection",
+      "line": 2064,
+      "calls": [
+        "applySortOrder",
+        "bindColumnHeaderClicks",
+        "bindPinClicks",
+        "bindResultDelegation",
+        "columnHeaderHtml",
+        "resultRowHtml"
+      ]
+    },
+    {
+      "name": "renderListExplore",
+      "line": 2091,
+      "calls": [
+        "buildExploreAutoBlocks",
+        "initHistoryFiles",
+        "loadHistoryBatch",
+        "renderExploreBlocks",
+        "runExploreBlockQuery"
+      ]
+    },
+    {
+      "name": "processInteractionsForDisplay",
+      "line": 2121,
+      "calls": [
+        "attentionStrength [attention-utils.js]",
+        "generateSlugFromUrl [utils.js]",
+        "parseAttention [attention-utils.js]"
+      ]
+    },
+    {
+      "name": "enrichFromEntityStorage",
+      "line": 2165,
+      "calls": []
+    },
+    {
+      "name": "displayInteractionRows",
+      "line": 2180,
+      "calls": [
+        "applySortOrder",
+        "columnHeaderHtml",
+        "displayMessage",
+        "enrichFromEntityStorage",
+        "getOrCreateGlobalScroller",
+        "isDeletableView",
+        "processInteractionsForDisplay",
+        "resultRowHtml"
+      ]
+    },
+    {
+      "name": "displayRecycleBinRows",
+      "line": 2202,
+      "calls": [
+        "bindRecycleBinClicks",
+        "bindResultDelegation",
+        "displayMessage",
+        "escapeHtml [popup.js]",
+        "formatTime"
+      ]
+    },
+    {
+      "name": "bindRecycleBinClicks",
+      "line": 2244,
+      "calls": [
+        "removeDeletedRows",
+        "restoreItem"
+      ]
+    },
+    {
+      "name": "groupInteractionsByUrl",
+      "line": 2275,
+      "calls": []
+    },
+    {
+      "name": "buildDetailHtml",
+      "line": 2284,
+      "calls": [
+        "escapeHtml [popup.js]"
+      ]
+    },
+    {
+      "name": "loadExtraDetail",
+      "line": 2317,
+      "calls": [
+        "generateSlugFromUrl [utils.js]",
+        "listDisplayName",
+        "loadLists [popup.js]",
+        "urlToPinId"
+      ]
+    },
+    {
+      "name": "renderExtraDetailHtml",
+      "line": 2348,
+      "calls": [
+        "escapeHtml [popup.js]"
+      ]
+    },
+    {
+      "name": "bindNoteDeleteButtons",
+      "line": 2388,
+      "calls": []
+    },
+    {
+      "name": "bindSnapshotClickHandlers",
+      "line": 2417,
+      "calls": []
+    },
+    {
+      "name": "resultRowHtml",
+      "line": 2431,
+      "calls": [
+        "attentionColor [attention-utils.js]",
+        "buildDetailHtml",
+        "escapeHtml [popup.js]",
+        "formatTime",
+        "getActivePinListId",
+        "getExtraColumns",
+        "isResultPinned"
+      ]
+    },
+    {
+      "name": "bindResultDelegation",
+      "line": 2484,
+      "calls": [
+        "bindNoteDeleteButtons",
+        "bindSnapshotClickHandlers",
+        "loadExtraDetail",
+        "openFocusPanel",
+        "permanentlyDeleteItem",
+        "recycleItem",
+        "removeDeletedRows",
+        "renderExtraDetailHtml",
+        "syncChartHighlights [time-chart.js]"
+      ]
+    },
+    {
+      "name": "bindPinClicks",
+      "line": 2623,
+      "calls": [
+        "refreshExplorePins",
+        "showExplore",
+        "showList",
+        "toggleResultPin"
+      ]
+    },
+    {
+      "name": "getOrCreateGlobalScroller",
+      "line": 2652,
+      "calls": [
+        "VirtualScroller [virtual-scroller.js]",
+        "bindColumnHeaderClicks",
+        "bindPinClicks",
+        "bindResultDelegation",
+        "getActivePinListId"
+      ]
+    },
+    {
+      "name": "getOrCreateRelatedScroller",
+      "line": 2665,
+      "calls": [
+        "VirtualScroller [virtual-scroller.js]",
+        "bindColumnHeaderClicks",
+        "bindResultDelegation"
+      ]
+    },
+    {
+      "name": "displayMessage",
+      "line": 2676,
+      "calls": [
+        "escapeHtml [popup.js]"
+      ]
+    },
+    {
+      "name": "listDisplayName",
+      "line": 2689,
+      "calls": []
+    },
+    {
+      "name": "updateMainTitle",
+      "line": 2693,
+      "calls": []
+    },
+    {
+      "name": "enterTitleEditMode",
+      "line": 2708,
+      "calls": []
+    },
+    {
+      "name": "updateSidebarActive",
+      "line": 2762,
+      "calls": []
+    },
+    {
+      "name": "loadLists",
+      "line": 2778,
+      "calls": []
+    },
+    {
+      "name": "renderLists",
+      "line": 2792,
+      "calls": [
+        "escapeHtml [popup.js]",
+        "listDisplayName",
+        "loadLists [popup.js]",
+        "saveListPinsById",
+        "saveSettingsValue [utils.js]",
+        "showExplore",
+        "showList",
+        "updateSidebarActive",
+        "urlToPinId"
+      ]
+    },
+    {
+      "name": "saveExploreAsList",
+      "line": 2936,
+      "calls": [
+        "enterTitleEditMode",
+        "generateSlugFromTitle [utils.js]",
+        "getExplorePins",
+        "renderLists",
+        "saveSettingsValue [utils.js]",
+        "showList",
+        "treeHasConfiguredPredicate",
+        "updateMainTitle"
+      ]
+    },
+    {
+      "name": "formatTime",
+      "line": 2967,
+      "calls": []
+    },
+    {
+      "name": "escapeHtml",
+      "line": 2983,
+      "calls": [
+        "isDeletableView",
+        "permanentlyDeleteItem",
+        "recycleItem",
+        "removeDeletedRows",
+        "showCategory",
+        "showExplore"
+      ]
+    },
+    {
+      "name": "initMarqueeForElements",
+      "line": 3035,
+      "calls": [
+        "renderBlacklist",
+        "renderTrimRules",
+        "syncChartHighlights [time-chart.js]",
+        "updateStatistics",
+        "updateStorageStatus"
+      ]
+    },
+    {
+      "name": "updateStorageStatus",
+      "line": 3156,
+      "calls": []
+    },
+    {
+      "name": "updateStatistics",
+      "line": 3184,
+      "calls": [
+        "updateCacheTable"
+      ]
+    },
+    {
+      "name": "formatBytes",
+      "line": 3198,
+      "calls": []
+    },
+    {
+      "name": "updateCacheTable",
+      "line": 3221,
+      "calls": [
+        "formatBytes",
+        "loadSettingsValue [utils.js]",
+        "resetHistory",
+        "saveSettingsValue [utils.js]",
+        "showCategory",
+        "showExplore",
+        "showStatus",
+        "updateStatistics",
+        "updateStorageStatus"
+      ]
+    },
+    {
+      "name": "showStatus",
+      "line": 3431,
+      "calls": []
+    },
+    {
+      "name": "loadBlacklist",
+      "line": 3441,
+      "calls": [
+        "loadSettingsValue [utils.js]",
+        "saveBlacklist"
+      ]
+    },
+    {
+      "name": "saveBlacklist",
+      "line": 3450,
+      "calls": [
+        "saveSettingsValue [utils.js]"
+      ]
+    },
+    {
+      "name": "renderBlacklist",
+      "line": 3454,
+      "calls": [
+        "escapeHtml [popup.js]",
+        "loadBlacklist",
+        "saveBlacklist"
+      ]
+    },
+    {
+      "name": "loadTrimRules",
+      "line": 3508,
+      "calls": [
+        "loadSettingsValue [utils.js]"
+      ]
+    },
+    {
+      "name": "saveTrimRules",
+      "line": 3512,
+      "calls": [
+        "saveSettingsValue [utils.js]"
+      ]
+    },
+    {
+      "name": "renderTrimRules",
+      "line": 3516,
+      "calls": [
+        "escapeHtml [popup.js]",
+        "extractInteractionBuffer [search-helpers.js]",
+        "loadTrimRules",
+        "refreshCurrentView",
+        "renderLists",
+        "runExploreBlockQuery",
+        "saveTrimRules",
+        "updateRecycleSidebarCount"
+      ]
+    },
+    {
+      "name": "getExplorePins",
+      "line": 3685,
+      "calls": []
+    },
+    {
+      "name": "updateExploreBadge",
+      "line": 3689,
+      "calls": [
+        "getExplorePins"
+      ]
+    },
+    {
+      "name": "buildExploreAutoBlocks",
+      "line": 3704,
+      "calls": [
+        "findRelatedPages [related-scoring.js]",
+        "generateSlugFromUrl [utils.js]",
+        "slugFromPinId"
+      ]
+    },
+    {
+      "name": "saveExploreBlockState",
+      "line": 3815,
+      "calls": []
+    },
+    {
+      "name": "renderExploreBlocks",
+      "line": 3829,
+      "calls": [
+        "bindExploreBlockEvents",
+        "escapeHtml [popup.js]",
+        "renderTreeNodePro"
+      ]
+    },
+    {
+      "name": "bindExploreBlockEvents",
+      "line": 3879,
+      "calls": [
+        "bindQueryBuilderEvents",
+        "qbCreatePlaceholder [qb-tree.js]",
+        "renderExploreBlocks",
+        "renderQueryBuilder",
+        "runExploreBlockQuery",
+        "saveExploreBlockState"
+      ]
+    },
+    {
+      "name": "debouncedRunExploreBlockQuery",
+      "line": 3954,
+      "calls": [
+        "runExploreBlockQuery"
+      ]
+    },
+    {
+      "name": "runExploreBlockQuery",
+      "line": 3959,
+      "calls": [
+        "applySortOrder",
+        "bindChartBarClick [time-chart.js]",
+        "bindPinClicks",
+        "columnHeaderHtml",
+        "enrichFromEntityStorage",
+        "evaluateQueryStream",
+        "generateSlugFromUrl [utils.js]",
+        "getExplorePins",
+        "getOrCreateRelatedScroller",
+        "isPermanentlyDeleted",
+        "isRecycled",
+        "isResultPinned",
+        "loadHistoryBatch",
+        "processInteractionsForDisplay",
+        "renderTimeChartInto [time-chart.js]",
+        "resultRowHtml",
+        "saveListQbTrees",
+        "slugFromPinId",
+        "treeHasConfiguredPredicate"
+      ]
+    },
+    {
+      "name": "openFocusPanel",
+      "line": 4082,
+      "calls": [
+        "escapeHtml [popup.js]",
+        "findRelatedPages [related-scoring.js]",
+        "renderFocusWaterfall"
+      ]
+    },
+    {
+      "name": "openListFocusPanel",
+      "line": 4113,
+      "calls": [
+        "bindFocusContentDelegation",
+        "escapeHtml [popup.js]",
+        "loadPinContext",
+        "resolvePageRef",
+        "resultRowHtml"
+      ]
+    },
+    {
+      "name": "renderFocusWaterfall",
+      "line": 4157,
+      "calls": [
+        "bindFocusContentDelegation",
+        "resultRowHtml"
+      ]
+    },
+    {
+      "name": "closeFocusPanel",
+      "line": 4211,
+      "calls": []
+    },
+    {
+      "name": "bindFocusContentDelegation",
+      "line": 4215,
+      "calls": [
+        "bindResultDelegation",
+        "getActivePinListId",
+        "openFocusPanel",
+        "refreshExplorePins",
+        "showList",
+        "toggleResultPin"
+      ]
+    },
+    {
+      "name": "initialize",
+      "line": 4264,
+      "calls": [
+        "closeFocusPanel",
+        "initCharts [time-chart.js]",
+        "initHistoryFiles",
+        "loadGatewayDomains",
+        "loadRecycleBin",
+        "loadSettingsValue [utils.js]",
+        "qbCreatePlaceholder [qb-tree.js]",
+        "renderBlacklist",
+        "renderLists",
+        "renderTrimRules",
+        "saveListPinsById",
+        "showExplore",
+        "updateExploreBadge",
+        "updateRecycleSidebarCount",
+        "urlToPinId"
+      ]
+    }
+  ],
+  "offscreen.js": [
+    {
+      "name": "withLock",
+      "line": 56,
+      "calls": []
+    },
+    {
+      "name": "handleRequest",
+      "line": 68,
+      "calls": [
+        "drainQueue",
+        "initialize [options.js]",
+        "listSnapshots [filesystem-storage.js]",
+        "loadListPins [popup.js]",
+        "loadListPinsById [filesystem-storage.js]",
+        "loadPageNotes [filesystem-storage.js]",
+        "withLock [background.js]"
+      ]
+    },
+    {
+      "name": "scheduleDrain",
+      "line": 280,
+      "calls": [
+        "drainQueue"
+      ]
+    },
+    {
+      "name": "dateKeyFromTimestamp",
+      "line": 285,
+      "calls": []
+    },
+    {
+      "name": "drainQueue",
+      "line": 293,
+      "calls": [
+        "dateKeyFromTimestamp [background.js]",
+        "defaultEntity [replay.js]",
+        "effectOf [replay.js]",
+        "withLock [background.js]"
+      ]
+    },
+    {
+      "name": "initialize",
+      "line": 478,
+      "calls": [
+        "scheduleDrain"
+      ]
+    }
+  ],
+  "filesystem-storage.js": [
+    {
+      "name": "constructor",
+      "line": 10,
+      "calls": []
+    },
+    {
+      "name": "initDB",
+      "line": 17,
+      "calls": []
+    },
+    {
+      "name": "selectDirectory",
+      "line": 34,
+      "calls": []
+    },
+    {
+      "name": "saveDirectoryHandle",
+      "line": 60,
+      "calls": []
+    },
+    {
+      "name": "loadDirectoryHandle",
+      "line": 73,
+      "calls": []
+    },
+    {
+      "name": "verifyPermission",
+      "line": 89,
+      "calls": []
+    },
+    {
+      "name": "resolveDir",
+      "line": 118,
+      "calls": []
+    },
+    {
+      "name": "resolveFile",
+      "line": 141,
+      "calls": []
+    },
+    {
+      "name": "readJson",
+      "line": 166,
+      "calls": []
+    },
+    {
+      "name": "writeJson",
+      "line": 172,
+      "calls": []
+    },
+    {
+      "name": "clearCache",
+      "line": 179,
+      "calls": []
+    },
+    {
+      "name": "softDelete",
+      "line": 187,
+      "calls": []
+    },
+    {
+      "name": "writeInteraction",
+      "line": 223,
+      "calls": []
+    },
+    {
+      "name": "writeAllInteractions",
+      "line": 259,
+      "calls": []
+    },
+    {
+      "name": "writeIndexFile",
+      "line": 310,
+      "calls": []
+    },
+    {
+      "name": "getDirectoryInfo",
+      "line": 344,
+      "calls": []
+    },
+    {
+      "name": "listInteractionFiles",
+      "line": 362,
+      "calls": []
+    },
+    {
+      "name": "loadInteractionFiles",
+      "line": 377,
+      "calls": []
+    },
+    {
+      "name": "loadAllInteractions",
+      "line": 397,
+      "calls": []
+    },
+    {
+      "name": "loadAllContent",
+      "line": 433,
+      "calls": []
+    },
+    {
+      "name": "loadGateways",
+      "line": 468,
+      "calls": []
+    },
+    {
+      "name": "saveGateways",
+      "line": 481,
+      "calls": []
+    },
+    {
+      "name": "processGatewaysAfterWatermark",
+      "line": 490,
+      "calls": []
+    },
+    {
+      "name": "loadShallowPageIndex",
+      "line": 555,
+      "calls": []
+    },
+    {
+      "name": "loadAllNotes",
+      "line": 568,
+      "calls": []
+    },
+    {
+      "name": "captureSnapshot",
+      "line": 599,
+      "calls": []
+    },
+    {
+      "name": "listSnapshots",
+      "line": 618,
+      "calls": []
+    },
+    {
+      "name": "getSnapshotBlobUrl",
+      "line": 657,
+      "calls": []
+    },
+    {
+      "name": "deleteSnapshot",
+      "line": 671,
+      "calls": []
+    },
+    {
+      "name": "loadPageNotes",
+      "line": 683,
+      "calls": []
+    },
+    {
+      "name": "pageExists",
+      "line": 709,
+      "calls": []
+    },
+    {
+      "name": "checkMultiDayVisits",
+      "line": 720,
+      "calls": []
+    },
+    {
+      "name": "loadPage",
+      "line": 756,
+      "calls": []
+    },
+    {
+      "name": "loadPageBatch",
+      "line": 766,
+      "calls": []
+    },
+    {
+      "name": "savePage",
+      "line": 778,
+      "calls": []
+    },
+    {
+      "name": "loadNote",
+      "line": 784,
+      "calls": []
+    },
+    {
+      "name": "saveNote",
+      "line": 794,
+      "calls": []
+    },
+    {
+      "name": "loadInteractionByUrl",
+      "line": 800,
+      "calls": []
+    },
+    {
+      "name": "#resolveListPath",
+      "line": 831,
+      "calls": []
+    },
+    {
+      "name": "loadListPinsById",
+      "line": 843,
+      "calls": []
+    },
+    {
+      "name": "loadListPinsEntity",
+      "line": 862,
+      "calls": []
+    },
+    {
+      "name": "loadListPins",
+      "line": 879,
+      "calls": []
+    },
+    {
+      "name": "saveListPinsById",
+      "line": 922,
+      "calls": []
+    },
+    {
+      "name": "saveListMeta",
+      "line": 943,
+      "calls": []
+    },
+    {
+      "name": "deleteListFile",
+      "line": 962,
+      "calls": []
+    },
+    {
+      "name": "loadAllListMetadata",
+      "line": 977,
+      "calls": []
+    },
+    {
+      "name": "saveListPins",
+      "line": 1007,
+      "calls": []
+    },
+    {
+      "name": "loadRecycleBin",
+      "line": 1050,
+      "calls": []
+    },
+    {
+      "name": "loadRecycleBinEntity",
+      "line": 1067,
+      "calls": []
+    },
+    {
+      "name": "saveRecycleBin",
+      "line": 1081,
+      "calls": []
+    },
+    {
+      "name": "loadPermanentDeletes",
+      "line": 1091,
+      "calls": []
+    },
+    {
+      "name": "loadPermanentDeletesEntity",
+      "line": 1109,
+      "calls": []
+    },
+    {
+      "name": "savePermanentDeletes",
+      "line": 1123,
+      "calls": []
+    },
+    {
+      "name": "loadSettings",
+      "line": 1132,
+      "calls": []
+    },
+    {
+      "name": "saveSettings",
+      "line": 1146,
+      "calls": []
+    }
+  ],
+  "related-scoring.js": [
+    {
+      "name": "titleWords",
+      "line": 14,
+      "calls": []
+    },
+    {
+      "name": "jaccardSimilarity",
+      "line": 19,
+      "calls": []
+    },
+    {
+      "name": "scoreTemporalProximity",
+      "line": 27,
+      "calls": []
+    },
+    {
+      "name": "prepareSeed",
+      "line": 39,
+      "calls": [
+        "titleWords"
+      ]
+    },
+    {
+      "name": "scorePair",
+      "line": 50,
+      "calls": [
+        "jaccardSimilarity",
+        "scoreTemporalProximity",
+        "titleWords"
+      ]
+    },
+    {
+      "name": "findRelatedPages",
+      "line": 66,
+      "calls": [
+        "prepareSeed",
+        "scorePair"
+      ]
+    }
+  ],
+  "search-helpers.js": [
+    {
+      "name": "extractInteractionBuffer",
+      "line": 8,
+      "calls": []
+    },
+    {
+      "name": "mergeBufferIntoInteractions",
+      "line": 18,
+      "calls": []
+    },
+    {
+      "name": "getBufferContentMap",
+      "line": 44,
+      "calls": []
+    },
+    {
+      "name": "buildInteractionsForEngine",
+      "line": 56,
+      "calls": []
+    }
+  ],
+  "time-chart.js": [
+    {
+      "name": "aggregateVisitsByDay",
+      "line": 3,
+      "calls": []
+    },
+    {
+      "name": "renderTimeChartInto",
+      "line": 15,
+      "calls": [
+        "aggregateVisitsByDay"
+      ]
+    },
+    {
+      "name": "renderTimeChart",
+      "line": 85,
+      "calls": [
+        "bindChartBarClick",
+        "renderTimeChartInto"
+      ]
+    },
+    {
+      "name": "bindChartTooltip",
+      "line": 96,
+      "calls": []
+    },
+    {
+      "name": "syncChartHighlights",
+      "line": 122,
+      "calls": []
+    },
+    {
+      "name": "applyDateFilter",
+      "line": 143,
+      "calls": []
+    },
+    {
+      "name": "bindChartBarClick",
+      "line": 173,
+      "calls": [
+        "applyDateFilter",
+        "syncChartHighlights"
+      ]
+    },
+    {
+      "name": "initCharts",
+      "line": 198,
+      "calls": [
+        "bindChartTooltip"
+      ]
+    }
+  ],
+  "savepage-bridge.js": [
+    {
+      "name": "captureSavePage",
+      "line": 6,
+      "calls": []
+    },
+    {
+      "name": "loadSavepageResource",
+      "line": 39,
+      "calls": []
+    },
+    {
+      "name": "initSavepageBridge",
+      "line": 93,
+      "calls": [
+        "loadSavepageResource"
+      ]
+    }
+  ],
+  "highlight-helpers.js": [
+    {
+      "name": "wrapRangeWithMark",
+      "line": 12,
+      "calls": [
+        "unwrapMark"
+      ]
+    },
+    {
+      "name": "unwrapMark",
+      "line": 44,
+      "calls": []
+    },
+    {
+      "name": "collectTextNodes",
+      "line": 56,
+      "calls": []
+    },
+    {
+      "name": "findTextRange",
+      "line": 90,
+      "calls": [
+        "collectTextNodes [content.js]"
+      ]
+    },
+    {
+      "name": "highlightTextInPage",
+      "line": 133,
+      "calls": [
+        "findTextRange [content.js]",
+        "wrapRangeWithMark [content.js]"
+      ]
+    },
+    {
+      "name": "isBlockElement",
+      "line": 152,
+      "calls": []
+    },
+    {
+      "name": "getClosestBlock",
+      "line": 160,
+      "calls": [
+        "isBlockElement [content.js]"
+      ]
+    },
+    {
+      "name": "isCrossBlock",
+      "line": 171,
+      "calls": [
+        "getClosestBlock [content.js]"
+      ]
+    },
+    {
+      "name": "splitSelectionByBlock",
+      "line": 183,
+      "calls": [
+        "getClosestBlock [content.js]"
+      ]
+    }
+  ]
+}

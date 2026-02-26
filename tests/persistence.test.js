@@ -575,6 +575,20 @@ describe('Persistence round-trip', () => {
       expect(pins).toEqual([]);
     });
 
+    it('loadListPinsEntity returns null for non-existent list', async () => {
+      const entity = await fs.loadListPinsEntity('nonexistent');
+      expect(entity).toBeNull();
+    });
+
+    it('loadListPinsEntity returns entity with slug for existing list', async () => {
+      await fs.saveListMeta('c1', { slug: 'c1', name: 'Test', qbTrees: [] });
+      await fs.saveListPinsById('c1', [pinFromUrl('https://a.com', 100)]);
+      const entity = await fs.loadListPinsEntity('c1');
+      expect(entity).not.toBeNull();
+      expect(entity.slug).toBe('c1');
+      expect(entity.pins).toEqual([pinFromUrl('https://a.com', 100)]);
+    });
+
     it('loadListPinsById round-trips with saveListPinsById', async () => {
       const pins = [pinFromUrl('https://solo.com', 999)];
       await fs.saveListPinsById('solo', pins);

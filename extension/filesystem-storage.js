@@ -868,9 +868,9 @@ class FileSystemStorage {
         return data;
       }
       // Legacy bare array — wrap with timestamp 0
-      return { timestamp: 0, pins: Array.isArray(data) ? data : [] };
+      return { timestamp: 0, slug: listId, pins: Array.isArray(data) ? data : [] };
     } catch {
-      return { timestamp: 0, pins: [] };
+      return null;
     }
   }
 

@@ -432,13 +432,7 @@ async function createListAndPin(name) {
   const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
   await saveSettingsValue('listOrder', [...order, 'list:' + listId]);
 
-  const slug = generateSlugFromUrl(currentUrl);
-  const pinId = `page:${slug}`;
-  await chrome.runtime.sendMessage({
-    action: 'saveListPinsById',
-    listId,
-    pins: [{ id: pinId, pinnedAt: Date.now() }]
-  });
+  await toggleListPin(listId);
 
   console.log('[popup] Created list and pinned page:', name);
 }

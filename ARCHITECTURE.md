@@ -79,7 +79,7 @@ The **only gateway** from shallow → checkpointed is `ensureCheckpointIfMissing
 2. **Referrer present** — cross-site navigation (parent page is also checkpointed)
 3. **Note creation** — parent page must exist for note's `parents` wiring
 
-Each creates a `page_checkpoint` log entry, which `applyTo()` in replay.js handles as the only action that can create a page entity from null.
+Each creates a `page_checkpoint` log entry, which `effectOf()` in replay.js handles as the only action that can create a page entity from null.
 
 ### How Shallow Pages Appear
 
@@ -100,8 +100,8 @@ They do NOT exist in:
 | `getPageInfo` (popup) | Returns `interaction` with entity data | Returns `interaction: null`; popup uses `tab.title` fallback; background falls back to `shallowPageIndex` for title |
 | `enrichFromEntityStorage` (options.js) | Overwrites display title with entity title | Skips — keeps JSONL title |
 | `loadPageBatch` (background) | Returns entity from cache/filesystem | Absent from result |
-| `applyTo` replay (page action) | Updates existing entity | Returns null (no-op); updates `shallowPageIndex` with parents/title |
-| `applyTo` replay (page_checkpoint) | Updates watermark; absorbs shallow-page index data (parents, lists) | Creates entity from `defaultEntity()` |
+| `effectOf` replay (page action) | Updates existing entity | Returns null (no-op); updates `shallowPageIndex` with parents/title |
+| `effectOf` replay (page_checkpoint) | Updates watermark; absorbs shallow-page index data (parents, lists) into page, upgrades `shallow:` list pins to `page:` | Creates entity from `defaultEntity()` |
 | `getPageRelations` (background) | Reads `parentIds`/`childIds`, resolves typed refs | Falls back to `shallowPageIndex.index[url]` for parents |
 | `buildExploreAutoBlocks` (options.js) | Resolves `page:<slug>` refs via `loadPageBatch` | Resolves `shallow:<url>` refs via `shallowPageIndex` for URL+title |
 | Pin display (options.js) | `resolvePageRef` → page entity from session cache | `resolvePageRef` → metadata from `shallowPageIndex`, or null if unreferenced |
@@ -119,7 +119,7 @@ All inter-entity references use typed keys with a prefix indicating the entity k
 
 Used in: `page.parentIds`, `page.childIds`, `note.parentIds`, `note.childIds`, list pin `id` fields, log entry `referrerId`/`ids`/`parentIds`/`childIds` fields.
 
-**Resolution**: `page:<slug>` refs are resolved to URLs via `loadPageBatch`. `shallow:<url>` refs have the URL embedded (extract via `ref.slice(8)`). When a shallow page becomes checkpointed, replay.js `applyTo` post-loop resolves `shallow:<url>` → `page:<slug>` in all entities within scope.
+**Resolution**: `page:<slug>` refs are resolved to URLs via `loadPageBatch`. `shallow:<url>` refs have the URL embedded (extract via `ref.slice(8)`). When a shallow page becomes checkpointed, `effectOf`'s page_checkpoint branch resolves `shallow:<url>` → `page:<slug>` in parentIds/childIds and upgrades `shallow:` pin IDs to `page:` in affected list entities.
 
 ### Shallow-Page Index
 
@@ -142,8 +142,25 @@ Tracks metadata for non-checkpointed pages that are referenced by checkpointed e
 ```
 
 - **Populated by**: `applyLogToShallowPage` in replay.js — `page` entries (parents, title), `list` entries with `shallow:` ids (list membership)
-- **Pruned**: when a shallow page becomes checkpointed, its entry is removed and data absorbed into the new page entity
+- **Pruned**: when a shallow page becomes checkpointed, its entry is removed, data (parents, lists) absorbed into the new page entity, and `shallow:` pin IDs in affected lists upgraded to `page:<slug>`
 - **Consumers**: `getPageRelations` (fallback for non-checkpointed children/parents), `buildExploreAutoBlocks` (resolve shallow refs to URLs+titles), `getPageInfo` (title fallback)
+
+### Pin ID Resolution
+
+When a page is pinned to a list, the pin ID must be authoritative: `page:<slug>` if checkpointed, `shallow:<url>` if not. A race condition exists between page capture (which creates the checkpoint) and the pin operation (which references the URL) — the caller may compute `shallow:<url>` for a page that was checkpointed in between.
+
+**Resolution chain** (background.js `resolvePageId(url)`):
+```
+getCachedEntity('page:' + slug)     ← session cache hit (fast)
+  ↓ miss
+requestOffscreen({ pageExists })    ← filesystem check (definitive)
+  ↓ exists? → 'page:<slug>'
+  ↓ not?   → 'shallow:<url>'
+```
+
+**Write-time re-validation** (`resolveShallowIds(ids)`): Every `shallow:<url>` ID in a list pin operation is re-checked against cache+disk before writing to the log. This ensures the log always contains the authoritative pin ID, regardless of what the caller computed.
+
+Applied in: `toggleListPin` handler (re-checks any shallow ID), `addListPins` handler (re-checks all IDs via `resolveShallowIds`).
 
 ### Design Rationale
 

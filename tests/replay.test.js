@@ -8,8 +8,6 @@ import { describe, it, expect } from 'vitest';
 import {
   getAffectedSlugs,
   getAffectedKeys,
-  scopeOf,
-  applyTo,
   effectOf,
   defaultEntity,
   applyLogToSettings,
@@ -705,11 +703,13 @@ describe('applyLogToPage — likes', () => {
     expect(result).toBe(page);
   });
 
-  it('applyTo integration: likes entry updates page attention', () => {
+  it('likes entry updates page attention via effectOf', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const entry = { timestamp: 200, action: 'page', url: 'https://a.com', likes: 1 };
     const page = { slug, timestamp: 100, parentIds: [], childIds: [] };
-    const result = applyTo(entry, { [`page:${slug}`]: page });
+    const result = await effectOf(entry, async (key) =>
+      key === `page:${slug}` ? page : null
+    );
     const att = JSON.parse(result[`page:${slug}`].attention);
     expect(att.likes).toBe(1);
   });
@@ -890,76 +890,81 @@ describe('sequence replay', () => {
 });
 
 // ---------------------------------------------------------------------------
-// scopeOf
+// effectOf scope (verifies which entity keys are affected by each entry type)
 // ---------------------------------------------------------------------------
 
-describe('scopeOf', () => {
-  it('returns settings key for set entries', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'set', key: 'workspace', value: {} });
-    expect(Object.keys(scope)).toEqual(['settings']);
+describe('effectOf scope', () => {
+  const nullLoad = async () => null;
+
+  it('affects settings key for set entries', async () => {
+    const result = await effectOf({ timestamp: 100, action: 'set', key: 'workspace', value: {} }, nullLoad);
+    expect(Object.keys(result)).toEqual(['settings']);
   });
 
-  it('returns list key for list entries (bare id)', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['page:a-slug'] });
-    expect(Object.keys(scope)).toEqual(['list:c1']);
+  it('affects list key for list entries (bare id)', async () => {
+    const result = await effectOf({ timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['page:a-slug'] }, nullLoad);
+    expect(Object.keys(result)).toEqual(['list:c1']);
   });
 
-  it('returns list + shallow_page keys for list entries with shallow ids', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['shallow:https://a.com'] });
-    const keys = Object.keys(scope).sort();
-    expect(keys).toEqual(['list:c1', 'list:system/shallow-page'].sort());
+  it('affects list + shallow_page keys for list entries with shallow ids', async () => {
+    const result = await effectOf({ timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['shallow:https://a.com'] }, nullLoad);
+    expect(Object.keys(result).sort()).toEqual(['list:c1', 'list:system/shallow-page'].sort());
   });
 
-  it('returns list key for list_meta entries', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'list_meta', id: 'c1', name: 'Test' });
-    expect(Object.keys(scope)).toEqual(['list:c1']);
+  it('affects list key for list_meta entries', async () => {
+    const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'c1', name: 'Test' }, nullLoad);
+    expect(Object.keys(result)).toEqual(['list:c1']);
   });
 
-  it('returns list key for del_list entries', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'del_list', id: 'c1' });
-    expect(Object.keys(scope)).toEqual(['list:c1']);
+  it('affects list key for del_list entries', async () => {
+    const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, nullLoad);
+    expect(Object.keys(result)).toEqual(['list:c1']);
   });
 
-  it('returns page + shallow_page keys for page entry with title but no referrerId', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' });
+  it('affects page + shallow_page keys for page entry with title', async () => {
     const slug = generateSlugFromUrl('https://a.com');
-    expect(Object.keys(scope)).toEqual([`page:${slug}`, 'list:system/shallow-page']);
+    const result = await effectOf({ timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' }, nullLoad);
+    expect(Object.keys(result)).toEqual([`page:${slug}`, 'list:system/shallow-page']);
   });
 
-  it('returns page key only for page entry without title or referrerId', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'page', url: 'https://a.com', scrollDepth: 50 });
+  it('affects page key only for page entry without title or referrerId', async () => {
     const slug = generateSlugFromUrl('https://a.com');
-    expect(Object.keys(scope)).toEqual([`page:${slug}`]);
+    const result = await effectOf({ timestamp: 100, action: 'page', url: 'https://a.com', scrollDepth: 50 }, nullLoad);
+    expect(Object.keys(result)).toEqual([`page:${slug}`]);
   });
 
-  it('returns page + shallow_page keys for page with referrerId', () => {
+  it('affects page + parent + shallow_page keys for page with referrerId', async () => {
     const parentSlug = generateSlugFromUrl('https://parent.com');
-    const scope = scopeOf({ timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrerId: `page:${parentSlug}` });
     const childSlug = generateSlugFromUrl('https://child.com');
-    const keys = Object.keys(scope).sort();
-    expect(keys).toEqual([`list:system/shallow-page`, `page:${childSlug}`, `page:${parentSlug}`].sort());
+    const result = await effectOf(
+      { timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrerId: `page:${parentSlug}` },
+      nullLoad,
+    );
+    expect(Object.keys(result).sort()).toEqual([`list:system/shallow-page`, `page:${childSlug}`, `page:${parentSlug}`].sort());
   });
 
-  it('returns page + shallow_page keys for page_checkpoint entry', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'page_checkpoint', url: 'https://a.com', title: 'A' });
+  it('affects page + shallow_page keys for page_checkpoint entry', async () => {
     const slug = generateSlugFromUrl('https://a.com');
-    expect(Object.keys(scope).sort()).toEqual([`list:system/shallow-page`, `page:${slug}`].sort());
+    const result = await effectOf({ timestamp: 100, action: 'page_checkpoint', url: 'https://a.com', title: 'A' }, nullLoad);
+    expect(Object.keys(result).sort()).toEqual([`list:system/shallow-page`, `page:${slug}`].sort());
   });
 
-  it('returns note + parent keys for note entry', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'note', slug: 'n1', excerpt: 'text', parentIds: ['page:p1'] });
-    const keys = Object.keys(scope).sort();
-    expect(keys).toEqual(['note:n1', 'page:p1'].sort());
+  it('affects note + parent keys for note entry', async () => {
+    const result = await effectOf(
+      { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'text', parentIds: ['page:p1'] },
+      nullLoad,
+    );
+    expect(Object.keys(result).sort()).toEqual(['note:n1', 'page:p1'].sort());
   });
 
-  it('returns recycle-bin key', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'add', keys: ['page:a'] });
-    expect(Object.keys(scope)).toEqual(['list:system/recycle-bin']);
+  it('affects recycle-bin key', async () => {
+    const result = await effectOf({ timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'add', keys: ['page:a'] }, nullLoad);
+    expect(Object.keys(result)).toEqual(['list:system/recycle-bin']);
   });
 
-  it('returns permanent-deletes key', () => {
-    const scope = scopeOf({ timestamp: 100, action: 'list', id: 'system/permanent-deletes', op: 'add', keys: ['page:a'] });
-    expect(Object.keys(scope)).toEqual(['list:system/permanent-deletes']);
+  it('affects permanent-deletes key', async () => {
+    const result = await effectOf({ timestamp: 100, action: 'list', id: 'system/permanent-deletes', op: 'add', keys: ['page:a'] }, nullLoad);
+    expect(Object.keys(result)).toEqual(['list:system/permanent-deletes']);
   });
 });
 
@@ -1005,138 +1010,135 @@ describe('defaultEntity', () => {
 });
 
 // ---------------------------------------------------------------------------
-// applyTo
+// effectOf apply (verifies entity mutations for each entry type)
 // ---------------------------------------------------------------------------
 
-describe('applyTo', () => {
-  it('applies set entry to settings', () => {
+describe('effectOf apply', () => {
+  it('applies set entry to settings', async () => {
     const entry = { timestamp: 100, action: 'set', key: 'workspace', value: { mode: 'private' } };
-    const scope = { settings: { timestamp: 0 } };
-    const result = applyTo(entry, scope);
+    const result = await effectOf(entry, async (key) =>
+      key === 'settings' ? { timestamp: 0 } : null
+    );
     expect(result.settings.workspace).toEqual({ mode: 'private' });
     expect(result.settings.timestamp).toBe(100);
   });
 
-  it('creates settings from null on first set', () => {
+  it('creates settings from null on first set', async () => {
     const entry = { timestamp: 100, action: 'set', key: 'workspace', value: { mode: 'private' } };
-    const scope = { settings: null };
-    const result = applyTo(entry, scope);
+    const result = await effectOf(entry, async () => null);
     expect(result.settings.workspace).toEqual({ mode: 'private' });
     expect(result.settings.timestamp).toBe(100);
   });
 
-  it('applies page to page entity', () => {
+  it('applies page to page entity', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
-    const scope = { [`page:${slug}`]: { slug, timestamp: 0, parentIds: [], childIds: [] } };
-    const result = applyTo(entry, scope);
+    const result = await effectOf(entry, async (key) =>
+      key === `page:${slug}` ? { slug, timestamp: 0, parentIds: [], childIds: [] } : null
+    );
     expect(result[`page:${slug}`].url).toBe('https://a.com');
     expect(result[`page:${slug}`].timestamp).toBe(100);
   });
 
-  it('only page_checkpoint can create page from null', () => {
+  it('only page_checkpoint can create page from null', async () => {
     const slug = generateSlugFromUrl('https://a.com');
-    const page = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
-    const result = applyTo(page, { [`page:${slug}`]: null });
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
+    const result = await effectOf(entry, async () => null);
     expect(result[`page:${slug}`]).toBeNull();
   });
 
-  it('page_checkpoint creates page from null', () => {
+  it('page_checkpoint creates page from null', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const entry = { timestamp: 100, action: 'page_checkpoint', url: 'https://a.com', title: 'A' };
-    const result = applyTo(entry, { [`page:${slug}`]: null });
+    const result = await effectOf(entry, async () => null);
     expect(result[`page:${slug}`]).not.toBeNull();
     expect(result[`page:${slug}`].url).toBe('https://a.com');
   });
 
-  it('note action creates note from null', () => {
+  it('note action creates note from null', async () => {
     const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parentIds: ['page:p1'] };
-    const scope = { 'note:n1': null, 'page:p1': { slug: 'p1', timestamp: 50, parentIds: [], childIds: [] } };
-    const result = applyTo(entry, scope);
+    const store = { 'page:p1': { slug: 'p1', timestamp: 50, parentIds: [], childIds: [] } };
+    const result = await effectOf(entry, async (key) => store[key] ?? null);
     expect(result['note:n1']).not.toBeNull();
     expect(result['note:n1'].excerpt).toBe('hello');
-    // Cross-entity: note key added to parent's childIds
     expect(result['page:p1'].childIds).toContain('note:n1');
   });
 
-  it('note action leaves parent page null when parent has no checkpoint', () => {
+  it('note action leaves parent page null when parent has no checkpoint', async () => {
     const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parentIds: ['page:p1'] };
-    const scope = { 'note:n1': null, 'page:p1': null };
-    const result = applyTo(entry, scope);
+    const result = await effectOf(entry, async () => null);
     expect(result['note:n1']).not.toBeNull();
-    // Parent stays null — orchestration must create page_checkpoint before note
     expect(result['page:p1']).toBeNull();
   });
 
-  it('applies page with referrerId to both child and parent pages', () => {
+  it('applies page with referrerId to both child and parent pages', async () => {
     const childSlug = generateSlugFromUrl('https://child.com');
     const parentSlug = generateSlugFromUrl('https://parent.com');
     const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrerId: `page:${parentSlug}` };
-    const scope = {
+    const store = {
       [`page:${childSlug}`]: { slug: childSlug, timestamp: 0, parentIds: [], childIds: [] },
       [`page:${parentSlug}`]: { slug: parentSlug, timestamp: 50, parentIds: [], childIds: [] },
       'list:system/shallow-page': { timestamp: 0, index: {} },
     };
-    const result = applyTo(entry, scope);
-    // Child gets visit data + parent ref
+    const result = await effectOf(entry, async (key) => store[key] ?? null);
     expect(result[`page:${childSlug}`].url).toBe('https://child.com');
     expect(result[`page:${childSlug}`].parentIds).toContain(`page:${parentSlug}`);
-    // Parent gets child ref (resolved to page:slug since child exists in scope)
     expect(result[`page:${parentSlug}`].childIds).toContain(`page:${childSlug}`);
-    // Shallow page index pruned (child page exists in scope)
     expect(result['list:system/shallow-page'].index['https://child.com']).toBeUndefined();
   });
 
-  it('skips parent page update when parent is null (no checkpoint)', () => {
+  it('skips parent page update when parent is null (no checkpoint)', async () => {
     const childSlug = generateSlugFromUrl('https://child.com');
     const parentSlug = generateSlugFromUrl('https://parent.com');
     const entry = { timestamp: 100, action: 'page', url: 'https://child.com', title: 'Child', referrerId: `page:${parentSlug}` };
-    const scope = {
+    const store = {
       [`page:${childSlug}`]: { slug: childSlug, timestamp: 0, parentIds: [], childIds: [] },
-      [`page:${parentSlug}`]: null,
       'list:system/shallow-page': { timestamp: 0, index: {} },
     };
-    const result = applyTo(entry, scope);
+    const result = await effectOf(entry, async (key) => store[key] ?? null);
     expect(result[`page:${parentSlug}`]).toBeNull();
-    // referrerId is kept as-is when parent is null
     expect(result[`page:${childSlug}`].parentIds).toContain(`page:${parentSlug}`);
   });
 
-  it('applies list entry to list entity', () => {
+  it('applies list entry to list entity', async () => {
     const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['page:a-slug'] };
-    const scope = { 'list:c1': { timestamp: 0, slug: 'c1', name: 'Test', qbTrees: [], pins: [] } };
-    const result = applyTo(entry, scope);
+    const result = await effectOf(entry, async (key) =>
+      key === 'list:c1' ? { timestamp: 0, slug: 'c1', name: 'Test', qbTrees: [], pins: [] } : null
+    );
     expect(result['list:c1'].pins).toHaveLength(1);
     expect(result['list:c1'].pins[0].id).toBe('page:a-slug');
   });
 
-  it('creates list entity from null on first list entry', () => {
+  it('creates list entity from null on first list entry', async () => {
     const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['shallow:https://a.com'] };
-    const scope = { 'list:c1': null };
-    const result = applyTo(entry, scope);
+    const result = await effectOf(entry, async () => null);
     expect(result['list:c1'].pins).toHaveLength(1);
     expect(result['list:c1'].slug).toBe('c1');
   });
 
-  it('applies list entry to recycle-bin', () => {
+  it('applies list entry to recycle-bin', async () => {
     const entry = { timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'add', keys: ['page:a'] };
-    const scope = { 'list:system/recycle-bin': { timestamp: 0, items: [] } };
-    const result = applyTo(entry, scope);
+    const result = await effectOf(entry, async (key) =>
+      key === 'list:system/recycle-bin' ? { timestamp: 0, items: [] } : null
+    );
     expect(result['list:system/recycle-bin'].items).toHaveLength(1);
   });
 
-  it('applies list entry to permanent-deletes', () => {
+  it('applies list entry to permanent-deletes', async () => {
     const entry = { timestamp: 100, action: 'list', id: 'system/permanent-deletes', op: 'add', keys: ['page:a'] };
-    const scope = { 'list:system/permanent-deletes': { timestamp: 0, keys: [] } };
-    const result = applyTo(entry, scope);
+    const result = await effectOf(entry, async (key) =>
+      key === 'list:system/permanent-deletes' ? { timestamp: 0, keys: [] } : null
+    );
     expect(result['list:system/permanent-deletes'].keys).toEqual(['page:a']);
   });
 
-  it('applies page attention entry to page', () => {
+  it('applies page attention entry to page', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const entry = { timestamp: 200, action: 'page', url: 'https://a.com', scrollDepth: 0.5, timeOnPage: 3000 };
     const page = { slug, timestamp: 100, parentIds: [], childIds: [] };
-    const result = applyTo(entry, { [`page:${slug}`]: page });
+    const result = await effectOf(entry, async (key) =>
+      key === `page:${slug}` ? page : null
+    );
     const att = JSON.parse(result[`page:${slug}`].attention);
     expect(att.scrollDepth).toBe(0.5);
     expect(att.timeOnPage).toBe(3000);
@@ -1296,6 +1298,40 @@ describe('effectOf', () => {
     expect(result['list:system/recycle-bin'].items).toHaveLength(1);
     expect(result['list:system/recycle-bin'].items[0].key).toBe('note:n1');
   });
+
+  it('creates list from null on list_meta then adds pins (drain simulation)', async () => {
+    // Simulates the offscreen drain for createListAndPin:
+    // list_meta creates the list, then list add appends a pin.
+    // The load closure returns null for non-existent lists — both sessionLoad
+    // and offscreen load must behave identically here.
+    const cache = new Map();
+    const load = async (key) => cache.get(key) ?? null;
+
+    // 1. list_meta creates the list from null
+    const r1 = await effectOf(
+      { timestamp: 50, action: 'list_meta', id: 'my-list', name: 'My List' },
+      load
+    );
+    for (const [k, v] of Object.entries(r1)) cache.set(k, v);
+
+    const listEntity = cache.get('list:my-list');
+    expect(listEntity).not.toBeNull();
+    expect(listEntity.slug).toBe('my-list');
+    expect(listEntity.name).toBe('My List');
+
+    // 2. list add appends a pin
+    const r2 = await effectOf(
+      { timestamp: 100, action: 'list', id: 'my-list', op: 'add', ids: ['page:some-slug'] },
+      load
+    );
+    for (const [k, v] of Object.entries(r2)) cache.set(k, v);
+
+    const updated = cache.get('list:my-list');
+    expect(updated.pins).toHaveLength(1);
+    expect(updated.pins[0].id).toBe('page:some-slug');
+    expect(updated.name).toBe('My List');
+  });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -1379,5 +1415,57 @@ describe('entity storage title resolution', () => {
 
     expect(current.user_title).toBe('My Custom Title');
     expect(current.title).toBe('Auto Title');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// page_checkpoint absorption: upgrade list pins from shallow: to page:
+// ---------------------------------------------------------------------------
+
+describe('page_checkpoint absorption upgrades list pins', () => {
+  const testUrl = 'https://example.com/article';
+  const testSlug = generateSlugFromUrl(testUrl);
+
+  it('effectOf upgrades shallow: pin to page: in affected lists on page_checkpoint', async () => {
+    // Setup: a list has a shallow pin, SPI has the entry with list membership
+    const listEntity = {
+      timestamp: 50, slug: 'my-list', name: 'My List', qbTrees: [],
+      pins: [{ id: `shallow:${testUrl}`, pinnedAt: 50 }],
+    };
+    const spiEntity = {
+      timestamp: 50, index: {
+        [testUrl]: { title: 'Test Article', parents: [], lists: ['list:my-list'] },
+      },
+    };
+
+    const cache = new Map();
+    cache.set('list:my-list', listEntity);
+    cache.set('list:system/shallow-page', spiEntity);
+    // No existing page entity
+    const load = async (key) => cache.get(key) ?? null;
+
+    // page_checkpoint absorbs the shallow page
+    const result = await effectOf(
+      { timestamp: 100, action: 'page_checkpoint', url: testUrl, title: 'Test Article' },
+      load,
+    );
+
+    // Apply results to cache
+    for (const [k, v] of Object.entries(result)) cache.set(k, v);
+
+    // Page entity should be created
+    const page = cache.get(`page:${testSlug}`);
+    expect(page).not.toBeNull();
+    expect(page.title).toBe('Test Article');
+
+    // SPI entry should be removed (absorbed)
+    const spi = cache.get('list:system/shallow-page');
+    expect(spi.index[testUrl]).toBeUndefined();
+
+    // List pin should be upgraded from shallow: to page:
+    const list = cache.get('list:my-list');
+    expect(list.pins).toHaveLength(1);
+    expect(list.pins[0].id).toBe(`page:${testSlug}`);
+    expect(list.pins[0].pinnedAt).toBe(50); // pinnedAt preserved
   });
 });

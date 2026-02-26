@@ -39,65 +39,8 @@ export function getAffectedSlugs(entry) {
 }
 
 // ---------------------------------------------------------------------------
-// Unified replay interface: scopeOf + applyTo
+// Unified replay interface: effectOf
 // ---------------------------------------------------------------------------
-
-/**
- * Return the set of entity keys that an entry affects.
- * Keys use prefixed namespaces:
- *   page:{slug}                — page entity checkpoints
- *   note:{slug}                — note entity
- *   settings                   — global settings
- *   list:{listId}              — user list entity
- *   list:system/recycle-bin    — recycle bin
- *   list:system/permanent-deletes — permanent deletes
- *   list:system/shallow-page    — shallow page index for non-checkpointed pages
- */
-export function scopeOf(entry) {
-  const scope = {};
-
-  if (entry.action === 'set') {
-    scope['settings'] = null;
-    return scope;
-  }
-
-  if (entry.action === 'list' || entry.action === 'list_meta' || entry.action === 'del_list') {
-    if (entry.id) scope[`list:${entry.id}`] = null;
-    // List entries with shallow: ids also affect shallow_page index
-    if (entry.action === 'list' && entry.ids && entry.ids.some(id => id.startsWith(SHALLOW_PREFIX))) {
-      scope['list:system/shallow-page'] = null;
-    }
-    return scope;
-  }
-
-  // Note action: affects the note entity + parent page entities
-  if (entry.action === 'note') {
-    scope[`${NOTE_PREFIX}${entry.slug}`] = null;
-    if (entry.parentIds) {
-      for (const parentKey of entry.parentIds) {
-        scope[parentKey] = null;
-      }
-    }
-    return scope;
-  }
-
-  // Page-affecting entries (page, page_checkpoint)
-  for (const key of getAffectedKeys(entry)) {
-    scope[key] = null;
-  }
-
-  // Page entries with referrer/title also affect shallow_page index
-  if (entry.action === 'page' && (entry.referrerId || entry.title || entry.user_title)) {
-    scope['list:system/shallow-page'] = null;
-  }
-
-  // page_checkpoint may need to absorb shallow_page index entries into new page
-  if (entry.action === 'page_checkpoint') {
-    scope['list:system/shallow-page'] = null;
-  }
-
-  return scope;
-}
 
 /**
  * Default empty entity for a given key. Used when creating entities from null.
@@ -122,158 +65,177 @@ export function defaultEntity(key) {
   return null;
 }
 
+/** Load entity, falling back to defaultEntity for non-page/non-note keys. */
+async function loadOrDefault(key, load) {
+  return (await load(key)) ?? defaultEntity(key);
+}
+
+/** Load a page entity; only page_checkpoint can create from null. */
+async function loadPage(key, load, canCreate) {
+  const entity = await load(key);
+  if (entity) return entity;
+  return canCreate ? defaultEntity(key) : null;
+}
+
 /**
  * Compute the effect of a log entry against a backing store.
  * load(key) → entity | null   — async closure that reads from any backing store
  *                                (session cache, filesystem + round cache, etc.)
  *
- * Returns { key: updatedEntity | null } for every key in scopeOf(entry).
- * Combines scopeOf + load + applyTo into a single call.
+ * Returns { key: updatedEntity | null } for every affected key.
+ * Each action branch loads what it needs and applies immediately.
  */
 export async function effectOf(entry, load) {
-  const scope = scopeOf(entry);
-  for (const key of Object.keys(scope)) {
-    scope[key] = await load(key);
-  }
-  return applyTo(entry, scope);
-}
-
-/**
- * Apply a log entry to a scope of entities.
- * scope: { key: entity | null } — null means entity doesn't exist.
- *
- * Rules for null entities:
- *   - page keys: only page_checkpoint can create from null
- *   - note keys: note action can create from null
- *   - all other keys: create from defaultEntity on first write
- * Returns new scope object with updated entities.
- */
-export function applyTo(entry, scope) {
   const result = {};
-  for (const [key, entity] of Object.entries(scope)) {
-    if (entity === null) {
-      // Page: only page_checkpoint can create from null
-      if (key.startsWith(PAGE_PREFIX)) {
-        if (entry.action === 'page_checkpoint') {
-          result[key] = applyLogToPage(defaultEntity(key), entry);
-        } else {
-          result[key] = null;
-        }
-        continue;
-      }
-      // Note: note action can create from null
-      if (key.startsWith(NOTE_PREFIX)) {
-        if (entry.action === 'note') {
-          result[key] = applyLogToNote(defaultEntity(key), entry);
-        } else {
-          result[key] = null;
-        }
-        continue;
-      }
-      // Non-page/note: create default entity and apply
-      result[key] = applyEntry(key, defaultEntity(key), entry);
-      continue;
-    }
-    result[key] = applyEntry(key, entity, entry);
+
+  // --- settings ---
+  if (entry.action === 'set') {
+    const settings = await loadOrDefault('settings', load);
+    result['settings'] = applyLogToSettings(settings, entry);
+    return result;
   }
 
-  // Cross-entity: when page_checkpoint creates page from null, absorb shallow_page index entries
-  if (entry.action === 'page_checkpoint' && entry.url) {
-    const slug = generateSlugFromUrl(entry.url);
-    const pageKey = `${PAGE_PREFIX}${slug}`;
-    const page = result[pageKey];
-    const spIdx = result['list:system/shallow-page'];
-    if (page && spIdx && spIdx.index && spIdx.index[entry.url]) {
-      const shallowEntry = spIdx.index[entry.url];
-      const parentRefs = shallowEntry.parents || [];
-      if (parentRefs.length > 0) {
-        // Absorb into page.parentIds
-        const updated = { ...page };
-        const parentIds = [...(updated.parentIds || [])];
-        for (const parentRef of parentRefs) {
-          if (!parentIds.includes(parentRef)) parentIds.push(parentRef);
-        }
-        updated.parentIds = parentIds;
-        result[pageKey] = updated;
-      }
-      // Remove absorbed entry from shallow_page index
-      const updatedIdx = { ...spIdx, index: { ...spIdx.index } };
-      delete updatedIdx.index[entry.url];
-      result['list:system/shallow-page'] = updatedIdx;
+  // --- list / list_meta / del_list ---
+  if (entry.action === 'list' || entry.action === 'list_meta' || entry.action === 'del_list') {
+    const listKey = `list:${entry.id}`;
+    const entity = await loadOrDefault(listKey, load);
+    if (listKey === 'list:system/recycle-bin') {
+      result[listKey] = applyLogToRecycleBin(entity, entry);
+    } else if (listKey === 'list:system/permanent-deletes') {
+      result[listKey] = applyLogToDeletes(entity, entry);
+    } else {
+      result[listKey] = applyLogToPins(entity, entry);
     }
+
+    // List entries with shallow: ids also update the shallow-page index
+    if (entry.action === 'list' && entry.ids?.some(id => id.startsWith(SHALLOW_PREFIX))) {
+      const spi = await loadOrDefault('list:system/shallow-page', load);
+      result['list:system/shallow-page'] = applyLogToShallowPage(spi, entry);
+    }
+    return result;
   }
 
-  // Cross-entity: when note action creates/updates a note, add to parent page's childIds
-  if (entry.action === 'note' && entry.slug) {
-    const noteKey = NOTE_PREFIX + entry.slug;
-    if (result[noteKey] && entry.parentIds) {
+  // --- note ---
+  if (entry.action === 'note') {
+    const noteKey = `${NOTE_PREFIX}${entry.slug}`;
+    const note = (await load(noteKey)) ?? defaultEntity(noteKey);
+    result[noteKey] = applyLogToNote(note, entry);
+
+    // Load parent pages and wire childIds
+    if (entry.parentIds) {
       for (const parentKey of entry.parentIds) {
-        if (parentKey.startsWith(PAGE_PREFIX) && result[parentKey]) {
-          const parentPage = result[parentKey];
-          const childIds = [...(parentPage.childIds || [])];
-          if (!childIds.includes(noteKey)) {
-            childIds.push(noteKey);
-            result[parentKey] = { ...parentPage, childIds };
+        const parent = await load(parentKey);
+        if (!parent) { result[parentKey] = null; continue; }
+        const childIds = [...(parent.childIds || [])];
+        if (!childIds.includes(noteKey)) childIds.push(noteKey);
+        result[parentKey] = { ...parent, childIds };
+      }
+    }
+    return result;
+  }
+
+  // --- page ---
+  if (entry.action === 'page') {
+    // Apply to each affected page (entry's own page + referrer parent)
+    for (const pageKey of getAffectedKeys(entry)) {
+      const page = await load(pageKey);
+      if (!page) { result[pageKey] = null; continue; }
+      result[pageKey] = applyLogToPage(page, entry);
+    }
+
+    // Update shallow-page index if entry carries referrer/title info
+    if (entry.referrerId || entry.title || entry.user_title) {
+      const spi = await loadOrDefault('list:system/shallow-page', load);
+      let updated = applyLogToShallowPage(spi, entry);
+      // Prune SPI entries for pages that exist in scope
+      if (updated.index) {
+        let pruned = false;
+        const index = { ...updated.index };
+        for (const url of Object.keys(index)) {
+          const pk = PAGE_PREFIX + generateSlugFromUrl(url);
+          if (result[pk] !== undefined && result[pk] !== null) {
+            delete index[url]; pruned = true;
           }
         }
+        if (pruned) updated = { ...updated, index };
       }
+      result['list:system/shallow-page'] = updated;
     }
+
+    // Resolve shallow:<url> refs in parentIds/childIds to page:<slug>
+    for (const [key, entity] of Object.entries(result)) {
+      if (!key.startsWith(PAGE_PREFIX) || !entity) continue;
+      let cur = entity;
+      for (const field of ['parentIds', 'childIds']) {
+        if (!cur[field]?.length) continue;
+        let changed = false;
+        const resolved = cur[field].map(ref => {
+          if (typeof ref !== 'string' || !ref.startsWith(SHALLOW_PREFIX)) return ref;
+          const refKey = PAGE_PREFIX + generateSlugFromUrl(ref.slice(SHALLOW_PREFIX.length));
+          if (result[refKey] !== undefined && result[refKey] !== null) { changed = true; return refKey; }
+          return ref;
+        });
+        if (changed) cur = { ...cur, [field]: resolved };
+      }
+      if (cur !== entity) result[key] = cur;
+    }
+    return result;
   }
 
-  // Post-loop: prune shallow_page index entries for URLs whose pages exist in scope
-  const spIdx = result['list:system/shallow-page'];
-  if (spIdx && spIdx.index) {
-    let pruned = false;
-    const index = { ...spIdx.index };
-    for (const url of Object.keys(index)) {
-      const pageKey = PAGE_PREFIX + generateSlugFromUrl(url);
-      if (result[pageKey] !== undefined && result[pageKey] !== null) {
-        delete index[url];
-        pruned = true;
-      }
-    }
-    if (pruned) result['list:system/shallow-page'] = { ...spIdx, index };
-  }
+  // --- page_checkpoint ---
+  if (entry.action === 'page_checkpoint') {
+    const slug = generateSlugFromUrl(entry.url);
+    const pageKey = `${PAGE_PREFIX}${slug}`;
+    const page = await loadPage(pageKey, load, true);
+    result[pageKey] = applyLogToPage(page, entry);
 
-  // Post-loop: resolve shallow:<url> references in parentIds/childIds to page:<slug> keys when page exists in scope
-  for (const [key, entity] of Object.entries(result)) {
-    if (!key.startsWith(PAGE_PREFIX) || !entity) continue;
-    let updated = entity;
-    for (const field of ['parentIds', 'childIds']) {
-      if (!updated[field] || updated[field].length === 0) continue;
-      let changed = false;
-      const resolved = updated[field].map(ref => {
-        if (typeof ref !== 'string' || !ref.startsWith(SHALLOW_PREFIX)) return ref;
-        const url = ref.slice(SHALLOW_PREFIX.length);
-        const refSlug = generateSlugFromUrl(url);
-        const refKey = PAGE_PREFIX + refSlug;
-        if (result[refKey] !== undefined && result[refKey] !== null) {
-          changed = true;
-          return refKey;
+    // Absorption: move SPI data into new page entity, upgrade list pins
+    const spi = await loadOrDefault('list:system/shallow-page', load);
+    const shallowEntry = spi.index?.[entry.url];
+    if (shallowEntry) {
+      // Absorb parent refs into page.parentIds
+      const parentRefs = shallowEntry.parents || [];
+      if (parentRefs.length > 0) {
+        const p = result[pageKey];
+        const parentIds = [...(p.parentIds || [])];
+        for (const ref of parentRefs) {
+          if (!parentIds.includes(ref)) parentIds.push(ref);
         }
-        return ref;
-      });
-      if (changed) updated = { ...updated, [field]: resolved };
+        result[pageKey] = { ...p, parentIds };
+      }
+
+      // Remove absorbed URL from SPI
+      const updatedIdx = { ...spi, index: { ...spi.index } };
+      delete updatedIdx.index[entry.url];
+      result['list:system/shallow-page'] = updatedIdx;
+
+      // Upgrade shallow: pins → page: in affected lists
+      const affectedLists = shallowEntry.lists || [];
+      if (affectedLists.length > 0) {
+        const shallowId = `${SHALLOW_PREFIX}${entry.url}`;
+        for (const listKey of affectedLists) {
+          const listEntity = await loadOrDefault(listKey, load);
+          if (!listEntity.pins?.some(p => p.id === shallowId)) continue;
+          result[listKey] = {
+            ...listEntity,
+            pins: listEntity.pins.map(p =>
+              p.id === shallowId ? { ...p, id: pageKey } : p
+            ),
+          };
+        }
+      }
+    } else {
+      result['list:system/shallow-page'] = spi;
     }
-    if (updated !== entity) result[key] = updated;
+
+    return result;
   }
 
   return result;
 }
 
-function applyEntry(key, entity, entry) {
-  if (key.startsWith(PAGE_PREFIX)) return applyLogToPage(entity, entry);
-  if (key.startsWith(NOTE_PREFIX)) return applyLogToNote(entity, entry);
-  if (key === 'settings') return applyLogToSettings(entity, entry);
-  if (key === 'list:system/recycle-bin') return applyLogToRecycleBin(entity, entry);
-  if (key === 'list:system/permanent-deletes') return applyLogToDeletes(entity, entry);
-  if (key === 'list:system/shallow-page') return applyLogToShallowPage(entity, entry);
-  if (key.startsWith('list:')) return applyLogToPins(entity, entry);
-  return entity;
-}
-
 // ---------------------------------------------------------------------------
-// Per-entity apply functions (used by applyTo internally, exported for tests)
+// Per-entity apply functions (used by effectOf internally, exported for tests)
 // ---------------------------------------------------------------------------
 
 /**

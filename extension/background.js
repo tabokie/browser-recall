@@ -713,6 +713,34 @@ chrome.runtime.onStartup.addListener(async () => {
 // ─── Save Page WE Integration ─────────────────────────────────────────
 initSavepageBridge();
 
+// ─── Pin ID Resolution ───────────────────────────────────────────────
+// Resolve a URL to its authoritative pin ID by checking cache then disk.
+// Returns 'page:<slug>' if the page is checkpointed, 'shallow:<url>' otherwise.
+
+async function resolvePageId(url) {
+  const slug = generateSlugFromUrl(url);
+  const key = 'page:' + slug;
+  if (await getCachedEntity(key)) return key;
+  const resp = await requestOffscreen({ action: 'pageExists', slug });
+  return resp?.exists ? key : 'shallow:' + url;
+}
+
+// Ensure each ID in the array is authoritative. Shallow IDs are re-checked
+// against cache and disk because a race between page capture (which creates
+// the checkpoint) and the pin message (which references the URL) can cause
+// callers to send 'shallow:<url>' for a page that was checkpointed in between.
+async function resolveShallowIds(ids) {
+  const resolved = [];
+  for (const id of ids) {
+    if (id.startsWith('shallow:')) {
+      resolved.push(await resolvePageId(id.slice(8)));
+    } else {
+      resolved.push(id);
+    }
+  }
+  return resolved;
+}
+
 // ─── Checkpoint Helper ────────────────────────────────────────────────
 // Ensure a page checkpoint exists in cache or disk; creates one if missing.
 
@@ -1327,12 +1355,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'toggleListPin': {
           const { listId, url, id: requestId } = request;
-          // Derive typed pin id: use provided id, or compute from url
-          let pinId = requestId;
-          if (!pinId && url) {
-            const pinSlug = generateSlugFromUrl(url);
-            const cachedPage = await getCachedEntity('page:' + pinSlug);
-            pinId = cachedPage ? 'page:' + pinSlug : 'shallow:' + url;
+          let pinId = requestId || (url ? await resolvePageId(url) : null);
+          // Re-check shallow IDs — see resolveShallowIds comment.
+          if (pinId?.startsWith('shallow:')) {
+            pinId = await resolvePageId(pinId.slice(8));
           }
           const { lists = [] } = await chrome.storage.session.get(['lists']);
           const list = lists.find(c => c.slug === listId);
@@ -1346,17 +1372,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'saveListPinsById': {
-          const ts = Date.now();
-          await addLog({
-            timestamp: ts, action: 'list',
-            id: request.listId, op: 'clear', ids: []
-          });
-          if (request.pins && request.pins.length > 0) {
+        case 'addListPins': {
+          if (request.ids && request.ids.length > 0) {
+            const ids = await resolveShallowIds(request.ids);
             await addLog({
-              timestamp: ts + 1, action: 'list',
-              id: request.listId, op: 'add',
-              ids: request.pins.map(p => p.id)
+              timestamp: Date.now(), action: 'list',
+              id: request.listId, op: 'add', ids
             });
           }
           sendResponse({ success: true });

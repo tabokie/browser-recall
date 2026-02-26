@@ -341,13 +341,6 @@ async function loadAllListPins() {
   return allListPins;
 }
 
-async function saveListPinsById(listId) {
-  try {
-    await chrome.runtime.sendMessage({ action: 'saveListPinsById', listId, pins: allListPins[listId] || [] });
-  } catch (error) {
-    console.log('Could not save list pins:', error.message);
-  }
-}
 
 function getActivePinListId() {
   if (activeView.type === 'explore') return EXPLORE_LIST_ID;
@@ -437,7 +430,7 @@ async function toggleResultPin(listId, url, title) {
   } else {
     pins.push({ id: pinId, pinnedAt: Date.now() });
   }
-  await saveListPinsById(listId);
+  await chrome.runtime.sendMessage({ action: 'toggleListPin', listId, id: pinId });
 }
 
 // --- Recycle bin ---
@@ -2021,7 +2014,6 @@ async function refreshListPages(listId, pins) {
     }
     if (changed) {
       allListPins[listId] = pins;
-      saveListPinsById(listId);
     }
   } catch (error) {
     console.debug('refreshListPages failed:', error.message);
@@ -2907,16 +2899,16 @@ async function renderLists() {
           const items = data.items || [{ url: data.url, title: data.title }];
           if (!allListPins[lst.slug]) allListPins[lst.slug] = [];
           const pins = allListPins[lst.slug];
-          let added = 0;
+          const newIds = [];
           for (const { url } of items) {
             const pinId = urlToPinId(url);
             if (url && !pins.some(p => p.id === pinId || p.id === 'shallow:' + url)) {
               pins.push({ id: pinId, pinnedAt: Date.now() });
-              added++;
+              newIds.push(pinId);
             }
           }
-          if (added > 0) {
-            await saveListPinsById(lst.slug);
+          if (newIds.length > 0) {
+            await chrome.runtime.sendMessage({ action: 'addListPins', listId: lst.slug, ids: newIds });
             if (activeView.type === 'list' && activeView.id === lst.slug) {
               showList(lst);
             }
@@ -2952,7 +2944,7 @@ async function saveExploreAsList() {
     // Copy explore pins to the new list (if any)
     if (pins.length > 0) {
       await chrome.runtime.sendMessage({
-        action: 'saveListPinsById', listId, pins: JSON.parse(JSON.stringify(pins)),
+        action: 'addListPins', listId, ids: pins.map(p => p.id),
       });
     }
     await renderLists();
@@ -4316,16 +4308,16 @@ async function initialize() {
       if (data.items) {
         if (!allListPins[EXPLORE_LIST_ID]) allListPins[EXPLORE_LIST_ID] = [];
         const pins = allListPins[EXPLORE_LIST_ID];
-        let added = 0;
+        const newIds = [];
         for (const item of data.items) {
           const pinId = urlToPinId(item.url);
           if (!pins.some(p => p.id === pinId || p.id === 'shallow:' + item.url)) {
             pins.push({ id: pinId, pinnedAt: Date.now() });
-            added++;
+            newIds.push(pinId);
           }
         }
-        if (added > 0) {
-          await saveListPinsById(EXPLORE_LIST_ID);
+        if (newIds.length > 0) {
+          await chrome.runtime.sendMessage({ action: 'addListPins', listId: EXPLORE_LIST_ID, ids: newIds });
           updateExploreBadge();
           if (activeView.type === 'explore') showExplore();
         }
