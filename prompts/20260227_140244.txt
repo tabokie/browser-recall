@@ -1,0 +1,7 @@
+- Let's create some TODO items in TODO.md. I will give descriptions, you go investigate with moderate effort and decide if it is really worth doing, if it is, create an item summarizing the context.
+- 1. "Gateways" filter in the search query doesn't work as intended. It is supposed to return only the root domain, but now all child pages are returned.
+- 2. Large text should not go in logs, it can overflow the log buffer. Instead, when the text (highlight, note) exceeds a threshold, we process it like page capture: persist the text in a dedicated file, when persist the log the references this file.
+- 3. Right now we cannot perform highlights on PDF opened in Chrome. The document is embeded so it is impossible to modify its styling using CSS. But I wonder if we can still extract the text without rendering the highlight. Because the usual text selection and copy does work for PDF.
+- 4. Currently we open snapshot in a virtualized url, we should identify that url as the original page, and renders highlights and popup UI as if it is the original page.
+- /finish 
+- n
