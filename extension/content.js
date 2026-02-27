@@ -2,8 +2,9 @@
 console.log('Portal content script loaded on:', window.location.href);
 
 // Private mode: skip all content script functionality
-chrome.storage.session.get(['workspace'], (result) => {
-  if (result.workspace && result.workspace.mode === 'private') {
+chrome.storage.session.get(['settings'], (result) => {
+  const workspace = result.settings?.workspace;
+  if (workspace && workspace.mode === 'private') {
     console.log('[content] Private mode — all tracking disabled');
     return;
   }

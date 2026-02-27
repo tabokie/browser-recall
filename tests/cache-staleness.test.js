@@ -314,6 +314,18 @@ describe('Cache staleness', () => {
       case 'loadPermanentDeletes':
         return { success: true, urls: [] };
 
+      case 'readCacheable':
+        // Simulate background readCacheable: dispatch to known handlers
+        switch (msg.key) {
+          case 'lists': return { value: TEST_LISTS };
+          case 'settings': return { value: TEST_SETTINGS };
+          case 'list:system/recycle-bin': return { value: [] };
+          case 'list:system/permanent-deletes': return { value: [] };
+          case 'list:system/gateways': return { value: [] };
+          case 'list:system/shallow-page': return { value: { timestamp: 0, index: {} } };
+          default: return { value: undefined };
+        }
+
       case 'initializeFilesystem':
         return { success: true };
 
@@ -323,16 +335,13 @@ describe('Cache staleness', () => {
   }
 
   function populateCache() {
-    // Session-cached keys (settings, workspace, lists, etc.)
+    // Session-cached keys (settings as single object, entity keys for system lists)
     sessionData = {
-      settings: TEST_SETTINGS.settings,
+      settings: TEST_SETTINGS,
       lists: TEST_LISTS,
-      listOrder: TEST_SETTINGS.listOrder,
-      urlBlacklist: TEST_SETTINGS.urlBlacklist,
-      titleTrimRules: TEST_SETTINGS.titleTrimRules,
-      recycleBin: [],
-      permanentDeletes: TEST_SETTINGS.permanentDeletes,
-      gatewayOrigins: [],
+      'list:system/recycle-bin': [],
+      'list:system/permanent-deletes': TEST_SETTINGS.permanentDeletes,
+      'list:system/gateways': [],
     };
     // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
     for (const [slug, url] of SLUG_TO_URL) {
@@ -537,14 +546,14 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   it('T4: resetHistory clears gateway cache', async () => {
     populateCache();
-    sessionData.gatewayOrigins = ['https://docs.rs'];
+    sessionData['list:system/gateways'] = ['https://docs.rs'];
 
     await importOptions();
     await tick(100);
 
     // initialize() calls loadGatewayDomains → sets gatewayOriginsLoaded = true
     const initialGwCalls = chrome.storage.session.get.mock.calls
-      .filter(c => c[0] && (c[0].includes?.('gatewayOrigins') || c[0][0] === 'gatewayOrigins'));
+      .filter(c => c[0] && (c[0].includes?.('list:system/gateways') || c[0][0] === 'list:system/gateways'));
     expect(initialGwCalls.length).toBeGreaterThanOrEqual(1);
 
     // Trigger resetHistory via selectDirBtn (selectDirectory → resetHistory → showCategory)
@@ -619,7 +628,7 @@ describe('Cache staleness', () => {
   it('T6: recycle bin count renders with logBuffer mutation entries', async () => {
     populateCache();
     // Add some recycled items to session cache
-    sessionData.recycleBin = [
+    sessionData['list:system/recycle-bin'] = [
       { url: 'https://deleted.com', title: 'Deleted', deletedAt: Date.now() },
       { url: 'https://alsogone.com', title: 'Also Gone', deletedAt: Date.now() },
     ];
@@ -1002,8 +1011,14 @@ describe('Cache staleness', () => {
     const TEST_RECYCLE_BIN = [
       { url: 'https://deleted.com', title: 'Deleted Page', deletedAt: Date.now() },
     ];
-    actionOverrides['getLists'] = () => ({ lists: TEST_LISTS });
-    actionOverrides['getRecycleBin'] = () => ({ items: TEST_RECYCLE_BIN });
+    const origHandler = actionOverrides['readCacheable'];
+    actionOverrides['readCacheable'] = (msg) => {
+      if (msg.key === 'lists') return { value: TEST_LISTS };
+      if (msg.key === 'list:system/recycle-bin') return { value: TEST_RECYCLE_BIN };
+      if (msg.key === 'list:system/permanent-deletes') return { value: [] };
+      // Fall through to default handler for other keys
+      return handleAction({ ...msg, action: 'readCacheable' });
+    };
 
     await importOptions();
     await tick(200);
@@ -1042,8 +1057,8 @@ describe('Cache staleness', () => {
       return { success: true, pins: shallowPins };
     };
 
-    // Put shallowPageIndex in session cache with the title
-    sessionData.shallowPageIndex = {
+    // Put shallow-page entity in session cache with the title
+    sessionData['list:system/shallow-page'] = {
       timestamp: 0,
       index: {
         [SHALLOW_URL]: { parents: [], lists: ['list:col-shallow'], title: SHALLOW_TITLE, user_title: null },

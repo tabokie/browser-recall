@@ -183,9 +183,8 @@ async function sessionLoad(key) {
     return await getCachedEntity(key);
   }
   if (key === 'settings') {
-    const data = await chrome.storage.session.get(SETTINGS_KEYS);
-    // Assemble entity from individual session keys
-    return { timestamp: 0, ...data };
+    const { settings } = await chrome.storage.session.get(['settings']);
+    return settings ? { timestamp: 0, ...settings } : null;
   }
   if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
     const listId = key.slice('list:'.length);
@@ -195,20 +194,23 @@ async function sessionLoad(key) {
     return null;
   }
   if (key === 'list:system/recycle-bin') {
-    const { recycleBin } = await chrome.storage.session.get(['recycleBin']);
-    return recycleBin ? { timestamp: 0, items: recycleBin } : null;
+    const data = await chrome.storage.session.get([key]);
+    const val = data[key];
+    return val ? { timestamp: 0, items: val } : null;
   }
   if (key === 'list:system/permanent-deletes') {
-    const { permanentDeletes } = await chrome.storage.session.get(['permanentDeletes']);
-    return permanentDeletes ? { timestamp: 0, keys: permanentDeletes } : null;
+    const data = await chrome.storage.session.get([key]);
+    const val = data[key];
+    return val ? { timestamp: 0, keys: val } : null;
   }
   if (key === 'list:system/shallow-page') {
-    const { shallowPageIndex } = await chrome.storage.session.get(['shallowPageIndex']);
-    return shallowPageIndex || null;
+    const data = await chrome.storage.session.get([key]);
+    return data[key] || null;
   }
   if (key === 'list:system/gateways') {
-    const { gatewayOrigins } = await chrome.storage.session.get(['gatewayOrigins']);
-    return gatewayOrigins ? { timestamp: 0, origins: gatewayOrigins } : null;
+    const data = await chrome.storage.session.get([key]);
+    const val = data[key];
+    return val ? { timestamp: 0, origins: val } : null;
   }
   return null;
 }
@@ -220,13 +222,12 @@ async function sessionWrite(effects) {
     if (key.startsWith('page:') || key.startsWith('note:')) {
       await setCachedEntity(key, entity);
     } else if (key === 'settings') {
-      const cacheUpdate = {};
-      for (const k of SETTINGS_KEYS) {
-        if (entity[k] !== undefined) cacheUpdate[k] = entity[k];
+      const { settings: existing = {} } = await chrome.storage.session.get(['settings']);
+      const merged = { ...existing };
+      for (const k of SETTINGS_SUBKEYS) {
+        if (entity[k] !== undefined) merged[k] = entity[k];
       }
-      if (Object.keys(cacheUpdate).length > 0) {
-        await chrome.storage.session.set(cacheUpdate);
-      }
+      await chrome.storage.session.set({ settings: merged });
     } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
       const { lists = [] } = await chrome.storage.session.get(['lists']);
       const listId = key.slice('list:'.length);
@@ -240,13 +241,13 @@ async function sessionWrite(effects) {
         await chrome.storage.session.set({ lists });
       }
     } else if (key === 'list:system/recycle-bin') {
-      await chrome.storage.session.set({ recycleBin: entity.items });
+      await chrome.storage.session.set({ [key]: entity.items });
     } else if (key === 'list:system/permanent-deletes') {
-      await chrome.storage.session.set({ permanentDeletes: entity.keys });
+      await chrome.storage.session.set({ [key]: entity.keys });
     } else if (key === 'list:system/shallow-page') {
-      await chrome.storage.session.set({ shallowPageIndex: entity });
+      await chrome.storage.session.set({ [key]: entity });
     } else if (key === 'list:system/gateways') {
-      await chrome.storage.session.set({ gatewayOrigins: entity.origins });
+      await chrome.storage.session.set({ [key]: entity.origins });
     }
   }
 }
@@ -280,9 +281,10 @@ async function appendVisit(interaction) {
 }
 
 // ─── Settings Keys ───────────────────────────────────────────────────
-// Keys from settings.json that are mirrored in session cache.
+// Sub-keys within the settings entity (settings.json on disk).
+// Used by saveSettings handler to enumerate loggable keys.
 
-const SETTINGS_KEYS = ['workspace', 'listOrder', 'urlBlacklist', 'titleTrimRules', 'settings'];
+const SETTINGS_SUBKEYS = ['workspace', 'listOrder', 'urlBlacklist', 'titleTrimRules', 'settings'];
 
 // ─── Session → Filesystem Fallback ───────────────────────────────────
 // readCacheable(key): await hydration, then session cache → readFs fallback.
@@ -296,27 +298,24 @@ async function readCacheable(key) {
 }
 
 async function readFs(key) {
-  if (SETTINGS_KEYS.includes(key)) {
-    // Batch-load all settings keys from settings.json
+  if (key === 'settings') {
+    // Batch-load all settings from settings.json into a single session key
     const resp = await requestOffscreen({ action: 'loadSettings' });
     const settings = resp?.settings || {};
-    const toCache = {};
-    for (const k of SETTINGS_KEYS) {
-      if (settings[k] !== undefined) toCache[k] = settings[k];
-    }
-    if (Object.keys(toCache).length > 0) await chrome.storage.session.set(toCache);
-    return settings[key];
+    await chrome.storage.session.set({ settings });
+    return settings;
   }
   let value;
   switch (key) {
     case 'lists': {
       const metaResp = await requestOffscreen({ action: 'loadAllListMetadata' });
       let allLists = metaResp?.lists || [];
-      const listOrder = (await readCacheable('listOrder')) || [];
+      const settings = (await readCacheable('settings')) || {};
+      const listOrder = settings.listOrder || [];
       if (listOrder.length > 0) {
         const ordered = [];
-        for (const key of listOrder) {
-          const slug = key.startsWith('list:') ? key.slice(5) : key;
+        for (const k of listOrder) {
+          const slug = k.startsWith('list:') ? k.slice(5) : k;
           const c = allLists.find(x => x.slug === slug);
           if (c) ordered.push(c);
         }
@@ -325,19 +324,19 @@ async function readFs(key) {
       }
       value = allLists; break;
     }
-    case 'recycleBin': {
+    case 'list:system/recycle-bin': {
       const r = await requestOffscreen({ action: 'loadRecycleBin' });
       value = r?.items || []; break;
     }
-    case 'permanentDeletes': {
+    case 'list:system/permanent-deletes': {
       const r = await requestOffscreen({ action: 'loadPermanentDeletes' });
       value = r?.keys || []; break;
     }
-    case 'shallowPageIndex': {
+    case 'list:system/shallow-page': {
       const r = await requestOffscreen({ action: 'loadShallowPageIndex' });
       value = r?.success ? { timestamp: r.timestamp || 0, index: r.index || {} } : { timestamp: 0, index: {} }; break;
     }
-    case 'gatewayOrigins': {
+    case 'list:system/gateways': {
       const r = await requestOffscreen({ action: 'loadGateways' });
       value = r?.origins || []; break;
     }
@@ -354,13 +353,7 @@ async function hydrateCache() {
   try {
     const resp = await requestOffscreen({ action: 'loadSettings' });
     if (resp?.success && resp.settings) {
-      const cacheUpdate = {};
-      for (const key of SETTINGS_KEYS) {
-        if (resp.settings[key] !== undefined) cacheUpdate[key] = resp.settings[key];
-      }
-      if (Object.keys(cacheUpdate).length > 0) {
-        await chrome.storage.session.set(cacheUpdate);
-      }
+      await chrome.storage.session.set({ settings: resp.settings });
     }
   } catch (e) { console.warn('Settings load failed:', e.message); }
 
@@ -373,20 +366,20 @@ async function hydrateCache() {
 
   try {
     const rbResp = await requestOffscreen({ action: 'loadRecycleBin' });
-    if (rbResp?.success) await chrome.storage.session.set({ recycleBin: rbResp.items || [] });
+    if (rbResp?.success) await chrome.storage.session.set({ 'list:system/recycle-bin': rbResp.items || [] });
   } catch (e) { console.warn('Recycle bin load failed:', e.message); }
 
   try {
     const pdResp = await requestOffscreen({ action: 'loadPermanentDeletes' });
-    if (pdResp?.success) await chrome.storage.session.set({ permanentDeletes: pdResp.keys || [] });
+    if (pdResp?.success) await chrome.storage.session.set({ 'list:system/permanent-deletes': pdResp.keys || [] });
   } catch (e) { console.warn('Permanent deletes load failed:', e.message); }
 
   try {
     const spResp = await requestOffscreen({ action: 'loadShallowPageIndex' });
-    const shallowPageIndex = spResp?.success
+    const spiValue = spResp?.success
       ? { timestamp: spResp.timestamp || 0, index: spResp.index || {} }
       : { timestamp: 0, index: {} };
-    await chrome.storage.session.set({ shallowPageIndex });
+    await chrome.storage.session.set({ 'list:system/shallow-page': spiValue });
   } catch (e) { console.warn('Shallow page index load failed:', e.message); }
 
   // Phase 1.5: Pre-load page entities referenced by logBuffer from filesystem
@@ -425,7 +418,8 @@ async function hydrateCache() {
   }
 
   // Phase 3: Order lists by listOrder
-  const { lists = [], listOrder = [] } = await chrome.storage.session.get(['lists', 'listOrder']);
+  const { lists = [], settings: settingsObj = {} } = await chrome.storage.session.get(['lists', 'settings']);
+  const listOrder = settingsObj.listOrder || [];
   const ordered = [];
   for (const key of listOrder) {
     const slug = key.startsWith('list:') ? key.slice(5) : key;
@@ -444,7 +438,7 @@ async function hydrateCache() {
 
 async function trimTitle(rawTitle, url) {
   let title = rawTitle || 'Untitled';
-  const titleTrimRules = (await readCacheable('titleTrimRules')) || [];
+  const titleTrimRules = (await readCacheable('settings'))?.titleTrimRules || [];
   for (const rule of titleTrimRules) {
     if (url.startsWith(rule.urlPrefix)) {
       if (rule.action === 'remove_after_pipe') {
@@ -541,7 +535,7 @@ async function updateGatewayRegistry(url) {
     const isRoot = parsed.pathname === '/' || parsed.pathname === '' || parsed.pathname === '/index.html' || parsed.pathname === '/index.htm';
 
     // Check if origin is already a gateway (persisted via log/replay)
-    const gatewayOrigins = (await readCacheable('gatewayOrigins')) || [];
+    const gatewayOrigins = (await readCacheable('list:system/gateways')) || [];
     if (gatewayOrigins.includes(origin)) return;
 
     if (!gatewayDetection[origin]) {
@@ -740,7 +734,7 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
 chrome.commands.onCommand.addListener(async (command) => {
   console.log(`[background] Command received: ${command}`);
 
-  const workspace = await readCacheable('workspace');
+  const workspace = (await readCacheable('settings'))?.workspace;
   if (workspace && workspace.mode === 'private') return;
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -853,14 +847,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           try {
             const url = request.url;
 
-            const workspace = await readCacheable('workspace');
+            const rpSettings = (await readCacheable('settings')) || {};
+            const workspace = rpSettings.workspace;
             if (workspace && workspace.mode === 'private') {
               sendResponse({ success: true });
               return;
             }
 
             // Check blacklist
-            const urlBlacklist = await readCacheable('urlBlacklist');
+            const urlBlacklist = rpSettings.urlBlacklist;
             const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
             if (blacklist.some(prefix => url.startsWith(prefix))) {
               if (request.isInitialLoad) {
@@ -1035,7 +1030,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'getShallowPageIndex': {
-          const spi = await readCacheable('shallowPageIndex');
+          const spi = await readCacheable('list:system/shallow-page');
           sendResponse(spi || { timestamp: 0, index: {} });
           break;
         }
@@ -1096,6 +1091,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
+        case 'readCacheable': {
+          const value = await readCacheable(request.key);
+          sendResponse({ value });
+          break;
+        }
+
         case 'getLists': {
           const lists = await readCacheable('lists') || [];
           sendResponse({ lists });
@@ -1103,19 +1104,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'getRecycleBin': {
-          const items = await readCacheable('recycleBin') || [];
+          const items = await readCacheable('list:system/recycle-bin') || [];
           sendResponse({ items });
           break;
         }
 
         case 'loadPermanentDeletes': {
-          const keys = await readCacheable('permanentDeletes') || [];
+          const keys = await readCacheable('list:system/permanent-deletes') || [];
           sendResponse({ success: true, keys });
           break;
         }
 
         case 'getGatewayDomains': {
-          const origins = await readCacheable('gatewayOrigins') || [];
+          const origins = await readCacheable('list:system/gateways') || [];
           sendResponse({ success: true, origins });
           break;
         }
@@ -1192,7 +1193,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             // Parents: from page.parentIds, fallback to shallowPageIndex for non-checkpointed pages
             let parentRefs = page.parentIds || [];
             if (parentRefs.length === 0) {
-              const spIndex = (await readCacheable('shallowPageIndex')) || { timestamp: 0, index: {} };
+              const spIndex = (await readCacheable('list:system/shallow-page')) || { timestamp: 0, index: {} };
               const shallowEntry = spIndex.index[url];
               if (shallowEntry) parentRefs = shallowEntry.parents || [];
             }
@@ -1218,7 +1219,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const childRefs = (page.childIds || []).filter(c => !c.startsWith('note:'));
             let children = await resolveRefs(childRefs);
             // Also check shallowPageIndex for non-checkpointed children
-            const spForChildren = (await readCacheable('shallowPageIndex')) || { timestamp: 0, index: {} };
+            const spForChildren = (await readCacheable('list:system/shallow-page')) || { timestamp: 0, index: {} };
             for (const [childUrl, shallowEntry] of Object.entries(spForChildren.index)) {
               const parentKey = 'page:' + slug;
               if ((shallowEntry.parents || []).includes(parentKey) && !children.includes(childUrl)) {
@@ -1242,9 +1243,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'saveSettings': {
           const s = request.settings;
           const ts = Date.now();
-          for (const key of SETTINGS_KEYS) {
-            if (s[key] !== undefined) {
-              await addLog({ timestamp: ts, action: 'set', key, value: s[key] });
+          for (const k of SETTINGS_SUBKEYS) {
+            if (s[k] !== undefined) {
+              await addLog({ timestamp: ts, action: 'set', key: k, value: s[k] });
             }
           }
           sendResponse({ success: true });
@@ -1357,7 +1358,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
           }
           sendResponse({ success: true });
-          notifyMutation('permanentDeletes');
+          notifyMutation('list:system/permanent-deletes');
           break;
         }
 
@@ -1371,8 +1372,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'deleteList': {
-          const order = (await readCacheable('listOrder')) || [];
-          const newOrder = order.filter(key => key !== 'list:' + request.listId);
+          const order = (await readCacheable('settings'))?.listOrder || [];
+          const newOrder = order.filter(k => k !== 'list:' + request.listId);
           await addLog({ timestamp: Date.now(), action: 'set', key: 'listOrder', value: newOrder });
           await addLog({ timestamp: Date.now(), action: 'del_list', id: request.listId });
           sendResponse({ success: true });
@@ -1394,7 +1395,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
           }
           sendResponse({ success: true });
-          notifyMutation('recycleBin');
+          notifyMutation('list:system/recycle-bin');
           break;
         }
 

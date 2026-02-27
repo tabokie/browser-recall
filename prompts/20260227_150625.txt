@@ -1,0 +1,40 @@
+- Check the TODO.md, work on the easiest one
+- y
+- Check the TODO.md, work on the easiest one
+- Fix this properly. Unify access to one single function.
+
+// ui.js
+import readSessionCache(key)
+async function readCacheable(key) {
+  r = readSessionCache(key);
+  if (r) { return r; }
+  await chrome.runtime.sendMessage({ action: 'readCacheable', key: key })
+}
+
+// background.js
+async fn readCacheable() {}
+- Fix this properly. Unify access to one single function.
+
+// ui.js
+import readSessionCache(key)
+async function readCacheable(key) {
+  r = readSessionCache(key);
+  if (r) { return r; }
+  await chrome.runtime.sendMessage({ action: 'readCacheable', key: key })
+}
+
+// background.js
+import readSessionCache
+async fn readCacheable(key) {
+  r = readSessionCache(key);
+  if (r) { return r; }
+  await chrome.offscreen.send("readFromFs", key);
+}
+- update CODEBASE_MAP.md and ARCHITECTURE.md
+- There is a misunderstanding. "lists, recycleBin, shallowPageIndex" are not non-entity cacheable keys, they are part of the list entities, and should be referenced using "list:<slug>" or "list:system/<slug>". The this key is the key that UI component uses to call `readCacheable`.
+- Update the code to use correct key format ("list:system/<name>") instead of "listOrder" or "recycleBin". In fact, list order is part of settings, and UI component should use "settings" to get the full setting object.
+- Wait, what do you mean "stays, part of settings batch" for background.js?
+- We should be consistent in referring concepts. I think we should uniformly change to using "settings", and remove all sub-key caching.
+- y
+- /finish 
+- n

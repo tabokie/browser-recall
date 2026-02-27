@@ -1,5 +1,5 @@
 // Popup — current-page dashboard
-import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue } from './utils.js';
+import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, readCacheable, saveSettingsValue } from './utils.js';
 
 let currentSlug = '';
 let currentNotes = [];
@@ -228,12 +228,12 @@ document.getElementById('pageNote').addEventListener('input', (e) => {
 
 // Lists — pin current page to lists
 async function loadLists() {
-  return await loadSettingsValue('lists', []);
+  return await readCacheable('lists') || [];
 }
 
 async function loadListPins() {
   try {
-    const { lists = [] } = await chrome.storage.session.get(['lists']);
+    const lists = await readCacheable('lists') || [];
     const allPins = {};
     for (const list of lists) {
       if (list.pins && list.pins.length > 0) allPins[list.slug] = list.pins;
@@ -429,7 +429,7 @@ async function createListAndPin(name) {
 
   const listId = generateSlugFromTitle(name);
   await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name });
-  const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
+  const order = (await readCacheable('settings'))?.listOrder || [];
   await saveSettingsValue('listOrder', [...order, 'list:' + listId]);
 
   await toggleListPin(listId);
@@ -745,17 +745,18 @@ async function showDashboard(tab) {
   // Skip blacklist if the page has visit history (previously captured and not deleted)
   let hasVisitHistory = false;
   try {
-    const [resp, binData] = await Promise.all([
+    const [resp, recycleBin, permanentDeletes] = await Promise.all([
       chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url }),
-      chrome.storage.session.get(['recycleBin', 'permanentDeletes'])
+      readCacheable('list:system/recycle-bin').then(v => v || []),
+      readCacheable('list:system/permanent-deletes').then(v => v || [])
     ]);
-    const recycled = (binData.recycleBin || []).some(item => item.url === tab.url);
-    const permDeleted = (binData.permanentDeletes || []).includes(tab.url);
+    const recycled = recycleBin.some(item => item.url === tab.url);
+    const permDeleted = permanentDeletes.includes(tab.url);
     hasVisitHistory = !!(resp && resp.interaction) && !recycled && !permDeleted;
   } catch {}
 
   // Check blacklist only for pages with no visit history
-  const { urlBlacklist } = await chrome.storage.session.get(['urlBlacklist']);
+  const urlBlacklist = (await readCacheable('settings'))?.urlBlacklist;
   const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
   if (!hasVisitHistory && blacklist.some(prefix => tab.url.startsWith(prefix))) {
     document.getElementById('loading').style.display = 'none';

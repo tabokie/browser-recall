@@ -1,26 +1,20 @@
 // Shared utility functions
 
-// Load a single key from chrome.storage.session cache, falling back to settings.json via background
-export async function loadSettingsValue(key, defaultValue) {
-  // Fast path: read from chrome.storage.session cache
+// Unified cache read: session cache → background readCacheable fallback.
+// Keys use entity key format: 'settings', 'lists', 'list:system/recycle-bin', etc.
+export async function readCacheable(key) {
   try {
-    const cached = await chrome.storage.session.get(key);
-    if (key in cached) {
-      console.debug(`[I/O] loadSettingsValue('${key}'): cache hit`);
-      return cached[key];
-    }
+    const cached = await chrome.storage.session.get([key]);
+    if (key in cached) return cached[key];
   } catch {}
-  // Slow path: read from settings.json via background→offscreen
-  console.debug(`[I/O] loadSettingsValue('${key}'): cache miss, reading from disk`);
-  try {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadSettings' });
-    if (resp && resp.success && resp.settings && key in resp.settings) {
-      return resp.settings[key];
-    }
-  } catch (error) {
-    console.warn('loadSettingsValue failed, using default:', error.message);
-  }
-  return defaultValue;
+  const resp = await chrome.runtime.sendMessage({ action: 'readCacheable', key });
+  return resp?.value;
+}
+
+// Backward-compat wrapper: returns defaultValue on miss
+export async function loadSettingsValue(key, defaultValue) {
+  const v = await readCacheable(key);
+  return v !== undefined ? v : defaultValue;
 }
 
 // Save a single key to settings.json via background, which updates session cache + buffers write
@@ -92,6 +86,16 @@ export function qbTreesChanged(oldTrees, newTrees) {
 }
 
 // Generate deterministic slug for a note entity
+// Check if a URL is the root page of a gateway origin
+export function isGatewayRoot(url, origins) {
+  try {
+    const urlObj = new URL(url);
+    return origins.includes(urlObj.origin) && (urlObj.pathname === '/' || urlObj.pathname === '');
+  } catch {
+    return false;
+  }
+}
+
 export function generateNoteSlug(timestamp, excerpt) {
   const d = new Date(timestamp);
   const yy = String(d.getFullYear()).slice(2);

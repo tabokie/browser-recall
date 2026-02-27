@@ -331,6 +331,17 @@ describe('Progressive loading', () => {
       case 'saveSettingsKey':
         return { success: true };
 
+      case 'readCacheable':
+        switch (msg.key) {
+          case 'lists': return { value: TEST_LISTS };
+          case 'settings': return { value: TEST_SETTINGS };
+          case 'list:system/recycle-bin': return { value: [] };
+          case 'list:system/permanent-deletes': return { value: TEST_SETTINGS.permanentDeletes };
+          case 'list:system/gateways': return { value: [] };
+          case 'list:system/shallow-page': return { value: { timestamp: 0, index: {} } };
+          default: return { value: undefined };
+        }
+
       default:
         return { success: true };
     }
@@ -339,14 +350,11 @@ describe('Progressive loading', () => {
   // Populate cache with all settings so loadSettingsValue hits fast path
   function populateCache() {
     sessionData = {
-      settings: TEST_SETTINGS.settings,
+      settings: TEST_SETTINGS,
       lists: TEST_LISTS,
-      listOrder: TEST_SETTINGS.listOrder,
-      urlBlacklist: TEST_SETTINGS.urlBlacklist,
-      titleTrimRules: TEST_SETTINGS.titleTrimRules,
-      recycleBin: [],
-      permanentDeletes: TEST_SETTINGS.permanentDeletes,
-      gatewayOrigins: [],
+      'list:system/recycle-bin': [],
+      'list:system/permanent-deletes': TEST_SETTINGS.permanentDeletes,
+      'list:system/gateways': [],
     };
     // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
     for (const [slug, url] of SLUG_TO_URL) {
@@ -448,12 +456,12 @@ describe('Progressive loading', () => {
   it('Test 1: clear cache, pause sidebar lists & interaction list → frames only', async () => {
     clearCache();
 
-    // Pause: sidebar lists loading (loadSettings slow path blocks renderLists
-    // and all other cache-miss settings) AND interaction file listing
-    deferreds['loadSettings'] = createDeferred();
+    // Pause: readCacheable (blocks renderLists + loadSettingsValue)
+    // AND interaction file listing
+    deferreds['readCacheable'] = createDeferred();
     deferreds['listInteractionFiles'] = createDeferred();
 
-    // Import triggers initialize() — it blocks at loadSettingsValue('settings') cache miss
+    // Import triggers initialize() — it blocks at readCacheable('settings') cache miss
     // and at initHistoryFiles() (listInteractionFiles paused)
     const importDone = importOptions();
     await tick(50);
@@ -463,14 +471,14 @@ describe('Progressive loading', () => {
     expect(mainTitle()).toBe('Explore'); // static HTML default
     expect(columnHeaders().length).toBeGreaterThan(0); // column headers in static HTML
 
-    // No list items (loadSettings blocked → renderLists hasn't completed)
+    // No list items (readCacheable blocked → renderLists hasn't completed)
     expect(sidebarLists()).toEqual([]);
 
     // No result rows (initialize stuck before initHistoryFiles → showCategory hasn't run)
     expect(resultRows()).toEqual([]);
 
     // Clean up: resolve deferreds so initialize can finish
-    deferreds['loadSettings'].resolve();
+    deferreds['readCacheable'].resolve();
     deferreds['listInteractionFiles'].resolve();
     await importDone;
     await tick(50);
@@ -480,16 +488,24 @@ describe('Progressive loading', () => {
     // Cache all settings EXCEPT 'lists' — simulates options.js loading
     // before background has finished hydrating list metadata from files.
     sessionData = {
-      settings: TEST_SETTINGS.settings,
-      listOrder: TEST_SETTINGS.listOrder,
-      urlBlacklist: TEST_SETTINGS.urlBlacklist,
-      titleTrimRules: TEST_SETTINGS.titleTrimRules,
-      recycleBin: [],
-      permanentDeletes: TEST_SETTINGS.permanentDeletes,
-      gatewayOrigins: [],
+      settings: TEST_SETTINGS,
+      'list:system/recycle-bin': [],
+      'list:system/permanent-deletes': TEST_SETTINGS.permanentDeletes,
+      'list:system/gateways': [],
       // 'lists' intentionally missing
     };
     localData = { logBuffer: [] };
+
+    // Defer readCacheable for 'lists' — simulate background not yet ready
+    const listsDeferred = createDeferred();
+    const origSendMessage = chrome.runtime.sendMessage;
+    chrome.runtime.sendMessage = vi.fn(async (msg) => {
+      if (msg.action === 'readCacheable' && msg.key === 'lists') {
+        await listsDeferred.promise;
+        return { value: TEST_LISTS };
+      }
+      return origSendMessage(msg);
+    });
 
     const importDone = importOptions();
     await tick(200);
@@ -500,17 +516,12 @@ describe('Progressive loading', () => {
     // Explore view rendered
     expect(mainTitle()).toBe('Explore');
 
-    // Lists still empty (session cache doesn't have 'lists')
+    // Lists still empty (readCacheable for 'lists' is deferred)
     expect(sidebarLists()).toEqual([]);
 
+    // Unblock lists loading
+    listsDeferred.resolve();
     await importDone;
-
-    // Now simulate background hydrateCache completing: populate session cache
-    sessionData.lists = TEST_LISTS;
-
-    // Simulate mutation notification from background that triggers re-render
-    const listener = chrome.runtime.onMessage.addListener.mock.calls[0]?.[0];
-    if (listener) listener({ action: 'mutation', type: 'lists' });
     await tick(100);
 
     expect(sidebarLists()).toContain('col-rust');

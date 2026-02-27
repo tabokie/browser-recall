@@ -24,7 +24,6 @@ Principle: no silent fallbacks. Always get the true information regardless of co
 
 ### MEDIUM — incorrect behavior
 
-- [ ] **options.js:897-904 — `isGatewayOrigin()` matches all child pages, not just root.** The function checks `url.origin ∈ gatewayOriginsCache` but does not verify the pathname is `/`. Result: `gateways` smart filter (used both in `showCategory('gateways')` and `matchSmartFilter`) returns every page from a gateway domain, not just the root. Fix: add `(urlObj.pathname === '/' || urlObj.pathname === '')` guard alongside the origin check.
 - [ ] **options.js:351-356 — `urlToPinId()` always returns `page:<slug>`.** Never checks if the page is actually checkpointed. `toggleResultPin` sends pre-computed `id` to background, bypassing `resolvePageId`. Toggle-off can fail for `shallow:` pins. Fix: remove `urlToPinId`, send only `url` to background, let `resolvePageId` decide.
 - [ ] **background.js:1247-1256 — `getPageRelations` list membership is cache-only.** `listCache:*` only populated when user has viewed that list in options. Unviewed lists silently skipped in the relations view. Should fall through to loading list pins from disk.
 - [ ] **popup.js:234-242 — `loadListPins()` session-only, no disk fallback.** Pre-hydration returns `{}` → all lists shown as unpinned. Should fall back to `chrome.runtime.sendMessage({ action: 'getLists' })`.

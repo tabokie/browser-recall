@@ -3,7 +3,7 @@
 import { FileSystemStorage } from './filesystem-storage.js';
 import init, { Interaction, SearchEngine, searchBatch } from './pkg/portal_extension.js';
 import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine, extractInteractionBuffer } from './search-helpers.js';
-import { generateSlugFromUrl, generateSlugFromTitle, saveSettingsValue, collectQbTrees, qbTreesChanged } from './utils.js';
+import { generateSlugFromUrl, generateSlugFromTitle, saveSettingsValue, readCacheable, collectQbTrees, qbTreesChanged, isGatewayRoot } from './utils.js';
 import { findRelatedPages } from './related-scoring.js';
 import { parseAttention, attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
 import { qbCreatePredicate, qbCreateOperator, qbCreatePlaceholder, qbFindNode, qbCollapseTree, qbFlattenSameOp, qbToTree, qbFlatten } from './qb-tree.js';
@@ -12,18 +12,11 @@ import { VirtualScroller } from './virtual-scroller.js';
 
 const fsStorage = new FileSystemStorage();
 
-// Read settings from session cache → local filesystem (no background relay).
-// Dirty objects are always in session cache, so stale filesystem reads are safe.
+// Read a single settings sub-key with fallback default
 async function loadSettingsValue(key, defaultValue) {
-  try {
-    const cached = await chrome.storage.session.get(key);
-    if (key in cached) return cached[key];
-  } catch {}
-  try {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadSettings' });
-    if (resp?.success && resp.settings && key in resp.settings) return resp.settings[key];
-  } catch {}
-  return defaultValue;
+  const settings = await readCacheable('settings');
+  const v = settings?.[key];
+  return v !== undefined ? v : defaultValue;
 }
 
 // --- State ---
@@ -393,9 +386,9 @@ async function loadPinContext(pins) {
   for (const p of pins) {
     if (p.id?.startsWith('page:')) pagePinSlugs.push(p.id.slice(5));
   }
-  const sessionKeys = [...pagePinSlugs.map(s => 'page:' + s), 'shallowPageIndex'];
+  const sessionKeys = [...pagePinSlugs.map(s => 'page:' + s), 'list:system/shallow-page'];
   const sessionBatch = sessionKeys.length > 0 ? await chrome.storage.session.get(sessionKeys) : {};
-  let spi = sessionBatch.shallowPageIndex;
+  let spi = sessionBatch['list:system/shallow-page'];
   if (!spi) {
     spi = await chrome.runtime.sendMessage({ action: 'getShallowPageIndex' }) || { index: {} };
   }
@@ -440,32 +433,19 @@ async function toggleResultPin(listId, url, title) {
 // Permanent deletes: URLs that are gone forever
 
 async function loadRecycleBin() {
-  const cached = await chrome.storage.session.get(['recycleBin']);
-  if ('recycleBin' in cached) {
-    recycleBin = cached.recycleBin;
-  } else {
-    // Fallback: ask background (awaits hydration, then reads session cache)
-    try {
-      const resp = await chrome.runtime.sendMessage({ action: 'getRecycleBin' });
-      recycleBin = resp?.items || [];
-    } catch { recycleBin = []; }
-  }
-  const pdCached = await chrome.storage.session.get('permanentDeletes');
-  if (pdCached.permanentDeletes) {
-    permanentDeletes = pdCached.permanentDeletes;
-  } else {
-    try {
-      const resp = await chrome.runtime.sendMessage({ action: 'loadPermanentDeletes' });
-      permanentDeletes = resp?.keys || [];
-    } catch { permanentDeletes = []; }
-  }
+  try {
+    recycleBin = (await readCacheable('list:system/recycle-bin')) || [];
+  } catch { recycleBin = []; }
+  try {
+    permanentDeletes = (await readCacheable('list:system/permanent-deletes')) || [];
+  } catch { permanentDeletes = []; }
   return recycleBin;
 }
 
 async function saveRecycleBin() {
   await chrome.runtime.sendMessage({ action: 'saveRecycleBin', items: recycleBin });
   await chrome.runtime.sendMessage({ action: 'savePermanentDeletes', keys: permanentDeletes });
-  await chrome.storage.session.set({ permanentDeletes });
+  await chrome.storage.session.set({ 'list:system/permanent-deletes': permanentDeletes });
   updateRecycleSidebarCount();
 }
 
@@ -882,25 +862,14 @@ function filterByCategory(interactions, category) {
 
 async function loadGatewayDomains() {
   if (gatewayOriginsLoaded) return;
-  const result = await chrome.storage.session.get(['gatewayOrigins']);
-  if ('gatewayOrigins' in result) {
-    gatewayOriginsCache = result.gatewayOrigins;
-  } else {
-    try {
-      const resp = await chrome.runtime.sendMessage({ action: 'getGatewayDomains' });
-      gatewayOriginsCache = resp?.origins || [];
-    } catch { gatewayOriginsCache = []; }
-  }
+  try {
+    gatewayOriginsCache = (await readCacheable('list:system/gateways')) || [];
+  } catch { gatewayOriginsCache = []; }
   gatewayOriginsLoaded = true;
 }
 
 function isGatewayOrigin(url) {
-  try {
-    const origin = new URL(url).origin;
-    return gatewayOriginsCache.includes(origin);
-  } catch {
-    return false;
-  }
+  return isGatewayRoot(url, gatewayOriginsCache);
 }
 
 // Time chart tooltips initialized via initCharts() in initialize()
@@ -2767,15 +2736,7 @@ function updateSidebarActive() {
 
 // --- Lists (pinned searches) ---
 async function loadLists() {
-  // Session cache (populated by background hydrateCache)
-  const cached = await chrome.storage.session.get('lists');
-  if ('lists' in cached) return cached.lists;
-  // Fallback: ask background (awaits hydration, then reads session cache)
-  try {
-    const resp = await chrome.runtime.sendMessage({ action: 'getLists' });
-    if (resp?.lists) return resp.lists;
-  } catch {}
-  return [];
+  return (await readCacheable('lists')) || [];
 }
 
 // saveLists removed — use saveListMeta/deleteList messages instead
@@ -2938,7 +2899,7 @@ async function saveExploreAsList() {
     const listId = generateSlugFromTitle(name);
     const newList = { slug: listId, name, qbTrees };
     await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, qbTrees });
-    const { listOrder: order = [] } = await chrome.storage.session.get(['listOrder']);
+    const order = (await readCacheable('settings'))?.listOrder || [];
     await saveSettingsValue('listOrder', [...order, 'list:' + listId]);
     // Copy explore pins to the new list (if any)
     if (pins.length > 0) {
@@ -3196,13 +3157,11 @@ function formatBytes(bytes) {
 // Session-cached keys live in chrome.storage.session; logBuffer lives in chrome.storage.local
 const SESSION_CACHE_KEYS = [
   { key: 'settings', label: 'Settings' },
-  { key: 'workspace', label: 'Workspace' },
   { key: 'lists', label: 'Lists' },
-  { key: 'urlBlacklist', label: 'URL Blacklist' },
-  { key: 'titleTrimRules', label: 'Title Trim Rules' },
-  { key: 'recycleBin', label: 'Recycle Bin' },
-  { key: 'permanentDeletes', label: 'Permanent Deletes' },
-  { key: 'gatewayOrigins', label: 'Gateway Origins' },
+  { key: 'list:system/recycle-bin', label: 'Recycle Bin' },
+  { key: 'list:system/permanent-deletes', label: 'Permanent Deletes' },
+  { key: 'list:system/gateways', label: 'Gateway Origins' },
+  { key: 'list:system/shallow-page', label: 'Shallow Page Index' },
 ];
 const LOCAL_CACHE_KEYS = [
   { key: 'logBuffer', label: 'Log Buffer' },
@@ -3612,10 +3571,10 @@ chrome.runtime.onMessage.addListener((request) => {
     }
   } else if (type === 'lists') {
     renderLists();
-  } else if (type === 'recycleBin') {
+  } else if (type === 'list:system/recycle-bin') {
     // Reload recycle bin from session cache
-    chrome.storage.session.get(['recycleBin']).then(({ recycleBin: rb = [] }) => {
-      recycleBin = rb;
+    chrome.storage.session.get(['list:system/recycle-bin']).then((data) => {
+      recycleBin = data['list:system/recycle-bin'] || [];
       updateRecycleSidebarCount();
     });
   } else if (type === 'settings') {
@@ -3738,7 +3697,7 @@ async function buildExploreAutoBlocks(pins) {
   const resolvedChildUrls = await resolveTypedRefs(allChildRefs);
   const childrenUrls = new Set(resolvedChildUrls.filter(u => !pinnedSlugs.has(generateSlugFromUrl(u))));
   // Also check shallowPageIndex for non-checkpointed children
-  const { shallowPageIndex: spiData = { index: {} } } = await chrome.storage.session.get(['shallowPageIndex']);
+  const spiData = await readCacheable('list:system/shallow-page') || { index: {} };
   const pinSlugSet = new Set(pinSlugs);
   for (const [childUrl, entry] of Object.entries(spiData.index)) {
     if (pinnedSlugs.has(generateSlugFromUrl(childUrl))) continue;

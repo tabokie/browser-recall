@@ -42,6 +42,22 @@ replayBufferOver(page)        ← apply pending logBuffer entries
 setCachedEntity(key, page)    ← populate session cache for next read
 ```
 
+### UI Read Path (Cacheable Keys)
+
+UI pages read cached data via `utils.js` `readCacheable(key)`, where `key` is an entity key (e.g., `'lists'`, `'list:system/recycle-bin'`, `'list:system/shallow-page'`, `'settings'`). Session cache stores entities under their entity keys and settings as a single `'settings'` object. Background's `readFs` handles key→filesystem resolution:
+
+```
+chrome.storage.session.get([key])     ← local session cache hit (fast, no IPC to background)
+  ↓ miss
+sendMessage({ action: 'readCacheable', key })  ← background.js readCacheable()
+  ↓
+background: session cache → readFs()  ← filesystem via offscreen, caches into session
+  ↓
+{ value }                             ← returned to UI page
+```
+
+`loadSettingsValue(subKey, default)` reads `(await readCacheable('settings'))?.[subKey]` and returns `defaultValue` when the sub-field is `undefined`.
+
 ### Write Path
 
 All mutations go through `addLog(entry)`:

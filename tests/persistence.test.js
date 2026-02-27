@@ -144,12 +144,7 @@ function pinFromUrl(url, pinnedAt) {
 async function hydrateCache(fsStorage, chromeStorage) {
   const settings = await fsStorage.loadSettings();
   const cacheUpdate = {};
-  if (settings.workspace !== undefined) cacheUpdate.workspace = settings.workspace;
-  if (settings.listOrder !== undefined) cacheUpdate.listOrder = settings.listOrder;
-  if (settings.urlBlacklist !== undefined) cacheUpdate.urlBlacklist = settings.urlBlacklist;
-  if (settings.titleTrimRules !== undefined) cacheUpdate.titleTrimRules = settings.titleTrimRules;
-  if (settings.permanentDeletes !== undefined) cacheUpdate.permanentDeletes = settings.permanentDeletes;
-  if (settings.settings !== undefined) cacheUpdate.settings = settings.settings;
+  if (Object.keys(settings).length > 0) cacheUpdate.settings = settings;
 
   // Load lists from self-describing files
   const lists = await fsStorage.loadAllListMetadata();
@@ -157,13 +152,13 @@ async function hydrateCache(fsStorage, chromeStorage) {
 
   // Load recycle bin from its own file
   const recycleBinItems = await fsStorage.loadRecycleBin();
-  cacheUpdate.recycleBin = recycleBinItems;
+  cacheUpdate['list:system/recycle-bin'] = recycleBinItems;
 
   if (Object.keys(cacheUpdate).length > 0) await chromeStorage.set(cacheUpdate);
 
   // Load gateway origins from entity file
   const gwData = await fsStorage.loadGateways();
-  await chromeStorage.set({ gatewayOrigins: gwData.origins || [] });
+  await chromeStorage.set({ 'list:system/gateways': gwData.origins || [] });
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +263,7 @@ describe('Persistence round-trip', () => {
 
       // Snapshot the cache
       const cacheBefore = { ...(await chromeStorage.get(null)) };
-      delete cacheBefore.gatewayOrigins; // tested separately
+      delete cacheBefore['list:system/gateways']; // tested separately
 
       // 3. Simulate reload: nuke chrome.storage.local
       await chromeStorage.clear();
@@ -278,7 +273,7 @@ describe('Persistence round-trip', () => {
       await hydrateCache(fs, chromeStorage);
 
       const cacheAfter = { ...(await chromeStorage.get(null)) };
-      delete cacheAfter.gatewayOrigins;
+      delete cacheAfter['list:system/gateways'];
 
       expect(cacheAfter).toEqual(cacheBefore);
     });
@@ -296,18 +291,12 @@ describe('Persistence round-trip', () => {
       await hydrateCache(fs, chromeStorage);
 
       const cached = await chromeStorage.get([
-        'workspace', 'listOrder', 'lists', 'urlBlacklist',
-        'titleTrimRules', 'recycleBin', 'permanentDeletes', 'settings',
+        'settings', 'lists', 'list:system/recycle-bin',
       ]);
 
-      expect(cached.workspace).toEqual(initialSettings.workspace);
-      expect(cached.listOrder).toEqual(initialSettings.listOrder);
+      expect(cached.settings).toEqual(initialSettings);
       expect(cached.lists).toEqual(listMeta);
-      expect(cached.urlBlacklist).toEqual(initialSettings.urlBlacklist);
-      expect(cached.titleTrimRules).toEqual(initialSettings.titleTrimRules);
-      expect(cached.recycleBin).toEqual(recycleBinItems);
-      expect(cached.permanentDeletes).toEqual(initialSettings.permanentDeletes);
-      expect(cached.settings).toEqual(initialSettings.settings);
+      expect(cached['list:system/recycle-bin']).toEqual(recycleBinItems);
     });
 
     it('logBuffer is not populated by hydrateCache (it is transient)', async () => {

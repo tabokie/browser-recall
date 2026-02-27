@@ -21,6 +21,24 @@ const extDir = resolve(__dirname, '..', 'extension');
 // ---------------------------------------------------------------------------
 // Structural tests — verify functions/handlers exist in background.js
 // ---------------------------------------------------------------------------
+describe('utils.js structural checks', () => {
+  const utilsSource = readFileSync(resolve(extDir, 'utils.js'), 'utf-8');
+
+  it('exports readCacheable function', () => {
+    expect(utilsSource).toMatch(/export async function readCacheable\s*\(\s*key\s*\)/);
+  });
+
+  it('readCacheable sends readCacheable action on session miss', () => {
+    expect(utilsSource).toMatch(/action:\s*'readCacheable'/);
+  });
+
+  it('loadSettingsValue delegates to readCacheable', () => {
+    const fnBody = utilsSource.match(/export async function loadSettingsValue[\s\S]*?\n\}/);
+    expect(fnBody).not.toBeNull();
+    expect(fnBody[0]).toMatch(/readCacheable\s*\(\s*key\s*\)/);
+  });
+});
+
 describe('background.js structural checks', () => {
   const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
 
@@ -30,6 +48,10 @@ describe('background.js structural checks', () => {
 
   it('exports readFs function', () => {
     expect(bgSource).toMatch(/async function readFs\s*\(\s*key\s*\)/);
+  });
+
+  it('has readCacheable case handler', () => {
+    expect(bgSource).toMatch(/case\s+'readCacheable'\s*:/);
   });
 
   it('has getGatewayDomains case handler', () => {
@@ -46,13 +68,13 @@ describe('background.js structural checks', () => {
   it('getRecycleBin handler uses readCacheable', () => {
     const match = bgSource.match(/case\s+'getRecycleBin'\s*:\s*\{([\s\S]*?)break;\s*\}/);
     expect(match).not.toBeNull();
-    expect(match[1]).toMatch(/readCacheable\s*\(\s*'recycleBin'\s*\)/);
+    expect(match[1]).toMatch(/readCacheable\s*\(\s*'list:system\/recycle-bin'\s*\)/);
   });
 
   it('loadPermanentDeletes handler uses readCacheable', () => {
     const match = bgSource.match(/case\s+'loadPermanentDeletes'\s*:\s*\{([\s\S]*?)break;\s*\}/);
     expect(match).not.toBeNull();
-    expect(match[1]).toMatch(/readCacheable\s*\(\s*'permanentDeletes'\s*\)/);
+    expect(match[1]).toMatch(/readCacheable\s*\(\s*'list:system\/permanent-deletes'\s*\)/);
   });
 });
 
@@ -79,26 +101,26 @@ function makeSessionStore(initial = {}) {
 describe('readCacheable / readFs', () => {
   let session;
   let offscreenCalls;
-  const SETTINGS_KEYS = ['workspace', 'listOrder', 'urlBlacklist', 'titleTrimRules', 'settings'];
-
   // Mimics the readCacheable/readFs functions from background.js
   let readCacheable, readFs;
   let hydrationResolve;
   let hydrationDone;
 
+  const TEST_SETTINGS = { workspace: { mode: 'normal' }, listOrder: ['list:b', 'list:a'], urlBlacklist: [], titleTrimRules: [{ urlPrefix: 'https://x.com', action: 'remove_after_pipe' }], settings: { captureContent: true } };
+
   function requestOffscreen(msg) {
     offscreenCalls.push(msg);
     switch (msg.action) {
       case 'loadSettings':
-        return { success: true, settings: { workspace: { mode: 'normal' }, listOrder: ['list:b', 'list:a'], urlBlacklist: [], titleTrimRules: [{ urlPrefix: 'https://x.com', action: 'remove_after_pipe' }], settings: { captureContent: true } } };
+        return { success: true, settings: TEST_SETTINGS };
       case 'loadAllListMetadata':
         return { success: true, lists: [{ slug: 'a', name: 'A' }, { slug: 'b', name: 'B' }] };
       case 'loadRecycleBin':
         return { success: true, items: [{ url: 'https://del.com', deletedAt: 123 }] };
       case 'loadPermanentDeletes':
         return { success: true, keys: ['page:slug1', 'page:slug2'] };
-      case 'loadParentIndex':
-        return { success: true, timestamp: 42, index: { 'https://a.com': ['s1'] } };
+      case 'loadShallowPageIndex':
+        return { success: true, timestamp: 42, index: { 'https://a.com': { parents: ['s1'] } } };
       case 'loadGateways':
         return { success: true, origins: ['https://docs.rs'] };
       default:
@@ -117,43 +139,40 @@ describe('readCacheable / readFs', () => {
 
     // Wire up readCacheable/readFs matching the background.js implementation
     readFs = async (key) => {
-      if (SETTINGS_KEYS.includes(key)) {
+      if (key === 'settings') {
         const resp = requestOffscreen({ action: 'loadSettings' });
         const settings = resp?.settings || {};
-        const toCache = {};
-        for (const k of SETTINGS_KEYS) {
-          if (settings[k] !== undefined) toCache[k] = settings[k];
-        }
-        if (Object.keys(toCache).length > 0) await session.set(toCache);
-        return settings[key];
+        await session.set({ settings });
+        return settings;
       }
       let value;
       switch (key) {
         case 'lists': {
           const metaResp = requestOffscreen({ action: 'loadAllListMetadata' });
           let allLists = metaResp?.lists || [];
-          const listOrder = (await readCacheable('listOrder')) || [];
+          const settings = (await readCacheable('settings')) || {};
+          const listOrder = settings.listOrder || [];
           if (listOrder.length > 0) {
             const ordered = [];
-            for (const key of listOrder) { const slug = key.startsWith('list:') ? key.slice(5) : key; const c = allLists.find(x => x.slug === slug); if (c) ordered.push(c); }
+            for (const k of listOrder) { const slug = k.startsWith('list:') ? k.slice(5) : k; const c = allLists.find(x => x.slug === slug); if (c) ordered.push(c); }
             for (const c of allLists) { if (!listOrder.includes('list:' + c.slug)) ordered.push(c); }
             allLists = ordered;
           }
           value = allLists; break;
         }
-        case 'recycleBin': {
+        case 'list:system/recycle-bin': {
           const r = requestOffscreen({ action: 'loadRecycleBin' });
           value = r?.items || []; break;
         }
-        case 'permanentDeletes': {
+        case 'list:system/permanent-deletes': {
           const r = requestOffscreen({ action: 'loadPermanentDeletes' });
           value = r?.keys || []; break;
         }
-        case 'parentIndex': {
-          const r = requestOffscreen({ action: 'loadParentIndex' });
+        case 'list:system/shallow-page': {
+          const r = requestOffscreen({ action: 'loadShallowPageIndex' });
           value = r?.success ? { timestamp: r.timestamp || 0, index: r.index || {} } : { timestamp: 0, index: {} }; break;
         }
-        case 'gatewayOrigins': {
+        case 'list:system/gateways': {
           const r = requestOffscreen({ action: 'loadGateways' });
           value = r?.origins || []; break;
         }
@@ -173,8 +192,8 @@ describe('readCacheable / readFs', () => {
 
   // ── Session hit ──────────────────────────────────────────────────────
   it('returns cached value from session without offscreen call', async () => {
-    await session.set({ gatewayOrigins: ['https://example.com'] });
-    const result = await readCacheable('gatewayOrigins');
+    await session.set({ 'list:system/gateways': ['https://example.com'] });
+    const result = await readCacheable('list:system/gateways');
     expect(result).toEqual(['https://example.com']);
     expect(offscreenCalls).toEqual([]); // No offscreen call
   });
@@ -196,61 +215,57 @@ describe('readCacheable / readFs', () => {
     expect(session._store.lists).toEqual([{ slug: 'b', name: 'B' }, { slug: 'a', name: 'A' }]);
   });
 
-  it('falls back to filesystem for recycleBin and caches result', async () => {
-    const result = await readCacheable('recycleBin');
+  it('falls back to filesystem for recycle-bin and caches result', async () => {
+    const result = await readCacheable('list:system/recycle-bin');
     expect(result).toEqual([{ url: 'https://del.com', deletedAt: 123 }]);
     expect(offscreenCalls.some(c => c.action === 'loadRecycleBin')).toBe(true);
-    expect(session._store.recycleBin).toEqual([{ url: 'https://del.com', deletedAt: 123 }]);
+    expect(session._store['list:system/recycle-bin']).toEqual([{ url: 'https://del.com', deletedAt: 123 }]);
   });
 
-  it('falls back to filesystem for permanentDeletes and caches result', async () => {
-    const result = await readCacheable('permanentDeletes');
+  it('falls back to filesystem for permanent-deletes and caches result', async () => {
+    const result = await readCacheable('list:system/permanent-deletes');
     expect(result).toEqual(['page:slug1', 'page:slug2']);
     expect(offscreenCalls.some(c => c.action === 'loadPermanentDeletes')).toBe(true);
-    expect(session._store.permanentDeletes).toEqual(['page:slug1', 'page:slug2']);
+    expect(session._store['list:system/permanent-deletes']).toEqual(['page:slug1', 'page:slug2']);
   });
 
-  it('falls back to filesystem for parentIndex and caches result', async () => {
-    const result = await readCacheable('parentIndex');
-    expect(result).toEqual({ timestamp: 42, index: { 'https://a.com': ['s1'] } });
-    expect(offscreenCalls.some(c => c.action === 'loadParentIndex')).toBe(true);
-    expect(session._store.parentIndex).toEqual({ timestamp: 42, index: { 'https://a.com': ['s1'] } });
+  it('falls back to filesystem for shallow-page and caches result', async () => {
+    const result = await readCacheable('list:system/shallow-page');
+    expect(result).toEqual({ timestamp: 42, index: { 'https://a.com': { parents: ['s1'] } } });
+    expect(offscreenCalls.some(c => c.action === 'loadShallowPageIndex')).toBe(true);
+    expect(session._store['list:system/shallow-page']).toEqual({ timestamp: 42, index: { 'https://a.com': { parents: ['s1'] } } });
   });
 
-  it('falls back to filesystem for gatewayOrigins and caches result', async () => {
-    const result = await readCacheable('gatewayOrigins');
+  it('falls back to filesystem for gateways and caches result', async () => {
+    const result = await readCacheable('list:system/gateways');
     expect(result).toEqual(['https://docs.rs']);
     expect(offscreenCalls.some(c => c.action === 'loadGateways')).toBe(true);
-    expect(session._store.gatewayOrigins).toEqual(['https://docs.rs']);
+    expect(session._store['list:system/gateways']).toEqual(['https://docs.rs']);
   });
 
   // ── Settings batch-load ──────────────────────────────────────────────
-  it('batch-loads all settings keys on any single settings key miss', async () => {
-    const result = await readCacheable('workspace');
-    expect(result).toEqual({ mode: 'normal' });
-    // All settings keys should be cached now
-    expect(session._store.workspace).toEqual({ mode: 'normal' });
-    expect(session._store.listOrder).toEqual(['list:b', 'list:a']);
-    expect(session._store.urlBlacklist).toEqual([]);
-    expect(session._store.titleTrimRules).toEqual([{ urlPrefix: 'https://x.com', action: 'remove_after_pipe' }]);
-    expect(session._store.settings).toEqual({ captureContent: true });
+  it('loads full settings object on miss', async () => {
+    const result = await readCacheable('settings');
+    expect(result).toEqual(TEST_SETTINGS);
+    // Full settings object should be cached
+    expect(session._store.settings).toEqual(TEST_SETTINGS);
     // Only ONE loadSettings call
     const settingsCalls = offscreenCalls.filter(c => c.action === 'loadSettings');
     expect(settingsCalls.length).toBe(1);
   });
 
-  it('second settings key read hits session cache (no second offscreen call)', async () => {
-    await readCacheable('workspace');
+  it('second settings read hits session cache (no second offscreen call)', async () => {
+    await readCacheable('settings');
     offscreenCalls = []; // clear
-    const result = await readCacheable('titleTrimRules');
-    expect(result).toEqual([{ urlPrefix: 'https://x.com', action: 'remove_after_pipe' }]);
+    const result = await readCacheable('settings');
+    expect(result).toEqual(TEST_SETTINGS);
     expect(offscreenCalls).toEqual([]); // No additional offscreen call
   });
 
   // ── Lists ordering ───────────────────────────────────────────────────
   it('applies listOrder when loading lists from filesystem', async () => {
-    // Pre-populate listOrder in session so readCacheable('listOrder') hits cache
-    await session.set({ listOrder: ['list:b', 'list:a'] });
+    // Pre-populate settings in session so readCacheable('settings') hits cache
+    await session.set({ settings: { listOrder: ['list:b', 'list:a'] } });
     const result = await readCacheable('lists');
     // 'b' should come before 'a' because listOrder = ['list:b', 'list:a']
     expect(result[0].slug).toBe('b');
@@ -258,7 +273,7 @@ describe('readCacheable / readFs', () => {
   });
 
   it('preserves original order when listOrder is empty', async () => {
-    await session.set({ listOrder: [] });
+    await session.set({ settings: { listOrder: [] } });
     const result = await readCacheable('lists');
     // Original order from loadAllListMetadata: a, b
     expect(result[0].slug).toBe('a');
@@ -280,9 +295,9 @@ describe('readCacheable / readFs', () => {
       return origReadFs(key);
     };
 
-    await session.set({ workspace: { mode: 'normal' } });
+    await session.set({ settings: { workspace: { mode: 'normal' } } });
 
-    const promise = readCacheable('workspace').then(v => { resolved = true; return v; });
+    const promise = readCacheable('settings').then(v => { resolved = true; return v; });
 
     // Should not have resolved yet
     await new Promise(r => setTimeout(r, 10));
@@ -292,7 +307,7 @@ describe('readCacheable / readFs', () => {
     hydrationResolve();
     const result = await promise;
     expect(resolved).toBe(true);
-    expect(result).toEqual({ mode: 'normal' });
+    expect(result).toEqual({ workspace: { mode: 'normal' } });
   });
 
   // ── Unknown keys ─────────────────────────────────────────────────────
@@ -320,11 +335,10 @@ describe('offscreen.js loadPermanentDeletes response', () => {
 // ---------------------------------------------------------------------------
 // options.js loadGatewayDomains — structural verification
 // ---------------------------------------------------------------------------
-describe('options.js loadGatewayDomains fallback', () => {
+describe('options.js loadGatewayDomains uses readCacheable', () => {
   const optionsSource = readFileSync(resolve(extDir, 'options.js'), 'utf-8');
 
-  it('has background message fallback for getGatewayDomains', () => {
-    // loadGatewayDomains should fall back to sendMessage when session is empty
-    expect(optionsSource).toMatch(/getGatewayDomains/);
+  it('reads gateways via readCacheable with entity key', () => {
+    expect(optionsSource).toMatch(/readCacheable\s*\(\s*'list:system\/gateways'\s*\)/);
   });
 });
