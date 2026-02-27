@@ -17,6 +17,7 @@ import {
   applyLogToDeletes,
   applyLogToRecycleBin,
   applyLogToShallowPage,
+  applyLogToGateways,
 } from '../extension/replay.js';
 import { generateSlugFromUrl } from '../extension/utils.js';
 
@@ -1467,5 +1468,81 @@ describe('page_checkpoint absorption upgrades list pins', () => {
     expect(list.pins).toHaveLength(1);
     expect(list.pins[0].id).toBe(`page:${testSlug}`);
     expect(list.pins[0].pinnedAt).toBe(50); // pinnedAt preserved
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyLogToGateways
+// ---------------------------------------------------------------------------
+
+describe('applyLogToGateways', () => {
+  it('adds origins', () => {
+    const entity = { timestamp: 0, origins: [] };
+    const entry = { timestamp: 100, action: 'list', id: 'system/gateways', op: 'add', origins: ['https://example.com'] };
+    const result = applyLogToGateways(entity, entry);
+    expect(result.origins).toEqual(['https://example.com']);
+    expect(result.timestamp).toBe(100);
+  });
+
+  it('adds multiple origins', () => {
+    const entity = { timestamp: 0, origins: ['https://a.com'] };
+    const entry = { timestamp: 100, action: 'list', id: 'system/gateways', op: 'add', origins: ['https://b.com', 'https://c.com'] };
+    const result = applyLogToGateways(entity, entry);
+    expect(result.origins).toEqual(['https://a.com', 'https://b.com', 'https://c.com']);
+  });
+
+  it('removes origins', () => {
+    const entity = { timestamp: 0, origins: ['https://a.com', 'https://b.com'] };
+    const entry = { timestamp: 100, action: 'list', id: 'system/gateways', op: 'del', origins: ['https://a.com'] };
+    const result = applyLogToGateways(entity, entry);
+    expect(result.origins).toEqual(['https://b.com']);
+  });
+
+  it('clears origins', () => {
+    const entity = { timestamp: 0, origins: ['https://a.com'] };
+    const entry = { timestamp: 100, action: 'list', id: 'system/gateways', op: 'clear' };
+    const result = applyLogToGateways(entity, entry);
+    expect(result.origins).toEqual([]);
+  });
+
+  it('ignores irrelevant entries', () => {
+    const entity = { timestamp: 0, origins: [] };
+    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
+    const result = applyLogToGateways(entity, entry);
+    expect(result).toBe(entity);
+  });
+
+  it('ignores wrong id', () => {
+    const entity = { timestamp: 0, origins: [] };
+    const entry = { timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'add', keys: ['page:a'] };
+    const result = applyLogToGateways(entity, entry);
+    expect(result).toBe(entity);
+  });
+
+  it('is idempotent for add', () => {
+    const entity = { timestamp: 0, origins: [] };
+    const entry = { timestamp: 100, action: 'list', id: 'system/gateways', op: 'add', origins: ['https://a.com'] };
+    const r1 = applyLogToGateways(entity, entry);
+    const r2 = applyLogToGateways(r1, entry);
+    expect(r2.origins).toEqual(['https://a.com']);
+  });
+
+  it('default entity has empty origins', () => {
+    const entity = defaultEntity('list:system/gateways');
+    expect(entity).toEqual({ timestamp: 0, origins: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// effectOf — gateways dispatch
+// ---------------------------------------------------------------------------
+
+describe('effectOf — gateways', () => {
+  it('dispatches list entry for system/gateways to applyLogToGateways', async () => {
+    const entry = { timestamp: 100, action: 'list', id: 'system/gateways', op: 'add', origins: ['https://example.com'] };
+    const result = await effectOf(entry, async () => null);
+    const gw = result['list:system/gateways'];
+    expect(gw.origins).toEqual(['https://example.com']);
+    expect(gw.timestamp).toBe(100);
   });
 });

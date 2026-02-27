@@ -100,7 +100,7 @@ describe('readCacheable / readFs', () => {
       case 'loadParentIndex':
         return { success: true, timestamp: 42, index: { 'https://a.com': ['s1'] } };
       case 'loadGateways':
-        return { success: true, domains: { 'https://docs.rs': { rootUrl: 'https://docs.rs/', childCount: 5 } } };
+        return { success: true, origins: ['https://docs.rs'] };
       default:
         return { success: false, error: 'unknown' };
     }
@@ -153,9 +153,9 @@ describe('readCacheable / readFs', () => {
           const r = requestOffscreen({ action: 'loadParentIndex' });
           value = r?.success ? { timestamp: r.timestamp || 0, index: r.index || {} } : { timestamp: 0, index: {} }; break;
         }
-        case 'gatewayDomains': {
+        case 'gatewayOrigins': {
           const r = requestOffscreen({ action: 'loadGateways' });
-          value = r?.domains || {}; break;
+          value = r?.origins || []; break;
         }
         default: return undefined;
       }
@@ -173,9 +173,9 @@ describe('readCacheable / readFs', () => {
 
   // ── Session hit ──────────────────────────────────────────────────────
   it('returns cached value from session without offscreen call', async () => {
-    await session.set({ gatewayDomains: { 'https://example.com': { rootUrl: '/', childCount: 3 } } });
-    const result = await readCacheable('gatewayDomains');
-    expect(result).toEqual({ 'https://example.com': { rootUrl: '/', childCount: 3 } });
+    await session.set({ gatewayOrigins: ['https://example.com'] });
+    const result = await readCacheable('gatewayOrigins');
+    expect(result).toEqual(['https://example.com']);
     expect(offscreenCalls).toEqual([]); // No offscreen call
   });
 
@@ -217,11 +217,11 @@ describe('readCacheable / readFs', () => {
     expect(session._store.parentIndex).toEqual({ timestamp: 42, index: { 'https://a.com': ['s1'] } });
   });
 
-  it('falls back to filesystem for gatewayDomains and caches result', async () => {
-    const result = await readCacheable('gatewayDomains');
-    expect(result).toEqual({ 'https://docs.rs': { rootUrl: 'https://docs.rs/', childCount: 5 } });
+  it('falls back to filesystem for gatewayOrigins and caches result', async () => {
+    const result = await readCacheable('gatewayOrigins');
+    expect(result).toEqual(['https://docs.rs']);
     expect(offscreenCalls.some(c => c.action === 'loadGateways')).toBe(true);
-    expect(session._store.gatewayDomains).toEqual({ 'https://docs.rs': { rootUrl: 'https://docs.rs/', childCount: 5 } });
+    expect(session._store.gatewayOrigins).toEqual(['https://docs.rs']);
   });
 
   // ── Settings batch-load ──────────────────────────────────────────────

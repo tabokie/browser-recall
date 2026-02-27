@@ -76,12 +76,12 @@ function extractVisibilityHandler() {
 }
 
 describe('mutation refresh completeness', () => {
-  it('pins mutation branch preserves active view cache (no refreshCurrentView)', () => {
+  it('pins mutation branch re-renders active view to pick up external pin changes', () => {
     const pinsBranch = extractMutationBranch('pins');
-    // Pins branch should NOT call refreshCurrentView() — the active view already
-    // has up-to-date pins from toggleResultPin + showExplore/showList.
-    // Calling refreshCurrentView would reload stale data from disk.
-    expect(pinsBranch, 'pins branch should not call refreshCurrentView()').not.toContain('refreshCurrentView()');
+    // Pins branch should call refreshCurrentView() so that pin mutations
+    // arriving from other contexts (popup, content script) are reflected
+    // immediately — entity storage is the source of truth, not in-memory cache.
+    expect(pinsBranch, 'pins branch should call refreshCurrentView()').toContain('refreshCurrentView()');
   });
 
   it('interaction mutation branch refreshes all view types (not just category)', () => {

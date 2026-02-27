@@ -48,8 +48,8 @@ let recycleBin = []; // [{ key, title, deletedAt }] — global recycle bin (key 
 let permanentDeletes = []; // [key, ...] — permanently deleted keys ('page:slug' or 'note:slug')
 let lastClickedRow = null; // for shift-click range select
 let marqueeActive = false; // suppress click during marquee drag
-let gatewayDomainsCache = {}; // { [origin]: { rootUrl, childCount, fetched } }
-let gatewayDomainsLoaded = false;
+let gatewayOriginsCache = []; // [origin, ...]
+let gatewayOriginsLoaded = false;
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
 // pinnedFilterCtx removed — pinned section no longer has related pages
 const EXPLORE_LIST_ID = 'explore';
@@ -283,19 +283,21 @@ async function loadHistoryBatch() {
     const resp = await chrome.runtime.sendMessage({ action: 'loadInteractionBatch', files: batch });
     const interactions = resp?.interactions || [];
     const newItems = [];
+    // Entries within a day file arrive oldest→newest. This isn't a full replay,
+    // but we simulate replay semantics: newer values always win, and older
+    // values are only kept when the newer entry omits the field (the "omit
+    // unchanged fields" optimisation in background.js means later entries
+    // often lack a title when it hasn't changed since the previous write).
     for (const item of interactions) {
       // Skip non-visit entries (set, highlight, list, etc.)
       if ((item.action && item.action !== 'page') || !item.url) continue;
       historyAllEntries.push(item);
-      if (!historyByUrl.has(item.url)) {
+      const existing = historyByUrl.get(item.url);
+      if (!existing) {
         historyByUrl.set(item.url, item);
       } else {
-        if (item.title && !historyByUrl.get(item.url).title) {
-          historyByUrl.get(item.url).title = item.title;
-        }
-        if (item.user_title && !historyByUrl.get(item.url).user_title) {
-          historyByUrl.get(item.url).user_title = item.user_title;
-        }
+        if (item.title) existing.title = item.title;
+        if (item.user_title) existing.user_title = item.user_title;
       }
       newItems.push(item);
     }
@@ -325,8 +327,8 @@ function resetHistory() {
   }
   allListPins = {};
   cachedAllNotes = null;
-  gatewayDomainsCache = {};
-  gatewayDomainsLoaded = false;
+  gatewayOriginsCache = [];
+  gatewayOriginsLoaded = false;
   bufferContentMap = {};
 }
 
@@ -869,7 +871,7 @@ function filterByCategory(interactions, category) {
     case 'highlighted':
       return interactions.filter(i => i.attention && i.attention.length > 0 && !isHidden(i.url));
     case 'gateways':
-      return interactions.filter(i => isGatewayUrl(i.url) && !isHidden(i.url));
+      return interactions.filter(i => isGatewayOrigin(i.url) && !isHidden(i.url));
     case 'recycleBin':
       return interactions.filter(i => isRecycled(i.url) && !isPermanentlyDeleted(i.url));
     case 'all':
@@ -879,24 +881,23 @@ function filterByCategory(interactions, category) {
 }
 
 async function loadGatewayDomains() {
-  if (gatewayDomainsLoaded) return;
-  const result = await chrome.storage.session.get(['gatewayDomains']);
-  if ('gatewayDomains' in result) {
-    gatewayDomainsCache = result.gatewayDomains;
+  if (gatewayOriginsLoaded) return;
+  const result = await chrome.storage.session.get(['gatewayOrigins']);
+  if ('gatewayOrigins' in result) {
+    gatewayOriginsCache = result.gatewayOrigins;
   } else {
     try {
       const resp = await chrome.runtime.sendMessage({ action: 'getGatewayDomains' });
-      gatewayDomainsCache = resp?.domains || {};
-    } catch { gatewayDomainsCache = {}; }
+      gatewayOriginsCache = resp?.origins || [];
+    } catch { gatewayOriginsCache = []; }
   }
-  gatewayDomainsLoaded = true;
+  gatewayOriginsLoaded = true;
 }
 
-function isGatewayUrl(url) {
+function isGatewayOrigin(url) {
   try {
-    const parsed = new URL(url);
-    const entry = gatewayDomainsCache[parsed.origin];
-    return !!(entry && entry.rootUrl === url && entry.childCount >= 2);
+    const origin = new URL(url).origin;
+    return gatewayOriginsCache.includes(origin);
   } catch {
     return false;
   }
@@ -995,7 +996,7 @@ function matchKeyword(item, field, value) {
 }
 
 function matchSmartFilter(item, filterName) {
-  if (filterName === 'gateways') return isGatewayUrl(item.url);
+  if (filterName === 'gateways') return isGatewayOrigin(item.url);
   return false;
 }
 
@@ -3201,7 +3202,7 @@ const SESSION_CACHE_KEYS = [
   { key: 'titleTrimRules', label: 'Title Trim Rules' },
   { key: 'recycleBin', label: 'Recycle Bin' },
   { key: 'permanentDeletes', label: 'Permanent Deletes' },
-  { key: 'gatewayDomains', label: 'Gateway Domains' },
+  { key: 'gatewayOrigins', label: 'Gateway Origins' },
 ];
 const LOCAL_CACHE_KEYS = [
   { key: 'logBuffer', label: 'Log Buffer' },

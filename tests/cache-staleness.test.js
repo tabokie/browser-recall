@@ -332,7 +332,7 @@ describe('Cache staleness', () => {
       titleTrimRules: TEST_SETTINGS.titleTrimRules,
       recycleBin: [],
       permanentDeletes: TEST_SETTINGS.permanentDeletes,
-      gatewayDomains: {},
+      gatewayOrigins: [],
     };
     // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
     for (const [slug, url] of SLUG_TO_URL) {
@@ -537,16 +537,14 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   it('T4: resetHistory clears gateway cache', async () => {
     populateCache();
-    sessionData.gatewayDomains = {
-      'https://docs.rs': { rootUrl: 'https://docs.rs', childCount: 5, fetched: true },
-    };
+    sessionData.gatewayOrigins = ['https://docs.rs'];
 
     await importOptions();
     await tick(100);
 
-    // initialize() calls loadGatewayDomains → sets gatewayDomainsLoaded = true
+    // initialize() calls loadGatewayDomains → sets gatewayOriginsLoaded = true
     const initialGwCalls = chrome.storage.session.get.mock.calls
-      .filter(c => c[0] && (c[0].includes?.('gatewayDomains') || c[0][0] === 'gatewayDomains'));
+      .filter(c => c[0] && (c[0].includes?.('gatewayOrigins') || c[0][0] === 'gatewayOrigins'));
     expect(initialGwCalls.length).toBeGreaterThanOrEqual(1);
 
     // Trigger resetHistory via selectDirBtn (selectDirectory → resetHistory → showCategory)
@@ -559,7 +557,7 @@ describe('Cache staleness', () => {
     // resetHistory clears all caches. Verify historyFiles was cleared
     // by checking initHistoryFiles re-ran (reads logBuffer from storage.local).
     // Since all caches are cleared in the same function, this proves
-    // gatewayDomainsLoaded was also reset.
+    // gatewayOriginsLoaded was also reset.
     const logBufferCalls = chrome.storage.local.get.mock.calls
       .filter(c => {
         const keys = c[0];

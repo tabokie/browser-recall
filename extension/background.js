@@ -206,6 +206,10 @@ async function sessionLoad(key) {
     const { shallowPageIndex } = await chrome.storage.session.get(['shallowPageIndex']);
     return shallowPageIndex || null;
   }
+  if (key === 'list:system/gateways') {
+    const { gatewayOrigins } = await chrome.storage.session.get(['gatewayOrigins']);
+    return gatewayOrigins ? { timestamp: 0, origins: gatewayOrigins } : null;
+  }
   return null;
 }
 
@@ -241,6 +245,8 @@ async function sessionWrite(effects) {
       await chrome.storage.session.set({ permanentDeletes: entity.keys });
     } else if (key === 'list:system/shallow-page') {
       await chrome.storage.session.set({ shallowPageIndex: entity });
+    } else if (key === 'list:system/gateways') {
+      await chrome.storage.session.set({ gatewayOrigins: entity.origins });
     }
   }
 }
@@ -331,9 +337,9 @@ async function readFs(key) {
       const r = await requestOffscreen({ action: 'loadShallowPageIndex' });
       value = r?.success ? { timestamp: r.timestamp || 0, index: r.index || {} } : { timestamp: 0, index: {} }; break;
     }
-    case 'gatewayDomains': {
+    case 'gatewayOrigins': {
       const r = await requestOffscreen({ action: 'loadGateways' });
-      value = r?.domains || {}; break;
+      value = r?.origins || []; break;
     }
     default: return undefined;
   }
@@ -431,45 +437,7 @@ async function hydrateCache() {
   }
   await chrome.storage.session.set({ lists: ordered });
 
-  // Phase 4: Gateways (incremental processing — separate from replay)
-  await hydrateIncrementalIndex({
-    loadAction: 'loadGateways', processAction: 'processGatewaysIncremental',
-    sessionKey: 'gatewayDomains', savePath: 'lists/system/gateways.json', dataKey: 'domains',
-    existingKey: 'existingDomains', label: 'Gateway domains'
-  });
-
   console.log('Cache hydrated');
-}
-
-async function hydrateIncrementalIndex({ loadAction, processAction, sessionKey, savePath, dataKey, existingKey, label }) {
-  try {
-    const loaded = await requestOffscreen({ action: loadAction });
-    let data = {};
-    let watermark = 0;
-    if (loaded?.success) {
-      data = loaded[dataKey] || {};
-      watermark = loaded.watermark || 0;
-    }
-
-    const incremental = await requestOffscreen({
-      action: processAction, watermark, [existingKey]: data
-    });
-
-    if (incremental?.success) {
-      data = incremental[dataKey];
-      const newWatermark = incremental.newWatermark;
-      await chrome.storage.session.set({ [sessionKey]: data });
-      if (newWatermark > watermark) {
-        await requestOffscreen({
-          action: 'saveJson', path: savePath,
-          data: { watermark: newWatermark, [dataKey]: data }
-        });
-      }
-      console.log(`${label} loaded incrementally:`, Object.keys(data).length, 'entries');
-    }
-  } catch (error) {
-    console.warn(`${label} hydration failed:`, error.message);
-  }
 }
 
 // ─── Title Trimming ───────────────────────────────────────────────────
@@ -560,6 +528,10 @@ async function processPageReport(delta) {
 }
 
 // ─── Gateway Domain Registry ──────────────────────────────────────────
+// Transient detection state: tracks child page counts per origin within the
+// current service worker lifetime. Not persisted — only used to decide when
+// an origin qualifies as a gateway (childCount >= 2).
+const gatewayDetection = {}; // { [origin]: { childCount, promoted } }
 
 async function updateGatewayRegistry(url) {
   try {
@@ -568,28 +540,31 @@ async function updateGatewayRegistry(url) {
     const isSearchQuery = parsed.searchParams.has('q') || parsed.searchParams.has('query') || parsed.searchParams.has('search');
     const isRoot = parsed.pathname === '/' || parsed.pathname === '' || parsed.pathname === '/index.html' || parsed.pathname === '/index.htm';
 
-    const gatewayDomains = (await readCacheable('gatewayDomains')) || {};
-    if (!gatewayDomains[origin]) {
-      gatewayDomains[origin] = { rootUrl: null, childCount: 0, fetched: false };
-    }
-    const entry = gatewayDomains[origin];
+    // Check if origin is already a gateway (persisted via log/replay)
+    const gatewayOrigins = (await readCacheable('gatewayOrigins')) || [];
+    if (gatewayOrigins.includes(origin)) return;
 
-    if (isSearchQuery) {
-      entry.childCount++;
-      if (isRoot && !entry.rootUrl && !entry.fetched) {
-        await chrome.storage.session.set({ gatewayDomains });
-        fetchAndCreateGatewayRoot(origin);
-        return;
-      }
-    } else if (isRoot) {
-      entry.rootUrl = url;
-    } else {
-      entry.childCount++;
+    if (!gatewayDetection[origin]) {
+      gatewayDetection[origin] = { childCount: 0, promoted: false };
+    }
+    const det = gatewayDetection[origin];
+    if (det.promoted) return;
+
+    if (isSearchQuery || !isRoot) {
+      det.childCount++;
     }
 
-    await chrome.storage.session.set({ gatewayDomains });
-
-    if (entry.childCount >= 2 && !entry.rootUrl && !entry.fetched) {
+    if (det.childCount >= 2) {
+      det.promoted = true;
+      await addLog({
+        timestamp: Date.now(),
+        action: 'list',
+        id: 'system/gateways',
+        op: 'add',
+        origins: [origin]
+      });
+      console.log(`Gateway: promoted ${origin}`);
+      // Create a synthetic page visit for the root so it appears in Explore history
       fetchAndCreateGatewayRoot(origin);
     }
   } catch (e) {
@@ -598,11 +573,6 @@ async function updateGatewayRegistry(url) {
 }
 
 async function fetchAndCreateGatewayRoot(origin) {
-  const gatewayDomains = (await readCacheable('gatewayDomains')) || {};
-  if (!gatewayDomains[origin]) return;
-  gatewayDomains[origin].fetched = true;
-  await chrome.storage.session.set({ gatewayDomains });
-
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -616,27 +586,9 @@ async function fetchAndCreateGatewayRoot(origin) {
     const rootUrl = origin + '/';
     const rawTitle = titleMatch ? titleMatch[1].trim() : origin;
     const title = await trimTitle(rawTitle, rootUrl);
-    const slug = generateSlugFromUrl(rootUrl);
 
-    const interaction = {
-      timestamp: Date.now(),
-      url: rootUrl,
-      title: title,
-      intent: '',
-      attention: '',
-      slug: slug
-    };
-
-    await appendVisit(interaction);
-
-    // Update registry with rootUrl
-    const updated = (await readCacheable('gatewayDomains')) || {};
-    if (updated[origin]) {
-      updated[origin].rootUrl = rootUrl;
-      await chrome.storage.session.set({ gatewayDomains: updated });
-    }
-
-    console.log(`Gateway: created synthetic root for ${origin}`);
+    await appendVisit({ timestamp: Date.now(), url: rootUrl, title });
+    console.log(`Gateway: created synthetic root visit for ${origin}`);
   } catch (e) {
     console.warn(`Gateway: failed to fetch root for ${origin}:`, e.message);
   }
@@ -767,9 +719,13 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
   if (url) await ensureCheckpointIfMissing(slug, url, title || '');
   const mdResp = await chrome.tabs.sendMessage(tabId, { action: 'extractMarkdown' });
   const html = await captureSavePage(tabId);
+  const markdown = mdResp?.markdown || '';
+  if (!markdown && !html) {
+    throw new Error('Capture failed: page returned no content');
+  }
   await requestOffscreen({
     action: 'captureSnapshot', slug, timestamp,
-    markdown: mdResp?.markdown || '', html: html || ''
+    markdown, html: html || ''
   });
   await addLog({
     timestamp, action: 'page', url,
@@ -801,6 +757,7 @@ chrome.commands.onCommand.addListener(async (command) => {
       chrome.tabs.sendMessage(tab.id, { action: 'showCaptureNotification' }).catch(() => {});
     } catch (error) {
       console.warn('[capture] ERROR:', error.message, error);
+      chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: error.message }).catch(() => {});
     }
   } else if (command === 'highlight-selection') {
     try {
@@ -877,6 +834,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ success: true, timestamp });
           } catch (error) {
             console.warn('[capture-popup] ERROR:', error.message, error);
+            const [errTab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+            if (errTab) chrome.tabs.sendMessage(errTab.id, { action: 'showErrorNotification', message: error.message }).catch(() => {});
             sendResponse({ success: false, error: error.message });
           }
           break;
@@ -1156,8 +1115,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'getGatewayDomains': {
-          const domains = await readCacheable('gatewayDomains') || {};
-          sendResponse({ success: true, domains });
+          const origins = await readCacheable('gatewayOrigins') || [];
+          sendResponse({ success: true, origins });
           break;
         }
 

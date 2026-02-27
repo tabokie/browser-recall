@@ -846,6 +846,40 @@ function showLikeNotification() {
   setTimeout(() => host.remove(), 1700);
 }
 
+// ─── Error notification bubble ───────────────────────────────────────
+function showErrorNotification(message) {
+  const host = document.createElement('div');
+  const shadow = host.attachShadow({ mode: 'closed' });
+  shadow.innerHTML = `
+    <style>
+      .bubble {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0.92);
+        z-index: 2147483647;
+        background: rgba(180, 30, 30, 0.88);
+        color: #fff;
+        font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        padding: 10px 20px;
+        border-radius: 8px;
+        pointer-events: none;
+        opacity: 0;
+        animation: fadeInOut 2.4s ease forwards;
+      }
+      @keyframes fadeInOut {
+        0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
+        10%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        80%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+      }
+    </style>
+    <div class="bubble">${message}</div>
+  `;
+  document.documentElement.appendChild(host);
+  setTimeout(() => host.remove(), 2500);
+}
+
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Skip Save Page WE messages (use `type` field, handled by savepage/content.js)
@@ -955,6 +989,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ success: true });
   } else if (request.action === 'showCaptureNotification') {
     showCaptureNotification();
+    sendResponse({ success: true });
+  } else if (request.action === 'showErrorNotification') {
+    showErrorNotification(request.message || 'Something went wrong');
     sendResponse({ success: true });
   } else if (request.action === 'showLikeNotification') {
     showLikeNotification();

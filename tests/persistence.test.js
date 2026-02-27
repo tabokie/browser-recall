@@ -161,15 +161,9 @@ async function hydrateCache(fsStorage, chromeStorage) {
 
   if (Object.keys(cacheUpdate).length > 0) await chromeStorage.set(cacheUpdate);
 
-  // Load and incrementally process gateway domains
+  // Load gateway origins from entity file
   const gwData = await fsStorage.loadGateways();
-  const { domains, newWatermark } = await fsStorage.processGatewaysAfterWatermark(
-    gwData.watermark, gwData.domains
-  );
-  await chromeStorage.set({ gatewayDomains: domains });
-  if (newWatermark > gwData.watermark) {
-    await fsStorage.saveGateways({ watermark: newWatermark, domains });
-  }
+  await chromeStorage.set({ gatewayOrigins: gwData.origins || [] });
 }
 
 // ---------------------------------------------------------------------------
@@ -274,7 +268,7 @@ describe('Persistence round-trip', () => {
 
       // Snapshot the cache
       const cacheBefore = { ...(await chromeStorage.get(null)) };
-      delete cacheBefore.gatewayDomains; // tested separately
+      delete cacheBefore.gatewayOrigins; // tested separately
 
       // 3. Simulate reload: nuke chrome.storage.local
       await chromeStorage.clear();
@@ -284,7 +278,7 @@ describe('Persistence round-trip', () => {
       await hydrateCache(fs, chromeStorage);
 
       const cacheAfter = { ...(await chromeStorage.get(null)) };
-      delete cacheAfter.gatewayDomains;
+      delete cacheAfter.gatewayOrigins;
 
       expect(cacheAfter).toEqual(cacheBefore);
     });
@@ -325,172 +319,12 @@ describe('Persistence round-trip', () => {
     });
   });
 
-  // ---- Gateway domains rebuild ----
+  // ---- Gateway origins persistence ----
 
-  describe('gateway persistence (incremental)', () => {
-    async function writeJsonl(dir, filename, lines) {
-      const historyDir = await dir.getDirectoryHandle('history', { create: true });
-      const fh = await historyDir.getFileHandle(filename, { create: true });
-      const w = await fh.createWritable();
-      await w.write(lines.map(l => JSON.stringify(l)).join('\n'));
-      await w.close();
-    }
-
-    it('processes domains from JSONL interactions', async () => {
-      await writeJsonl(rootDir, '2026-02-14.jsonl', [
-        { url: 'https://example.com/', timestamp: 1 },
-        { url: 'https://example.com/page1', timestamp: 2 },
-        { url: 'https://example.com/page2', timestamp: 3 },
-        { url: 'https://other.com/a', timestamp: 4 },
-      ]);
-
-      const { domains } = await fs.processGatewaysAfterWatermark(0, {});
-
-      expect(domains['https://example.com'].rootUrl).toBe('https://example.com/');
-      expect(domains['https://example.com'].childCount).toBe(2);
-      expect(domains['https://other.com'].rootUrl).toBeNull();
-      expect(domains['https://other.com'].childCount).toBe(1);
-    });
-
-    it('classifies search query URLs as children, not roots', async () => {
-      await writeJsonl(rootDir, '2026-02-14.jsonl', [
-        { url: 'https://google.com/?q=test', timestamp: 1 },
-        { url: 'https://google.com/?q=other', timestamp: 2 },
-      ]);
-
-      const { domains } = await fs.processGatewaysAfterWatermark(0, {});
-
-      expect(domains['https://google.com'].rootUrl).toBeNull();
-      expect(domains['https://google.com'].childCount).toBe(2);
-    });
-
-    it('counts children without cap', async () => {
-      const lines = [];
-      for (let i = 0; i < 120; i++) {
-        lines.push({ url: `https://big.com/page${i}`, timestamp: i + 1 });
-      }
-      await writeJsonl(rootDir, '2026-02-14.jsonl', lines);
-
-      const { domains } = await fs.processGatewaysAfterWatermark(0, {});
-      expect(domains['https://big.com'].childCount).toBe(120);
-    });
-
-    it('gateway domains survive reload via gateways.json', async () => {
-      await writeJsonl(rootDir, '2026-02-14.jsonl', [
-        { url: 'https://hub.com/', timestamp: 1 },
-        { url: 'https://hub.com/a', timestamp: 2 },
-        { url: 'https://hub.com/b', timestamp: 3 },
-      ]);
-
-      // Initial hydration
-      await hydrateCache(fs, chromeStorage);
-      const before = (await chromeStorage.get(['gatewayDomains'])).gatewayDomains;
-
-      // Reload
-      await chromeStorage.clear();
-      await hydrateCache(fs, chromeStorage);
-      const after = (await chromeStorage.get(['gatewayDomains'])).gatewayDomains;
-
-      expect(after).toEqual(before);
-      expect(after['https://hub.com'].rootUrl).toBe('https://hub.com/');
-      expect(after['https://hub.com'].childCount).toBe(2);
-    });
-
-    it('incremental processing only processes new interactions', async () => {
-      await writeJsonl(rootDir, '2026-02-14.jsonl', [
-        { url: 'https://example.com/', timestamp: 1 },
-        { url: 'https://example.com/page1', timestamp: 2 },
-      ]);
-
-      // First full scan
-      const { domains, newWatermark } = await fs.processGatewaysAfterWatermark(0, {});
-      expect(domains['https://example.com'].childCount).toBe(1);
-      expect(newWatermark).toBe(2);
-
-      // Incremental scan (no new data above watermark=2)
-      const { domains: d2, newWatermark: w2 } = await fs.processGatewaysAfterWatermark(2, domains);
-      expect(d2['https://example.com'].childCount).toBe(1);
-      expect(w2).toBe(2);
-    });
-
+  describe('gateway persistence', () => {
     it('loadGateways returns empty when file missing', async () => {
       const data = await fs.loadGateways();
-      expect(data).toEqual({ watermark: 0, domains: {} });
-    });
-
-    it('saveGateways + loadGateways round-trips', async () => {
-      const data = {
-        watermark: 12345,
-        domains: { 'https://foo.com': { rootUrl: 'https://foo.com/', childCount: 5, fetched: true } }
-      };
-      await fs.saveGateways(data);
-      const loaded = await fs.loadGateways();
-      expect(loaded).toEqual(data);
-    });
-
-    it('skips non-JSONL files and malformed lines', async () => {
-      const readme = await rootDir.getFileHandle('README.md', { create: true });
-      const w = await readme.createWritable();
-      await w.write('# hello');
-      await w.close();
-
-      await writeJsonl(rootDir, '2026-02-14.jsonl', [
-        { url: 'https://ok.com/page', timestamp: 1 },
-      ]);
-      const historyDir = await rootDir.getDirectoryHandle('history');
-      const fh = await historyDir.getFileHandle('2026-02-14.jsonl');
-      const file = await fh.getFile();
-      const existing = await file.text();
-      const fh2 = await historyDir.getFileHandle('2026-02-14.jsonl', { create: true });
-      const w2 = await fh2.createWritable();
-      await w2.write(existing + '\n{not valid json\n');
-      await w2.close();
-
-      const { domains } = await fs.processGatewaysAfterWatermark(0, {});
-      expect(Object.keys(domains)).toEqual(['https://ok.com']);
-    });
-
-    it('skips JSONL files whose date is entirely before the watermark', async () => {
-      const oldTs1 = new Date('2026-01-01T10:00:00Z').getTime();
-      const oldTs2 = new Date('2026-01-01T14:00:00Z').getTime();
-      const newTs1 = new Date('2026-02-14T10:00:00Z').getTime();
-      const newTs2 = new Date('2026-02-14T11:00:00Z').getTime();
-
-      await writeJsonl(rootDir, '2026-01-01.jsonl', [
-        { url: 'https://old.com/', timestamp: oldTs1 },
-        { url: 'https://old.com/a', timestamp: oldTs2 },
-      ]);
-      await writeJsonl(rootDir, '2026-02-14.jsonl', [
-        { url: 'https://new.com/', timestamp: newTs1 },
-        { url: 'https://new.com/x', timestamp: newTs2 },
-      ]);
-
-      // Watermark after end-of-day Jan 1 — should skip that file entirely
-      const watermark = new Date('2026-01-02T00:00:00Z').getTime();
-      const { domains, newWatermark } = await fs.processGatewaysAfterWatermark(watermark, {});
-
-      // Only the Feb 14 file should have been processed
-      expect(domains['https://new.com']).toBeDefined();
-      expect(domains['https://old.com']).toBeUndefined();
-      expect(newWatermark).toBe(newTs2);
-    });
-
-    it('processes file on the same day as watermark (partial day overlap)', async () => {
-      const earlyTs = new Date('2026-02-14T08:00:00Z').getTime();
-      const midTs = new Date('2026-02-14T12:00:00Z').getTime();
-      const lateTs = new Date('2026-02-14T18:00:00Z').getTime();
-
-      await writeJsonl(rootDir, '2026-02-14.jsonl', [
-        { url: 'https://a.com/', timestamp: earlyTs },
-        { url: 'https://a.com/early', timestamp: midTs },
-        { url: 'https://a.com/late', timestamp: lateTs },
-      ]);
-
-      // Watermark in the middle of Feb 14 — file should still be read,
-      // but only the entry after the watermark should be processed
-      const { domains } = await fs.processGatewaysAfterWatermark(midTs, {});
-      // Only late entry is new; root and early are at/before watermark
-      expect(domains['https://a.com'].childCount).toBe(1);
+      expect(data).toEqual({ timestamp: 0, origins: [] });
     });
   });
 

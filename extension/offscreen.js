@@ -173,14 +173,7 @@ async function handleRequest(request) {
         const t0 = performance.now();
         const gatewayData = await fsStorage.loadGateways();
         console.debug(`[I/O] loadGateways: ${(performance.now() - t0).toFixed(1)}ms`);
-        return { success: true, ...gatewayData };
-      }
-
-      case 'processGatewaysIncremental': {
-        const result = await fsStorage.processGatewaysAfterWatermark(
-          request.watermark, request.existingDomains
-        );
-        return { success: true, ...result };
+        return { success: true, origins: gatewayData.origins || [] };
       }
 
       case 'loadShallowPageIndex': {

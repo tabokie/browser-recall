@@ -10,10 +10,10 @@
 | `extension/background.js` | ~1471 | Service worker: central authority — handles ALL actions, `addLog(entry)` (appends to logBuffer + replays via `effectOf` + `sessionLoad`/`sessionWrite`), port channel to offscreen, unified `hydrateCache()` (loads base entities from offscreen then replays logBuffer via `effectOf`), `readCacheable(key)`/`readFs(key)` (session→filesystem fallback for all cacheable keys — awaits hydrationDone, batch-loads settings, applies listOrder), gateway registry, referrer tracking (webNavigation closure: `getReferrer(tabId)`, always emits page_checkpoint for referrer pages, stores `referrerId: 'page:<slug>'` in log entries), multi-day checkpoint detection, page relations (parentIds/childIds from page entity + shallowPageIndex fallback, resolves typed refs `page:<slug>`/`shallow:<url>`), keyboard commands, `captureAndLog(tabId, slug, timestamp, url, title)` (checkpoints page before capture), `ensureCheckpointIfMissing(slug, url, title)` (module-level helper), `resolvePageId(url)` (definitive cache→disk check, returns `page:<slug>` or `shallow:<url>`), `resolveShallowIds(ids)` (re-validates shallow IDs against cache+disk to guard against capture/pin race conditions), `replayBufferOver(page)` (replays logBuffer over a filesystem page entity), `setEntityCacheWatermark` on offscreen persist |
 | `extension/savepage-bridge.js` | ~170 | Save Page WE integration: `initSavepageBridge()` (registers `type`-based onMessage listener), `captureSavePage(tabId)` (injects SPWE scripts, returns Promise\<html\>), `loadSavepageResource()` (internal) — only Chrome APIs |
 | `extension/entity-cache.js` | ~40 | Entity LRU cache: `getCachedEntity(key)`, `setCachedEntity(key, entity)` — wraps `chrome.storage.session` with 500-entry LRU; `setEntityCacheWatermark(ts)` gates eviction to only flush entities with `timestamp <= persistWatermark` |
-| `extension/replay.js` | ~547 | Shared pure replay: `effectOf(entry, load)` — single-pass: each action branch loads affected entities and applies immediately, handles cross-entity effects inline (no separate scope/apply phases); `defaultEntity(key)` creates empty entities; per-entity appliers: `applyLogToPage` (action='page' with parentIds/childIds accumulation using typed refs `page:<slug>`/`shallow:<url>`, visitDates, attention, capture fields; action='page_checkpoint'), `applyLogToNote` (action='note' with excerpt/note/cssPath/parentIds/childIds), `applyLogToSettings`, `applyLogToPins` (list add/del/clear using `entry.ids` with typed refs, list_meta, del_list; pin format `{id, pinnedAt}`), `applyLogToRecycleBin`, `applyLogToDeletes`, `applyLogToShallowPage` (tracks parents/lists/title for non-checkpointed URLs); cross-entity effects within effectOf: note→parent childIds wiring, page_checkpoint absorption (SPI data→page parentIds, SPI entry removal, shallow:→page: pin upgrade in affected lists), shallow ref resolution (`shallow:<url>`→`page:<slug>` in parentIds/childIds), SPI pruning for checkpointed pages; entity key namespaces: `page:{slug}`, `note:{slug}`, `settings`, `list:{id}`, `list:system/recycle-bin`, `list:system/permanent-deletes`, `list:system/shallow-page` |
+| `extension/replay.js` | ~580 | Shared pure replay: `effectOf(entry, load)` — single-pass: each action branch loads affected entities and applies immediately, handles cross-entity effects inline (no separate scope/apply phases); `defaultEntity(key)` creates empty entities; per-entity appliers: `applyLogToPage` (action='page' with parentIds/childIds accumulation using typed refs `page:<slug>`/`shallow:<url>`, visitDates, attention, capture fields; action='page_checkpoint'), `applyLogToNote` (action='note' with excerpt/note/cssPath/parentIds/childIds), `applyLogToSettings`, `applyLogToPins` (list add/del/clear using `entry.ids` with typed refs, list_meta, del_list; pin format `{id, pinnedAt}`), `applyLogToRecycleBin`, `applyLogToDeletes`, `applyLogToShallowPage` (tracks parents/lists/title for non-checkpointed URLs), `applyLogToGateways` (action='list' id='system/gateways', ops: add/del/clear on flat `origins` array); cross-entity effects within effectOf: note→parent childIds wiring, page_checkpoint absorption (SPI data→page parentIds, SPI entry removal, shallow:→page: pin upgrade in affected lists), shallow ref resolution (`shallow:<url>`→`page:<slug>` in parentIds/childIds), SPI pruning for checkpointed pages; entity key namespaces: `page:{slug}`, `note:{slug}`, `settings`, `list:{id}`, `list:system/recycle-bin`, `list:system/permanent-deletes`, `list:system/shallow-page`, `list:system/gateways` |
 | `extension/offscreen.js` | ~495 | Offscreen doc: port-only FS I/O worker — drains logBuffer via round-cache + sequential `effectOf(entry, load)` replay (load closure over roundCache + filesystem), flushes dirty entities to disk (pure save — all cross-entity effects handled by effectOf), appends to history JSONL, per-file locks; routes `list:system/shallow-page` to `lists/system/shallow-page.json` |
 | `extension/offscreen.html` | 10 | Minimal host for offscreen.js (module script) |
-| `extension/filesystem-storage.js` | ~1157 | `FileSystemStorage` class: `#permissionGranted` cache, `#dirCache`/`#fileCache` Maps, `resolveDir(path)`, `resolveFile(path, {create})`, `readJson(handle)`, `writeJson(handle, data)`, `clearCache()`, `pageExists(slug)`, `checkMultiDayVisits(slugs, days)` (scans JSONL for multi-day visitors), `loadShallowPageIndex()` (from `lists/system/shallow-page.json`); all File System Access API operations, settings.json, gateway persistence, per-list pin loading; entity methods return wrapped `{timestamp, ...}` format |
+| `extension/filesystem-storage.js` | ~1080 | `FileSystemStorage` class: `#permissionGranted` cache, `#dirCache`/`#fileCache` Maps, `resolveDir(path)`, `resolveFile(path, {create})`, `readJson(handle)`, `writeJson(handle, data)`, `clearCache()`, `pageExists(slug)`, `checkMultiDayVisits(slugs, days)` (scans JSONL for multi-day visitors), `loadShallowPageIndex()` (from `lists/system/shallow-page.json`), `loadGateways()` (from `lists/system/gateways.json`); all File System Access API operations, settings.json, per-list pin loading; entity methods return wrapped `{timestamp, ...}` format |
 | `extension/content.js` | ~950 | Content script: accumulated attention tracking (1h timer + page close), highlight system (save-on-close for notes), markdown extraction (HTML capture moved to Save Page WE) |
 | `extension/savepage/content.js` | ~4300 | Adapted Save Page WE v33.9 — self-contained HTML capture with data URIs for all resources |
 | `extension/savepage/content-frame.js` | 286 | SPWE frame handler (upstream, unchanged) |
@@ -38,10 +38,10 @@
 | `tests/replay.test.js` | ~1471 | Vitest: 142 tests for replay.js — effectOf scope (which keys affected per action), effectOf apply (entity mutations per action), effectOf integration (drain simulations, round-cache, referrer wiring, absorption), per-entity appliers (settings, page parentIds/childIds/visitDates/capture/page_checkpoint/attention with typed refs, note creation/parentIds/childIds, pins with `{id, pinnedAt}` format and `entry.ids`, recycleBin, deletes, shallowPage index tracking parents/lists/title); idempotency + sequence replay; entity storage title resolution (last-write-wins, buffer replay, user_title); page_checkpoint absorption with list pin upgrade (shallow:→page:) |
 | `tests/log-buffer.test.js` | ~160 | Vitest: 10 tests for background.js log buffer — appendLog, appendVisit, watermark pruning, SW restart recovery, mixed entry types |
 | `tests/search-helpers.test.js` | 144 | Vitest: merge + engine-builder tests (flat log entry format) |
-| `tests/persistence.test.js` | ~410 | Vitest: settings round-trip, gateway incremental processing, list pins (wrapped entity format) |
+| `tests/persistence.test.js` | ~350 | Vitest: settings round-trip, gateway loadGateways, list pins (wrapped entity format) |
 | `tests/referrer-focus.test.js` | ~55 | Vitest: static analysis — webNavigation permission, onCommitted listener, getReferrer closure, focus panel parent title delegation to makeCard |
 | `tests/message-routing.test.js` | 49 | Vitest: static analysis — every action sent by options/popup has a case handler in background.js |
-| `tests/read-cacheable.test.js` | ~200 | Vitest: structural + behavioral tests for readCacheable/readFs — session hit, FS fallback, settings batch-load, list ordering, hydrationDone blocking, offscreen field mismatch, options.js gateway fallback |
+| `tests/read-cacheable.test.js` | ~200 | Vitest: structural + behavioral tests for readCacheable/readFs — session hit, FS fallback, settings batch-load, list ordering, hydrationDone blocking, offscreen field mismatch, options.js gatewayOrigins fallback |
 | `tests/mutation-refresh.test.js` | ~105 | Vitest: static analysis — mutation listener + visibilitychange handler refresh all view types, not just category |
 | `vitest.config.js` | 7 | Test config |
 | `package.json` | 25 | Build: `wasm-pack`, test: `vitest` |
@@ -63,7 +63,7 @@ Offscreen is port-only — responds via `chrome.runtime.connect({ name: 'bg-offs
 **Buffer management:** `clearWriteQueue`, `flushLogBuffer`
 
 ### offscreen.js handles via port (line ~68):
-Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllListMetadata` + `loadRecycleBin` + `pageExists` + `listListFiles` + `saveJson` (direct saves) + `loadShallowPageIndex` + log buffer drain via port `drainEntries` messages (appends to history JSONL + checkpoints entities via replay.js, handles list_meta/del_list/recycle_replace, checkpoints shallow-page index, piggybacks gateway saves)
+Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllListMetadata` + `loadRecycleBin` + `pageExists` + `listListFiles` + `saveJson` (direct saves) + `loadShallowPageIndex` + log buffer drain via port `drainEntries` messages (appends to history JSONL + checkpoints entities via replay.js, handles list_meta/del_list/recycle_replace, checkpoints shallow-page index + gateways entity)
 
 ### content.js handles (line ~875):
 `extractMarkdown`, `highlightSelection`, `removeHighlightMark`, `showCaptureNotification`, `showLikeNotification`
@@ -173,14 +173,13 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **Auto-snapshot**: if workspace.autoSnapshot, captures snapshot on visit
 
 ### Gateway Domain Registry
-- **Persistence**: `gateways.json` at root — `{ watermark, domains: { [origin]: { rootUrl, childCount, fetched } } }`
-- **Cache**: `chrome.storage.session['gatewayDomains']` — `{ [origin]: { rootUrl, childCount, fetched } }`
-- **Incremental processing**: `filesystem-storage.js` `processGatewaysAfterWatermark(watermark, existingDomains)` — only scans JSONL entries after watermark
-- **Hydration**: `background.js` `hydrateCache()` — loads `gateways.json`, incrementally processes new entries, saves updated watermark
-- **Drain piggyback**: `offscreen.js` `drainQueue()` — after successful drain, saves current gatewayDomains to `gateways.json` with watermark = max drained timestamp
-- **Registry update**: `background.js` `updateGatewayRegistry()` — increments `childCount` (no childUrls array); auto-promotes when `childCount >= 2`
-- **Options cache**: `options.js` `gatewayDomainsCache` — loaded via `loadGatewayDomains()` on init (session cache → `getGatewayDomains` background fallback)
-- **Gateway filter**: `options.js` `isGatewayUrl()` — root URL with `childCount >= 2`
+- **Entity**: `lists/system/gateways.json` — `{ timestamp, origins: [origin, ...] }` (flat list of origins)
+- **Log type**: `{ action: 'list', id: 'system/gateways', op: 'add'|'del'|'clear', origins: [...] }`
+- **Replay**: `replay.js` `applyLogToGateways()` — dedicated apply function dispatched by `effectOf`
+- **Cache**: `chrome.storage.session['gatewayOrigins']` — `[origin, ...]`
+- **Detection**: `background.js` transient `gatewayDetection` variable — tracks `childCount` per origin within SW lifetime; promotes to gateways list via `addLog` when `childCount >= 2`; creates synthetic root page visit via `fetchAndCreateGatewayRoot` on first promotion (for Explore history visibility)
+- **Options cache**: `options.js` `gatewayOriginsCache` — loaded via `loadGatewayDomains()` on init (session cache → `getGatewayDomains` background fallback)
+- **Gateway filter**: `options.js` `isGatewayOrigin()` — checks if URL's origin exists in `gatewayOriginsCache`
 
 ### Options Page Views
 - **Category filters**: `options.js` `filterByCategory()` — today, week, highlighted, gateways, recycleBin
@@ -249,9 +248,9 @@ Lists                 ← section label
 - **Source of truth**: log files (`history/YYYY-MM-DD.jsonl`) — entity files are derived checkpoints
 - **Hot cache**: `chrome.storage.session` — in-memory IPC, survives SW termination, cleared on browser restart; hydrated on every startup
 - **Durable backup**: `chrome.storage.local['logBuffer']` — log buffer only; all other cache keys in session
-- **Hydration**: `background.js` `hydrateCache()` — Phase 1: loads base entities from offscreen into session; Phase 1.5: pre-loads page entities referenced by logBuffer from filesystem (so Phase 2 replay has them available); Phase 2: replays ALL `logBuffer` entries via `effectOf(entry, sessionLoad)` + `sessionWrite`; Phase 3: orders lists by `listOrder`; Phase 4: incremental gateway processing
+- **Hydration**: `background.js` `hydrateCache()` — Phase 1: loads base entities from offscreen into session; Phase 1.5: pre-loads page entities referenced by logBuffer from filesystem (so Phase 2 replay has them available); Phase 2: replays ALL `logBuffer` entries via `effectOf(entry, sessionLoad)` + `sessionWrite`; Phase 3: orders lists by `listOrder`
 - **Write-through**: `utils.js` `saveSettingsValue(key, value)` sends `saveSettingsKey` to background, which calls `addLog` (append + `effectOf` session replay)
-- **Hot-path reads**: background.js uses `readCacheable(key)` for workspace, urlBlacklist, titleTrimRules, gatewayDomains, shallowPageIndex, lists, listOrder (awaits hydrationDone, then session→readFs fallback); popup.js/content.js/options.js read cached keys from session directly with sendMessage fallback (access level: TRUSTED_AND_UNTRUSTED_CONTEXTS)
+- **Hot-path reads**: background.js uses `readCacheable(key)` for workspace, urlBlacklist, titleTrimRules, gatewayOrigins, shallowPageIndex, lists, listOrder (awaits hydrationDone, then session→readFs fallback); popup.js/content.js/options.js read cached keys from session directly with sendMessage fallback (access level: TRUSTED_AND_UNTRUSTED_CONTEXTS)
 - **Entity LRU cache**: `entity-cache.js` caches entities in session as `page:{slug}` / `note:{slug}` keys (500 limit); `getCachedEntity`/`setCachedEntity` with watermark-gated LRU eviction (only evicts entities with `timestamp <= persistWatermark`); `setEntityCacheWatermark(ts)` called by background on offscreen persist; imported by background.js; checked on loadPageBatch, loadPageNotes, createNote/deleteNote
 - **Log buffer**: background holds `logBuffer` array (lazy-loaded via `ensureLogBuffer()`), synced to `chrome.storage.local['logBuffer']`; offscreen drains via port `drainEntries`; all mutations via `addLog(entry)` — immutable, no dedup, serialized via `withLock('logBuffer')`
 - **Unified replay path**: both `addLog` (runtime) and `hydrateCache` (startup) use `effectOf(entry, sessionLoad)` + `sessionWrite` — identical replay logic for all entity types
@@ -304,7 +303,7 @@ Lists                 ← section label
 - **Build WASM**: `npm run build` → `wasm-pack build --target web --out-dir extension/pkg`
 - **Run tests**: `npm test` → `vitest run`
 - **Test files**: `tests/utils.test.js`, `tests/search-helpers.test.js`, `tests/replay.test.js`, `tests/log-buffer.test.js`, `tests/persistence.test.js`, `tests/cache-staleness.test.js`, `tests/highlight-helpers.test.js`, `tests/virtual-scroller.test.js`, `tests/progressive-loading.test.js`, `tests/message-routing.test.js`, `tests/mutation-refresh.test.js`, `tests/referrer-focus.test.js`, `tests/attention-utils.test.js`, `tests/auto-blocks.test.js`, `tests/state-preservation.test.js`, `tests/read-cacheable.test.js`
-- **Migration scripts**: `scripts/migrate-keys-and-notes.js` (atoms→pages, highlights→notes), `scripts/migrate-quote-to-excerpt.js` (quote→excerpt field rename), `scripts/migrate-shallow-refs.js` (parents→parentIds, children→childIds, referrer→referrerId, urls→ids, pins url→id, parent.json→shallow-page.json), `scripts/fix-raw-refs.js` (converts remaining raw URLs/{url,title} objects to typed refs, backfills shallow-page.json); utility: `scripts/check-gateways.js`, `scripts/check-gateway-filtering.js`
+- **Migration scripts**: `scripts/migrate-keys-and-notes.js` (atoms→pages, highlights→notes), `scripts/migrate-quote-to-excerpt.js` (quote→excerpt field rename), `scripts/migrate-shallow-refs.js` (parents→parentIds, children→childIds, referrer→referrerId, urls→ids, pins url→id, parent.json→shallow-page.json), `scripts/fix-raw-refs.js` (converts remaining raw URLs/{url,title} objects to typed refs, backfills shallow-page.json); utility: `scripts/check-gateways.js`, `scripts/check-gateway-filtering.js`; `scripts/migrate-gateways.mjs` (converts old `{ watermark, domains }` → new `{ timestamp, origins }` format + appends log entry)
 
 ## Key Data Schemas
 
@@ -383,12 +382,10 @@ Only checkpointed for pages with: rich data (notes/snapshots/reports), multi-day
 ```
 Dynamic key-value store: each `set` log entry adds/overwrites a key. Lists, recycle bin, and permanent deletes are in their own entity files.
 
-### Gateway domains (persisted in `gateways.json`, cached in chrome.storage.session)
+### Gateway origins (persisted in `lists/system/gateways.json`, replayed via log/replay)
 ```json
 {
-  "watermark": 1707345600000,
-  "domains": {
-    "https://example.com": { "rootUrl": "https://example.com/", "childCount": 15, "fetched": true }
-  }
+  "timestamp": 1707345600000,
+  "origins": ["https://example.com", "https://github.com"]
 }
 ```

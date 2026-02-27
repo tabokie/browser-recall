@@ -464,7 +464,7 @@ class FileSystemStorage {
     return contentMap;
   }
 
-  // Load gateway domains from lists/system/gateways.json
+  // Load gateway origins from lists/system/gateways.json
   async loadGateways() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
@@ -473,82 +473,8 @@ class FileSystemStorage {
       const fileHandle = await this.resolveFile('lists/system/gateways.json');
       return this.readJson(fileHandle);
     } catch {
-      return { watermark: 0, domains: {} };
+      return { timestamp: 0, origins: [] };
     }
-  }
-
-  // Save gateway domains to lists/system/gateways.json
-  async saveGateways(data) {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to write directory');
-    }
-    const fileHandle = await this.resolveFile('lists/system/gateways.json', { create: true });
-    await this.writeJson(fileHandle, data);
-  }
-
-  // Process gateway domains incrementally from JSONL files after a watermark timestamp
-  async processGatewaysAfterWatermark(watermark, existingDomains) {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to read directory');
-    }
-
-    const domains = { ...existingDomains };
-    let newWatermark = watermark;
-
-    const historyDir = await this.resolveDir('history');
-    for await (const entry of historyDir.values()) {
-      if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
-        // Skip files whose date is entirely before the watermark
-        if (watermark > 0) {
-          const dateMatch = entry.name.match(/^(\d{4}-\d{2}-\d{2})\.jsonl$/);
-          if (dateMatch) {
-            const fileEndOfDay = new Date(dateMatch[1] + 'T23:59:59.999Z').getTime();
-            if (fileEndOfDay < watermark) continue;
-          }
-        }
-
-        const file = await entry.getFile();
-        const text = await file.text();
-        const lines = text.split('\n').filter(line => line.trim());
-
-        for (const line of lines) {
-          try {
-            const interaction = JSON.parse(line);
-            if (!interaction.url || !interaction.timestamp) continue;
-            if (interaction.timestamp <= watermark) continue;
-
-            if (interaction.timestamp > newWatermark) {
-              newWatermark = interaction.timestamp;
-            }
-
-            const parsed = new URL(interaction.url);
-            const origin = parsed.origin;
-            const isRoot = parsed.pathname === '/' || parsed.pathname === '' ||
-              parsed.pathname === '/index.html' || parsed.pathname === '/index.htm';
-            const isSearchQuery = parsed.searchParams.has('q') ||
-              parsed.searchParams.has('query') || parsed.searchParams.has('search');
-
-            if (!domains[origin]) {
-              domains[origin] = { rootUrl: null, childCount: 0, fetched: false };
-            }
-
-            const domainEntry = domains[origin];
-
-            if (isSearchQuery) {
-              domainEntry.childCount++;
-            } else if (isRoot) {
-              domainEntry.rootUrl = interaction.url;
-            } else {
-              domainEntry.childCount++;
-            }
-          } catch {
-            // Skip invalid lines
-          }
-        }
-      }
-    }
-
-    return { domains, newWatermark };
   }
 
   // Load shallow page index from lists/system/shallow-page.json

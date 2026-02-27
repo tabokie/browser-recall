@@ -1,0 +1,24 @@
+- For page that changes title after load, in logs, "Untitled" -> title, checkpoint is correct, but history explore still shows "Untitled", even after refresh
+- It is okay that we don't always call entity storage. It would be too costly. But the history reads should always scan from latest to oldest (in reverse), and use information from older logs only when newer logs are missing those information.
+- Yes, add comment to explain that, this is not exactly replay but we try to simulate the semantics of replay
+- Fix the pre-existing test
+- There is a bug I asked you to fixed in the last commit, but not quite fixed. List pins are not updated to reflect the checkpoint, even after refreshing UI
+- Sometimes capture snapshot fails silently
+- Yes, validate content. For errors, show them in the bubble notification
+- Fix a minor issue. When we visit a page and try to figure out its domain and record to Gateways, we also record a visit to that domain. This is not expected because user didn't actually visit the domain
+- yes, background.js is responsible for checking if a visit belongs to a root domain that is not already in Gateways, when that happens, background.js will append a log to add to "gateways" list, using "list" log type
+- How do we handle non-standard admin lists in the current implementation? What messages and log types we use?
+- It should be inside the log/replay system, but use a dedicated apply function like other admin lists. Some of the fields (childCound, fetched) can be removed if it is not easy to pass via "list" logs.
+- What's the difference between `origin` and `rootUrl`, why not keep a flat list of `origin`s in the entity?
+- Yes
+- Now. I remember the original intention to fake a page visit of origin. It is because we want to display them in explore history UI when applying a "Gateway" filter. Let's keep this logic, but only fake a page visit in the first time we add that origin to gateway list
+- Is the data format changed?
+- yes
+- y
+- Are the old log entry purged?
+- Update CODEBASE_MAP.md and ARCHITECTURE.md
+- /finish 
+- n
+- n
+- move on
+- You should account for changes not in this session as well

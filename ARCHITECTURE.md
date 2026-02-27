@@ -61,7 +61,6 @@ Phase 1:    Load base entities (settings, lists, recycle bin, shallow-page index
 Phase 1.5:  Pre-load page entities referenced by logBuffer from filesystem
 Phase 2:    Replay ALL logBuffer entries via effectOf (brings session cache up-to-date)
 Phase 3:    Order lists by listOrder setting
-Phase 4:    Incremental gateway processing
 ```
 
 ## Shallow Pages vs Checkpointed Pages

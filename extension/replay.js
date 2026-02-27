@@ -58,6 +58,7 @@ export function defaultEntity(key) {
   if (key === 'list:system/recycle-bin') return { timestamp: 0, items: [] };
   if (key === 'list:system/permanent-deletes') return { timestamp: 0, keys: [] };
   if (key === 'list:system/shallow-page') return { timestamp: 0, index: {} };
+  if (key === 'list:system/gateways') return { timestamp: 0, origins: [] };
   if (key.startsWith('list:')) {
     const slug = key.slice('list:'.length);
     return { timestamp: 0, slug, name: '', qbTrees: [], pins: [] };
@@ -103,6 +104,8 @@ export async function effectOf(entry, load) {
       result[listKey] = applyLogToRecycleBin(entity, entry);
     } else if (listKey === 'list:system/permanent-deletes') {
       result[listKey] = applyLogToDeletes(entity, entry);
+    } else if (listKey === 'list:system/gateways') {
+      result[listKey] = applyLogToGateways(entity, entry);
     } else {
       result[listKey] = applyLogToPins(entity, entry);
     }
@@ -541,6 +544,37 @@ export function applyLogToDeletes(deletesEntity, entry) {
     updated.keys = keys;
   } else {
     updated.keys = keys;
+  }
+
+  return updated;
+}
+
+/**
+ * Apply a log entry to a gateways entity.
+ * Entity: { timestamp, origins: [...] }
+ * Entry: { timestamp, action: 'list', id: 'system/gateways', op: 'add'|'del'|'clear', origins: [...] }
+ * Returns new entity (or original if entry is irrelevant).
+ */
+export function applyLogToGateways(gatewaysEntity, entry) {
+  if (entry.action !== 'list' || entry.id !== 'system/gateways') return gatewaysEntity;
+
+  const updated = { timestamp: entry.timestamp };
+  let origins = [...(gatewaysEntity.origins || [])];
+
+  if (entry.op === 'clear') {
+    updated.origins = [];
+  } else if (entry.op === 'add' && entry.origins) {
+    for (const origin of entry.origins) {
+      if (!origins.includes(origin)) {
+        origins.push(origin);
+      }
+    }
+    updated.origins = origins;
+  } else if (entry.op === 'del' && entry.origins) {
+    origins = origins.filter(o => !entry.origins.includes(o));
+    updated.origins = origins;
+  } else {
+    updated.origins = origins;
   }
 
   return updated;

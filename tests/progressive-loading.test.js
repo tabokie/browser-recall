@@ -346,7 +346,7 @@ describe('Progressive loading', () => {
       titleTrimRules: TEST_SETTINGS.titleTrimRules,
       recycleBin: [],
       permanentDeletes: TEST_SETTINGS.permanentDeletes,
-      gatewayDomains: {},
+      gatewayOrigins: [],
     };
     // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
     for (const [slug, url] of SLUG_TO_URL) {
@@ -486,7 +486,7 @@ describe('Progressive loading', () => {
       titleTrimRules: TEST_SETTINGS.titleTrimRules,
       recycleBin: [],
       permanentDeletes: TEST_SETTINGS.permanentDeletes,
-      gatewayDomains: {},
+      gatewayOrigins: [],
       // 'lists' intentionally missing
     };
     localData = { logBuffer: [] };
@@ -651,7 +651,47 @@ describe('Progressive loading', () => {
     await tick(200);
   });
 
-  it('Test 6: list with zero-hit query still shows related pages from loaded history', async () => {
+  it('Test 6: title-changing page shows latest title from history, not "Untitled"', async () => {
+    // Simulate a page whose title changes after initial load:
+    //   entry 1 (oldest): title = "Untitled"
+    //   entry 2: title = "Real Title"
+    //   entry 3 (newest): no title field (attention update, title unchanged)
+    // The explore view should display "Real Title", not "Untitled".
+    const TITLE_CHANGE_URL = 'https://example.com/title-change-page';
+    const base = new Date('2026-02-15T14:00:00Z').getTime();
+    const slug = TITLE_CHANGE_URL.replace(/[^a-z0-9]/gi, '-').substring(0, 40);
+    const titleEntries = [
+      { id: `${base}-${slug}`, url: TITLE_CHANGE_URL, title: 'Untitled', timestamp: base, slug, action: 'page' },
+      { id: `${base + 60000}-${slug}`, url: TITLE_CHANGE_URL, title: 'Real Title', timestamp: base + 60000, slug, action: 'page' },
+      { id: `${base + 120000}-${slug}`, url: TITLE_CHANGE_URL, timestamp: base + 120000, slug, action: 'page' },
+    ];
+
+    // Inject title-change entries into FILE1 data
+    const origFile1 = FILE_MAP[`${FILE1_DATE}.jsonl`];
+    FILE_MAP[`${FILE1_DATE}.jsonl`] = [...origFile1, ...titleEntries];
+
+    populateCache();
+    const importDone = importOptions();
+    await importDone;
+    await tick(200);
+
+    // Verify explore view rendered
+    expect(mainTitle()).toBe('Explore');
+    expect(listLayoutVisible()).toBe(true);
+
+    // Find the result row for our title-change page
+    const rows = [...document.querySelectorAll('#relatedResults .result-item, #results .result-item')];
+    const matchingRow = rows.find(el => el.innerHTML.includes(TITLE_CHANGE_URL));
+    expect(matchingRow).toBeTruthy();
+    // The displayed title should be "Real Title", not "Untitled"
+    expect(matchingRow.textContent).toContain('Real Title');
+    expect(matchingRow.textContent).not.toContain('Untitled');
+
+    // Restore original FILE_MAP
+    FILE_MAP[`${FILE1_DATE}.jsonl`] = origFile1;
+  });
+
+  it('Test 7: list with zero-hit query still shows related pages from loaded history', async () => {
     populateCache();
 
     // searchBatch returns [] (query matches nothing in metadata)
