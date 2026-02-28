@@ -155,6 +155,13 @@ async function handleRequest(request) {
         return { success: true, pins };
       }
 
+      case 'loadListEntity': {
+        const t0 = performance.now();
+        const entity = await fsStorage.loadListPinsEntity(request.listId);
+        console.debug(`[I/O] loadListEntity(${request.listId}): ${(performance.now() - t0).toFixed(1)}ms`);
+        return { success: true, entity };
+      }
+
       case 'loadPermanentDeletes': {
         const t0 = performance.now();
         const keys = await fsStorage.loadPermanentDeletes();

@@ -12,25 +12,3 @@
 
 - [ ] **Large note/excerpt text overflows logBuffer quota.** `note` and `excerpt` fields on `action: 'note'` log entries are written verbatim into `chrome.storage.local['logBuffer']` (10 MB hard limit) with no size check. Risk: many large annotations accumulate before the 5 s drain and push the buffer past quota. Fix mirrors the page-snapshot pattern — when `note` or `excerpt` exceeds a threshold (e.g. 4 KB), write the text to a dedicated file (`pages/{slug}/note-{timestamp}.md`) via `requestOffscreen`, then store only the path reference in the log entry. Replay must detect the path reference and load the file on demand. Both `background.js:1262-1312` (createNote / updateNote handlers) and `replay.js:364-376` (applyLogToNote) need updating. Tests: add a failing test that creates an oversized note entry and asserts the log entry does not contain inline text.
 
-## Silent fallback / evil default audit
-
-Principle: no silent fallbacks. Always get the true information regardless of cost. If a cache misses, fall through to disk — never silently degrade to a less-correct default.
-
-### HIGH — data corruption risk
-
-- [ ] **background.js — Multi-day visit check is dead logic.** If cache hits, entity already has checkpoint (no-op). If cache misses, logBuffer scan covers ~5s (never finds previous day). Fix: (1) cache recent immutable history files (`history/YYYY-MM-DD.jsonl`) into a URL→seen set for efficient multi-day detection; (2) when user opens a link from Portal Search (options.js), proactively emit `page_checkpoint` before navigating (we know it's a revisit).
-
-### MEDIUM — incorrect behavior
-
-- [ ] **options.js:351-356 — `urlToPinId()` always returns `page:<slug>`.** Never checks if the page is actually checkpointed. `toggleResultPin` sends pre-computed `id` to background, bypassing `resolvePageId`. Toggle-off can fail for `shallow:` pins. Fix: remove `urlToPinId`, send only `url` to background, let `resolvePageId` decide.
-- [ ] **background.js:1247-1256 — `getPageRelations` list membership is cache-only.** `listCache:*` only populated when user has viewed that list in options. Unviewed lists silently skipped in the relations view. Should fall through to loading list pins from disk.
-- [ ] **popup.js:234-242 — `loadListPins()` session-only, no disk fallback.** Pre-hydration returns `{}` → all lists shown as unpinned. Should fall back to `chrome.runtime.sendMessage({ action: 'getLists' })`.
-- [ ] **popup.js:747-754 — Recycle/deleted check structurally wrong.** Compares `item.url` when entities use `item.key` (`page:<slug>` format). Also session-only with `|| []` default. Fix both the key format and the fallback.
-- [ ] **popup.js:432 — `listOrder` session-only read, destructive on miss.** Cache miss → defaults to `[]` → saves `[newList]` → **wipes all existing list ordering**. Use `loadSettingsValue('listOrder', [])` which has session→disk fallback.
-- [ ] **options.js:2942 — Same `listOrder` session-only read in "save explore as list".** Identical destructive pattern. Use `loadSettingsValue('listOrder', [])`.
-- [ ] **options.js:3747 — `shallowPageIndex` session-only in explore auto-blocks.** Cache miss → empty SPI → children/parents-of-pins blocks show nothing. Fall back to `chrome.runtime.sendMessage({ action: 'getShallowPageIndex' })`.
-
-### LOW — timing / cosmetic
-
-- [ ] **content.js:5-9 — Private mode check races with hydration.** Content script reads `workspace` from session before background has hydrated. May start tracking before confirming private mode. Should query background (which awaits `hydrationDone`).
-- [ ] **popup.js:758 — URL blacklist hardcoded fallback.** Session miss → falls back to `['chrome://', 'edge://']` instead of user's customized blacklist. Should query background for authoritative value.

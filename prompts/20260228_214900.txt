@@ -1,0 +1,15 @@
+- Continue to work on "Silent fallback / evil default audit" section in TODO.md
+- I believe HIGH-1 is fixed already, check again
+- Proceed
+- yes, ignore #5 (we will refactor deletion later), ignore #9 (private mode is supposed to be session level setting), for 2,3,4, explain in more details before planning
+- go ahead with fixes
+- I have doubts about #2. Why can we use "page:<slug>" when we are not sure whether the page is checkpointed?
+- What do you mean by "legacy, for saveExploreAsList"? And what do you mean "for immediate UI feedback"?
+- What is allListPins?
+- Remind me, why do we load all list pins at startup?
+- y
+- /finish 
+- n
+- n
+- y
+- move on

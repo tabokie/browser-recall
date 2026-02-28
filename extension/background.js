@@ -286,7 +286,15 @@ async function readFs(key) {
       const r = await requestOffscreen({ action: 'loadGateways' });
       value = r?.origins || []; break;
     }
-    default: return undefined;
+    default: {
+      if (key.startsWith('list:')) {
+        const listId = key.slice('list:'.length);
+        const r = await requestOffscreen({ action: 'loadListEntity', listId });
+        value = r?.entity ?? null;
+        break;
+      }
+      return undefined;
+    }
   }
   await cacheSet(key, value);
   return value;
@@ -1228,15 +1236,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const listOrder = await getListOrder();
             for (const entry of listOrder) {
               const listSlug = entry.id.startsWith('list:') ? entry.id.slice(5) : entry.id;
-              const listCacheKey = 'listCache:' + listSlug;
-              const cached = await cacheGet(listCacheKey);
-              if (cached) {
+              const listEntity = await readCacheable('list:' + listSlug);
+              if (listEntity?.pins) {
                 const pageId = 'page:' + slug;
                 const shallowId = 'shallow:' + url;
-                const inPinned = cached.fullPinned?.some(p => p.url === url || p.id === pageId || p.id === shallowId);
-                const inRelated = cached.related?.some(r => r.url === url);
+                const inPinned = listEntity.pins.some(p => p.id === pageId || p.id === shallowId);
                 if (inPinned) parentLists.push({ slug: listSlug, name: entry.name, type: 'pin' });
-                else if (inRelated) parentLists.push({ slug: listSlug, name: entry.name, type: 'appear' });
               }
             }
 
@@ -1352,11 +1357,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           if (pinId?.startsWith('shallow:')) {
             pinId = await resolvePageId(pinId.slice(8));
           }
-          const list = await cacheGet('list:' + listId);
-          const isPinned = (list?.pins || []).some(p => p.id === pinId);
+          const list = await readCacheable('list:' + listId);
+          const pins = list?.pins || [];
+          // Check both page:<slug> and shallow:<url> forms — a pin may have been
+          // stored as shallow:<url> before the page was checkpointed.
+          const altId = pinId.startsWith('page:')
+            ? (url ? 'shallow:' + url : null)
+            : (pinId.startsWith('shallow:') ? 'page:' + generateSlugFromUrl(pinId.slice(8)) : null);
+          const matchIdx = pins.findIndex(p => p.id === pinId || (altId && p.id === altId));
+          const isPinned = matchIdx !== -1;
+          // When removing, use the ID actually stored in the pin
+          const logId = isPinned ? pins[matchIdx].id : pinId;
           await addLog({
             timestamp: Date.now(), action: 'list', id: listId,
-            op: isPinned ? 'del' : 'add', ids: [pinId]
+            op: isPinned ? 'del' : 'add', ids: [logId]
           });
           sendResponse({ success: true, pinned: !isPinned });
           notifyMutation('pins', { listId });
@@ -1364,8 +1378,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'addListPins': {
-          if (request.ids && request.ids.length > 0) {
-            const ids = await resolveShallowIds(request.ids);
+          const ids = await Promise.all(request.urls.map(u => resolvePageId(u)));
+          if (ids.length > 0) {
             await addLog({
               timestamp: Date.now(), action: 'list',
               id: request.listId, op: 'add', ids
@@ -1373,6 +1387,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           }
           sendResponse({ success: true });
           notifyMutation('pins', { listId: request.listId });
+          break;
+        }
+
+        case 'copyListPins': {
+          const source = await readCacheable('list:' + request.fromListId);
+          const ids = (source?.pins || []).map(p => p.id);
+          if (ids.length > 0) {
+            await addLog({
+              timestamp: Date.now(), action: 'list',
+              id: request.toListId, op: 'add', ids
+            });
+          }
+          sendResponse({ success: true });
+          notifyMutation('pins', { listId: request.toListId });
           break;
         }
 

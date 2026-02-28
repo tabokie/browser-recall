@@ -338,29 +338,11 @@ function resetHistory() {
   bufferContentMap = {};
 }
 
-// --- List pins (filesystem) ---
-async function loadAllListPins() {
-  try {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadListPins' });
-    allListPins = resp?.pins || {};
-  } catch (error) {
-    console.log('Could not load list pins:', error.message);
-  }
-  return allListPins;
-}
-
 
 function getActivePinListId() {
   if (activeView.type === 'explore') return EXPLORE_LIST_ID;
   if (activeView.type === 'list') return activeView.id;
   return EXPLORE_LIST_ID; // default: pin to explore
-}
-
-function urlToPinId(url) {
-  // Derive typed pin id from URL: page:<slug> if we have a page entity reference, shallow:<url> otherwise
-  // In options.js we can check allListPins or just use URL-based approach
-  const slug = generateSlugFromUrl(url);
-  return `page:${slug}`;
 }
 
 function pinIdToUrl(id) {
@@ -423,7 +405,7 @@ async function loadPinContext(pins) {
 
 function isResultPinned(listId, url) {
   const pins = allListPins[listId] || [];
-  const pageId = urlToPinId(url);
+  const pageId = 'page:' + generateSlugFromUrl(url);
   const shallowId = 'shallow:' + url;
   return pins.some(p => p.id === pageId || p.id === shallowId || p.url === url);
 }
@@ -431,14 +413,16 @@ function isResultPinned(listId, url) {
 async function toggleResultPin(listId, url, title) {
   if (!allListPins[listId]) allListPins[listId] = [];
   const pins = allListPins[listId];
-  const pinId = urlToPinId(url);
-  const idx = pins.findIndex(p => p.id === pinId || p.id === 'shallow:' + url || p.url === url);
+  const slug = generateSlugFromUrl(url);
+  const pageId = `page:${slug}`;
+  const shallowId = 'shallow:' + url;
+  const idx = pins.findIndex(p => p.id === pageId || p.id === shallowId || p.url === url);
   if (idx !== -1) {
     pins.splice(idx, 1);
   } else {
-    pins.push({ id: pinId, pinnedAt: Date.now() });
+    pins.push({ id: pageId, pinnedAt: Date.now() });
   }
-  await chrome.runtime.sendMessage({ action: 'toggleListPin', listId, id: pinId });
+  await chrome.runtime.sendMessage({ action: 'toggleListPin', listId, url });
 }
 
 // --- Recycle bin ---
@@ -2312,7 +2296,7 @@ async function loadExtraDetail(url) {
   const belongedLists = [];
   for (const lst of lists) {
     const pins = allListPins[lst.slug] || [];
-    const pageId = urlToPinId(url);
+    const pageId = 'page:' + generateSlugFromUrl(url);
     const shallowId = 'shallow:' + url;
     if (pins.some(p => p.id === pageId || p.id === shallowId)) {
       belongedLists.push(listDisplayName(lst));
@@ -2881,16 +2865,16 @@ async function renderLists() {
           const items = data.items || [{ url: data.url, title: data.title }];
           if (!allListPins[lst.slug]) allListPins[lst.slug] = [];
           const pins = allListPins[lst.slug];
-          const newIds = [];
+          const newUrls = [];
           for (const { url } of items) {
-            const pinId = urlToPinId(url);
+            const pinId = 'page:' + generateSlugFromUrl(url);
             if (url && !pins.some(p => p.id === pinId || p.id === 'shallow:' + url)) {
               pins.push({ id: pinId, pinnedAt: Date.now() });
-              newIds.push(pinId);
+              newUrls.push(url);
             }
           }
-          if (newIds.length > 0) {
-            await chrome.runtime.sendMessage({ action: 'addListPins', listId: lst.slug, ids: newIds });
+          if (newUrls.length > 0) {
+            await chrome.runtime.sendMessage({ action: 'addListPins', listId: lst.slug, urls: newUrls });
             if (activeView.type === 'list' && activeView.id === lst.slug) {
               showList(lst);
             }
@@ -2926,7 +2910,7 @@ async function saveExploreAsList() {
     // Copy explore pins to the new list (if any)
     if (pins.length > 0) {
       await chrome.runtime.sendMessage({
-        action: 'addListPins', listId, ids: pins.map(p => p.id),
+        action: 'copyListPins', fromListId: EXPLORE_LIST_ID, toListId: listId,
       });
     }
     await renderLists();
@@ -4278,16 +4262,16 @@ async function initialize() {
       if (data.items) {
         if (!allListPins[EXPLORE_LIST_ID]) allListPins[EXPLORE_LIST_ID] = [];
         const pins = allListPins[EXPLORE_LIST_ID];
-        const newIds = [];
+        const newUrls = [];
         for (const item of data.items) {
-          const pinId = urlToPinId(item.url);
+          const pinId = 'page:' + generateSlugFromUrl(item.url);
           if (!pins.some(p => p.id === pinId || p.id === 'shallow:' + item.url)) {
             pins.push({ id: pinId, pinnedAt: Date.now() });
-            newIds.push(pinId);
+            newUrls.push(item.url);
           }
         }
-        if (newIds.length > 0) {
-          await chrome.runtime.sendMessage({ action: 'addListPins', listId: EXPLORE_LIST_ID, ids: newIds });
+        if (newUrls.length > 0) {
+          await chrome.runtime.sendMessage({ action: 'addListPins', listId: EXPLORE_LIST_ID, urls: newUrls });
           updateExploreBadge();
           if (activeView.type === 'explore') showExplore();
         }

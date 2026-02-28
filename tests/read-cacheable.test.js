@@ -123,6 +123,11 @@ describe('readCacheable / readFs', () => {
         return { success: true, timestamp: 42, index: { 'https://a.com': { parents: ['s1'] } } };
       case 'loadGateways':
         return { success: true, origins: ['https://docs.rs'] };
+      case 'loadListEntity':
+        if (msg.listId === 'my-custom-list') {
+          return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }] } };
+        }
+        return { success: true, entity: null };
       default:
         return { success: false, error: 'unknown' };
     }
@@ -162,7 +167,15 @@ describe('readCacheable / readFs', () => {
           const r = requestOffscreen({ action: 'loadGateways' });
           value = r?.origins || []; break;
         }
-        default: return undefined;
+        default: {
+          if (key.startsWith('list:')) {
+            const listId = key.slice('list:'.length);
+            const r = requestOffscreen({ action: 'loadListEntity', listId });
+            value = r?.entity ?? null;
+            break;
+          }
+          return undefined;
+        }
       }
       await session.set({ [key]: value });
       return value;
@@ -305,6 +318,136 @@ describe('readCacheable / readFs', () => {
   it('returns undefined for unknown keys', async () => {
     const result = await readCacheable('nonExistentKey');
     expect(result).toBeUndefined();
+  });
+
+  // ── #4: User list keys fall back to filesystem ─────────────────────
+  it('falls back to filesystem for user list keys on session miss', async () => {
+    const result = await readCacheable('list:my-custom-list');
+    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }] });
+    expect(offscreenCalls.some(c => c.action === 'loadListEntity' && c.listId === 'my-custom-list')).toBe(true);
+    // Should be cached after first load
+    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }] });
+  });
+
+  it('returns null for user list key that does not exist on disk', async () => {
+    const result = await readCacheable('list:nonexistent-list');
+    expect(result).toBeNull();
+    expect(offscreenCalls.some(c => c.action === 'loadListEntity' && c.listId === 'nonexistent-list')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #2: toggleListPin should accept url (not pre-computed id) — structural
+// ---------------------------------------------------------------------------
+describe('options.js toggleResultPin sends url to background', () => {
+  const optionsSource = readFileSync(resolve(extDir, 'options.js'), 'utf-8');
+
+  it('toggleResultPin sends url, not pre-computed id, in toggleListPin message', () => {
+    const fnBody = optionsSource.match(/async function toggleResultPin[\s\S]*?\n\}/);
+    expect(fnBody).not.toBeNull();
+    const fn = fnBody[0];
+    // Should send url to let background resolve the id
+    expect(fn).toMatch(/action:\s*'toggleListPin'.*url/);
+    // Should NOT send a pre-computed id field
+    expect(fn).not.toMatch(/action:\s*'toggleListPin'.*\bid:\s*pinId\b/);
+  });
+
+  it('does not have urlToPinId function', () => {
+    // urlToPinId should be removed — background resolves pin IDs
+    expect(optionsSource).not.toMatch(/function urlToPinId\s*\(/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #2: toggleListPin handler checks both page:<slug> and shallow:<url> forms
+// ---------------------------------------------------------------------------
+describe('background.js toggleListPin handles both pin ID forms', () => {
+  const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
+
+  it('toggleListPin checks both page: and shallow: forms for isPinned', () => {
+    const caseBlock = bgSource.match(/case\s+'toggleListPin'\s*:\s*\{([\s\S]*?)break;\s*\}/);
+    expect(caseBlock).not.toBeNull();
+    const handler = caseBlock[1];
+    // Should check for shallow: variant when resolving pin match
+    expect(handler).toMatch(/shallow:/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #2: addListPins accepts urls and resolves via resolvePageId
+// ---------------------------------------------------------------------------
+describe('background.js addListPins accepts urls', () => {
+  const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
+
+  it('addListPins handler accepts request.urls', () => {
+    const caseBlock = bgSource.match(/case\s+'addListPins'\s*:\s*\{([\s\S]*?)break;\s*\}/);
+    expect(caseBlock).not.toBeNull();
+    expect(caseBlock[1]).toMatch(/request\.urls/);
+  });
+
+  it('addListPins resolves urls via resolvePageId', () => {
+    const caseBlock = bgSource.match(/case\s+'addListPins'\s*:\s*\{([\s\S]*?)break;\s*\}/);
+    expect(caseBlock).not.toBeNull();
+    expect(caseBlock[1]).toMatch(/resolvePageId/);
+  });
+});
+
+describe('options.js pin operations send urls or use copyListPins', () => {
+  const optionsSource = readFileSync(resolve(extDir, 'options.js'), 'utf-8');
+
+  it('list drag-drop sends urls to addListPins', () => {
+    expect(optionsSource).toMatch(/action:\s*'addListPins'.*urls:\s*newUrls/);
+  });
+
+  it('saveExploreAsList uses copyListPins instead of sending local pin IDs', () => {
+    const fnBody = optionsSource.match(/async function saveExploreAsList[\s\S]*?\n\}/);
+    expect(fnBody).not.toBeNull();
+    expect(fnBody[0]).toMatch(/action:\s*'copyListPins'/);
+    expect(fnBody[0]).not.toMatch(/action:\s*'addListPins'/);
+  });
+
+  it('no addListPins call sends ids', () => {
+    // All addListPins calls should use urls, never ids
+    const calls = optionsSource.match(/action:\s*'addListPins'[^}]*/g) || [];
+    for (const call of calls) {
+      expect(call).toMatch(/urls:/);
+      expect(call).not.toMatch(/\bids:/);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #3: getPageRelations reads actual list entities, not listCache:* keys
+// ---------------------------------------------------------------------------
+describe('background.js getPageRelations reads list entities', () => {
+  const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
+
+  it('does not use listCache: session keys for list membership check', () => {
+    const caseBlock = bgSource.match(/case\s+'getPageRelations'\s*:\s*\{([\s\S]*?)break;\s*\}/);
+    expect(caseBlock).not.toBeNull();
+    // Should NOT read from the options-only listCache: session keys
+    expect(caseBlock[1]).not.toMatch(/listCache:/);
+  });
+
+  it('reads list entities via readCacheable for list membership', () => {
+    const caseBlock = bgSource.match(/case\s+'getPageRelations'\s*:\s*\{([\s\S]*?)break;\s*\}/);
+    expect(caseBlock).not.toBeNull();
+    // Should use readCacheable (which has disk fallback) for list entities
+    expect(caseBlock[1]).toMatch(/readCacheable\s*\(\s*'list:/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #4: readFs handles user list keys — structural
+// ---------------------------------------------------------------------------
+describe('background.js readFs handles user list keys', () => {
+  const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
+
+  it('readFs has a fallback for list: keys', () => {
+    const fnBody = bgSource.match(/async function readFs[\s\S]*?\n\}/);
+    expect(fnBody).not.toBeNull();
+    // Should handle list: prefix in the default branch or a dedicated case
+    expect(fnBody[0]).toMatch(/loadListEntity/);
   });
 });
 
