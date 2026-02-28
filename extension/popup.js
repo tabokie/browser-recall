@@ -218,15 +218,18 @@ document.getElementById('pageNote').addEventListener('input', (e) => {
 
 // Lists — pin current page to lists
 async function loadLists() {
-  return await readCacheable('lists') || [];
+  const settings = await readCacheable('settings');
+  const listOrder = settings?.listOrder || [];
+  return listOrder.map(e => ({ slug: e.id.startsWith('list:') ? e.id.slice(5) : e.id, name: e.name }));
 }
 
 async function loadListPins() {
   try {
-    const lists = await readCacheable('lists') || [];
+    const lists = await loadLists();
     const allPins = {};
     for (const list of lists) {
-      if (list.pins && list.pins.length > 0) allPins[list.slug] = list.pins;
+      const entity = await readCacheable('list:' + list.slug);
+      if (entity?.pins?.length > 0) allPins[list.slug] = entity.pins;
     }
     return allPins;
   } catch { return {}; }
@@ -420,7 +423,7 @@ async function createListAndPin(name) {
   const listId = generateSlugFromTitle(name);
   await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name });
   const order = (await readCacheable('settings'))?.listOrder || [];
-  await saveSettingsValue('listOrder', [...order, 'list:' + listId]);
+  await saveSettingsValue('listOrder', [...order, { id: 'list:' + listId, name }]);
 
   await toggleListPin(listId);
 

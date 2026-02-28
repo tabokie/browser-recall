@@ -241,11 +241,11 @@ describe('readCacheable', () => {
   });
 
   it('returns value from session cache without sendMessage', async () => {
-    sessionStore.lists = [{ slug: 'a', name: 'A' }];
+    sessionStore.settings = { listOrder: [] };
     // Dynamic import to pick up mocked chrome
     const { readCacheable } = await import('../extension/utils.js');
-    const result = await readCacheable('lists');
-    expect(result).toEqual([{ slug: 'a', name: 'A' }]);
+    const result = await readCacheable('settings');
+    expect(result).toEqual({ listOrder: [] });
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 

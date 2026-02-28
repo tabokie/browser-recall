@@ -1,7 +1,7 @@
 // Shared utility functions
 
 // Unified cache read: session cache → background readCacheable fallback.
-// Keys use entity key format: 'settings', 'lists', 'list:system/recycle-bin', etc.
+// Keys use entity key format: 'settings', 'list:system/recycle-bin', etc.
 export async function readCacheable(key) {
   try {
     const cached = await chrome.storage.session.get([key]);

@@ -195,6 +195,13 @@ async function handleRequest(request) {
         return { success: true, interactions };
       }
 
+      case 'loadHistoryRange': {
+        const t0 = performance.now();
+        const { entries, files } = await fsStorage.loadInteractionFileRange(request.from, request.to);
+        console.debug(`[I/O] loadHistoryRange(${request.from}..${request.to}): ${files.length} files, ${entries.length} entries in ${(performance.now() - t0).toFixed(1)}ms`);
+        return { success: true, entries, files };
+      }
+
       // List list file IDs from lists/ (excluding system/)
       case 'listListFiles': {
         const files = [];

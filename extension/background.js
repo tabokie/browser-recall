@@ -3,11 +3,16 @@
 import { generateSlugFromUrl, generateNoteSlug } from './utils.js';
 import { effectOf, applyLogToPage } from './replay.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
-import { getCachedEntity, setCachedEntity, setEntityCacheWatermark } from './entity-cache.js';
+import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, getCachedEntity, setCachedEntity, setEntityCacheWatermark } from './entity-cache.js';
 
 console.log('Background script loading...');
 
 const DRAIN_INTERVAL_MS = 5000; // 5 seconds — data is safe in chrome.storage.local until drained
+const HISTORY_RECENT_DAYS = 7; // days of past history to cache for multi-day checks
+
+// In-memory Set of URLs from history:recent (past days) for O(1) multi-day lookups.
+// Populated during hydration, immutable until next browser restart.
+let recentUrls = new Set();
 
 // Session storage: in-memory IPC, survives SW termination, cleared on browser restart.
 // hydrateCache() re-populates from filesystem on every startup.
@@ -179,70 +184,21 @@ async function appendLog(entry) {
 // Read an entity from session cache by replay key.
 // Returns entity or null (null = not cached / doesn't exist).
 async function sessionLoad(key) {
-  if (key.startsWith('page:') || key.startsWith('note:')) {
-    return await getCachedEntity(key);
-  }
-  if (key === 'settings') {
-    const { settings } = await chrome.storage.session.get(['settings']);
-    return settings ? { timestamp: 0, ...settings } : null;
-  }
-  if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
-    const listId = key.slice('list:'.length);
-    const { lists = [] } = await chrome.storage.session.get(['lists']);
-    const list = lists.find(c => c.slug === listId);
-    if (list) return { timestamp: 0, slug: listId, name: list.name || '', qbTrees: list.qbTrees || [], pins: list.pins || [] };
-    return null;
-  }
-  if (key === 'list:system/recycle-bin') {
-    const data = await chrome.storage.session.get([key]);
-    const val = data[key];
-    return val ? { timestamp: 0, items: val } : null;
-  }
-  if (key === 'list:system/permanent-deletes') {
-    const data = await chrome.storage.session.get([key]);
-    const val = data[key];
-    return val ? { timestamp: 0, keys: val } : null;
-  }
-  if (key === 'list:system/shallow-page') {
-    const data = await chrome.storage.session.get([key]);
-    return data[key] || null;
-  }
-  if (key === 'list:system/gateways') {
-    const data = await chrome.storage.session.get([key]);
-    const val = data[key];
-    return val ? { timestamp: 0, origins: val } : null;
-  }
-  return null;
+  return await cacheGet(key);
 }
 
 // Write effectOf results back to session cache.
 async function sessionWrite(effects) {
   for (const [key, entity] of Object.entries(effects)) {
     if (entity === null) continue;
-    if (key.startsWith('page:') || key.startsWith('note:')) {
-      await setCachedEntity(key, entity);
-    } else if (key === 'settings') {
-      await chrome.storage.session.set({ settings: entity });
-    } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
-      const { lists = [] } = await chrome.storage.session.get(['lists']);
-      const listId = key.slice('list:'.length);
+    if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
       if (entity.deleted) {
-        await chrome.storage.session.set({ lists: lists.filter(c => c.slug !== listId) });
+        await cacheRemove(key);
       } else {
-        const idx = lists.findIndex(c => c.slug === listId);
-        const meta = { slug: entity.slug, name: entity.name, qbTrees: entity.qbTrees, pins: entity.pins || [] };
-        if (idx >= 0) lists[idx] = meta;
-        else lists.push(meta);
-        await chrome.storage.session.set({ lists });
+        await cacheSet(key, entity);
       }
-    } else if (key === 'list:system/recycle-bin') {
-      await chrome.storage.session.set({ [key]: entity.items });
-    } else if (key === 'list:system/permanent-deletes') {
-      await chrome.storage.session.set({ [key]: entity.keys });
-    } else if (key === 'list:system/shallow-page') {
-      await chrome.storage.session.set({ [key]: entity });
-    } else if (key === 'list:system/gateways') {
-      await chrome.storage.session.set({ [key]: entity.origins });
+    } else {
+      await cacheSet(key, entity);
     }
   }
 }
@@ -259,6 +215,17 @@ async function addLog(entry) {
     effects = await effectOf(entry, sessionLoad);
     await sessionWrite(effects);
   });
+  // Append to today's history date key in session (fire-and-forget).
+  // Pin the key: today's session data includes unflushed entries from addLog that
+  // are newer than the on-disk JSONL file, so evicting it would lose data.
+  // Also covers date rollover (new date key created mid-session).
+  const todayKey = 'history:' + dateKeyFromTimestamp(entry.timestamp);
+  cacheGet(todayKey).then(today => {
+    const arr = today || [];
+    arr.push(entry);
+    cacheSet(todayKey, arr, { timestamp: entry.timestamp });
+    cachePin(todayKey);
+  }).catch(() => {});
   ensureOffscreenPort().catch(() => {});
   scheduleDrainNotify();
   return effects;
@@ -283,37 +250,25 @@ async function appendVisit(interaction) {
 
 async function readCacheable(key) {
   await hydrationDone;
-  const cached = await chrome.storage.session.get([key]);
-  if (key in cached) return cached[key];
+  const cached = await cacheGet(key);
+  if (cached !== null) return cached;
   return readFs(key);
 }
 
+// Read listOrder from settings. Each entry is { id: 'list:<slug>', name }.
+async function getListOrder() {
+  await hydrationDone;
+  const settings = (await readCacheable('settings')) || {};
+  return settings.listOrder || [];
+}
+
 async function readFs(key) {
-  if (key === 'settings') {
-    // Batch-load all settings from settings.json into a single session key
-    const resp = await requestOffscreen({ action: 'loadSettings' });
-    const settings = resp?.settings || {};
-    await chrome.storage.session.set({ settings });
-    return settings;
-  }
   let value;
   switch (key) {
-    case 'lists': {
-      const metaResp = await requestOffscreen({ action: 'loadAllListMetadata' });
-      let allLists = metaResp?.lists || [];
-      const settings = (await readCacheable('settings')) || {};
-      const listOrder = settings.listOrder || [];
-      if (listOrder.length > 0) {
-        const ordered = [];
-        for (const k of listOrder) {
-          const slug = k.startsWith('list:') ? k.slice(5) : k;
-          const c = allLists.find(x => x.slug === slug);
-          if (c) ordered.push(c);
-        }
-        for (const c of allLists) { if (!listOrder.includes('list:' + c.slug)) ordered.push(c); }
-        allLists = ordered;
-      }
-      value = allLists; break;
+    case 'settings': {
+      const resp = await requestOffscreen({ action: 'loadSettings' });
+      value = resp?.settings || {};
+      break;
     }
     case 'list:system/recycle-bin': {
       const r = await requestOffscreen({ action: 'loadRecycleBin' });
@@ -333,7 +288,7 @@ async function readFs(key) {
     }
     default: return undefined;
   }
-  await chrome.storage.session.set({ [key]: value });
+  await cacheSet(key, value);
   return value;
 }
 
@@ -344,25 +299,27 @@ async function hydrateCache() {
   try {
     const resp = await requestOffscreen({ action: 'loadSettings' });
     if (resp?.success && resp.settings) {
-      await chrome.storage.session.set({ settings: resp.settings });
+      await cacheSet('settings', resp.settings);
     }
   } catch (e) { console.warn('Settings load failed:', e.message); }
 
   try {
     const metaResp = await requestOffscreen({ action: 'loadAllListMetadata' });
     if (metaResp?.success && metaResp.lists) {
-      await chrome.storage.session.set({ lists: metaResp.lists });
+      for (const list of metaResp.lists) {
+        await cacheSet('list:' + list.slug, list);
+      }
     }
   } catch (e) { console.warn('List metadata load failed:', e.message); }
 
   try {
     const rbResp = await requestOffscreen({ action: 'loadRecycleBin' });
-    if (rbResp?.success) await chrome.storage.session.set({ 'list:system/recycle-bin': rbResp.items || [] });
+    if (rbResp?.success) await cacheSet('list:system/recycle-bin', rbResp.items || []);
   } catch (e) { console.warn('Recycle bin load failed:', e.message); }
 
   try {
     const pdResp = await requestOffscreen({ action: 'loadPermanentDeletes' });
-    if (pdResp?.success) await chrome.storage.session.set({ 'list:system/permanent-deletes': pdResp.keys || [] });
+    if (pdResp?.success) await cacheSet('list:system/permanent-deletes', pdResp.keys || []);
   } catch (e) { console.warn('Permanent deletes load failed:', e.message); }
 
   try {
@@ -370,11 +327,106 @@ async function hydrateCache() {
     const spiValue = spResp?.success
       ? { timestamp: spResp.timestamp || 0, index: spResp.index || {} }
       : { timestamp: 0, index: {} };
-    await chrome.storage.session.set({ 'list:system/shallow-page': spiValue });
+    await cacheSet('list:system/shallow-page', spiValue);
   } catch (e) { console.warn('Shallow page index load failed:', e.message); }
 
-  // Phase 1.5: Pre-load page entities referenced by logBuffer from filesystem
+  // Phase 1.5: History cache — per-date keys history:YYYY-MM-DD
+  try {
+    const todayStr = dateKeyFromTimestamp(Date.now());
+
+    // Load today's history — pinned because addLog appends entries here that are
+    // newer than the on-disk JSONL file; evicting would lose unflushed data.
+    const todayResp = await requestOffscreen({ action: 'loadHistoryRange', from: todayStr, to: todayStr });
+    const todayEntries = todayResp?.entries || [];
+    const todayKey = 'history:' + todayStr;
+    const todayMaxTs = todayEntries.length ? todayEntries[todayEntries.length - 1].timestamp : 0;
+    await cacheSet(todayKey, todayEntries, { timestamp: todayMaxTs });
+    cachePin(todayKey);
+
+    // Load past HISTORY_RECENT_DAYS days — pinned because multi-day visit checks
+    // (recentUrls) read these frequently; eviction would force repeated disk loads.
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - HISTORY_RECENT_DAYS);
+    const fromStr = dateKeyFromTimestamp(fromDate.getTime());
+    const toStr = dateKeyFromTimestamp(yesterday.getTime());
+
+    recentUrls = new Set();
+    if (fromStr <= toStr) {
+      // Load the full range, then split into per-date keys
+      const recentResp = await requestOffscreen({ action: 'loadHistoryRange', from: fromStr, to: toStr });
+      const recentEntries = recentResp?.entries || [];
+      const recentFiles = recentResp?.files || [];
+
+      // Group entries by date
+      const byDate = new Map();
+      for (const entry of recentEntries) {
+        const d = dateKeyFromTimestamp(entry.timestamp);
+        if (!byDate.has(d)) byDate.set(d, []);
+        byDate.get(d).push(entry);
+      }
+
+      // Fill every date in range: existing files get their entries, gaps get empty arrays
+      const cur = new Date(fromDate);
+      const end = new Date(yesterday);
+      while (cur <= end) {
+        const d = dateKeyFromTimestamp(cur.getTime());
+        const entries = byDate.get(d) || [];
+        const hKey = 'history:' + d;
+        const maxTs = entries.length ? entries[entries.length - 1].timestamp : 0;
+        await cacheSet(hKey, entries, { timestamp: maxTs });
+        cachePin(hKey);
+        cur.setDate(cur.getDate() + 1);
+      }
+
+      // Build in-memory URL set for O(1) multi-day lookups
+      for (const entry of recentEntries) {
+        if ((entry.action === 'page' || !entry.action) && entry.url) {
+          recentUrls.add(entry.url);
+        }
+      }
+
+      // Unpin any older history keys still in session from prior SW lifetime
+      // (session survives SW termination; these are stale cache from before the 7-day window)
+      const fromMs = fromDate.getTime();
+      for (const file of (recentResp?.files || [])) {
+        // files returned by loadHistoryRange are within range, skip
+      }
+      // We can't enumerate session keys, but we can check known old dates
+      // by looking at files older than our range from listInteractionFiles
+      const allFilesResp = await requestOffscreen({ action: 'listInteractionFiles' });
+      const allFiles = allFilesResp?.files || [];
+      for (const f of allFiles) {
+        const d = f.replace('.jsonl', '');
+        if (d < fromStr) {
+          const oldKey = 'history:' + d;
+          cacheUnpin(oldKey); // evictable if still in session
+        }
+      }
+    }
+
+    console.log(`History cache: ${todayEntries.length} today, ${recentUrls.size} recent URLs`);
+  } catch (e) { console.warn('History cache load failed:', e.message); }
+
+  // Phase 1.6: Pre-load page entities referenced by logBuffer from filesystem
   await ensureLogBuffer();
+
+  // Dedup logBuffer against today's history (entries already flushed to disk)
+  {
+    const todayKey = 'history:' + dateKeyFromTimestamp(Date.now());
+    const todayForDedup = (await cacheGet(todayKey)) || [];
+    if (todayForDedup.length > 0 && logBuffer.length > 0) {
+      const flushedTimestamps = new Set(todayForDedup.map(e => e.timestamp));
+      const before = logBuffer.length;
+      logBuffer = logBuffer.filter(e => !flushedTimestamps.has(e.timestamp));
+      if (logBuffer.length < before) {
+        console.log(`logBuffer dedup: ${before} → ${logBuffer.length} (${before - logBuffer.length} already flushed)`);
+        await chrome.storage.local.set({ logBuffer });
+      }
+    }
+  }
+
   const bufferPageSlugs = new Set();
   for (const entry of logBuffer) {
     if (entry.url) bufferPageSlugs.add(generateSlugFromUrl(entry.url));
@@ -407,20 +459,6 @@ async function hydrateCache() {
       await sessionWrite(effects);
     } catch (e) { console.warn('Hydration replay failed for entry:', e.message); }
   }
-
-  // Phase 3: Order lists by listOrder
-  const { lists = [], settings: settingsObj = {} } = await chrome.storage.session.get(['lists', 'settings']);
-  const listOrder = settingsObj.listOrder || [];
-  const ordered = [];
-  for (const key of listOrder) {
-    const slug = key.startsWith('list:') ? key.slice(5) : key;
-    const col = lists.find(c => c.slug === slug);
-    if (col) ordered.push(col);
-  }
-  for (const col of lists) {
-    if (!listOrder.includes('list:' + col.slug)) ordered.push(col);
-  }
-  await chrome.storage.session.set({ lists: ordered });
 
   console.log('Cache hydrated');
 }
@@ -457,7 +495,17 @@ async function trimTitle(rawTitle, url) {
 async function processPageReport(delta) {
   const url = delta.url;
   const slug = delta.slug || generateSlugFromUrl(url);
-  const cached = await getCachedEntity('page:' + slug);
+  const key = 'page:' + slug;
+  let cached = await getCachedEntity(key);
+  if (!cached) {
+    // Disk fallback: cache miss (SW restart, LRU eviction) → load from filesystem
+    const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
+    const diskPage = resp?.pages?.[slug];
+    if (diskPage) {
+      await setCachedEntity(key, diskPage);
+      cached = diskPage;
+    }
+  }
 
   const entry = {
     timestamp: Date.now(),
@@ -725,7 +773,7 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
 chrome.commands.onCommand.addListener(async (command) => {
   console.log(`[background] Command received: ${command}`);
 
-  const { workspace } = await chrome.storage.session.get(['workspace']);
+  const workspace = await cacheGet('workspace');
   if (workspace && workspace.mode === 'private') return;
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -839,7 +887,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           try {
             const url = request.url;
 
-            const { workspace: rpWorkspace } = await chrome.storage.session.get(['workspace']);
+            const rpWorkspace = await cacheGet('workspace');
             if (rpWorkspace && rpWorkspace.mode === 'private') {
               sendResponse({ success: true });
               return;
@@ -882,20 +930,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               if (request.isInitialLoad) {
                 const slug = delta.slug || generateSlugFromUrl(url);
                 const title = entry.title || '';
-                await ensureLogBuffer();
 
-                // Multi-day visit checkpoint
-                const todayStr = new Date().toISOString().slice(0, 10);
-                const key = 'page:' + slug;
-                const cachedPage = await getCachedEntity(key);
-                let isMultiDay = false;
-                if (cachedPage && cachedPage.visitDates) {
-                  const todayYMD = (() => { const d = new Date(); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); })();
-                  isMultiDay = cachedPage.visitDates.some(ymd => ymd !== todayYMD);
-                } else {
-                  isMultiDay = logBuffer.some(e => e.action === 'page' && e.url === url && dateKeyFromTimestamp(e.timestamp) !== todayStr);
-                }
-                if (isMultiDay) {
+                // Multi-day visit checkpoint: check in-memory recentUrls set (built from history:recent)
+                if (recentUrls.has(url)) {
                   await ensureCheckpointIfMissing(slug, url, title);
                 }
 
@@ -919,16 +956,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const wsListIds = rpWorkspace?.listIds || [];
                 if (rpWorkspace && rpWorkspace.mode === 'workspace' && wsListIds.length > 0) {
                   try {
-                    const { lists: cachedLists = [] } = await chrome.storage.session.get(['lists']);
-
                     for (const listKey of wsListIds) {
                       const listSlug = listKey.startsWith('list:') ? listKey.slice(5) : listKey;
-                      const listEntry = cachedLists.find(c => c.slug === listSlug);
+                      const listEntry = await cacheGet('list:' + listSlug);
                       const listPins = listEntry?.pins || [];
-                      // Derive typed pin id: page:<slug> if checkpointed, shallow:<url> otherwise
-                      const pinSlug = delta.slug || generateSlugFromUrl(url);
-                      const cachedPage = await getCachedEntity('page:' + pinSlug);
-                      const pinId = cachedPage ? 'page:' + pinSlug : 'shallow:' + url;
+                      const pinId = await resolvePageId(url);
                       const already = listPins.some(p => p.id === pinId);
                       if (!already) {
                         await addLog({
@@ -1090,8 +1122,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'getLists': {
-          const lists = await readCacheable('lists') || [];
-          sendResponse({ lists });
+          const listOrder = await getListOrder();
+          sendResponse({ lists: listOrder });
           break;
         }
 
@@ -1193,17 +1225,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             // Parents: lists containing this URL
             const parentLists = [];
-            const allLists = (await readCacheable('lists')) || [];
-            for (const list of allLists) {
-              const listCacheKey = 'listCache:' + list.slug;
-              const cached = (await chrome.storage.session.get(listCacheKey))[listCacheKey];
+            const listOrder = await getListOrder();
+            for (const entry of listOrder) {
+              const listSlug = entry.id.startsWith('list:') ? entry.id.slice(5) : entry.id;
+              const listCacheKey = 'listCache:' + listSlug;
+              const cached = await cacheGet(listCacheKey);
               if (cached) {
                 const pageId = 'page:' + slug;
                 const shallowId = 'shallow:' + url;
                 const inPinned = cached.fullPinned?.some(p => p.url === url || p.id === pageId || p.id === shallowId);
                 const inRelated = cached.related?.some(r => r.url === url);
-                if (inPinned) parentLists.push({ slug: list.slug, name: list.name, type: 'pin' });
-                else if (inRelated) parentLists.push({ slug: list.slug, name: list.name, type: 'appear' });
+                if (inPinned) parentLists.push({ slug: listSlug, name: entry.name, type: 'pin' });
+                else if (inRelated) parentLists.push({ slug: listSlug, name: entry.name, type: 'appear' });
               }
             }
 
@@ -1231,6 +1264,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         // ── Writes (session cache + log buffer) ──
+
+        case 'ensurePageCheckpoint': {
+          const url = request.url;
+          const title = request.title || '';
+          const slug = generateSlugFromUrl(url);
+          await ensureCheckpointIfMissing(slug, url, title);
+          sendResponse({ success: true });
+          break;
+        }
 
         case 'saveSettings': {
           const s = request.settings;
@@ -1310,8 +1352,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           if (pinId?.startsWith('shallow:')) {
             pinId = await resolvePageId(pinId.slice(8));
           }
-          const { lists = [] } = await chrome.storage.session.get(['lists']);
-          const list = lists.find(c => c.slug === listId);
+          const list = await cacheGet('list:' + listId);
           const isPinned = (list?.pins || []).some(p => p.id === pinId);
           await addLog({
             timestamp: Date.now(), action: 'list', id: listId,
@@ -1362,9 +1403,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'deleteList': {
-          const order = (await readCacheable('settings'))?.listOrder || [];
-          const newOrder = order.filter(k => k !== 'list:' + request.listId);
-          await addLog({ timestamp: Date.now(), action: 'set', key: 'listOrder', value: newOrder });
           await addLog({ timestamp: Date.now(), action: 'del_list', id: request.listId });
           sendResponse({ success: true });
           notifyMutation('lists');

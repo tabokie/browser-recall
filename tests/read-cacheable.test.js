@@ -5,7 +5,7 @@
  * - Session hit returns cached value without offscreen call
  * - Session miss falls back to filesystem and caches the result
  * - Settings keys batch-load all keys on any single miss
- * - `lists` fallback applies `listOrder` ordering
+ * - `listOrder` stores `{ id, name }` entries for direct consumption
  * - `await hydrationDone` blocks readCacheable until resolved
  *
  * Structural tests verify readCacheable/readFs and getGatewayDomains exist in background.js.
@@ -58,11 +58,11 @@ describe('background.js structural checks', () => {
     expect(bgSource).toMatch(/case\s+'getGatewayDomains'\s*:/);
   });
 
-  it('getLists handler uses readCacheable', () => {
+  it('getLists handler uses getListOrder', () => {
     // Extract the getLists case block
     const getListsMatch = bgSource.match(/case\s+'getLists'\s*:\s*\{([\s\S]*?)break;\s*\}/);
     expect(getListsMatch).not.toBeNull();
-    expect(getListsMatch[1]).toMatch(/readCacheable\s*\(\s*'lists'\s*\)/);
+    expect(getListsMatch[1]).toMatch(/getListOrder\s*\(\s*\)/);
   });
 
   it('getRecycleBin handler uses readCacheable', () => {
@@ -101,12 +101,12 @@ function makeSessionStore(initial = {}) {
 describe('readCacheable / readFs', () => {
   let session;
   let offscreenCalls;
-  // Mimics the readCacheable/readFs functions from background.js
-  let readCacheable, readFs;
+  // Mimics the readCacheable/readFs/getListOrder functions from background.js
+  let readCacheable, readFs, getListOrder;
   let hydrationResolve;
   let hydrationDone;
 
-  const TEST_SETTINGS = { listOrder: ['list:b', 'list:a'], urlBlacklist: [], titleTrimRules: [{ urlPrefix: 'https://x.com', action: 'remove_after_pipe' }], captureContent: true };
+  const TEST_SETTINGS = { listOrder: [{ id: 'list:b', name: 'B' }, { id: 'list:a', name: 'A' }], urlBlacklist: [], titleTrimRules: [{ urlPrefix: 'https://x.com', action: 'remove_after_pipe' }], captureContent: true };
 
   function requestOffscreen(msg) {
     offscreenCalls.push(msg);
@@ -139,26 +139,12 @@ describe('readCacheable / readFs', () => {
 
     // Wire up readCacheable/readFs matching the background.js implementation
     readFs = async (key) => {
-      if (key === 'settings') {
-        const resp = requestOffscreen({ action: 'loadSettings' });
-        const settings = resp?.settings || {};
-        await session.set({ settings });
-        return settings;
-      }
       let value;
       switch (key) {
-        case 'lists': {
-          const metaResp = requestOffscreen({ action: 'loadAllListMetadata' });
-          let allLists = metaResp?.lists || [];
-          const settings = (await readCacheable('settings')) || {};
-          const listOrder = settings.listOrder || [];
-          if (listOrder.length > 0) {
-            const ordered = [];
-            for (const k of listOrder) { const slug = k.startsWith('list:') ? k.slice(5) : k; const c = allLists.find(x => x.slug === slug); if (c) ordered.push(c); }
-            for (const c of allLists) { if (!listOrder.includes('list:' + c.slug)) ordered.push(c); }
-            allLists = ordered;
-          }
-          value = allLists; break;
+        case 'settings': {
+          const resp = requestOffscreen({ action: 'loadSettings' });
+          value = resp?.settings || {};
+          break;
         }
         case 'list:system/recycle-bin': {
           const r = requestOffscreen({ action: 'loadRecycleBin' });
@@ -188,6 +174,12 @@ describe('readCacheable / readFs', () => {
       if (key in cached) return cached[key];
       return readFs(key);
     };
+
+    // Read listOrder from settings. Each entry is { id: 'list:<slug>', name }.
+    getListOrder = async () => {
+      const settings = await readCacheable('settings');
+      return settings?.listOrder || [];
+    };
   });
 
   // ── Session hit ──────────────────────────────────────────────────────
@@ -198,21 +190,19 @@ describe('readCacheable / readFs', () => {
     expect(offscreenCalls).toEqual([]); // No offscreen call
   });
 
-  it('returns cached lists without offscreen call', async () => {
-    await session.set({ lists: [{ slug: 'x', name: 'X' }] });
-    const result = await readCacheable('lists');
-    expect(result).toEqual([{ slug: 'x', name: 'X' }]);
+  it('returns listOrder entries from cached settings without offscreen call', async () => {
+    await session.set({ settings: { listOrder: [{ id: 'list:x', name: 'X' }] } });
+    const result = await getListOrder();
+    expect(result).toEqual([{ id: 'list:x', name: 'X' }]);
     expect(offscreenCalls).toEqual([]);
   });
 
   // ── Session miss → filesystem fallback ───────────────────────────────
-  it('falls back to filesystem for lists and caches result', async () => {
-    // listOrder is also missing, so readCacheable('listOrder') triggers loadSettings
-    const result = await readCacheable('lists');
-    expect(result).toEqual([{ slug: 'b', name: 'B' }, { slug: 'a', name: 'A' }]); // ordered by listOrder
-    expect(offscreenCalls.some(c => c.action === 'loadAllListMetadata')).toBe(true);
-    // Should be cached now
-    expect(session._store.lists).toEqual([{ slug: 'b', name: 'B' }, { slug: 'a', name: 'A' }]);
+  it('getListOrder falls back to filesystem for settings then returns listOrder', async () => {
+    // Settings not in session — triggers readFs('settings')
+    const result = await getListOrder();
+    expect(result).toEqual(TEST_SETTINGS.listOrder);
+    expect(offscreenCalls.some(c => c.action === 'loadSettings')).toBe(true);
   });
 
   it('falls back to filesystem for recycle-bin and caches result', async () => {
@@ -263,21 +253,22 @@ describe('readCacheable / readFs', () => {
   });
 
   // ── Lists ordering ───────────────────────────────────────────────────
-  it('applies listOrder when loading lists from filesystem', async () => {
-    // Pre-populate settings in session so readCacheable('settings') hits cache
-    await session.set({ settings: { listOrder: ['list:b', 'list:a'] } });
-    const result = await readCacheable('lists');
-    // 'b' should come before 'a' because listOrder = ['list:b', 'list:a']
-    expect(result[0].slug).toBe('b');
-    expect(result[1].slug).toBe('a');
+  it('getListOrder returns entries in listOrder order', async () => {
+    await session.set({
+      settings: { listOrder: [{ id: 'list:b', name: 'B' }, { id: 'list:a', name: 'A' }] },
+    });
+    const result = await getListOrder();
+    // 'b' should come before 'a' because listOrder = [b, a]
+    expect(result[0].id).toBe('list:b');
+    expect(result[1].id).toBe('list:a');
+    expect(offscreenCalls).toEqual([]);
   });
 
-  it('preserves original order when listOrder is empty', async () => {
+  it('returns empty array when listOrder is empty', async () => {
     await session.set({ settings: { listOrder: [] } });
-    const result = await readCacheable('lists');
-    // Original order from loadAllListMetadata: a, b
-    expect(result[0].slug).toBe('a');
-    expect(result[1].slug).toBe('b');
+    const result = await getListOrder();
+    expect(result).toEqual([]);
+    expect(offscreenCalls).toEqual([]);
   });
 
   // ── hydrationDone blocking ──────────────────────────────────────────
@@ -295,7 +286,7 @@ describe('readCacheable / readFs', () => {
       return origReadFs(key);
     };
 
-    await session.set({ settings: { listOrder: ['list:a'] } });
+    await session.set({ settings: { listOrder: [{ id: 'list:a', name: 'A' }] } });
 
     const promise = readCacheable('settings').then(v => { resolved = true; return v; });
 
@@ -307,7 +298,7 @@ describe('readCacheable / readFs', () => {
     hydrationResolve();
     const result = await promise;
     expect(resolved).toBe(true);
-    expect(result).toEqual({ listOrder: ['list:a'] });
+    expect(result).toEqual({ listOrder: [{ id: 'list:a', name: 'A' }] });
   });
 
   // ── Unknown keys ─────────────────────────────────────────────────────

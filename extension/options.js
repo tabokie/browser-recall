@@ -238,15 +238,29 @@ async function precomputeCapturesMatches(queries) {
 
 async function initHistoryFiles() {
   if (historyFiles.length > 0) return;
+
+  // Always get file list from offscreen (no session cache for file list)
   try {
     const resp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
     historyFiles = resp?.files || [];
   } catch (error) {
     console.log('Filesystem not available:', error.message);
   }
-  // Merge log buffer (newest unwritten data)
-  const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
-  const interactionBuffer = extractInteractionBuffer(logBuffer);
+
+  // Merge today's history from session cache (date-specific key) or logBuffer
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayKey = 'history:' + todayStr;
+  const sessionData = await chrome.storage.session.get([todayKey]);
+  const todayEntries = sessionData[todayKey];
+  let interactionBuffer;
+  if (todayEntries && todayEntries.length > 0) {
+    // Session has today's entries (already includes flushed + logBuffer via background addLog)
+    interactionBuffer = todayEntries.filter(e => (e.action === 'page' || !e.action) && e.url);
+  } else {
+    // Fallback: read raw logBuffer
+    const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
+    interactionBuffer = extractInteractionBuffer(logBuffer);
+  }
   for (const entry of interactionBuffer) {
     const existing = historyByUrl.get(entry.url);
     if (!existing || entry.timestamp > existing.timestamp) {
@@ -2553,7 +2567,10 @@ function bindResultDelegation(container) {
     const row = e.target.closest('.result-row');
     if (!row) return;
     if (e.target.closest('.result-pin') || e.target.closest('.result-expand') || e.target.closest('.result-delete') || e.target.closest('.result-focus')) return;
-    chrome.tabs.create({ url: row.dataset.url });
+    const url = row.dataset.url;
+    // Proactive checkpoint: ensure a page entity exists before navigation
+    chrome.runtime.sendMessage({ action: 'ensurePageCheckpoint', url, title: row.dataset.title || '' }).catch(() => {});
+    chrome.tabs.create({ url });
   });
 
   container.addEventListener('dragstart', (e) => {
@@ -2734,7 +2751,9 @@ function updateSidebarActive() {
 
 // --- Lists (pinned searches) ---
 async function loadLists() {
-  return (await readCacheable('lists')) || [];
+  const settings = await readCacheable('settings');
+  const listOrder = settings?.listOrder || [];
+  return listOrder.map(e => ({ slug: e.id.startsWith('list:') ? e.id.slice(5) : e.id, name: e.name }));
 }
 
 // saveLists removed — use saveListMeta/deleteList messages instead
@@ -2847,7 +2866,7 @@ async function renderLists() {
         const rect = item.getBoundingClientRect();
         if (e.clientY >= rect.top + rect.height / 2) toIdx++;
         allItems.splice(toIdx, 0, moved);
-        await saveSettingsValue('listOrder', allItems.map(c => 'list:' + c.slug));
+        await saveSettingsValue('listOrder', allItems.map(c => ({ id: 'list:' + c.slug, name: c.name })));
         await renderLists();
       } else {
         // --- Pin drop (existing logic) ---
@@ -2898,7 +2917,7 @@ async function saveExploreAsList() {
     const newList = { slug: listId, name, qbTrees };
     await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, qbTrees });
     const order = (await readCacheable('settings'))?.listOrder || [];
-    await saveSettingsValue('listOrder', [...order, 'list:' + listId]);
+    await saveSettingsValue('listOrder', [...order, { id: 'list:' + listId, name }]);
     // Copy explore pins to the new list (if any)
     if (pins.length > 0) {
       await chrome.runtime.sendMessage({

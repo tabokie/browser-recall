@@ -373,6 +373,20 @@ class FileSystemStorage {
     return files;
   }
 
+  // Load interactions from JSONL files within a date range (inclusive).
+  // fromDate/toDate are YYYY-MM-DD strings.
+  // Returns { entries, files } — entries in chronological order, files sorted oldest-first.
+  async loadInteractionFileRange(fromDate, toDate) {
+    const allFiles = await this.listInteractionFiles(); // newest-first
+    const filtered = allFiles.filter(f => {
+      const dateStr = f.replace('.jsonl', '');
+      return dateStr >= fromDate && dateStr <= toDate;
+    });
+    filtered.sort(); // oldest-first for chronological reading
+    const entries = await this.loadInteractionFiles(filtered);
+    return { entries, files: filtered };
+  }
+
   // Read and parse specific .jsonl files, return raw interactions
   async loadInteractionFiles(filenames) {
     if (!(await this.verifyPermission())) {

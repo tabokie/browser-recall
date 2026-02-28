@@ -124,7 +124,7 @@ const KNOWN_PIN_URLS = [
 const SLUG_TO_URL = new Map(KNOWN_PIN_URLS.map(url => [generateSlugFromUrl(url), url]));
 
 const TEST_SETTINGS = {
-  listOrder: ['list:col-rust', 'list:col-nohit'],
+  listOrder: [{ id: 'list:col-rust', name: 'Rust Lang' }, { id: 'list:col-nohit', name: 'No-Hit Query' }],
   captureContent: true,
   captureAttention: true,
   archiveQuality: 'medium',
@@ -335,13 +335,18 @@ describe('Progressive loading', () => {
 
       case 'readCacheable':
         switch (msg.key) {
-          case 'lists': return { value: TEST_LISTS };
           case 'settings': return { value: TEST_SETTINGS };
           case 'list:system/recycle-bin': return { value: [] };
           case 'list:system/permanent-deletes': return { value: TEST_SETTINGS.permanentDeletes };
           case 'list:system/gateways': return { value: [] };
           case 'list:system/shallow-page': return { value: { timestamp: 0, index: {} } };
-          default: return { value: undefined };
+          default: {
+            // Return individual list entities by slug
+            for (const list of TEST_LISTS) {
+              if (msg.key === 'list:' + list.slug) return { value: list };
+            }
+            return { value: undefined };
+          }
         }
 
       default:
@@ -353,11 +358,14 @@ describe('Progressive loading', () => {
   function populateCache() {
     sessionData = {
       settings: TEST_SETTINGS,
-      lists: TEST_LISTS,
       'list:system/recycle-bin': [],
       'list:system/permanent-deletes': TEST_SETTINGS.permanentDeletes,
       'list:system/gateways': [],
     };
+    // Individual list entity keys
+    for (const list of TEST_LISTS) {
+      sessionData['list:' + list.slug] = list;
+    }
     // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
     for (const [slug, url] of SLUG_TO_URL) {
       sessionData['page:' + slug] = { slug, url, watermark: 0 };
@@ -486,28 +494,17 @@ describe('Progressive loading', () => {
     await tick(50);
   });
 
-  it('Test 2: lists absent from cache → sidebar empty, then populated after cache arrival', async () => {
-    // Cache all settings EXCEPT 'lists' — simulates options.js loading
-    // before background has finished hydrating list metadata from files.
+  it('Test 2: sidebar lists render from listOrder even when individual entity keys are absent', async () => {
+    // Cache settings (with listOrder containing { id, name }) but NOT individual list:<slug> keys.
+    // loadLists() reads from settings.listOrder directly, so sidebar renders immediately.
     sessionData = {
       settings: TEST_SETTINGS,
       'list:system/recycle-bin': [],
       'list:system/permanent-deletes': TEST_SETTINGS.permanentDeletes,
       'list:system/gateways': [],
-      // 'lists' intentionally missing
+      // individual list:<slug> keys intentionally missing
     };
     localData = { logBuffer: [] };
-
-    // Defer readCacheable for 'lists' — simulate background not yet ready
-    const listsDeferred = createDeferred();
-    const origSendMessage = chrome.runtime.sendMessage;
-    chrome.runtime.sendMessage = vi.fn(async (msg) => {
-      if (msg.action === 'readCacheable' && msg.key === 'lists') {
-        await listsDeferred.promise;
-        return { value: TEST_LISTS };
-      }
-      return origSendMessage(msg);
-    });
 
     const importDone = importOptions();
     await tick(200);
@@ -518,15 +515,11 @@ describe('Progressive loading', () => {
     // Explore view rendered
     expect(mainTitle()).toBe('Explore');
 
-    // Lists still empty (readCacheable for 'lists' is deferred)
-    expect(sidebarLists()).toEqual([]);
+    // Sidebar lists render immediately from listOrder (no need for individual entity keys)
+    expect(sidebarLists()).toContain('col-rust');
 
-    // Unblock lists loading
-    listsDeferred.resolve();
     await importDone;
     await tick(100);
-
-    expect(sidebarLists()).toContain('col-rust');
   });
 
   it('Test 3: pause interaction list only → frames + sidebar lists visible', async () => {

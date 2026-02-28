@@ -98,7 +98,7 @@ const KNOWN_PIN_URLS = [
 const SLUG_TO_URL = new Map(KNOWN_PIN_URLS.map(url => [generateSlugFromUrl(url), url]));
 
 const TEST_SETTINGS = {
-  listOrder: ['list:col-rust', 'list:col-noq'],
+  listOrder: [{ id: 'list:col-rust', name: 'Rust Lang' }, { id: 'list:col-noq', name: 'No Query List' }],
   captureContent: true,
   captureAttention: true,
   archiveQuality: 'medium',
@@ -319,7 +319,6 @@ describe('Cache staleness', () => {
       case 'readCacheable':
         // Simulate background readCacheable: dispatch to known handlers
         switch (msg.key) {
-          case 'lists': return { value: TEST_LISTS };
           case 'settings': return { value: TEST_SETTINGS };
           case 'list:system/recycle-bin': return { value: [] };
           case 'list:system/permanent-deletes': return { value: [] };
@@ -337,14 +336,17 @@ describe('Cache staleness', () => {
   }
 
   function populateCache() {
-    // Session-cached keys (settings as single object, entity keys for system lists)
+    // Session-cached keys (settings as single object, individual list keys, entity keys for system lists)
     sessionData = {
       settings: TEST_SETTINGS,
-      lists: TEST_LISTS,
       'list:system/recycle-bin': [],
       'list:system/permanent-deletes': TEST_SETTINGS.permanentDeletes,
       'list:system/gateways': [],
     };
+    // Individual list entity keys
+    for (const list of TEST_LISTS) {
+      sessionData['list:' + list.slug] = list;
+    }
     // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
     for (const [slug, url] of SLUG_TO_URL) {
       sessionData['page:' + slug] = { slug, url, watermark: 0 };
@@ -591,10 +593,8 @@ describe('Cache staleness', () => {
     ];
 
     // Add a list with pins on buffered.com (same domain as logBuffer entries)
-    sessionData.lists = [
-      ...TEST_LISTS,
-      { slug: 'col-buf', query: '', name: 'Buffered' },
-    ];
+    sessionData['list:col-buf'] = { slug: 'col-buf', query: '', name: 'Buffered' };
+    sessionData.settings = { ...TEST_SETTINGS, listOrder: [...TEST_SETTINGS.listOrder, { id: 'list:col-buf', name: 'Buffered' }] };
     actionOverrides['loadListPinsById'] = (msg) => {
       if (msg.listId === 'col-buf') {
         return { success: true, pins: [
@@ -713,10 +713,7 @@ describe('Cache staleness', () => {
     // col-noq has query '' and pins on example.com (same domain as history)
     // Give it a query so it goes through pipelinedSearch path
     // Override session cache with modified list
-    sessionData.lists = [
-      TEST_LIST,
-      { slug: 'col-noq', query: 'example', name: 'Example List' },
-    ];
+    sessionData['list:col-noq'] = { slug: 'col-noq', query: 'example', name: 'Example List' };
 
     mockSearchBatchFn.mockImplementation(async () => {
       throw new Error('RuntimeError: memory access out of bounds');
@@ -755,9 +752,8 @@ describe('Cache staleness', () => {
       },
     ];
 
-    sessionData.lists = [
-      { slug: 'col-today', query: 'today', name: 'Today Search' },
-    ];
+    sessionData['list:col-today'] = { slug: 'col-today', query: 'today', name: 'Today Search' };
+    sessionData.settings = { ...TEST_SETTINGS, listOrder: [{ id: 'list:col-today', name: 'Today Search' }] };
     actionOverrides['loadListPinsById'] = actionOverrides['loadListPins'] = (msg) => {
       if (msg.listId === 'col-today') {
         return { success: true, pins: [
@@ -1013,12 +1009,14 @@ describe('Cache staleness', () => {
     const TEST_RECYCLE_BIN = [
       { url: 'https://deleted.com', title: 'Deleted Page', deletedAt: Date.now() },
     ];
-    const origHandler = actionOverrides['readCacheable'];
     actionOverrides['readCacheable'] = (msg) => {
-      if (msg.key === 'lists') return { value: TEST_LISTS };
+      if (msg.key === 'settings') return { value: TEST_SETTINGS };
       if (msg.key === 'list:system/recycle-bin') return { value: TEST_RECYCLE_BIN };
       if (msg.key === 'list:system/permanent-deletes') return { value: [] };
-      // Fall through to default handler for other keys
+      // Return individual list entities by slug
+      for (const list of TEST_LISTS) {
+        if (msg.key === 'list:' + list.slug) return { value: list };
+      }
       return handleAction({ ...msg, action: 'readCacheable' });
     };
 
@@ -1068,9 +1066,8 @@ describe('Cache staleness', () => {
     };
 
     // Add the shallow list to lists and listOrder
-    sessionData.lists = [...TEST_LISTS, TEST_LIST_WITH_SHALLOW];
-    sessionData.listOrder = [...TEST_SETTINGS.listOrder, 'list:col-shallow'];
-    actionOverrides['getLists'] = () => ({ lists: sessionData.lists });
+    sessionData['list:' + TEST_LIST_WITH_SHALLOW.slug] = TEST_LIST_WITH_SHALLOW;
+    sessionData.settings = { ...TEST_SETTINGS, listOrder: [...TEST_SETTINGS.listOrder, { id: 'list:col-shallow', name: 'Shallow List' }] };
 
     await importOptions();
     await tick(200);
@@ -1110,7 +1107,6 @@ describe('Cache staleness', () => {
     actionOverrides['loadListPinsById'] = (msg) => ({
       success: true, pins: uncachedPins[msg.listId] || [],
     });
-    actionOverrides['getLists'] = () => ({ lists: [...TEST_LISTS, TEST_LIST_UNCACHED] });
     // loadPageBatch returns the page entity (filesystem fallback)
     actionOverrides['loadPageBatch'] = (msg) => ({
       success: true,
@@ -1121,8 +1117,8 @@ describe('Cache staleness', () => {
     });
 
     // Do NOT put 'page:<slug>' in sessionData — simulating empty session cache
-    sessionData.lists = [...TEST_LISTS, TEST_LIST_UNCACHED];
-    sessionData.listOrder = [...TEST_SETTINGS.listOrder, 'list:col-uncached'];
+    sessionData['list:' + TEST_LIST_UNCACHED.slug] = TEST_LIST_UNCACHED;
+    sessionData.settings = { ...TEST_SETTINGS, listOrder: [...TEST_SETTINGS.listOrder, { id: 'list:col-uncached', name: 'Uncached List' }] };
 
     await importOptions();
     await tick(200);
@@ -1158,7 +1154,6 @@ describe('Cache staleness', () => {
     actionOverrides['loadListPinsById'] = (msg) => ({
       success: true, pins: spiPins[msg.listId] || [],
     });
-    actionOverrides['getLists'] = () => ({ lists: [...TEST_LISTS, TEST_LIST_SPI] });
     // getShallowPageIndex handler returns SPI (filesystem fallback via background)
     actionOverrides['getShallowPageIndex'] = () => ({
       timestamp: 0,
@@ -1168,8 +1163,8 @@ describe('Cache staleness', () => {
     });
 
     // Do NOT put shallowPageIndex in sessionData — simulating pre-hydration state
-    sessionData.lists = [...TEST_LISTS, TEST_LIST_SPI];
-    sessionData.listOrder = [...TEST_SETTINGS.listOrder, 'list:col-spi'];
+    sessionData['list:' + TEST_LIST_SPI.slug] = TEST_LIST_SPI;
+    sessionData.settings = { ...TEST_SETTINGS, listOrder: [...TEST_SETTINGS.listOrder, { id: 'list:col-spi', name: 'SPI Fallback List' }] };
 
     await importOptions();
     await tick(200);

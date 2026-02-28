@@ -1,0 +1,34 @@
+- Take a look at "Silent fallback / evil default audit" in TODO.md, let's work on this section
+- Start with HIGH, but 3 needs discussion
+- I have a question, how does browser determine whether we have opened a link before? Because visited links are usually marked with special color
+- (1) First of all, it is not practical to scan the entire history just to check visited dates (5 years of history amounts to 200MiB), we should best-effort scan latest chunk of history; (2) When user opens a history link directly from Portal Search, we know for certain that it is a multi-day visit. We should append a page_checkpoint log before opening that link.
+- "the current best-effort cache→logBuffer scan in reportPage" is meaningless. Because if a page entity is cached, it is already certain that it has a checkpoint. We don't need to additionally make it checkpointed. The correct way is to cache history files (before today, which are immutable), and check if this page appears in the history files.
+- Continue with 3
+- I think (1) we should cache the recent history in session storage. This cache can be reused for history UI.  (2) we also cache today's history in session storage, use it for history UI, update it when appending log, use it to dedup log buffer when initializing the extension. (3) The offscreen should accept a range selector for history file reads.
+- Don't use ambiguous names such as "history:today" and "history:recent", use specific date "history:<date>". And during background.js initialize, we add the history keys that are older than 7d to LRU eviction queue.
+- The LRU queue is shared globally with all entity reads. There is a default policy to determine whether a key should be pinned (e.g. page entity can be evicted, settings should not be evicted, history files should not be evicted), and cache exposes an API to pin/unpin a key. In this case, we unpin the old history files, meaning that when memory is short, they will be evicted.
+
+One more thing, I am not sure why "history:files" is needed. When we ask offscreen to return files within range [x, y], we will set the cache keys of every single dates within that range. For files that doesn't exist, we fill the value with empty object.
+- For Q2, tell me more about "lists" key, I don't know it before.
+- For Q1, yes, persistWatermark still exists. And we also use it to avoid evicting today's history. For Q2, use individual keys for each list.
+- Reload token
+- What is "list:_index" used for?
+- Why not use listOrder?
+- yes
+- Why does "lists" still exist in the codebase?
+- `readCacheable` has a clear responsibility: managing keys. Those that are not stored in session storage as key should not be passed into this function. For your use case, you can extract a util function `readCacheableLists()` that calls individual keys.
+- Are there any other virtual keys?
+- Enumerate callsites of readCacheableLists, can they be replaced with listOrder? Because I didn't know where in the UI we would need the full data of all lists at once.
+- Let's make listOrder store both id and name. Make most of these calls use listOrder directly.
+- in sync
+- When replaying a list_meta log, is the settings.listOrder updated?
+- I think we should keep it a responsibility of replay, instead of explicitly setting a log. Because in most cases, a log represent a user action.
+- Are there other cases where a side effect is being explicitly enforced using extra logs (other than "page_checkpoint")?
+- Migrate my data at ~/portal-data. Update listOrder in settings.json, and remove the redundant log { set key=listOrder } before `list_meta` log.
+- What is the interplay between history cache and persistWatermark?
+- How do we determine that today's history data shouldn't be evicted?
+- Earlier I mentioned, recent history files should be pinned, not just today's.
+- Actually, explicit pinning is okay, just make sure we cover the recent 7d of data. And add a comment that says today's file is newer than disk and should not be evicted.
+- I said, pinning should apply to recent 7d. Today is mandatory because of the comment, the past 7d is because we use it frequently to perform multi-day checks.
+- /finish 
+- y

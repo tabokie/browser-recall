@@ -907,12 +907,52 @@ describe('effectOf scope', () => {
     expect(Object.keys(result).sort()).toEqual(['list:c1', 'list:system/shallow-page'].sort());
   });
 
-  it('affects list key for list_meta entries', async () => {
+  it('list_meta with name change also updates settings.listOrder', async () => {
+    const settings = { listOrder: [{ id: 'list:c1', name: 'Old Name' }, { id: 'list:c2', name: 'Other' }] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'Old Name', qbTrees: [], pins: [] };
+    const load = async (key) => {
+      if (key === 'settings') return settings;
+      if (key === 'list:c1') return listEntity;
+      return null;
+    };
+    const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'c1', name: 'New Name' }, load);
+    expect(Object.keys(result).sort()).toEqual(['list:c1', 'settings']);
+    expect(result['list:c1'].name).toBe('New Name');
+    expect(result['settings'].listOrder[0]).toEqual({ id: 'list:c1', name: 'New Name' });
+    expect(result['settings'].listOrder[1]).toEqual({ id: 'list:c2', name: 'Other' });
+  });
+
+  it('list_meta without name change does not touch settings', async () => {
+    const settings = { listOrder: [{ id: 'list:c1', name: 'Same' }] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'Same', qbTrees: [], pins: [] };
+    const load = async (key) => {
+      if (key === 'settings') return settings;
+      if (key === 'list:c1') return listEntity;
+      return null;
+    };
+    const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'c1', name: 'Same', qbTrees: [{ type: 'AND' }] }, load);
+    expect(Object.keys(result)).toEqual(['list:c1']);
+  });
+
+  it('del_list removes entry from settings.listOrder', async () => {
+    const settings = { listOrder: [{ id: 'list:c1', name: 'A' }, { id: 'list:c2', name: 'B' }] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'A', qbTrees: [], pins: [] };
+    const load = async (key) => {
+      if (key === 'settings') return settings;
+      if (key === 'list:c1') return listEntity;
+      return null;
+    };
+    const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, load);
+    expect(Object.keys(result).sort()).toEqual(['list:c1', 'settings']);
+    expect(result['settings'].listOrder).toEqual([{ id: 'list:c2', name: 'B' }]);
+  });
+
+  it('affects list key for list_meta entries without settings', async () => {
     const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'c1', name: 'Test' }, nullLoad);
     expect(Object.keys(result)).toEqual(['list:c1']);
   });
 
-  it('affects list key for del_list entries', async () => {
+  it('affects list key for del_list entries without settings', async () => {
     const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, nullLoad);
     expect(Object.keys(result)).toEqual(['list:c1']);
   });

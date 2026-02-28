@@ -115,6 +115,31 @@ export async function effectOf(entry, load) {
       const spi = await loadOrDefault('list:system/shallow-page', load);
       result['list:system/shallow-page'] = applyLogToShallowPage(spi, entry);
     }
+
+    // list_meta name change → update listOrder entry name in settings
+    if (entry.action === 'list_meta' && entry.name && !listKey.startsWith('list:system/')) {
+      const settings = await load('settings');
+      if (settings?.listOrder) {
+        const idx = settings.listOrder.findIndex(e => e.id === listKey);
+        if (idx >= 0 && settings.listOrder[idx].name !== entry.name) {
+          const newOrder = [...settings.listOrder];
+          newOrder[idx] = { ...newOrder[idx], name: entry.name };
+          result['settings'] = { ...settings, listOrder: newOrder };
+        }
+      }
+    }
+
+    // del_list → remove entry from listOrder in settings
+    if (entry.action === 'del_list' && !listKey.startsWith('list:system/')) {
+      const settings = await load('settings');
+      if (settings?.listOrder) {
+        const newOrder = settings.listOrder.filter(e => e.id !== listKey);
+        if (newOrder.length !== settings.listOrder.length) {
+          result['settings'] = { ...settings, listOrder: newOrder };
+        }
+      }
+    }
+
     return result;
   }
 

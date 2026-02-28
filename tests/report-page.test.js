@@ -62,11 +62,14 @@ function makeTrimTitle(titleTrimRules = []) {
 /**
  * Process a page report delta against cached state.
  * Returns { entry } where entry is null if nothing changed.
+ *
+ * loadPage(slug): async fallback — loads page entity from disk when cache misses.
  */
-function processPageReport(delta, { getCachedEntity, trimTitle }) {
+async function processPageReport(delta, { getCachedEntity, loadPage, trimTitle }) {
   const url = delta.url;
   const slug = delta.slug || url.replace(/\W/g, '-');
-  const cached = getCachedEntity('page:' + slug);
+  let cached = getCachedEntity('page:' + slug);
+  if (!cached && loadPage) cached = await loadPage(slug);
 
   const entry = {
     timestamp: Date.now(),
@@ -84,11 +87,15 @@ function processPageReport(delta, { getCachedEntity, trimTitle }) {
     }
   }
 
-  // Referrer: only meaningful on first visit or if changed
+  // Referrer: convert to referrerId (page:<slug> format), skip self-referential
   if (delta.referrer != null) {
-    if (!cached || cached.referrer !== delta.referrer) {
-      entry.referrer = delta.referrer;
-      hasChange = true;
+    const refSlug = delta.referrer.replace(/\W/g, '-');
+    if (refSlug !== slug) {
+      const referrerId = 'page:' + refSlug;
+      if (!cached || cached.referrerId !== referrerId) {
+        entry.referrerId = referrerId;
+        hasChange = true;
+      }
     }
   }
 
@@ -124,28 +131,29 @@ function processPageReport(delta, { getCachedEntity, trimTitle }) {
 describe('processPageReport', () => {
   const url = 'https://example.com/page';
   const slug = 'example-com-page';
+  const noLoad = { getCachedEntity: () => null, loadPage: () => null, trimTitle: makeTrimTitle() };
 
   describe('title trimming', () => {
-    it('trims title before logging on initial visit', () => {
+    it('trims title before logging on initial visit', async () => {
       const trimTitle = makeTrimTitle([
         { urlPrefix: 'https://example.com', action: 'remove_after_pipe' },
       ]);
-      const { entry } = processPageReport(
+      const { entry } = await processPageReport(
         { url, title: 'My Page | Example Site', isInitialLoad: true },
-        { getCachedEntity: () => null, trimTitle },
+        { ...noLoad, trimTitle },
       );
       expect(entry.title).toBe('My Page');
     });
 
-    it('trims title before comparing against cached value', () => {
+    it('trims title before comparing against cached value', async () => {
       const trimTitle = makeTrimTitle([
         { urlPrefix: 'https://example.com', action: 'remove_after_pipe' },
       ]);
       // Cached title is already trimmed
       const cached = { title: 'My Page', scrollDepth: 0 };
-      const { entry } = processPageReport(
+      const { entry } = await processPageReport(
         { url, title: 'My Page | Example Site', scrollDepth: 10 },
-        { getCachedEntity: () => cached, trimTitle },
+        { ...noLoad, getCachedEntity: () => cached, trimTitle },
       );
       // Title should NOT appear in entry (matches cached after trim)
       expect(entry).not.toBeNull();
@@ -154,112 +162,142 @@ describe('processPageReport', () => {
       expect(entry.scrollDepth).toBe(10);
     });
 
-    it('includes title when trimmed value differs from cached', () => {
+    it('includes title when trimmed value differs from cached', async () => {
       const trimTitle = makeTrimTitle([
         { urlPrefix: 'https://example.com', action: 'remove_after_pipe' },
       ]);
       const cached = { title: 'Old Title' };
-      const { entry } = processPageReport(
+      const { entry } = await processPageReport(
         { url, title: 'New Title | Example Site' },
-        { getCachedEntity: () => cached, trimTitle },
+        { ...noLoad, getCachedEntity: () => cached, trimTitle },
       );
       expect(entry.title).toBe('New Title');
     });
   });
 
   describe('diff-only logging', () => {
-    it('returns null entry when nothing changed', () => {
-      const trimTitle = makeTrimTitle();
+    it('returns null entry when nothing changed', async () => {
       const cached = { title: 'Same', scrollDepth: 50 };
-      const { entry } = processPageReport(
+      const { entry } = await processPageReport(
         { url, title: 'Same', scrollDepth: 30 },
-        { getCachedEntity: () => cached, trimTitle },
+        { ...noLoad, getCachedEntity: () => cached },
       );
       expect(entry).toBeNull();
     });
 
-    it('includes only changed fields', () => {
-      const trimTitle = makeTrimTitle();
+    it('includes only changed fields', async () => {
       const cached = { title: 'Same', scrollDepth: 20 };
-      const { entry } = processPageReport(
+      const { entry } = await processPageReport(
         { url, title: 'Same', scrollDepth: 50, timeOnPage: 3000 },
-        { getCachedEntity: () => cached, trimTitle },
+        { ...noLoad, getCachedEntity: () => cached },
       );
       expect(entry.title).toBeUndefined(); // unchanged
       expect(entry.scrollDepth).toBe(50); // higher
       expect(entry.timeOnPage).toBe(3000); // always included
     });
 
-    it('skips scrollDepth when not higher than cached', () => {
-      const trimTitle = makeTrimTitle();
+    it('skips scrollDepth when not higher than cached', async () => {
       const cached = { title: 'Page', scrollDepth: 80 };
-      const { entry } = processPageReport(
+      const { entry } = await processPageReport(
         { url, title: 'Page', scrollDepth: 50, timeOnPage: 1000 },
-        { getCachedEntity: () => cached, trimTitle },
+        { ...noLoad, getCachedEntity: () => cached },
       );
       expect(entry.scrollDepth).toBeUndefined();
       expect(entry.timeOnPage).toBe(1000);
     });
 
-    it('skips timeOnPage when zero', () => {
-      const trimTitle = makeTrimTitle();
-      const { entry } = processPageReport(
+    it('skips timeOnPage when zero', async () => {
+      const { entry } = await processPageReport(
         { url, title: 'New Page', timeOnPage: 0, isInitialLoad: true },
-        { getCachedEntity: () => null, trimTitle },
+        noLoad,
       );
       expect(entry.title).toBe('New Page');
       expect(entry.timeOnPage).toBeUndefined();
     });
   });
 
-  describe('referrer handling', () => {
-    it('includes referrer on first visit', () => {
-      const trimTitle = makeTrimTitle();
-      const { entry } = processPageReport(
-        { url, title: 'Page', referrer: 'https://google.com', isInitialLoad: true },
-        { getCachedEntity: () => null, trimTitle },
+  describe('disk fallback on cache miss', () => {
+    it('diffs against disk entity when cache misses', async () => {
+      const diskPage = { title: 'Same Title', scrollDepth: 50, referrerId: 'page:google-com' };
+      const loadPage = vi.fn().mockReturnValue(diskPage);
+      const { entry } = await processPageReport(
+        { url, title: 'Same Title', scrollDepth: 30, timeOnPage: 2000 },
+        { getCachedEntity: () => null, loadPage, trimTitle: makeTrimTitle() },
       );
-      expect(entry.referrer).toBe('https://google.com');
+      // loadPage should have been called
+      expect(loadPage).toHaveBeenCalledWith(expect.stringContaining('example'));
+      // title and scrollDepth unchanged vs disk — should NOT appear
+      expect(entry).not.toBeNull();
+      expect(entry.title).toBeUndefined();
+      expect(entry.scrollDepth).toBeUndefined();
+      // timeOnPage always included
+      expect(entry.timeOnPage).toBe(2000);
     });
 
-    it('skips referrer when same as cached', () => {
-      const trimTitle = makeTrimTitle();
-      const cached = { title: 'Page', referrer: 'https://google.com' };
-      const { entry } = processPageReport(
-        { url, title: 'Page', referrer: 'https://google.com', timeOnPage: 1000 },
-        { getCachedEntity: () => cached, trimTitle },
+    it('returns null when all fields match disk entity', async () => {
+      const diskPage = { title: 'Page Title', scrollDepth: 80 };
+      const { entry } = await processPageReport(
+        { url, title: 'Page Title', scrollDepth: 50 },
+        { getCachedEntity: () => null, loadPage: () => diskPage, trimTitle: makeTrimTitle() },
       );
-      expect(entry.referrer).toBeUndefined();
+      expect(entry).toBeNull();
+    });
+
+    it('does not call loadPage when cache hits', async () => {
+      const cached = { title: 'Cached' };
+      const loadPage = vi.fn();
+      await processPageReport(
+        { url, title: 'Cached', timeOnPage: 500 },
+        { getCachedEntity: () => cached, loadPage, trimTitle: makeTrimTitle() },
+      );
+      expect(loadPage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('referrer handling', () => {
+    it('includes referrerId on first visit', async () => {
+      const { entry } = await processPageReport(
+        { url, title: 'Page', referrer: 'https://google.com', isInitialLoad: true },
+        noLoad,
+      );
+      expect(entry.referrerId).toBe('page:https---google-com');
+    });
+
+    it('skips referrerId when same as cached', async () => {
+      const refSlug = 'https---google-com';
+      const cached = { title: 'Page', referrerId: 'page:' + refSlug };
+      const { entry } = await processPageReport(
+        { url, title: 'Page', referrer: 'https://google.com', timeOnPage: 1000 },
+        { ...noLoad, getCachedEntity: () => cached },
+      );
+      expect(entry.referrerId).toBeUndefined();
     });
   });
 
   describe('user_title handling', () => {
-    it('includes user_title when no cached user_title', () => {
-      const trimTitle = makeTrimTitle();
-      const { entry } = processPageReport(
+    it('includes user_title when no cached user_title', async () => {
+      const { entry } = await processPageReport(
         { url, user_title: 'My Custom Name' },
-        { getCachedEntity: () => ({ title: 'Auto Title' }), trimTitle },
+        { ...noLoad, getCachedEntity: () => ({ title: 'Auto Title' }) },
       );
       expect(entry.user_title).toBe('My Custom Name');
     });
 
-    it('skips user_title when same as cached', () => {
-      const trimTitle = makeTrimTitle();
+    it('skips user_title when same as cached', async () => {
       const cached = { title: 'Auto Title', user_title: 'My Custom Name' };
-      const { entry } = processPageReport(
+      const { entry } = await processPageReport(
         { url, user_title: 'My Custom Name', timeOnPage: 1000 },
-        { getCachedEntity: () => cached, trimTitle },
+        { ...noLoad, getCachedEntity: () => cached },
       );
       expect(entry.user_title).toBeUndefined();
       expect(entry.timeOnPage).toBe(1000);
     });
 
-    it('user_title and title are independent', () => {
-      const trimTitle = makeTrimTitle();
+    it('user_title and title are independent', async () => {
       const cached = { title: 'Old Auto', user_title: 'Custom' };
-      const { entry } = processPageReport(
+      const { entry } = await processPageReport(
         { url, title: 'New Auto', user_title: 'Custom' },
-        { getCachedEntity: () => cached, trimTitle },
+        { ...noLoad, getCachedEntity: () => cached },
       );
       // title changed, user_title didn't
       expect(entry.title).toBe('New Auto');
