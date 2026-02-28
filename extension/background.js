@@ -222,12 +222,7 @@ async function sessionWrite(effects) {
     if (key.startsWith('page:') || key.startsWith('note:')) {
       await setCachedEntity(key, entity);
     } else if (key === 'settings') {
-      const { settings: existing = {} } = await chrome.storage.session.get(['settings']);
-      const merged = { ...existing };
-      for (const k of SETTINGS_SUBKEYS) {
-        if (entity[k] !== undefined) merged[k] = entity[k];
-      }
-      await chrome.storage.session.set({ settings: merged });
+      await chrome.storage.session.set({ settings: entity });
     } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
       const { lists = [] } = await chrome.storage.session.get(['lists']);
       const listId = key.slice('list:'.length);
@@ -281,10 +276,6 @@ async function appendVisit(interaction) {
 }
 
 // ─── Settings Keys ───────────────────────────────────────────────────
-// Sub-keys within the settings entity (settings.json on disk).
-// Used by saveSettings handler to enumerate loggable keys.
-
-const SETTINGS_SUBKEYS = ['workspace', 'listOrder', 'urlBlacklist', 'titleTrimRules', 'settings'];
 
 // ─── Session → Filesystem Fallback ───────────────────────────────────
 // readCacheable(key): await hydration, then session cache → readFs fallback.
@@ -734,7 +725,7 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
 chrome.commands.onCommand.addListener(async (command) => {
   console.log(`[background] Command received: ${command}`);
 
-  const workspace = (await readCacheable('settings'))?.workspace;
+  const { workspace } = await chrome.storage.session.get(['workspace']);
   if (workspace && workspace.mode === 'private') return;
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -810,7 +801,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse({
             success: true, slug,
             interaction: page ? { url: page.url, title: page.title, user_title: page.user_title,
-              attention: page.attention || '', timestamp: page.timestamp, slug } : null,
+              scrollDepth: page.scrollDepth, timeOnPage: page.timeOnPage, likes: page.likes,
+              timestamp: page.timestamp, slug } : null,
             snapshots: snapshotsResp?.snapshots || [],
             notes: notesResp?.notes || []
           });
@@ -847,14 +839,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           try {
             const url = request.url;
 
-            const rpSettings = (await readCacheable('settings')) || {};
-            const workspace = rpSettings.workspace;
-            if (workspace && workspace.mode === 'private') {
+            const { workspace: rpWorkspace } = await chrome.storage.session.get(['workspace']);
+            if (rpWorkspace && rpWorkspace.mode === 'private') {
               sendResponse({ success: true });
               return;
             }
 
             // Check blacklist
+            const rpSettings = (await readCacheable('settings')) || {};
             const urlBlacklist = rpSettings.urlBlacklist;
             const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
             if (blacklist.some(prefix => url.startsWith(prefix))) {
@@ -924,8 +916,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                 updateGatewayRegistry(url);
 
-                const wsListIds = workspace?.listIds || [];
-                if (workspace && workspace.mode === 'workspace' && wsListIds.length > 0) {
+                const wsListIds = rpWorkspace?.listIds || [];
+                if (rpWorkspace && rpWorkspace.mode === 'workspace' && wsListIds.length > 0) {
                   try {
                     const { lists: cachedLists = [] } = await chrome.storage.session.get(['lists']);
 
@@ -950,7 +942,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                       }
                     }
 
-                    if (workspace.autoSnapshot && sender.tab) {
+                    if (rpWorkspace.autoSnapshot && sender.tab) {
                       captureAndLog(sender.tab.id, slug, timestamp, url, title).catch(err => {
                         console.warn('[auto-snapshot] ERROR:', err.message, err);
                       });
@@ -1243,10 +1235,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'saveSettings': {
           const s = request.settings;
           const ts = Date.now();
-          for (const k of SETTINGS_SUBKEYS) {
-            if (s[k] !== undefined) {
-              await addLog({ timestamp: ts, action: 'set', key: k, value: s[k] });
-            }
+          for (const k of Object.keys(s)) {
+            await addLog({ timestamp: ts, action: 'set', key: k, value: s[k] });
           }
           sendResponse({ success: true });
           notifyMutation('settings');

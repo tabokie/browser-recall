@@ -32,10 +32,10 @@ describe('utils.js structural checks', () => {
     expect(utilsSource).toMatch(/action:\s*'readCacheable'/);
   });
 
-  it('loadSettingsValue delegates to readCacheable', () => {
+  it('loadSettingsValue delegates to readCacheable for settings', () => {
     const fnBody = utilsSource.match(/export async function loadSettingsValue[\s\S]*?\n\}/);
     expect(fnBody).not.toBeNull();
-    expect(fnBody[0]).toMatch(/readCacheable\s*\(\s*key\s*\)/);
+    expect(fnBody[0]).toMatch(/readCacheable\s*\(\s*'settings'\s*\)/);
   });
 });
 
@@ -106,7 +106,7 @@ describe('readCacheable / readFs', () => {
   let hydrationResolve;
   let hydrationDone;
 
-  const TEST_SETTINGS = { workspace: { mode: 'normal' }, listOrder: ['list:b', 'list:a'], urlBlacklist: [], titleTrimRules: [{ urlPrefix: 'https://x.com', action: 'remove_after_pipe' }], settings: { captureContent: true } };
+  const TEST_SETTINGS = { listOrder: ['list:b', 'list:a'], urlBlacklist: [], titleTrimRules: [{ urlPrefix: 'https://x.com', action: 'remove_after_pipe' }], captureContent: true };
 
   function requestOffscreen(msg) {
     offscreenCalls.push(msg);
@@ -295,7 +295,7 @@ describe('readCacheable / readFs', () => {
       return origReadFs(key);
     };
 
-    await session.set({ settings: { workspace: { mode: 'normal' } } });
+    await session.set({ settings: { listOrder: ['list:a'] } });
 
     const promise = readCacheable('settings').then(v => { resolved = true; return v; });
 
@@ -307,7 +307,7 @@ describe('readCacheable / readFs', () => {
     hydrationResolve();
     const result = await promise;
     expect(resolved).toBe(true);
-    expect(result).toEqual({ workspace: { mode: 'normal' } });
+    expect(result).toEqual({ listOrder: ['list:a'] });
   });
 
   // ── Unknown keys ─────────────────────────────────────────────────────

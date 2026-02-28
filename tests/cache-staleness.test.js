@@ -36,7 +36,7 @@ function pinFromUrl(url, pinnedAt) {
 // ---------------------------------------------------------------------------
 function makeInteraction(url, title, timestamp, opts = {}) {
   const slug = url.replace(/[^a-z0-9]/gi, '-').substring(0, 40);
-  return { id: `${timestamp}-${slug}`, url, title, timestamp, slug, intent: opts.intent || '', attention: opts.attention || '' };
+  return { id: `${timestamp}-${slug}`, url, title, timestamp, slug, intent: opts.intent || '' };
 }
 
 const NOW = Date.now();
@@ -99,7 +99,9 @@ const SLUG_TO_URL = new Map(KNOWN_PIN_URLS.map(url => [generateSlugFromUrl(url),
 
 const TEST_SETTINGS = {
   listOrder: ['list:col-rust', 'list:col-noq'],
-  settings: { captureContent: true, captureAttention: true, archiveQuality: 'medium' },
+  captureContent: true,
+  captureAttention: true,
+  archiveQuality: 'medium',
   urlBlacklist: [],
   titleTrimRules: [],
   permanentDeletes: [],

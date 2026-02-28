@@ -1,13 +1,4 @@
-// Attention parsing and scoring — pure functions, no DOM or Chrome API deps
-
-export function parseAttention(interaction) {
-  if (!interaction.attention) return null;
-  try {
-    return typeof interaction.attention === 'string'
-      ? JSON.parse(interaction.attention)
-      : interaction.attention;
-  } catch { return null; }
-}
+// Attention scoring — pure functions, no DOM or Chrome API deps
 
 export function attentionStrength(att) {
   // Composite score: weighted sum of normalized metrics
@@ -37,15 +28,14 @@ export function attentionColor(normalizedScore) {
   }
 }
 
-// Compute aggregate attention for a group of interactions
+// Compute aggregate attention for a group of interactions (flat fields)
 export function aggregateAttention(interactions) {
   let total = 0;
   let att = null;
   for (const i of interactions) {
-    const a = parseAttention(i);
-    if (a) {
-      total += attentionStrength(a);
-      att = a; // keep last one for details
+    if (i.scrollDepth !== undefined || i.timeOnPage !== undefined || i.likes !== undefined) {
+      total += attentionStrength(i);
+      att = i; // keep last one for details
     }
   }
   return { score: total, detail: att };

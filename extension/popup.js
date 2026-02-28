@@ -76,31 +76,21 @@ function renderSnapshots(snapshots) {
   });
 }
 
-// Render attention section
+// Render attention section (flat fields on interaction entity)
 function renderAttention(interaction) {
   const container = document.getElementById('attentionGrid');
 
-  if (!interaction || !interaction.attention) {
-    container.innerHTML = '<div class="empty-state">No data</div>';
-    return;
-  }
-
-  let attention;
-  try {
-    attention = typeof interaction.attention === 'string'
-      ? JSON.parse(interaction.attention)
-      : interaction.attention;
-  } catch (e) {
+  if (!interaction || (interaction.scrollDepth === undefined && interaction.timeOnPage === undefined)) {
     container.innerHTML = '<div class="empty-state">No data</div>';
     return;
   }
 
   const items = [];
-  if (attention.scrollDepth !== undefined) {
-    items.push(`<span class="attention-item"><strong>Scroll:</strong> ${Math.round(attention.scrollDepth)}%</span>`);
+  if (interaction.scrollDepth !== undefined) {
+    items.push(`<span class="attention-item"><strong>Scroll:</strong> ${Math.round(interaction.scrollDepth)}%</span>`);
   }
-  if (attention.timeOnPage !== undefined) {
-    items.push(`<span class="attention-item"><strong>Time:</strong> ${formatDuration(attention.timeOnPage)}</span>`);
+  if (interaction.timeOnPage !== undefined) {
+    items.push(`<span class="attention-item"><strong>Time:</strong> ${formatDuration(interaction.timeOnPage)}</span>`);
   }
 
   container.innerHTML = items.length > 0
@@ -437,14 +427,14 @@ async function createListAndPin(name) {
   console.log('[popup] Created list and pinned page:', name);
 }
 
-// Workspace mode
+// Workspace mode (session-only, not persisted to disk)
 async function loadWorkspace() {
-  const ws = await loadSettingsValue('workspace', {});
-  return { mode: 'default', listIds: [], autoSnapshot: false, ...ws };
+  const { workspace = {} } = await chrome.storage.session.get(['workspace']);
+  return { mode: 'default', listIds: [], autoSnapshot: false, ...workspace };
 }
 
 async function saveWorkspace(workspace) {
-  await saveSettingsValue('workspace', workspace);
+  await chrome.storage.session.set({ workspace });
 }
 
 async function renderWorkspaceBar() {
@@ -642,7 +632,6 @@ async function showDashboard(tab) {
     url: tab.url,
     title: tab.title || 'Untitled',
     intent: '',
-    attention: '',
     slug: currentSlug
   };
 

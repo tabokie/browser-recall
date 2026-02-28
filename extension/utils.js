@@ -11,9 +11,10 @@ export async function readCacheable(key) {
   return resp?.value;
 }
 
-// Backward-compat wrapper: returns defaultValue on miss
+// Read a settings sub-key from the unified settings entity.
 export async function loadSettingsValue(key, defaultValue) {
-  const v = await readCacheable(key);
+  const settings = await readCacheable('settings');
+  const v = settings?.[key];
   return v !== undefined ? v : defaultValue;
 }
 
@@ -90,7 +91,7 @@ export function qbTreesChanged(oldTrees, newTrees) {
 export function isGatewayRoot(url, origins) {
   try {
     const urlObj = new URL(url);
-    return origins.includes(urlObj.origin) && (urlObj.pathname === '/' || urlObj.pathname === '');
+    return origins.includes(urlObj.origin) && (urlObj.pathname === '/' || urlObj.pathname === '') && urlObj.search === '';
   } catch {
     return false;
   }

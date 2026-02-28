@@ -61,8 +61,9 @@ export function buildInteractionsForEngine(InteractionClass, engine, dataList, c
 
     interaction.setContent((data.slug && contentMap[data.slug]) || '');
 
-    const att = data.attention;
-    interaction.setAttention(typeof att === 'string' ? att : (att ? JSON.stringify(att) : ''));
+    // Build attention string for WASM engine from flat fields
+    const hasAtt = data.scrollDepth !== undefined || data.timeOnPage !== undefined || data.likes !== undefined;
+    interaction.setAttention(hasAtt ? JSON.stringify({ scrollDepth: data.scrollDepth, timeOnPage: data.timeOnPage, likes: data.likes }) : '');
     engine.addInteraction(interaction);
   }
 }

@@ -197,6 +197,14 @@ describe('isGatewayRoot', () => {
   it('returns false when origins is empty', () => {
     expect(isGatewayRoot('https://github.com/', [])).toBe(false);
   });
+
+  it('rejects gateway origin with query parameters', () => {
+    expect(isGatewayRoot('https://github.com/?q=test', origins)).toBe(false);
+  });
+
+  it('rejects gateway origin with complex query string', () => {
+    expect(isGatewayRoot('https://docs.rs/?dateRange=pastWeek&page=0&query=2028', origins)).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -288,14 +296,14 @@ describe('loadSettingsValue delegates to readCacheable', () => {
   it('returns defaultValue when readCacheable returns undefined', async () => {
     sendMessageMock.mockResolvedValue({ value: undefined });
     const { loadSettingsValue } = await import('../extension/utils.js');
-    const result = await loadSettingsValue('workspace', { mode: 'default' });
-    expect(result).toEqual({ mode: 'default' });
+    const result = await loadSettingsValue('archiveQuality', 'medium');
+    expect(result).toBe('medium');
   });
 
   it('returns value from readCacheable when present', async () => {
-    sessionStore.workspace = { mode: 'private' };
+    sessionStore.settings = { archiveQuality: 'high' };
     const { loadSettingsValue } = await import('../extension/utils.js');
-    const result = await loadSettingsValue('workspace', { mode: 'default' });
-    expect(result).toEqual({ mode: 'private' });
+    const result = await loadSettingsValue('archiveQuality', 'medium');
+    expect(result).toBe('high');
   });
 });

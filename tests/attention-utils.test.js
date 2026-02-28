@@ -4,7 +4,7 @@
  * Verifies attentionStrength scoring, including the likes component.
  */
 import { describe, it, expect } from 'vitest';
-import { attentionStrength, parseAttention } from '../extension/attention-utils.js';
+import { attentionStrength } from '../extension/attention-utils.js';
 
 describe('attentionStrength', () => {
   it('returns 0 for empty attention', () => {
@@ -41,18 +41,14 @@ describe('attentionStrength', () => {
   });
 });
 
-describe('parseAttention', () => {
-  it('parses JSON string attention', () => {
-    const result = parseAttention({ attention: '{"scrollDepth":80,"timeOnPage":5000,"likes":2}' });
-    expect(result).toEqual({ scrollDepth: 80, timeOnPage: 5000, likes: 2 });
+describe('attentionStrength on flat entity fields', () => {
+  it('scores entity with flat scrollDepth/timeOnPage/likes', () => {
+    const entity = { scrollDepth: 80, timeOnPage: 60000, likes: 2 };
+    // scrollDepth: 80/100*2 = 1.6, timeOnPage: 60000/60000 = 1, likes: min(2,5) = 2
+    expect(attentionStrength(entity)).toBeCloseTo(4.6, 5);
   });
 
-  it('returns object attention as-is', () => {
-    const att = { scrollDepth: 50 };
-    expect(parseAttention({ attention: att })).toBe(att);
-  });
-
-  it('returns null for missing attention', () => {
-    expect(parseAttention({})).toBeNull();
+  it('handles entity with no attention fields', () => {
+    expect(attentionStrength({})).toBe(0);
   });
 });

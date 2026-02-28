@@ -329,20 +329,15 @@ export function applyLogToPage(page, entry) {
     // Attention (guard with prevTimestamp for idempotency)
     if ((entry.scrollDepth !== undefined || entry.timeOnPage !== undefined || entry.likes !== undefined)
         && entry.timestamp > prevTimestamp) {
-      let att = { scrollDepth: 0, timeOnPage: 0 };
-      if (updated.attention && updated.attention !== '') {
-        try { att = JSON.parse(updated.attention); } catch {}
-      }
       if (entry.scrollDepth !== undefined) {
-        att.scrollDepth = Math.max(att.scrollDepth || 0, entry.scrollDepth);
+        updated.scrollDepth = Math.max(updated.scrollDepth || 0, entry.scrollDepth);
       }
       if (entry.timeOnPage !== undefined) {
-        att.timeOnPage = (att.timeOnPage || 0) + entry.timeOnPage;
+        updated.timeOnPage = (updated.timeOnPage || 0) + entry.timeOnPage;
       }
       if (entry.likes !== undefined) {
-        att.likes = (att.likes || 0) + entry.likes;
+        updated.likes = (updated.likes || 0) + entry.likes;
       }
-      updated.attention = JSON.stringify(att);
     }
 
     // Capture fields

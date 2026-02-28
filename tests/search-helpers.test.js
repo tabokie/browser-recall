@@ -57,9 +57,9 @@ describe('mergeBufferIntoInteractions', () => {
 describe('extractInteractionBuffer (logBuffer format)', () => {
   it('extracts visit entries (no action field) from logBuffer', () => {
     const logBuffer = [
-      { timestamp: 1, url: 'https://a.com', title: 'A', slug: 'a',  attention: '' },
-      { timestamp: 2, action: 'set', key: 'workspace', value: {} },
-      { timestamp: 3, url: 'https://b.com', title: 'B', slug: 'b',  attention: '' },
+      { timestamp: 1, url: 'https://a.com', title: 'A', slug: 'a' },
+      { timestamp: 2, action: 'set', key: 'listOrder', value: [] },
+      { timestamp: 3, url: 'https://b.com', title: 'B', slug: 'b' },
       { timestamp: 4, action: 'highlight', slug: 'a', highlight: { text: 'hi' } },
     ];
 
@@ -72,7 +72,7 @@ describe('extractInteractionBuffer (logBuffer format)', () => {
 
   it('returns empty array for buffer with no visit entries', () => {
     const logBuffer = [
-      { timestamp: 1, action: 'set', key: 'workspace', value: {} },
+      { timestamp: 1, action: 'set', key: 'listOrder', value: [] },
       { timestamp: 2, action: 'highlight', slug: 'x', highlight: {} },
     ];
 
@@ -85,8 +85,8 @@ describe('extractInteractionBuffer (logBuffer format)', () => {
       { url: 'https://old.com', timestamp: 1, slug: 'old' },
     ];
     const logBuffer = [
-      { timestamp: 2, url: 'https://new.com', title: 'New', slug: 'new',  attention: '' },
-      { timestamp: 3, action: 'set', key: 'workspace', value: {} },
+      { timestamp: 2, url: 'https://new.com', title: 'New', slug: 'new' },
+      { timestamp: 3, action: 'set', key: 'listOrder', value: [] },
     ];
 
     const extracted = extractInteractionBuffer(logBuffer);
@@ -127,7 +127,7 @@ describe('buildInteractionsForEngine', () => {
     const MockInteraction = makeMockInteractionClass();
     const engine = { addInteraction: vi.fn() };
     const dataList = [
-      { url: 'https://a.com', title: 'A', timestamp: 100,  slug: 'a', attention: '{}' },
+      { url: 'https://a.com', title: 'A', timestamp: 100,  slug: 'a' },
     ];
     const contentMap = { a: '# A content' };
 
@@ -139,7 +139,7 @@ describe('buildInteractionsForEngine', () => {
     const obj = engine.addInteraction.mock.calls[0][0];
     expect(obj.timestamp).toBe(BigInt(100));
     expect(obj.setContent).toHaveBeenCalledWith('# A content');
-    expect(obj.setAttention).toHaveBeenCalledWith('{}');
+    expect(obj.setAttention).toHaveBeenCalledWith('');
   });
 
   it('converts timestamp to BigInt', () => {
@@ -182,20 +182,20 @@ describe('buildInteractionsForEngine', () => {
     expect(obj.setAttention).toHaveBeenCalledWith('');
   });
 
-  it('stringifies object attention field (log entries may have raw objects)', () => {
+  it('builds attention string from flat entity fields', () => {
     const MockInteraction = makeMockInteractionClass();
     const engine = { addInteraction: vi.fn() };
     const dataList = [
       {
         url: 'https://e.com', title: 'E', timestamp: 1, slug: 'e',
-         attention: { scrollDepth: 42, timeOnPage: 5000 }
+        scrollDepth: 42, timeOnPage: 5000
       },
     ];
 
     buildInteractionsForEngine(MockInteraction, engine, dataList, {});
 
     const obj = engine.addInteraction.mock.calls[0][0];
-    // Must be a string, not an object — WASM passStringToWasm0 rejects objects
+    // Must be a string — WASM passStringToWasm0 rejects objects
     expect(typeof obj.setAttention.mock.calls[0][0]).toBe('string');
     const parsed = JSON.parse(obj.setAttention.mock.calls[0][0]);
     expect(parsed.scrollDepth).toBe(42);

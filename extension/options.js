@@ -5,7 +5,7 @@ import init, { Interaction, SearchEngine, searchBatch } from './pkg/portal_exten
 import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine, extractInteractionBuffer } from './search-helpers.js';
 import { generateSlugFromUrl, generateSlugFromTitle, saveSettingsValue, readCacheable, collectQbTrees, qbTreesChanged, isGatewayRoot } from './utils.js';
 import { findRelatedPages } from './related-scoring.js';
-import { parseAttention, attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
+import { attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
 import { qbCreatePredicate, qbCreateOperator, qbCreatePlaceholder, qbFindNode, qbCollapseTree, qbFlattenSameOp, qbToTree, qbFlatten } from './qb-tree.js';
 import { initCharts, renderTimeChart, renderTimeChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './time-chart.js';
 import { VirtualScroller } from './virtual-scroller.js';
@@ -100,12 +100,11 @@ function computeFieldRanges(interactions) {
     const firstVisit = (Date.now() - Math.min(...timestamps)) / 86400000;
     const visitCount = group.length;
     const latest = group.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
-    const att = parseAttention(latest);
     const vals = {
       lastVisit, firstVisit, visitCount,
-      timeOnPage: att?.timeOnPage || 0,
-      scrollDepth: att?.scrollDepth || 0,
-      clicks: att?.clicks || 0,
+      timeOnPage: latest.timeOnPage || 0,
+      scrollDepth: latest.scrollDepth || 0,
+      clicks: latest.clicks || 0,
     };
     for (const [key, v] of Object.entries(vals)) {
       if (v < ranges[key].min) ranges[key].min = v;
@@ -849,7 +848,7 @@ function filterByCategory(interactions, category) {
       return interactions.filter(i => i.timestamp >= weekAgo && !isHidden(i.url));
     }
     case 'highlighted':
-      return interactions.filter(i => i.attention && i.attention.length > 0 && !isHidden(i.url));
+      return interactions.filter(i => (i.likes > 0) && !isHidden(i.url));
     case 'gateways':
       return interactions.filter(i => isGatewayOrigin(i.url) && !isHidden(i.url));
     case 'recycleBin':
@@ -1171,17 +1170,17 @@ async function evaluateQueryStream(qbTree) {
 function enrichSingle(item, notesMap) {
   const slug = item.slug || '';
   const notes = (slug && notesMap && notesMap[slug]) || [];
-  const attParsed = parseAttention(item);
+  const attScore = attentionStrength(item);
   return {
     url: item.url, title: item.title, user_title: item.user_title, slug, timestamps: [item.timestamp],
-    attScore: attParsed ? attentionStrength(attParsed) : 0, attDetail: attParsed,
+    attScore, attDetail: item,
     notes,
     visitCount: 1,
     lastVisit: item.timestamp,
     firstVisit: item.timestamp,
-    timeOnPage: attParsed?.timeOnPage || 0,
-    scrollDepth: attParsed?.scrollDepth || 0,
-    clicks: attParsed?.clicks || 0,
+    timeOnPage: item.timeOnPage || 0,
+    scrollDepth: item.scrollDepth || 0,
+    clicks: item.clicks || 0,
     intent: item.intent || '',
   };
 }
@@ -1744,12 +1743,12 @@ async function showExplore() {
       const slug = r.slug || generateSlugFromUrl(r.url);
       const cached = pageSnap.get(slug);
       const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
-      const attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
-      const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
+      const attScore = source.attDetail ? attentionStrength(source.attDetail) : (source.attScore || attentionStrength(source));
+      const attDetail = source.attDetail || source;
       const rSlug = slug;
       const pin = pins.find(p => slugFromPinId(p.id) === rSlug);
       const enriched = {
-        ...r, slug, attScore, attDetail: attParsed,
+        ...r, slug, attScore, attDetail,
         notes: source.notes || r.notes || [],
         timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
         pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
@@ -1815,12 +1814,12 @@ async function refreshExplorePins() {
       const slug = r.slug || generateSlugFromUrl(r.url);
       const cached = pageSnap.get(slug);
       const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
-      const attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
-      const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
+      const attScore = source.attDetail ? attentionStrength(source.attDetail) : (source.attScore || attentionStrength(source));
+      const attDetail = source.attDetail || source;
       const rSlug = slug;
       const pin = pins.find(p => slugFromPinId(p.id) === rSlug);
       const enriched = {
-        ...r, slug, attScore, attDetail: attParsed,
+        ...r, slug, attScore, attDetail,
         notes: source.notes || r.notes || [],
         timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
         pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
@@ -1901,17 +1900,17 @@ async function showList(list) {
       const cached = pageSnap.get(slug);
       // Use session page if available and newer than pin's watermark, else use pin's cached fields
       const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
-      let attParsed = source.attDetail || (source.attention ? parseAttention({ attention: source.attention }) : null);
+      let attSource = source.attDetail || source;
       // Fallback: use attention from loaded history when page lacks it
-      if (!attParsed) {
+      if (attSource.scrollDepth === undefined && attSource.timeOnPage === undefined) {
         const histEntry = historyByUrl.get(r.url);
-        if (histEntry) attParsed = parseAttention(histEntry);
+        if (histEntry) attSource = histEntry;
       }
-      const attScore = attParsed ? attentionStrength(attParsed) : (source.attScore || 0);
+      const attScore = attentionStrength(attSource) || (source.attScore || 0);
       const rSlug = slug;
       const pin = pins.find(p => slugFromPinId(p.id) === rSlug);
       const enriched = {
-        ...r, slug, attScore, attDetail: attParsed,
+        ...r, slug, attScore, attDetail: attSource,
         notes: source.notes || r.notes || [],
         timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
         pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
@@ -1966,15 +1965,15 @@ async function refreshListPages(listId, pins) {
       const page = pages[slug];
       if (!page) continue;
       if ((page.watermark || 0) > (pin.watermark || 0)) {
-        let attParsed = page.attention ? parseAttention({ attention: page.attention }) : null;
+        let attSource = page;
         // Fallback: use attention from loaded history when page lacks it
-        if (!attParsed) {
+        if (attSource.scrollDepth === undefined && attSource.timeOnPage === undefined) {
           const pinUrl = pin.id.startsWith('shallow:') ? pin.id.slice(8) : (page.url || '');
           const histEntry = historyByUrl.get(pinUrl);
-          if (histEntry) attParsed = parseAttention(histEntry);
+          if (histEntry) attSource = histEntry;
         }
-        pin.attScore = attParsed ? attentionStrength(attParsed) : 0;
-        pin.attDetail = attParsed;
+        pin.attScore = attentionStrength(attSource);
+        pin.attDetail = attSource;
         pin.notes = []; // Notes loaded separately when needed for search
         pin.watermark = page.watermark;
         changed = true;
@@ -2102,7 +2101,6 @@ function processInteractionsForDisplay(interactions, { globalDedup = false } = {
       if (daySet.has(item.url)) continue;
       daySet.add(item.url);
     }
-    const attParsed = parseAttention(item);
     results.push({
       url: item.url,
       title: item.title || historyByUrl.get(item.url)?.title || '',
@@ -2110,8 +2108,8 @@ function processInteractionsForDisplay(interactions, { globalDedup = false } = {
       slug: item.slug || generateSlugFromUrl(item.url),
       timestamp: item.timestamp,
       day,
-      attScore: attParsed ? attentionStrength(attParsed) : 0,
-      attDetail: attParsed,
+      attScore: attentionStrength(item),
+      attDetail: item,
       notes: [],
       timestamps: [item.timestamp],
       latestTs: item.timestamp,
@@ -3312,9 +3310,7 @@ document.getElementById('relatedPagesLimit').addEventListener('change', async ()
   const val = parseInt(document.getElementById('relatedPagesLimit').value) || 50;
   relatedPagesLimit = Math.max(1, val);
   document.getElementById('relatedPagesLimit').value = relatedPagesLimit;
-  const current = await loadSettingsValue('settings', {});
-  current.relatedPagesLimit = relatedPagesLimit;
-  await saveSettingsValue('settings', current);
+  await saveSettingsValue('relatedPagesLimit', relatedPagesLimit);
   showStatus('Settings saved', 'success');
 });
 
@@ -3322,9 +3318,7 @@ document.getElementById('historyFileBatch').addEventListener('change', async () 
   const val = parseInt(document.getElementById('historyFileBatch').value) || 10;
   historyFileBatch = Math.max(1, val);
   document.getElementById('historyFileBatch').value = historyFileBatch;
-  const current = await loadSettingsValue('settings', {});
-  current.historyFileBatch = historyFileBatch;
-  await saveSettingsValue('settings', current);
+  await saveSettingsValue('historyFileBatch', historyFileBatch);
   showStatus('Settings saved', 'success');
 });
 
@@ -4208,10 +4202,9 @@ function bindFocusContentDelegation(content) {
 // --- Initialize ---
 async function initialize() {
   // Load settings from filesystem
-  const settings = await loadSettingsValue('settings', {});
-  relatedPagesLimit = settings.relatedPagesLimit || 50;
+  relatedPagesLimit = await loadSettingsValue('relatedPagesLimit', 50);
   document.getElementById('relatedPagesLimit').value = relatedPagesLimit;
-  historyFileBatch = settings.historyFileBatch || 10;
+  historyFileBatch = await loadSettingsValue('historyFileBatch', 10);
   document.getElementById('historyFileBatch').value = historyFileBatch;
 
   // Initialize query builder and chart tooltips

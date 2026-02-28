@@ -656,13 +656,12 @@ describe('applyLogToPage — visitDates', () => {
 // ---------------------------------------------------------------------------
 
 describe('applyLogToPage — likes', () => {
-  it('accumulates likes in attention JSON', () => {
+  it('accumulates likes as flat field', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const page = { slug, timestamp: 0, parentIds: [], childIds: [] };
     const entry = { timestamp: 100, action: 'page', url: 'https://a.com', likes: 1 };
     const result = applyLogToPage(page, entry);
-    const att = JSON.parse(result.attention);
-    expect(att.likes).toBe(1);
+    expect(result.likes).toBe(1);
   });
 
   it('accumulates multiple likes', () => {
@@ -671,8 +670,7 @@ describe('applyLogToPage — likes', () => {
     page = applyLogToPage(page, { timestamp: 100, action: 'page', url: 'https://a.com', likes: 1 });
     page = applyLogToPage(page, { timestamp: 200, action: 'page', url: 'https://a.com', likes: 1 });
     page = applyLogToPage(page, { timestamp: 300, action: 'page', url: 'https://a.com', likes: 1 });
-    const att = JSON.parse(page.attention);
-    expect(att.likes).toBe(3);
+    expect(page.likes).toBe(3);
   });
 
   it('preserves other attention fields when adding likes', () => {
@@ -680,10 +678,9 @@ describe('applyLogToPage — likes', () => {
     let page = { slug, timestamp: 0, parentIds: [], childIds: [] };
     page = applyLogToPage(page, { timestamp: 100, action: 'page', url: 'https://a.com', scrollDepth: 80, timeOnPage: 5000 });
     page = applyLogToPage(page, { timestamp: 200, action: 'page', url: 'https://a.com', likes: 1 });
-    const att = JSON.parse(page.attention);
-    expect(att.scrollDepth).toBe(80);
-    expect(att.timeOnPage).toBe(5000);
-    expect(att.likes).toBe(1);
+    expect(page.scrollDepth).toBe(80);
+    expect(page.timeOnPage).toBe(5000);
+    expect(page.likes).toBe(1);
   });
 
   it('idempotent: same timestamp replay does not double-count likes', () => {
@@ -692,8 +689,7 @@ describe('applyLogToPage — likes', () => {
     const entry = { timestamp: 100, action: 'page', url: 'https://a.com', likes: 1 };
     page = applyLogToPage(page, entry);
     page = applyLogToPage(page, entry); // replay same timestamp
-    const att = JSON.parse(page.attention);
-    expect(att.likes).toBe(1);
+    expect(page.likes).toBe(1);
   });
 
   it('ignores likes entry with mismatched slug', () => {
@@ -711,8 +707,7 @@ describe('applyLogToPage — likes', () => {
     const result = await effectOf(entry, async (key) =>
       key === `page:${slug}` ? page : null
     );
-    const att = JSON.parse(result[`page:${slug}`].attention);
-    expect(att.likes).toBe(1);
+    expect(result[`page:${slug}`].likes).toBe(1);
   });
 });
 
@@ -1140,9 +1135,8 @@ describe('effectOf apply', () => {
     const result = await effectOf(entry, async (key) =>
       key === `page:${slug}` ? page : null
     );
-    const att = JSON.parse(result[`page:${slug}`].attention);
-    expect(att.scrollDepth).toBe(0.5);
-    expect(att.timeOnPage).toBe(3000);
+    expect(result[`page:${slug}`].scrollDepth).toBe(0.5);
+    expect(result[`page:${slug}`].timeOnPage).toBe(3000);
   });
 });
 

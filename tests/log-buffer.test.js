@@ -76,9 +76,6 @@ function createLogBuffer(storageLocal) {
       title: interaction.title,
       slug: interaction.slug,
       intent: interaction.intent || '',
-      attention: typeof interaction.attention === 'string'
-        ? interaction.attention
-        : (interaction.attention ? JSON.stringify(interaction.attention) : ''),
     };
     if (interaction.referrer) entry.referrer = interaction.referrer;
     await appendLog(entry);
@@ -109,8 +106,6 @@ function makeVisit(url, timestamp) {
     title: url,
     timestamp,
     slug: url.replace(/\W/g, '-'),
-    
-    attention: '',
   };
 }
 
@@ -154,7 +149,7 @@ describe('Log buffer', () => {
     it('appendLog works for mutation entries with action field', async () => {
       const lb = createLogBuffer(storage);
 
-      await lb.appendLog({ timestamp: 1000, action: 'set', key: 'workspace', value: { mode: 'private' } });
+      await lb.appendLog({ timestamp: 1000, action: 'set', key: 'listOrder', value: ['list:a'] });
       await lb.appendLog({ timestamp: 2000, action: 'highlight', slug: 'a', highlight: { text: 'hello' } });
 
       const { logBuffer } = await storage.get(['logBuffer']);
@@ -228,7 +223,7 @@ describe('Log buffer', () => {
       storage._seed({
         logBuffer: [
           { timestamp: 1000, url: 'https://a.com', title: 'A', slug: 'a' },
-          { timestamp: 2000, action: 'set', key: 'workspace', value: {} },
+          { timestamp: 2000, action: 'set', key: 'listOrder', value: [] },
         ],
       });
 
@@ -251,7 +246,7 @@ describe('Log buffer', () => {
       const lb = createLogBuffer(storage);
 
       await lb.appendVisit(makeVisit('https://a.com', 1000));
-      await lb.appendLog({ timestamp: 2000, action: 'set', key: 'workspace', value: { mode: 'private' } });
+      await lb.appendLog({ timestamp: 2000, action: 'set', key: 'listOrder', value: ['list:a'] });
       await lb.appendLog({ timestamp: 3000, action: 'highlight', slug: 'a', highlight: { text: 'hi' } });
       await lb.appendLog({ timestamp: 4000, action: 'list', id: 'user/c1', op: 'clear', urls: [] });
       await lb.appendLog({ timestamp: 5000, action: 'list', id: 'permanent-deletes', op: 'add', urls: ['https://gone.com'] });
@@ -268,19 +263,6 @@ describe('Log buffer', () => {
       expect(logBuffer[2].action).toBe('highlight');
       expect(logBuffer[3].action).toBe('list');
       expect(logBuffer[4].action).toBe('list');
-    });
-
-    it('appendVisit stringifies object attention', async () => {
-      const lb = createLogBuffer(storage);
-
-      await lb.appendVisit({
-        ...makeVisit('https://a.com', 1000),
-        attention: { scrollDepth: 42, timeOnPage: 5000 },
-      });
-
-      const { logBuffer } = await storage.get(['logBuffer']);
-      expect(typeof logBuffer[0].attention).toBe('string');
-      expect(JSON.parse(logBuffer[0].attention).scrollDepth).toBe(42);
     });
 
     it('appendVisit preserves referrer field', async () => {

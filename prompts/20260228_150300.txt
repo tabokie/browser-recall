@@ -1,0 +1,9 @@
+- Fix a bug, search Gateways filter mistakenly treat URLs such as https://hn.algolia.com/?dateRange=pastWeek&page=0&prefix=false&query=2028&sort=byPopularity&type=story as root domain
+- https://<domain>/ should also count as gateway
+- Let's do these: (a) flatten `settings` object in settings.json, (b) remove settings.workspace, workspace config should be in session storage only, (c) flatten `attention` object in logs and in page entities.
+- Yes. Additionally for (a), there is no need to keep a list of SETTINGS_SUBKEYS
+- Did you run the migration already?
+- do it
+- /finish 
+- n
+- n
