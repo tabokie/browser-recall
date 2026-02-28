@@ -18,8 +18,6 @@ Principle: no silent fallbacks. Always get the true information regardless of co
 
 ### HIGH — data corruption risk
 
-- [x] **background.js — Workspace auto-pin uses cache-only check.** `getCachedEntity` miss → defaults to `shallow:<url>` for a checkpointed page. Fixed: uses `resolvePageId(url)` (cache → disk).
-- [x] **background.js — `processPageReport()` diffs against cache-only entity.** `getCachedEntity` miss → treats every field as changed → logs redundant entries (bloats JSONL). Fixed: falls through to `loadPageBatch` on cache miss, caches result with `setCachedEntity`.
 - [ ] **background.js — Multi-day visit check is dead logic.** If cache hits, entity already has checkpoint (no-op). If cache misses, logBuffer scan covers ~5s (never finds previous day). Fix: (1) cache recent immutable history files (`history/YYYY-MM-DD.jsonl`) into a URL→seen set for efficient multi-day detection; (2) when user opens a link from Portal Search (options.js), proactively emit `page_checkpoint` before navigating (we know it's a revisit).
 
 ### MEDIUM — incorrect behavior

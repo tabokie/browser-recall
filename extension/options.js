@@ -1867,6 +1867,11 @@ async function refreshExplorePins() {
 }
 
 async function showList(list) {
+  // loadLists() returns { slug, name } only — load full entity for qbTrees
+  if (!list.qbTrees) {
+    const entity = await readCacheable('list:' + list.slug);
+    if (entity?.qbTrees) list.qbTrees = entity.qbTrees;
+  }
   const displayName = listDisplayName(list);
   activeView = { type: 'list', id: list.slug, qbTrees: list.qbTrees || [], name: list.name || null };
   updateSidebarActive();

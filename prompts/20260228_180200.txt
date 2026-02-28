@@ -1,0 +1,6 @@
+- Continue to work on "Silent fallback / evil default audit" section in TODO.md
+- Update TODO.md, remove checked items
+- Before we proceed, let's fix a bug. With the history data caching introduced in the last commit, the search results in list UI don't show up anymore. Explore full history still works.
+- go ahead
+- /finish 
+- n
