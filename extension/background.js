@@ -931,14 +931,15 @@ chrome.commands.onCommand.addListener(async (command) => {
     } catch (error) {
       console.warn('[background] Could not highlight selection:', error.message);
     }
-  } else if (command === 'like-page') {
+  } else if (command === 'like-page' || command === 'dislike-page') {
+    const delta = command === 'like-page' ? 1 : -1;
     try {
       await ensureCheckpointIfMissing(tab.url, tab.title);
-      await addLog({ timestamp: Date.now(), action: 'page', url: tab.url, likes: 1 });
+      await addLog({ timestamp: Date.now(), action: 'page', url: tab.url, likes: delta });
       notifyMutation('interaction', { url: tab.url });
-      chrome.tabs.sendMessage(tab.id, { action: 'showLikeNotification' }).catch(() => {});
+      chrome.tabs.sendMessage(tab.id, { action: 'showLikeNotification', delta }).catch(() => {});
     } catch (error) {
-      console.warn('[like-page] ERROR:', error.message, error);
+      console.warn(`[${command}] ERROR:`, error.message, error);
     }
   }
 });

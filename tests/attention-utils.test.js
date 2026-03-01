@@ -29,6 +29,11 @@ describe('attentionStrength', () => {
     expect(attentionStrength({ likes: 10 })).toBe(5); // capped
   });
 
+  it('negative likes score as 0', () => {
+    expect(attentionStrength({ likes: -1 })).toBe(0);
+    expect(attentionStrength({ likes: -5 })).toBe(0);
+  });
+
   it('combines all metrics', () => {
     const att = { timeOnPage: 120000, scrollDepth: 100, likes: 3 };
     // timeOnPage: 120000/60000 = 2, scrollDepth: 100/100*2 = 2, likes: min(3,5) = 3

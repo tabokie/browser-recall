@@ -664,6 +664,22 @@ describe('applyLogToPage — likes', () => {
     expect(page.likes).toBe(1);
   });
 
+  it('dislike decrements likes', () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    let page = { slug, timestamp: 0, parentIds: [], childIds: [] };
+    page = applyLogToPage(page, { timestamp: 100, action: 'page', url: 'https://a.com', likes: 1 });
+    page = applyLogToPage(page, { timestamp: 200, action: 'page', url: 'https://a.com', likes: 1 });
+    page = applyLogToPage(page, { timestamp: 300, action: 'page', url: 'https://a.com', likes: -1 });
+    expect(page.likes).toBe(1);
+  });
+
+  it('likes can go negative', () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    let page = { slug, timestamp: 0, parentIds: [], childIds: [] };
+    page = applyLogToPage(page, { timestamp: 100, action: 'page', url: 'https://a.com', likes: -1 });
+    expect(page.likes).toBe(-1);
+  });
+
   it('ignores likes entry with mismatched slug', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const page = { slug, timestamp: 0, parentIds: [], childIds: [] };

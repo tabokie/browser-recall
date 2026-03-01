@@ -67,6 +67,10 @@
     "like-page": {
       "suggested_key": { "default": "Alt+L" },
       "description": "Like the current page"
+    },
+    "dislike-page": {
+      "suggested_key": { "default": "Alt+D" },
+      "description": "Dislike the current page"
     }
   }
 }

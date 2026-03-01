@@ -815,7 +815,7 @@ function showCaptureNotification() {
 }
 
 // ─── Like notification bubble ─────────────────────────────────────────
-function showLikeNotification() {
+function showLikeNotification(delta = 1) {
   const host = document.createElement('div');
   const shadow = host.attachShadow({ mode: 'closed' });
   shadow.innerHTML = `
@@ -842,7 +842,7 @@ function showLikeNotification() {
         100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
       }
     </style>
-    <div class="bubble">\uD83D\uDC4D Liked</div>
+    <div class="bubble">${delta >= 0 ? '\uD83D\uDC4D Liked' : '\uD83D\uDC4E Disliked'}</div>
   `;
   document.documentElement.appendChild(host);
   setTimeout(() => host.remove(), 1700);
@@ -997,7 +997,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     showErrorNotification(request.message || 'Something went wrong');
     sendResponse({ success: true });
   } else if (request.action === 'showLikeNotification') {
-    showLikeNotification();
+    showLikeNotification(request.delta);
     sendResponse({ success: true });
   }
 

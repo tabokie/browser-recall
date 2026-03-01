@@ -1,0 +1,5 @@
+- Does liking a page makes it checkpointed?
+- Implement a dislike action similar to like, but decrement the like count.
+- Like and dislike can be handled using the same field and code path. Just change unsigned integer to signed integer.
+- /finish 
+- n
