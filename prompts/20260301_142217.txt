@@ -1,0 +1,11 @@
+- I have a question. There is a page already checkpointed earilier. Then I visited again on a different day, the "page" log only records attention, no title. Is this expected?
+- I see, it makes sense. But, when rendering history lists, we should try to get title from checkpoints or SPI if missing.
+- Sure. But I thought we haven't implemented the checkpoint fallback. Because yesterday, on history UI, I see a checkpointed page visit shows "Untitled". You can check it in ~/portal-data/history/2026-03-01.jsonl, the url is https://music.douban.com/
+- Both fixes are needed. TDD
+- What is the overhead of enrichFromEntityStorage? Are we smart enough to read entity only for title-less items?
+- Yes, be selective
+- Review, what else is missing?
+- /finish 
+- y
+- n
+- n

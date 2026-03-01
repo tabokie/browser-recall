@@ -931,7 +931,9 @@ async function showCategory(category) {
       const newFiltered = filterByCategory(newItems, activeView.value);
       if (newFiltered.length > 0) {
         const sort = currentSortState.column ? currentSortState : { column: 'lastVisit', direction: 'desc' };
-        vs.appendData(applySortOrder(processInteractionsForDisplay(newFiltered), sort));
+        const newEntries = processInteractionsForDisplay(newFiltered);
+        await enrichFromEntityStorage(newEntries);
+        vs.appendData(applySortOrder(newEntries, sort));
       }
       // Re-render chart with all loaded history
       const allInteractions = [...historyAllEntries];
@@ -2141,17 +2143,32 @@ function processInteractionsForDisplay(interactions, { globalDedup = false } = {
 }
 
 // Batch-fetch page entities for all unique slugs in entries, enrich with entity titles.
-// Shallow pages (no checkpoint) are skipped — entries keep their JSONL titles.
+// Falls back to SPI for shallow pages (no checkpoint) still missing a title.
 async function enrichFromEntityStorage(entries) {
-  const slugs = [...new Set(entries.map(r => r.slug).filter(Boolean))];
+  const titleless = entries.filter(e => !e.title);
+  if (titleless.length === 0) return;
+  const slugs = [...new Set(titleless.map(r => r.slug).filter(Boolean))];
   if (slugs.length === 0) return;
   const resp = await sendAction({ action: 'loadPageBatch', slugs });
   const pages = resp.pages || {};
-  for (const entry of entries) {
+  const needSpi = []; // entries still missing title after checkpoint lookup
+  for (const entry of titleless) {
     const page = pages[entry.slug];
-    if (!page) continue;  // shallow page — keep JSONL title
-    if (page.title) entry.title = page.title;
-    if (page.user_title) entry.user_title = page.user_title;
+    if (page) {
+      if (page.title) entry.title = page.title;
+      if (page.user_title) entry.user_title = page.user_title;
+    } else {
+      needSpi.push(entry);
+    }
+  }
+  // SPI fallback for shallow pages with no title
+  if (needSpi.length > 0) {
+    const spi = await readCacheable('list:system/shallow-page');
+    for (const entry of needSpi) {
+      const spiEntry = spi?.index?.[entry.url];
+      if (spiEntry?.title) entry.title = spiEntry.title;
+      if (spiEntry?.user_title) entry.user_title = spiEntry.user_title;
+    }
   }
 }
 
@@ -3923,6 +3940,7 @@ async function runExploreBlockQuery() {
       results = processInteractionsForDisplay(
         historyAllEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)) && !isPermanentlyDeleted(item.url) && !isRecycled(item.url))
       ).map(item => ({ ...item, relevance: 0 }));
+      await enrichFromEntityStorage(results);
     } else {
       // List: show empty state when no blocks enabled
       const relatedContainer = document.getElementById('relatedResults');
