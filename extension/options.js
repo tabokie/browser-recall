@@ -1717,6 +1717,9 @@ function qbSummarize(node) {
 }
 
 async function showExplore() {
+  const _t0 = performance.now();
+  const _timer = (label) => console.debug(`[explore-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
+
   activeView = { type: 'explore' };
   updateSidebarActive();
   updateMainTitle('Explore');
@@ -1733,6 +1736,7 @@ async function showExplore() {
     allListPins[listId] = pinsResp.pins;
   }
   const pins = getExplorePins();
+  _timer('load explore pins');
 
   // Hide pinned section when no pins
   const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
@@ -1765,14 +1769,18 @@ async function showExplore() {
 
     const fullPinned = pinsResolved.map(enrichResult);
     renderPinnedSection(fullPinned, listId);
+    _timer('render pinned section');
   }
 
   // Load history for block evaluation and fallback display
   await initHistoryFiles();
+  _timer('initHistoryFiles');
   await loadHistoryBatch();
+  _timer('loadHistoryBatch');
 
   // Build auto-blocks from pins (empty array if no pins)
   exploreBlocks = pins.length > 0 ? await buildExploreAutoBlocks(pins) : [];
+  _timer('buildExploreAutoBlocks');
 
   // Restore saved block state (enabled flags + manual blocks)
   const { exploreBlockState } = await chrome.storage.session.get(['exploreBlockState']);
@@ -1798,7 +1806,10 @@ async function showExplore() {
   }
 
   renderExploreBlocks();
+  _timer('renderExploreBlocks');
   runExploreBlockQuery();
+  _timer('runExploreBlockQuery (fired)');
+  document.body.dataset.ready = 'true';
 }
 
 // Incremental refresh after pin toggle — preserves scroll position and block selection state
@@ -4201,26 +4212,33 @@ function bindFocusContentDelegation(content) {
 
 // --- Initialize ---
 async function initialize() {
+  const _t0 = performance.now();
+  const _timer = (label) => console.debug(`[init-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
+
   // Load settings from filesystem
   relatedPagesLimit = await loadSettingsValue('relatedPagesLimit', 50);
   document.getElementById('relatedPagesLimit').value = relatedPagesLimit;
   historyFileBatch = await loadSettingsValue('historyFileBatch', 10);
   document.getElementById('historyFileBatch').value = historyFileBatch;
+  _timer('loadSettings');
 
   // Initialize query builder and chart tooltips
   qbRoot = qbCreatePlaceholder(KEYWORD_FIELDS);
   initCharts();
+  _timer('initCharts');
 
   // Render sidebar concurrently with heavy data (don't block on sidebar)
   renderLists().catch(err => showFatalError(err.message));
   renderBlacklist();
   renderTrimRules();
+  _timer('renderSidebar (fire-and-forget)');
 
   // Load metadata in parallel (history is demand-loaded in showCategory, pins loaded per-list)
   await Promise.all([
     initHistoryFiles(), loadRecycleBin(), loadGatewayDomains(),
     sendAction({ action: 'loadListPinsById', listId: EXPLORE_LIST_ID }).then(resp => { allListPins[EXPLORE_LIST_ID] = resp.pins; }),
   ]);
+  _timer('parallel metadata load');
   updateRecycleSidebarCount();
   updateExploreBadge();
   showExplore();

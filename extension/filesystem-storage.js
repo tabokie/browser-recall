@@ -180,6 +180,12 @@ class FileSystemStorage {
     await writable.close();
   }
 
+  // Grant permission unconditionally (for OPFS-backed test directories
+  // where queryPermission/requestPermission are not available).
+  grantPermission() {
+    this.#permissionGranted = true;
+  }
+
   // Clear all cached handles and permission state
   clearCache() {
     this.#permissionGranted = false;

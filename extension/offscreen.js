@@ -102,6 +102,11 @@ async function handleRequest(request) {
         return { success: true };
       }
 
+      case 'loadNote': {
+        const note = await fsStorage.loadNote(request.noteSlug);
+        return { success: true, note };
+      }
+
       case 'loadPageNotes': {
         const t0 = performance.now();
         const notes = await fsStorage.loadPageNotes(request.slug);
@@ -260,6 +265,58 @@ async function handleRequest(request) {
           const fh = await fsStorage.resolveFile(request.path, { create: true });
           await fsStorage.writeJson(fh, request.data);
         });
+        return { success: true };
+      }
+
+      case 'setTestDirectory': {
+        // Use OPFS (Origin Private File System) as a no-user-gesture directory handle.
+        // Creates a subdirectory inside OPFS so each reset can wipe cleanly.
+        const opfsRoot = await navigator.storage.getDirectory();
+        // Remove previous test dir if it exists
+        try { await opfsRoot.removeEntry('portal-test', { recursive: true }); } catch {}
+        const testDir = await opfsRoot.getDirectoryHandle('portal-test', { create: true });
+        fsStorage.directoryHandle = testDir;
+        fsStorage.clearCache();
+        // OPFS handles don't support queryPermission/requestPermission,
+        // so grant permission unconditionally for drain to work.
+        fsStorage.grantPermission();
+        return { success: true };
+      }
+
+      case 'resetDirectory': {
+        // Wipe all contents of current directory (no-op if no handle)
+        if (!fsStorage.directoryHandle) return { success: true };
+        for await (const name of fsStorage.directoryHandle.keys()) {
+          await fsStorage.directoryHandle.removeEntry(name, { recursive: true });
+        }
+        fsStorage.clearCache();
+        // Re-grant for OPFS handles (clearCache resets #permissionGranted)
+        fsStorage.grantPermission();
+        // Reset drain state
+        if (drainTimer) { clearTimeout(drainTimer); drainTimer = null; }
+        draining = false;
+        pendingDrainEntries = null;
+        lastDrainedTimestamp = 0;
+        pendingWatermark = 0;
+        return { success: true };
+      }
+
+      case 'seedTestData': {
+        // request.files = [{ path, data } or { path, lines }]
+        for (const file of request.files) {
+          if (file.lines) {
+            const fh = await fsStorage.resolveFile(file.path, { create: true });
+            const writable = await fh.createWritable();
+            for (const line of file.lines) {
+              await writable.write(JSON.stringify(line) + '\n');
+            }
+            await writable.close();
+          } else {
+            const fh = await fsStorage.resolveFile(file.path, { create: true });
+            await fsStorage.writeJson(fh, file.data);
+          }
+        }
+        fsStorage.clearCache();
         return { success: true };
       }
 

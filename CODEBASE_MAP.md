@@ -43,8 +43,16 @@
 | `tests/message-routing.test.js` | 49 | Vitest: static analysis — every action sent by options/popup has a case handler in background.js |
 | `tests/read-cacheable.test.js` | ~330 | Vitest: structural + behavioral tests for readCacheable/readFs — utils.js `readCacheable` export + background `readCacheable` handler, session hit, FS fallback, settings read via `readCacheable('settings')`, list ordering, hydrationDone blocking, offscreen field mismatch, options.js `readCacheable`-based loading |
 | `tests/mutation-refresh.test.js` | ~105 | Vitest: static analysis — mutation listener + visibilitychange handler refresh all view types, not just category |
+| `tests/e2e/fixtures.js` | ~55 | Playwright: worker-scoped fixtures — `extContext` (persistent browser context with extension loaded), `extensionId`, `setupDir` (OPFS-backed test directory via `setTestDirectory` action) |
+| `tests/e2e/helpers.js` | ~65 | Playwright: `resetAndSeed(extContext, extensionId, files)`, `getSlugForUrl(page, url)` — reset/seed/rehydrate + slug computation matching extension's generateSlugFromUrl |
+| `tests/e2e/history.spec.js` | ~80 | Playwright E2E (4 tests): seeded history in explore, clean state isolation, content script auto-reports visit, multi-entry sort order |
+| `tests/e2e/lists.spec.js` | ~210 | Playwright E2E (5 tests): seeded list in sidebar, seeded pin in list view, pin via toggleListPin, unpin via toggleListPin, create new list |
+| `tests/e2e/settings.spec.js` | ~55 | Playwright E2E (2 tests): seeded settings display in modal, changed setting persists after reload |
+| `tests/e2e/interactions.spec.js` | ~140 | Playwright E2E (4 tests): seeded page with likes via getPageInfo, createNote round-trip, attention data in explore, likes on seeded entity |
+| `tests/e2e/cross-context.spec.js` | ~85 | Playwright E2E (2 tests): pin mutation visible after flush+fresh page, live visit notification updates explore |
+| `playwright.config.js` | ~10 | Playwright config: `tests/e2e/`, single worker, chromium channel |
 | `vitest.config.js` | 7 | Test config |
-| `package.json` | 25 | Build: `wasm-pack`, test: `vitest` |
+| `package.json` | ~27 | Build: `wasm-pack`, test: `vitest`, test:e2e: `playwright test` |
 
 ## Message Routing
 
@@ -55,15 +63,17 @@ Offscreen is port-only — responds via `chrome.runtime.connect({ name: 'bg-offs
 
 ### background.js handles ALL actions (line ~646):
 **Tab-dependent:** `getPageInfo` (entity storage: session cache → filesystem + buffer replay; null for shallow pages), `captureCurrentPageFromPopup`, `hydrateCache`, `reportPage`
-**Pure reads (relay to offscreen via port, cache pages):** `loadSettings`, `loadInteractionByUrl`, `loadPageBatch`, `loadPageNotes`, `loadAllNotes`, `loadListPins`, `loadListPinsById`, `loadGateways`, `listSnapshots`, `getDirectoryInfo`, `getSnapshotUrl`, `listInteractionFiles`, `loadInteractionBatch`
-**Cacheable reads (via `readCacheable` — session→filesystem fallback):** `readCacheable` (generic: any key), `loadPermanentDeletes`, `getGatewayDomains`
-**Page relations:** `getPageRelations` (returns parents {referrers resolved from `page.parentIds` typed refs + shallowPageIndex fallback, lists} + children {resolved from `page.childIds` typed refs — `page:<slug>` via loadPageBatch, `shallow:<url>` extracted directly})
+**Pure reads (relay to offscreen via port, cache pages):** `loadSettings`, `loadInteractionByUrl`, `loadPageBatch`, `loadAllNotes`, `loadListPins`, `loadGateways`, `listSnapshots`, `getDirectoryInfo`, `getSnapshotUrl`, `listInteractionFiles`, `loadInteractionBatch`
+**Cacheable reads (via `readCacheable` — session→filesystem fallback):** `readCacheable` (generic: any key), `loadListPinsById`, `loadPermanentDeletes`, `getGatewayDomains`. `getPageInfo` reads notes from page.childIds via `readCacheable('note:*')`.
+**Page relations:** `getPageRelations` (resolves `page:<slug>` refs via `readCacheable`, `shallow:<url>` extracted directly; parents from parentIds + SPI fallback + list membership; children from childIds + SPI inverse lookup)
 **Writes (all via `addLog` — append + effectOf session replay):** `saveSettings`, `saveSettingsKey`, `createNote`, `deleteNote`, `updateNote`, `toggleListPin` (re-validates shallow IDs via `resolvePageId`), `addListPins` (re-validates via `resolveShallowIds`), `saveListMeta`, `deleteList`, `saveRecycleBin`, `savePermanentDeletes`
 **Pass-through (complex FS ops via port):** `saveListPins` (orphan cleanup), `deleteSnapshot`, `initializeFilesystem`
 **Buffer management:** `clearWriteQueue`, `flushLogBuffer`
+**Test infrastructure:** `setTestDirectory` (relay → offscreen OPFS setup), `resetForTest` (clear logBuffer + caches + wipe directory + re-hydrate), `rehydrateForTest` (clear caches + re-hydrate without wiping directory), `seedTestData` (relay → offscreen file writes)
 
 ### offscreen.js handles via port (line ~68):
-Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllListMetadata` + `loadRecycleBin` + `pageExists` + `listListFiles` + `saveJson` (direct saves) + `loadShallowPageIndex` + log buffer drain via port `drainEntries` messages (appends to history JSONL + checkpoints entities via replay.js, handles list_meta/del_list/recycle_replace, checkpoints shallow-page index + gateways entity)
+Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllListMetadata` + `loadRecycleBin` + `pageExists` + `listListFiles` + `saveJson` (direct saves) + `loadShallowPageIndex` + `loadNote` (single note by slug) + log buffer drain via port `drainEntries` messages (appends to history JSONL + checkpoints entities via replay.js, handles list_meta/del_list/recycle_replace, checkpoints shallow-page index + gateways entity)
+**Test infrastructure:** `setTestDirectory` (creates OPFS-backed directory handle for test use), `resetDirectory` (wipes all directory contents + resets drain state), `seedTestData` (writes JSON/JSONL files to directory)
 
 ### content.js handles (line ~875):
 `extractMarkdown`, `highlightSelection`, `removeHighlightMark`, `showCaptureNotification`, `showLikeNotification`

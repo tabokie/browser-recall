@@ -947,6 +947,35 @@ describe('effectOf scope', () => {
     expect(result['settings'].listOrder[1]).toEqual({ id: 'list:c2', name: 'Other' });
   });
 
+  it('list_meta for new list adds entry to settings.listOrder', async () => {
+    const settings = { listOrder: [{ id: 'list:existing', name: 'Existing' }] };
+    const load = async (key) => {
+      if (key === 'settings') return settings;
+      if (key === 'list:brand-new') return null; // new list, not yet on disk
+      return null;
+    };
+    const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'brand-new', name: 'Brand New' }, load);
+    expect(result['settings']).toBeTruthy();
+    expect(result['settings'].listOrder).toEqual([
+      { id: 'list:existing', name: 'Existing' },
+      { id: 'list:brand-new', name: 'Brand New' },
+    ]);
+  });
+
+  it('list_meta for new list with empty listOrder creates it', async () => {
+    const settings = { trimRules: [] }; // no listOrder key at all
+    const load = async (key) => {
+      if (key === 'settings') return settings;
+      if (key === 'list:first') return null;
+      return null;
+    };
+    const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'first', name: 'First List' }, load);
+    expect(result['settings']).toBeTruthy();
+    expect(result['settings'].listOrder).toEqual([
+      { id: 'list:first', name: 'First List' },
+    ]);
+  });
+
   it('list_meta without name change does not touch settings', async () => {
     const settings = { listOrder: [{ id: 'list:c1', name: 'Same' }] };
     const listEntity = { timestamp: 0, slug: 'c1', name: 'Same', qbTrees: [], pins: [] };
@@ -972,9 +1001,11 @@ describe('effectOf scope', () => {
     expect(result['settings'].listOrder).toEqual([{ id: 'list:c2', name: 'B' }]);
   });
 
-  it('affects list key for list_meta entries without settings', async () => {
+  it('affects list key and settings for list_meta entries without settings', async () => {
     const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'c1', name: 'Test' }, nullLoad);
-    expect(Object.keys(result)).toEqual(['list:c1']);
+    expect(Object.keys(result).sort()).toEqual(['list:c1', 'settings']);
+    // New list should be added to listOrder even when settings was null
+    expect(result['settings'].listOrder).toEqual([{ id: 'list:c1', name: 'Test' }]);
   });
 
   it('affects list key for del_list entries without settings', async () => {

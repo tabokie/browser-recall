@@ -9,7 +9,8 @@
     "watch": "wasm-pack build --target web --out-dir extension/pkg --dev",
     "dev": "npm run watch",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
   },
   "keywords": [
     "chrome-extension",
@@ -20,6 +21,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "jsdom": "^28.0.0",
     "vitest": "^3.0.0"
   }

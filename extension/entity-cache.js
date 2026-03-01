@@ -67,6 +67,14 @@ export async function cacheSet(key, value, { timestamp } = {}) {
   await evict();
 }
 
+export async function cacheClear() {
+  await chrome.storage.session.clear();
+  lruKeys = [];
+  keyTimestamps.clear();
+  pinnedKeys.clear();
+  persistWatermark = 0;
+}
+
 export async function cacheRemove(key) {
   await chrome.storage.session.remove([key]);
   const idx = lruKeys.indexOf(key);

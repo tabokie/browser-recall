@@ -108,16 +108,20 @@ export async function effectOf(entry, load) {
       result['list:system/shallow-page'] = applyLogToShallowPage(spi, entry);
     }
 
-    // list_meta name change → update listOrder entry name in settings
+    // list_meta → sync listOrder in settings (add new entry or rename existing)
     if (entry.action === 'list_meta' && entry.name && !listKey.startsWith('list:system/')) {
-      const settings = await load('settings');
-      if (settings?.listOrder) {
-        const idx = settings.listOrder.findIndex(e => e.id === listKey);
-        if (idx >= 0 && settings.listOrder[idx].name !== entry.name) {
-          const newOrder = [...settings.listOrder];
+      const settings = await load('settings') || {};
+      const listOrder = settings.listOrder || [];
+      const idx = listOrder.findIndex(e => e.id === listKey);
+      if (idx >= 0) {
+        if (listOrder[idx].name !== entry.name) {
+          const newOrder = [...listOrder];
           newOrder[idx] = { ...newOrder[idx], name: entry.name };
           result['settings'] = { ...settings, listOrder: newOrder };
         }
+      } else {
+        // New list — append to listOrder
+        result['settings'] = { ...settings, listOrder: [...listOrder, { id: listKey, name: entry.name }] };
       }
     }
 

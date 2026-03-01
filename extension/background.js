@@ -3,7 +3,7 @@
 import { generateSlugFromUrl, generateNoteSlug, dateKeyFromTimestamp } from './utils.js';
 import { effectOf, applyLogToPage } from './replay.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
-import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark } from './entity-cache.js';
+import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark, cacheClear } from './entity-cache.js';
 
 console.log('Background script loading...');
 
@@ -30,12 +30,18 @@ async function setupOffscreenDocument() {
   });
   if (existingContexts.length > 0) return;
 
-  await chrome.offscreen.createDocument({
-    url: 'offscreen.html',
-    reasons: ['LOCAL_STORAGE'],
-    justification: 'Manage filesystem operations for interaction history'
-  });
-  console.log('Offscreen document created');
+  try {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['LOCAL_STORAGE'],
+      justification: 'Manage filesystem operations for interaction history'
+    });
+    console.log('Offscreen document created');
+  } catch (e) {
+    // TOCTOU: another caller created the document between getContexts and createDocument
+    if (e.message?.includes('single offscreen')) return;
+    throw e;
+  }
 }
 
 // ─── Port Channel to Offscreen ────────────────────────────────────────
@@ -177,7 +183,15 @@ async function appendLog(entry) {
 // Read an entity from session cache by replay key.
 // Returns entity or null (null = not cached / doesn't exist).
 async function sessionLoad(key) {
-  return await cacheGet(key);
+  return await readCacheable(key);
+}
+
+// Like sessionLoad but without the hydrationDone guard.
+// Used during hydrateCache() where awaiting hydrationDone would deadlock.
+async function sessionLoadDuringHydration(key) {
+  const cached = await cacheGet(key);
+  if (cached !== null) return cached;
+  return readFs(key);
 }
 
 // Write effectOf results back to session cache.
@@ -312,6 +326,20 @@ async function readFs(key) {
         const r = await requestOffscreen({ action: 'loadHistoryRange', from: dateStr, to: dateStr });
         assertOffscreenSuccess(r, key);
         value = r.entries || [];
+        break;
+      }
+      if (key.startsWith('page:')) {
+        const slug = key.slice('page:'.length);
+        const r = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
+        assertOffscreenSuccess(r, key);
+        value = r.pages?.[slug] ?? null;
+        break;
+      }
+      if (key.startsWith('note:')) {
+        const slug = key.slice('note:'.length);
+        const r = await requestOffscreen({ action: 'loadNote', noteSlug: slug });
+        assertOffscreenSuccess(r, key);
+        value = r.note ?? null;
         break;
       }
       if (key.startsWith('list:')) {
@@ -497,10 +525,12 @@ async function hydrateCache() {
     }
   }
 
-  // Phase 2: Replay pending logBuffer entries via effectOf
+  // Phase 2: Replay pending logBuffer entries via effectOf.
+  // Uses sessionLoadDuringHydration (not sessionLoad) to avoid deadlock:
+  // sessionLoad → readCacheable → await hydrationDone → waiting for us.
   for (const entry of logBuffer) {
     try {
-      const effects = await effectOf(entry, sessionLoad);
+      const effects = await effectOf(entry, sessionLoadDuringHydration);
       await sessionWrite(effects);
     } catch (e) { console.warn('Hydration replay failed for entry:', e.message); }
   }
@@ -991,10 +1021,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
           }
 
-          const [snapshotsResp, notesResp] = await Promise.all([
-            requestOffscreen({ action: 'listSnapshots', slug }),
-            requestOffscreen({ action: 'loadPageNotes', slug })
-          ]);
+          const snapshotsResp = await requestOffscreen({ action: 'listSnapshots', slug });
+
+          // Notes: read from page.childIds via readCacheable (session cache → disk).
+          // This surfaces notes created via addLog that haven't drained to disk yet.
+          const noteRefs = (page?.childIds || []).filter(c => c.startsWith('note:'));
+          const notes = [];
+          for (const ref of noteRefs) {
+            const note = await readCacheable(ref);
+            if (note) notes.push(note);
+          }
 
           // page is null for shallow pages (no checkpoint) — popup uses tab.title as fallback
           sendResponse({
@@ -1003,7 +1039,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               scrollDepth: page.scrollDepth, timeOnPage: page.timeOnPage, likes: page.likes,
               timestamp: page.timestamp, slug } : null,
             snapshots: snapshotsResp?.snapshots || [],
-            notes: notesResp?.notes || []
+            notes
           });
           break;
         }
@@ -1259,9 +1295,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'loadListPinsById': {
           const t0 = performance.now();
-          const resp = await requestOffscreen({ action: 'loadListPinsById', listId: request.listId });
-          console.debug(`[I/O] loadListPinsById(${request.listId}): ${(performance.now() - t0).toFixed(1)}ms`);
-          sendResponse(resp);
+          const entity = await readCacheable('list:' + request.listId);
+          console.debug(`loadListPinsById(${request.listId}): ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse({ success: true, pins: entity?.pins || [] });
           break;
         }
 
@@ -1344,18 +1380,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               page = resp?.pages?.[slug] || {}; // Empty page is valid (no checkpoint yet)
             }
 
-            // Resolve typed refs: page:<slug> → URL via loadPageBatch, shallow:<url> → extract URL
+            // Resolve typed refs: page:<slug> → URL via readCacheable, shallow:<url> → extract URL
             async function resolveRefs(refs) {
               const urls = [];
-              const slugsToLoad = [];
               for (const ref of refs) {
                 if (ref.startsWith('shallow:')) { urls.push(ref.slice(8)); continue; }
-                if (ref.startsWith('page:')) { slugsToLoad.push(ref.slice(5)); continue; }
-              }
-              if (slugsToLoad.length > 0) {
-                const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: slugsToLoad });
-                for (const s of slugsToLoad) {
-                  const p = resp?.pages?.[s];
+                if (ref.startsWith('page:')) {
+                  const p = await readCacheable(ref);
                   if (p && p.url) urls.push(p.url);
                 }
               }
@@ -1616,6 +1647,55 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           });
           sendResponse(resp);
           notifyMutation('snapshot', { slug: request.slug });
+          break;
+        }
+
+        case 'setTestDirectory': {
+          const resp = await requestOffscreen({ action: 'setTestDirectory' });
+          if (resp?.success) {
+            // Re-hydrate from the fresh OPFS directory
+            hydrationDone = hydrateCache();
+            await hydrationDone;
+          }
+          sendResponse(resp);
+          break;
+        }
+
+        case 'resetForTest': {
+          // 1. Clear logBuffer
+          logBuffer = [];
+          await chrome.storage.local.set({ logBuffer });
+          // 2. Clear entity cache (session storage + in-memory LRU)
+          await cacheClear();
+          // 3. Reset in-memory state
+          recentUrls = new Set();
+          if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
+          // 4. Tell offscreen to wipe directory and reset drain state
+          await requestOffscreen({ action: 'resetDirectory' });
+          // 5. Re-hydrate from (now empty) filesystem
+          hydrationDone = hydrateCache();
+          await hydrationDone;
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'rehydrateForTest': {
+          // Clear caches and re-hydrate without wiping the directory.
+          // Used after seedTestData to pick up seeded files.
+          logBuffer = [];
+          await chrome.storage.local.set({ logBuffer });
+          await cacheClear();
+          recentUrls = new Set();
+          if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
+          hydrationDone = hydrateCache();
+          await hydrationDone;
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'seedTestData': {
+          const resp = await requestOffscreen({ action: 'seedTestData', files: request.files });
+          sendResponse(resp);
           break;
         }
 

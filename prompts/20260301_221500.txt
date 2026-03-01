@@ -1,0 +1,39 @@
+- There have been many bugs during development. Please take a look at git history, run a list of bugs, figure out why our test suite is incapable of capturing them. My idea is, many of our tests are focused on small scope logic, but no covering the end-to-end behavior of the code.
+- There are many node (vitest) processes on my machine, is it caused by you running tests?
+- 1~3 all sounds good. I am more interested in e2e functionality tests. Tell me more about Playwrite
+- First move earlier 1~3 to TODO.md. Then focus on Playwright integration in this session. You should use tmp data. And I was wondering, is it possible to reduce overhead of Playwright, by introducing a clear context message that basically reset the entire extension and point to a different directory. We can run multiple test cases using one setup.
+- Write to TODO.md
+- Continue plan
+- Great. Let's add test cases. The first category is functionality tests. Go over the important functionalities based on code and git messages.
+- Skip deletion operation (but do test pin and unpin). Write all tests.
+- 3 and 4 seems like bugs worth fixing?
+- How did you get the tests to pass with these two bugs?
+- Go ahead
+- Why not use readCacheable for loadListPinsById?
+- Sometimes there are long pauses during the playwright test, what is it doing?
+- I don't think that explains it. Slug computation is pure CPU, should be finished instantly.
+- Add some timer logs to check what is the majority time spent during playwright testing, e.g. initialization and teardown.
+- But sometimes it pauses at Portal UI page for at least 1s, somewhere is not being timed.
+- Could you add logs to know for certain the root cause? e.g. where exactly in initialize() is slow
+- We should use busy polling with small sleeps. E.g.
+
+while (true) {
+  if UI.not_ready() {  sleep(10ms); continue; }
+  break;
+}
+- You changed a few `function()` to `await function()`. Will it affect UI responsiveness?
+- Great. Let's add more cases. The coverage of functionality is still small. And the amount of data is small. And sub-page and referer is not tested. For the latter two, maybe we can use localhost to serve custom pages.
+- Tell me about the bugs you found and didn't fix
+- Fix them all and test properly. For 2, undrained notes should've been cached and we should use readCacheable similarly.
+- Explain your thoughts earlier about sessionLoad and note log's effectOf
+- Explain why not readCacheable?
+- You feeling may be right. hydrateCache don't call addLog, but it replays the log buffer? And during replay we will call sessionLoad? I think hydrateCache should pass a special load function to replay that doesn't wait for itself
+- Good progress, let's memorize how to run e2e tests in the future
+- /finish 
+- Keep timer logs, update docs, drop lesson 1
+- update entry
+- skip
+- n
+- n
+- y
+- go
