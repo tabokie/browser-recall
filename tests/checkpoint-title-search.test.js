@@ -35,18 +35,18 @@ describe('ensureCheckpointIfMissing — context search on miss', () => {
 });
 
 describe('searchPageContext — SPI as authoritative source', () => {
-  it('extracts title, user_title, and parents from SPI', () => {
+  it('extracts title, user_title, and parentIds from SPI', () => {
     expect(bgSource).toMatch(/async function searchPageContext\(url\)/);
     expect(bgSource).toMatch(/rec\.title/);
     expect(bgSource).toMatch(/rec\.user_title/);
-    expect(bgSource).toMatch(/rec\.parents/);
+    expect(bgSource).toMatch(/rec\.parentIds/);
   });
 
   it('documents all SPI record fields in comment', () => {
     expect(bgSource).toMatch(/SPI record fields/);
     expect(bgSource).toMatch(/title.*auto-detected page title/);
     expect(bgSource).toMatch(/user_title.*user-assigned custom title/);
-    expect(bgSource).toMatch(/parents.*referrer IDs/);
+    expect(bgSource).toMatch(/parentIds.*referrer IDs/);
     expect(bgSource).toMatch(/lists.*list IDs/);
   });
 

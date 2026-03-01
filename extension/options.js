@@ -392,7 +392,7 @@ function resolvePageRef(refId, pageSnap, spi) {
     const url = refId.slice(8);
     const entry = spi?.index?.[url];
     if (!entry) return null;
-    return { url, title: entry.title || null, user_title: entry.user_title || null, parentIds: entry.parents || [], lists: entry.lists || [] };
+    return { url, title: entry.title || null, user_title: entry.user_title || null, parentIds: entry.parentIds || [], lists: entry.lists || [] };
   }
   return null;
 }
@@ -3714,8 +3714,8 @@ async function buildExploreAutoBlocks(pins) {
   const pinSlugSet = new Set(pinSlugs);
   for (const [childUrl, entry] of Object.entries(spiData.index)) {
     if (pinnedSlugs.has(generateSlugFromUrl(childUrl))) continue;
-    const parents = entry.parents || [];
-    if (parents.some(p => pinSlugSet.has(p.startsWith('page:') ? p.slice(5) : p))) childrenUrls.add(childUrl);
+    const parentIds = entry.parentIds || [];
+    if (parentIds.some(p => pinSlugSet.has(p.startsWith('page:') ? p.slice(5) : p))) childrenUrls.add(childUrl);
   }
 
   // Parents of pins: from page.parentIds (typed keys) + shallowPageIndex fallback
@@ -3725,11 +3725,11 @@ async function buildExploreAutoBlocks(pins) {
     if (page && page.parentIds && page.parentIds.length > 0) {
       for (const p of page.parentIds) allParentRefs.push(p);
     } else {
-      // Non-checkpointed pin: check shallowPageIndex for its parents
+      // Non-checkpointed pin: check shallowPageIndex for its parentIds
       const pinUrl = pins[i].id.startsWith('shallow:') ? pins[i].id.slice(8) : (pageData['page:' + pinSlugs[i]]?.url || '');
       const spiEntry = spiData.index[pinUrl];
-      if (spiEntry && spiEntry.parents) {
-        for (const ps of spiEntry.parents) allParentRefs.push(ps);
+      if (spiEntry && spiEntry.parentIds) {
+        for (const ps of spiEntry.parentIds) allParentRefs.push(ps);
       }
     }
   }

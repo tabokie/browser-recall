@@ -1,0 +1,8 @@
+- The children of a index page are too many. Let's not add a page to childIds if the parent is the root domain (gateways)
+- y
+- Migrating the data in ~/porta-data to rid of the relations between gateways and sub-pages
+- Clean shallow page index of entries that have no parentIds and lists and user_title
+- Keep naming consistent, use parentIds instead of parents in all cases
+- Review, what else is missing
+- /finish 
+- n

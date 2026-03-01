@@ -120,7 +120,7 @@ describe('readCacheable / readFs', () => {
       case 'loadPermanentDeletes':
         return { success: true, keys: ['page:slug1', 'page:slug2'] };
       case 'loadShallowPageIndex':
-        return { success: true, timestamp: 42, index: { 'https://a.com': { parents: ['s1'] } } };
+        return { success: true, timestamp: 42, index: { 'https://a.com': { parentIds: ['s1'] } } };
       case 'loadGateways':
         return { success: true, origins: ['https://docs.rs'] };
       case 'loadListEntity':
@@ -234,9 +234,9 @@ describe('readCacheable / readFs', () => {
 
   it('falls back to filesystem for shallow-page and caches result', async () => {
     const result = await readCacheable('list:system/shallow-page');
-    expect(result).toEqual({ timestamp: 42, index: { 'https://a.com': { parents: ['s1'] } } });
+    expect(result).toEqual({ timestamp: 42, index: { 'https://a.com': { parentIds: ['s1'] } } });
     expect(offscreenCalls.some(c => c.action === 'loadShallowPageIndex')).toBe(true);
-    expect(session._store['list:system/shallow-page']).toEqual({ timestamp: 42, index: { 'https://a.com': { parents: ['s1'] } } });
+    expect(session._store['list:system/shallow-page']).toEqual({ timestamp: 42, index: { 'https://a.com': { parentIds: ['s1'] } } });
   });
 
   it('falls back to filesystem for gateways and caches result', async () => {

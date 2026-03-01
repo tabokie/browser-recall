@@ -793,7 +793,7 @@ describe('applyLogToShallowPage', () => {
     const entry = { timestamp: 100, action: 'page', url: 'https://child.com', referrerId: `page:${parentSlug}`, title: 'Child' };
     const result = applyLogToShallowPage(idx, entry);
     expect(Object.keys(result.index)).toHaveLength(1);
-    expect(result.index['https://child.com'].parents).toEqual([`page:${parentSlug}`]);
+    expect(result.index['https://child.com'].parentIds).toEqual([`page:${parentSlug}`]);
     expect(result.index['https://child.com'].title).toBe('Child');
     expect(result.timestamp).toBe(100);
   });
@@ -812,13 +812,13 @@ describe('applyLogToShallowPage', () => {
     expect(result.index['https://child.com'].user_title).toBe('Custom');
   });
 
-  it('accumulates multiple parents for the same URL', () => {
+  it('accumulates multiple parentIds for the same URL', () => {
     let idx = { timestamp: 0, index: {} };
     const p1Slug = generateSlugFromUrl('https://parent1.com');
     const p2Slug = generateSlugFromUrl('https://parent2.com');
     idx = applyLogToShallowPage(idx, { timestamp: 100, action: 'page', url: 'https://child.com', referrerId: `page:${p1Slug}`, title: 'C' });
     idx = applyLogToShallowPage(idx, { timestamp: 200, action: 'page', url: 'https://child.com', referrerId: `page:${p2Slug}`, title: 'C' });
-    expect(idx.index['https://child.com'].parents).toHaveLength(2);
+    expect(idx.index['https://child.com'].parentIds).toHaveLength(2);
     expect(idx.timestamp).toBe(200);
   });
 
@@ -830,7 +830,7 @@ describe('applyLogToShallowPage', () => {
   });
 
   it('removes list membership on list del', () => {
-    const idx = { timestamp: 0, index: { 'https://child.com': { parents: [], lists: ['list:my-list'], title: null, user_title: null } } };
+    const idx = { timestamp: 0, index: { 'https://child.com': { parentIds: [], lists: ['list:my-list'], title: null, user_title: null } } };
     const entry = { timestamp: 100, action: 'list', id: 'my-list', op: 'del', ids: ['shallow:https://child.com'] };
     const result = applyLogToShallowPage(idx, entry);
     expect(result.index['https://child.com'].lists).toEqual([]);
@@ -842,7 +842,7 @@ describe('applyLogToShallowPage', () => {
     let idx = { timestamp: 0, index: {} };
     idx = applyLogToShallowPage(idx, entry);
     const r2 = applyLogToShallowPage(idx, entry);
-    expect(r2.index['https://child.com'].parents).toEqual(idx.index['https://child.com'].parents);
+    expect(r2.index['https://child.com'].parentIds).toEqual(idx.index['https://child.com'].parentIds);
   });
 
   it('ignores entries with non-page/list action', () => {
@@ -1161,6 +1161,23 @@ describe('effectOf apply', () => {
     expect(result[`page:${childSlug}`].parentIds).toContain(`page:${parentSlug}`);
   });
 
+  it('skips parent childIds accumulation when parent is a gateway root', async () => {
+    const childSlug = generateSlugFromUrl('https://github.com/user/repo');
+    const parentSlug = generateSlugFromUrl('https://github.com/');
+    const entry = { timestamp: 100, action: 'page', url: 'https://github.com/user/repo', title: 'Repo', referrerId: `page:${parentSlug}` };
+    const store = {
+      [`page:${childSlug}`]: { slug: childSlug, url: 'https://github.com/user/repo', timestamp: 0, parentIds: [], childIds: [] },
+      [`page:${parentSlug}`]: { slug: parentSlug, url: 'https://github.com/', timestamp: 50, parentIds: [], childIds: [] },
+      'list:system/shallow-page': { timestamp: 0, index: {} },
+      'list:system/gateways': { timestamp: 0, origins: ['https://github.com'] },
+    };
+    const result = await effectOf(entry, async (key) => store[key] ?? null);
+    // Child still gets parentIds
+    expect(result[`page:${childSlug}`].parentIds).toContain(`page:${parentSlug}`);
+    // But parent should NOT get childIds (it's a gateway root)
+    expect(result[`page:${parentSlug}`]).toBeUndefined();
+  });
+
   it('applies list entry to list entity', async () => {
     const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['page:a-slug'] };
     const result = await effectOf(entry, async (key) =>
@@ -1331,7 +1348,7 @@ describe('effectOf', () => {
     for (const [k, v] of Object.entries(r1)) cache.set(k, v);
 
     expect(cache.get(`page:${childSlug}`)).toBeNull();
-    expect(cache.get('list:system/shallow-page').index['https://child.com'].parents).toEqual([`page:${parentSlug}`]);
+    expect(cache.get('list:system/shallow-page').index['https://child.com'].parentIds).toEqual([`page:${parentSlug}`]);
     expect(cache.get(`page:${parentSlug}`).childIds).toContain('shallow:https://child.com');
 
     // Entry 2: page_checkpoint for child — creates page, absorbs shallow_page index
@@ -1489,7 +1506,7 @@ describe('SPI and checkpoint mutual exclusion', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const existingSpi = {
       timestamp: 50,
-      index: { 'https://a.com': { parents: ['page:ref'], lists: ['list:x'], title: 'Title', user_title: null } },
+      index: { 'https://a.com': { parentIds: ['page:ref'], lists: ['list:x'], title: 'Title', user_title: null } },
     };
     const store = { 'list:system/shallow-page': existingSpi };
     const entry = { timestamp: 100, action: 'page_checkpoint', url: 'https://a.com', title: 'A' };
@@ -1497,7 +1514,7 @@ describe('SPI and checkpoint mutual exclusion', () => {
     const spi = result['list:system/shallow-page'];
     // SPI entry must be deleted after absorption
     expect(spi.index['https://a.com']).toBeUndefined();
-    // Page entity must have absorbed the parents
+    // Page entity must have absorbed the parentIds
     expect(result[`page:${slug}`].parentIds).toContain('page:ref');
   });
 });
@@ -1518,7 +1535,7 @@ describe('page_checkpoint absorption upgrades list pins', () => {
     };
     const spiEntity = {
       timestamp: 50, index: {
-        [testUrl]: { title: 'Test Article', parents: [], lists: ['list:my-list'] },
+        [testUrl]: { title: 'Test Article', parentIds: [], lists: ['list:my-list'] },
       },
     };
 

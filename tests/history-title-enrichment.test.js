@@ -97,7 +97,7 @@ const SPI_DATA = {
   index: {
     [SHALLOW_URL]: {
       title: SHALLOW_TITLE,
-      parents: [],
+      parentIds: [],
       lists: [],
     },
   },

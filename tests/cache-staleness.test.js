@@ -1061,7 +1061,7 @@ describe('Cache staleness', () => {
     sessionData['list:system/shallow-page'] = {
       timestamp: 0,
       index: {
-        [SHALLOW_URL]: { parents: [], lists: ['list:col-shallow'], title: SHALLOW_TITLE, user_title: null },
+        [SHALLOW_URL]: { parentIds: [], lists: ['list:col-shallow'], title: SHALLOW_TITLE, user_title: null },
       },
     };
 
@@ -1158,7 +1158,7 @@ describe('Cache staleness', () => {
     actionOverrides['getShallowPageIndex'] = () => ({
       timestamp: 0,
       index: {
-        [SHALLOW_URL]: { parents: [], lists: ['list:col-spi'], title: SHALLOW_TITLE, user_title: null },
+        [SHALLOW_URL]: { parentIds: [], lists: ['list:col-spi'], title: SHALLOW_TITLE, user_title: null },
       },
     });
 

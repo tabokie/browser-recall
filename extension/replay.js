@@ -1,7 +1,7 @@
 // replay.js — pure functions for applying log entries to entity state.
 // Imported by both background.js (cache-miss replay) and offscreen.js (checkpoint).
 // Each function is idempotent — safe to replay the same entry twice.
-import { generateSlugFromUrl } from './utils.js';
+import { generateSlugFromUrl, isGatewayRoot } from './utils.js';
 
 const REFERRER_CAP = 50;
 
@@ -156,10 +156,16 @@ export async function effectOf(entry, load) {
 
   // --- page ---
   if (entry.action === 'page') {
+    // Skip parent-side childIds accumulation when parent is a gateway root
+    const gatewayOrigins = entry.referrerId
+      ? (await loadOrDefault('list:system/gateways', load)).origins || []
+      : [];
     // Apply to each affected page (entry's own page + referrer parent)
     for (const pageKey of getAffectedKeys(entry)) {
       const page = await load(pageKey);
       if (!page) { result[pageKey] = null; continue; }
+      // Skip parent-side update for gateway roots (too many children)
+      if (pageKey === entry.referrerId && page.url && isGatewayRoot(page.url, gatewayOrigins)) continue;
       result[pageKey] = applyLogToPage(page, entry);
     }
 
@@ -214,7 +220,7 @@ export async function effectOf(entry, load) {
     const shallowEntry = spi.index?.[entry.url];
     if (shallowEntry) {
       // Absorb parent refs into page.parentIds
-      const parentRefs = shallowEntry.parents || [];
+      const parentRefs = shallowEntry.parentIds || [];
       if (parentRefs.length > 0) {
         const p = result[pageKey];
         const parentIds = [...(p.parentIds || [])];
@@ -470,9 +476,9 @@ export function applyLogToRecycleBin(recycleBinEntity, entry) {
 
 /**
  * Apply a log entry to the shallow page index (for non-checkpointed pages).
- * Index: { timestamp, index: { url: { parents: [...], lists: [...], title, user_title } } }
+ * Index: { timestamp, index: { url: { parentIds: [...], lists: [...], title, user_title } } }
  * Processes:
- *   - page entries with referrerId: records parent in index[url].parents
+ *   - page entries with referrerId: records parent in index[url].parentIds
  *   - page entries with title/user_title: updates index[url].title/user_title
  *   - list entries with shallow: ids: records list membership in index[url].lists
  * Returns new index (or original if entry is irrelevant).
@@ -487,7 +493,7 @@ export function applyLogToRecycleBin(recycleBinEntity, entry) {
  * page already has an SPI record, the title is overwritten.
  */
 export function applyLogToShallowPage(shallowPageIndex, entry) {
-  // Page entry: record parents and title info
+  // Page entry: record parentIds and title info
   if (entry.action === 'page' && entry.url) {
     const hasReferrer = !!entry.referrerId;
     const hasTitle = !!entry.title;
@@ -496,13 +502,13 @@ export function applyLogToShallowPage(shallowPageIndex, entry) {
 
     const updated = { ...shallowPageIndex };
     const index = { ...updated.index };
-    const existing = index[entry.url] || { parents: [], lists: [], title: null, user_title: null };
+    const existing = index[entry.url] || { parentIds: [], lists: [], title: null, user_title: null };
     const rec = { ...existing };
 
     if (hasReferrer) {
-      const parents = [...rec.parents];
-      if (!parents.includes(entry.referrerId)) parents.push(entry.referrerId);
-      rec.parents = parents;
+      const parentIds = [...rec.parentIds];
+      if (!parentIds.includes(entry.referrerId)) parentIds.push(entry.referrerId);
+      rec.parentIds = parentIds;
     }
     if (hasTitle) rec.title = entry.title;
     if (hasUserTitle) rec.user_title = entry.user_title;
@@ -525,7 +531,7 @@ export function applyLogToShallowPage(shallowPageIndex, entry) {
     const index = { ...updated.index };
 
     for (const url of shallowUrls) {
-      const existing = index[url] || { parents: [], lists: [], title: null, user_title: null };
+      const existing = index[url] || { parentIds: [], lists: [], title: null, user_title: null };
       const rec = { ...existing };
 
       if (entry.op === 'add') {

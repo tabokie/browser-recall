@@ -807,7 +807,7 @@ async function ensureCheckpointIfMissing(url, title) {
 // SPI record fields (see applyLogToShallowPage in replay.js):
 //   - title        (string|null)  — auto-detected page title
 //   - user_title   (string|null)  — user-assigned custom title
-//   - parents      (string[])     — referrer IDs in page:<slug> format
+//   - parentIds    (string[])     — referrer IDs in page:<slug> format
 //   - lists        (string[])     — list IDs this page is pinned to (not used here)
 //
 // SPI completeness guarantee (documented in applyLogToShallowPage):
@@ -825,7 +825,7 @@ async function searchPageContext(url) {
     if (rec) {
       if (rec.title) result.title = rec.title;
       if (rec.user_title) result.user_title = rec.user_title;
-      if (rec.parents?.length) result.parentIds = [...rec.parents];
+      if (rec.parentIds?.length) result.parentIds = [...rec.parentIds];
     }
   } catch (error) {
     // SPI not available; continue to next source
@@ -1369,7 +1369,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (parentRefs.length === 0) {
               const spIndex = await readCacheable('list:system/shallow-page');
               const shallowEntry = spIndex.index[url];
-              if (shallowEntry) parentRefs = shallowEntry.parents || [];
+              if (shallowEntry) parentRefs = shallowEntry.parentIds || [];
             }
             const parentReferrers = await resolveRefs(parentRefs);
 
@@ -1394,7 +1394,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const spForChildren = await readCacheable('list:system/shallow-page');
             for (const [childUrl, shallowEntry] of Object.entries(spForChildren.index)) {
               const parentKey = 'page:' + slug;
-              if ((shallowEntry.parents || []).includes(parentKey) && !children.includes(childUrl)) {
+              if ((shallowEntry.parentIds || []).includes(parentKey) && !children.includes(childUrl)) {
                 children.push(childUrl);
               }
             }
