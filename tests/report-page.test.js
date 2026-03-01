@@ -76,12 +76,14 @@ async function processPageReport(delta, { getCachedEntity, loadPage, trimTitle }
     action: 'page',
     url,
   };
-  let hasChange = false;
+  let hasChange = !!delta.isInitialLoad; // initial visit is always meaningful
 
-  // Title: trim then compare
+  // Title: trim then compare; always include on initial load
   if (delta.title != null) {
     const trimmed = trimTitle(delta.title, url);
-    if (!cached || cached.title !== trimmed) {
+    if (delta.isInitialLoad) {
+      entry.title = trimmed;
+    } else if (!cached || cached.title !== trimmed) {
       entry.title = trimmed;
       hasChange = true;
     }
@@ -113,12 +115,14 @@ async function processPageReport(delta, { getCachedEntity, loadPage, trimTitle }
     hasChange = true;
   }
 
-  // user_title: independent from auto-detected title
+  // user_title: from delta if explicitly set, or from cached entity on initial load
   if (delta.user_title != null) {
     if (!cached || cached.user_title !== delta.user_title) {
       entry.user_title = delta.user_title;
       hasChange = true;
     }
+  } else if (delta.isInitialLoad && cached?.user_title) {
+    entry.user_title = cached.user_title;
   }
 
   return { entry: hasChange ? entry : null };
@@ -213,6 +217,54 @@ describe('processPageReport', () => {
       );
       expect(entry.title).toBe('New Page');
       expect(entry.timeOnPage).toBeUndefined();
+    });
+  });
+
+  describe('initial load always logs', () => {
+    it('produces entry on initial load even when all fields match cached', async () => {
+      const cached = { title: 'Same', scrollDepth: 50 };
+      const { entry } = await processPageReport(
+        { url, title: 'Same', scrollDepth: 30, isInitialLoad: true },
+        { ...noLoad, getCachedEntity: () => cached },
+      );
+      // Initial load should always produce an entry (the visit itself matters)
+      expect(entry).not.toBeNull();
+      expect(entry.action).toBe('page');
+      expect(entry.url).toBe(url);
+      // Title is always included on initial load (avoids enrichment at render time)
+      expect(entry.title).toBe('Same');
+      // But other unchanged fields should still be omitted
+      expect(entry.scrollDepth).toBeUndefined();
+    });
+
+    it('includes user_title from cached entity on initial load', async () => {
+      const cached = { title: 'Auto Title', user_title: 'My Custom Name', scrollDepth: 50 };
+      const { entry } = await processPageReport(
+        { url, title: 'Auto Title', isInitialLoad: true },
+        { ...noLoad, getCachedEntity: () => cached },
+      );
+      expect(entry).not.toBeNull();
+      expect(entry.title).toBe('Auto Title');
+      expect(entry.user_title).toBe('My Custom Name');
+    });
+
+    it('omits user_title on initial load when cached entity has none', async () => {
+      const cached = { title: 'Auto Title', scrollDepth: 50 };
+      const { entry } = await processPageReport(
+        { url, title: 'Auto Title', isInitialLoad: true },
+        { ...noLoad, getCachedEntity: () => cached },
+      );
+      expect(entry).not.toBeNull();
+      expect(entry.user_title).toBeUndefined();
+    });
+
+    it('still returns null for non-initial reports with no changes', async () => {
+      const cached = { title: 'Same', scrollDepth: 50 };
+      const { entry } = await processPageReport(
+        { url, title: 'Same', scrollDepth: 30 },
+        { ...noLoad, getCachedEntity: () => cached },
+      );
+      expect(entry).toBeNull();
     });
   });
 

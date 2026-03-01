@@ -1,0 +1,12 @@
+- There seems to be an issue with checkpointed page. When I visit when on another day, the first visit doesn't immediately triggers a log anymore. Only when the page exits, a "page" log of attention updates are written.
+- Yes
+- Actually, let's record title as well. So it is less likely that we will need to check title when rendering history UI.
+- Do we check checkpoint before logging "page"?
+- I am concerned that user_title, if present in checkpoint, is missed in the "page" log, and later when we render the history, user_title is forgotten
+- Actually, didn't we always load entity (hard load, may read disk) when visiting a page? We can ask content.js to send us the user_title.
+- Current solution is good. Add a comment to explain why this entity is likely to be cached (because of getCachedEntity called earlier)
+- /finish 
+- Review, what else is missing?
+- /finish 
+- n
+- n

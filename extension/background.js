@@ -552,12 +552,14 @@ async function processPageReport(delta) {
     action: 'page',
     url,
   };
-  let hasChange = false;
+  let hasChange = !!delta.isInitialLoad; // initial visit is always meaningful
 
-  // Title: trim then compare
+  // Title: trim then compare; always include on initial load
   if (delta.title != null) {
     const trimmed = await trimTitle(delta.title, url);
-    if (!cached || cached.title !== trimmed) {
+    if (delta.isInitialLoad) {
+      entry.title = trimmed;
+    } else if (!cached || cached.title !== trimmed) {
       entry.title = trimmed;
       hasChange = true;
     }
@@ -589,12 +591,16 @@ async function processPageReport(delta) {
     hasChange = true;
   }
 
-  // user_title: independent from auto-detected title
+  // user_title: from delta if explicitly set, or from cached entity on initial load
   if (delta.user_title != null) {
     if (!cached || cached.user_title !== delta.user_title) {
       entry.user_title = delta.user_title;
       hasChange = true;
     }
+  } else if (delta.isInitialLoad && cached?.user_title) {
+    // Content script doesn't know user_title; pull from cached entity
+    // (already loaded via getCachedEntity + disk fallback above)
+    entry.user_title = cached.user_title;
   }
 
   return { entry: hasChange ? entry : null };
@@ -1039,7 +1045,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             // Augment referrer from webNavigation fallback
             const delta = { ...request };
             delete delta.action;
-            delete delta.isInitialLoad;
             delete delta.isLeaving;
             if (!delta.referrer && request.isInitialLoad && sender.tab?.id != null) {
               const bgRef = getReferrer(sender.tab.id);
