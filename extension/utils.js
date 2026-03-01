@@ -39,7 +39,7 @@ export async function saveSettingsValue(key, value) {
 }
 
 // Generic slug generation: normalize text + hash for uniqueness
-export function generateSlug(text, hashInput) {
+function generateSlug(text, hashInput) {
   if (!text || text.trim() === '') {
     text = 'untitled';
   }
@@ -97,7 +97,6 @@ export function qbTreesChanged(oldTrees, newTrees) {
   return JSON.stringify(oldTrees) !== JSON.stringify(newTrees);
 }
 
-// Generate deterministic slug for a note entity
 // Check if a URL is the root page of a gateway origin
 export function isGatewayRoot(url, origins) {
   try {
@@ -108,6 +107,23 @@ export function isGatewayRoot(url, origins) {
   }
 }
 
+// Format timestamp to YYYY-MM-DD date key
+export function dateKeyFromTimestamp(ts) {
+  const d = new Date(ts);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+// Escape HTML entities for safe insertion into innerHTML
+export function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Generate deterministic slug for a note entity
 export function generateNoteSlug(timestamp, excerpt) {
   const d = new Date(timestamp);
   const yy = String(d.getFullYear()).slice(2);

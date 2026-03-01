@@ -1,5 +1,5 @@
 // Popup — current-page dashboard
-import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, readCacheable, sendAction, saveSettingsValue } from './utils.js';
+import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, readCacheable, sendAction, saveSettingsValue, escapeHtml } from './utils.js';
 
 let currentSlug = '';
 let currentNotes = [];
@@ -36,12 +36,6 @@ function showErrorBubble(message) {
   bubble.style.opacity = '1';
   clearTimeout(_errorBubbleTimer);
   _errorBubbleTimer = setTimeout(() => { bubble.style.opacity = '0'; }, 4000);
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
 }
 
 function autoResizeTextarea(textarea) {

@@ -3,7 +3,7 @@
 import { FileSystemStorage } from './filesystem-storage.js';
 import init, { Interaction, SearchEngine, searchBatch } from './pkg/portal_extension.js';
 import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine, extractInteractionBuffer } from './search-helpers.js';
-import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, collectQbTrees, qbTreesChanged, isGatewayRoot } from './utils.js';
+import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, collectQbTrees, qbTreesChanged, isGatewayRoot, escapeHtml } from './utils.js';
 import { findRelatedPages } from './related-scoring.js';
 import { attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
 import { qbCreatePredicate, qbCreateOperator, qbCreatePlaceholder, qbFindNode, qbCollapseTree, qbFlattenSameOp, qbToTree, qbFlatten } from './qb-tree.js';
@@ -189,7 +189,7 @@ async function pipelinedSearch(query) {
   const filesResp = await sendAction({ action: 'listInteractionFiles' });
   const files = filesResp.files;
 
-  // Write buffer overlay
+  // Write buffer overlay — read undrained entries before WASM processes JSONL on disk
   const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
   const interactionBuffer = extractInteractionBuffer(logBuffer);
   bufferContentMap = getBufferContentMap(interactionBuffer);
@@ -270,20 +270,10 @@ async function initHistoryFiles() {
     console.log('Filesystem not available:', error.message);
   }
 
-  // Merge today's history from session cache (date-specific key) or logBuffer
+  // Merge today's history — session cache has disk + undrained entries via addLog
   const todayStr = new Date().toISOString().slice(0, 10);
-  const todayKey = 'history:' + todayStr;
-  const sessionData = await chrome.storage.session.get([todayKey]);
-  const todayEntries = sessionData[todayKey];
-  let interactionBuffer;
-  if (todayEntries && todayEntries.length > 0) {
-    // Session has today's entries (already includes flushed + logBuffer via background addLog)
-    interactionBuffer = todayEntries.filter(e => (e.action === 'page' || !e.action) && e.url);
-  } else {
-    // Fallback: read raw logBuffer
-    const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
-    interactionBuffer = extractInteractionBuffer(logBuffer);
-  }
+  const todayEntries = await readCacheable('history:' + todayStr) || [];
+  const interactionBuffer = todayEntries.filter(e => (e.action === 'page' || !e.action) && e.url);
   for (const entry of interactionBuffer) {
     const existing = historyByUrl.get(entry.url);
     if (!existing || entry.timestamp > existing.timestamp) {
@@ -377,7 +367,6 @@ function pinIdToUrl(id) {
 function slugFromPinId(id) {
   if (id.startsWith('page:')) return id.slice(5);
   if (id.startsWith('shallow:')) return generateSlugFromUrl(id.slice(8));
-  return generateSlugFromUrl(id); // legacy: treat as URL
 }
 
 // Resolve a typed page reference to entity-like data, or null.
@@ -1151,9 +1140,9 @@ async function evaluateQueryStream(qbTree) {
     capturesMatchCache = null;
   }
 
-  // Merge write buffer
-  const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
-  const interactionBuffer = extractInteractionBuffer(logBuffer);
+  // Merge today's entries (session cache has disk + undrained via addLog)
+  const todayEntries = await readCacheable('history:' + new Date().toISOString().slice(0, 10)) || [];
+  const interactionBuffer = todayEntries.filter(e => (e.action === 'page' || !e.action) && e.url);
   const seenByDay = new Map(); // YYYYMMDD → Set<url>
   const results = [];
 
@@ -2968,12 +2957,6 @@ function formatTime(timestamp) {
   return date.toLocaleDateString();
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
 // --- Event listeners: Sidebar categories ---
 document.querySelectorAll('.sidebar-item[data-category]').forEach(item => {
   item.addEventListener('click', () => {
@@ -3538,8 +3521,8 @@ chrome.runtime.onMessage.addListener((request) => {
     // New page visit — merge into historyByUrl and historyAllEntries
     clearTimeout(mutationRefreshTimer);
     mutationRefreshTimer = setTimeout(async () => {
-      const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
-      const interactionBuffer = extractInteractionBuffer(logBuffer);
+      const todayEntries = await readCacheable('history:' + new Date().toISOString().slice(0, 10)) || [];
+      const interactionBuffer = todayEntries.filter(e => (e.action === 'page' || !e.action) && e.url);
       let changed = false;
       for (const entry of interactionBuffer) {
         const existing = historyByUrl.get(entry.url);
@@ -3681,9 +3664,6 @@ async function buildExploreAutoBlocks(pins) {
     for (const ref of refs) {
       if (ref.startsWith('shallow:')) { urls.push(ref.slice(8)); continue; }
       if (ref.startsWith('page:')) { slugs.push(ref.slice(5)); continue; }
-      // Legacy: bare slug or URL
-      if (ref.startsWith('http')) { urls.push(ref); continue; }
-      slugs.push(ref);
     }
     if (slugs.length > 0) {
       const resp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs });

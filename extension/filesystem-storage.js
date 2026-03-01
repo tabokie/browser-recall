@@ -260,7 +260,6 @@ class FileSystemStorage {
     }
   }
 
-  // Write all interactions at once (for migration)
   // Get directory info
   async getDirectoryInfo() {
     if (!this.directoryHandle) {

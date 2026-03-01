@@ -10,7 +10,7 @@
 // and call its methods.
 import { FileSystemStorage } from './filesystem-storage.js';
 import { effectOf, defaultEntity } from './replay.js';
-import { generateNoteSlug } from './utils.js';
+import { generateNoteSlug, dateKeyFromTimestamp } from './utils.js';
 
 console.log('Offscreen document loaded');
 
@@ -289,13 +289,6 @@ function scheduleDrain() {
   drainTimer = setTimeout(() => { drainTimer = null; drainQueue(); }, 100);
 }
 
-function dateKeyFromTimestamp(ts) {
-  const d = new Date(ts);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
 
 async function drainQueue() {
   if (draining) return;

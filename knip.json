@@ -1,0 +1,23 @@
+{
+  "entry": [
+    "extension/background.js",
+    "extension/content.js",
+    "extension/offscreen.js",
+    "extension/popup.js",
+    "extension/options.js",
+    "extension/savepage/content.js",
+    "extension/savepage/content-frame.js",
+    "extension/savepage/content-fontface.js",
+    "extension/savepage/content-fontface-intercept.js",
+    "extension/savepage/shadowloader.js",
+    "tests/**/*.test.js"
+  ],
+  "project": [
+    "extension/**/*.js",
+    "tests/**/*.js"
+  ],
+  "ignore": [
+    "extension/pkg/**",
+    "scripts/**"
+  ]
+}

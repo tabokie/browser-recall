@@ -230,7 +230,7 @@ describe('readCacheable', () => {
         },
       },
       runtime: {
-        sendMessage: vi.fn(async () => ({ value: undefined })),
+        sendMessage: vi.fn(async () => ({ success: true, value: undefined })),
       },
     };
     sendMessageMock = chrome.runtime.sendMessage;
@@ -250,7 +250,7 @@ describe('readCacheable', () => {
   });
 
   it('sends readCacheable action on session miss and returns resp.value', async () => {
-    sendMessageMock.mockResolvedValue({ value: ['https://docs.rs'] });
+    sendMessageMock.mockResolvedValue({ success: true, value: ['https://docs.rs'] });
     const { readCacheable } = await import('../extension/utils.js');
     const result = await readCacheable('list:system/gateways');
     expect(sendMessageMock).toHaveBeenCalledWith({ action: 'readCacheable', key: 'list:system/gateways' });
@@ -258,7 +258,7 @@ describe('readCacheable', () => {
   });
 
   it('returns undefined when both session and background miss', async () => {
-    sendMessageMock.mockResolvedValue({ value: undefined });
+    sendMessageMock.mockResolvedValue({ success: true, value: undefined });
     const { readCacheable } = await import('../extension/utils.js');
     const result = await readCacheable('nonExistent');
     expect(result).toBeUndefined();
@@ -283,7 +283,7 @@ describe('loadSettingsValue delegates to readCacheable', () => {
         },
       },
       runtime: {
-        sendMessage: vi.fn(async () => ({ value: undefined })),
+        sendMessage: vi.fn(async () => ({ success: true, value: undefined })),
       },
     };
     sendMessageMock = chrome.runtime.sendMessage;
@@ -294,7 +294,7 @@ describe('loadSettingsValue delegates to readCacheable', () => {
   });
 
   it('returns defaultValue when readCacheable returns undefined', async () => {
-    sendMessageMock.mockResolvedValue({ value: undefined });
+    sendMessageMock.mockResolvedValue({ success: true, value: undefined });
     const { loadSettingsValue } = await import('../extension/utils.js');
     const result = await loadSettingsValue('archiveQuality', 'medium');
     expect(result).toBe('medium');

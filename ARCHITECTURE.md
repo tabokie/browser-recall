@@ -33,13 +33,13 @@ This is applied:
 ### Read Path
 
 ```
-getCachedEntity(key)          ← session cache hit (fast)
+cacheGet(key)                 ← session cache hit (fast)
   ↓ miss
 loadPageBatch([slug])         ← filesystem via offscreen
   ↓ loaded
 replayBufferOver(page)        ← apply pending logBuffer entries
   ↓
-setCachedEntity(key, page)    ← populate session cache for next read
+cacheSet(key, page)           ← populate session cache for next read
 ```
 
 ### UI Read Path (Cacheable Keys)
@@ -53,7 +53,7 @@ sendMessage({ action: 'readCacheable', key })  ← background.js readCacheable()
   ↓
 background: session cache → readFs()  ← filesystem via offscreen, caches into session
   ↓
-{ value }                             ← returned to UI page
+{ success: true, value }              ← returned to UI page
 ```
 
 `loadSettingsValue(subKey, default)` reads `(await readCacheable('settings'))?.[subKey]` and returns `defaultValue` when the sub-field is `undefined`.
@@ -166,7 +166,7 @@ When a page is pinned to a list, the pin ID must be authoritative: `page:<slug>`
 
 **Resolution chain** (background.js `resolvePageId(url)`):
 ```
-getCachedEntity('page:' + slug)     ← session cache hit (fast)
+cacheGet('page:' + slug)            ← session cache hit (fast)
   ↓ miss
 requestOffscreen({ pageExists })    ← filesystem check (definitive)
   ↓ exists? → 'page:<slug>'
@@ -180,3 +180,65 @@ Applied in: `toggleListPin` handler (re-checks any shallow ID), `addListPins` ha
 ### Design Rationale
 
 Most visited pages are one-time visits that don't need rich entity state. Selective checkpointing keeps the filesystem lean — only pages with meaningful relationships (referrers, notes, multi-day engagement) get checkpoint files. Shallow pages still appear in history views via JSONL data. The typed reference system (`page:<slug>` vs `shallow:<url>`) makes it explicit whether a referenced page is materialized, and the shallow-page index provides a lightweight way to track parent/list/title metadata for non-checkpointed pages without creating full entity files.
+
+## Module Responsibilities
+
+### Canonical Data Flow
+
+```
+┌─ content.js ─────────────────┐
+│  DOM capture, user intent     │──sendMessage──┐
+└───────────────────────────────┘               │
+┌─ popup.js ───────────────────┐               │
+│  Current-page dashboard       │──sendMessage──┤
+└───────────────────────────────┘               │
+┌─ options.js ─────────────────┐               │     ┌─ offscreen.js ──────┐
+│  Bookmark-manager UI, search  │──sendMessage──┼────▶│  background.js      │──port──▶│  Filesystem I/O     │
+└───────────────────────────────┘               │     │  Business logic hub  │◀─port──│  (File System Access │
+                                                │     │  Event-sourced log   │        │   API, IndexedDB)    │
+                                                │     └──────────────────────┘        └─────────────────────┘
+```
+
+| Module | Responsibility | Allowed APIs |
+|--------|---------------|-------------|
+| **background.js** | Business logic, event-sourced log, cache coordination, message dispatch | `chrome.storage.session/local`, `chrome.runtime`, `chrome.tabs`, `chrome.offscreen` |
+| **offscreen.js** | Filesystem I/O only (File System Access API needs document context) | `chrome.runtime` (port only) |
+| **content.js** | DOM interaction, scroll/time tracking, highlight rendering | `chrome.runtime.sendMessage`, `chrome.storage.session` (read workspace) |
+| **popup.js** | Current-page dashboard UI | `chrome.runtime.sendMessage`, `chrome.tabs.query` |
+| **options.js** | Full UI: search, explore, lists, settings | `chrome.runtime.sendMessage`, `chrome.storage.session` (transient UI state) |
+| **replay.js** | Pure event replay functions (no chrome APIs) | None |
+| **utils.js** | Shared utilities, `readCacheable`, `sendAction` | `chrome.runtime.sendMessage`, `chrome.storage.session` (cache read) |
+| **entity-cache.js** | Session cache with LRU eviction | `chrome.storage.session` |
+| **filesystem-storage.js** | File System Access API wrapper | File System Access, IndexedDB |
+
+### Message Response Convention
+
+All background.js message handlers return `{ success: true, ...fields }` on success and `{ success: false, error }` on failure. The `sendAction()` helper in utils.js throws on `success === false`.
+
+### History Date Keys
+
+`history:<YYYY-MM-DD>` keys in session cache hold the complete list of entries for that date — both drained (on-disk JSONL) and undrained (still in logBuffer). `addLog()` appends every new entry to the appropriate date key and pins it. This makes `readCacheable('history:<today>')` the canonical way for UI pages to get today's entries.
+
+`readFs` handles `history:*` keys via offscreen `loadHistoryRange` (pure disk read, no replay — same as all other keys). During hydration, Phase 2.5 appends logBuffer entries to their `history:<date>` keys after Phase 2 entity replay. This ensures session cache has the complete view before any `readCacheable` call from UI pages.
+
+**Post-hydration eviction safety**: `readFs` returns disk-only data without logBuffer replay. This is safe because keys with undrained logBuffer entries are protected from eviction:
+- **Today's key**: pinned by hydration (Phase 1.5) and `addLog()` — never evicted.
+- **Past date keys with undrained entries**: Phase 2.5 sets their timestamp from logBuffer entries. Since undrained timestamps > `persistWatermark`, watermark-gated eviction in `entity-cache.js` won't evict them until drain completes (at which point disk is complete).
+- **Past date keys fully drained**: disk is the complete record — `readFs` returns correct data.
+
+### Pending Buffer for WASM Search
+
+`pipelinedSearch()` in options.js reads `chrome.storage.local.get(['logBuffer'])` directly to get the exact undrained delta. WASM searches JSONL files on disk, so only undrained entries need to be searched separately. The raw logBuffer (not `history:<today>`) avoids double-processing entries already in JSONL.
+
+### Known Architectural Exceptions
+
+**options.js direct FileSystemStorage access** — options.js instantiates its own `FileSystemStorage` for:
+1. **WASM search pipeline** (`pipelinedSearch`): reads `history/` JSONL files directly via the WASM `searchBatch()` API for zero-copy performance. Routing through background→offscreen would require serializing file contents across IPC boundaries.
+2. **Directory picker UI** (`selectDirectory`): the File System Access `showDirectoryPicker()` API requires user gesture in a document context — can't be proxied through background.
+3. **Settings page diagnostics** (`getDirectoryInfo`, data purge): inspects/manages the storage directory.
+
+These bypass the background→offscreen pipeline. The tradeoff is acceptable because (a) the WASM search is read-only and operates on immutable JSONL history files, (b) directory picker is a one-time setup action, (c) diagnostics are developer-facing.
+
+**options.js direct chrome.storage.local** — Three call sites remain:
+1. **WASM search** (`pipelinedSearch`): reads undrained logBuffer entries to search separately from on-disk JSONL (see "Pending Buffer for WASM Search" above).
+2. **Settings diagnostics** (`updateStatistics`, `updateCacheTable`): read logBuffer to display byte sizes and entry counts in the cache inspector UI.

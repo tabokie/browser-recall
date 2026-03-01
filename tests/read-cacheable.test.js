@@ -58,17 +58,10 @@ describe('background.js structural checks', () => {
     expect(bgSource).toMatch(/case\s+'getGatewayDomains'\s*:/);
   });
 
-  it('getLists handler uses getListOrder', () => {
-    // Extract the getLists case block
-    const getListsMatch = bgSource.match(/case\s+'getLists'\s*:\s*\{([\s\S]*?)break;\s*\}/);
-    expect(getListsMatch).not.toBeNull();
-    expect(getListsMatch[1]).toMatch(/getListOrder\s*\(\s*\)/);
-  });
-
-  it('getRecycleBin handler uses readCacheable', () => {
-    const match = bgSource.match(/case\s+'getRecycleBin'\s*:\s*\{([\s\S]*?)break;\s*\}/);
+  it('readCacheable handler returns success: true', () => {
+    const match = bgSource.match(/case\s+'readCacheable'\s*:\s*\{([\s\S]*?)break;\s*\}/);
     expect(match).not.toBeNull();
-    expect(match[1]).toMatch(/readCacheable\s*\(\s*'list:system\/recycle-bin'\s*\)/);
+    expect(match[1]).toMatch(/success:\s*true/);
   });
 
   it('loadPermanentDeletes handler uses readCacheable', () => {

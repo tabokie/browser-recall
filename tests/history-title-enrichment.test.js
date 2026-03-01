@@ -248,12 +248,12 @@ describe('History title enrichment', () => {
 
       case 'readCacheable':
         switch (msg.key) {
-          case 'settings': return { value: TEST_SETTINGS };
-          case 'list:system/recycle-bin': return { value: [] };
-          case 'list:system/permanent-deletes': return { value: TEST_SETTINGS.permanentDeletes };
-          case 'list:system/gateways': return { value: [] };
-          case 'list:system/shallow-page': return { value: SPI_DATA };
-          default: return { value: undefined };
+          case 'settings': return { success: true, value: TEST_SETTINGS };
+          case 'list:system/recycle-bin': return { success: true, value: [] };
+          case 'list:system/permanent-deletes': return { success: true, value: TEST_SETTINGS.permanentDeletes };
+          case 'list:system/gateways': return { success: true, value: [] };
+          case 'list:system/shallow-page': return { success: true, value: SPI_DATA };
+          default: return { success: true, value: undefined };
         }
 
       case 'getShallowPageIndex':

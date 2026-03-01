@@ -63,7 +63,6 @@ ollection search failed, continuing with related pages: expected a string argume
 - Refactor the read flow. options.rs first ask storage.session for cached data, if not found, read files directly from options.rs. The same goes for other UIs. offscreen.rs will only serve reads from background.rs.
 - Refactor the read flow. options.rs first ask storage.session for cached data, if not found, read files directly from options.rs. The same goes for other UIs. offscreen.rs will only serve reads from background.rs. We wouldn't read files that are being modified because dirty objects should be in cache.
 - Go over the codebase thoroughly. Cleanup dead code and unnecessary abstraction. Simplify it.
-- Go over the codebase thoroughly. Cleanup dead code and unnecessary abstraction. Simplify it.
 - Finish up
 - no
 - no

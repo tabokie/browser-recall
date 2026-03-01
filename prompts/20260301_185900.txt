@@ -1,0 +1,29 @@
+- Go over the codebase thoroughly. Cleanup dead code and unnecessary abstraction. Simplify it.
+- Are there code linting tools that can check these issues staticly? like rust-clippy.
+- Try the first two tools 
+- Keep them. Fix their reported issues and your earlier 4 issues
+- Is there other compatibility code we can remove?
+- remove
+- Remember the lint tools and the commands
+- Let's work on architectural cleanup. Understand the overall structural relations between modules: responsibility, interface, data flow, etc. And search for outliers that violate or don't fit in with the grand scheme of things.
+- Have you looked at CODEBASE_MAP.md and ARCHITECTURE.md?
+- Fix as much as you can, you can add more section to ARCHITECTURE.md if needed
+- Remind me, why did we need to access log-buffer in options.js?
+- Can we read "history:<today>" instead? I believe it is kept up-to-date as well.
+- > But it means touching readFs in background.js
+What do you mean? I thought background.js already touches it?
+
+> includes both drained (already in JSONL) and undrained entries,
+This is a fair point. For WASM search, we should definitely distinguish the delta. And the timing is important, we must get undrained entries first before processing drained entries on disk. But I'm not sure why we can't directly read storage.local if it's available to options.js?
+
+And, I believe in other cases, it is better to update the entire history:<today> than to catch up only the undrained delta. Because it is difficult to know whether there is gap between the in-memory history and log-buffer.
+- Let me confirm. During initialization, for normal entities with timestamp, we use `readCacheable` to get the disk version, then replay log-buffer over it. For history:<today>, we should do the same, get the disk version and append log-buffer onto it.
+- But it seems like an outlier for only history:<date> to perform replay inside readFs. Where do all other keys perform their replay?
+- So readFs happens before hydration? What if a key got evicted and read again later, will we still hydrate it?
+- Make sure this nuance is commented or documented 
+- /finish 
+- n
+- n
+- y
+- n
+- n

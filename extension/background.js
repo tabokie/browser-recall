@@ -1,9 +1,9 @@
 // Background service worker for Portal extension
 // Central authority for reads and mutations. Offscreen is a pure filesystem I/O worker.
-import { generateSlugFromUrl, generateNoteSlug } from './utils.js';
+import { generateSlugFromUrl, generateNoteSlug, dateKeyFromTimestamp } from './utils.js';
 import { effectOf, applyLogToPage } from './replay.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
-import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, getCachedEntity, setCachedEntity, setEntityCacheWatermark } from './entity-cache.js';
+import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark } from './entity-cache.js';
 
 console.log('Background script loading...');
 
@@ -21,13 +21,6 @@ chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONT
 // Resolves when hydrateCache() completes (or immediately if no hydration needed).
 let hydrationDone = Promise.resolve();
 
-function dateKeyFromTimestamp(ts) {
-  const d = new Date(ts);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
 
 // ─── Offscreen Document ───────────────────────────────────────────────
 
@@ -309,6 +302,18 @@ async function readFs(key) {
       break;
     }
     default: {
+      if (key.startsWith('history:')) {
+        // Disk-only read (no logBuffer replay). Safe because:
+        // - Today's key is pinned (never evicted, never reaches readFs post-hydration)
+        // - Past keys with undrained logBuffer entries have timestamp > persistWatermark,
+        //   so watermark-gated eviction won't evict them until drain completes
+        // - Past keys fully drained: disk is complete, no replay needed
+        const dateStr = key.slice('history:'.length);
+        const r = await requestOffscreen({ action: 'loadHistoryRange', from: dateStr, to: dateStr });
+        assertOffscreenSuccess(r, key);
+        value = r.entries || [];
+        break;
+      }
       if (key.startsWith('list:')) {
         const listId = key.slice('list:'.length);
         const r = await requestOffscreen({ action: 'loadListEntity', listId });
@@ -478,14 +483,14 @@ async function hydrateCache() {
   if (bufferPageSlugs.size > 0) {
     const slugsToLoad = [];
     for (const slug of bufferPageSlugs) {
-      if (!(await getCachedEntity('page:' + slug))) slugsToLoad.push(slug);
+      if (!(await cacheGet('page:' + slug))) slugsToLoad.push(slug);
     }
     if (slugsToLoad.length > 0) {
       try {
         const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: slugsToLoad });
         if (resp?.success && resp.pages) {
           for (const [slug, page] of Object.entries(resp.pages)) {
-            await setCachedEntity('page:' + slug, page);
+            await cacheSet('page:' + slug, page);
           }
         }
       } catch (e) { console.warn('Page pre-load failed:', e.message); }
@@ -498,6 +503,21 @@ async function hydrateCache() {
       const effects = await effectOf(entry, sessionLoad);
       await sessionWrite(effects);
     } catch (e) { console.warn('Hydration replay failed for entry:', e.message); }
+  }
+
+  // Phase 2.5: Append logBuffer entries to their history:<date> keys.
+  // effectOf (Phase 2) updates entities but not history date keys. addLog() does
+  // this lazily at runtime, but we need it done before any readCacheable call.
+  // After this phase, history keys have disk + undrained entries. Their timestamps
+  // reflect undrained data, so watermark-gated eviction protects them until drain.
+  // Today's key is also pinned (Phase 1.5 + addLog) as an extra safeguard.
+  for (const entry of logBuffer) {
+    const dk = dateKeyFromTimestamp(entry.timestamp);
+    const hk = 'history:' + dk;
+    let entries = await cacheGet(hk);
+    if (entries == null) entries = [];
+    entries.push(entry);
+    await cacheSet(hk, entries, { timestamp: entry.timestamp });
   }
 
   console.log('Cache hydrated');
@@ -536,13 +556,13 @@ async function processPageReport(delta) {
   const url = delta.url;
   const slug = delta.slug || generateSlugFromUrl(url);
   const key = 'page:' + slug;
-  let cached = await getCachedEntity(key);
+  let cached = await cacheGet(key);
   if (!cached) {
     // Disk fallback: cache miss (SW restart, LRU eviction) → load from filesystem
     const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
     const diskPage = resp?.pages?.[slug];
     if (diskPage) {
-      await setCachedEntity(key, diskPage);
+      await cacheSet(key, diskPage);
       cached = diskPage;
     }
   }
@@ -599,7 +619,7 @@ async function processPageReport(delta) {
     }
   } else if (delta.isInitialLoad && cached?.user_title) {
     // Content script doesn't know user_title; pull from cached entity
-    // (already loaded via getCachedEntity + disk fallback above)
+    // (already loaded via cacheGet + disk fallback above)
     entry.user_title = cached.user_title;
   }
 
@@ -751,7 +771,7 @@ initSavepageBridge();
 async function resolvePageId(url) {
   const slug = generateSlugFromUrl(url);
   const key = 'page:' + slug;
-  if (await getCachedEntity(key)) return key;
+  if (await cacheGet(key)) return key;
   const resp = await requestOffscreen({ action: 'pageExists', slug });
   return resp?.exists ? key : 'shallow:' + url;
 }
@@ -780,7 +800,7 @@ async function ensureCheckpointIfMissing(url, title) {
   if (!url) return;
   const slug = generateSlugFromUrl(url);
   const key = 'page:' + slug;
-  const cached = await getCachedEntity(key);
+  const cached = await cacheGet(key);
   if (!cached) {
     const existsResp = await requestOffscreen({ action: 'pageExists', slug });
     if (!existsResp?.exists) {
@@ -961,13 +981,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const key = 'page:' + slug;
 
           // Entity storage: session cache → filesystem fallback
-          let page = await getCachedEntity(key);
+          let page = await cacheGet(key);
           if (!page) {
             const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
             if (resp?.pages?.[slug]) {
               await ensureLogBuffer();
               page = replayBufferOver(resp.pages[slug]);
-              await setCachedEntity(key, page);
+              await cacheSet(key, page);
             }
           }
 
@@ -1197,7 +1217,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // Check page cache for each slug
           for (const slug of request.slugs) {
             const key = 'page:' + slug;
-            const cached = await getCachedEntity(key);
+            const cached = await cacheGet(key);
             if (cached) {
               result[slug] = cached;
             } else {
@@ -1213,7 +1233,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               for (const [slug, page] of Object.entries(resp.pages)) {
                 const upToDate = replayBufferOver(page);
                 result[slug] = upToDate;
-                await setCachedEntity('page:' + slug, upToDate);
+                await cacheSet('page:' + slug, upToDate);
               }
             }
           }
@@ -1248,27 +1268,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'readCacheable': {
           try {
             const value = await readCacheable(request.key);
-            sendResponse({ value });
-          } catch (error) {
-            sendResponse({ success: false, error: error.message });
-          }
-          break;
-        }
-
-        case 'getLists': {
-          try {
-            const listOrder = await getListOrder();
-            sendResponse({ lists: listOrder });
-          } catch (error) {
-            sendResponse({ success: false, error: error.message });
-          }
-          break;
-        }
-
-        case 'getRecycleBin': {
-          try {
-            const items = await readCacheable('list:system/recycle-bin');
-            sendResponse({ items });
+            sendResponse({ success: true, value });
           } catch (error) {
             sendResponse({ success: false, error: error.message });
           }
@@ -1338,7 +1338,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             // Load page
             const key = 'page:' + slug;
-            let page = await getCachedEntity(key);
+            let page = await cacheGet(key);
             if (!page) {
               const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
               page = resp?.pages?.[slug] || {}; // Empty page is valid (no checkpoint yet)
@@ -1351,8 +1351,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               for (const ref of refs) {
                 if (ref.startsWith('shallow:')) { urls.push(ref.slice(8)); continue; }
                 if (ref.startsWith('page:')) { slugsToLoad.push(ref.slice(5)); continue; }
-                if (ref.startsWith('http')) { urls.push(ref); continue; }
-                slugsToLoad.push(ref); // bare slug (legacy)
               }
               if (slugsToLoad.length > 0) {
                 const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: slugsToLoad });

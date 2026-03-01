@@ -53,7 +53,7 @@ function unwrapMark(mark) {
  * Collect all text nodes under a root, traversing into open shadow DOMs.
  * Skips nodes inside overlay or existing highlights.
  */
-export function collectTextNodes(root) {
+function collectTextNodes(root) {
   const textNodes = [];
   function walk(parent) {
     const walker = document.createTreeWalker(parent, NodeFilter.SHOW_ALL, {

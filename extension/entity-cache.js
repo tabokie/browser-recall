@@ -102,12 +102,3 @@ async function evict() {
   }
 }
 
-// ─── Backward Compatibility ───────────────────────────────────────────
-
-export async function getCachedEntity(key) {
-  return await cacheGet(key);
-}
-
-export async function setCachedEntity(key, entity) {
-  await cacheSet(key, entity, { timestamp: entity?.timestamp || 0 });
-}

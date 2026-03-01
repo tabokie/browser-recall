@@ -319,12 +319,12 @@ describe('Cache staleness', () => {
       case 'readCacheable':
         // Simulate background readCacheable: dispatch to known handlers
         switch (msg.key) {
-          case 'settings': return { value: TEST_SETTINGS };
-          case 'list:system/recycle-bin': return { value: [] };
-          case 'list:system/permanent-deletes': return { value: [] };
-          case 'list:system/gateways': return { value: [] };
-          case 'list:system/shallow-page': return { value: { timestamp: 0, index: {} } };
-          default: return { value: undefined };
+          case 'settings': return { success: true, value: TEST_SETTINGS };
+          case 'list:system/recycle-bin': return { success: true, value: [] };
+          case 'list:system/permanent-deletes': return { success: true, value: [] };
+          case 'list:system/gateways': return { success: true, value: [] };
+          case 'list:system/shallow-page': return { success: true, value: { timestamp: 0, index: {} } };
+          default: return { success: true, value: undefined };
         }
 
       case 'initializeFilesystem':
@@ -561,23 +561,23 @@ describe('Cache staleness', () => {
     expect(initialGwCalls.length).toBeGreaterThanOrEqual(1);
 
     // Trigger resetHistory via selectDirBtn (selectDirectory → resetHistory → showCategory)
-    chrome.storage.local.get.mockClear();
+    chrome.storage.session.get.mockClear();
     const selectDirBtn = document.getElementById('selectDirBtn');
     expect(selectDirBtn).not.toBeNull();
     selectDirBtn.click();
     await tick(200);
 
     // resetHistory clears all caches. Verify historyFiles was cleared
-    // by checking initHistoryFiles re-ran (reads logBuffer from storage.local).
+    // by checking initHistoryFiles re-ran (reads history:<today> via session cache).
     // Since all caches are cleared in the same function, this proves
     // gatewayOriginsLoaded was also reset.
-    const logBufferCalls = chrome.storage.local.get.mock.calls
+    const historyCalls = chrome.storage.session.get.mock.calls
       .filter(c => {
         const keys = c[0];
-        if (Array.isArray(keys)) return keys.includes('logBuffer');
-        return keys === 'logBuffer';
+        if (Array.isArray(keys)) return keys.some(k => k.startsWith('history:'));
+        return typeof keys === 'string' && keys.startsWith('history:');
       });
-    expect(logBufferCalls.length).toBeGreaterThanOrEqual(1);
+    expect(historyCalls.length).toBeGreaterThanOrEqual(1);
   });
 
   // ---------------------------------------------------------------------------
@@ -585,8 +585,9 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   it('T5: logBuffer visit entries are merged into history and visible in list', async () => {
     populateCache();
-    // Put visit entries (no action) + mutation entries in logBuffer
-    localData.logBuffer = [
+    // Today's history entries (simulates session cache populated by addLog)
+    const todayStr = new Date().toISOString().slice(0, 10);
+    sessionData['history:' + todayStr] = [
       { timestamp: Date.now(), url: 'https://buffered.com/page1', title: 'Buffered Page 1', slug: 'buffered-page1',  attention: '' },
       { timestamp: Date.now(), action: 'set', key: 'workspace', value: {} },
       { timestamp: Date.now() + 1, url: 'https://buffered.com/page2', title: 'Buffered Page 2', slug: 'buffered-page2',  attention: '' },
@@ -1010,12 +1011,12 @@ describe('Cache staleness', () => {
       { url: 'https://deleted.com', title: 'Deleted Page', deletedAt: Date.now() },
     ];
     actionOverrides['readCacheable'] = (msg) => {
-      if (msg.key === 'settings') return { value: TEST_SETTINGS };
-      if (msg.key === 'list:system/recycle-bin') return { value: TEST_RECYCLE_BIN };
-      if (msg.key === 'list:system/permanent-deletes') return { value: [] };
+      if (msg.key === 'settings') return { success: true, value: TEST_SETTINGS };
+      if (msg.key === 'list:system/recycle-bin') return { success: true, value: TEST_RECYCLE_BIN };
+      if (msg.key === 'list:system/permanent-deletes') return { success: true, value: [] };
       // Return individual list entities by slug
       for (const list of TEST_LISTS) {
-        if (msg.key === 'list:' + list.slug) return { value: list };
+        if (msg.key === 'list:' + list.slug) return { success: true, value: list };
       }
       return handleAction({ ...msg, action: 'readCacheable' });
     };
