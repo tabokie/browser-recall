@@ -6,7 +6,6 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  getAffectedSlugs,
   getAffectedKeys,
   effectOf,
   defaultEntity,
@@ -22,35 +21,8 @@ import {
 import { generateSlugFromUrl } from '../extension/utils.js';
 
 // ---------------------------------------------------------------------------
-// getAffectedSlugs / getAffectedKeys
+// getAffectedKeys
 // ---------------------------------------------------------------------------
-
-describe('getAffectedSlugs', () => {
-  it('returns entry slug for page entry without referrer', () => {
-    const slugs = getAffectedSlugs({ timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' });
-    expect(slugs.size).toBe(1);
-    expect(slugs.has(generateSlugFromUrl('https://a.com'))).toBe(true);
-  });
-
-  it('returns both child and parent slugs for page with referrerId', () => {
-    const parentSlug = generateSlugFromUrl('https://parent.com');
-    const slugs = getAffectedSlugs({ timestamp: 100, action: 'page', url: 'https://child.com', title: 'C', referrerId: `page:${parentSlug}` });
-    expect(slugs.size).toBe(2);
-    expect(slugs.has(generateSlugFromUrl('https://child.com'))).toBe(true);
-    expect(slugs.has(parentSlug)).toBe(true);
-  });
-
-  it('returns single slug when referrerId points to same page', () => {
-    const slug = generateSlugFromUrl('https://a.com');
-    const slugs = getAffectedSlugs({ timestamp: 100, action: 'page', url: 'https://a.com', title: 'A', referrerId: `page:${slug}` });
-    expect(slugs.size).toBe(1);
-  });
-
-  it('returns empty set for entries without url', () => {
-    const slugs = getAffectedSlugs({ timestamp: 100, action: 'set', key: 'workspace', value: {} });
-    expect(slugs.size).toBe(0);
-  });
-});
 
 describe('getAffectedKeys', () => {
   it('returns page: prefixed keys', () => {
@@ -755,6 +727,43 @@ describe('applyLogToPage — page_checkpoint', () => {
     const r2 = applyLogToPage(r1, entry);
     expect(r2).toEqual(r1);
   });
+
+  it('sets parentIds from checkpoint entry', () => {
+    const page = { timestamp: 0 };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://child.com', title: 'Child', parentIds: ['page:parent-com'] };
+    const result = applyLogToPage(page, entry);
+    expect(result.parentIds).toEqual(['page:parent-com']);
+  });
+
+  it('merges parentIds without duplicates', () => {
+    const slug = generateSlugFromUrl('https://child.com');
+    const page = { slug, timestamp: 100, url: 'https://child.com', title: 'Child', parentIds: ['page:parent-a'] };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://child.com', parentIds: ['page:parent-a', 'page:parent-b'] };
+    const result = applyLogToPage(page, entry);
+    expect(result.parentIds).toEqual(['page:parent-a', 'page:parent-b']);
+  });
+
+  it('does not set parentIds when entry has none', () => {
+    const page = { timestamp: 0 };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://x.com', title: 'X' };
+    const result = applyLogToPage(page, entry);
+    expect(result.parentIds).toBeUndefined();
+  });
+
+  it('sets user_title from checkpoint entry', () => {
+    const page = { timestamp: 0 };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://x.com', title: 'X', user_title: 'My Custom Title' };
+    const result = applyLogToPage(page, entry);
+    expect(result.user_title).toBe('My Custom Title');
+  });
+
+  it('does not overwrite existing user_title', () => {
+    const slug = generateSlugFromUrl('https://x.com');
+    const page = { slug, timestamp: 100, url: 'https://x.com', title: 'X', user_title: 'Original' };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://x.com', user_title: 'New' };
+    const result = applyLogToPage(page, entry);
+    expect(result.user_title).toBe('Original');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1450,6 +1459,30 @@ describe('entity storage title resolution', () => {
 
     expect(current.user_title).toBe('My Custom Title');
     expect(current.title).toBe('Auto Title');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SPI invariant: SPI entries are for non-checkpointed pages only
+// ---------------------------------------------------------------------------
+
+describe('SPI and checkpoint mutual exclusion', () => {
+  it('page_checkpoint absorption removes SPI entry', async () => {
+    // When a page gets checkpointed, its SPI entry is absorbed into the page
+    // entity and deleted from SPI. So SPI entries never coexist with checkpoints.
+    const slug = generateSlugFromUrl('https://a.com');
+    const existingSpi = {
+      timestamp: 50,
+      index: { 'https://a.com': { parents: ['page:ref'], lists: ['list:x'], title: 'Title', user_title: null } },
+    };
+    const store = { 'list:system/shallow-page': existingSpi };
+    const entry = { timestamp: 100, action: 'page_checkpoint', url: 'https://a.com', title: 'A' };
+    const result = await effectOf(entry, async (key) => store[key] ?? null);
+    const spi = result['list:system/shallow-page'];
+    // SPI entry must be deleted after absorption
+    expect(spi.index['https://a.com']).toBeUndefined();
+    // Page entity must have absorbed the parents
+    expect(result[`page:${slug}`].parentIds).toContain('page:ref');
   });
 });
 

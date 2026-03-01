@@ -29,14 +29,6 @@ export function getAffectedKeys(entry) {
   return keys;
 }
 
-// Legacy alias
-export function getAffectedSlugs(entry) {
-  const slugs = new Set();
-  for (const key of getAffectedKeys(entry)) {
-    if (key.startsWith(PAGE_PREFIX)) slugs.add(key.slice(PAGE_PREFIX.length));
-  }
-  return slugs;
-}
 
 // ---------------------------------------------------------------------------
 // Unified replay interface: effectOf
@@ -294,6 +286,14 @@ export function applyLogToPage(page, entry) {
     const updated = { ...page };
     if (!updated.url && entry.url) updated.url = entry.url;
     if (!updated.title && entry.title) updated.title = entry.title;
+    if (!updated.user_title && entry.user_title) updated.user_title = entry.user_title;
+    if (entry.parentIds?.length) {
+      const parentIds = [...(updated.parentIds || [])];
+      for (const pid of entry.parentIds) {
+        if (!parentIds.includes(pid)) parentIds.push(pid);
+      }
+      updated.parentIds = parentIds;
+    }
     updated.timestamp = Math.max(updated.timestamp || 0, entry.timestamp);
     return updated;
   }
@@ -476,6 +476,15 @@ export function applyLogToRecycleBin(recycleBinEntity, entry) {
  *   - page entries with title/user_title: updates index[url].title/user_title
  *   - list entries with shallow: ids: records list membership in index[url].lists
  * Returns new index (or original if entry is irrelevant).
+ *
+ * SPI completeness guarantee — a page MUST have an SPI entry if any of:
+ *   (a) it has parentIds (recorded via referrerId on page entries)
+ *   (b) it belongs to a list (recorded via shallow: ids on list entries)
+ *   (c) it has a user_title (recorded via user_title on page entries)
+ * Callers (e.g. searchPageContext) may rely on this: if a field governed by
+ * (a)–(c) is absent from SPI, it is genuinely absent — no history search needed.
+ * Title is also kept up-to-date: if a page entry carries a new title and the
+ * page already has an SPI record, the title is overwritten.
  */
 export function applyLogToShallowPage(shallowPageIndex, entry) {
   // Page entry: record parents and title info

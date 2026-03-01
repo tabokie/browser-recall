@@ -6,8 +6,11 @@ export async function readCacheable(key) {
   try {
     const cached = await chrome.storage.session.get([key]);
     if (key in cached) return cached[key];
-  } catch {}
+  } catch (e) { console.warn('[readCacheable] session cache error:', e.message); }
   const resp = await chrome.runtime.sendMessage({ action: 'readCacheable', key });
+  if (resp?.success === false) {
+    throw new Error(resp.error || `Failed to load ${key}`);
+  }
   return resp?.value;
 }
 
@@ -16,6 +19,14 @@ export async function loadSettingsValue(key, defaultValue) {
   const settings = await readCacheable('settings');
   const v = settings?.[key];
   return v !== undefined ? v : defaultValue;
+}
+
+// Send a message to background and throw on error response.
+// Use for all data-reading messages where silent defaults are unacceptable.
+export async function sendAction(msg) {
+  const resp = await chrome.runtime.sendMessage(msg);
+  if (resp?.success === false) throw new Error(resp.error || `${msg.action} failed`);
+  return resp ?? {};
 }
 
 // Save a single key to settings.json via background, which updates session cache + buffers write

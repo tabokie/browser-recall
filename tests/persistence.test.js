@@ -42,7 +42,7 @@ class MockDirectoryHandle {
         node = { type: 'file', name, content: '' };
         this._children.set(name, node);
       } else {
-        throw new DOMException('NotFoundError');
+        throw new DOMException('File not found', 'NotFoundError');
       }
     }
     return new MockFileHandle(node);
@@ -55,14 +55,14 @@ class MockDirectoryHandle {
         node = { type: 'directory', name, handle: new MockDirectoryHandle(name) };
         this._children.set(name, node);
       } else {
-        throw new DOMException('NotFoundError');
+        throw new DOMException('Directory not found', 'NotFoundError');
       }
     }
     return node.handle;
   }
 
   async removeEntry(name) {
-    if (!this._children.has(name)) throw new DOMException('NotFoundError');
+    if (!this._children.has(name)) throw new DOMException('Entry not found', 'NotFoundError');
     this._children.delete(name);
   }
 

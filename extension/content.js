@@ -541,6 +541,7 @@ function attachMarkClickHandler(mark) {
     }
 
     chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: pageSlug }).then(resp => {
+      if (resp?.success === false) { console.warn('[content] loadPageNotes failed:', resp.error); return; }
       const notes = resp?.notes || [];
       const match = notes.find(n => n.slug === noteSlug);
       const displayText = match ? (Array.isArray(match.excerpt) ? match.excerpt.join(' ') : match.excerpt) : text;
@@ -965,6 +966,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       console.log('[content] No text selected, opening global note');
       const slug = getSlugForCurrentPage();
       chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }).then(resp => {
+        if (resp?.success === false) { console.warn('[content] loadPageNotes failed:', resp.error); return; }
         const notes = resp?.notes || [];
         const globalNote = notes.find(n => n.excerpt === null);
         showGlobalNoteOverlay(globalNote?.note || '', globalNote?.slug || null, slug);

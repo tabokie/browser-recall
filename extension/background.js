@@ -220,13 +220,20 @@ async function addLog(entry) {
   // are newer than the on-disk JSONL file, so evicting it would lose data.
   // Also covers date rollover (new date key created mid-session).
   const todayKey = 'history:' + dateKeyFromTimestamp(entry.timestamp);
-  cacheGet(todayKey).then(today => {
-    const arr = today || [];
-    arr.push(entry);
-    cacheSet(todayKey, arr, { timestamp: entry.timestamp });
+  cacheGet(todayKey).then(async today => {
+    if (today == null) {
+      // Cache miss — load from disk. Should not happen after hydration.
+      console.warn(`[addLog] history cache miss for ${todayKey}, loading from disk`);
+      const dateStr = dateKeyFromTimestamp(entry.timestamp);
+      const resp = await requestOffscreen({ action: 'loadHistoryRange', from: dateStr, to: dateStr });
+      assertOffscreenSuccess(resp, todayKey);
+      today = resp.entries || [];
+    }
+    today.push(entry);
+    cacheSet(todayKey, today, { timestamp: entry.timestamp });
     cachePin(todayKey);
-  }).catch(() => {});
-  ensureOffscreenPort().catch(() => {});
+  }).catch(e => console.warn('[addLog] history cache update failed:', e.message));
+  ensureOffscreenPort().catch(e => console.warn('[addLog] offscreen port failed:', e.message));
   scheduleDrainNotify();
   return effects;
 }
@@ -258,8 +265,14 @@ async function readCacheable(key) {
 // Read listOrder from settings. Each entry is { id: 'list:<slug>', name }.
 async function getListOrder() {
   await hydrationDone;
-  const settings = (await readCacheable('settings')) || {};
+  const settings = await readCacheable('settings');
   return settings.listOrder || [];
+}
+
+function assertOffscreenSuccess(resp, key) {
+  if (!resp || resp.success === false) {
+    throw new Error(resp?.error || `Offscreen load failed for ${key}`);
+  }
 }
 
 async function readFs(key) {
@@ -267,30 +280,40 @@ async function readFs(key) {
   switch (key) {
     case 'settings': {
       const resp = await requestOffscreen({ action: 'loadSettings' });
-      value = resp?.settings || {};
+      assertOffscreenSuccess(resp, key);
+      value = resp.settings;
       break;
     }
     case 'list:system/recycle-bin': {
       const r = await requestOffscreen({ action: 'loadRecycleBin' });
-      value = r?.items || []; break;
+      assertOffscreenSuccess(r, key);
+      value = r.items;
+      break;
     }
     case 'list:system/permanent-deletes': {
       const r = await requestOffscreen({ action: 'loadPermanentDeletes' });
-      value = r?.keys || []; break;
+      assertOffscreenSuccess(r, key);
+      value = r.keys;
+      break;
     }
     case 'list:system/shallow-page': {
       const r = await requestOffscreen({ action: 'loadShallowPageIndex' });
-      value = r?.success ? { timestamp: r.timestamp || 0, index: r.index || {} } : { timestamp: 0, index: {} }; break;
+      assertOffscreenSuccess(r, key);
+      value = { timestamp: r.timestamp, index: r.index };
+      break;
     }
     case 'list:system/gateways': {
       const r = await requestOffscreen({ action: 'loadGateways' });
-      value = r?.origins || []; break;
+      assertOffscreenSuccess(r, key);
+      value = r.origins;
+      break;
     }
     default: {
       if (key.startsWith('list:')) {
         const listId = key.slice('list:'.length);
         const r = await requestOffscreen({ action: 'loadListEntity', listId });
-        value = r?.entity ?? null;
+        assertOffscreenSuccess(r, key);
+        value = r.entity ?? null;
         break;
       }
       return undefined;
@@ -322,20 +345,19 @@ async function hydrateCache() {
 
   try {
     const rbResp = await requestOffscreen({ action: 'loadRecycleBin' });
-    if (rbResp?.success) await cacheSet('list:system/recycle-bin', rbResp.items || []);
+    if (rbResp?.success) await cacheSet('list:system/recycle-bin', rbResp.items);
   } catch (e) { console.warn('Recycle bin load failed:', e.message); }
 
   try {
     const pdResp = await requestOffscreen({ action: 'loadPermanentDeletes' });
-    if (pdResp?.success) await cacheSet('list:system/permanent-deletes', pdResp.keys || []);
+    if (pdResp?.success) await cacheSet('list:system/permanent-deletes', pdResp.keys);
   } catch (e) { console.warn('Permanent deletes load failed:', e.message); }
 
   try {
     const spResp = await requestOffscreen({ action: 'loadShallowPageIndex' });
-    const spiValue = spResp?.success
-      ? { timestamp: spResp.timestamp || 0, index: spResp.index || {} }
-      : { timestamp: 0, index: {} };
-    await cacheSet('list:system/shallow-page', spiValue);
+    if (spResp?.success) {
+      await cacheSet('list:system/shallow-page', { timestamp: spResp.timestamp, index: spResp.index });
+    }
   } catch (e) { console.warn('Shallow page index load failed:', e.message); }
 
   // Phase 1.5: History cache — per-date keys history:YYYY-MM-DD
@@ -345,7 +367,8 @@ async function hydrateCache() {
     // Load today's history — pinned because addLog appends entries here that are
     // newer than the on-disk JSONL file; evicting would lose unflushed data.
     const todayResp = await requestOffscreen({ action: 'loadHistoryRange', from: todayStr, to: todayStr });
-    const todayEntries = todayResp?.entries || [];
+    assertOffscreenSuccess(todayResp, 'history:' + todayStr);
+    const todayEntries = todayResp.entries || [];
     const todayKey = 'history:' + todayStr;
     const todayMaxTs = todayEntries.length ? todayEntries[todayEntries.length - 1].timestamp : 0;
     await cacheSet(todayKey, todayEntries, { timestamp: todayMaxTs });
@@ -364,8 +387,9 @@ async function hydrateCache() {
     if (fromStr <= toStr) {
       // Load the full range, then split into per-date keys
       const recentResp = await requestOffscreen({ action: 'loadHistoryRange', from: fromStr, to: toStr });
-      const recentEntries = recentResp?.entries || [];
-      const recentFiles = recentResp?.files || [];
+      assertOffscreenSuccess(recentResp, `history:${fromStr}..${toStr}`);
+      const recentEntries = recentResp.entries || [];
+      const recentFiles = recentResp.files || [];
 
       // Group entries by date
       const byDate = new Map();
@@ -404,7 +428,7 @@ async function hydrateCache() {
       // We can't enumerate session keys, but we can check known old dates
       // by looking at files older than our range from listInteractionFiles
       const allFilesResp = await requestOffscreen({ action: 'listInteractionFiles' });
-      const allFiles = allFilesResp?.files || [];
+      const allFiles = allFilesResp?.files || []; // Missing files listing is non-fatal
       for (const f of allFiles) {
         const d = f.replace('.jsonl', '');
         if (d < fromStr) {
@@ -423,7 +447,15 @@ async function hydrateCache() {
   // Dedup logBuffer against today's history (entries already flushed to disk)
   {
     const todayKey = 'history:' + dateKeyFromTimestamp(Date.now());
-    const todayForDedup = (await cacheGet(todayKey)) || [];
+    let todayForDedup = await cacheGet(todayKey);
+    if (todayForDedup == null) {
+      // Cache miss — load from disk. Should not happen after hydration.
+      console.warn(`[dedup] history cache miss for ${todayKey}, loading from disk`);
+      const dateStr = dateKeyFromTimestamp(Date.now());
+      const resp = await requestOffscreen({ action: 'loadHistoryRange', from: dateStr, to: dateStr });
+      assertOffscreenSuccess(resp, todayKey);
+      todayForDedup = resp.entries || [];
+    }
     if (todayForDedup.length > 0 && logBuffer.length > 0) {
       const flushedTimestamps = new Set(todayForDedup.map(e => e.timestamp));
       const before = logBuffer.length;
@@ -475,7 +507,7 @@ async function hydrateCache() {
 
 async function trimTitle(rawTitle, url) {
   let title = rawTitle || 'Untitled';
-  const titleTrimRules = (await readCacheable('settings'))?.titleTrimRules || [];
+  const titleTrimRules = (await readCacheable('settings')).titleTrimRules || [];
   for (const rule of titleTrimRules) {
     if (url.startsWith(rule.urlPrefix)) {
       if (rule.action === 'remove_after_pipe') {
@@ -582,7 +614,7 @@ async function updateGatewayRegistry(url) {
     const isRoot = parsed.pathname === '/' || parsed.pathname === '' || parsed.pathname === '/index.html' || parsed.pathname === '/index.htm';
 
     // Check if origin is already a gateway (persisted via log/replay)
-    const gatewayOrigins = (await readCacheable('list:system/gateways')) || [];
+    const gatewayOrigins = await readCacheable('list:system/gateways');
     if (gatewayOrigins.includes(origin)) return;
 
     if (!gatewayDetection[origin]) {
@@ -736,19 +768,104 @@ async function resolveShallowIds(ids) {
 
 // ─── Checkpoint Helper ────────────────────────────────────────────────
 // Ensure a page checkpoint exists in cache or disk; creates one if missing.
+// When the caller cannot provide title/parentIds, searches SPI and recent history.
 
-async function ensureCheckpointIfMissing(checkSlug, checkUrl, checkTitle) {
-  const key = 'page:' + checkSlug;
+async function ensureCheckpointIfMissing(url, title) {
+  if (!url) return;
+  const slug = generateSlugFromUrl(url);
+  const key = 'page:' + slug;
   const cached = await getCachedEntity(key);
   if (!cached) {
-    const existsResp = await requestOffscreen({ action: 'pageExists', slug: checkSlug });
+    const existsResp = await requestOffscreen({ action: 'pageExists', slug });
     if (!existsResp?.exists) {
-      await addLog({
+      const entry = {
         timestamp: Date.now(),
         action: 'page_checkpoint',
-        url: checkUrl,
-        title: checkTitle
-      });
+        url,
+        title: title || null
+      };
+      if (!title) {
+        const found = await searchPageContext(url);
+        if (found.title) entry.title = found.title;
+        if (found.user_title) entry.user_title = found.user_title;
+        if (found.parentIds.length) entry.parentIds = found.parentIds;
+      }
+      await addLog(entry);
+    }
+  }
+}
+
+// Search SPI and recent history cache for page context.
+// Called only when creating a new checkpoint without caller-provided context.
+//
+// SPI record fields (see applyLogToShallowPage in replay.js):
+//   - title        (string|null)  — auto-detected page title
+//   - user_title   (string|null)  — user-assigned custom title
+//   - parents      (string[])     — referrer IDs in page:<slug> format
+//   - lists        (string[])     — list IDs this page is pinned to (not used here)
+//
+// SPI completeness guarantee (documented in applyLogToShallowPage):
+//   If a page has parentIds, belongs to a list, or has user_title, it MUST
+//   have an SPI entry. Therefore user_title and parentIds are authoritative
+//   from SPI alone — only title needs a history fallback (a page may have
+//   been visited with a title but without any of the (a)–(c) criteria).
+async function searchPageContext(url) {
+  const result = { title: null, user_title: null, parentIds: [] };
+
+  // 1. Shallow page index — authoritative for user_title and parentIds
+  try {
+    const spi = await readCacheable('list:system/shallow-page');
+    const rec = spi?.index?.[url];
+    if (rec) {
+      if (rec.title) result.title = rec.title;
+      if (rec.user_title) result.user_title = rec.user_title;
+      if (rec.parents?.length) result.parentIds = [...rec.parents];
+    }
+  } catch (error) {
+    // SPI not available; continue to next source
+  }
+
+  // 2. Recent history cache — only for title and parentIds not yet found.
+  //    user_title is NOT searched here: per SPI completeness guarantee,
+  //    if a page has user_title it is already in SPI.
+  if (!result.title || !result.parentIds.length) {
+    try {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const todayEntries = await cacheGet('history:' + todayStr) || [];
+      searchHistoryEntries(todayEntries, url, result);
+
+      if (!result.title || !result.parentIds.length) {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const fromDate = new Date();
+        fromDate.setDate(fromDate.getDate() - HISTORY_RECENT_DAYS);
+        const cur = new Date(fromDate);
+        while (cur <= yesterday && (!result.title || !result.parentIds.length)) {
+          const dateKey = 'history:' + dateKeyFromTimestamp(cur.getTime());
+          const entries = await cacheGet(dateKey) || [];
+          searchHistoryEntries(entries, url, result);
+          cur.setDate(cur.getDate() + 1);
+        }
+      }
+    } catch (error) {
+      // History cache miss; continue
+    }
+  }
+
+  if (!result.title) {
+    console.warn(`[checkpoint] No title found in SPI or history for: ${url}`);
+  }
+  return result;
+}
+
+// Scan history entries for title and referrerId matching the given URL.
+// user_title is NOT extracted here — it is authoritative from SPI only.
+function searchHistoryEntries(entries, url, result) {
+  for (const entry of entries) {
+    if (entry.url !== url) continue;
+    if (!result.title && entry.title) result.title = entry.title;
+    if (entry.referrerId && !result.parentIds.includes(entry.referrerId)) {
+      result.parentIds.push(entry.referrerId);
     }
   }
 }
@@ -757,7 +874,7 @@ async function ensureCheckpointIfMissing(checkSlug, checkUrl, checkTitle) {
 
 async function captureAndLog(tabId, slug, timestamp, url, title) {
   // Ensure page exists before capture
-  if (url) await ensureCheckpointIfMissing(slug, url, title || '');
+  if (url) await ensureCheckpointIfMissing(url, title);
   const mdResp = await chrome.tabs.sendMessage(tabId, { action: 'extractMarkdown' });
   const html = await captureSavePage(tabId);
   const markdown = mdResp?.markdown || '';
@@ -810,8 +927,7 @@ chrome.commands.onCommand.addListener(async (command) => {
     }
   } else if (command === 'like-page') {
     try {
-      const slug = generateSlugFromUrl(tab.url);
-      await ensureCheckpointIfMissing(slug, tab.url, tab.title || '');
+      await ensureCheckpointIfMissing(tab.url, tab.title);
       await addLog({ timestamp: Date.now(), action: 'page', url: tab.url, likes: 1 });
       notifyMutation('interaction', { url: tab.url });
       chrome.tabs.sendMessage(tab.id, { action: 'showLikeNotification' }).catch(() => {});
@@ -902,7 +1018,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
 
             // Check blacklist
-            const rpSettings = (await readCacheable('settings')) || {};
+            const rpSettings = await readCacheable('settings');
             const urlBlacklist = rpSettings.urlBlacklist;
             const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
             if (blacklist.some(prefix => url.startsWith(prefix))) {
@@ -936,18 +1052,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (entry) {
               // First-visit extras: checkpoints before the visit entry
               if (request.isInitialLoad) {
-                const slug = delta.slug || generateSlugFromUrl(url);
-                const title = entry.title || '';
-
                 // Multi-day visit checkpoint: check in-memory recentUrls set (built from history:recent)
                 if (recentUrls.has(url)) {
-                  await ensureCheckpointIfMissing(slug, url, title);
+                  await ensureCheckpointIfMissing(url, entry.title);
                 }
 
                 // Parent checkpoint for referrer
                 if (entry.referrerId) {
-                  const refSlug = entry.referrerId.startsWith('page:') ? entry.referrerId.slice(5) : entry.referrerId;
-                  await ensureCheckpointIfMissing(refSlug, delta.referrer || '', '');
+                  await ensureCheckpointIfMissing(delta.referrer);
                 }
               }
 
@@ -966,7 +1078,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                   try {
                     for (const listKey of wsListIds) {
                       const listSlug = listKey.startsWith('list:') ? listKey.slice(5) : listKey;
-                      const listEntry = await cacheGet('list:' + listSlug);
+                      const listEntry = await readCacheable('list:' + listSlug);
                       const listPins = listEntry?.pins || [];
                       const pinId = await resolvePageId(url);
                       const already = listPins.some(p => p.id === pinId);
@@ -1062,8 +1174,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'getShallowPageIndex': {
-          const spi = await readCacheable('list:system/shallow-page');
-          sendResponse(spi || { timestamp: 0, index: {} });
+          try {
+            const spi = await readCacheable('list:system/shallow-page');
+            sendResponse(spi);
+          } catch (error) {
+            sendResponse({ success: false, error: error.message });
+          }
           break;
         }
 
@@ -1124,32 +1240,52 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'readCacheable': {
-          const value = await readCacheable(request.key);
-          sendResponse({ value });
+          try {
+            const value = await readCacheable(request.key);
+            sendResponse({ value });
+          } catch (error) {
+            sendResponse({ success: false, error: error.message });
+          }
           break;
         }
 
         case 'getLists': {
-          const listOrder = await getListOrder();
-          sendResponse({ lists: listOrder });
+          try {
+            const listOrder = await getListOrder();
+            sendResponse({ lists: listOrder });
+          } catch (error) {
+            sendResponse({ success: false, error: error.message });
+          }
           break;
         }
 
         case 'getRecycleBin': {
-          const items = await readCacheable('list:system/recycle-bin') || [];
-          sendResponse({ items });
+          try {
+            const items = await readCacheable('list:system/recycle-bin');
+            sendResponse({ items });
+          } catch (error) {
+            sendResponse({ success: false, error: error.message });
+          }
           break;
         }
 
         case 'loadPermanentDeletes': {
-          const keys = await readCacheable('list:system/permanent-deletes') || [];
-          sendResponse({ success: true, keys });
+          try {
+            const keys = await readCacheable('list:system/permanent-deletes');
+            sendResponse({ success: true, keys });
+          } catch (error) {
+            sendResponse({ success: false, error: error.message });
+          }
           break;
         }
 
         case 'getGatewayDomains': {
-          const origins = await readCacheable('list:system/gateways') || [];
-          sendResponse({ success: true, origins });
+          try {
+            const origins = await readCacheable('list:system/gateways');
+            sendResponse({ success: true, origins });
+          } catch (error) {
+            sendResponse({ success: false, error: error.message });
+          }
           break;
         }
 
@@ -1199,7 +1335,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             let page = await getCachedEntity(key);
             if (!page) {
               const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
-              page = resp?.pages?.[slug] || {};
+              page = resp?.pages?.[slug] || {}; // Empty page is valid (no checkpoint yet)
             }
 
             // Resolve typed refs: page:<slug> → URL via loadPageBatch, shallow:<url> → extract URL
@@ -1225,7 +1361,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             // Parents: from page.parentIds, fallback to shallowPageIndex for non-checkpointed pages
             let parentRefs = page.parentIds || [];
             if (parentRefs.length === 0) {
-              const spIndex = (await readCacheable('list:system/shallow-page')) || { timestamp: 0, index: {} };
+              const spIndex = await readCacheable('list:system/shallow-page');
               const shallowEntry = spIndex.index[url];
               if (shallowEntry) parentRefs = shallowEntry.parents || [];
             }
@@ -1249,7 +1385,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const childRefs = (page.childIds || []).filter(c => !c.startsWith('note:'));
             let children = await resolveRefs(childRefs);
             // Also check shallowPageIndex for non-checkpointed children
-            const spForChildren = (await readCacheable('list:system/shallow-page')) || { timestamp: 0, index: {} };
+            const spForChildren = await readCacheable('list:system/shallow-page');
             for (const [childUrl, shallowEntry] of Object.entries(spForChildren.index)) {
               const parentKey = 'page:' + slug;
               if ((shallowEntry.parents || []).includes(parentKey) && !children.includes(childUrl)) {
@@ -1271,10 +1407,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // ── Writes (session cache + log buffer) ──
 
         case 'ensurePageCheckpoint': {
-          const url = request.url;
-          const title = request.title || '';
-          const slug = generateSlugFromUrl(url);
-          await ensureCheckpointIfMissing(slug, url, title);
+          await ensureCheckpointIfMissing(request.url, request.title);
           sendResponse({ success: true });
           break;
         }
@@ -1304,7 +1437,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
           // Ensure parent page has a checkpoint so drain can update its children
           // (same pattern as referrer handling in the visit flow)
-          await ensureCheckpointIfMissing(pageSlug, sender?.tab?.url || '', sender?.tab?.title || '');
+          await ensureCheckpointIfMissing(sender?.tab?.url, sender?.tab?.title);
           const effects = await addLog({
             timestamp,
             action: 'note',
@@ -1351,29 +1484,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'toggleListPin': {
-          const { listId, url, id: requestId } = request;
-          let pinId = requestId || (url ? await resolvePageId(url) : null);
-          // Re-check shallow IDs — see resolveShallowIds comment.
-          if (pinId?.startsWith('shallow:')) {
-            pinId = await resolvePageId(pinId.slice(8));
+          try {
+            const { listId, url, id: requestId } = request;
+            let pinId = requestId || (url ? await resolvePageId(url) : null);
+            // Re-check shallow IDs — see resolveShallowIds comment.
+            if (pinId?.startsWith('shallow:')) {
+              pinId = await resolvePageId(pinId.slice(8));
+            }
+            const list = await readCacheable('list:' + listId);
+            const pins = list?.pins || [];
+            // Check both page:<slug> and shallow:<url> forms — a pin may have been
+            // stored as shallow:<url> before the page was checkpointed.
+            const altId = pinId.startsWith('page:')
+              ? (url ? 'shallow:' + url : null)
+              : (pinId.startsWith('shallow:') ? 'page:' + generateSlugFromUrl(pinId.slice(8)) : null);
+            const matchIdx = pins.findIndex(p => p.id === pinId || (altId && p.id === altId));
+            const isPinned = matchIdx !== -1;
+            // When removing, use the ID actually stored in the pin
+            const logId = isPinned ? pins[matchIdx].id : pinId;
+            await addLog({
+              timestamp: Date.now(), action: 'list', id: listId,
+              op: isPinned ? 'del' : 'add', ids: [logId]
+            });
+            sendResponse({ success: true, pinned: !isPinned });
+            notifyMutation('pins', { listId });
+          } catch (error) {
+            sendResponse({ success: false, error: error.message });
           }
-          const list = await readCacheable('list:' + listId);
-          const pins = list?.pins || [];
-          // Check both page:<slug> and shallow:<url> forms — a pin may have been
-          // stored as shallow:<url> before the page was checkpointed.
-          const altId = pinId.startsWith('page:')
-            ? (url ? 'shallow:' + url : null)
-            : (pinId.startsWith('shallow:') ? 'page:' + generateSlugFromUrl(pinId.slice(8)) : null);
-          const matchIdx = pins.findIndex(p => p.id === pinId || (altId && p.id === altId));
-          const isPinned = matchIdx !== -1;
-          // When removing, use the ID actually stored in the pin
-          const logId = isPinned ? pins[matchIdx].id : pinId;
-          await addLog({
-            timestamp: Date.now(), action: 'list', id: listId,
-            op: isPinned ? 'del' : 'add', ids: [logId]
-          });
-          sendResponse({ success: true, pinned: !isPinned });
-          notifyMutation('pins', { listId });
           break;
         }
 
@@ -1391,16 +1528,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'copyListPins': {
-          const source = await readCacheable('list:' + request.fromListId);
-          const ids = (source?.pins || []).map(p => p.id);
-          if (ids.length > 0) {
-            await addLog({
-              timestamp: Date.now(), action: 'list',
-              id: request.toListId, op: 'add', ids
-            });
+          try {
+            const source = await readCacheable('list:' + request.fromListId);
+            const ids = (source?.pins || []).map(p => p.id);
+            if (ids.length > 0) {
+              await addLog({
+                timestamp: Date.now(), action: 'list',
+                id: request.toListId, op: 'add', ids
+              });
+            }
+            sendResponse({ success: true });
+            notifyMutation('pins', { listId: request.toListId });
+          } catch (error) {
+            sendResponse({ success: false, error: error.message });
           }
-          sendResponse({ success: true });
-          notifyMutation('pins', { listId: request.toListId });
           break;
         }
 

@@ -1,0 +1,41 @@
+- Let's work on eliminating silent fallback, legacy implementation, silent default, back compat code. Scan the codebase for these patterns, we will triage one by one.
+- All worth fixing. Store them in a PROGRESS.md, and work on them one by one
+-  I prefer the original error message gets passed up to the caller. If the caller is a critical service routine, we need to disable all UI (including popup and portal), replace the UI with error message and ask user to reload extension. If the caller is an user event/action, we need to show the error message in a notification bubble (e.g. the "Like" notification) and ask user to reload extension.
+- y
+- Before that, are you sure the code still works if extension is freshly installed and run over an empty directory?
+- Do we check the error is NotFoundError somewhere? Or do we tolerate any I/O errors?
+- continue the test
+- Take a look at dirty Git changes. Catch up the context based on PROGRESS.md
+- Reload token
+- Continue to work on remaining tasks
+- For 6, should change to uniformly use parentIds, record this in TODO.md for later; For 5, migrated, feel free to check it; For 8, keep the changeDirBtn, but ask user to confirm that we are not migrating data, they should disable extension and copy the data if want to keep data
+- A minor issue. We should not catch JSON parse errors.
+- Are you catching twice in two levels?
+- Another issue, you used virtual keys again when reporting error (history:recent, history:today), let's use specific key or key range instead.
+- /finish 
+- There is another case of default values I want you to look at. When we are creating page checkpoints, we don't try that hard to gather enough information (such as title, referer) but fill them with default nulls instead. The second TODO item in TODO.md is a part of this larger issue.
+- I think you idea is good. Let's investigate right away
+- I think in these cases, it is almost certain that the page has been visited earlier. We already cache history data in "history:<date>", we can try to get information from both shallow-page and recent history. If due to rare conditions, the information is still not found, we print an error log and use null for title. 
+- You shouldn't ask offscreen for page checkpoints during findPageTitle, because ensureCheckpointIfMissing will only use the title when page is not checkpointed. We should instead find the title inside ensureCheckpointIfMissing (if no title is provided from caller).
+
+Also, did you check other callsites they have correct information?
+- What about parentIds? It should be strong consistent too?
+- I see shallow-page also stores user_title. We need to use it as well. In fact, add comments to searchPageContext to include all fields from shallow-page index.
+- If only user_title is null, don't try to search history. We should guarantee (in replay logic) that (a) if a page has parents or belongs to lists or has user_title, it must be remembered in shallow-page index, (b) if a page title changes AND it is already in shallow-page index, then shallow-page index should be updated. The criteria in (a) should be commented or documented.
+- Are entries in SPI guaranteed to have valid title?
+- Similarly to page_checkpoint, we need to guarantee SPI has all the information it can gathered.
+- Please explain your thoughts. In what cases a entry in shallow-page can have a checkpoint?
+- Review this session, what else is missing?
+- Is it necessary to pass so many arguments into ensureCheckpointIfMissing now?
+- Why callsite still use `|| ''` for title?
+- y
+- Search for other silent default patterns that we missed
+- Fix them all, TDD
+- /finish 
+- n
+- n
+- Wait, save lesson 2, drop 3
+- y
+- Explain "cache-miss defaults that are intentional (cacheGet(key) || [] when cache is a secondary copy)"
+- Doesn't sound right. First of all, today's data should always be cached on startup; secondly, we should try to get true data from disk even when cache missed
+- fix them

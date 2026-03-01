@@ -2,6 +2,10 @@
 // Manages writing interactions to a user-selected directory
 import { generateSlugFromUrl } from './utils.js';
 
+function isNotFound(error) {
+  return error?.name === 'NotFoundError';
+}
+
 class FileSystemStorage {
   #permissionGranted = false;
   #dirCache = new Map();
@@ -153,7 +157,8 @@ class FileSystemStorage {
     }
 
     try {
-      const fileHandle = await dirHandle.getFileHandle(fileName, create ? { create: true } : undefined);
+      const opts = create ? { create: true } : undefined;
+      const fileHandle = await dirHandle.getFileHandle(fileName, opts);
       this.#fileCache.set(path, fileHandle);
       return fileHandle;
     } catch (e) {
@@ -214,7 +219,7 @@ class FileSystemStorage {
       }
     } catch (e) {
       // If move fails, fall through to hard delete as last resort
-      try { await parentDir.removeEntry(name, opts); } catch {}
+      try { await parentDir.removeEntry(name, opts); } catch (e2) { if (!isNotFound(e2)) throw e2; }
     }
     this.clearCache();
   }
@@ -256,90 +261,6 @@ class FileSystemStorage {
   }
 
   // Write all interactions at once (for migration)
-  async writeAllInteractions(interactions, contentMap) {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to write to directory');
-    }
-
-    contentMap = contentMap || {};
-
-    // Group interactions by date
-    const byDate = {};
-    interactions.forEach(interaction => {
-      const date = new Date(interaction.timestamp);
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-
-      if (!byDate[key]) {
-        byDate[key] = [];
-      }
-
-      const metadata = { ...interaction };
-      delete metadata.content;
-      byDate[key].push(metadata);
-    });
-
-    // Write each date's interactions
-    for (const [date, dayInteractions] of Object.entries(byDate)) {
-      const filename = `${date}.jsonl`;
-      const fileHandle = await this.resolveFile('history/' + filename, { create: true });
-      const writable = await fileHandle.createWritable();
-
-      for (const interaction of dayInteractions) {
-        const line = JSON.stringify(interaction) + '\n';
-        await writable.write(line);
-      }
-
-      await writable.close();
-    }
-
-    // Write content files using versioned snapshot structure
-    for (const [slug, markdownText] of Object.entries(contentMap)) {
-      if (markdownText) {
-        // Use a fixed migration timestamp for migrated content
-        await this.captureSnapshot(slug, Date.now(), markdownText, '');
-      }
-    }
-
-    // Also write a master index file
-    await this.writeIndexFile(interactions);
-
-    return { success: true, fileCount: Object.keys(byDate).length };
-  }
-
-  // Write an index/summary file in human-readable format
-  async writeIndexFile(interactions) {
-    const fileHandle = await this.resolveFile('README.md', { create: true });
-    const writable = await fileHandle.createWritable();
-
-    let content = '# Portal Interaction History\n\n';
-    content += `Last updated: ${new Date().toISOString()}\n`;
-    content += `Total interactions: ${interactions.length}\n\n`;
-    content += '## Files\n\n';
-    content += '- `history/YYYY-MM-DD.jsonl` - Daily interaction logs in JSON Lines format (metadata only)\n';
-    content += '- `pages/{slug}.json` - Page entity checkpoint (metadata, parents, children)\n';
-    content += '- `pages/{slug}/{timestamp}.md` - Markdown extract of page content (versioned)\n';
-    content += '- `pages/{slug}/{timestamp}.html` - HTML snapshot of page content (versioned)\n';
-    content += '- `notes/{slug}.json` - Note entity (highlights and annotations)\n';
-    content += '- `lists/{id}.json` - User list entity (pins, metadata)\n';
-    content += '- `lists/system/recycle-bin.json` - Deleted items\n';
-    content += '- `lists/system/permanent-deletes.json` - Permanently deleted items\n';
-    content += '- `lists/system/shallow-page.json` - Shallow page index for non-checkpointed pages\n\n';
-    content += '## Metadata Format\n\n';
-    content += '```json\n';
-    content += JSON.stringify({
-      id: 'timestamp-url',
-      timestamp: 1234567890,
-      url: 'https://example.com',
-      title: 'Page Title',
-      attention: 'JSON string: {"scrollDepth": 0-100, "timeOnPage": ms}',
-      slug: '1234567890-page-title'
-    }, null, 2);
-    content += '\n```\n';
-
-    await writable.write(content);
-    await writable.close();
-  }
-
   // Get directory info
   async getDirectoryInfo() {
     if (!this.directoryHandle) {
@@ -402,7 +323,7 @@ class FileSystemStorage {
           if (!line.trim()) continue;
           try { interactions.push(JSON.parse(line)); } catch {}
         }
-      } catch {}
+      } catch (error) { if (!isNotFound(error)) throw error; }
     }
     return interactions;
   }
@@ -444,40 +365,6 @@ class FileSystemStorage {
   }
 
   // Load all markdown content from pages/ directory (latest snapshot per slug)
-  async loadAllContent() {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to read directory');
-    }
-
-    const contentMap = {};
-
-    try {
-      const pagesDir = await this.resolveDir('pages');
-
-      for await (const entry of pagesDir.values()) {
-        if (entry.kind === 'directory') {
-          const slug = entry.name;
-          let latestTs = 0;
-          for await (const subEntry of entry.values()) {
-            if (subEntry.kind === 'file' && subEntry.name.endsWith('.md')) {
-              const ts = parseInt(subEntry.name.replace('.md', ''), 10);
-              if (ts > latestTs) {
-                latestTs = ts;
-                const file = await subEntry.getFile();
-                contentMap[slug] = await file.text();
-              }
-            }
-          }
-        }
-      }
-    } catch (error) {
-      // pages/ directory may not exist yet
-      console.log('No pages directory found:', error.message);
-    }
-
-    return contentMap;
-  }
-
   // Load gateway origins from lists/system/gateways.json
   async loadGateways() {
     if (!(await this.verifyPermission())) {
@@ -486,8 +373,9 @@ class FileSystemStorage {
     try {
       const fileHandle = await this.resolveFile('lists/system/gateways.json');
       return this.readJson(fileHandle);
-    } catch {
-      return { timestamp: 0, origins: [] };
+    } catch (error) {
+      if (isNotFound(error)) return { timestamp: 0, origins: [] };
+      throw error;
     }
   }
 
@@ -499,8 +387,9 @@ class FileSystemStorage {
     try {
       const fileHandle = await this.resolveFile('lists/system/shallow-page.json');
       return this.readJson(fileHandle);
-    } catch {
-      return { timestamp: 0, index: {} };
+    } catch (error) {
+      if (isNotFound(error)) return { timestamp: 0, index: {} };
+      throw error;
     }
   }
 
@@ -516,21 +405,19 @@ class FileSystemStorage {
       const notesDir = await this.resolveDir('notes');
       for await (const entry of notesDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
-          try {
-            const file = await entry.getFile();
-            const note = JSON.parse(await file.text());
-            // Group by parent page slug
-            for (const parentKey of (note.parentIds || [])) {
-              if (parentKey.startsWith('page:')) {
-                const pageSlug = parentKey.slice(5);
-                if (!notesMap[pageSlug]) notesMap[pageSlug] = [];
-                notesMap[pageSlug].push(note);
-              }
+          const file = await entry.getFile();
+          const note = JSON.parse(await file.text());
+          // Group by parent page slug
+          for (const parentKey of (note.parentIds || [])) {
+            if (parentKey.startsWith('page:')) {
+              const pageSlug = parentKey.slice(5);
+              if (!notesMap[pageSlug]) notesMap[pageSlug] = [];
+              notesMap[pageSlug].push(note);
             }
-          } catch { /* skip malformed note files */ }
+          }
         }
       }
-    } catch { /* no notes dir */ }
+    } catch (error) { if (!isNotFound(error)) throw error; }
 
     return notesMap;
   }
@@ -586,7 +473,7 @@ class FileSystemStorage {
         snapshots.push(snap);
       }
     } catch (error) {
-      // pages/ directory or slug directory may not exist
+      if (!isNotFound(error)) throw error;
     }
 
     snapshots.sort((a, b) => b.timestamp - a.timestamp);
@@ -602,7 +489,7 @@ class FileSystemStorage {
         const handle = await slugDir.getFileHandle(`${timestamp}.${ext}`);
         const file = await handle.getFile();
         return URL.createObjectURL(file);
-      } catch (e) { /* try next */ }
+      } catch (e) { if (!isNotFound(e)) throw e; }
     }
     return null;
   }
@@ -615,8 +502,8 @@ class FileSystemStorage {
 
     const pagesDir = await this.resolveDir('pages');
     const slugDir = await pagesDir.getDirectoryHandle(slug);
-    try { await this.softDelete(slugDir, `${timestamp}.md`); } catch (e) {}
-    try { await this.softDelete(slugDir, `${timestamp}.html`); } catch (e) {}
+    try { await this.softDelete(slugDir, `${timestamp}.md`); } catch (e) { if (!isNotFound(e)) throw e; }
+    try { await this.softDelete(slugDir, `${timestamp}.html`); } catch (e) { if (!isNotFound(e)) throw e; }
   }
 
   // Load notes for a page slug from page entity's children + notes/ directory
@@ -633,15 +520,14 @@ class FileSystemStorage {
       for (const childKey of page.childIds) {
         if (childKey.startsWith('note:')) {
           const noteSlug = childKey.slice(5);
-          try {
-            const note = await this.loadNote(noteSlug);
-            if (note) notes.push(note);
-          } catch { /* skip missing notes */ }
+          const note = await this.loadNote(noteSlug);
+          if (note) notes.push(note);
         }
       }
       return notes;
     } catch (error) {
-      return [];
+      if (isNotFound(error)) return [];
+      throw error;
     }
   }
 
@@ -650,8 +536,9 @@ class FileSystemStorage {
     try {
       await this.resolveFile('pages/' + slug + '.json');
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if (isNotFound(error)) return false;
+      throw error;
     }
   }
 
@@ -697,8 +584,9 @@ class FileSystemStorage {
     try {
       const fileHandle = await this.resolveFile(`pages/${slug}.json`);
       return this.readJson(fileHandle);
-    } catch {
-      return null;
+    } catch (error) {
+      if (isNotFound(error)) return null;
+      throw error;
     }
   }
 
@@ -709,7 +597,9 @@ class FileSystemStorage {
       try {
         const fh = await this.resolveFile(`pages/${slug}.json`);
         result[slug] = await this.readJson(fh);
-      } catch { /* page doesn't exist */ }
+      } catch (error) {
+        if (!isNotFound(error)) throw error;
+      }
     }
     return result;
   }
@@ -725,8 +615,9 @@ class FileSystemStorage {
     try {
       const fileHandle = await this.resolveFile(`notes/${slug}.json`);
       return this.readJson(fileHandle);
-    } catch {
-      return null;
+    } catch (error) {
+      if (isNotFound(error)) return null;
+      throw error;
     }
   }
 
@@ -788,12 +679,10 @@ class FileSystemStorage {
     try {
       const fh = await this.resolveFile(path);
       const data = await this.readJson(fh);
-      if (data && typeof data === 'object' && !Array.isArray(data) && data.pins) {
-        return data.pins;
-      }
-      return data; // legacy bare array
-    } catch {
-      return [];
+      return data.pins;
+    } catch (error) {
+      if (isNotFound(error)) return [];
+      throw error;
     }
   }
 
@@ -803,14 +692,10 @@ class FileSystemStorage {
     const path = this.#resolveListPath(listId);
     try {
       const fh = await this.resolveFile(path);
-      const data = await this.readJson(fh);
-      if (data && typeof data === 'object' && !Array.isArray(data) && data.pins) {
-        return data;
-      }
-      // Legacy bare array — wrap with timestamp 0
-      return { timestamp: 0, slug: listId, pins: Array.isArray(data) ? data : [] };
-    } catch {
-      return null;
+      return await this.readJson(fh);
+    } catch (error) {
+      if (isNotFound(error)) return null;
+      throw error;
     }
   }
 
@@ -827,12 +712,8 @@ class FileSystemStorage {
     try {
       const fh = await this.resolveFile('lists/system/explore.json');
       const data = await this.readJson(fh);
-      if (data && typeof data === 'object' && !Array.isArray(data) && data.pins) {
-        allPins['explore'] = data.pins;
-      } else if (Array.isArray(data)) {
-        allPins['explore'] = data; // legacy bare array
-      }
-    } catch { /* explore.json doesn't exist yet */ }
+      allPins['explore'] = data.pins;
+    } catch (error) { if (!isNotFound(error)) throw error; }
 
     // Load user lists from lists/ — filename is the list slug
     try {
@@ -842,18 +723,12 @@ class FileSystemStorage {
           const id = entry.name.replace('.json', '');
           // Skip system, index, and special files
           if (id.startsWith('system') || id.startsWith('index')) continue;
-          try {
-            const file = await entry.getFile();
-            const data = JSON.parse(await file.text());
-            if (data && typeof data === 'object' && !Array.isArray(data) && data.pins) {
-              allPins[id] = data.pins;
-            } else {
-              allPins[id] = data; // legacy bare array
-            }
-          } catch { /* skip malformed files */ }
+          const file = await entry.getFile();
+          const data = JSON.parse(await file.text());
+          allPins[id] = data.pins;
         }
       }
-    } catch { /* lists dir doesn't exist yet */ }
+    } catch (error) { if (!isNotFound(error)) throw error; }
     return allPins;
   }
 
@@ -872,7 +747,7 @@ class FileSystemStorage {
       if (data && typeof data === 'object' && !Array.isArray(data)) {
         existing = data;
       }
-    } catch { /* file doesn't exist yet */ }
+    } catch (error) { if (!isNotFound(error)) throw error; }
     const fileHandle = await this.resolveFile(path, { create: true });
     await this.writeJson(fileHandle, { ...existing, timestamp, pins });
   }
@@ -893,7 +768,7 @@ class FileSystemStorage {
       if (data && typeof data === 'object' && !Array.isArray(data)) {
         existing = data;
       }
-    } catch { /* file doesn't exist yet */ }
+    } catch (error) { if (!isNotFound(error)) throw error; }
     const fileHandle = await this.resolveFile(path, { create: true });
     await this.writeJson(fileHandle, { ...existing, ...meta, timestamp });
   }
@@ -908,7 +783,7 @@ class FileSystemStorage {
       const listsDir = await this.resolveDir('lists');
       await this.softDelete(listsDir, `${listId}.json`);
       this.#fileCache.delete(path);
-    } catch { /* file may not exist */ }
+    } catch (error) { if (!isNotFound(error)) throw error; }
   }
 
   // Load metadata for all lists from lists/ files.
@@ -926,19 +801,17 @@ class FileSystemStorage {
           const slug = entry.name.replace('.json', '');
           // Skip system and special files
           if (slug === 'gateways' || slug.startsWith('system') || slug.startsWith('index')) continue;
-          try {
-            const file = await entry.getFile();
-            const data = JSON.parse(await file.text());
-            result.push({
-              slug,
-              name: data.name || slug,
-              qbTrees: data.qbTrees || [],
-              pins: data.pins || [],
-            });
-          } catch { /* skip malformed */ }
+          const file = await entry.getFile();
+          const data = JSON.parse(await file.text());
+          result.push({
+            slug,
+            name: data.name || slug,
+            qbTrees: data.qbTrees || [],
+            pins: data.pins || [],
+          });
         }
       }
-    } catch { /* lists/ doesn't exist */ }
+    } catch (error) { if (!isNotFound(error)) throw error; }
     return result;
   }
 
@@ -969,7 +842,7 @@ class FileSystemStorage {
         if (data && typeof data === 'object' && !Array.isArray(data)) {
           existing = data;
         }
-      } catch { /* file doesn't exist yet */ }
+      } catch (error) { if (!isNotFound(error)) throw error; }
       const fileHandle = await this.resolveFile(path, { create: true });
       await this.writeJson(fileHandle, { ...existing, timestamp: 0, pins: pinsArray });
     }
@@ -994,12 +867,10 @@ class FileSystemStorage {
     try {
       const fh = await this.resolveFile('lists/system/recycle-bin.json');
       const data = await this.readJson(fh);
-      if (data && typeof data === 'object' && data.items) {
-        return data.items;
-      }
-      return [];
-    } catch {
-      return [];
+      return data.items;
+    } catch (error) {
+      if (isNotFound(error)) return [];
+      throw error;
     }
   }
 
@@ -1007,13 +878,10 @@ class FileSystemStorage {
   async loadRecycleBinEntity() {
     try {
       const fh = await this.resolveFile('lists/system/recycle-bin.json');
-      const data = await this.readJson(fh);
-      if (data && typeof data === 'object' && data.items) {
-        return data;
-      }
-      return { timestamp: 0, items: [] };
-    } catch {
-      return { timestamp: 0, items: [] };
+      return await this.readJson(fh);
+    } catch (error) {
+      if (isNotFound(error)) return { timestamp: 0, items: [] };
+      throw error;
     }
   }
 
@@ -1035,13 +903,10 @@ class FileSystemStorage {
     try {
       const fileHandle = await this.resolveFile('lists/system/permanent-deletes.json');
       const data = await this.readJson(fileHandle);
-      // New format: { timestamp, keys: [...] }
-      if (data && typeof data === 'object' && !Array.isArray(data) && data.keys) {
-        return data.keys;
-      }
-      return data; // legacy bare array
-    } catch {
-      return [];
+      return data.keys;
+    } catch (error) {
+      if (isNotFound(error)) return [];
+      throw error;
     }
   }
 
@@ -1049,13 +914,10 @@ class FileSystemStorage {
   async loadPermanentDeletesEntity() {
     try {
       const fileHandle = await this.resolveFile('lists/system/permanent-deletes.json');
-      const data = await this.readJson(fileHandle);
-      if (data && typeof data === 'object' && !Array.isArray(data) && data.keys) {
-        return data;
-      }
-      return { timestamp: 0, keys: Array.isArray(data) ? data : [] };
-    } catch {
-      return { timestamp: 0, keys: [] };
+      return await this.readJson(fileHandle);
+    } catch (error) {
+      if (isNotFound(error)) return { timestamp: 0, keys: [] };
+      throw error;
     }
   }
 
@@ -1078,7 +940,8 @@ class FileSystemStorage {
       const fileHandle = await this.resolveFile('settings.json');
       return this.readJson(fileHandle);
     } catch (error) {
-      return {};
+      if (isNotFound(error)) return {};
+      throw error;
     }
   }
 

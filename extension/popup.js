@@ -1,5 +1,5 @@
 // Popup — current-page dashboard
-import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, readCacheable, saveSettingsValue } from './utils.js';
+import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, readCacheable, sendAction, saveSettingsValue } from './utils.js';
 
 let currentSlug = '';
 let currentNotes = [];
@@ -8,6 +8,35 @@ let currentUrl = '';
 let currentTitle = '';
 let currentTab = null;
 let detachedContent = null; // holds dashboardContent when removed in private mode
+
+// ─── Error UI ────────────────────────────────────────────────────────
+
+function showFatalError(message) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:999999;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+  overlay.innerHTML = `
+    <div style="color:#b41e1e;font-size:14px;font-weight:600;">Storage Unavailable</div>
+    <div style="color:#555;font-size:12px;max-width:360px;text-align:center;">${escapeHtml(message)}</div>
+    <button id="fatalReloadBtn" style="margin-top:6px;padding:4px 12px;border:1px solid #ccc;border-radius:4px;background:#f5f5f5;cursor:pointer;font-size:12px;">Reload Extension</button>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#fatalReloadBtn').addEventListener('click', () => chrome.runtime.reload());
+}
+
+let _errorBubbleTimer = null;
+function showErrorBubble(message) {
+  let bubble = document.getElementById('errorBubble');
+  if (!bubble) {
+    bubble = document.createElement('div');
+    bubble.id = 'errorBubble';
+    bubble.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(180,30,30,0.92);color:#fff;font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:6px 14px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:360px;text-align:center;';
+    document.body.appendChild(bubble);
+  }
+  bubble.textContent = message + ' — please reload the extension.';
+  bubble.style.opacity = '1';
+  clearTimeout(_errorBubbleTimer);
+  _errorBubbleTimer = setTimeout(() => { bubble.style.opacity = '0'; }, 4000);
+}
 
 function escapeHtml(text) {
   const div = document.createElement('div');
@@ -61,8 +90,8 @@ function renderSnapshots(snapshots) {
       const ts = parseInt(btn.dataset.ts, 10);
       await chrome.runtime.sendMessage({ action: 'deleteSnapshot', slug: currentSlug, timestamp: ts });
       // Re-fetch and re-render
-      const resp = await chrome.runtime.sendMessage({ action: 'listSnapshots', slug: currentSlug });
-      renderSnapshots(resp?.snapshots || []);
+      const resp = await sendAction({ action: 'listSnapshots', slug: currentSlug });
+      renderSnapshots(resp.snapshots || []);
     });
   });
 
@@ -224,15 +253,13 @@ async function loadLists() {
 }
 
 async function loadListPins() {
-  try {
-    const lists = await loadLists();
-    const allPins = {};
-    for (const list of lists) {
-      const entity = await readCacheable('list:' + list.slug);
-      if (entity?.pins?.length > 0) allPins[list.slug] = entity.pins;
-    }
-    return allPins;
-  } catch { return {}; }
+  const lists = await loadLists();
+  const allPins = {};
+  for (const list of lists) {
+    const entity = await readCacheable('list:' + list.slug);
+    if (entity?.pins?.length > 0) allPins[list.slug] = entity.pins;
+  }
+  return allPins;
 }
 
 function isPagePinned(allPins, listId, url) {
@@ -272,9 +299,11 @@ async function renderListChips() {
   // Toggle existing chips
   container.querySelectorAll('.list-chip').forEach(chip => {
     chip.addEventListener('click', async () => {
-      const listId = chip.dataset.listId;
-      await toggleListPin(listId);
-      renderListChips();
+      try {
+        const listId = chip.dataset.listId;
+        await toggleListPin(listId);
+        renderListChips();
+      } catch (err) { showErrorBubble(err.message); }
     });
   });
 
@@ -363,12 +392,14 @@ function openListPicker(lists, allPins) {
     listEl.querySelectorAll('.list-picker-row').forEach(row => {
       row.addEventListener('click', async (e) => {
         e.stopPropagation();
-        const listId = row.dataset.listId;
-        await toggleListPin(listId);
-        // Refresh allPins and re-render rows in place
-        const freshPins = await loadListPins();
-        Object.assign(allPins, freshPins);
-        renderPickerRows();
+        try {
+          const listId = row.dataset.listId;
+          await toggleListPin(listId);
+          // Refresh allPins and re-render rows in place
+          const freshPins = await loadListPins();
+          Object.assign(allPins, freshPins);
+          renderPickerRows();
+        } catch (err) { showErrorBubble(err.message); }
       });
     });
 
@@ -376,9 +407,11 @@ function openListPicker(lists, allPins) {
     if (createBtn) {
       createBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        await createListAndPin(inputVal);
-        closeListPicker();
-        renderListChips();
+        try {
+          await createListAndPin(inputVal);
+          closeListPicker();
+          renderListChips();
+        } catch (err) { showErrorBubble(err.message); }
       });
     }
   }
@@ -393,18 +426,20 @@ function openListPicker(lists, allPins) {
     if (e.key === 'Enter') {
       const inputVal = input.value.trim();
       if (!inputVal) return;
-      const exactMatch = lists.find(c =>
-        (c.name).toLowerCase() === inputVal.toLowerCase()
-      );
-      if (exactMatch) {
-        await toggleListPin(exactMatch.slug);
-        closeListPicker();
-        renderListChips();
-      } else {
-        await createListAndPin(inputVal);
-        closeListPicker();
-        renderListChips();
-      }
+      try {
+        const exactMatch = lists.find(c =>
+          (c.name).toLowerCase() === inputVal.toLowerCase()
+        );
+        if (exactMatch) {
+          await toggleListPin(exactMatch.slug);
+          closeListPicker();
+          renderListChips();
+        } else {
+          await createListAndPin(inputVal);
+          closeListPicker();
+          renderListChips();
+        }
+      } catch (err) { showErrorBubble(err.message); }
     } else if (e.key === 'Escape') {
       closeListPicker();
     }
@@ -422,7 +457,7 @@ async function createListAndPin(name) {
 
   const listId = generateSlugFromTitle(name);
   await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name });
-  const order = (await readCacheable('settings'))?.listOrder || [];
+  const order = (await readCacheable('settings')).listOrder || [];
   await saveSettingsValue('listOrder', [...order, { id: 'list:' + listId, name }]);
 
   await toggleListPin(listId);
@@ -602,8 +637,8 @@ document.getElementById('captureBtn').addEventListener('click', async () => {
     const resp = await chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' });
     console.log('[popup] Capture response:', resp);
     if (resp && resp.success) {
-      const snapshotsResp = await chrome.runtime.sendMessage({ action: 'listSnapshots', slug: currentSlug });
-      renderSnapshots(snapshotsResp?.snapshots || []);
+      const snapshotsResp = await sendAction({ action: 'listSnapshots', slug: currentSlug });
+      renderSnapshots(snapshotsResp.snapshots || []);
     } else {
       console.warn('[popup] Capture failed:', resp);
     }
@@ -736,19 +771,17 @@ async function showDashboard(tab) {
 
   // Skip blacklist if the page has visit history (previously captured and not deleted)
   let hasVisitHistory = false;
-  try {
-    const [resp, recycleBin, permanentDeletes] = await Promise.all([
-      chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url }),
-      readCacheable('list:system/recycle-bin').then(v => v || []),
-      readCacheable('list:system/permanent-deletes').then(v => v || [])
-    ]);
-    const recycled = recycleBin.some(item => item.url === tab.url);
-    const permDeleted = permanentDeletes.includes(tab.url);
-    hasVisitHistory = !!(resp && resp.interaction) && !recycled && !permDeleted;
-  } catch {}
+  const [resp, recycleBin, permanentDeletes] = await Promise.all([
+    chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url }),
+    readCacheable('list:system/recycle-bin'),
+    readCacheable('list:system/permanent-deletes')
+  ]);
+  const recycled = recycleBin.some(item => item.url === tab.url);
+  const permDeleted = permanentDeletes.includes(tab.url);
+  hasVisitHistory = !!(resp && resp.interaction) && !recycled && !permDeleted;
 
   // Check blacklist only for pages with no visit history
-  const urlBlacklist = (await readCacheable('settings'))?.urlBlacklist;
+  const urlBlacklist = (await readCacheable('settings')).urlBlacklist;
   const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
   if (!hasVisitHistory && blacklist.some(prefix => tab.url.startsWith(prefix))) {
     document.getElementById('loading').style.display = 'none';
@@ -792,4 +825,4 @@ async function showDashboard(tab) {
   }
 
   await showDashboard(tab);
-})();
+})().catch(err => showFatalError(err.message));

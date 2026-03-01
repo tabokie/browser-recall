@@ -3,7 +3,7 @@
 import { FileSystemStorage } from './filesystem-storage.js';
 import init, { Interaction, SearchEngine, searchBatch } from './pkg/portal_extension.js';
 import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine, extractInteractionBuffer } from './search-helpers.js';
-import { generateSlugFromUrl, generateSlugFromTitle, saveSettingsValue, readCacheable, collectQbTrees, qbTreesChanged, isGatewayRoot } from './utils.js';
+import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, collectQbTrees, qbTreesChanged, isGatewayRoot } from './utils.js';
 import { findRelatedPages } from './related-scoring.js';
 import { attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
 import { qbCreatePredicate, qbCreateOperator, qbCreatePlaceholder, qbFindNode, qbCollapseTree, qbFlattenSameOp, qbToTree, qbFlatten } from './qb-tree.js';
@@ -12,12 +12,35 @@ import { VirtualScroller } from './virtual-scroller.js';
 
 const fsStorage = new FileSystemStorage();
 
-// Read a single settings sub-key with fallback default
-async function loadSettingsValue(key, defaultValue) {
-  const settings = await readCacheable('settings');
-  const v = settings?.[key];
-  return v !== undefined ? v : defaultValue;
+// ─── Error UI ────────────────────────────────────────────────────────
+
+function showFatalError(message) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:999999;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+  overlay.innerHTML = `
+    <div style="color:#b41e1e;font-size:18px;font-weight:600;">Storage Unavailable</div>
+    <div style="color:#555;font-size:14px;max-width:480px;text-align:center;">${escapeHtml(message)}</div>
+    <button id="fatalReloadBtn" style="margin-top:8px;padding:6px 16px;border:1px solid #ccc;border-radius:4px;background:#f5f5f5;cursor:pointer;font-size:13px;">Reload Extension</button>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#fatalReloadBtn').addEventListener('click', () => chrome.runtime.reload());
 }
+
+let _errorBubbleTimer = null;
+function showErrorBubble(message) {
+  let bubble = document.getElementById('errorBubble');
+  if (!bubble) {
+    bubble = document.createElement('div');
+    bubble.id = 'errorBubble';
+    bubble.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(180,30,30,0.92);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
+    document.body.appendChild(bubble);
+  }
+  bubble.textContent = message + ' — please reload the extension.';
+  bubble.style.opacity = '1';
+  clearTimeout(_errorBubbleTimer);
+  _errorBubbleTimer = setTimeout(() => { bubble.style.opacity = '0'; }, 4000);
+}
+
 
 // --- State ---
 let currentSortState = { column: null, direction: null };
@@ -163,8 +186,8 @@ async function pipelinedSearch(query) {
   const historyDir = await rootDir.getDirectoryHandle('history');
   const pagesDir = await rootDir.getDirectoryHandle('pages');
 
-  const filesResp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
-  const files = filesResp?.files || [];
+  const filesResp = await sendAction({ action: 'listInteractionFiles' });
+  const files = filesResp.files;
 
   // Write buffer overlay
   const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
@@ -241,8 +264,8 @@ async function initHistoryFiles() {
 
   // Always get file list from offscreen (no session cache for file list)
   try {
-    const resp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
-    historyFiles = resp?.files || [];
+    const resp = await sendAction({ action: 'listInteractionFiles' });
+    historyFiles = resp.files;
   } catch (error) {
     console.log('Filesystem not available:', error.message);
   }
@@ -286,8 +309,8 @@ async function loadHistoryBatch() {
   const batch = historyFiles.slice(historyLoadedCount, historyLoadedCount + historyFileBatch);
   try {
     const t0 = performance.now();
-    const resp = await chrome.runtime.sendMessage({ action: 'loadInteractionBatch', files: batch });
-    const interactions = resp?.interactions || [];
+    const resp = await sendAction({ action: 'loadInteractionBatch', files: batch });
+    const interactions = resp.interactions;
     const newItems = [];
     // Entries within a day file arrive oldest→newest. This isn't a full replay,
     // but we simulate replay semantics: newer values always win, and older
@@ -385,7 +408,9 @@ async function loadPinContext(pins) {
   const sessionBatch = sessionKeys.length > 0 ? await chrome.storage.session.get(sessionKeys) : {};
   let spi = sessionBatch['list:system/shallow-page'];
   if (!spi) {
-    spi = await chrome.runtime.sendMessage({ action: 'getShallowPageIndex' }) || { index: {} };
+    const spiResp = await chrome.runtime.sendMessage({ action: 'getShallowPageIndex' });
+    if (spiResp?.success === false) throw new Error(spiResp.error || 'Failed to load shallow page index');
+    spi = spiResp;
   }
   const pageSnap = new Map();
   const missingSlugs = [];
@@ -395,10 +420,8 @@ async function loadPinContext(pins) {
     else missingSlugs.push(slug);
   }
   if (missingSlugs.length > 0) {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs: missingSlugs });
-    if (resp?.pages) {
-      for (const [slug, page] of Object.entries(resp.pages)) pageSnap.set(slug, page);
-    }
+    const resp = await sendAction({ action: 'loadPageBatch', slugs: missingSlugs });
+    for (const [slug, page] of Object.entries(resp.pages || {})) pageSnap.set(slug, page);
   }
   return { pageSnap, spi };
 }
@@ -430,12 +453,8 @@ async function toggleResultPin(listId, url, title) {
 // Permanent deletes: URLs that are gone forever
 
 async function loadRecycleBin() {
-  try {
-    recycleBin = (await readCacheable('list:system/recycle-bin')) || [];
-  } catch { recycleBin = []; }
-  try {
-    permanentDeletes = (await readCacheable('list:system/permanent-deletes')) || [];
-  } catch { permanentDeletes = []; }
+  recycleBin = await readCacheable('list:system/recycle-bin');
+  permanentDeletes = await readCacheable('list:system/permanent-deletes');
   return recycleBin;
 }
 
@@ -859,9 +878,7 @@ function filterByCategory(interactions, category) {
 
 async function loadGatewayDomains() {
   if (gatewayOriginsLoaded) return;
-  try {
-    gatewayOriginsCache = (await readCacheable('list:system/gateways')) || [];
-  } catch { gatewayOriginsCache = []; }
+  gatewayOriginsCache = await readCacheable('list:system/gateways');
   gatewayOriginsLoaded = true;
 }
 
@@ -1115,12 +1132,12 @@ function qbUpdateNode(nodeId, updates) {
 
 // --- Stream-evaluate a qbTree against all JSONL files ---
 async function evaluateQueryStream(qbTree) {
-  const filesResp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
-  const files = filesResp?.files || [];
+  const filesResp = await sendAction({ action: 'listInteractionFiles' });
+  const files = filesResp.files;
   let notesMap = {};
   if (treeNeedsHighlights(qbTree)) {
-    const notesResp = await chrome.runtime.sendMessage({ action: 'loadAllNotes' });
-    notesMap = notesResp?.notesMap || {};
+    const notesResp = await sendAction({ action: 'loadAllNotes' });
+    notesMap = notesResp.notesMap || {};
     cachedAllNotes = notesMap;
   }
   await loadGatewayDomains();
@@ -1157,8 +1174,8 @@ async function evaluateQueryStream(qbTree) {
   for (const entry of interactionBuffer) tryAdd(entry);
 
   for (let fi = 0; fi < files.length; fi += 10) {
-    const batchResp = await chrome.runtime.sendMessage({ action: 'loadInteractionBatch', files: files.slice(fi, fi + 10) });
-    const batchItems = batchResp?.interactions || [];
+    const batchResp = await sendAction({ action: 'loadInteractionBatch', files: files.slice(fi, fi + 10) });
+    const batchItems = batchResp.interactions;
     for (const item of batchItems) tryAdd(item);
   }
   return results;
@@ -1721,8 +1738,8 @@ async function showExplore() {
   const listId = EXPLORE_LIST_ID;
   // Lazy-load explore pins (may have been invalidated by visibilitychange)
   if (!allListPins[listId]) {
-    const pinsResp = await chrome.runtime.sendMessage({ action: 'loadListPinsById', listId });
-    allListPins[listId] = pinsResp?.pins || [];
+    const pinsResp = await sendAction({ action: 'loadListPinsById', listId });
+    allListPins[listId] = pinsResp.pins;
   }
   const pins = getExplorePins();
 
@@ -1853,8 +1870,10 @@ async function refreshExplorePins() {
 async function showList(list) {
   // loadLists() returns { slug, name } only — load full entity for qbTrees
   if (!list.qbTrees) {
-    const entity = await readCacheable('list:' + list.slug);
-    if (entity?.qbTrees) list.qbTrees = entity.qbTrees;
+    try {
+      const entity = await readCacheable('list:' + list.slug);
+      if (entity?.qbTrees) list.qbTrees = entity.qbTrees;
+    } catch (err) { showErrorBubble(err.message); return; }
   }
   const displayName = listDisplayName(list);
   activeView = { type: 'list', id: list.slug, qbTrees: list.qbTrees || [], name: list.name || null };
@@ -1887,8 +1906,8 @@ async function showList(list) {
     const listId = list.slug;
 
     // Always fetch pins from entity storage
-    const pinsResp = await chrome.runtime.sendMessage({ action: 'loadListPinsById', listId });
-    allListPins[listId] = pinsResp?.pins || [];
+    const pinsResp = await sendAction({ action: 'loadListPinsById', listId });
+    allListPins[listId] = pinsResp.pins;
     const pins = allListPins[listId];
 
     const { pageSnap, spi } = await loadPinContext(pins);
@@ -1959,8 +1978,8 @@ async function refreshListPages(listId, pins) {
       else uncachedSlugs.push(slug);
     }
     if (uncachedSlugs.length > 0) {
-      const pageResp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs: uncachedSlugs });
-      Object.assign(pages, pageResp?.pages || {});
+      const pageResp = await sendAction({ action: 'loadPageBatch', slugs: uncachedSlugs });
+      Object.assign(pages, pageResp.pages || {});
     }
     let changed = false;
     for (const pin of pins) {
@@ -2126,16 +2145,14 @@ function processInteractionsForDisplay(interactions, { globalDedup = false } = {
 async function enrichFromEntityStorage(entries) {
   const slugs = [...new Set(entries.map(r => r.slug).filter(Boolean))];
   if (slugs.length === 0) return;
-  try {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs });
-    const pages = resp?.pages || {};
-    for (const entry of entries) {
-      const page = pages[entry.slug];
-      if (!page) continue;  // shallow page — keep JSONL title
-      if (page.title) entry.title = page.title;
-      if (page.user_title) entry.user_title = page.user_title;
-    }
-  } catch {}
+  const resp = await sendAction({ action: 'loadPageBatch', slugs });
+  const pages = resp.pages || {};
+  for (const entry of entries) {
+    const page = pages[entry.slug];
+    if (!page) continue;  // shallow page — keep JSONL title
+    if (page.title) entry.title = page.title;
+    if (page.user_title) entry.user_title = page.user_title;
+  }
 }
 
 async function displayInteractionRows(interactions) {
@@ -2279,17 +2296,11 @@ async function loadExtraDetail(url) {
   const slug = generateSlugFromUrl(url);
 
   // Load notes for this page
-  let notes = [];
-  try {
-    const notesResp = await chrome.runtime.sendMessage({ action: 'loadPageNotes', slug });
-    notes = notesResp?.notes || [];
-  } catch (e) { /* not available */ }
+  const notesResp = await sendAction({ action: 'loadPageNotes', slug });
+  const notes = notesResp.notes || [];
 
-  let snapshots = [];
-  try {
-    const snapResp = await chrome.runtime.sendMessage({ action: 'listSnapshots', slug });
-    snapshots = snapResp?.snapshots || [];
-  } catch (e) { /* filesystem not available */ }
+  const snapResp = await sendAction({ action: 'listSnapshots', slug });
+  const snapshots = snapResp.snapshots || [];
 
   // Find belonged lists (reverse lookup)
   const lists = await loadLists();
@@ -2558,7 +2569,7 @@ function bindResultDelegation(container) {
     if (e.target.closest('.result-pin') || e.target.closest('.result-expand') || e.target.closest('.result-delete') || e.target.closest('.result-focus')) return;
     const url = row.dataset.url;
     // Proactive checkpoint: ensure a page entity exists before navigation
-    chrome.runtime.sendMessage({ action: 'ensurePageCheckpoint', url, title: row.dataset.title || '' }).catch(() => {});
+    sendAction({ action: 'ensurePageCheckpoint', url, title: row.dataset.title }).catch(e => console.warn('[checkpoint]', e.message));
     chrome.tabs.create({ url });
   });
 
@@ -2902,19 +2913,21 @@ async function saveExploreAsList() {
 
   enterTitleEditMode('', async (name) => {
     if (!name) return;
-    const listId = generateSlugFromTitle(name);
-    const newList = { slug: listId, name, qbTrees };
-    await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, qbTrees });
-    const order = (await readCacheable('settings'))?.listOrder || [];
-    await saveSettingsValue('listOrder', [...order, { id: 'list:' + listId, name }]);
-    // Copy explore pins to the new list (if any)
-    if (pins.length > 0) {
-      await chrome.runtime.sendMessage({
-        action: 'copyListPins', fromListId: EXPLORE_LIST_ID, toListId: listId,
-      });
-    }
-    await renderLists();
-    showList(newList);
+    try {
+      const listId = generateSlugFromTitle(name);
+      const newList = { slug: listId, name, qbTrees };
+      await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, qbTrees });
+      const order = (await readCacheable('settings')).listOrder || [];
+      await saveSettingsValue('listOrder', [...order, { id: 'list:' + listId, name }]);
+      // Copy explore pins to the new list (if any)
+      if (pins.length > 0) {
+        await chrome.runtime.sendMessage({
+          action: 'copyListPins', fromListId: EXPLORE_LIST_ID, toListId: listId,
+        });
+      }
+      await renderLists();
+      showList(newList);
+    } catch (err) { showErrorBubble(err.message); }
   }, () => {
     updateMainTitle('Explore');
     document.getElementById('pinSearchBtn').style.display = 'flex';
@@ -3262,7 +3275,7 @@ document.getElementById('selectDirBtn').addEventListener('click', async () => {
 
 // Change directory
 document.getElementById('changeDirBtn').addEventListener('click', async () => {
-  if (!confirm('Change storage directory? This will migrate all existing data to the new location.')) {
+  if (!confirm('Change storage directory?\n\nData will NOT be migrated automatically. To keep existing data, disable the extension and copy the portal-data folder to the new location before proceeding.')) {
     return;
   }
 
@@ -3271,14 +3284,6 @@ document.getElementById('changeDirBtn').addEventListener('click', async () => {
   changeDirBtn.textContent = 'Changing...';
 
   try {
-    const oldInteractions = await fsStorage.loadAllInteractions();
-    let oldContentMap = {};
-    try {
-      oldContentMap = await fsStorage.loadAllContent();
-    } catch (error) {
-      console.log('Could not load old content:', error.message);
-    }
-
     const result = await fsStorage.selectDirectory();
 
     if (!result.success) {
@@ -3290,18 +3295,7 @@ document.getElementById('changeDirBtn').addEventListener('click', async () => {
       return;
     }
 
-    if (oldInteractions.length > 0) {
-      showStatus(`Migrating ${oldInteractions.length} interactions...`, 'warning');
-      const migrateResult = await fsStorage.writeAllInteractions(oldInteractions, oldContentMap);
-      if (migrateResult.success) {
-        showStatus(`Migrated ${oldInteractions.length} interactions to ${result.name}`, 'success');
-      } else {
-        showStatus(`Error migrating data: ${migrateResult.error}`, 'error');
-      }
-    } else {
-      showStatus(`Storage location changed to: ${result.name}`, 'success');
-    }
-
+    showStatus(`Storage location changed to: ${result.name}`, 'success');
     await updateStorageStatus();
     await updateStatistics();
     chrome.runtime.sendMessage({ action: 'initializeFilesystem' });
@@ -3604,13 +3598,13 @@ document.addEventListener('visibilitychange', async () => {
   // Re-list history files and load any new ones
   let historyChanged = false;
   try {
-    const filesResp = await chrome.runtime.sendMessage({ action: 'listInteractionFiles' });
-    const allFiles = filesResp?.files || [];
+    const filesResp = await sendAction({ action: 'listInteractionFiles' });
+    const allFiles = filesResp.files;
     const newFiles = allFiles.filter(f => !historyFiles.includes(f));
     if (newFiles.length > 0) {
       historyFiles = allFiles;
-      const batchResp = await chrome.runtime.sendMessage({ action: 'loadInteractionBatch', files: newFiles });
-      const newInteractions = batchResp?.interactions || [];
+      const batchResp = await sendAction({ action: 'loadInteractionBatch', files: newFiles });
+      const newInteractions = batchResp.interactions;
       for (const item of newInteractions) {
         if (!historyByUrl.has(item.url) || item.timestamp > historyByUrl.get(item.url).timestamp) {
           historyByUrl.set(item.url, item);
@@ -3699,7 +3693,7 @@ async function buildExploreAutoBlocks(pins) {
   const resolvedChildUrls = await resolveTypedRefs(allChildRefs);
   const childrenUrls = new Set(resolvedChildUrls.filter(u => !pinnedSlugs.has(generateSlugFromUrl(u))));
   // Also check shallowPageIndex for non-checkpointed children
-  const spiData = await readCacheable('list:system/shallow-page') || { index: {} };
+  const spiData = await readCacheable('list:system/shallow-page');
   const pinSlugSet = new Set(pinSlugs);
   for (const [childUrl, entry] of Object.entries(spiData.index)) {
     if (pinnedSlugs.has(generateSlugFromUrl(childUrl))) continue;
@@ -4067,8 +4061,8 @@ async function openListFocusPanel(listId, listName) {
   try {
     let pins = allListPins[listId];
     if (!pins) {
-      const fpResp = await chrome.runtime.sendMessage({ action: 'loadListPinsById', listId });
-      pins = fpResp?.pins || [];
+      const fpResp = await sendAction({ action: 'loadListPinsById', listId });
+      pins = fpResp.pins;
       allListPins[listId] = pins;
     }
 
@@ -4220,14 +4214,14 @@ async function initialize() {
   initCharts();
 
   // Render sidebar concurrently with heavy data (don't block on sidebar)
-  renderLists(); // fire-and-forget: updates sidebar when ready
+  renderLists().catch(err => showFatalError(err.message));
   renderBlacklist();
   renderTrimRules();
 
   // Load metadata in parallel (history is demand-loaded in showCategory, pins loaded per-list)
   await Promise.all([
     initHistoryFiles(), loadRecycleBin(), loadGatewayDomains(),
-    chrome.runtime.sendMessage({ action: 'loadListPinsById', listId: EXPLORE_LIST_ID }).then(resp => { allListPins[EXPLORE_LIST_ID] = resp?.pins || []; }).catch(() => { allListPins[EXPLORE_LIST_ID] = []; }),
+    sendAction({ action: 'loadListPinsById', listId: EXPLORE_LIST_ID }).then(resp => { allListPins[EXPLORE_LIST_ID] = resp.pins; }),
   ]);
   updateRecycleSidebarCount();
   updateExploreBadge();
@@ -4280,4 +4274,4 @@ async function initialize() {
   });
 }
 
-initialize();
+initialize().catch(err => showFatalError(err.message));
