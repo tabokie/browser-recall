@@ -291,18 +291,6 @@ async function readFs(key) {
       value = resp.settings;
       break;
     }
-    case 'list:system/recycle-bin': {
-      const r = await requestOffscreen({ action: 'loadRecycleBin' });
-      assertOffscreenSuccess(r, key);
-      value = r.items;
-      break;
-    }
-    case 'list:system/permanent-deletes': {
-      const r = await requestOffscreen({ action: 'loadPermanentDeletes' });
-      assertOffscreenSuccess(r, key);
-      value = r.keys;
-      break;
-    }
     case 'list:system/shallow-page': {
       const r = await requestOffscreen({ action: 'loadShallowPageIndex' });
       assertOffscreenSuccess(r, key);
@@ -313,6 +301,12 @@ async function readFs(key) {
       const r = await requestOffscreen({ action: 'loadGateways' });
       assertOffscreenSuccess(r, key);
       value = r.origins;
+      break;
+    }
+    case 'list:system/orphaned': {
+      const r = await requestOffscreen({ action: 'loadOrphaned' });
+      assertOffscreenSuccess(r, key);
+      value = r.entity;
       break;
     }
     default: {
@@ -375,16 +369,6 @@ async function hydrateCache() {
       }
     }
   } catch (e) { console.warn('List metadata load failed:', e.message); }
-
-  try {
-    const rbResp = await requestOffscreen({ action: 'loadRecycleBin' });
-    if (rbResp?.success) await cacheSet('list:system/recycle-bin', rbResp.items);
-  } catch (e) { console.warn('Recycle bin load failed:', e.message); }
-
-  try {
-    const pdResp = await requestOffscreen({ action: 'loadPermanentDeletes' });
-    if (pdResp?.success) await cacheSet('list:system/permanent-deletes', pdResp.keys);
-  } catch (e) { console.warn('Permanent deletes load failed:', e.message); }
 
   try {
     const spResp = await requestOffscreen({ action: 'loadShallowPageIndex' });
@@ -1311,16 +1295,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'loadPermanentDeletes': {
-          try {
-            const keys = await readCacheable('list:system/permanent-deletes');
-            sendResponse({ success: true, keys });
-          } catch (error) {
-            sendResponse({ success: false, error: error.message });
-          }
-          break;
-        }
-
         case 'getGatewayDomains': {
           try {
             const origins = await readCacheable('list:system/gateways');
@@ -1471,18 +1445,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const noteSlug = generateNoteSlug(timestamp, request.excerpt);
 
           // Ensure parent page has a checkpoint so drain can update its children
-          // (same pattern as referrer handling in the visit flow)
           await ensureCheckpointIfMissing(sender?.tab?.url, sender?.tab?.title);
-          const effects = await addLog({
+
+          // 1. Write note content to filesystem first (not inlined in log)
+          await requestOffscreen({
+            action: 'saveNote',
+            slug: noteSlug,
+            data: {
+              slug: noteSlug,
+              excerpt: request.excerpt,
+              note: request.note || '',
+              cssPath: request.cssPath || null,
+              parentIds: [`page:${pageSlug}`],
+              childIds: [],
+              timestamp
+            }
+          });
+
+          // 2. Log only the relation (wire note as child of page)
+          await addLog({
             timestamp,
             action: 'note',
             slug: noteSlug,
-            excerpt: request.excerpt,
-            note: request.note || '',
-            cssPath: request.cssPath || null,
-            parentIds: [`page:${pageSlug}`],
-            childIds: []
+            parentIds: [`page:${pageSlug}`]
           });
+
           const notes = await requestOffscreen({ action: 'loadPageNotes', slug: pageSlug });
           sendResponse({ success: true, notes: notes.notes || [], noteSlug });
           notifyMutation('note', { pageSlug, noteSlug });
@@ -1491,14 +1478,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'deleteNote': {
           const noteSlug = request.noteSlug;
-          // Move to recycle bin via list operation
+
+          // Load note to get its parentIds for relation cleanup
+          const noteResp = await requestOffscreen({ action: 'loadNote', noteSlug });
+          const noteData = noteResp.note;
+          const parentIds = noteData?.parentIds || [];
+
+          // Log unlinks note from parents + adds to orphaned list.
+          // Note file stays on disk (replay idempotency).
           await addLog({
             timestamp: Date.now(),
-            action: 'list',
-            id: 'system/recycle-bin',
-            op: 'add',
-            keys: [`note:${noteSlug}`]
+            action: 'del_note',
+            slug: noteSlug,
+            parentIds
           });
+
           sendResponse({ success: true });
           notifyMutation('note', { noteSlug });
           break;
@@ -1506,13 +1500,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'updateNote': {
           const noteSlug = request.noteSlug;
-          const timestamp = Date.now();
-          await addLog({
-            timestamp,
-            action: 'note',
-            slug: noteSlug,
-            note: request.note
-          });
+          // Load current note, merge update, save directly to filesystem (no log entry)
+          const currentNote = await requestOffscreen({ action: 'loadNote', noteSlug: noteSlug });
+          const noteData = currentNote.note || {};
+          noteData.note = request.note;
+          noteData.timestamp = Date.now();
+          await requestOffscreen({ action: 'saveNote', slug: noteSlug, data: noteData });
           sendResponse({ success: true });
           notifyMutation('note', { noteSlug });
           break;
@@ -1580,23 +1573,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'savePermanentDeletes': {
-          const ts = Date.now();
-          await addLog({
-            timestamp: ts, action: 'list',
-            id: 'system/permanent-deletes', op: 'clear', keys: []
-          });
-          if (request.keys && request.keys.length > 0) {
-            await addLog({
-              timestamp: ts + 1, action: 'list',
-              id: 'system/permanent-deletes', op: 'add', keys: request.keys
-            });
-          }
-          sendResponse({ success: true });
-          notifyMutation('list:system/permanent-deletes');
-          break;
-        }
-
         case 'saveListMeta': {
           const metaEntry = { timestamp: Date.now(), action: 'list_meta', id: request.listId, name: request.name };
           if (request.qbTrees !== undefined) metaEntry.qbTrees = request.qbTrees;
@@ -1610,24 +1586,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           await addLog({ timestamp: Date.now(), action: 'del_list', id: request.listId });
           sendResponse({ success: true });
           notifyMutation('lists');
-          break;
-        }
-
-        case 'saveRecycleBin': {
-          const ts = Date.now();
-          await addLog({
-            timestamp: ts, action: 'list',
-            id: 'system/recycle-bin', op: 'clear', keys: []
-          });
-          if (request.items && request.items.length > 0) {
-            await addLog({
-              timestamp: ts + 1, action: 'list',
-              id: 'system/recycle-bin', op: 'add',
-              keys: request.items.map(item => item.key)
-            });
-          }
-          sendResponse({ success: true });
-          notifyMutation('list:system/recycle-bin');
           break;
         }
 

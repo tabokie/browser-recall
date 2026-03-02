@@ -150,10 +150,6 @@ async function hydrateCache(fsStorage, chromeStorage) {
   const lists = await fsStorage.loadAllListMetadata();
   cacheUpdate.lists = lists;
 
-  // Load recycle bin from its own file
-  const recycleBinItems = await fsStorage.loadRecycleBin();
-  cacheUpdate['list:system/recycle-bin'] = recycleBinItems;
-
   if (Object.keys(cacheUpdate).length > 0) await chromeStorage.set(cacheUpdate);
 
   // Load gateway origins from entity file
@@ -245,18 +241,12 @@ describe('Persistence round-trip', () => {
       { slug: 'c2', name: 'Rust Lang', qbTrees: [], pins: [] },
     ];
 
-    // Recycle bin in its own file
-    const recycleBinItems = [
-      { url: 'https://old.com', title: 'Old page', deletedAt: 1000 },
-    ];
-
     it('data survives chrome.storage.local.clear() + hydrateCache', async () => {
-      // 1. Persist settings + list files + recycle bin
+      // 1. Persist settings + list files
       await fs.saveSettings(initialSettings);
       for (const col of listMeta) {
         await fs.saveListMeta(col.slug, col);
       }
-      await fs.saveRecycleBin(recycleBinItems);
 
       // 2. Hydrate chrome cache (simulates startup)
       await hydrateCache(fs, chromeStorage);
@@ -283,7 +273,6 @@ describe('Persistence round-trip', () => {
       for (const col of listMeta) {
         await fs.saveListMeta(col.slug, col);
       }
-      await fs.saveRecycleBin(recycleBinItems);
       await hydrateCache(fs, chromeStorage);
 
       // Clear + re-hydrate
@@ -291,12 +280,11 @@ describe('Persistence round-trip', () => {
       await hydrateCache(fs, chromeStorage);
 
       const cached = await chromeStorage.get([
-        'settings', 'lists', 'list:system/recycle-bin',
+        'settings', 'lists',
       ]);
 
       expect(cached.settings).toEqual(initialSettings);
       expect(cached.lists).toEqual(listMeta);
-      expect(cached['list:system/recycle-bin']).toEqual(recycleBinItems);
     });
 
     it('logBuffer is not populated by hydrateCache (it is transient)', async () => {

@@ -130,7 +130,6 @@ const TEST_SETTINGS = {
   archiveQuality: 'medium',
   urlBlacklist: [],
   titleTrimRules: [],
-  permanentDeletes: [],
 };
 
 const FILES_NEWEST_FIRST = [
@@ -336,8 +335,6 @@ describe('Progressive loading', () => {
       case 'readCacheable':
         switch (msg.key) {
           case 'settings': return { success: true, value: TEST_SETTINGS };
-          case 'list:system/recycle-bin': return { success: true, value: [] };
-          case 'list:system/permanent-deletes': return { success: true, value: TEST_SETTINGS.permanentDeletes };
           case 'list:system/gateways': return { success: true, value: [] };
           case 'list:system/shallow-page': return { success: true, value: { timestamp: 0, index: {} } };
           default: {
@@ -358,8 +355,6 @@ describe('Progressive loading', () => {
   function populateCache() {
     sessionData = {
       settings: TEST_SETTINGS,
-      'list:system/recycle-bin': [],
-      'list:system/permanent-deletes': TEST_SETTINGS.permanentDeletes,
       'list:system/gateways': [],
     };
     // Individual list entity keys
@@ -414,11 +409,6 @@ describe('Progressive loading', () => {
   // ---------------------------------------------------------------------------
   // DOM assertion helpers
   // ---------------------------------------------------------------------------
-
-  function sidebarCategories() {
-    return [...document.querySelectorAll('.sidebar-item[data-category]')]
-      .map(el => el.dataset.category);
-  }
 
   function sidebarLists() {
     return [...document.querySelectorAll('#listsList .sidebar-item')]
@@ -477,7 +467,7 @@ describe('Progressive loading', () => {
     await tick(50);
 
     // Frames should be rendered from static HTML
-    expect(sidebarCategories()).toContain('recycleBin');
+    expect(document.getElementById('exploreBtn')).not.toBeNull();
     expect(mainTitle()).toBe('Explore'); // static HTML default
     expect(columnHeaders().length).toBeGreaterThan(0); // column headers in static HTML
 
@@ -499,8 +489,6 @@ describe('Progressive loading', () => {
     // loadLists() reads from settings.listOrder directly, so sidebar renders immediately.
     sessionData = {
       settings: TEST_SETTINGS,
-      'list:system/recycle-bin': [],
-      'list:system/permanent-deletes': TEST_SETTINGS.permanentDeletes,
       'list:system/gateways': [],
       // individual list:<slug> keys intentionally missing
     };
@@ -510,7 +498,7 @@ describe('Progressive loading', () => {
     await tick(200);
 
     // Frames visible
-    expect(sidebarCategories()).toContain('recycleBin');
+    expect(document.getElementById('exploreBtn')).not.toBeNull();
 
     // Explore view rendered
     expect(mainTitle()).toBe('Explore');
@@ -535,7 +523,7 @@ describe('Progressive loading', () => {
     expect(sidebarLists()).toContain('col-rust');
 
     // Frames visible
-    expect(sidebarCategories()).toContain('recycleBin');
+    expect(document.getElementById('exploreBtn')).not.toBeNull();
 
     // initHistoryFiles blocked → Promise.all blocked → showExplore hasn't run yet
     expect(listLayoutVisible()).toBe(false);
@@ -584,7 +572,7 @@ describe('Progressive loading', () => {
     expect(sidebarLists()).toContain('col-rust');
 
     // Sidebar categories still visible
-    expect(sidebarCategories()).toContain('recycleBin');
+    expect(document.getElementById('exploreBtn')).not.toBeNull();
 
     // Main title should reflect list
     expect(mainTitle()).toBe('Rust Lang');

@@ -1,0 +1,26 @@
+- Explain how we implemented deletion
+- Maintaining and applying a visibilty filter at Runtime is too costly. Let's redesign the type of deletion that we support. Fundamentally, deletion affects user in two ways: viewing checkpoints of page and lists, viewing search results. History is immutable by design, therefore we don't support deletion that may affect first-order search results. That means we cannot delete information inlined in history logs, including page visits and inlined notes/highlights. What we can delete, is second-order entities and relations. That includes lists, page relations, captures. These can be applied once and for all without later filtering.
+
+One minor issue is, we want user to have a consistent mental model around note deletion. Therefore maybe it is better to always store note/highlights seperately, like captures?
+- 1. Let's handle it similarly to captures. Persist note to json first, then append log to update childIds of page.
+2. Highlights are identical to notes, except with slightly more decoration fields. Highlights are { excerpt, note }, notes are { note }.
+3. I'm not sure if it's the status quo, but list is the parent of the pages it pins, notes are the children of the page. Therefore, deleting a list or note will cause changes in page relations. Let's only focus on these two cases right now. ANd the changes should be handled by event-replay system.
+4. There is no deleting a page now. Because the first-order information of a page (e.g. title, url) is always inlined in logs. We don't support page deletion.
+4. Recycle bin is nice to have. For deletion of notes or captures, let's physically move them to a recycle directory, and show a list in recycle bin UI. This list can be kept in another system list. User can view them as raw JSON or html, but we do not support restoring them.
+- Go ahead
+- Why did you create another log type "note_attach"? I thought the relations update should be a side effect of "note" log?
+- Continue
+- Wait, I meant when we are creating note, there are already a note type log? When we are deleting note, we should use a log such as "del_note".
+- Are you sure that now when we create a note, there won't be duplicate logs?
+- continue
+- continue
+- Why is there no e2e tests? Let's remember for functionality changes add E2E test first.
+- Review the code changes from this session thoroughly, then explain to me
+- The note deletion needs some work. We do not delete or move files outside of current replay system, we simply unlinks it. For example, note deletion immediately appends a log "del_note". During the replay of that log, we unlinks the note slug from its parents, and add it to the system list "orphaned". The note file on disk is never changed. This way we ensure the idempotency of log replay. The "orphaned" list will be rendered in recycle bin UI, and user can manually delete the files there.
+
+After this change, we need to record two TODOs: (1) support restoring deleted files, after all, the json file and capture file is still intact, we can recover the original relations later, (2) add guardrails to tolerate missing files during second-order file lookup, consider the case where user physically deleted a note/capture, and then we replay the entire history, the path will become invalid.
+- Handle list deletion similarly
+- Review with more details, also prepare to run data migration
+- apply it
+- I have two small questions. (1) Will user receive a notification to update note when offscreen fails to persist? (2) Will shallow-page index be updated when a list is deleted?
+- /finish 

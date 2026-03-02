@@ -11,10 +11,7 @@ import {
   defaultEntity,
   applyLogToSettings,
   applyLogToPage,
-  applyLogToNote,
   applyLogToPins,
-  applyLogToDeletes,
-  applyLogToRecycleBin,
   applyLogToShallowPage,
   applyLogToGateways,
 } from '../extension/replay.js';
@@ -281,69 +278,6 @@ describe('applyLogToPage — childIds from referrerId', () => {
 });
 
 // ---------------------------------------------------------------------------
-// applyLogToNote
-// ---------------------------------------------------------------------------
-
-describe('applyLogToNote', () => {
-  it('creates note with excerpt, note text, cssPath, parentIds', () => {
-    const noteEntity = { slug: '260223-hello-abc', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
-    const entry = { timestamp: 100, action: 'note', slug: '260223-hello-abc', excerpt: 'hello world', note: 'my note', cssPath: 'body > p', parentIds: ['page:some-slug'] };
-    const result = applyLogToNote(noteEntity, entry);
-    expect(result.excerpt).toBe('hello world');
-    expect(result.note).toBe('my note');
-    expect(result.cssPath).toBe('body > p');
-    expect(result.parentIds).toEqual(['page:some-slug']);
-    expect(result.timestamp).toBe(100);
-  });
-
-  it('updates note text without changing excerpt', () => {
-    const noteEntity = { slug: 'n1', timestamp: 100, excerpt: 'text', note: 'old', cssPath: 'p', parentIds: ['page:p1'], childIds: [] };
-    const entry = { timestamp: 200, action: 'note', slug: 'n1', note: 'updated' };
-    const result = applyLogToNote(noteEntity, entry);
-    expect(result.note).toBe('updated');
-    expect(result.excerpt).toBe('text'); // unchanged
-    expect(result.timestamp).toBe(200);
-  });
-
-  it('supports array excerpts (cross-block highlights)', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: ['block1', 'block2'], parentIds: ['page:p1'] };
-    const result = applyLogToNote(noteEntity, entry);
-    expect(result.excerpt).toEqual(['block1', 'block2']);
-  });
-
-  it('supports null excerpt (page-level note)', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: null, note: 'Page level note', parentIds: ['page:p1'] };
-    const result = applyLogToNote(noteEntity, entry);
-    expect(result.excerpt).toBeNull();
-    expect(result.note).toBe('Page level note');
-  });
-
-  it('ignores non-note entries', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
-    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
-    const result = applyLogToNote(noteEntity, entry);
-    expect(result).toBe(noteEntity);
-  });
-
-  it('ignores mismatched slug', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
-    const entry = { timestamp: 100, action: 'note', slug: 'n2', excerpt: 'text', parentIds: ['page:p1'] };
-    const result = applyLogToNote(noteEntity, entry);
-    expect(result).toBe(noteEntity);
-  });
-
-  it('is idempotent', () => {
-    const noteEntity = { slug: 'n1', timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', note: 'world', parentIds: ['page:p1'] };
-    const r1 = applyLogToNote(noteEntity, entry);
-    const r2 = applyLogToNote(r1, entry);
-    expect(r2).toEqual(r1);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // applyLogToPage — capture (via page)
 // ---------------------------------------------------------------------------
 
@@ -469,119 +403,6 @@ describe('applyLogToPins — del_list', () => {
 });
 
 // ---------------------------------------------------------------------------
-// applyLogToDeletes
-// ---------------------------------------------------------------------------
-
-describe('applyLogToDeletes', () => {
-  it('adds keys', () => {
-    const entity = { timestamp: 0, keys: ['page:old-slug'] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/permanent-deletes', op: 'add', keys: ['page:new-slug'] };
-    const result = applyLogToDeletes(entity, entry);
-    expect(result.keys).toEqual(['page:old-slug', 'page:new-slug']);
-    expect(result.timestamp).toBe(100);
-  });
-
-  it('removes keys', () => {
-    const entity = { timestamp: 0, keys: ['page:a', 'page:b'] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/permanent-deletes', op: 'del', keys: ['page:a'] };
-    const result = applyLogToDeletes(entity, entry);
-    expect(result.keys).toEqual(['page:b']);
-  });
-
-  it('clears keys', () => {
-    const entity = { timestamp: 0, keys: ['page:a'] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/permanent-deletes', op: 'clear', keys: [] };
-    const result = applyLogToDeletes(entity, entry);
-    expect(result.keys).toEqual([]);
-  });
-
-  it('ignores irrelevant entries', () => {
-    const entity = { timestamp: 0, keys: [] };
-    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
-    const result = applyLogToDeletes(entity, entry);
-    expect(result).toBe(entity);
-  });
-
-  it('ignores wrong id', () => {
-    const entity = { timestamp: 0, keys: [] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'add', keys: ['page:a'] };
-    const result = applyLogToDeletes(entity, entry);
-    expect(result).toBe(entity);
-  });
-
-  it('is idempotent for add', () => {
-    const entity = { timestamp: 0, keys: [] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/permanent-deletes', op: 'add', keys: ['page:a'] };
-    const r1 = applyLogToDeletes(entity, entry);
-    const r2 = applyLogToDeletes(r1, entry);
-    expect(r2.keys).toEqual(['page:a']);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// applyLogToRecycleBin
-// ---------------------------------------------------------------------------
-
-describe('applyLogToRecycleBin', () => {
-  it('adds items with key field', () => {
-    const entity = { timestamp: 0, items: [{ key: 'page:old', title: 'Old', deletedAt: 50 }] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'add', keys: ['page:new'] };
-    const result = applyLogToRecycleBin(entity, entry);
-    expect(result.items).toHaveLength(2);
-    expect(result.items[1].key).toBe('page:new');
-    expect(result.items[1].title).toBe('Untitled');
-    expect(result.items[1].deletedAt).toBe(100);
-    expect(result.timestamp).toBe(100);
-  });
-
-  it('adds note keys to recycle bin', () => {
-    const entity = { timestamp: 0, items: [] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'add', keys: ['note:n1'] };
-    const result = applyLogToRecycleBin(entity, entry);
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0].key).toBe('note:n1');
-  });
-
-  it('removes items by key', () => {
-    const entity = { timestamp: 0, items: [{ key: 'page:a', title: 'A', deletedAt: 50 }, { key: 'page:b', title: 'B', deletedAt: 60 }] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'del', keys: ['page:a'] };
-    const result = applyLogToRecycleBin(entity, entry);
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0].key).toBe('page:b');
-  });
-
-  it('clears items', () => {
-    const entity = { timestamp: 0, items: [{ key: 'page:a', title: 'A', deletedAt: 50 }] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'clear', keys: [] };
-    const result = applyLogToRecycleBin(entity, entry);
-    expect(result.items).toEqual([]);
-    expect(result.timestamp).toBe(100);
-  });
-
-  it('ignores irrelevant entries', () => {
-    const entity = { timestamp: 0, items: [] };
-    const entry = { timestamp: 100, action: 'set', key: 'workspace', value: {} };
-    const result = applyLogToRecycleBin(entity, entry);
-    expect(result).toBe(entity);
-  });
-
-  it('ignores wrong id', () => {
-    const entity = { timestamp: 0, items: [] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/permanent-deletes', op: 'add', keys: ['page:a'] };
-    const result = applyLogToRecycleBin(entity, entry);
-    expect(result).toBe(entity);
-  });
-
-  it('is idempotent for add', () => {
-    const entity = { timestamp: 0, items: [] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'add', keys: ['page:a'] };
-    const r1 = applyLogToRecycleBin(entity, entry);
-    const r2 = applyLogToRecycleBin(r1, entry);
-    expect(r2.items).toHaveLength(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // applyLogToPage — visitDates accumulation
 // ---------------------------------------------------------------------------
 
@@ -618,7 +439,7 @@ describe('applyLogToPage — visitDates', () => {
 
   it('does not add visitDates for non-page entries', () => {
     const page = { slug: 'a', timestamp: 0 };
-    const result = applyLogToPage(page, { timestamp: 100, action: 'note', slug: 'a', excerpt: 'x' });
+    const result = applyLogToPage(page, { timestamp: 100, action: 'note', slug: 'a' });
     expect(result.visitDates).toBeUndefined();
   });
 });
@@ -847,7 +668,7 @@ describe('applyLogToShallowPage', () => {
 
   it('ignores entries with non-page/list action', () => {
     const idx = { timestamp: 0, index: {} };
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'x' };
+    const entry = { timestamp: 100, action: 'note', slug: 'n1' };
     const result = applyLogToShallowPage(idx, entry);
     expect(result).toBe(idx);
   });
@@ -904,8 +725,8 @@ describe('sequence replay', () => {
     const r2 = applyLogToPage(page, { timestamp: 200, action: 'list', id: 'c1', op: 'clear', ids: [] });
     expect(r2).toBe(page);
 
-    // Deletes list entry should not affect page
-    const r3 = applyLogToPage(page, { timestamp: 300, action: 'list', id: 'system/permanent-deletes', op: 'clear', keys: [] });
+    // System list entry should not affect page
+    const r3 = applyLogToPage(page, { timestamp: 300, action: 'list', id: 'system/gateways', op: 'add', origins: ['https://a.com'] });
     expect(r3).toBe(page);
   });
 });
@@ -997,8 +818,45 @@ describe('effectOf scope', () => {
       return null;
     };
     const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, load);
-    expect(Object.keys(result).sort()).toEqual(['list:c1', 'settings']);
     expect(result['settings'].listOrder).toEqual([{ id: 'list:c2', name: 'B' }]);
+  });
+
+  it('del_list adds list key to system/orphaned', async () => {
+    const settings = { listOrder: [{ id: 'list:c1', name: 'A' }] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'A', qbTrees: [], pins: [] };
+    const load = async (key) => {
+      if (key === 'settings') return settings;
+      if (key === 'list:c1') return listEntity;
+      return null;
+    };
+    const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, load);
+    expect(result['list:system/orphaned']).toBeTruthy();
+    expect(result['list:system/orphaned'].keys).toContain('list:c1');
+  });
+
+  it('del_list removes list from shallow page SPI lists', async () => {
+    const settings = { listOrder: [{ id: 'list:c1', name: 'A' }] };
+    const listEntity = {
+      timestamp: 0, slug: 'c1', name: 'A', qbTrees: [],
+      pins: [{ id: 'shallow:https://a.com', pinnedAt: 50 }],
+    };
+    const spi = {
+      timestamp: 50,
+      index: {
+        'https://a.com': { parentIds: [], lists: ['list:c1', 'list:other'], title: 'A', user_title: null },
+      },
+    };
+    const load = async (key) => {
+      if (key === 'settings') return settings;
+      if (key === 'list:c1') return listEntity;
+      if (key === 'list:system/shallow-page') return spi;
+      return null;
+    };
+    const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, load);
+    expect(result['list:system/shallow-page']).toBeTruthy();
+    const entry = result['list:system/shallow-page'].index['https://a.com'];
+    expect(entry.lists).not.toContain('list:c1');
+    expect(entry.lists).toContain('list:other');
   });
 
   it('affects list key and settings for list_meta entries without settings', async () => {
@@ -1008,9 +866,105 @@ describe('effectOf scope', () => {
     expect(result['settings'].listOrder).toEqual([{ id: 'list:c1', name: 'Test' }]);
   });
 
-  it('affects list key for del_list entries without settings', async () => {
+  it('affects list key + orphaned for del_list entries without settings', async () => {
     const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, nullLoad);
-    expect(Object.keys(result)).toEqual(['list:c1']);
+    expect(Object.keys(result).sort()).toEqual(['list:c1', 'list:system/orphaned']);
+  });
+
+  // --- list→page parentIds wiring ---
+
+  it('list op:add adds list:<id> to pinned page parentIds', async () => {
+    const pageEntity = { slug: 'a-slug', timestamp: 0, parentIds: ['page:ref'], childIds: [] };
+    const load = async (key) => {
+      if (key === 'page:a-slug') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'list', id: 'my-list', op: 'add', ids: ['page:a-slug'] },
+      load,
+    );
+    expect(result['page:a-slug']).toBeTruthy();
+    expect(result['page:a-slug'].parentIds).toContain('list:my-list');
+    // Existing parentIds preserved
+    expect(result['page:a-slug'].parentIds).toContain('page:ref');
+  });
+
+  it('list op:add does not duplicate list ref in parentIds', async () => {
+    const pageEntity = { slug: 'a-slug', timestamp: 0, parentIds: ['list:my-list'], childIds: [] };
+    const load = async (key) => {
+      if (key === 'page:a-slug') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'list', id: 'my-list', op: 'add', ids: ['page:a-slug'] },
+      load,
+    );
+    expect(result['page:a-slug'].parentIds.filter(p => p === 'list:my-list')).toHaveLength(1);
+  });
+
+  it('list op:add skips shallow pins (no page entity update)', async () => {
+    const load = async () => null;
+    const result = await effectOf(
+      { timestamp: 100, action: 'list', id: 'my-list', op: 'add', ids: ['shallow:https://a.com'] },
+      load,
+    );
+    // Should have list + SPI keys, but no page: keys
+    expect(Object.keys(result).some(k => k.startsWith('page:'))).toBe(false);
+  });
+
+  it('list op:del removes list:<id> from unpinned page parentIds', async () => {
+    const pageEntity = { slug: 'a-slug', timestamp: 0, parentIds: ['page:ref', 'list:my-list'], childIds: [] };
+    const load = async (key) => {
+      if (key === 'page:a-slug') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'list', id: 'my-list', op: 'del', ids: ['page:a-slug'] },
+      load,
+    );
+    expect(result['page:a-slug']).toBeTruthy();
+    expect(result['page:a-slug'].parentIds).not.toContain('list:my-list');
+    expect(result['page:a-slug'].parentIds).toContain('page:ref');
+  });
+
+  it('del_list removes list:<id> from all pinned page parentIds', async () => {
+    const pageA = { slug: 'a-slug', timestamp: 0, parentIds: ['list:c1', 'page:ref'], childIds: [] };
+    const pageB = { slug: 'b-slug', timestamp: 0, parentIds: ['list:c1'], childIds: [] };
+    const listEntity = {
+      timestamp: 0, slug: 'c1', name: 'A', qbTrees: [], pins: [
+        { id: 'page:a-slug', pinnedAt: 50 },
+        { id: 'page:b-slug', pinnedAt: 60 },
+      ]
+    };
+    const settings = { listOrder: [{ id: 'list:c1', name: 'A' }] };
+    const load = async (key) => {
+      if (key === 'list:c1') return listEntity;
+      if (key === 'page:a-slug') return pageA;
+      if (key === 'page:b-slug') return pageB;
+      if (key === 'settings') return settings;
+      return null;
+    };
+    const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, load);
+    expect(result['page:a-slug'].parentIds).not.toContain('list:c1');
+    expect(result['page:a-slug'].parentIds).toContain('page:ref');
+    expect(result['page:b-slug'].parentIds).not.toContain('list:c1');
+    expect(result['page:b-slug'].parentIds).toEqual([]);
+  });
+
+  it('del_list skips shallow pins in parentIds cleanup', async () => {
+    const listEntity = {
+      timestamp: 0, slug: 'c1', name: 'A', qbTrees: [],
+      pins: [{ id: 'shallow:https://a.com', pinnedAt: 50 }]
+    };
+    const settings = { listOrder: [{ id: 'list:c1', name: 'A' }] };
+    const load = async (key) => {
+      if (key === 'list:c1') return listEntity;
+      if (key === 'settings') return settings;
+      return null;
+    };
+    const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, load);
+    // Should not have any page: keys
+    expect(Object.keys(result).some(k => k.startsWith('page:'))).toBe(false);
   });
 
   it('affects page + shallow_page keys for page entry with title', async () => {
@@ -1041,23 +995,109 @@ describe('effectOf scope', () => {
     expect(Object.keys(result).sort()).toEqual([`list:system/shallow-page`, `page:${slug}`].sort());
   });
 
-  it('affects note + parent keys for note entry', async () => {
+  it('note wires childIds on parent page without updating note entity', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: [] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
     const result = await effectOf(
-      { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'text', parentIds: ['page:p1'] },
+      { timestamp: 100, action: 'note', slug: 'n1', parentIds: ['page:p1'] },
+      load,
+    );
+    // Should only update parent page, not note entity
+    expect(Object.keys(result)).toEqual(['page:p1']);
+    expect(result['page:p1'].childIds).toContain('note:n1');
+  });
+
+  it('note does not duplicate existing childId', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['note:n1'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'note', slug: 'n1', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['page:p1'].childIds.filter(c => c === 'note:n1')).toHaveLength(1);
+  });
+
+  it('note skips missing parent pages', async () => {
+    const result = await effectOf(
+      { timestamp: 100, action: 'note', slug: 'n1', parentIds: ['page:missing'] },
       nullLoad,
     );
-    expect(Object.keys(result).sort()).toEqual(['note:n1', 'page:p1'].sort());
+    expect(result['page:missing']).toBeNull();
   });
 
-  it('affects recycle-bin key', async () => {
-    const result = await effectOf({ timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'add', keys: ['page:a'] }, nullLoad);
-    expect(Object.keys(result)).toEqual(['list:system/recycle-bin']);
+  // --- del_note: remove note from parent page childIds ---
+
+  it('del_note removes note from parent page childIds', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['note:n1', 'note:n2'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_note', slug: 'n1', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['page:p1'].childIds).toEqual(['note:n2']);
+    expect(result['page:p1'].childIds).not.toContain('note:n1');
   });
 
-  it('affects permanent-deletes key', async () => {
-    const result = await effectOf({ timestamp: 100, action: 'list', id: 'system/permanent-deletes', op: 'add', keys: ['page:a'] }, nullLoad);
-    expect(Object.keys(result)).toEqual(['list:system/permanent-deletes']);
+  it('del_note is safe when note not in childIds', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['note:other'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_note', slug: 'n1', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['page:p1'].childIds).toEqual(['note:other']);
   });
+
+  it('del_note skips missing parent pages', async () => {
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_note', slug: 'n1', parentIds: ['page:missing'] },
+      nullLoad,
+    );
+    expect(result['page:missing']).toBeNull();
+  });
+
+  it('del_note adds note key to system/orphaned list', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['note:n1'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_note', slug: 'n1', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['list:system/orphaned']).toBeTruthy();
+    expect(result['list:system/orphaned'].keys).toContain('note:n1');
+    expect(result['list:system/orphaned'].timestamp).toBe(100);
+  });
+
+  it('del_note does not duplicate key in orphaned list', async () => {
+    const orphaned = { timestamp: 50, keys: ['note:n1'] };
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['note:n1'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_note', slug: 'n1', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['list:system/orphaned'].keys.filter(k => k === 'note:n1')).toHaveLength(1);
+  });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -1084,13 +1124,6 @@ describe('defaultEntity', () => {
     expect(e).toEqual({ timestamp: 0, slug: 'uuid-1', name: '', qbTrees: [], pins: [] });
   });
 
-  it('returns recycle-bin default', () => {
-    expect(defaultEntity('list:system/recycle-bin')).toEqual({ timestamp: 0, items: [] });
-  });
-
-  it('returns permanent-deletes default', () => {
-    expect(defaultEntity('list:system/permanent-deletes')).toEqual({ timestamp: 0, keys: [] });
-  });
 
   it('returns shallow_page default', () => {
     expect(defaultEntity('list:system/shallow-page')).toEqual({ timestamp: 0, index: {} });
@@ -1147,19 +1180,19 @@ describe('effectOf apply', () => {
     expect(result[`page:${slug}`].url).toBe('https://a.com');
   });
 
-  it('note action creates note from null', async () => {
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parentIds: ['page:p1'] };
+  it('note wires childIds on parent page', async () => {
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', parentIds: ['page:p1'] };
     const store = { 'page:p1': { slug: 'p1', timestamp: 50, parentIds: [], childIds: [] } };
     const result = await effectOf(entry, async (key) => store[key] ?? null);
-    expect(result['note:n1']).not.toBeNull();
-    expect(result['note:n1'].excerpt).toBe('hello');
+    // note does NOT create/update note entity — only wires parent childIds
+    expect(result['note:n1']).toBeUndefined();
     expect(result['page:p1'].childIds).toContain('note:n1');
   });
 
-  it('note action leaves parent page null when parent has no checkpoint', async () => {
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parentIds: ['page:p1'] };
+  it('note leaves parent page null when parent has no checkpoint', async () => {
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', parentIds: ['page:p1'] };
     const result = await effectOf(entry, async () => null);
-    expect(result['note:n1']).not.toBeNull();
+    expect(result['note:n1']).toBeUndefined();
     expect(result['page:p1']).toBeNull();
   });
 
@@ -1225,22 +1258,6 @@ describe('effectOf apply', () => {
     expect(result['list:c1'].slug).toBe('c1');
   });
 
-  it('applies list entry to recycle-bin', async () => {
-    const entry = { timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'add', keys: ['page:a'] };
-    const result = await effectOf(entry, async (key) =>
-      key === 'list:system/recycle-bin' ? { timestamp: 0, items: [] } : null
-    );
-    expect(result['list:system/recycle-bin'].items).toHaveLength(1);
-  });
-
-  it('applies list entry to permanent-deletes', async () => {
-    const entry = { timestamp: 100, action: 'list', id: 'system/permanent-deletes', op: 'add', keys: ['page:a'] };
-    const result = await effectOf(entry, async (key) =>
-      key === 'list:system/permanent-deletes' ? { timestamp: 0, keys: [] } : null
-    );
-    expect(result['list:system/permanent-deletes'].keys).toEqual(['page:a']);
-  });
-
   it('applies page attention entry to page', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const entry = { timestamp: 200, action: 'page', url: 'https://a.com', scrollDepth: 0.5, timeOnPage: 3000 };
@@ -1282,19 +1299,16 @@ describe('effectOf', () => {
     expect(result[`page:${slug}`].url).toBe('https://a.com');
   });
 
-  it('creates note from null on note action', async () => {
-    const entry = { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parentIds: ['page:p1'] };
+  it('note wires childIds on parent page (effectOf idempotent)', async () => {
+    const entry = { timestamp: 100, action: 'note', slug: 'n1', parentIds: ['page:p1'] };
     const store = { 'page:p1': { slug: 'p1', timestamp: 50, parentIds: [], childIds: [] } };
     const result = await effectOf(entry, async (key) => store[key] ?? null);
-    expect(result['note:n1']).not.toBeNull();
-    expect(result['note:n1'].excerpt).toBe('hello');
     expect(result['page:p1'].childIds).toContain('note:n1');
   });
 
   it('page_checkpoint before note wires note into parent childIds (drain simulation)', async () => {
     // Simulates the correct drain sequence: page_checkpoint creates the page,
-    // then note entry adds to its childIds. This is the pattern background.js
-    // must follow — ensureCheckpointIfMissing before createNote.
+    // then note adds note to its childIds.
     const cache = new Map();
     const load = async (key) => cache.get(key) ?? null;
 
@@ -1308,15 +1322,15 @@ describe('effectOf', () => {
     const slug = generateSlugFromUrl('https://example.com/article');
     expect(cache.get(`page:${slug}`)).not.toBeNull();
 
-    // 2. note entry references that page as parent
+    // 2. note references that page as parent
     const r2 = await effectOf(
-      { timestamp: 100, action: 'note', slug: 'n1', excerpt: 'hello', parentIds: [`page:${slug}`] },
+      { timestamp: 100, action: 'note', slug: 'n1', parentIds: [`page:${slug}`] },
       load
     );
     for (const [k, v] of Object.entries(r2)) cache.set(k, v);
 
-    // Note created and wired into page childIds
-    expect(cache.get('note:n1')).not.toBeNull();
+    // Note entity NOT in cache (written directly to filesystem), but page childIds wired
+    expect(cache.get('note:n1')).toBeUndefined();
     expect(cache.get(`page:${slug}`).childIds).toContain('note:n1');
   });
 
@@ -1397,14 +1411,6 @@ describe('effectOf', () => {
     // Shallow page index entry absorbed into page — should be removed
     const shallowPageIndex = cache.get('list:system/shallow-page');
     expect(shallowPageIndex.index['https://child.com']).toBeUndefined();
-  });
-
-  it('note deletion via recycle bin', async () => {
-    const entry = { timestamp: 200, action: 'list', id: 'system/recycle-bin', op: 'add', keys: ['note:n1'] };
-    const store = { 'list:system/recycle-bin': { timestamp: 0, items: [] } };
-    const result = await effectOf(entry, async (key) => store[key] ?? null);
-    expect(result['list:system/recycle-bin'].items).toHaveLength(1);
-    expect(result['list:system/recycle-bin'].items[0].key).toBe('note:n1');
   });
 
   it('creates list from null on list_meta then adds pins (drain simulation)', async () => {
@@ -1645,7 +1651,7 @@ describe('applyLogToGateways', () => {
 
   it('ignores wrong id', () => {
     const entity = { timestamp: 0, origins: [] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/recycle-bin', op: 'add', keys: ['page:a'] };
+    const entry = { timestamp: 100, action: 'list', id: 'some-list', op: 'add', ids: ['page:a'] };
     const result = applyLogToGateways(entity, entry);
     expect(result).toBe(entity);
   });

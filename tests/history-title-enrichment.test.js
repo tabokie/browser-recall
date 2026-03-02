@@ -76,7 +76,6 @@ const TEST_SETTINGS = {
   archiveQuality: 'medium',
   urlBlacklist: [],
   titleTrimRules: [],
-  permanentDeletes: [],
 };
 
 // Page checkpoint returned by loadPageBatch
@@ -249,8 +248,6 @@ describe('History title enrichment', () => {
       case 'readCacheable':
         switch (msg.key) {
           case 'settings': return { success: true, value: TEST_SETTINGS };
-          case 'list:system/recycle-bin': return { success: true, value: [] };
-          case 'list:system/permanent-deletes': return { success: true, value: TEST_SETTINGS.permanentDeletes };
           case 'list:system/gateways': return { success: true, value: [] };
           case 'list:system/shallow-page': return { success: true, value: SPI_DATA };
           default: return { success: true, value: undefined };
@@ -290,8 +287,6 @@ describe('History title enrichment', () => {
   function populateCache() {
     sessionData = {
       settings: TEST_SETTINGS,
-      'list:system/recycle-bin': [],
-      'list:system/permanent-deletes': TEST_SETTINGS.permanentDeletes,
       'list:system/gateways': [],
       'list:system/shallow-page': SPI_DATA,
     };

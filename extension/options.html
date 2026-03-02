@@ -329,29 +329,6 @@
       fill: currentColor;
     }
 
-    .recycle-action-btn {
-      padding: 4px 12px;
-      background: none;
-      color: #5f6368;
-      border: 1px solid #dadce0;
-      border-radius: 16px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-
-    .recycle-action-btn:hover {
-      background: #f1f3f4;
-    }
-
-    .recycle-action-btn.danger {
-      color: #d93025;
-      border-color: #d93025;
-    }
-
-    .recycle-action-btn.danger:hover {
-      background: #fce8e6;
-    }
-
     /* ── Time chart ── */
     .time-chart {
       display: none;
@@ -1301,16 +1278,6 @@
       position: relative;
     }
 
-    .recycle-count {
-      font-size: 11px;
-      color: #9aa0a6;
-      flex-shrink: 0;
-    }
-
-    .recycle-count:empty {
-      display: none;
-    }
-
     .result-delete {
       width: var(--col-action);
       height: var(--col-action);
@@ -2102,14 +2069,6 @@
     </button>
 
     <div class="sidebar-content">
-      <div class="sidebar-item" data-category="recycleBin">
-        <span class="icon"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></span>
-        <span class="label">Recycle Bin</span>
-        <span class="recycle-count" id="recycleSidebarCount"></span>
-      </div>
-
-      <hr class="sidebar-separator">
-
       <div class="sidebar-section-label">Lists</div>
       <div id="listsList">
         <div class="lists-empty" id="listsEmpty">Pin a search to create a list</div>
@@ -2123,8 +2082,6 @@
       <span class="main-title" id="mainTitle">Explore</span>
       <input class="main-title-input" id="mainTitleInput" type="text" style="display:none">
       <button class="confirm-title-btn" id="confirmTitleBtn" style="display:none">&#x2713;</button>
-      <button class="recycle-action-btn" id="restoreAllBtn" style="display:none" title="Restore all items">Restore all</button>
-      <button class="recycle-action-btn danger" id="deleteAllBtn" style="display:none" title="Permanently delete all items">Delete all</button>
       <button class="pin-search-btn" id="pinSearchBtn" title="Save as list">
         Save
       </button>

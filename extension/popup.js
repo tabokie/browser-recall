@@ -762,16 +762,10 @@ async function showDashboard(tab) {
     return;
   }
 
-  // Skip blacklist if the page has visit history (previously captured and not deleted)
+  // Skip blacklist if the page has visit history (previously captured)
   let hasVisitHistory = false;
-  const [resp, recycleBin, permanentDeletes] = await Promise.all([
-    chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url }),
-    readCacheable('list:system/recycle-bin'),
-    readCacheable('list:system/permanent-deletes')
-  ]);
-  const recycled = recycleBin.some(item => item.url === tab.url);
-  const permDeleted = permanentDeletes.includes(tab.url);
-  hasVisitHistory = !!(resp && resp.interaction) && !recycled && !permDeleted;
+  const resp = await chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url });
+  hasVisitHistory = !!(resp && resp.interaction);
 
   // Check blacklist only for pages with no visit history
   const urlBlacklist = (await readCacheable('settings')).urlBlacklist;

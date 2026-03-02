@@ -47,10 +47,9 @@ export function defaultEntity(key) {
     return { slug, timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
   }
   if (key === 'settings') return { timestamp: 0 };
-  if (key === 'list:system/recycle-bin') return { timestamp: 0, items: [] };
-  if (key === 'list:system/permanent-deletes') return { timestamp: 0, keys: [] };
   if (key === 'list:system/shallow-page') return { timestamp: 0, index: {} };
   if (key === 'list:system/gateways') return { timestamp: 0, origins: [] };
+  if (key === 'list:system/orphaned') return { timestamp: 0, keys: [] };
   if (key.startsWith('list:')) {
     const slug = key.slice('list:'.length);
     return { timestamp: 0, slug, name: '', qbTrees: [], pins: [] };
@@ -92,11 +91,7 @@ export async function effectOf(entry, load) {
   if (entry.action === 'list' || entry.action === 'list_meta' || entry.action === 'del_list') {
     const listKey = `list:${entry.id}`;
     const entity = await loadOrDefault(listKey, load);
-    if (listKey === 'list:system/recycle-bin') {
-      result[listKey] = applyLogToRecycleBin(entity, entry);
-    } else if (listKey === 'list:system/permanent-deletes') {
-      result[listKey] = applyLogToDeletes(entity, entry);
-    } else if (listKey === 'list:system/gateways') {
+    if (listKey === 'list:system/gateways') {
       result[listKey] = applyLogToGateways(entity, entry);
     } else {
       result[listKey] = applyLogToPins(entity, entry);
@@ -169,16 +164,61 @@ export async function effectOf(entry, load) {
       }
     }
 
+    // list pin/unpin → update page parentIds with list:<id>
+    if (entry.action === 'list' && entry.ids && !listKey.startsWith('list:system/')) {
+      const pageIds = entry.ids.filter(id => id.startsWith(PAGE_PREFIX));
+      for (const pageKey of pageIds) {
+        const page = await load(pageKey);
+        if (!page) continue;
+        const parentIds = [...(page.parentIds || [])];
+        if (entry.op === 'add') {
+          if (!parentIds.includes(listKey)) parentIds.push(listKey);
+        } else if (entry.op === 'del') {
+          const idx = parentIds.indexOf(listKey);
+          if (idx >= 0) parentIds.splice(idx, 1);
+        }
+        result[pageKey] = { ...page, parentIds };
+      }
+    }
+
+    // del_list → remove list:<id> from all pinned page parentIds + clean SPI + orphan
+    if (entry.action === 'del_list' && !listKey.startsWith('list:system/')) {
+      const pins = entity.pins || [];
+      const shallowUrls = [];
+      for (const pin of pins) {
+        if (pin.id.startsWith(PAGE_PREFIX)) {
+          const page = await load(pin.id);
+          if (!page) continue;
+          const parentIds = (page.parentIds || []).filter(p => p !== listKey);
+          result[pin.id] = { ...page, parentIds };
+        } else if (pin.id.startsWith(SHALLOW_PREFIX)) {
+          shallowUrls.push(pin.id.slice(SHALLOW_PREFIX.length));
+        }
+      }
+      // Remove list from SPI lists for shallow pins
+      if (shallowUrls.length > 0) {
+        const spi = result['list:system/shallow-page'] || await loadOrDefault('list:system/shallow-page', load);
+        const index = { ...spi.index };
+        for (const url of shallowUrls) {
+          if (index[url]) {
+            index[url] = { ...index[url], lists: (index[url].lists || []).filter(l => l !== listKey) };
+          }
+        }
+        result['list:system/shallow-page'] = { ...spi, timestamp: entry.timestamp, index };
+      }
+      // Add to orphaned list
+      const orphaned = await loadOrDefault('list:system/orphaned', load);
+      const keys = [...(orphaned.keys || [])];
+      if (!keys.includes(listKey)) keys.push(listKey);
+      result['list:system/orphaned'] = { ...orphaned, timestamp: entry.timestamp, keys };
+    }
+
     return result;
   }
 
-  // --- note ---
+  // --- note: wire note as child of parent pages (content is on disk, not in log) ---
   if (entry.action === 'note') {
     const noteKey = `${NOTE_PREFIX}${entry.slug}`;
-    const note = (await load(noteKey)) ?? defaultEntity(noteKey);
-    result[noteKey] = applyLogToNote(note, entry);
-
-    // Load parent pages and wire childIds
     if (entry.parentIds) {
       for (const parentKey of entry.parentIds) {
         const parent = await load(parentKey);
@@ -188,6 +228,25 @@ export async function effectOf(entry, load) {
         result[parentKey] = { ...parent, childIds };
       }
     }
+    return result;
+  }
+
+  // --- del_note: unlink note from parents + add to orphaned list ---
+  if (entry.action === 'del_note') {
+    const noteKey = `${NOTE_PREFIX}${entry.slug}`;
+    if (entry.parentIds) {
+      for (const parentKey of entry.parentIds) {
+        const parent = await load(parentKey);
+        if (!parent) { result[parentKey] = null; continue; }
+        const childIds = (parent.childIds || []).filter(c => c !== noteKey);
+        result[parentKey] = { ...parent, childIds };
+      }
+    }
+    // Add to orphaned list
+    const orphaned = await loadOrDefault('list:system/orphaned', load);
+    const keys = [...(orphaned.keys || [])];
+    if (!keys.includes(noteKey)) keys.push(noteKey);
+    result['list:system/orphaned'] = { ...orphaned, timestamp: entry.timestamp, keys };
     return result;
   }
 
@@ -419,26 +478,6 @@ export function applyLogToPage(page, entry) {
 }
 
 /**
- * Apply a log entry to a note entity.
- * Handles:
- *   - note: create/update note (excerpt, note text, cssPath, parentIds, childIds)
- * Returns new note object (or original if entry is irrelevant).
- */
-export function applyLogToNote(noteEntity, entry) {
-  if (entry.action !== 'note') return noteEntity;
-  if (entry.slug !== noteEntity.slug) return noteEntity;
-
-  const updated = { ...noteEntity };
-  if (entry.excerpt !== undefined) updated.excerpt = entry.excerpt;
-  if (entry.note !== undefined) updated.note = entry.note;
-  if (entry.cssPath !== undefined) updated.cssPath = entry.cssPath;
-  if (entry.parentIds !== undefined) updated.parentIds = entry.parentIds;
-  if (entry.childIds !== undefined) updated.childIds = entry.childIds;
-  updated.timestamp = entry.timestamp;
-  return updated;
-}
-
-/**
  * Apply a log entry to a list entity (self-describing file).
  * Entity: { timestamp, id, name, qbTrees, pins: [...] }
  * Handles:
@@ -478,37 +517,6 @@ export function applyLogToPins(pinsEntity, entry) {
     return { timestamp: entry.timestamp, deleted: true };
   }
   return pinsEntity;
-}
-
-/**
- * Apply a log entry to a recycle-bin entity.
- * Entity: { timestamp, items: [...] }
- * Entry: { timestamp, action: 'list', id: 'system/recycle-bin', op: 'add'|'del'|'clear', keys: [...] }
- * Returns new entity (or original if entry is irrelevant).
- */
-export function applyLogToRecycleBin(recycleBinEntity, entry) {
-  if (entry.action !== 'list' || entry.id !== 'system/recycle-bin') return recycleBinEntity;
-
-  const updated = { timestamp: entry.timestamp };
-  let items = [...(recycleBinEntity.items || [])];
-
-  if (entry.op === 'clear') {
-    updated.items = [];
-  } else if (entry.op === 'add' && entry.keys) {
-    for (const key of entry.keys) {
-      if (!items.some(item => item.key === key)) {
-        items.push({ key, title: 'Untitled', deletedAt: entry.timestamp });
-      }
-    }
-    updated.items = items;
-  } else if (entry.op === 'del' && entry.keys) {
-    items = items.filter(item => !entry.keys.includes(item.key));
-    updated.items = items;
-  } else {
-    updated.items = items;
-  }
-
-  return updated;
 }
 
 /**
@@ -588,37 +596,6 @@ export function applyLogToShallowPage(shallowPageIndex, entry) {
   }
 
   return shallowPageIndex;
-}
-
-/**
- * Apply a log entry to a permanent-deletes entity.
- * Entity: { timestamp, keys: [...] }
- * Entry: { timestamp, action: 'list', id: 'system/permanent-deletes', op: 'add'|'del'|'clear', keys: [...] }
- * Returns new entity (or original if entry is irrelevant).
- */
-export function applyLogToDeletes(deletesEntity, entry) {
-  if (entry.action !== 'list' || entry.id !== 'system/permanent-deletes') return deletesEntity;
-
-  const updated = { timestamp: entry.timestamp };
-  let keys = [...(deletesEntity.keys || [])];
-
-  if (entry.op === 'clear') {
-    updated.keys = [];
-  } else if (entry.op === 'add' && entry.keys) {
-    for (const key of entry.keys) {
-      if (!keys.includes(key)) {
-        keys.push(key);
-      }
-    }
-    updated.keys = keys;
-  } else if (entry.op === 'del' && entry.keys) {
-    keys = keys.filter(k => !entry.keys.includes(k));
-    updated.keys = keys;
-  } else {
-    updated.keys = keys;
-  }
-
-  return updated;
 }
 
 /**

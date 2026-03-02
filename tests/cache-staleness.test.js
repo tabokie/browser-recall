@@ -104,7 +104,6 @@ const TEST_SETTINGS = {
   archiveQuality: 'medium',
   urlBlacklist: [],
   titleTrimRules: [],
-  permanentDeletes: [],
 };
 
 const FILES_NEWEST_FIRST = [
@@ -320,8 +319,6 @@ describe('Cache staleness', () => {
         // Simulate background readCacheable: dispatch to known handlers
         switch (msg.key) {
           case 'settings': return { success: true, value: TEST_SETTINGS };
-          case 'list:system/recycle-bin': return { success: true, value: [] };
-          case 'list:system/permanent-deletes': return { success: true, value: [] };
           case 'list:system/gateways': return { success: true, value: [] };
           case 'list:system/shallow-page': return { success: true, value: { timestamp: 0, index: {} } };
           default: return { success: true, value: undefined };
@@ -339,8 +336,6 @@ describe('Cache staleness', () => {
     // Session-cached keys (settings as single object, individual list keys, entity keys for system lists)
     sessionData = {
       settings: TEST_SETTINGS,
-      'list:system/recycle-bin': [],
-      'list:system/permanent-deletes': TEST_SETTINGS.permanentDeletes,
       'list:system/gateways': [],
     };
     // Individual list entity keys
@@ -626,30 +621,6 @@ describe('Cache staleness', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // T6: logBuffer with mutation entries doesn't break recycle bin count
-  // ---------------------------------------------------------------------------
-  it('T6: recycle bin count renders with logBuffer mutation entries', async () => {
-    populateCache();
-    // Add some recycled items to session cache
-    sessionData['list:system/recycle-bin'] = [
-      { url: 'https://deleted.com', title: 'Deleted', deletedAt: Date.now() },
-      { url: 'https://alsogone.com', title: 'Also Gone', deletedAt: Date.now() },
-    ];
-    // Put mutation entries (non-visit) in logBuffer
-    localData.logBuffer = [
-      { timestamp: Date.now(), action: 'set', key: 'workspace', value: {} },
-      { timestamp: Date.now(), action: 'highlight', slug: 'x', highlight: { text: 'hi' } },
-    ];
-
-    await importOptions();
-    await tick(100);
-
-    // Recycle bin sidebar count should show "2"
-    const countEl = document.getElementById('recycleSidebarCount');
-    expect(countEl).not.toBeNull();
-    expect(countEl.textContent).toBe('2');
-  });
-
   // ---------------------------------------------------------------------------
   // T7: list with no query still shows related pages from history
   // ---------------------------------------------------------------------------
@@ -999,21 +970,16 @@ describe('Cache staleness', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // T15: empty session cache (disable/re-enable) still loads lists and recycle bin
+  // T15: empty session cache (disable/re-enable) still loads lists via fallback
   // ---------------------------------------------------------------------------
-  it('T15: empty session cache still loads lists and recycle bin via fallback', async () => {
+  it('T15: empty session cache still loads lists via fallback', async () => {
     // Do NOT call populateCache() — simulate disable/re-enable clearing session
     sessionData = {};
     localData = { logBuffer: [] };
 
     // Background would handle these actions after hydration
-    const TEST_RECYCLE_BIN = [
-      { url: 'https://deleted.com', title: 'Deleted Page', deletedAt: Date.now() },
-    ];
     actionOverrides['readCacheable'] = (msg) => {
       if (msg.key === 'settings') return { success: true, value: TEST_SETTINGS };
-      if (msg.key === 'list:system/recycle-bin') return { success: true, value: TEST_RECYCLE_BIN };
-      if (msg.key === 'list:system/permanent-deletes') return { success: true, value: [] };
       // Return individual list entities by slug
       for (const list of TEST_LISTS) {
         if (msg.key === 'list:' + list.slug) return { success: true, value: list };
@@ -1027,10 +993,6 @@ describe('Cache staleness', () => {
     // Lists should render in sidebar
     const collItems = document.querySelectorAll('#listsList .sidebar-item');
     expect(collItems.length, 'lists sidebar should have items').toBe(TEST_LISTS.length);
-
-    // Recycle bin count should show
-    const countEl = document.getElementById('recycleSidebarCount');
-    expect(countEl.textContent, 'recycle bin count should show 1').toBe('1');
   });
 
   // ---------------------------------------------------------------------------

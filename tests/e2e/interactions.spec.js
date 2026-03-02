@@ -160,4 +160,149 @@ test.describe('Interactions — likes, notes, attention', () => {
     expect(pageEntity.value).toBeTruthy();
     expect(pageEntity.value.childIds).toContain(`note:${noteSlug}`);
   });
+
+  test('createNote writes content to filesystem, log entry has no content', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: 'history/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      ]},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    const noteResult = await helper.evaluate(({ slug }) =>
+      chrome.runtime.sendMessage({
+        action: 'createNote', pageSlug: slug,
+        excerpt: 'Saved to disk', note: 'My annotation', cssPath: 'div > p',
+      })
+    , { slug: TEST_SLUG });
+    expect(noteResult.success).toBe(true);
+    const noteSlug = noteResult.noteSlug;
+
+    // Note content should be on disk (readable via loadNote)
+    const noteOnDisk = await helper.evaluate((slug) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: `note:${slug}` })
+    , noteSlug);
+    expect(noteOnDisk.value).toBeTruthy();
+    expect(noteOnDisk.value.excerpt).toBe('Saved to disk');
+    expect(noteOnDisk.value.note).toBe('My annotation');
+
+    // Flush log to disk so we can inspect JSONL
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+    );
+
+    // Load today's history and find the note entry — it should NOT have content
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const history = await helper.evaluate((date) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: `history:${date}` })
+    , todayStr);
+
+    const noteEntry = (history.value || []).find(e => e.action === 'note' && e.slug === noteSlug);
+    expect(noteEntry).toBeTruthy();
+    expect(noteEntry.excerpt).toBeUndefined();
+    expect(noteEntry.note).toBeUndefined();
+    expect(noteEntry.cssPath).toBeUndefined();
+    expect(noteEntry.parentIds).toBeTruthy(); // relation is logged
+
+    await helper.close();
+  });
+
+  test('deleteNote unlinks note from parent childIds and adds to orphaned list', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const noteSlug = '260301-test-note-abc';
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [`note:${noteSlug}`],
+      }},
+      { path: `notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: 'Hello', note: 'World', cssPath: 'p',
+        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Delete the note
+    const delResult = await helper.evaluate((slug) =>
+      chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug: slug })
+    , noteSlug);
+    expect(delResult.success).toBe(true);
+
+    // Parent page should no longer have note in childIds
+    const pageEntity = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${TEST_SLUG}`);
+    expect(pageEntity.value).toBeTruthy();
+    expect(pageEntity.value.childIds).not.toContain(`note:${noteSlug}`);
+
+    // Note file should still exist on disk (not physically deleted)
+    const noteOnDisk = await helper.evaluate((slug) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: `note:${slug}` })
+    , noteSlug);
+    expect(noteOnDisk.value).toBeTruthy();
+    expect(noteOnDisk.value.excerpt).toBe('Hello');
+
+    // Note should be in orphaned list
+    const orphaned = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+    );
+    expect(orphaned.value).toBeTruthy();
+    expect(orphaned.value.keys).toContain(`note:${noteSlug}`);
+
+    await helper.close();
+  });
+
+  test('updateNote writes directly to disk without log entry', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const noteSlug = '260301-update-test';
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [`note:${noteSlug}`],
+      }},
+      { path: `notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: 'Original', note: 'Old text', cssPath: 'p',
+        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Update the note text
+    const updateResult = await helper.evaluate(({ slug }) =>
+      chrome.runtime.sendMessage({ action: 'updateNote', noteSlug: slug, note: 'New text' })
+    , { slug: noteSlug });
+    expect(updateResult.success).toBe(true);
+
+    // Note should have updated text on disk
+    const noteOnDisk = await helper.evaluate((slug) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: `note:${slug}` })
+    , noteSlug);
+    expect(noteOnDisk.value).toBeTruthy();
+    expect(noteOnDisk.value.note).toBe('New text');
+    expect(noteOnDisk.value.excerpt).toBe('Original'); // unchanged
+
+    // Flush and check no 'note' log entry was created for the update
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+    );
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const history = await helper.evaluate((date) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: `history:${date}` })
+    , todayStr);
+    const noteEntries = (history.value || []).filter(e => e.action === 'note' && e.slug === noteSlug);
+    expect(noteEntries).toHaveLength(0); // no log entry for update
+
+    await helper.close();
+  });
 });

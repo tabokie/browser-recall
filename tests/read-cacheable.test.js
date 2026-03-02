@@ -64,11 +64,6 @@ describe('background.js structural checks', () => {
     expect(match[1]).toMatch(/success:\s*true/);
   });
 
-  it('loadPermanentDeletes handler uses readCacheable', () => {
-    const match = bgSource.match(/case\s+'loadPermanentDeletes'\s*:\s*\{([\s\S]*?)break;\s*\}/);
-    expect(match).not.toBeNull();
-    expect(match[1]).toMatch(/readCacheable\s*\(\s*'list:system\/permanent-deletes'\s*\)/);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -108,10 +103,6 @@ describe('readCacheable / readFs', () => {
         return { success: true, settings: TEST_SETTINGS };
       case 'loadAllListMetadata':
         return { success: true, lists: [{ slug: 'a', name: 'A' }, { slug: 'b', name: 'B' }] };
-      case 'loadRecycleBin':
-        return { success: true, items: [{ url: 'https://del.com', deletedAt: 123 }] };
-      case 'loadPermanentDeletes':
-        return { success: true, keys: ['page:slug1', 'page:slug2'] };
       case 'loadShallowPageIndex':
         return { success: true, timestamp: 42, index: { 'https://a.com': { parentIds: ['s1'] } } };
       case 'loadGateways':
@@ -143,14 +134,6 @@ describe('readCacheable / readFs', () => {
           const resp = requestOffscreen({ action: 'loadSettings' });
           value = resp?.settings || {};
           break;
-        }
-        case 'list:system/recycle-bin': {
-          const r = requestOffscreen({ action: 'loadRecycleBin' });
-          value = r?.items || []; break;
-        }
-        case 'list:system/permanent-deletes': {
-          const r = requestOffscreen({ action: 'loadPermanentDeletes' });
-          value = r?.keys || []; break;
         }
         case 'list:system/shallow-page': {
           const r = requestOffscreen({ action: 'loadShallowPageIndex' });
@@ -209,20 +192,6 @@ describe('readCacheable / readFs', () => {
     const result = await getListOrder();
     expect(result).toEqual(TEST_SETTINGS.listOrder);
     expect(offscreenCalls.some(c => c.action === 'loadSettings')).toBe(true);
-  });
-
-  it('falls back to filesystem for recycle-bin and caches result', async () => {
-    const result = await readCacheable('list:system/recycle-bin');
-    expect(result).toEqual([{ url: 'https://del.com', deletedAt: 123 }]);
-    expect(offscreenCalls.some(c => c.action === 'loadRecycleBin')).toBe(true);
-    expect(session._store['list:system/recycle-bin']).toEqual([{ url: 'https://del.com', deletedAt: 123 }]);
-  });
-
-  it('falls back to filesystem for permanent-deletes and caches result', async () => {
-    const result = await readCacheable('list:system/permanent-deletes');
-    expect(result).toEqual(['page:slug1', 'page:slug2']);
-    expect(offscreenCalls.some(c => c.action === 'loadPermanentDeletes')).toBe(true);
-    expect(session._store['list:system/permanent-deletes']).toEqual(['page:slug1', 'page:slug2']);
   });
 
   it('falls back to filesystem for shallow-page and caches result', async () => {
@@ -447,17 +416,6 @@ describe('background.js readFs handles user list keys', () => {
 // ---------------------------------------------------------------------------
 // offscreen.js field mismatch — structural verification
 // ---------------------------------------------------------------------------
-describe('offscreen.js loadPermanentDeletes response', () => {
-  const offscreenSource = readFileSync(resolve(extDir, 'offscreen.js'), 'utf-8');
-
-  it('uses "keys" not "urls" in loadPermanentDeletes response', () => {
-    // The response should use `keys` to match all consumers
-    const caseBlock = offscreenSource.match(/case\s+'loadPermanentDeletes'\s*:\s*\{([\s\S]*?)\}/);
-    expect(caseBlock).not.toBeNull();
-    expect(caseBlock[1]).toMatch(/\bkeys\b/);
-    expect(caseBlock[1]).not.toMatch(/\burls\b/);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // options.js loadGatewayDomains — structural verification

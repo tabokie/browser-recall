@@ -107,6 +107,16 @@ async function handleRequest(request) {
         return { success: true, note };
       }
 
+      case 'saveNote': {
+        await fsStorage.saveNote(request.slug, request.data);
+        return { success: true };
+      }
+
+      case 'deleteNote': {
+        await fsStorage.deleteNote(request.noteSlug);
+        return { success: true };
+      }
+
       case 'loadPageNotes': {
         const t0 = performance.now();
         const notes = await fsStorage.loadPageNotes(request.slug);
@@ -167,11 +177,14 @@ async function handleRequest(request) {
         return { success: true, entity };
       }
 
-      case 'loadPermanentDeletes': {
-        const t0 = performance.now();
-        const keys = await fsStorage.loadPermanentDeletes();
-        console.debug(`[I/O] loadPermanentDeletes: ${keys.length} keys in ${(performance.now() - t0).toFixed(1)}ms`);
-        return { success: true, keys };
+      case 'loadOrphaned': {
+        try {
+          const fh = await fsStorage.resolveFile('lists/system/orphaned.json');
+          const entity = await fsStorage.readJson(fh);
+          return { success: true, entity };
+        } catch {
+          return { success: true, entity: { timestamp: 0, keys: [] } };
+        }
       }
 
       case 'loadSettings': {
@@ -237,13 +250,6 @@ async function handleRequest(request) {
         const lists = await fsStorage.loadAllListMetadata();
         console.debug(`[I/O] loadAllListMetadata: ${lists.length} lists in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, lists };
-      }
-
-      case 'loadRecycleBin': {
-        const t0 = performance.now();
-        const items = await fsStorage.loadRecycleBin();
-        console.debug(`[I/O] loadRecycleBin: ${items.length} items in ${(performance.now() - t0).toFixed(1)}ms`);
-        return { success: true, items };
       }
 
       // Force-flush the log buffer to disk
@@ -396,18 +402,6 @@ async function drainQueue() {
         } else {
           roundCache.set(key, null);
         }
-      } else if (key.startsWith('note:')) {
-        const slug = key.slice(5);
-        try {
-          const note = await fsStorage.loadNote(slug);
-          if (note) {
-            roundCache.set(key, note);
-          } else {
-            roundCache.set(key, null);
-          }
-        } catch {
-          roundCache.set(key, null);
-        }
       } else if (key === 'settings') {
         let s = await fsStorage.loadSettings();
         if (!s.timestamp) s.timestamp = 0;
@@ -415,10 +409,13 @@ async function drainQueue() {
       } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
         const listId = key.slice('list:'.length);
         roundCache.set(key, await fsStorage.loadListPinsEntity(listId));
-      } else if (key === 'list:system/recycle-bin') {
-        roundCache.set(key, await fsStorage.loadRecycleBinEntity());
-      } else if (key === 'list:system/permanent-deletes') {
-        roundCache.set(key, await fsStorage.loadPermanentDeletesEntity());
+      } else if (key === 'list:system/orphaned') {
+        try {
+          const fh = await fsStorage.resolveFile('lists/system/orphaned.json');
+          roundCache.set(key, await fsStorage.readJson(fh));
+        } catch {
+          roundCache.set(key, defaultEntity(key));
+        }
       } else if (key === 'list:system/shallow-page') {
         try {
           roundCache.set(key, await fsStorage.loadShallowPageIndex());
@@ -484,21 +481,21 @@ async function drainQueue() {
       if (key.startsWith('page:')) {
         const slug = key.slice(5);
         await withLock('pages/' + slug + '.json', () => fsStorage.savePage(slug, entity));
-      } else if (key.startsWith('note:')) {
-        const slug = key.slice(5);
-        await withLock('notes/' + slug + '.json', () => fsStorage.saveNote(slug, entity));
       } else if (key === 'settings') {
         await withLock('settings.json', () => fsStorage.saveSettings(entity));
       } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
         const listId = key.slice('list:'.length);
-        await withLock('lists/' + listId + '.json', async () => {
-          if (entity.deleted) await fsStorage.deleteListFile(listId);
-          else await fsStorage.saveListMeta(listId, entity, entity.timestamp);
+        // Skip deleted lists — file stays on disk (orphaned, not physically removed)
+        if (!entity.deleted) {
+          await withLock('lists/' + listId + '.json', async () => {
+            await fsStorage.saveListMeta(listId, entity, entity.timestamp);
+          });
+        }
+      } else if (key === 'list:system/orphaned') {
+        await withLock('lists/system/orphaned.json', async () => {
+          const fh = await fsStorage.resolveFile('lists/system/orphaned.json', { create: true });
+          await fsStorage.writeJson(fh, entity);
         });
-      } else if (key === 'list:system/recycle-bin') {
-        await withLock('lists/system/recycle-bin.json', () => fsStorage.saveRecycleBin(entity.items, entity.timestamp));
-      } else if (key === 'list:system/permanent-deletes') {
-        await withLock('lists/system/permanent-deletes.json', () => fsStorage.savePermanentDeletes(entity.keys, entity.timestamp));
       } else if (key === 'list:system/shallow-page') {
         await withLock('lists/system/shallow-page.json', async () => {
           const fh = await fsStorage.resolveFile('lists/system/shallow-page.json', { create: true });

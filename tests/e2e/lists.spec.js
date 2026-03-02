@@ -519,6 +519,33 @@ test.describe('List operations', () => {
     expect(order.find(e => e.id === 'list:remove')).toBeUndefined();
   });
 
+  test('deleteList adds list key to orphaned list', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: {
+        trimRules: [],
+        listOrder: [{ id: 'list:doomed', name: 'Doomed' }],
+      }},
+      { path: 'lists/doomed.json', data: {
+        slug: 'doomed', name: 'Doomed', timestamp: now, pins: [], qbTrees: [],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'deleteList', listId: 'doomed' })
+    );
+
+    // List key should be in orphaned list
+    const orphaned = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+    );
+    expect(orphaned.value).toBeTruthy();
+    expect(orphaned.value.keys).toContain('list:doomed');
+
+    await helper.close();
+  });
+
   // Bug 20260226: unpin should emit a single 'del' op, not 'clear' then 'add'.
   // Verify by checking that after unpin, the other pins remain intact.
   test('unpin one page leaves other pins intact', async ({ extContext, extensionId, setupDir }) => {
@@ -567,5 +594,120 @@ test.describe('List operations', () => {
 
     expect(pinsResult.pins.length).toBe(1);
     expect(pinsResult.pins[0].id).toBe(`page:${slug2}`);
+  });
+
+  test('pin adds list to page parentIds', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: {
+        trimRules: [],
+        listOrder: [{ id: 'list:reading', name: 'Reading' }],
+      }},
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [],
+      }},
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Pin a page to the list
+    await helper.evaluate(({ url }) =>
+      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'reading', url })
+    , { url: TEST_URL });
+
+    // Page should have list:reading in parentIds
+    const pageEntity = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${TEST_SLUG}`);
+    await helper.close();
+
+    expect(pageEntity.value).toBeTruthy();
+    expect(pageEntity.value.parentIds).toContain('list:reading');
+  });
+
+  test('unpin removes list from page parentIds', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: {
+        trimRules: [],
+        listOrder: [{ id: 'list:reading', name: 'Reading' }],
+      }},
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading', timestamp: now,
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], qbTrees: [],
+      }},
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: ['list:reading'], childIds: [],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Unpin the page (toggle)
+    await helper.evaluate(({ url }) =>
+      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'reading', url })
+    , { url: TEST_URL });
+
+    // Page should no longer have list:reading in parentIds
+    const pageEntity = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${TEST_SLUG}`);
+    await helper.close();
+
+    expect(pageEntity.value).toBeTruthy();
+    expect(pageEntity.value.parentIds).not.toContain('list:reading');
+  });
+
+  test('deleteList removes list from all pinned page parentIds', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const url2 = 'https://example.com/page-2';
+    const slug2 = getSlugForUrl(url2);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: {
+        trimRules: [],
+        listOrder: [{ id: 'list:doomed', name: 'Doomed' }],
+      }},
+      { path: 'lists/doomed.json', data: {
+        slug: 'doomed', name: 'Doomed', timestamp: now,
+        pins: [
+          { id: `page:${TEST_SLUG}`, pinnedAt: now },
+          { id: `page:${slug2}`, pinnedAt: now },
+        ], qbTrees: [],
+      }},
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: ['list:doomed', 'page:other-ref'], childIds: [],
+      }},
+      { path: `pages/${slug2}.json`, data: {
+        slug: slug2, url: url2, title: 'Page 2', timestamp: now,
+        parentIds: ['list:doomed'], childIds: [],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'deleteList', listId: 'doomed' })
+    );
+
+    // Both pages should have list:doomed removed from parentIds
+    const page1 = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${TEST_SLUG}`);
+    const page2 = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${slug2}`);
+    await helper.close();
+
+    expect(page1.value.parentIds).not.toContain('list:doomed');
+    expect(page1.value.parentIds).toContain('page:other-ref'); // other refs preserved
+    expect(page2.value.parentIds).not.toContain('list:doomed');
+    expect(page2.value.parentIds).toEqual([]);
   });
 });

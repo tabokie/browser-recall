@@ -632,6 +632,12 @@ class FileSystemStorage {
     await this.writeJson(fileHandle, data);
   }
 
+  // Delete note by moving to deleted/ directory
+  async deleteNote(slug) {
+    const notesDir = await this.resolveDir('notes');
+    await this.softDelete(notesDir, `${slug}.json`);
+  }
+
   // Load a single interaction metadata by URL from JSONL files
   async loadInteractionByUrl(url) {
     if (!(await this.verifyPermission())) {
@@ -861,78 +867,6 @@ class FileSystemStorage {
         }
       }
     }
-  }
-
-  // Load recycle bin from lists/system/recycle-bin.json
-  // Returns the items array.
-  async loadRecycleBin() {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to read directory');
-    }
-    try {
-      const fh = await this.resolveFile('lists/system/recycle-bin.json');
-      const data = await this.readJson(fh);
-      return data.items;
-    } catch (error) {
-      if (isNotFound(error)) return [];
-      throw error;
-    }
-  }
-
-  // Load the full recycle-bin entity (includes timestamp).
-  async loadRecycleBinEntity() {
-    try {
-      const fh = await this.resolveFile('lists/system/recycle-bin.json');
-      return await this.readJson(fh);
-    } catch (error) {
-      if (isNotFound(error)) return { timestamp: 0, items: [] };
-      throw error;
-    }
-  }
-
-  // Save recycle bin to lists/system/recycle-bin.json
-  async saveRecycleBin(items, timestamp = 0) {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to write');
-    }
-    const fh = await this.resolveFile('lists/system/recycle-bin.json', { create: true });
-    await this.writeJson(fh, { timestamp, items });
-  }
-
-  // Load permanent deletes from lists/system/permanent-deletes.json
-  // Returns the keys array (unwraps { timestamp, keys } wrapper).
-  async loadPermanentDeletes() {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to read directory');
-    }
-    try {
-      const fileHandle = await this.resolveFile('lists/system/permanent-deletes.json');
-      const data = await this.readJson(fileHandle);
-      return data.keys;
-    } catch (error) {
-      if (isNotFound(error)) return [];
-      throw error;
-    }
-  }
-
-  // Load the raw wrapped entity for permanent deletes (includes timestamp).
-  async loadPermanentDeletesEntity() {
-    try {
-      const fileHandle = await this.resolveFile('lists/system/permanent-deletes.json');
-      return await this.readJson(fileHandle);
-    } catch (error) {
-      if (isNotFound(error)) return { timestamp: 0, keys: [] };
-      throw error;
-    }
-  }
-
-  // Save permanent deletes to lists/system/permanent-deletes.json (wrapped format)
-  async savePermanentDeletes(keys, timestamp = 0) {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to write directory');
-    }
-    const fileHandle = await this.resolveFile('lists/system/permanent-deletes.json', { create: true });
-    await this.writeJson(fileHandle, { timestamp, keys });
   }
 
   // Load settings.json — returns {} if missing or unreadable

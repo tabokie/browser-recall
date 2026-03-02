@@ -60,8 +60,6 @@ let historyAllEntries = [];        // all loaded entries (not deduped), for date
 let historyLoading = false;        // guard against concurrent loads
 let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'list', query: '...', id: '...' } or { type: 'explore', query: '...', filter: '...' }
 let allListPins = {}; // listId -> [{ url, title, pinnedAt }]
-let recycleBin = []; // [{ key, title, deletedAt }] — global recycle bin (key = 'page:slug' or 'note:slug')
-let permanentDeletes = []; // [key, ...] — permanently deleted keys ('page:slug' or 'note:slug')
 let lastClickedRow = null; // for shift-click range select
 let marqueeActive = false; // suppress click during marquee drag
 let gatewayOriginsCache = []; // [origin, ...]
@@ -437,75 +435,6 @@ async function toggleResultPin(listId, url, title) {
   await chrome.runtime.sendMessage({ action: 'toggleListPin', listId, url });
 }
 
-// --- Recycle bin ---
-// Global recycle bin: { url, title, deletedAt }
-// Permanent deletes: URLs that are gone forever
-
-async function loadRecycleBin() {
-  recycleBin = await readCacheable('list:system/recycle-bin');
-  permanentDeletes = await readCacheable('list:system/permanent-deletes');
-  return recycleBin;
-}
-
-async function saveRecycleBin() {
-  await chrome.runtime.sendMessage({ action: 'saveRecycleBin', items: recycleBin });
-  await chrome.runtime.sendMessage({ action: 'savePermanentDeletes', keys: permanentDeletes });
-  await chrome.storage.session.set({ 'list:system/permanent-deletes': permanentDeletes });
-  updateRecycleSidebarCount();
-}
-
-function isRecycled(url) {
-  const key = 'page:' + generateSlugFromUrl(url);
-  return recycleBin.some(item => item.key === key);
-}
-
-function isPermanentlyDeleted(url) {
-  const key = 'page:' + generateSlugFromUrl(url);
-  return permanentDeletes.includes(key);
-}
-
-async function recycleItem(url, title) {
-  const key = 'page:' + generateSlugFromUrl(url);
-  if (recycleBin.some(item => item.key === key)) return;
-  recycleBin.push({ key, title, deletedAt: Date.now() });
-  await saveRecycleBin();
-}
-
-async function restoreItem(key) {
-  recycleBin = recycleBin.filter(item => item.key !== key);
-  await saveRecycleBin();
-}
-
-async function permanentlyDeleteItem(key) {
-  recycleBin = recycleBin.filter(item => item.key !== key);
-  if (!permanentDeletes.includes(key)) permanentDeletes.push(key);
-  await saveRecycleBin();
-}
-
-function updateRecycleSidebarCount() {
-  const el = document.getElementById('recycleSidebarCount');
-  el.textContent = recycleBin.length > 0 ? recycleBin.length : '';
-}
-
-document.getElementById('restoreAllBtn').addEventListener('click', async () => {
-  if (recycleBin.length === 0) return;
-  recycleBin = [];
-  await saveRecycleBin();
-  lastClickedRow = null;
-  showCategory('recycleBin');
-});
-
-document.getElementById('deleteAllBtn').addEventListener('click', async () => {
-  if (recycleBin.length === 0) return;
-  for (const item of recycleBin) {
-    if (!permanentDeletes.includes(item.key)) permanentDeletes.push(item.key);
-  }
-  recycleBin = [];
-  await saveRecycleBin();
-  lastClickedRow = null;
-  showCategory('recycleBin');
-});
-
 // --- Layout switching (list vs normal) ---
 function showListLayout() {
   saveExploreQbState();
@@ -615,7 +544,7 @@ function applySortOrder(items, sortState) {
 function columnHeaderHtml(context, opts = {}) {
   const sortState = getSortState(context);
   const extraCols = getExtraColumns(context);
-  const { hasDelete = true, hasPin = false, showRelevance = false } = opts;
+  const { hasDelete = false, hasPin = false, showRelevance = false } = opts;
 
   function arrow(col) {
     if (sortState.column !== col) return '';
@@ -756,10 +685,6 @@ function showColumnPopover(anchorBtn, context) {
   setTimeout(() => document.addEventListener('click', closeHandler), 0);
 }
 
-function isDeletableView() {
-  if (activeView.type === 'category' && activeView.value === 'recycleBin') return false;
-  return true;
-}
 
 // Show chart frame + column headers immediately (bars and rows fill in after data loads)
 function renderResultsSkeleton(opts = {}) {
@@ -769,7 +694,7 @@ function renderResultsSkeleton(opts = {}) {
   chartEl.classList.add('visible');
 
   const vs = getOrCreateGlobalScroller();
-  vs._headerHtml = columnHeaderHtml('global', { hasDelete: isDeletableView(), hasPin: false, showRelevance });
+  vs._headerHtml = columnHeaderHtml('global', { hasPin: false, showRelevance });
   vs.setData([], () => '');
 }
 
@@ -779,7 +704,7 @@ function renderListSkeleton() {
   const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
   pinnedSection.style.display = '';
   const pinnedContainer = document.getElementById('pinnedResults');
-  pinnedContainer.innerHTML = columnHeaderHtml('pinned', { hasDelete: true, hasPin: true });
+  pinnedContainer.innerHTML = columnHeaderHtml('pinned', { hasPin: true });
   bindColumnHeaderClicks(pinnedContainer);
 
   // Explore section: show chart frame + column header
@@ -787,7 +712,7 @@ function renderListSkeleton() {
   relatedChart.querySelector('.chart-bars').innerHTML = '';
   relatedChart.classList.add('visible');
   const vs = getOrCreateRelatedScroller();
-  vs._headerHtml = columnHeaderHtml('related', { hasDelete: true, hasPin: true, showRelevance: false });
+  vs._headerHtml = columnHeaderHtml('related', { hasPin: true, showRelevance: false });
   vs.setData([], () => '');
 }
 
@@ -813,55 +738,30 @@ function resortActiveScroller(context) {
   // Regenerate header with updated sort indicators
   const showRelevance = vs._headerHtml.includes('col-rel');
   const hasPin = context === 'related' || context === 'pinned';
-  vs._headerHtml = columnHeaderHtml(context, { hasDelete: true, hasPin, showRelevance });
+  vs._headerHtml = columnHeaderHtml(context, { hasPin, showRelevance });
 
   vs.updateData(sorted);
-}
-
-// Remove deleted/restored rows from the list without full view reload.
-// For virtual scroller views, removes from the data array and re-renders incrementally.
-// For recycle bin (no virtual scroller), removes DOM nodes directly.
-function removeDeletedRows(container, urls, isRecycleBin) {
-  const vs = container._virtualScroller;
-  if (!isRecycleBin && vs && vs.data.length > 0) {
-    vs.removeItems(urls);
-  } else {
-    // Recycle bin or non-scroller view: remove DOM nodes directly
-    const urlSet = new Set(urls);
-    for (const item of [...container.querySelectorAll('.result-item')]) {
-      const row = item.querySelector('.result-row');
-      if (row && urlSet.has(row.dataset.url)) item.remove();
-    }
-    if (isRecycleBin && container.querySelectorAll('.result-item').length === 0) {
-      displayMessage('Recycle bin is empty');
-    }
-  }
 }
 
 // --- Category filters ---
 function filterByCategory(interactions, category) {
   const now = Date.now();
-  function isHidden(url) {
-    return isPermanentlyDeleted(url) || isRecycled(url);
-  }
   switch (category) {
     case 'today': {
       const startOfDay = new Date().setHours(0, 0, 0, 0);
-      return interactions.filter(i => i.timestamp >= startOfDay && !isHidden(i.url));
+      return interactions.filter(i => i.timestamp >= startOfDay);
     }
     case 'week': {
       const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-      return interactions.filter(i => i.timestamp >= weekAgo && !isHidden(i.url));
+      return interactions.filter(i => i.timestamp >= weekAgo);
     }
     case 'highlighted':
-      return interactions.filter(i => (i.likes > 0) && !isHidden(i.url));
+      return interactions.filter(i => (i.likes > 0));
     case 'gateways':
-      return interactions.filter(i => isGatewayOrigin(i.url) && !isHidden(i.url));
-    case 'recycleBin':
-      return interactions.filter(i => isRecycled(i.url) && !isPermanentlyDeleted(i.url));
+      return interactions.filter(i => isGatewayOrigin(i.url));
     case 'all':
     default:
-      return interactions.filter(i => !isPermanentlyDeleted(i.url) && !isRecycled(i.url));
+      return interactions;
   }
 }
 
@@ -882,21 +782,10 @@ function isGatewayOrigin(url) {
 async function showCategory(category) {
   activeView = { type: 'category', value: category };
   updateSidebarActive();
-  const categoryLabels = { all: 'History', today: 'Today', week: 'This Week', highlighted: 'Highlighted', gateways: 'Gateways', recycleBin: 'Recycle Bin', explore: 'Explore' };
+  const categoryLabels = { all: 'History', today: 'Today', week: 'This Week', highlighted: 'Highlighted', gateways: 'Gateways', explore: 'Explore' };
   updateMainTitle(categoryLabels[category] || category);
   document.getElementById('pinSearchBtn').style.display = 'none';
   document.getElementById('queryBuilder').style.display = 'none';
-
-  if (category === 'recycleBin') {
-    showNormalLayout();
-    document.getElementById('timeChart').classList.remove('visible');
-    if (recycleBin.length > 0) {
-      document.getElementById('restoreAllBtn').style.display = '';
-      document.getElementById('deleteAllBtn').style.display = '';
-    }
-    displayRecycleBinRows();
-    return;
-  }
 
   renderResultsSkeleton();
   showNormalLayout();
@@ -1158,7 +1047,7 @@ async function evaluateQueryStream(qbTree) {
     if (daySet.has(item.url)) return;
     daySet.add(item.url);
     const enriched = enrichSingle(item, notesMap);
-    if (!isPermanentlyDeleted(enriched.url) && !isRecycled(enriched.url) && evaluateNode(qbTree, enriched)) results.push(enriched);
+    if (evaluateNode(qbTree, enriched)) results.push(enriched);
   }
 
   // Process buffer entries first (newest)
@@ -1244,10 +1133,10 @@ async function runQuery() {
   }));
 
   const vs = getOrCreateGlobalScroller();
-  vs._headerHtml = columnHeaderHtml('global', { hasDelete: true, hasPin: false, showRelevance: hasKeywords });
+  vs._headerHtml = columnHeaderHtml('global', { hasPin: false, showRelevance: hasKeywords });
   vs.setData(normalized, (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
-      deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
+      attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'global', relevance: r.relevance
     })
   );
@@ -1305,11 +1194,11 @@ function runListExploreQuery(matched) {
   }));
 
   const vs = getOrCreateRelatedScroller();
-  vs._headerHtml = columnHeaderHtml('related', { hasDelete: true, hasPin: true, showRelevance: hasKeywords });
+  vs._headerHtml = columnHeaderHtml('related', { hasPin: true, showRelevance: hasKeywords });
   vs.setData(normalized, (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
       pinned: isResultPinned(listId, r.url),
-      deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
+      attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'related', relevance: r.relevance,
     })
   );
@@ -2056,9 +1945,9 @@ function renderPinnedSection(allPinned, listId) {
     pinnedSection.style.display = 'none';
   } else {
     pinnedSection.style.display = '';
-    let html = columnHeaderHtml('pinned', { hasDelete: true, hasPin: true });
+    let html = columnHeaderHtml('pinned', { hasPin: true });
     html += sortedPinned.map(r =>
-      resultRowHtml(r.user_title || r.title, r.url, { pinned: true, deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, notes: r.notes, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt })
+      resultRowHtml(r.user_title || r.title, r.url, { pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, notes: r.notes, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt })
     ).join('');
     pinnedContainer.innerHTML = html;
     bindColumnHeaderClicks(pinnedContainer);
@@ -2186,79 +2075,11 @@ async function displayInteractionRows(interactions) {
   const sorted = applySortOrder(entries, effectiveSort);
   const maxAtt = Math.max(...sorted.map(e => e.attScore), 0.1);
 
-  const deletable = isDeletableView();
   const vs = getOrCreateGlobalScroller();
-  vs._headerHtml = columnHeaderHtml('global', { hasDelete: deletable, hasPin: false });
+  vs._headerHtml = columnHeaderHtml('global', { hasPin: false });
   vs.setData(sorted, (e) =>
-    resultRowHtml(e.user_title || e.title, e.url, { deletable, attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global' })
+    resultRowHtml(e.user_title || e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global' })
   );
-}
-
-function displayRecycleBinRows() {
-  const container = document.getElementById('results');
-  if (recycleBin.length === 0) {
-    displayMessage('Recycle bin is empty');
-    return;
-  }
-
-  // Reset virtual scroller so scroll events don't overwrite recycle bin content
-  if (globalVirtualScroller) {
-    globalVirtualScroller.data = [];
-    globalVirtualScroller.renderedRange = { start: -1, end: -1 };
-  }
-
-  // Use recycleBin array directly — guarantees count matches displayed list
-  const entries = recycleBin
-    .map(item => ({ url: item.url, title: item.title || 'Untitled', deletedAt: item.deletedAt }))
-    .sort((a, b) => b.deletedAt - a.deletedAt);
-
-  const RESTORE_SVG = '<svg viewBox="0 0 24 24"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18z"/></svg>';
-
-  container.style.paddingTop = '0px';
-  container.style.paddingBottom = '0px';
-  container.innerHTML = entries.map(e => {
-    const safeTitle = escapeHtml(e.title || 'Untitled');
-    const safeUrl = escapeHtml(e.url || '');
-    return `<div class="result-item">
-      <div class="result-row" data-url="${safeUrl}" data-title="${safeTitle}">
-        <button class="result-expand" title="Show details">&#9654;</button>
-        <div class="result-title">${safeTitle}</div>
-        <div class="result-time">${escapeHtml(formatTime(e.deletedAt))}</div>
-        <button class="result-restore" data-restore-url="${safeUrl}" title="Restore">${RESTORE_SVG}</button>
-        <button class="result-delete" data-delete-url="${safeUrl}" data-delete-title="${safeTitle}" title="Delete permanently">${DELETE_SVG}</button>
-      </div>
-      <div class="result-detail"><div class="detail-url"><a href="${safeUrl}" target="_blank">${safeUrl}</a></div></div>
-    </div>`;
-  }).join('');
-
-  // Bind expand delegation (shared handler — avoids double-toggle with recycle bin handler)
-  bindResultDelegation(container);
-  bindRecycleBinClicks(container);
-}
-
-function bindRecycleBinClicks(container) {
-  if (container._recycleBinDelegationBound) return;
-  container._recycleBinDelegationBound = true;
-
-  container.addEventListener('click', async (e) => {
-    // Expand, delete, and selection are handled by bindResultDelegation — only handle restore here
-    const restoreBtn = e.target.closest('.result-restore');
-    if (!restoreBtn) return;
-    e.stopPropagation();
-    const restoredUrls = [];
-    const row = restoreBtn.closest('.result-row');
-    if (row && row.classList.contains('selected')) {
-      for (const r of container.querySelectorAll('.result-row.selected')) {
-        restoredUrls.push(r.dataset.url);
-        await restoreItem(r.dataset.url);
-      }
-    } else {
-      restoredUrls.push(restoreBtn.dataset.restoreUrl);
-      await restoreItem(restoreBtn.dataset.restoreUrl);
-    }
-    lastClickedRow = null;
-    removeDeletedRows(container, restoredUrls, true);
-  });
 }
 
 const PIN_SVG = '<svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>';
@@ -2505,36 +2326,6 @@ function bindResultDelegation(container) {
       return;
     }
 
-    const deleteBtn = e.target.closest('.result-delete');
-    if (deleteBtn) {
-      e.stopPropagation();
-      const inRecycleBin = activeView.type === 'category' && activeView.value === 'recycleBin';
-      const deletedUrls = [];
-      const row = deleteBtn.closest('.result-row');
-      if (row && row.classList.contains('selected')) {
-        const selectedRows = container.querySelectorAll('.result-row.selected');
-        for (const r of selectedRows) {
-          deletedUrls.push(r.dataset.url);
-          if (inRecycleBin) {
-            await permanentlyDeleteItem(r.dataset.url);
-          } else {
-            await recycleItem(r.dataset.url, r.dataset.title);
-          }
-        }
-      } else {
-        const url = inRecycleBin ? deleteBtn.dataset.deleteUrl : deleteBtn.dataset.deleteUrl;
-        deletedUrls.push(url);
-        if (inRecycleBin) {
-          await permanentlyDeleteItem(url);
-        } else {
-          await recycleItem(url, deleteBtn.dataset.deleteTitle);
-        }
-      }
-      lastClickedRow = null;
-      removeDeletedRows(container, deletedUrls, inRecycleBin);
-      return;
-    }
-
     const pinBtn = e.target.closest('.result-pin');
     if (pinBtn) {
       e.stopPropagation();
@@ -2583,7 +2374,7 @@ function bindResultDelegation(container) {
   container.addEventListener('dblclick', (e) => {
     const row = e.target.closest('.result-row');
     if (!row) return;
-    if (e.target.closest('.result-pin') || e.target.closest('.result-expand') || e.target.closest('.result-delete') || e.target.closest('.result-focus')) return;
+    if (e.target.closest('.result-pin') || e.target.closest('.result-expand') || e.target.closest('.result-focus')) return;
     const url = row.dataset.url;
     // Proactive checkpoint: ensure a page entity exists before navigation
     sendAction({ action: 'ensurePageCheckpoint', url, title: row.dataset.title }).catch(e => console.warn('[checkpoint]', e.message));
@@ -2692,9 +2483,6 @@ function updateMainTitle(text) {
   titleEl.ondblclick = null;
   inputEl.style.display = 'none';
   confirmBtn.style.display = 'none';
-  // Hide recycle bin actions by default (showCategory will re-show them)
-  document.getElementById('restoreAllBtn').style.display = 'none';
-  document.getElementById('deleteAllBtn').style.display = 'none';
 }
 
 function enterTitleEditMode(prefill, onConfirm, onCancel) {
@@ -2984,35 +2772,6 @@ document.getElementById('exploreBtn').addEventListener('click', () => {
 // --- Event listeners: Pin search ---
 document.getElementById('pinSearchBtn').addEventListener('click', saveExploreAsList);
 
-// --- Event listeners: Del key to delete selected rows ---
-document.addEventListener('keydown', async (e) => {
-  if (e.key === 'Delete' || e.key === 'Backspace') {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-
-    const selectedRows = document.querySelectorAll('.result-row.selected');
-    if (selectedRows.length === 0) return;
-
-    const isRecycleBinView = activeView.type === 'category' && activeView.value === 'recycleBin';
-
-    if (!isRecycleBinView && !isDeletableView()) return;
-
-    e.preventDefault();
-    const deletedUrls = [...selectedRows].map(r => r.dataset.url);
-    if (isRecycleBinView) {
-      for (const row of selectedRows) {
-        await permanentlyDeleteItem(row.dataset.url);
-      }
-    } else {
-      for (const row of selectedRows) {
-        await recycleItem(row.dataset.url, row.dataset.title);
-      }
-    }
-    lastClickedRow = null;
-    const container = document.getElementById('results');
-    removeDeletedRows(container, deletedUrls, isRecycleBinView);
-  }
-});
-
 // --- Marquee drag-select from results background ---
 function initMarqueeForElements(wrapper, container) {
   let band = null;
@@ -3188,8 +2947,6 @@ function formatBytes(bytes) {
 const SESSION_CACHE_KEYS = [
   { key: 'settings', label: 'Settings' },
   { key: 'lists', label: 'Lists' },
-  { key: 'list:system/recycle-bin', label: 'Recycle Bin' },
-  { key: 'list:system/permanent-deletes', label: 'Permanent Deletes' },
   { key: 'list:system/gateways', label: 'Gateway Origins' },
   { key: 'list:system/shallow-page', label: 'Shallow Page Index' },
 ];
@@ -3578,18 +3335,12 @@ chrome.runtime.onMessage.addListener((request) => {
     }
   } else if (type === 'lists') {
     renderLists();
-  } else if (type === 'list:system/recycle-bin') {
-    // Reload recycle bin from session cache
-    chrome.storage.session.get(['list:system/recycle-bin']).then((data) => {
-      recycleBin = data['list:system/recycle-bin'] || [];
-      updateRecycleSidebarCount();
-    });
   } else if (type === 'settings') {
     if (request.key === 'listOrder') {
       renderLists();
     }
   }
-  // highlight, snapshot, permanentDeletes: session cache is already updated by background
+  // highlight, snapshot: session cache is already updated by background
 });
 
 // --- Visibility change: invalidate stale caches when tab regains focus ---
@@ -3929,7 +3680,7 @@ async function runExploreBlockQuery() {
       // Explore: show entire history when no blocks enabled (date-boundary dedup)
       showAllHistory = true;
       results = processInteractionsForDisplay(
-        historyAllEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)) && !isPermanentlyDeleted(item.url) && !isRecycled(item.url))
+        historyAllEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
       ).map(item => ({ ...item, relevance: 0 }));
       await enrichFromEntityStorage(results);
     } else {
@@ -3971,7 +3722,6 @@ async function runExploreBlockQuery() {
     // Build result items — global dedup for filtered results, day-wise for all-history
     const filteredEntries = historyAllEntries.filter(item => {
       if (!item.url || pinnedSlugs.has(generateSlugFromUrl(item.url))) return false;
-      if (isPermanentlyDeleted(item.url) || isRecycled(item.url)) return false;
       return matchAll || mergedUrls.has(item.url);
     });
     results = processInteractionsForDisplay(filteredEntries, { globalDedup: !showAllHistory }).map(item => ({ ...item, relevance: 0 }));
@@ -3990,11 +3740,11 @@ async function runExploreBlockQuery() {
   const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
 
   const vs = getOrCreateRelatedScroller();
-  vs._headerHtml = columnHeaderHtml('related', { hasDelete: true, hasPin: true, showRelevance: false });
+  vs._headerHtml = columnHeaderHtml('related', { hasPin: true, showRelevance: false });
   vs.updateData(sorted, (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
       pinned: isResultPinned(listId, r.url),
-      deletable: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
+      attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'related',
     })
   );
@@ -4005,7 +3755,7 @@ async function runExploreBlockQuery() {
     vs.onLoadMore = async () => {
       const newItems = await loadHistoryBatch();
       if (newItems.length > 0) {
-        const filtered = newItems.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)) && !isPermanentlyDeleted(item.url) && !isRecycled(item.url));
+        const filtered = newItems.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)));
         const newResults = processInteractionsForDisplay(filtered).map(item => ({ ...item, relevance: 0 }));
         await enrichFromEntityStorage(newResults);
         if (newResults.length > 0) {
@@ -4235,11 +3985,10 @@ async function initialize() {
 
   // Load metadata in parallel (history is demand-loaded in showCategory, pins loaded per-list)
   await Promise.all([
-    initHistoryFiles(), loadRecycleBin(), loadGatewayDomains(),
+    initHistoryFiles(), loadGatewayDomains(),
     sendAction({ action: 'loadListPinsById', listId: EXPLORE_LIST_ID }).then(resp => { allListPins[EXPLORE_LIST_ID] = resp.pins; }),
   ]);
   _timer('parallel metadata load');
-  updateRecycleSidebarCount();
   updateExploreBadge();
   showExplore();
 
