@@ -1,0 +1,30 @@
+- Go over past git commits, enumerate the bugs we fixed before, and cover them using e2e tests.
+- Reload token
+- go
+- Did you take any shortcuts?
+- Fix the easy ones. For difficult one, comment the situation
+- Is there a way to spawn the playwright in background or in smaller window? Right now it blocks my screen during testing
+- There are a few bugs. Let's reproduce in e2e tests, then fix it.
+
+1. When adding a list in popup UI, the log to change listOrder append the new list twice ([.., new_list, new_list]), and the popup UI display the new list twice.
+2. After pinning a page to list in popup UI, the portal list UI is not updated to show the new pin, even after refreshing the UI.
+3. In ~/portal-data, yesterday there is a page visit to https://news.ycombinator.com/item?id=47189650 , it is added to list and inserted to shallow-page index, but shallow-page index item has title = null.
+- For bug 2, I use F5 to reload
+- Forget about bug 2, let's work on 1 & 3 first
+- resume
+- continue
+- Where do the other places that populate shallow-page index handle it? I lean towards (a).
+- Actually, I meant I prefer (b). Fix the shallow-page callsite thoroughly. Fix bug 1 too. Test first.
+- I though earlier you said a lot of cases where we populate SPI have the same bug?
+- Are all four paths covered in tests though?
+- No, add functionality tests in e2e tests. Remember this: use case is more valuable than implementation, a bug in implementation illustrates our lacking in use case test coverage.
+- Great. Fix data: (a) update SPI for https://news.ycombinator.com/item?id=47189650, (b) update log and list checkpoint for "Community" being written twice
+- In case there is something you missed in Git history, let's go over the prompts logs under "./prompts", look for issue or bug I asked you to fix earlier, and check if they are properly covered in e2e tests
+- All of them
+- Be creative, what else can be tested in E2E suite to improve quality?
+- Go ahead and test them all
+- Did you take any shortcuts writing tests throughout this session?
+- Can they be improved?
+- Summarize changes made to non-test code
+- /finish 
+- save 1

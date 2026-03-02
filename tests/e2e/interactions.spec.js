@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, getSlugForUrl, openOptionsPage } from './helpers.js';
+import { resetAndSeed, getSlugForUrl, openOptionsPage, openHelperPage } from './helpers.js';
 
 const TEST_URL = 'https://example.com/';
 const TEST_SLUG = getSlugForUrl(TEST_URL);
@@ -116,5 +116,48 @@ test.describe('Interactions — likes, notes, attention', () => {
     expect(info.interaction.likes).toBe(0);
 
     await page.close();
+  });
+
+  // Bug d2815bf: dislike (Alt+D) sends likes:-1 via addLog.
+  // NOT tested here: the runtime like/dislike path uses chrome.commands.onCommand
+  // which triggers addLog({ likes: delta }) internally. There's no message action
+  // to inject arbitrary log entries, and keyboard shortcuts are unreliable in
+  // Playwright. The replay accumulation of positive/negative likes deltas is
+  // covered by unit tests (replay.test.js applyLogToPage).
+
+  // Bug 20260223: createNote should add note:<slug> to parent page's childIds
+  test('createNote adds note to parent page childIds', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: 'history/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      ]},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Create a note on the page
+    const noteResult = await helper.evaluate(({ slug }) =>
+      chrome.runtime.sendMessage({
+        action: 'createNote', pageSlug: slug,
+        excerpt: 'Test highlight', note: 'A note', cssPath: 'body > p',
+      })
+    , { slug: TEST_SLUG });
+    expect(noteResult.success).toBe(true);
+    const noteSlug = noteResult.noteSlug;
+
+    // Check parent page entity has the note in childIds
+    const pageEntity = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${TEST_SLUG}`);
+    await helper.close();
+
+    expect(pageEntity.value).toBeTruthy();
+    expect(pageEntity.value.childIds).toContain(`note:${noteSlug}`);
   });
 });

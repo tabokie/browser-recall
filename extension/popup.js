@@ -450,9 +450,8 @@ async function createListAndPin(name) {
   if (lists.some(c => c.name === name)) return;
 
   const listId = generateSlugFromTitle(name);
+  // saveListMeta's effectOf already appends to listOrder — no manual append needed.
   await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name });
-  const order = (await readCacheable('settings')).listOrder || [];
-  await saveSettingsValue('listOrder', [...order, { id: 'list:' + listId, name }]);
 
   await toggleListPin(listId);
 

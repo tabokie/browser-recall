@@ -105,7 +105,40 @@ export async function effectOf(entry, load) {
     // List entries with shallow: ids also update the shallow-page index
     if (entry.action === 'list' && entry.ids?.some(id => id.startsWith(SHALLOW_PREFIX))) {
       const spi = await loadOrDefault('list:system/shallow-page', load);
-      result['list:system/shallow-page'] = applyLogToShallowPage(spi, entry);
+      let updatedSpi = applyLogToShallowPage(spi, entry);
+
+      // Enrich newly-created SPI entries that have title=null from history
+      if (entry.op === 'add') {
+        const shallowUrls = entry.ids
+          .filter(id => id.startsWith(SHALLOW_PREFIX))
+          .map(id => id.slice(SHALLOW_PREFIX.length));
+        const needTitle = shallowUrls.filter(url => updatedSpi.index[url] && !updatedSpi.index[url].title);
+        if (needTitle.length > 0) {
+          const dateStr = new Date(entry.timestamp).toISOString().slice(0, 10);
+          const todayEntries = (await load('history:' + dateStr)) || [];
+          let sources = todayEntries;
+          // Also check yesterday (visit may have been logged the day before)
+          let remaining = needTitle.filter(url => !sources.find(e => e.url === url && e.title));
+          if (remaining.length > 0) {
+            const yest = new Date(entry.timestamp);
+            yest.setDate(yest.getDate() - 1);
+            const yestEntries = (await load('history:' + yest.toISOString().slice(0, 10))) || [];
+            sources = [...sources, ...yestEntries];
+          }
+          let changed = false;
+          const index = { ...updatedSpi.index };
+          for (const url of needTitle) {
+            const match = sources.find(e => e.url === url && e.title);
+            if (match) {
+              index[url] = { ...index[url], title: match.title };
+              changed = true;
+            }
+          }
+          if (changed) updatedSpi = { ...updatedSpi, index };
+        }
+      }
+
+      result['list:system/shallow-page'] = updatedSpi;
     }
 
     // list_meta → sync listOrder in settings (add new entry or rename existing)

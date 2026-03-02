@@ -20,6 +20,7 @@ export const test = base.extend({
     const context = await chromium.launchPersistentContext(userDataDir, {
       headless: false,
       args: [
+        '--headless=new',
         `--disable-extensions-except=${extPath}`,
         `--load-extension=${extPath}`,
       ],
@@ -75,8 +76,8 @@ export const test = base.extend({
         res.end('<html><head><title>Not Found</title></head><body>404</body></html>');
         return;
       }
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(`<!DOCTYPE html><html><head><title>${page.title}</title></head><body>${page.body}</body></html>`);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${page.title}</title></head><body>${page.body}</body></html>`);
     });
     await new Promise(r => server.listen(0, '127.0.0.1', r));
     const port = server.address().port;

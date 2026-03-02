@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, openOptionsPage } from './helpers.js';
+import { resetAndSeed, openOptionsPage, openHelperPage } from './helpers.js';
 
 test.describe('Settings persistence', () => {
   test('seeded settings values display in settings modal', async ({ extContext, extensionId, setupDir }) => {
@@ -51,5 +51,27 @@ test.describe('Settings persistence', () => {
     const savedValue = await options2.inputValue('#relatedPagesLimit');
     expect(savedValue).toBe('30');
     await options2.close();
+  });
+
+  // Bug 20260224: gateways data should be available after rehydration.
+  // After disable/re-enable, readCacheable should return gateway origins.
+  test('seeded gateways available via readCacheable after rehydration', async ({ extContext, extensionId, setupDir }) => {
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'lists/system/gateways.json', data: {
+        timestamp: Date.now(),
+        origins: ['https://example.com', 'https://news.ycombinator.com'],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const gateways = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/gateways' })
+    );
+    await helper.close();
+
+    expect(gateways.value).toBeTruthy();
+    expect(gateways.value).toContain('https://example.com');
+    expect(gateways.value).toContain('https://news.ycombinator.com');
   });
 });
