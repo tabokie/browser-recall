@@ -44,7 +44,7 @@ cacheSet(key, page)           ← populate session cache for next read
 
 ### UI Read Path (Cacheable Keys)
 
-UI pages read cached data via `utils.js` `readCacheable(key)`, where `key` is an entity key (e.g., `'lists'`, `'list:system/recycle-bin'`, `'list:system/shallow-page'`, `'settings'`). Session cache stores entities under their entity keys and settings as a single `'settings'` object. Background's `readFs` handles key→filesystem resolution:
+UI pages read cached data via `utils.js` `readCacheable(key)`, where `key` is an entity key (e.g., `'lists'`, `'list:system/orphaned'`, `'list:system/shallow-page'`, `'settings'`). Session cache stores entities under their entity keys and settings as a single `'settings'` object. Background's `readFs` handles key→filesystem resolution:
 
 ```
 chrome.storage.session.get([key])     ← local session cache hit (fast, no IPC to background)
@@ -73,7 +73,7 @@ addLog(entry)
 ### Hydration (Startup)
 
 ```
-Phase 1:    Load base entities (settings, lists, recycle bin, shallow-page index) from filesystem
+Phase 1:    Load base entities (settings, lists, shallow-page index) from filesystem
 Phase 1.5:  Pre-load page entities referenced by logBuffer from filesystem
 Phase 2:    Replay ALL logBuffer entries via effectOf (brings session cache up-to-date)
 Phase 3:    Order lists by listOrder setting
@@ -92,7 +92,7 @@ The **only gateway** from shallow → checkpointed is `ensureCheckpointIfMissing
 
 1. **Multi-day visit** — page has `visitDates` spanning multiple calendar days
 2. **Referrer present** — cross-site navigation (parent page is also checkpointed)
-3. **Note creation** — parent page must exist for note's `parents` wiring
+3. **Note creation** — parent page must exist for note's `childIds` wiring on parent
 
 Each creates a `page_checkpoint` log entry, which `effectOf()` in replay.js handles as the only action that can create a page entity from null.
 
@@ -116,6 +116,10 @@ They do NOT exist in:
 | `enrichFromEntityStorage` (options.js) | Overwrites display title with entity title | Skips — keeps JSONL title |
 | `loadPageBatch` (background) | Returns entity from cache/filesystem | Absent from result |
 | `effectOf` replay (page action) | Updates existing entity | Returns null (no-op); updates `shallowPageIndex` with parents/title |
+| `effectOf` replay (note action) | Wires `note:<slug>` into parent page `childIds` only (note entity not created/updated by replay — content is on disk) | N/A |
+| `effectOf` replay (del_note action) | Unlinks `note:<slug>` from parent page `childIds`, adds `note:<slug>` to `list:system/orphaned` | N/A |
+| `effectOf` replay (del_list action) | Removes `list:<id>` from page `parentIds` (checkpointed pins), removes list from SPI `lists` (shallow pins), adds `list:<id>` to `list:system/orphaned` | N/A |
+| `effectOf` replay (list pin/unpin) | Updates page `parentIds` with `list:<id>` | Updates SPI `lists` with `list:<id>` |
 | `effectOf` replay (page_checkpoint) | Updates watermark; absorbs shallow-page index data (parents, lists) into page, upgrades `shallow:` list pins to `page:` | Creates entity from `defaultEntity()` |
 | `getPageRelations` (background) | Reads `parentIds`/`childIds`, resolves typed refs | Falls back to `shallowPageIndex.index[url]` for parents |
 | `buildExploreAutoBlocks` (options.js) | Resolves `page:<slug>` refs via `loadPageBatch` | Resolves `shallow:<url>` refs via `shallowPageIndex` for URL+title |
@@ -132,7 +136,7 @@ All inter-entity references use typed keys with a prefix indicating the entity k
 | `note:<slug>` | Note entity (has `notes/{slug}.json`) | `note:my-note-abc123` |
 | `list:<id>` | List entity (has `lists/{id}.json`) | `list:rust-lang-ffnyqr` |
 
-Used in: `page.parentIds`, `page.childIds`, `note.parentIds`, `note.childIds`, list pin `id` fields, log entry `referrerId`/`ids`/`parentIds`/`childIds` fields.
+Used in: `page.parentIds` (includes `page:<slug>` from referrers and `list:<id>` from list membership), `page.childIds`, `note.parentIds`, `note.childIds`, list pin `id` fields, log entry `referrerId`/`ids`/`parentIds`/`childIds` fields.
 
 **Resolution**: `page:<slug>` refs are resolved to URLs via `loadPageBatch`. `shallow:<url>` refs have the URL embedded (extract via `ref.slice(8)`). When a shallow page becomes checkpointed, `effectOf`'s page_checkpoint branch resolves `shallow:<url>` → `page:<slug>` in parentIds/childIds and upgrades `shallow:` pin IDs to `page:` in affected list entities.
 

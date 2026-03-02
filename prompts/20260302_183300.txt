@@ -1,0 +1,11 @@
+- We should remove redundant fields in history logs, even though they are harmless.
+- For these items, add 1, 2, 3 to TODO.md, do 5 right away, finally do 4.
+
+1. Recycle bin / trash viewer UI for orphaned items
+2. Restore support for deleted notes/lists (re-linking from orphaned)
+3. Guardrails for missing files during second-order lookups (e.g. user physically deleted a note
+file)
+4. CODEBASE_MAP.md and ARCHITECTURE.md updates (per memory rule)
+5. list:system/gateways not in drain flush (pre-existing, not from this session)
+- Did you add e2e tests for the gateway fixes? Or is it more suitable to do unit test?
+- Reload token

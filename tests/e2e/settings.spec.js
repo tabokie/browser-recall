@@ -74,4 +74,53 @@ test.describe('Settings persistence', () => {
     expect(gateways.value).toContain('https://example.com');
     expect(gateways.value).toContain('https://news.ycombinator.com');
   });
+
+  // Verifies that gateway promotion via page visits survives drain→disk→rehydrate.
+  // Navigates to 2 child pages of the same origin (triggers gateway detection),
+  // flushes, rehydrates, and checks that the gateway origin persists.
+  test('gateway promotion persists through drain flush + rehydrate', async ({ extContext, extensionId, setupDir, localServer }) => {
+    localServer.addPage('/gw-child-1', { title: 'Child 1', body: '<p>Page 1</p>' });
+    localServer.addPage('/gw-child-2', { title: 'Child 2', body: '<p>Page 2</p>' });
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+    ]);
+
+    // Visit 2 child pages of the same origin to trigger gateway promotion
+    const page = await extContext.newPage();
+    await page.goto(localServer.url('/gw-child-1'));
+    await page.waitForSelector('p');
+    await page.goto(localServer.url('/gw-child-2'));
+    await page.waitForSelector('p');
+    await page.waitForTimeout(1000);
+    await page.close();
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Wait for gateway to appear in session cache (content script → background is async)
+    const baseUrl = localServer.baseUrl;
+    await helper.waitForFunction(async (url) => {
+      const r = await chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/gateways' });
+      return Array.isArray(r.value) && r.value.includes(url);
+    }, baseUrl, { timeout: 5000 });
+
+    // Flush (drain persists dirty entities to disk)
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+    );
+
+    // Rehydrate (clears session cache, re-reads from disk)
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+    );
+
+    // Gateway should survive — drain flushed it to gateways.json
+    const after = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/gateways' })
+    );
+    await helper.close();
+
+    expect(after.value).toBeTruthy();
+    expect(after.value).toContain(localServer.baseUrl);
+  });
 });

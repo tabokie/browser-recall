@@ -409,6 +409,12 @@ async function drainQueue() {
       } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
         const listId = key.slice('list:'.length);
         roundCache.set(key, await fsStorage.loadListPinsEntity(listId));
+      } else if (key === 'list:system/gateways') {
+        try {
+          roundCache.set(key, await fsStorage.loadGateways());
+        } catch {
+          roundCache.set(key, defaultEntity(key));
+        }
       } else if (key === 'list:system/orphaned') {
         try {
           const fh = await fsStorage.resolveFile('lists/system/orphaned.json');
@@ -491,6 +497,11 @@ async function drainQueue() {
             await fsStorage.saveListMeta(listId, entity, entity.timestamp);
           });
         }
+      } else if (key === 'list:system/gateways') {
+        await withLock('lists/system/gateways.json', async () => {
+          const fh = await fsStorage.resolveFile('lists/system/gateways.json', { create: true });
+          await fsStorage.writeJson(fh, entity);
+        });
       } else if (key === 'list:system/orphaned') {
         await withLock('lists/system/orphaned.json', async () => {
           const fh = await fsStorage.resolveFile('lists/system/orphaned.json', { create: true });
