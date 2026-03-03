@@ -25,7 +25,7 @@ describe('utils.js structural checks', () => {
   const utilsSource = readFileSync(resolve(extDir, 'utils.js'), 'utf-8');
 
   it('exports readCacheable function', () => {
-    expect(utilsSource).toMatch(/export async function readCacheable\s*\(\s*key\s*\)/);
+    expect(utilsSource).toMatch(/export async function readCacheable\s*\(\s*key/);
   });
 
   it('readCacheable sends readCacheable action on session miss', () => {
@@ -43,7 +43,7 @@ describe('background.js structural checks', () => {
   const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
 
   it('exports readCacheable function', () => {
-    expect(bgSource).toMatch(/async function readCacheable\s*\(\s*key\s*\)/);
+    expect(bgSource).toMatch(/async function readCacheable\s*\(\s*key/);
   });
 
   it('exports readFs function', () => {

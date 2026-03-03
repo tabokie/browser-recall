@@ -126,6 +126,71 @@ test.describe('Deletion guardrails', () => {
     await options.close();
   });
 
+  // Deleted list entity should return null from readCacheable, not stale disk data.
+  // Currently sessionWrite calls cacheRemove for deleted entities, so readCacheable
+  // falls through to readFs and loads the pre-deletion disk checkpoint.
+  test('deleted list entity returns null from readCacheable', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: {
+        trimRules: [],
+        listOrder: [{ id: 'list:to-delete', name: 'To Delete' }],
+      }},
+      { path: 'lists/to-delete.json', data: {
+        slug: 'to-delete', name: 'To Delete', timestamp: now, pins: [], qbTrees: [],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Delete the list
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'deleteList', listId: 'to-delete' })
+    );
+
+    // readCacheable should return null for the deleted list entity
+    const result = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:to-delete' })
+    );
+    expect(result.success).toBe(true);
+    expect(result.value).toBeNull();
+
+    await helper.close();
+  });
+
+  // Deleted list (deleted: true on disk) should return null from readCacheable
+  // after hydration. This simulates extension restart where the disk checkpoint
+  // was written with deleted: true by a previous drain.
+  test('deleted list stays hidden after rehydration', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: {
+        trimRules: [],
+        listOrder: [],  // already removed by del_list effectOf
+      }},
+      // Disk checkpoint already has deleted: true (written by previous drain)
+      { path: 'lists/rehydrate-del.json', data: {
+        slug: 'rehydrate-del', name: 'Rehydrate Del', timestamp: now,
+        pins: [], qbTrees: [], deleted: true,
+      }},
+      // Orphaned list tracks it
+      { path: 'lists/system/orphaned.json', data: {
+        timestamp: now, keys: ['list:rehydrate-del'],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // readCacheable should return null for deleted entity loaded from disk
+    const result = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:rehydrate-del' })
+    );
+    expect(result.success).toBe(true);
+    expect(result.value).toBeNull();
+
+    await helper.close();
+  });
+
   // Fix 3: replay guard on orphaned list resurrection.
   // After del_list, a subsequent toggleListPin should NOT resurrect the list
   // entity or re-add it to listOrder via effectOf replay.

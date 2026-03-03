@@ -2,12 +2,15 @@
 
 // Unified cache read: session cache → background readCacheable fallback.
 // Keys use entity key format: 'settings', 'list:system/recycle-bin', etc.
-export async function readCacheable(key) {
+export async function readCacheable(key, includeDeleted = false) {
   try {
     const cached = await chrome.storage.session.get([key]);
-    if (key in cached) return cached[key];
+    if (key in cached) {
+      if (!includeDeleted && cached[key]?.deleted) return null;
+      return cached[key];
+    }
   } catch (e) { console.warn('[readCacheable] session cache error:', e.message); }
-  const resp = await chrome.runtime.sendMessage({ action: 'readCacheable', key });
+  const resp = await chrome.runtime.sendMessage({ action: 'readCacheable', key, includeDeleted });
   if (resp?.success === false) {
     throw new Error(resp.error || `Failed to load ${key}`);
   }

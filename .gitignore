@@ -16,6 +16,7 @@ yarn-error.log*
 # Extension build output
 /dist/
 /build/
+/test-results/
 
 # IDE
 .vscode/

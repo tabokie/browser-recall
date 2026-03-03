@@ -1,0 +1,19 @@
+- In a previous session, you wrote:
+
+sessionWrite removes deleted entities from session cache — cacheRemove(key) is called for entity.deleted, so readCacheable falls through to readFs which loads the stale disk version. When testing entity state after deletion, check behavior via the replay path (effectOf), not via readCacheable.
+
+And you added a TODO item:
+
+**Write `deleted: true` to disk for deleted list entities.** `sessionWrite` removes deleted entities from session cache (`cacheRemove`), and the drain in offscreen.js skips writing deleted list files (`if (!entity.deleted)`). This means the disk checkpoint for a deleted list retains its pre-deletion content. After rehydrate-from-disk (extension restart), the entity appears alive �~@~T only the replay guard in `effectOf` prevents resurrection. Fix: remove the `if (!entity.deleted)` skip in drain's flush loop (offscreen.js ~line 495) so `{ deleted: true }` is checkpointed to disk. `saveListMeta` does read-merge-write, so the original content is preserved alongside the flag. This makes the disk state self-consistent and simplifies future restore/recycle-bin logic.
+
+I think they are both part of the same issue of how to hide deleted entities from UI. There are two ways: (1) For WASM engine that directly reads file system, we apply a filter using `orphaned` list over that result, (2) For direct entity reads, we check entity.deleted and return null when it is set. The `deleted` field is governed by the same timestamp replay logic, meaning setting `deleted` will update the entity's checkpoint, and we cannot remove it from cache before this timestamp is persisted by offscreen.
+- Does javascript support default function arguments like f(flag = true)?
+- I think we can let readCacheable have a "include_deleted=false" argument. And filter it automatically for most callers 
+- Remember, that moving forward, favors E2E tests over unit tests. Only when a feature cannot be tested in E2E do we use unit tests.
+- Is data migration needed?
+- No need. There is no deleted entity in ~/portal-data
+- Add a TODO item for deletion system. Physically deleting a entity requires log-buffer to be fully drained.
+- No, add it to TODO.md
+- /finish 
+- Fix 1 & 2
+- continue

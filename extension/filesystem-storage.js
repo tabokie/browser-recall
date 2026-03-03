@@ -814,12 +814,15 @@ class FileSystemStorage {
           if (slug === 'gateways' || slug.startsWith('system') || slug.startsWith('index')) continue;
           const file = await entry.getFile();
           const data = JSON.parse(await file.text());
-          result.push({
+          const listEntry = {
             slug,
             name: data.name || slug,
             qbTrees: data.qbTrees || [],
             pins: data.pins || [],
-          });
+          };
+          if (data.deleted) listEntry.deleted = true;
+          if (data.timestamp) listEntry.timestamp = data.timestamp;
+          result.push(listEntry);
         }
       }
     } catch (error) { if (!isNotFound(error)) throw error; }

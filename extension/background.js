@@ -198,15 +198,7 @@ async function sessionLoadDuringHydration(key) {
 async function sessionWrite(effects) {
   for (const [key, entity] of Object.entries(effects)) {
     if (entity === null) continue;
-    if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
-      if (entity.deleted) {
-        await cacheRemove(key);
-      } else {
-        await cacheSet(key, entity);
-      }
-    } else {
-      await cacheSet(key, entity);
-    }
+    await cacheSet(key, entity);
   }
 }
 
@@ -262,11 +254,16 @@ async function appendVisit(interaction) {
 // readCacheable(key): await hydration, then session cache → readFs fallback.
 // readFs(key): load from filesystem via offscreen, cache into session.
 
-async function readCacheable(key) {
+async function readCacheable(key, includeDeleted = false) {
   await hydrationDone;
   const cached = await cacheGet(key);
-  if (cached !== null) return cached;
-  return readFs(key);
+  if (cached !== null) {
+    if (!includeDeleted && cached.deleted) return null;
+    return cached;
+  }
+  const value = await readFs(key);
+  if (!includeDeleted && value?.deleted) return null;
+  return value;
 }
 
 // Read listOrder from settings. Each entry is { id: 'list:<slug>', name }.
@@ -1302,7 +1299,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'readCacheable': {
           try {
-            const value = await readCacheable(request.key);
+            const value = await readCacheable(request.key, request.includeDeleted);
             sendResponse({ success: true, value });
           } catch (error) {
             sendResponse({ success: false, error: error.message });

@@ -491,12 +491,9 @@ async function drainQueue() {
         await withLock('settings.json', () => fsStorage.saveSettings(entity));
       } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
         const listId = key.slice('list:'.length);
-        // Skip deleted lists — file stays on disk (orphaned, not physically removed)
-        if (!entity.deleted) {
-          await withLock('lists/' + listId + '.json', async () => {
-            await fsStorage.saveListMeta(listId, entity, entity.timestamp);
-          });
-        }
+        await withLock('lists/' + listId + '.json', async () => {
+          await fsStorage.saveListMeta(listId, entity, entity.timestamp);
+        });
       } else if (key === 'list:system/gateways') {
         await withLock('lists/system/gateways.json', async () => {
           const fh = await fsStorage.resolveFile('lists/system/gateways.json', { create: true });
