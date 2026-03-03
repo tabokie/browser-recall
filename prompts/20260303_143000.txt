@@ -1,0 +1,9 @@
+- Take a look at TODO.md, pick a task to work on
+- Good. Let's first add e2e tests to cover both I/O error and file missing error. Make sure the errors are propagated to user or UI. Then let's tolerate second-order file missing error, print warning in UI instead of crashing.
+- Actually, let me think more on this. Write a section in ARCHITECTURE.md to explain how we do deletion in current implementation, and the rationale behind this design.
+- The current implementation is okay. Let's run a full scrutiny to ensure `del_note` and `del_list` truly removes all references from the system. There is no accitental re-surfacing of a logically deleted entity.
+- 2 is easy to fix. 3 should be fixed in replay logic (check orphaned list). 1 should run a filter using orphaned list.
+- Add E2E tests to reproduce the failures before these fixes. TDD
+- /finish 
+- Write the second to TODO.md, ignore others
+- Skip all

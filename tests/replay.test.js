@@ -1083,6 +1083,51 @@ describe('effectOf scope', () => {
     expect(result['list:system/orphaned'].timestamp).toBe(100);
   });
 
+  // --- orphaned entity guards ---
+
+  it('list action on orphaned list is a no-op', async () => {
+    const orphaned = { timestamp: 50, keys: ['list:c1'] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'Deleted', qbTrees: [], pins: [], deleted: true };
+    const load = async (key) => {
+      if (key === 'list:c1') return listEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['page:p1'] },
+      load,
+    );
+    // Should not resurrect the list entity — either empty result or entity stays deleted
+    if (result['list:c1']) {
+      expect(result['list:c1'].deleted).toBe(true);
+      expect(result['list:c1'].pins || []).toEqual([]);
+    }
+  });
+
+  it('list_meta action on orphaned list is a no-op', async () => {
+    const orphaned = { timestamp: 50, keys: ['list:c1'] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'Deleted', qbTrees: [], pins: [], deleted: true };
+    const load = async (key) => {
+      if (key === 'list:c1') return listEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      if (key === 'settings') return { listOrder: [] };
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'list_meta', id: 'c1', name: 'Resurrected' },
+      load,
+    );
+    // Should not resurrect the list in listOrder
+    const settings = result['settings'];
+    if (settings) {
+      expect(settings.listOrder.some(e => e.id === 'list:c1')).toBe(false);
+    }
+    // Entity should remain deleted
+    if (result['list:c1']) {
+      expect(result['list:c1'].deleted).toBe(true);
+    }
+  });
+
   it('del_note does not duplicate key in orphaned list', async () => {
     const orphaned = { timestamp: 50, keys: ['note:n1'] };
     const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['note:n1'] };

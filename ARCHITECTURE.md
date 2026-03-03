@@ -243,6 +243,49 @@ All background.js message handlers return `{ success: true, ...fields }` on succ
 
 These bypass the background→offscreen pipeline. The tradeoff is acceptable because (a) the WASM search is read-only and operates on immutable JSONL history files, (b) directory picker is a one-time setup action, (c) diagnostics are developer-facing.
 
+## Deletion
+
+### Design: Unlink + Orphan (No Physical File Moves)
+
+Deletion is a **logical operation**, not a physical one. Deleting a note or list appends a log entry (`del_note` or `del_list`) that unlinks the entity from its parents and adds its key to the `list:system/orphaned` tracking list. The entity file on disk (`notes/{slug}.json`, `lists/{id}.json`) is never touched.
+
+This design exists because of the event-sourced architecture. The JSONL history is the source of truth, and entity files are derived checkpoints rebuilt by replaying history. If deletion moved or removed files, replaying history would attempt to reference files that no longer exist at their expected paths — breaking replay idempotency. By keeping deletion as a pure relation change in the log, replay can be run any number of times and always produce a consistent result.
+
+### What Each Deletion Does
+
+**`del_note` (replay.js):**
+1. Unlinks `note:<slug>` from each parent page's `childIds`
+2. Adds `note:<slug>` to `list:system/orphaned`
+3. File `notes/{slug}.json` stays on disk
+
+**`del_list` (replay.js):**
+1. Removes the list from `settings.listOrder` (sidebar disappears)
+2. Removes `list:<id>` from `parentIds` of all checkpointed pages that were pinned
+3. Removes `list:<id>` from `lists` arrays in the shallow-page index for shallow-pinned pages
+4. Adds `list:<id>` to `list:system/orphaned`
+5. File `lists/{id}.json` stays on disk
+
+Both handlers use `effectOf` in replay.js — all side-effects are computed in a single replay pass, not as separate log entries.
+
+### The Orphaned List
+
+`list:system/orphaned` (`lists/system/orphaned.json`) holds an array of entity keys (`note:<slug>`, `list:<id>`) for deleted items. This serves as a "recycle bin" manifest: the keys are unlinked from the entity graph but the underlying files are intact and could be restored.
+
+### File Persistence and Its Consequences
+
+Because entity files survive deletion, a **second-order lookup** can still reach them. For example, if a page's `childIds` is `["note:abc"]` and `note:abc` was deleted, `loadPageNotes` will still find `notes/abc.json` on disk and return it — the note appears in the UI even though it was logically deleted. The `del_note` replay removes the key from the parent's `childIds`, so after replay completes, the reference is gone. But if the user *physically* deletes the file from the filesystem (e.g., via a future recycle-bin UI that offers permanent deletion), then the file is gone while stale references may still exist in older history entries. Replaying that history will hit a missing file.
+
+Currently, `loadNote()` in filesystem-storage.js returns `null` for missing files (catches `NotFoundError`), and `loadPageNotes()` silently skips null results. This means missing files degrade silently — no crash, but no warning to the user either. A future improvement should surface these as warnings in the UI so users know data is missing rather than simply absent.
+
+### Scope: What Can and Cannot Be Deleted
+
+| Entity | Deletion supported | Log action | Notes |
+|--------|-------------------|------------|-------|
+| Note | Yes | `del_note` | Unlinks from parent page `childIds` |
+| List | Yes | `del_list` | Unlinks from all pinned pages, removes from sidebar |
+| Page | No | — | Pages are never deleted; they either exist as checkpoints or as shallow entries |
+| Shallow page | No | — | Entries in SPI are pruned when absorbed into a checkpoint, but not user-deletable |
+
 **options.js direct chrome.storage.local** — Three call sites remain:
 1. **WASM search** (`pipelinedSearch`): reads undrained logBuffer entries to search separately from on-disk JSONL (see "Pending Buffer for WASM Search" above).
 2. **Settings diagnostics** (`updateStatistics`, `updateCacheTable`): read logBuffer to display byte sizes and entry counts in the cache inspector UI.

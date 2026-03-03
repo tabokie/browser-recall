@@ -90,6 +90,15 @@ export async function effectOf(entry, load) {
   // --- list / list_meta / del_list ---
   if (entry.action === 'list' || entry.action === 'list_meta' || entry.action === 'del_list') {
     const listKey = `list:${entry.id}`;
+
+    // Guard: reject list/list_meta actions on orphaned (deleted) lists
+    if (entry.action !== 'del_list' && !listKey.startsWith('list:system/')) {
+      const orphaned = await loadOrDefault('list:system/orphaned', load);
+      if ((orphaned.keys || []).includes(listKey)) {
+        return result;
+      }
+    }
+
     const entity = await loadOrDefault(listKey, load);
     if (listKey === 'list:system/gateways') {
       result[listKey] = applyLogToGateways(entity, entry);

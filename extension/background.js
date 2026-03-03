@@ -1198,6 +1198,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'loadPageNotes': {
           const t0 = performance.now();
           const resp = await requestOffscreen({ action: 'loadPageNotes', slug: request.slug });
+          // Filter out orphaned (deleted) notes — disk checkpoint may be stale before drain
+          const orphanedNotes = await readCacheable('list:system/orphaned');
+          const orphanedNoteKeys = new Set((orphanedNotes?.keys || []).filter(k => k.startsWith('note:')));
+          if (orphanedNoteKeys.size > 0 && resp.notes) {
+            resp.notes = resp.notes.filter(n => !orphanedNoteKeys.has('note:' + n.slug));
+          }
           console.debug(`[I/O] loadPageNotes(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse(resp);
           break;
@@ -1206,6 +1212,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'loadAllNotes': {
           const t0 = performance.now();
           const resp = await requestOffscreen({ action: 'loadAllNotes' });
+          // Filter out orphaned (deleted) notes
+          const orphaned = await readCacheable('list:system/orphaned');
+          const orphanedKeys = new Set((orphaned?.keys || []).filter(k => k.startsWith('note:')));
+          if (orphanedKeys.size > 0 && resp.notesMap) {
+            for (const [pageSlug, notes] of Object.entries(resp.notesMap)) {
+              resp.notesMap[pageSlug] = notes.filter(n => !orphanedKeys.has('note:' + n.slug));
+              if (resp.notesMap[pageSlug].length === 0) delete resp.notesMap[pageSlug];
+            }
+          }
           console.debug(`[I/O] loadAllNotes: ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse(resp);
           break;

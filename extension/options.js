@@ -3339,6 +3339,10 @@ chrome.runtime.onMessage.addListener((request) => {
     if (request.key === 'listOrder') {
       renderLists();
     }
+  } else if (type === 'note') {
+    // Note created/deleted — invalidate cached notes and refresh view
+    cachedAllNotes = null;
+    refreshCurrentView();
   }
   // highlight, snapshot: session cache is already updated by background
 });
