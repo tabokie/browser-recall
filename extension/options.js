@@ -767,7 +767,8 @@ function filterByCategory(interactions, category) {
 
 async function loadGatewayDomains() {
   if (gatewayOriginsLoaded) return;
-  gatewayOriginsCache = await readCacheable('list:system/gateways');
+  const gateways = await readCacheable('list:system/gateways');
+  gatewayOriginsCache = gateways.origins;
   gatewayOriginsLoaded = true;
 }
 

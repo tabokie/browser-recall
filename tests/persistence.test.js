@@ -154,7 +154,7 @@ async function hydrateCache(fsStorage, chromeStorage) {
 
   // Load gateway origins from entity file
   const gwData = await fsStorage.loadGateways();
-  await chromeStorage.set({ 'list:system/gateways': gwData.origins || [] });
+  await chromeStorage.set({ 'list:system/gateways': gwData });
 }
 
 // ---------------------------------------------------------------------------

@@ -297,7 +297,7 @@ async function readFs(key) {
     case 'list:system/gateways': {
       const r = await requestOffscreen({ action: 'loadGateways' });
       assertOffscreenSuccess(r, key);
-      value = r.origins;
+      value = { timestamp: r.timestamp, origins: r.origins };
       break;
     }
     case 'list:system/orphaned': {
@@ -651,8 +651,8 @@ async function updateGatewayRegistry(url) {
     const isRoot = parsed.pathname === '/' || parsed.pathname === '' || parsed.pathname === '/index.html' || parsed.pathname === '/index.htm';
 
     // Check if origin is already a gateway (persisted via log/replay)
-    const gatewayOrigins = await readCacheable('list:system/gateways');
-    if (gatewayOrigins.includes(origin)) return;
+    const gateways = await readCacheable('list:system/gateways');
+    if (gateways.origins.includes(origin)) return;
 
     if (!gatewayDetection[origin]) {
       gatewayDetection[origin] = { childCount: 0, promoted: false };
@@ -1309,8 +1309,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'getGatewayDomains': {
           try {
-            const origins = await readCacheable('list:system/gateways');
-            sendResponse({ success: true, origins });
+            const gateways = await readCacheable('list:system/gateways');
+            sendResponse({ success: true, origins: gateways.origins });
           } catch (error) {
             sendResponse({ success: false, error: error.message });
           }
@@ -1637,8 +1637,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           await chrome.storage.local.set({ logBuffer });
           // 2. Clear entity cache (session storage + in-memory LRU)
           await cacheClear();
-          // 3. Reset in-memory state
+          // 3. Reset ALL in-memory state (SW survives across tests)
           recentUrls = new Set();
+          for (const key of Object.keys(gatewayDetection)) delete gatewayDetection[key];
           if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
           // 4. Tell offscreen to wipe directory and reset drain state
           await requestOffscreen({ action: 'resetDirectory' });

@@ -253,7 +253,7 @@ describe('readCacheable', () => {
     sendMessageMock.mockResolvedValue({ success: true, value: ['https://docs.rs'] });
     const { readCacheable } = await import('../extension/utils.js');
     const result = await readCacheable('list:system/gateways');
-    expect(sendMessageMock).toHaveBeenCalledWith({ action: 'readCacheable', key: 'list:system/gateways' });
+    expect(sendMessageMock).toHaveBeenCalledWith({ action: 'readCacheable', key: 'list:system/gateways', includeDeleted: false });
     expect(result).toEqual(['https://docs.rs']);
   });
 

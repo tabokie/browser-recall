@@ -304,7 +304,7 @@ test.describe('Navigation and referrer tracking', () => {
     // Wait for promotion: origin should appear in gateways
     await helper.waitForFunction((o) =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/gateways' })
-        .then(r => r.value && r.value.includes(o))
+        .then(r => r.value?.origins && r.value.origins.includes(o))
     , origin, { timeout: 5000 });
 
     // Visit a 3rd child page — should NOT create another synthetic root visit

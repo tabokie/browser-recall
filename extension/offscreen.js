@@ -292,18 +292,20 @@ async function handleRequest(request) {
       case 'resetDirectory': {
         // Wipe all contents of current directory (no-op if no handle)
         if (!fsStorage.directoryHandle) return { success: true };
+        // Cancel any pending drain timer
+        if (drainTimer) { clearTimeout(drainTimer); drainTimer = null; }
+        // Wait for in-flight drain to finish before wiping — drainQueue is async
+        // and can be mid-execution at an await point when this message arrives
+        while (draining) await new Promise(r => setTimeout(r, 50));
+        pendingDrainEntries = null;
+        lastDrainedTimestamp = 0;
+        pendingWatermark = 0;
         for await (const name of fsStorage.directoryHandle.keys()) {
           await fsStorage.directoryHandle.removeEntry(name, { recursive: true });
         }
         fsStorage.clearCache();
         // Re-grant for OPFS handles (clearCache resets #permissionGranted)
         fsStorage.grantPermission();
-        // Reset drain state
-        if (drainTimer) { clearTimeout(drainTimer); drainTimer = null; }
-        draining = false;
-        pendingDrainEntries = null;
-        lastDrainedTimestamp = 0;
-        pendingWatermark = 0;
         return { success: true };
       }
 

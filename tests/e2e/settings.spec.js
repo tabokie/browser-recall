@@ -71,8 +71,8 @@ test.describe('Settings persistence', () => {
     await helper.close();
 
     expect(gateways.value).toBeTruthy();
-    expect(gateways.value).toContain('https://example.com');
-    expect(gateways.value).toContain('https://news.ycombinator.com');
+    expect(gateways.value.origins).toContain('https://example.com');
+    expect(gateways.value.origins).toContain('https://news.ycombinator.com');
   });
 
   // Verifies that gateway promotion via page visits survives drain→disk→rehydrate.
@@ -101,7 +101,7 @@ test.describe('Settings persistence', () => {
     const baseUrl = localServer.baseUrl;
     await helper.waitForFunction(async (url) => {
       const r = await chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/gateways' });
-      return Array.isArray(r.value) && r.value.includes(url);
+      return Array.isArray(r.value?.origins) && r.value.origins.includes(url);
     }, baseUrl, { timeout: 5000 });
 
     // Flush (drain persists dirty entities to disk)
@@ -121,6 +121,6 @@ test.describe('Settings persistence', () => {
     await helper.close();
 
     expect(after.value).toBeTruthy();
-    expect(after.value).toContain(localServer.baseUrl);
+    expect(after.value.origins).toContain(localServer.baseUrl);
   });
 });

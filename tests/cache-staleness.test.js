@@ -319,7 +319,7 @@ describe('Cache staleness', () => {
         // Simulate background readCacheable: dispatch to known handlers
         switch (msg.key) {
           case 'settings': return { success: true, value: TEST_SETTINGS };
-          case 'list:system/gateways': return { success: true, value: [] };
+          case 'list:system/gateways': return { success: true, value: { timestamp: 0, origins: [] } };
           case 'list:system/shallow-page': return { success: true, value: { timestamp: 0, index: {} } };
           default: return { success: true, value: undefined };
         }
@@ -336,7 +336,7 @@ describe('Cache staleness', () => {
     // Session-cached keys (settings as single object, individual list keys, entity keys for system lists)
     sessionData = {
       settings: TEST_SETTINGS,
-      'list:system/gateways': [],
+      'list:system/gateways': { timestamp: 0, origins: [] },
     };
     // Individual list entity keys
     for (const list of TEST_LISTS) {
@@ -545,7 +545,7 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   it('T4: resetHistory clears gateway cache', async () => {
     populateCache();
-    sessionData['list:system/gateways'] = ['https://docs.rs'];
+    sessionData['list:system/gateways'] = { timestamp: 0, origins: ['https://docs.rs'] };
 
     await importOptions();
     await tick(100);

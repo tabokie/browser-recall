@@ -248,7 +248,7 @@ describe('History title enrichment', () => {
       case 'readCacheable':
         switch (msg.key) {
           case 'settings': return { success: true, value: TEST_SETTINGS };
-          case 'list:system/gateways': return { success: true, value: [] };
+          case 'list:system/gateways': return { success: true, value: { timestamp: 0, origins: [] } };
           case 'list:system/shallow-page': return { success: true, value: SPI_DATA };
           default: return { success: true, value: undefined };
         }
@@ -287,7 +287,7 @@ describe('History title enrichment', () => {
   function populateCache() {
     sessionData = {
       settings: TEST_SETTINGS,
-      'list:system/gateways': [],
+      'list:system/gateways': { timestamp: 0, origins: [] },
       'list:system/shallow-page': SPI_DATA,
     };
     localData = { logBuffer: [] };

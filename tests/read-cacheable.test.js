@@ -106,7 +106,7 @@ describe('readCacheable / readFs', () => {
       case 'loadShallowPageIndex':
         return { success: true, timestamp: 42, index: { 'https://a.com': { parentIds: ['s1'] } } };
       case 'loadGateways':
-        return { success: true, origins: ['https://docs.rs'] };
+        return { success: true, timestamp: 0, origins: ['https://docs.rs'] };
       case 'loadListEntity':
         if (msg.listId === 'my-custom-list') {
           return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }] } };
@@ -141,7 +141,7 @@ describe('readCacheable / readFs', () => {
         }
         case 'list:system/gateways': {
           const r = requestOffscreen({ action: 'loadGateways' });
-          value = r?.origins || []; break;
+          value = { timestamp: r.timestamp, origins: r.origins }; break;
         }
         default: {
           if (key.startsWith('list:')) {
@@ -173,9 +173,9 @@ describe('readCacheable / readFs', () => {
 
   // ── Session hit ──────────────────────────────────────────────────────
   it('returns cached value from session without offscreen call', async () => {
-    await session.set({ 'list:system/gateways': ['https://example.com'] });
+    await session.set({ 'list:system/gateways': { timestamp: 0, origins: ['https://example.com'] } });
     const result = await readCacheable('list:system/gateways');
-    expect(result).toEqual(['https://example.com']);
+    expect(result).toEqual({ timestamp: 0, origins: ['https://example.com'] });
     expect(offscreenCalls).toEqual([]); // No offscreen call
   });
 
@@ -203,9 +203,9 @@ describe('readCacheable / readFs', () => {
 
   it('falls back to filesystem for gateways and caches result', async () => {
     const result = await readCacheable('list:system/gateways');
-    expect(result).toEqual(['https://docs.rs']);
+    expect(result).toEqual({ timestamp: 0, origins: ['https://docs.rs'] });
     expect(offscreenCalls.some(c => c.action === 'loadGateways')).toBe(true);
-    expect(session._store['list:system/gateways']).toEqual(['https://docs.rs']);
+    expect(session._store['list:system/gateways']).toEqual({ timestamp: 0, origins: ['https://docs.rs'] });
   });
 
   // ── Settings batch-load ──────────────────────────────────────────────

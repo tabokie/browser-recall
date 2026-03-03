@@ -335,7 +335,7 @@ describe('Progressive loading', () => {
       case 'readCacheable':
         switch (msg.key) {
           case 'settings': return { success: true, value: TEST_SETTINGS };
-          case 'list:system/gateways': return { success: true, value: [] };
+          case 'list:system/gateways': return { success: true, value: { timestamp: 0, origins: [] } };
           case 'list:system/shallow-page': return { success: true, value: { timestamp: 0, index: {} } };
           default: {
             // Return individual list entities by slug
@@ -355,7 +355,7 @@ describe('Progressive loading', () => {
   function populateCache() {
     sessionData = {
       settings: TEST_SETTINGS,
-      'list:system/gateways': [],
+      'list:system/gateways': { timestamp: 0, origins: [] },
     };
     // Individual list entity keys
     for (const list of TEST_LISTS) {
@@ -489,7 +489,7 @@ describe('Progressive loading', () => {
     // loadLists() reads from settings.listOrder directly, so sidebar renders immediately.
     sessionData = {
       settings: TEST_SETTINGS,
-      'list:system/gateways': [],
+      'list:system/gateways': { timestamp: 0, origins: [] },
       // individual list:<slug> keys intentionally missing
     };
     localData = { logBuffer: [] };
