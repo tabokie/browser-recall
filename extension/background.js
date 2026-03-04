@@ -1601,6 +1601,102 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
+        case 'restoreNote': {
+          const noteSlug = request.noteSlug;
+          // Load note from disk to get its parentIds for re-linking
+          const noteResp = await requestOffscreen({ action: 'loadNote', noteSlug });
+          const noteData = noteResp.note;
+          const parentIds = noteData?.parentIds || [];
+          await addLog({
+            timestamp: Date.now(),
+            action: 'restore_note',
+            slug: noteSlug,
+            parentIds,
+          });
+          sendResponse({ success: true });
+          notifyMutation('orphaned');
+          notifyMutation('note', { noteSlug });
+          break;
+        }
+
+        case 'restoreList': {
+          const listId = request.listId;
+          // Load list entity (include deleted) to get name and pins
+          const entity = await readCacheable('list:' + listId, true);
+          const name = entity?.name || listId;
+          const pins = entity?.pins || [];
+          await addLog({
+            timestamp: Date.now(),
+            action: 'restore_list',
+            id: listId,
+            name,
+            pins,
+          });
+          sendResponse({ success: true });
+          notifyMutation('orphaned');
+          notifyMutation('lists');
+          break;
+        }
+
+        case 'permanentDelete': {
+          const key = request.key;
+          // 1. Drain all pending log entries first
+          await ensureOffscreenPort();
+          await drainNow();
+          await requestOffscreen({ action: 'flushLogBuffer', entries: logBuffer });
+          await new Promise(r => setTimeout(r, 100));
+          // 2. Delete the file via offscreen
+          if (key.startsWith('note:')) {
+            const slug = key.slice('note:'.length);
+            await requestOffscreen({ action: 'deleteNote', noteSlug: slug });
+          } else if (key.startsWith('list:')) {
+            const id = key.slice('list:'.length);
+            await requestOffscreen({ action: 'deleteListFile', listId: id });
+          }
+          // 3. Update orphaned list: remove the key
+          const orphaned = await readCacheable('list:system/orphaned') || { timestamp: 0, keys: [] };
+          const updatedOrphaned = {
+            ...orphaned,
+            timestamp: Date.now(),
+            keys: orphaned.keys.filter(k => k !== key),
+          };
+          await requestOffscreen({ action: 'saveJson', path: 'lists/system/orphaned.json', data: updatedOrphaned });
+          await cacheSet('list:system/orphaned', updatedOrphaned);
+          // 4. Clear session cache for the deleted entity
+          await cacheRemove(key);
+          sendResponse({ success: true });
+          notifyMutation('orphaned');
+          break;
+        }
+
+        case 'permanentDeleteAll': {
+          // 1. Drain all pending log entries first
+          await ensureOffscreenPort();
+          await drainNow();
+          await requestOffscreen({ action: 'flushLogBuffer', entries: logBuffer });
+          await new Promise(r => setTimeout(r, 100));
+          // 2. Load orphaned list
+          const orphaned = await readCacheable('list:system/orphaned') || { timestamp: 0, keys: [] };
+          // 3. Delete each file
+          for (const key of orphaned.keys) {
+            if (key.startsWith('note:')) {
+              const slug = key.slice('note:'.length);
+              await requestOffscreen({ action: 'deleteNote', noteSlug: slug });
+            } else if (key.startsWith('list:')) {
+              const id = key.slice('list:'.length);
+              await requestOffscreen({ action: 'deleteListFile', listId: id });
+            }
+            await cacheRemove(key);
+          }
+          // 4. Save empty orphaned list
+          const emptyOrphaned = { timestamp: Date.now(), keys: [] };
+          await requestOffscreen({ action: 'saveJson', path: 'lists/system/orphaned.json', data: emptyOrphaned });
+          await cacheSet('list:system/orphaned', emptyOrphaned);
+          sendResponse({ success: true });
+          notifyMutation('orphaned');
+          break;
+        }
+
         // ── Pass-through (complex FS ops) ──
 
         case 'initializeFilesystem': {

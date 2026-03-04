@@ -1083,6 +1083,140 @@ describe('effectOf scope', () => {
     expect(result['list:system/orphaned'].timestamp).toBe(100);
   });
 
+  // --- restore_note: re-link note to parent page childIds ---
+
+  it('restore_note re-adds note to parent page childIds', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['note:n2'] };
+    const orphaned = { timestamp: 50, keys: ['note:n1'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_note', slug: 'n1', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['page:p1'].childIds).toContain('note:n1');
+    expect(result['page:p1'].childIds).toContain('note:n2');
+  });
+
+  it('restore_note removes note key from system/orphaned', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: [] };
+    const orphaned = { timestamp: 50, keys: ['note:n1', 'list:c1'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_note', slug: 'n1', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['list:system/orphaned'].keys).not.toContain('note:n1');
+    expect(result['list:system/orphaned'].keys).toContain('list:c1');
+    expect(result['list:system/orphaned'].timestamp).toBe(100);
+  });
+
+  it('restore_note does not duplicate note in childIds', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['note:n1'] };
+    const orphaned = { timestamp: 50, keys: ['note:n1'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_note', slug: 'n1', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['page:p1'].childIds.filter(c => c === 'note:n1')).toHaveLength(1);
+  });
+
+  it('restore_note skips missing parent pages', async () => {
+    const orphaned = { timestamp: 50, keys: ['note:n1'] };
+    const load = async (key) => {
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_note', slug: 'n1', parentIds: ['page:missing'] },
+      load,
+    );
+    expect(result['page:missing']).toBeNull();
+    expect(result['list:system/orphaned'].keys).not.toContain('note:n1');
+  });
+
+  // --- restore_list: re-add to listOrder, clear deleted, restore parentIds ---
+
+  it('restore_list clears deleted flag and re-adds to listOrder', async () => {
+    const settings = { listOrder: [{ id: 'list:c2', name: 'B' }] };
+    const orphaned = { timestamp: 50, keys: ['list:c1'] };
+    const load = async (key) => {
+      if (key === 'settings') return settings;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null; // list:c1 returns null (readCacheable filters deleted)
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_list', id: 'c1', name: 'A', pins: [] },
+      load,
+    );
+    expect(result['list:c1'].deleted).toBe(false);
+    expect(result['list:c1'].name).toBe('A');
+    expect(result['settings'].listOrder).toContainEqual({ id: 'list:c1', name: 'A' });
+    expect(result['settings'].listOrder).toContainEqual({ id: 'list:c2', name: 'B' });
+  });
+
+  it('restore_list restores page parentIds for checkpointed pins', async () => {
+    const settings = { listOrder: [] };
+    const orphaned = { timestamp: 50, keys: ['list:c1'] };
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: [] };
+    const load = async (key) => {
+      if (key === 'settings') return settings;
+      if (key === 'list:system/orphaned') return orphaned;
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_list', id: 'c1', name: 'A', pins: [{ id: 'page:p1', pinnedAt: 50 }] },
+      load,
+    );
+    expect(result['page:p1'].parentIds).toContain('list:c1');
+  });
+
+  it('restore_list restores SPI lists for shallow pins', async () => {
+    const settings = { listOrder: [] };
+    const orphaned = { timestamp: 50, keys: ['list:c1'] };
+    const spi = { timestamp: 0, index: { 'https://example.com': { parentIds: [], lists: [], title: 'Example' } } };
+    const load = async (key) => {
+      if (key === 'settings') return settings;
+      if (key === 'list:system/orphaned') return orphaned;
+      if (key === 'list:system/shallow-page') return spi;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_list', id: 'c1', name: 'A', pins: [{ id: 'shallow:https://example.com', pinnedAt: 50 }] },
+      load,
+    );
+    expect(result['list:system/shallow-page'].index['https://example.com'].lists).toContain('list:c1');
+  });
+
+  it('restore_list removes list key from system/orphaned', async () => {
+    const settings = { listOrder: [] };
+    const orphaned = { timestamp: 50, keys: ['list:c1', 'note:n1'] };
+    const load = async (key) => {
+      if (key === 'settings') return settings;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_list', id: 'c1', name: 'A', pins: [] },
+      load,
+    );
+    expect(result['list:system/orphaned'].keys).not.toContain('list:c1');
+    expect(result['list:system/orphaned'].keys).toContain('note:n1');
+  });
+
   // --- orphaned entity guards ---
 
   it('list action on orphaned list is a no-op', async () => {

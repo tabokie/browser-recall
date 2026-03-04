@@ -259,6 +259,78 @@ export async function effectOf(entry, load) {
     return result;
   }
 
+  // --- restore_note: re-link note to parents + remove from orphaned list ---
+  if (entry.action === 'restore_note') {
+    const noteKey = `${NOTE_PREFIX}${entry.slug}`;
+    if (entry.parentIds) {
+      for (const parentKey of entry.parentIds) {
+        const parent = await load(parentKey);
+        if (!parent) { result[parentKey] = null; continue; }
+        const childIds = [...(parent.childIds || [])];
+        if (!childIds.includes(noteKey)) childIds.push(noteKey);
+        result[parentKey] = { ...parent, childIds };
+      }
+    }
+    // Remove from orphaned list
+    const orphaned = await loadOrDefault('list:system/orphaned', load);
+    const keys = (orphaned.keys || []).filter(k => k !== noteKey);
+    result['list:system/orphaned'] = { ...orphaned, timestamp: entry.timestamp, keys };
+    return result;
+  }
+
+  // --- restore_list: re-add to listOrder, clear deleted flag, restore page parentIds ---
+  if (entry.action === 'restore_list') {
+    const listKey = `list:${entry.id}`;
+
+    // Load list entity — may be null if readCacheable filters deleted: true.
+    // Fall back to default, then overlay with entry data (name, pins from handler).
+    const entity = await loadOrDefault(listKey, load);
+    // Clear deleted flag and update timestamp
+    const restored = { ...entity, deleted: false, timestamp: entry.timestamp };
+    if (entry.name) restored.name = entry.name;
+    // Restore pins from log entry (handler passes them since load may filter deleted entities)
+    if (entry.pins) restored.pins = entry.pins;
+    result[listKey] = restored;
+
+    // Re-add to settings.listOrder
+    const settings = await load('settings') || {};
+    const listOrder = [...(settings.listOrder || [])];
+    if (!listOrder.some(e => e.id === listKey)) {
+      listOrder.push({ id: listKey, name: entry.name || entity.name || '' });
+    }
+    result['settings'] = { ...settings, listOrder };
+
+    // Restore page parentIds for checkpointed pins (use entry.pins — authoritative)
+    const pins = entry.pins || restored.pins || [];
+    for (const pin of pins) {
+      if (pin.id.startsWith(PAGE_PREFIX)) {
+        const page = await load(pin.id);
+        if (!page) continue;
+        const parentIds = [...(page.parentIds || [])];
+        if (!parentIds.includes(listKey)) parentIds.push(listKey);
+        result[pin.id] = { ...page, parentIds };
+      } else if (pin.id.startsWith(SHALLOW_PREFIX)) {
+        // Re-add list to SPI lists for shallow pins
+        const url = pin.id.slice(SHALLOW_PREFIX.length);
+        const spi = result['list:system/shallow-page'] || await loadOrDefault('list:system/shallow-page', load);
+        const index = { ...spi.index };
+        if (index[url]) {
+          const lists = [...(index[url].lists || [])];
+          if (!lists.includes(listKey)) lists.push(listKey);
+          index[url] = { ...index[url], lists };
+        }
+        result['list:system/shallow-page'] = { ...spi, timestamp: entry.timestamp, index };
+      }
+    }
+
+    // Remove from orphaned list
+    const orphaned = await loadOrDefault('list:system/orphaned', load);
+    const keys = (orphaned.keys || []).filter(k => k !== listKey);
+    result['list:system/orphaned'] = { ...orphaned, timestamp: entry.timestamp, keys };
+
+    return result;
+  }
+
   // --- page ---
   if (entry.action === 'page') {
     // Skip parent-side childIds accumulation when parent is a gateway root

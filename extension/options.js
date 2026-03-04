@@ -9,6 +9,7 @@ import { attentionStrength, attentionColor, aggregateAttention } from './attenti
 import { qbCreatePredicate, qbCreateOperator, qbCreatePlaceholder, qbFindNode, qbCollapseTree, qbFlattenSameOp, qbToTree, qbFlatten } from './qb-tree.js';
 import { initCharts, renderTimeChart, renderTimeChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './time-chart.js';
 import { VirtualScroller } from './virtual-scroller.js';
+import { entityTypeLabel } from './entity-types.js';
 
 const fsStorage = new FileSystemStorage();
 
@@ -435,19 +436,107 @@ async function toggleResultPin(listId, url, title) {
   await chrome.runtime.sendMessage({ action: 'toggleListPin', listId, url });
 }
 
-// --- Layout switching (list vs normal) ---
+// --- Layout switching (list vs normal vs recycle bin) ---
 function showListLayout() {
   saveExploreQbState();
   document.getElementById('timeChart').classList.remove('visible');
   document.getElementById('resultsWrapper').style.display = 'none';
   document.getElementById('listLayout').classList.add('visible');
+  document.getElementById('recycleBinLayout').classList.remove('visible');
   document.getElementById('queryBuilder').style.display = 'none';
 }
 
 function showNormalLayout() {
   document.getElementById('resultsWrapper').style.display = '';
   document.getElementById('listLayout').classList.remove('visible');
+  document.getElementById('recycleBinLayout').classList.remove('visible');
   restoreExploreQbState();
+}
+
+function showRecycleBinLayout() {
+  saveExploreQbState();
+  document.getElementById('timeChart').classList.remove('visible');
+  document.getElementById('resultsWrapper').style.display = 'none';
+  document.getElementById('listLayout').classList.remove('visible');
+  document.getElementById('recycleBinLayout').classList.add('visible');
+  document.getElementById('queryBuilder').style.display = 'none';
+  document.getElementById('pinSearchBtn').style.display = 'none';
+}
+
+// --- Recycle Bin ---
+
+async function showRecycleBin() {
+  activeView = { type: 'recycle-bin' };
+  updateSidebarActive();
+  updateMainTitle('Recycle Bin');
+  showRecycleBinLayout();
+
+  const orphaned = await readCacheable('list:system/orphaned');
+  const keys = orphaned?.keys || [];
+  const itemsEl = document.getElementById('recycleBinItems');
+  const emptyEl = document.getElementById('recycleBinEmpty');
+  const headerEl = document.querySelector('.recycle-bin-header');
+  itemsEl.innerHTML = '';
+
+  if (keys.length === 0) {
+    emptyEl.style.display = '';
+    headerEl.style.display = 'none';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  headerEl.style.display = '';
+
+  for (const key of keys) {
+    const typeLabel = entityTypeLabel(key);
+    const typeCls = 'type-' + typeLabel.toLowerCase();
+
+    // Load entity to get display name
+    let displayName = key;
+    try {
+      const entity = await sendAction({ action: 'readCacheable', key, includeDeleted: true });
+      if (entity) {
+        displayName = entity.name || entity.excerpt || entity.title || entity.slug || key;
+      }
+    } catch {}
+
+    const card = document.createElement('div');
+    card.className = 'recycle-card';
+    card.dataset.key = key;
+    card.innerHTML = `
+      <span class="entity-type-badge ${typeCls}">${escapeHtml(typeLabel)}</span>
+      <div class="recycle-card-info">
+        <div class="recycle-card-name">${escapeHtml(displayName)}</div>
+        <div class="recycle-card-key">${escapeHtml(key)}</div>
+      </div>
+      <button class="restore-btn">Restore</button>
+    `;
+    card.querySelector('.restore-btn').addEventListener('click', async () => {
+      if (key.startsWith('note:')) {
+        const slug = key.slice('note:'.length);
+        await sendAction({ action: 'restoreNote', noteSlug: slug });
+      } else if (key.startsWith('list:')) {
+        const id = key.slice('list:'.length);
+        await sendAction({ action: 'restoreList', listId: id });
+      }
+    });
+    itemsEl.appendChild(card);
+  }
+
+  // Empty bin button
+  const emptyBtn = document.querySelector('.empty-bin-btn');
+  // Clone to remove old listeners
+  const newBtn = emptyBtn.cloneNode(true);
+  emptyBtn.parentNode.replaceChild(newBtn, emptyBtn);
+  newBtn.addEventListener('click', async () => {
+    await sendAction({ action: 'permanentDeleteAll' });
+  });
+}
+
+async function updateRecycleBinBadge() {
+  const orphaned = await readCacheable('list:system/orphaned');
+  const count = orphaned?.keys?.length || 0;
+  const badge = document.getElementById('recycleBinCount');
+  badge.textContent = count > 0 ? String(count) : '';
 }
 
 function saveExploreQbState() {
@@ -723,6 +812,8 @@ function refreshCurrentView() {
     showList({ slug: activeView.id, qbTrees: activeView.qbTrees, name: activeView.name });
   } else if (activeView.type === 'explore') {
     showExplore();
+  } else if (activeView.type === 'recycle-bin') {
+    showRecycleBin();
   }
 }
 
@@ -2552,6 +2643,8 @@ function updateSidebarActive() {
     if (el) el.classList.add('active');
   } else if (activeView.type === 'explore') {
     document.getElementById('exploreBtn').classList.add('active');
+  } else if (activeView.type === 'recycle-bin') {
+    document.getElementById('recycleBinBtn').classList.add('active');
   }
 }
 
@@ -2769,6 +2862,10 @@ document.getElementById('exploreBtn').addEventListener('click', () => {
   showExplore();
 });
 
+// --- Event listeners: Recycle Bin button ---
+document.getElementById('recycleBinBtn').addEventListener('click', () => {
+  showRecycleBin();
+});
 
 // --- Event listeners: Pin search ---
 document.getElementById('pinSearchBtn').addEventListener('click', saveExploreAsList);
@@ -3344,6 +3441,10 @@ chrome.runtime.onMessage.addListener((request) => {
     // Note created/deleted — invalidate cached notes and refresh view
     cachedAllNotes = null;
     refreshCurrentView();
+  } else if (type === 'orphaned') {
+    // Orphaned list changed — refresh recycle bin if active, update badge
+    updateRecycleBinBadge();
+    if (activeView.type === 'recycle-bin') showRecycleBin();
   }
   // highlight, snapshot: session cache is already updated by background
 });
@@ -3995,6 +4096,7 @@ async function initialize() {
   ]);
   _timer('parallel metadata load');
   updateExploreBadge();
+  updateRecycleBinBadge();
   showExplore();
 
   // Focus overlay: close on backdrop click or Escape

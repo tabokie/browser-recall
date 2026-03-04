@@ -1351,6 +1351,111 @@
       display: flex;
     }
 
+    /* ── Recycle Bin ── */
+    .recycle-bin-layout {
+      display: none;
+      flex-direction: column;
+      padding: 12px 24px;
+      gap: 8px;
+    }
+    .recycle-bin-layout.visible {
+      display: flex;
+    }
+    .recycle-bin-header {
+      display: flex;
+      justify-content: flex-end;
+      padding: 4px 0;
+    }
+    .empty-bin-btn {
+      padding: 6px 14px;
+      border: 1px solid #d93025;
+      border-radius: 4px;
+      background: #fff;
+      color: #d93025;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .empty-bin-btn:hover {
+      background: #fce8e6;
+    }
+    .recycle-bin-items {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .recycle-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: #f8f9fa;
+      border: 1px solid #e8eaed;
+      border-radius: var(--card-radius);
+    }
+    .entity-type-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      flex-shrink: 0;
+    }
+    .entity-type-badge.type-note { background: #e8f0fe; color: #1967d2; }
+    .entity-type-badge.type-list { background: #e6f4ea; color: #137333; }
+    .entity-type-badge.type-page { background: #fef7e0; color: #b06000; }
+    .entity-type-badge.type-unknown { background: #f1f3f4; color: #5f6368; }
+    .recycle-card-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .recycle-card-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: #202124;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .recycle-card-key {
+      font-size: 11px;
+      color: #80868b;
+      font-family: monospace;
+    }
+    .restore-btn {
+      padding: 5px 12px;
+      border: 1px solid #34a853;
+      border-radius: 4px;
+      background: #fff;
+      color: #34a853;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+    .restore-btn:hover {
+      background: #e6f4ea;
+    }
+    .recycle-count {
+      font-size: 11px;
+      background: #d93025;
+      color: #fff;
+      border-radius: 10px;
+      padding: 1px 6px;
+      margin-left: auto;
+      font-weight: 600;
+      min-width: 18px;
+      text-align: center;
+    }
+    .recycle-count:empty { display: none; }
+    .recycle-bin-empty {
+      padding: 32px 0;
+      text-align: center;
+      color: #80868b;
+      font-size: 13px;
+    }
+
     .list-section {
       display: flex;
       flex-direction: column;
@@ -2073,6 +2178,12 @@
       <div id="listsList">
         <div class="lists-empty" id="listsEmpty">Pin a search to create a list</div>
       </div>
+      <div class="sidebar-section-label" style="margin-top:12px">System</div>
+      <div class="sidebar-item" id="recycleBinBtn">
+        <span class="icon"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></span>
+        <span class="label">Recycle Bin</span>
+        <span class="recycle-count" id="recycleBinCount"></span>
+      </div>
     </div>
   </div>
 
@@ -2138,6 +2249,17 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Recycle bin layout -->
+    <div class="recycle-bin-layout" id="recycleBinLayout">
+      <div class="recycle-bin-header">
+        <button class="empty-bin-btn">Empty Recycle Bin</button>
+      </div>
+      <div class="recycle-bin-items" id="recycleBinItems">
+        <!-- Rendered by JS -->
+      </div>
+      <div class="recycle-bin-empty" id="recycleBinEmpty" style="display:none">No deleted items</div>
     </div>
   </div>
 

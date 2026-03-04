@@ -117,6 +117,11 @@ async function handleRequest(request) {
         return { success: true };
       }
 
+      case 'deleteListFile': {
+        await fsStorage.deleteListFile(request.listId);
+        return { success: true };
+      }
+
       case 'loadPageNotes': {
         const t0 = performance.now();
         const notes = await fsStorage.loadPageNotes(request.slug);

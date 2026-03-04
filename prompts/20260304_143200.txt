@@ -1,0 +1,8 @@
+- Take a look at the last two items in TODO.md, I think "Physical deletion requires log buffer to be fully drained" can eliminate the need for "Guardrails". What do you think?
+- Yes
+- Go over TODO.md, find something to do
+- Let's work on items from deletion system. TDD
+- Go ahead. Recycle Bin UI is similar to a normal list but in a different section. There is one big button on the title bar to "Delete All", and for individual items, its card has a small restore button.
+
+One key difference is, normal list UI only displays pages. Recycle bin UI displays list and snapshot and notes. The type must be rendered in human-readable way. And I expect to expand this type rendering to other UI components in the future, so make it modular.
+- /finish 

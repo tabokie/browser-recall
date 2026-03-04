@@ -118,7 +118,9 @@ They do NOT exist in:
 | `effectOf` replay (page action) | Updates existing entity | Returns null (no-op); updates `shallowPageIndex` with parents/title |
 | `effectOf` replay (note action) | Wires `note:<slug>` into parent page `childIds` only (note entity not created/updated by replay — content is on disk) | N/A |
 | `effectOf` replay (del_note action) | Unlinks `note:<slug>` from parent page `childIds`, adds `note:<slug>` to `list:system/orphaned` | N/A |
+| `effectOf` replay (restore_note action) | Re-links `note:<slug>` to parent page `childIds`, removes from `list:system/orphaned` | N/A |
 | `effectOf` replay (del_list action) | Removes `list:<id>` from page `parentIds` (checkpointed pins), removes list from SPI `lists` (shallow pins), adds `list:<id>` to `list:system/orphaned` | N/A |
+| `effectOf` replay (restore_list action) | Clears `deleted` flag, re-adds to `settings.listOrder`, restores page `parentIds` (checkpointed pins) + SPI `lists` (shallow pins), removes from `list:system/orphaned`. Pins passed in log entry (readCacheable filters deleted entities). | N/A |
 | `effectOf` replay (list pin/unpin) | Updates page `parentIds` with `list:<id>` | Updates SPI `lists` with `list:<id>` |
 | `effectOf` replay (page_checkpoint) | Updates watermark; absorbs shallow-page index data (parents, lists) into page, upgrades `shallow:` list pins to `page:` | Creates entity from `defaultEntity()` |
 | `getPageRelations` (background) | Reads `parentIds`/`childIds`, resolves typed refs | Falls back to `shallowPageIndex.index[url]` for parents |

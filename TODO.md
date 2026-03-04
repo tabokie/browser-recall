@@ -15,8 +15,7 @@
 
 ## Deletion system
 
-- [ ] **Recycle bin / trash viewer UI for orphaned items.** `list:system/orphaned` tracks deleted entity keys (`note:<slug>`, `list:<id>`). Need a UI in options page to display these, show raw JSON content, and allow permanent physical deletion of the underlying files.
-- [ ] **Restore support for deleted notes/lists.** Note/list files stay on disk after deletion — only relations are unlinked. Add a restore action that re-links the entity: for notes, re-add `note:<slug>` to parent page `childIds` (reverse of `del_note`); for lists, re-add to `settings.listOrder` and restore page `parentIds` (reverse of `del_list`). Remove key from `list:system/orphaned`.
-- [ ] **Guardrails for missing files during second-order lookups.** If a user physically deletes a note/capture file and we replay full history, file lookups will fail. `readCacheable` → `readFs` → offscreen `loadNote` must return null gracefully. Audit all code paths that load notes/captures and ensure they tolerate missing files without throwing.
-- [ ] **Physical deletion requires log buffer to be fully drained.** Before physically deleting an entity's file from disk, ensure the log buffer has been completely drained to JSONL history. Otherwise, undrained log entries that reference the entity will fail on replay (file path becomes invalid). The deletion UI must trigger a drain and await completion before removing files.
+- [x] **Recycle bin / trash viewer UI for orphaned items.** Options page sidebar → "Recycle Bin" shows cards for each orphaned entity with type badge, name, and restore/empty buttons. Mutation handler refreshes on `orphaned` type. Badge count in sidebar.
+- [x] **Restore support for deleted notes/lists.** `restore_note` and `restore_list` log actions in replay.js re-link entities (reverse of `del_note`/`del_list`). Background handlers: `restoreNote`, `restoreList`. For lists, pins are passed in the log entry since `readCacheable` filters deleted entities.
+- [x] **Physical deletion with log buffer drain.** `permanentDelete` and `permanentDeleteAll` handlers flush log buffer before soft-deleting files via offscreen, then update orphaned list and clear session cache.
 
