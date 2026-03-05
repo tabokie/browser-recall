@@ -78,7 +78,7 @@ const TEST_SETTINGS = {
   titleTrimRules: [],
 };
 
-// Page checkpoint returned by loadPageBatch
+// Page checkpoint returned by readCacheable('page:*')
 const PAGE_CHECKPOINTS = {
   [CHECKPOINTED_SLUG]: {
     slug: CHECKPOINTED_SLUG,
@@ -199,9 +199,6 @@ describe('History title enrichment', () => {
 
   function handleAction(msg) {
     switch (msg.action) {
-      case 'loadSettings':
-        return { success: true, settings: TEST_SETTINGS };
-
       case 'listInteractionFiles':
         return { success: true, files: FILES_NEWEST_FIRST };
 
@@ -212,12 +209,6 @@ describe('History title enrichment', () => {
         }
         return { success: true, interactions };
       }
-
-      case 'loadListPins':
-        return { success: true, pins: {} };
-
-      case 'loadListPinsById':
-        return { success: true, pins: [] };
 
       case 'loadPermanentDeletes':
         return { success: true, urls: [] };
@@ -234,14 +225,6 @@ describe('History title enrichment', () => {
       case 'loadAllHighlights':
         return { success: true, highlightsMap: {} };
 
-      case 'loadPageBatch': {
-        const pages = {};
-        for (const slug of msg.slugs) {
-          if (PAGE_CHECKPOINTS[slug]) pages[slug] = PAGE_CHECKPOINTS[slug];
-        }
-        return { success: true, pages };
-      }
-
       case 'saveSettingsKey':
         return { success: true };
 
@@ -250,11 +233,15 @@ describe('History title enrichment', () => {
           case 'settings': return { success: true, value: TEST_SETTINGS };
           case 'list:system/gateways': return { success: true, value: { timestamp: 0, origins: [] } };
           case 'list:system/shallow-page': return { success: true, value: SPI_DATA };
-          default: return { success: true, value: undefined };
+          case 'list:system/orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
+          default: {
+            if (msg.key.startsWith('page:')) {
+              const slug = msg.key.slice('page:'.length);
+              return { success: true, value: PAGE_CHECKPOINTS[slug] || null };
+            }
+            return { success: true, value: undefined };
+          }
         }
-
-      case 'getShallowPageIndex':
-        return { success: true, ...SPI_DATA };
 
       default:
         return { success: true };

@@ -232,6 +232,16 @@ All background.js message handlers return `{ success: true, ...fields }` on succ
 - **Past date keys with undrained entries**: Phase 2.5 sets their timestamp from logBuffer entries. Since undrained timestamps > `persistWatermark`, watermark-gated eviction in `entity-cache.js` won't evict them until drain completes (at which point disk is complete).
 - **Past date keys fully drained**: disk is the complete record — `readFs` returns correct data.
 
+### Entity Cache Guarantees
+
+Two invariants ensure `readCacheable('page:*')` / `readCacheable('note:*')` / etc. always return up-to-date data without replaying the logBuffer on read:
+
+1. **Dirty entities are pinned (not evictable).** Every `addLog()` call replays via `effectOf` and writes updated entities to session cache. The entity-cache LRU only evicts entries whose `timestamp <= persistWatermark`. Undrained entities have timestamps newer than the watermark, so they cannot be evicted until drain completes (at which point disk matches the session state).
+
+2. **Hydration pre-fills cache with all entities modified by logBuffer.** Phase 1.5 pre-loads page entities referenced by logBuffer from filesystem into session cache. Phase 2 then replays every logBuffer entry via `effectOf`, bringing all affected entities (pages, notes, lists, SPI, settings) up-to-date. By the time `hydrationDone` resolves and `readCacheable` becomes callable, every entity that has undrained mutations is already in session cache with the correct state.
+
+**Consequence:** `readFs` (the filesystem fallback in `readCacheable`) does NOT need to replay logBuffer entries. For any key with undrained mutations, the session cache will have the up-to-date entity. `readFs` only runs on a true cache miss — meaning no undrained mutations exist for that key, so the disk checkpoint is authoritative.
+
 ### Pending Buffer for WASM Search
 
 `pipelinedSearch()` in options.js reads `chrome.storage.local.get(['logBuffer'])` directly to get the exact undrained delta. WASM searches JSONL files on disk, so only undrained entries need to be searched separately. The raw logBuffer (not `history:<today>`) avoids double-processing entries already in JSONL.

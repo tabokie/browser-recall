@@ -150,19 +150,19 @@ test.describe('Empty and edge states', () => {
     expect(r.pinned).toBe(true);
 
     // SPI should have an entry (with null title since never visited)
-    const spi = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'getShallowPageIndex' })
+    const spiResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/shallow-page' })
     );
 
     // Pin should be retrievable
-    const pins = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'loadListPinsById', listId: 'reading' })
+    const listResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
     );
     await helper.close();
 
-    expect(spi.index[url]).toBeDefined();
-    expect(spi.index[url].lists).toContain('list:reading');
-    expect(pins.pins.length).toBe(1);
+    expect(spiResult.value.index[url]).toBeDefined();
+    expect(spiResult.value.index[url].lists).toContain('list:reading');
+    expect((listResult.value?.pins || []).length).toBe(1);
   });
 
   test('empty list renders list view without error', async ({ extContext, extensionId, setupDir }) => {
@@ -213,10 +213,10 @@ test.describe('Empty and edge states', () => {
     expect(pin.pinned).toBe(true);
 
     // Verify pinned
-    let pins = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'loadListPinsById', listId: 'reading' })
+    let listResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
     );
-    expect(pins.pins.length).toBe(1);
+    expect((listResult.value?.pins || []).length).toBe(1);
 
     // Unpin
     const unpin = await helper.evaluate((u) =>
@@ -225,11 +225,11 @@ test.describe('Empty and edge states', () => {
     expect(unpin.pinned).toBe(false);
 
     // Verify unpinned
-    pins = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'loadListPinsById', listId: 'reading' })
+    listResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
     );
     await helper.close();
-    expect(pins.pins.length).toBe(0);
+    expect((listResult.value?.pins || []).length).toBe(0);
   });
 });
 

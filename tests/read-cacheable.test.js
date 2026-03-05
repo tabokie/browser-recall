@@ -8,7 +8,7 @@
  * - `listOrder` stores `{ id, name }` entries for direct consumption
  * - `await hydrationDone` blocks readCacheable until resolved
  *
- * Structural tests verify readCacheable/readFs and getGatewayDomains exist in background.js.
+ * Structural tests verify readCacheable/readFs exist in background.js.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
@@ -52,10 +52,6 @@ describe('background.js structural checks', () => {
 
   it('has readCacheable case handler', () => {
     expect(bgSource).toMatch(/case\s+'readCacheable'\s*:/);
-  });
-
-  it('has getGatewayDomains case handler', () => {
-    expect(bgSource).toMatch(/case\s+'getGatewayDomains'\s*:/);
   });
 
   it('readCacheable handler returns success: true', () => {

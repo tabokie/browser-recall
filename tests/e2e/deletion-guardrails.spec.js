@@ -6,76 +6,43 @@ const TEST_SLUG = getSlugForUrl(TEST_URL);
 
 test.describe('Deletion guardrails', () => {
 
-  // Fix 1a: loadPageNotes should filter out orphaned (deleted) notes.
-  // Simulate stale disk checkpoint: page.childIds still references a note
-  // that is already in the orphaned list. loadPageNotes reads from disk and
-  // must filter against orphaned keys.
-  test('deleted note does not appear in loadPageNotes even with stale disk', async ({ extContext, extensionId, setupDir }) => {
+  // loadPageNotes reads from session cache (where del_note replay removes note refs).
+  // After deleteNote action, the page entity in session cache has updated childIds
+  // and loadPageNotes should not return the deleted note.
+  //
+  // NOTE: We call the real deleteNote handler rather than seeding a del_note log
+  // entry. Seeding in history files doesn't trigger hydration replay (only logBuffer
+  // entries are replayed), and seeding in logBuffer is impractical (cleared by
+  // rehydrateForTest). The correct E2E pattern: seed the entity, then call the
+  // action handler via sendMessage.
+  test('deleted note does not appear in loadPageNotes after deleteNote', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const noteSlug = '260301-guardrail-note';
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
-      // Page on disk still has note in childIds (stale checkpoint)
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`],
       }},
-      // Note file still on disk (deletion doesn't remove files)
       { path: `notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'To be deleted', note: 'Gone', cssPath: 'p',
         parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
-      }},
-      // Orphaned list already tracks the deleted note
-      { path: 'lists/system/orphaned.json', data: {
-        timestamp: now, keys: [`note:${noteSlug}`],
       }},
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
 
-    // loadPageNotes reads from disk (stale childIds) — must filter orphaned notes
+    // Delete the note via the real handler (triggers del_note log + effectOf replay)
+    await helper.evaluate((slug) =>
+      chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug: slug })
+    , noteSlug);
+
+    // loadPageNotes reads from session cache — del_note replay removed the note ref
     const notesResp = await helper.evaluate((slug) =>
       chrome.runtime.sendMessage({ action: 'loadPageNotes', slug })
     , TEST_SLUG);
     expect(notesResp.success).toBe(true);
     expect(notesResp.notes.filter(n => n.slug === noteSlug)).toHaveLength(0);
-
-    await helper.close();
-  });
-
-  // Fix 1b: loadAllNotes (used by search) should filter out orphaned notes.
-  // loadAllNotes scans all note files on disk and groups by parentIds.
-  // Deleted notes still have parentIds on disk, so they appear in results
-  // unless filtered against the orphaned list.
-  test('deleted note does not appear in loadAllNotes', async ({ extContext, extensionId, setupDir }) => {
-    const now = Date.now();
-    const noteSlug = '260301-search-note';
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
-      { path: `pages/${TEST_SLUG}.json`, data: {
-        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
-        parentIds: [], childIds: [`note:${noteSlug}`],
-      }},
-      { path: `notes/${noteSlug}.json`, data: {
-        slug: noteSlug, excerpt: 'Search target', note: 'Find me', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
-      }},
-      // Orphaned list already tracks the deleted note
-      { path: 'lists/system/orphaned.json', data: {
-        timestamp: now, keys: [`note:${noteSlug}`],
-      }},
-    ]);
-
-    const helper = await openHelperPage(extContext, extensionId);
-
-    // loadAllNotes scans disk — must filter orphaned notes
-    const allNotes = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'loadAllNotes' })
-    );
-    expect(allNotes.success).toBe(true);
-    for (const [, notes] of Object.entries(allNotes.notesMap || {})) {
-      expect(notes.filter(n => n.slug === noteSlug)).toHaveLength(0);
-    }
 
     await helper.close();
   });

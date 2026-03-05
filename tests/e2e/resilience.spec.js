@@ -116,12 +116,12 @@ test.describe('Accumulation correctness', () => {
       expect(r.pinned).toBe(true);
     }
 
-    const pins = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'loadListPinsById', listId: 'bulk' })
+    const listResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:bulk' })
     );
     await helper.close();
 
-    expect(pins.pins.length).toBe(5);
+    expect((listResult.value?.pins || []).length).toBe(5);
   });
 
   // Scroll depth: only the max scroll depth is logged (deduped by processPageReport).
@@ -214,16 +214,16 @@ test.describe('Cross-entity interference', () => {
     expect(r.pinned).toBe(false);
 
     // Alpha pin should be untouched
-    const alphaPins = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'loadListPinsById', listId: 'alpha' })
+    const alphaResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:alpha' })
     );
-    const betaPins = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'loadListPinsById', listId: 'beta' })
+    const betaResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:beta' })
     );
     await helper.close();
 
-    expect(alphaPins.pins.length).toBe(1);
-    expect(betaPins.pins.length).toBe(0);
+    expect((alphaResult.value?.pins || []).length).toBe(1);
+    expect((betaResult.value?.pins || []).length).toBe(0);
   });
 
   test('deleting list A leaves list B intact', async ({ extContext, extensionId, setupDir }) => {
@@ -259,15 +259,15 @@ test.describe('Cross-entity interference', () => {
     );
 
     // Safe list should be unaffected
-    const safePins = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'loadListPinsById', listId: 'safe' })
+    const safeResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:safe' })
     );
     const settings = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'settings' })
     );
     await helper.close();
 
-    expect(safePins.pins.length).toBe(1);
+    expect((safeResult.value?.pins || []).length).toBe(1);
     const order = settings.value.listOrder;
     expect(order.length).toBe(1);
     expect(order[0].id).toBe('list:safe');

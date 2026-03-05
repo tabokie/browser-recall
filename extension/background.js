@@ -1184,42 +1184,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         // ── Pure Reads (relay to offscreen, cache pages) ──
 
-        case 'loadSettings': {
-          const t0 = performance.now();
-          const resp = await requestOffscreen({ action: 'loadSettings' });
-          console.debug(`[I/O] loadSettings: ${(performance.now() - t0).toFixed(1)}ms`);
-          sendResponse(resp);
-          break;
-        }
-
         case 'loadPageNotes': {
           const t0 = performance.now();
-          const resp = await requestOffscreen({ action: 'loadPageNotes', slug: request.slug });
-          // Filter out orphaned (deleted) notes — disk checkpoint may be stale before drain
-          const orphanedNotes = await readCacheable('list:system/orphaned');
-          const orphanedNoteKeys = new Set((orphanedNotes?.keys || []).filter(k => k.startsWith('note:')));
-          if (orphanedNoteKeys.size > 0 && resp.notes) {
-            resp.notes = resp.notes.filter(n => !orphanedNoteKeys.has('note:' + n.slug));
+          // Read page entity from session cache (childIds already up-to-date — del_note removes refs)
+          const page = await readCacheable('page:' + request.slug);
+          const noteRefs = (page?.childIds || []).filter(c => c.startsWith('note:'));
+          const notes = [];
+          for (const ref of noteRefs) {
+            const note = await readCacheable(ref);
+            if (note) notes.push(note);
           }
-          console.debug(`[I/O] loadPageNotes(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
-          sendResponse(resp);
-          break;
-        }
-
-        case 'loadAllNotes': {
-          const t0 = performance.now();
-          const resp = await requestOffscreen({ action: 'loadAllNotes' });
-          // Filter out orphaned (deleted) notes
-          const orphaned = await readCacheable('list:system/orphaned');
-          const orphanedKeys = new Set((orphaned?.keys || []).filter(k => k.startsWith('note:')));
-          if (orphanedKeys.size > 0 && resp.notesMap) {
-            for (const [pageSlug, notes] of Object.entries(resp.notesMap)) {
-              resp.notesMap[pageSlug] = notes.filter(n => !orphanedKeys.has('note:' + n.slug));
-              if (resp.notesMap[pageSlug].length === 0) delete resp.notesMap[pageSlug];
-            }
-          }
-          console.debug(`[I/O] loadAllNotes: ${(performance.now() - t0).toFixed(1)}ms`);
-          sendResponse(resp);
+          console.debug(`[I/O] loadPageNotes(${request.slug}): ${notes.length} notes in ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse({ success: true, notes });
           break;
         }
 
@@ -1231,86 +1207,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'getShallowPageIndex': {
-          try {
-            const spi = await readCacheable('list:system/shallow-page');
-            sendResponse(spi);
-          } catch (error) {
-            sendResponse({ success: false, error: error.message });
-          }
-          break;
-        }
-
-        case 'loadPageBatch': {
-          const t0 = performance.now();
-          const result = {};
-          const uncachedSlugs = [];
-
-          // Check page cache for each slug
-          for (const slug of request.slugs) {
-            const key = 'page:' + slug;
-            const cached = await cacheGet(key);
-            if (cached) {
-              result[slug] = cached;
-            } else {
-              uncachedSlugs.push(slug);
-            }
-          }
-
-          // Fetch uncached from offscreen, replay logBuffer to bring up-to-date
-          if (uncachedSlugs.length > 0) {
-            await ensureLogBuffer();
-            const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: uncachedSlugs });
-            if (resp?.success && resp.pages) {
-              for (const [slug, page] of Object.entries(resp.pages)) {
-                const upToDate = replayBufferOver(page);
-                result[slug] = upToDate;
-                await cacheSet('page:' + slug, upToDate);
-              }
-            }
-          }
-
-          console.debug(`[I/O] loadPageBatch: ${request.slugs.length} slugs (${request.slugs.length - uncachedSlugs.length} cached) in ${(performance.now() - t0).toFixed(1)}ms`);
-          sendResponse({ success: true, pages: result });
-          break;
-        }
-
-        case 'loadListPins': {
-          const t0 = performance.now();
-          if (request.listId) {
-            const resp = await requestOffscreen({ action: 'loadListPins', listId: request.listId });
-            console.debug(`[I/O] loadListPins(${request.listId}): ${(performance.now() - t0).toFixed(1)}ms`);
-            sendResponse(resp);
-          } else {
-            const resp = await requestOffscreen({ action: 'loadListPins' });
-            console.debug(`[I/O] loadListPins: ${(performance.now() - t0).toFixed(1)}ms`);
-            sendResponse(resp);
-          }
-          break;
-        }
-
-        case 'loadListPinsById': {
-          const t0 = performance.now();
-          const entity = await readCacheable('list:' + request.listId);
-          console.debug(`loadListPinsById(${request.listId}): ${(performance.now() - t0).toFixed(1)}ms`);
-          sendResponse({ success: true, pins: entity?.pins || [] });
-          break;
-        }
-
         case 'readCacheable': {
           try {
             const value = await readCacheable(request.key, request.includeDeleted);
             sendResponse({ success: true, value });
-          } catch (error) {
-            sendResponse({ success: false, error: error.message });
-          }
-          break;
-        }
-
-        case 'getGatewayDomains': {
-          try {
-            const gateways = await readCacheable('list:system/gateways');
-            sendResponse({ success: true, origins: gateways.origins });
           } catch (error) {
             sendResponse({ success: false, error: error.message });
           }

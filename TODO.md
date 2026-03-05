@@ -1,6 +1,7 @@
 # TODO
 
 - [ ] **Re-inject content scripts on extension reload/re-enable.** Content script's `chrome.runtime` context is permanently invalidated after extension reload or disable→re-enable. Fix: call `chrome.scripting.executeScript` from `onInstalled` in background.js to re-inject into all existing tabs. Requires idempotency guard and stale Shadow DOM cleanup in content.js.
+- [ ] Rename interaction to history across the codebase.
 
 ## Test infrastructure
 

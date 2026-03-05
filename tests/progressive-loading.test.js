@@ -287,9 +287,6 @@ describe('Progressive loading', () => {
 
   function handleAction(msg) {
     switch (msg.action) {
-      case 'loadSettings':
-        return { success: true, settings: TEST_SETTINGS };
-
       case 'listInteractionFiles':
         return { success: true, files: FILES_NEWEST_FIRST };
 
@@ -300,15 +297,6 @@ describe('Progressive loading', () => {
         }
         return { success: true, interactions };
       }
-
-      case 'loadListPins':
-        if (msg.listId) {
-          return { success: true, pins: TEST_LIST_PINS[msg.listId] || [] };
-        }
-        return { success: true, pins: TEST_LIST_PINS };
-
-      case 'loadListPinsById':
-        return { success: true, pins: TEST_LIST_PINS[msg.listId] || [] };
 
       case 'loadPermanentDeletes':
         return { success: true, urls: [] };
@@ -326,9 +314,6 @@ describe('Progressive loading', () => {
       case 'loadAllHighlights':
         return { success: true, highlightsMap: {} };
 
-      case 'loadPageBatch':
-        return { success: true, pages: {} };
-
       case 'saveSettingsKey':
         return { success: true };
 
@@ -337,10 +322,13 @@ describe('Progressive loading', () => {
           case 'settings': return { success: true, value: TEST_SETTINGS };
           case 'list:system/gateways': return { success: true, value: { timestamp: 0, origins: [] } };
           case 'list:system/shallow-page': return { success: true, value: { timestamp: 0, index: {} } };
+          case 'list:system/orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
           default: {
-            // Return individual list entities by slug
+            // Return individual list entities by slug with pins
             for (const list of TEST_LISTS) {
-              if (msg.key === 'list:' + list.slug) return { success: true, value: list };
+              if (msg.key === 'list:' + list.slug) {
+                return { success: true, value: { ...list, pins: TEST_LIST_PINS[list.slug] || [], qbTrees: list.qbTrees || [] } };
+              }
             }
             return { success: true, value: undefined };
           }
@@ -357,9 +345,9 @@ describe('Progressive loading', () => {
       settings: TEST_SETTINGS,
       'list:system/gateways': { timestamp: 0, origins: [] },
     };
-    // Individual list entity keys
+    // Individual list entity keys (include pins for session cache hits)
     for (const list of TEST_LISTS) {
-      sessionData['list:' + list.slug] = list;
+      sessionData['list:' + list.slug] = { ...list, pins: TEST_LIST_PINS[list.slug] || [], qbTrees: list.qbTrees || [] };
     }
     // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
     for (const [slug, url] of SLUG_TO_URL) {

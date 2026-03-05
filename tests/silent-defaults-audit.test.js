@@ -119,9 +119,11 @@ describe('No silent response defaults — options.js', () => {
     expect(optionsSource).not.toMatch(/ensurePageCheckpoint.*title:\s*row\.dataset\.title\s*\|\|\s*''/);
   });
 
-  it('enrichTitles does not silently swallow errors with catch {}', () => {
-    // The enrichTitles/loadPageBatch call should propagate errors
-    expect(optionsSource).not.toMatch(/loadPageBatch[\s\S]{0,200}catch\s*\{\s*\}/);
+  it('enrichFromEntityStorage does not silently swallow errors with catch {}', () => {
+    // enrichFromEntityStorage readCacheable calls should propagate errors
+    const fnBody = optionsSource.match(/async function enrichFromEntityStorage[\s\S]*?\n\}/);
+    expect(fnBody).not.toBeNull();
+    expect(fnBody[0]).not.toMatch(/catch\s*\{\s*\}/);
   });
 });
 

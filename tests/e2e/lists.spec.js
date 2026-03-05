@@ -261,8 +261,8 @@ test.describe('List operations', () => {
     await options.close();
   });
 
-  // Bug: loadListPinsById via readCacheable — undrained pin visible immediately (4c77b2c)
-  test('newly pinned page visible via loadListPinsById without flush', async ({ extContext, extensionId, setupDir }) => {
+  // Bug: readCacheable list entity — undrained pin visible immediately (4c77b2c)
+  test('newly pinned page visible via readCacheable without flush', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const url = 'https://example.com/immediate-pin';
     const slug = getSlugForUrl(url);
@@ -292,13 +292,14 @@ test.describe('List operations', () => {
 
     // Immediately query pins WITHOUT flushing — should see the pin via session cache
     const pinsResult = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'loadListPinsById', listId: 'reading' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
     );
     await helper.close();
 
     expect(pinsResult.success).toBe(true);
-    expect(pinsResult.pins.length).toBe(1);
-    expect(pinsResult.pins[0].id).toBe(`page:${slug}`);
+    const pins = pinsResult.value?.pins || [];
+    expect(pins.length).toBe(1);
+    expect(pins[0].id).toBe(`page:${slug}`);
   });
 
   // Bug: createListAndPin in popup sent saveListMeta (whose effectOf already
@@ -357,12 +358,12 @@ test.describe('List operations', () => {
     expect(pinResult.success).toBe(true);
     expect(pinResult.pinned).toBe(true);
 
-    const spi = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'getShallowPageIndex' })
+    const spiResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/shallow-page' })
     );
     await helper.close();
 
-    const entry = spi.index[url];
+    const entry = spiResult.value.index[url];
     expect(entry).toBeDefined();
     expect(entry.lists).toContain('list:reading');
     expect(entry.title).toBe('SPI Title Test Page');
@@ -394,13 +395,13 @@ test.describe('List operations', () => {
     , [url1, url2]);
     expect(result.success).toBe(true);
 
-    const spi = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'getShallowPageIndex' })
+    const spiResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/shallow-page' })
     );
     await helper.close();
 
-    expect(spi.index[url1]?.title).toBe('Bulk Page One');
-    expect(spi.index[url2]?.title).toBe('Bulk Page Two');
+    expect(spiResult.value.index[url1]?.title).toBe('Bulk Page One');
+    expect(spiResult.value.index[url2]?.title).toBe('Bulk Page Two');
   });
 
   test('copyListPins with shallow pins enriches SPI title from history', async ({ extContext, extensionId, setupDir }) => {
@@ -439,12 +440,12 @@ test.describe('List operations', () => {
     );
     expect(result.success).toBe(true);
 
-    const spi = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'getShallowPageIndex' })
+    const spiResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/shallow-page' })
     );
     await helper.close();
 
-    const entry = spi.index[url];
+    const entry = spiResult.value.index[url];
     expect(entry).toBeDefined();
     expect(entry.lists).toContain('list:target');
     // effectOf should have enriched the null title from history
@@ -588,12 +589,13 @@ test.describe('List operations', () => {
 
     // pin-2 should still be there
     const pinsResult = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'loadListPinsById', listId: 'reading' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
     );
     await helper.close();
 
-    expect(pinsResult.pins.length).toBe(1);
-    expect(pinsResult.pins[0].id).toBe(`page:${slug2}`);
+    const pins = pinsResult.value?.pins || [];
+    expect(pins.length).toBe(1);
+    expect(pins[0].id).toBe(`page:${slug2}`);
   });
 
   test('pin adds list to page parentIds', async ({ extContext, extensionId, setupDir }) => {

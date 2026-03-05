@@ -1,0 +1,19 @@
+- You said "loadNote not routed through background — Tests had to use readCacheable instead of loadNote because background doesn't handle loadNote messages (offscreen-only via port). This is pre-existing, not introduced here." Is this an issue that needs fixing?
+- Tell me more about the extra logic, let's see if we can unify all to use readCacheable
+- Fix the four first
+- Reload token
+- Recall your answer to "Tell me more about the extra logic, let's see if we can unify all to use readCacheable"
+- - loadPageNotes: where is it used? I thought we can get notes from childIds?
+- loadAllNotes: where is it used? I thought only WASM search needs to scan filesystem directly?
+- loadPageBatch: What is the replay logic you mentioned when we already have page entity cache?
+- loadListPins: what is it used for?
+- listSnapshots: Is this used in WASM engine?
+- 1. Why does loadPageNotes need to filter orphan notes? Isn't orphan notes removed from childIds already?
+2. Why do we need to use loadAllNotes for query? Isn't query executed in WASM?
+3. For loadPageBatch. First of all, entity cache guarantees dirty entities are not evicted. And during initialization, background.js guarantees cache is prefilled with entities that would be modified by log-buffer. (These two guarantees should be documented in ARCHITECTURE.md.) Thanks to them, we can directly readCacheable without worrying about getting stale data.
+4. Remove loadListPins?
+- 1. loadPageNotes should use readCacheable
+2. "needs note content to score matches" WASM engine can return relevance score.
+3. Do both righ away.
+- /finish
+- Make sure the 1 & 2 lesson you mentioned earlier are reflected in code comments somewhere 

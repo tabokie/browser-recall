@@ -75,7 +75,6 @@ let listCacheKeys = []; // tracks which listCache:* keys exist in session
 
 // --- Query builder state ---
 let qbRoot = null;        // tree root (null = empty)
-let cachedAllNotes = null; // slug → [noteEntity, ...], lazy-loaded
 let qbDebounceTimer = null;
 let savedExploreQbRoot = null;  // saved global explore QB state when viewing a list
 
@@ -344,7 +343,7 @@ function resetHistory() {
     listCacheKeys = [];
   }
   allListPins = {};
-  cachedAllNotes = null;
+
   gatewayOriginsCache = [];
   gatewayOriginsLoaded = false;
   bufferContentMap = {};
@@ -396,9 +395,7 @@ async function loadPinContext(pins) {
   const sessionBatch = sessionKeys.length > 0 ? await chrome.storage.session.get(sessionKeys) : {};
   let spi = sessionBatch['list:system/shallow-page'];
   if (!spi) {
-    const spiResp = await chrome.runtime.sendMessage({ action: 'getShallowPageIndex' });
-    if (spiResp?.success === false) throw new Error(spiResp.error || 'Failed to load shallow page index');
-    spi = spiResp;
+    spi = await readCacheable('list:system/shallow-page');
   }
   const pageSnap = new Map();
   const missingSlugs = [];
@@ -408,8 +405,10 @@ async function loadPinContext(pins) {
     else missingSlugs.push(slug);
   }
   if (missingSlugs.length > 0) {
-    const resp = await sendAction({ action: 'loadPageBatch', slugs: missingSlugs });
-    for (const [slug, page] of Object.entries(resp.pages || {})) pageSnap.set(slug, page);
+    const pages = await Promise.all(missingSlugs.map(s => readCacheable('page:' + s)));
+    for (let i = 0; i < missingSlugs.length; i++) {
+      if (pages[i]) pageSnap.set(missingSlugs[i], pages[i]);
+    }
   }
   return { pageSnap, spi };
 }
@@ -1021,15 +1020,6 @@ function computeRelevance(node, item) {
 }
 
 // --- Query builder: Tree helpers ---
-function treeNeedsHighlights(node) {
-  if (!node) return false;
-  if (node.type === 'operator') return node.children.some(c => treeNeedsHighlights(c));
-  if (node.predicateType === 'keyword') {
-    const fields = normalizeFieldToArray(node.field);
-    return fields.includes('highlights') || fields.includes('notes');
-  }
-  return false;
-}
 
 function treeHasKeyword(node) {
   if (!node) return false;
@@ -1106,12 +1096,7 @@ function qbUpdateNode(nodeId, updates) {
 async function evaluateQueryStream(qbTree) {
   const filesResp = await sendAction({ action: 'listInteractionFiles' });
   const files = filesResp.files;
-  let notesMap = {};
-  if (treeNeedsHighlights(qbTree)) {
-    const notesResp = await sendAction({ action: 'loadAllNotes' });
-    notesMap = notesResp.notesMap || {};
-    cachedAllNotes = notesMap;
-  }
+  const notesMap = {};
   await loadGatewayDomains();
 
   const capturesQueries = extractCapturesQueries(qbTree);
@@ -1525,7 +1510,7 @@ function bindQueryBuilderEvents(body) {
       allCheckbox.checked = isAll;
       toggle.textContent = isAll ? 'All' : (selected.length === 0 ? 'None' : selected.map(f => KEYWORD_FIELD_LABELS[f] || f).join(', '));
       qbUpdateNode(nodeId, { field: isAll ? [...KEYWORD_FIELDS] : selected });
-      cachedAllNotes = null;
+    
       debouncedRunQuery();
     }
 
@@ -1713,8 +1698,8 @@ async function showExplore() {
   const listId = EXPLORE_LIST_ID;
   // Lazy-load explore pins (may have been invalidated by visibilitychange)
   if (!allListPins[listId]) {
-    const pinsResp = await sendAction({ action: 'loadListPinsById', listId });
-    allListPins[listId] = pinsResp.pins;
+    const listEntity = await readCacheable('list:' + listId);
+    allListPins[listId] = listEntity?.pins || [];
   }
   const pins = getExplorePins();
   _timer('load explore pins');
@@ -1889,8 +1874,8 @@ async function showList(list) {
     const listId = list.slug;
 
     // Always fetch pins from entity storage
-    const pinsResp = await sendAction({ action: 'loadListPinsById', listId });
-    allListPins[listId] = pinsResp.pins;
+    const listEntity = await readCacheable('list:' + listId);
+    allListPins[listId] = listEntity?.pins || [];
     const pins = allListPins[listId];
 
     const { pageSnap, spi } = await loadPinContext(pins);
@@ -1961,8 +1946,10 @@ async function refreshListPages(listId, pins) {
       else uncachedSlugs.push(slug);
     }
     if (uncachedSlugs.length > 0) {
-      const pageResp = await sendAction({ action: 'loadPageBatch', slugs: uncachedSlugs });
-      Object.assign(pages, pageResp.pages || {});
+      const loaded = await Promise.all(uncachedSlugs.map(s => readCacheable('page:' + s)));
+      for (let i = 0; i < uncachedSlugs.length; i++) {
+        if (loaded[i]) pages[uncachedSlugs[i]] = loaded[i];
+      }
     }
     let changed = false;
     for (const pin of pins) {
@@ -2130,8 +2117,11 @@ async function enrichFromEntityStorage(entries) {
   if (titleless.length === 0) return;
   const slugs = [...new Set(titleless.map(r => r.slug).filter(Boolean))];
   if (slugs.length === 0) return;
-  const resp = await sendAction({ action: 'loadPageBatch', slugs });
-  const pages = resp.pages || {};
+  const loaded = await Promise.all(slugs.map(s => readCacheable('page:' + s)));
+  const pages = {};
+  for (let i = 0; i < slugs.length; i++) {
+    if (loaded[i]) pages[slugs[i]] = loaded[i];
+  }
   const needSpi = []; // entries still missing title after checkpoint lookup
   for (const entry of titleless) {
     const page = pages[entry.slug];
@@ -3439,7 +3429,7 @@ chrome.runtime.onMessage.addListener((request) => {
     }
   } else if (type === 'note') {
     // Note created/deleted — invalidate cached notes and refresh view
-    cachedAllNotes = null;
+  
     refreshCurrentView();
   } else if (type === 'orphaned') {
     // Orphaned list changed — refresh recycle bin if active, update badge
@@ -3513,15 +3503,13 @@ function updateExploreBadge() {
 async function buildExploreAutoBlocks(pins) {
   const pinnedSlugs = new Set(pins.map(p => slugFromPinId(p.id)));
 
-  // Load pages for all pins via background (checks cache + disk)
+  // Load pages for all pins via readCacheable (session cache → filesystem fallback)
   const pinSlugs = pins.map(p => slugFromPinId(p.id));
   const pageData = {};
   if (pinSlugs.length > 0) {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs: pinSlugs });
-    if (resp?.success && resp.pages) {
-      for (const [slug, page] of Object.entries(resp.pages)) {
-        pageData['page:' + slug] = page;
-      }
+    const loaded = await Promise.all(pinSlugs.map(s => readCacheable('page:' + s)));
+    for (let i = 0; i < pinSlugs.length; i++) {
+      if (loaded[i]) pageData['page:' + pinSlugs[i]] = loaded[i];
     }
   }
 
@@ -3534,12 +3522,9 @@ async function buildExploreAutoBlocks(pins) {
       if (ref.startsWith('page:')) { slugs.push(ref.slice(5)); continue; }
     }
     if (slugs.length > 0) {
-      const resp = await chrome.runtime.sendMessage({ action: 'loadPageBatch', slugs });
-      if (resp?.success && resp.pages) {
-        for (const s of slugs) {
-          const p = resp.pages[s];
-          if (p && p.url) urls.push(p.url);
-        }
+      const loaded = await Promise.all(slugs.map(s => readCacheable('page:' + s)));
+      for (let i = 0; i < slugs.length; i++) {
+        if (loaded[i]?.url) urls.push(loaded[i].url);
       }
     }
     return urls;
@@ -3926,8 +3911,8 @@ async function openListFocusPanel(listId, listName) {
   try {
     let pins = allListPins[listId];
     if (!pins) {
-      const fpResp = await sendAction({ action: 'loadListPinsById', listId });
-      pins = fpResp.pins;
+      const fpEntity = await readCacheable('list:' + listId);
+      pins = fpEntity?.pins || [];
       allListPins[listId] = pins;
     }
 
@@ -4092,7 +4077,7 @@ async function initialize() {
   // Load metadata in parallel (history is demand-loaded in showCategory, pins loaded per-list)
   await Promise.all([
     initHistoryFiles(), loadGatewayDomains(),
-    sendAction({ action: 'loadListPinsById', listId: EXPLORE_LIST_ID }).then(resp => { allListPins[EXPLORE_LIST_ID] = resp.pins; }),
+    readCacheable('list:' + EXPLORE_LIST_ID).then(entity => { allListPins[EXPLORE_LIST_ID] = entity?.pins || []; }),
   ]);
   _timer('parallel metadata load');
   updateExploreBadge();
