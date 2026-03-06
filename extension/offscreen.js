@@ -315,7 +315,7 @@ async function handleRequest(request) {
       }
 
       case 'seedTestData': {
-        // request.files = [{ path, data } or { path, lines }]
+        // request.files = [{ path, data } or { path, lines } or { path, content }]
         for (const file of request.files) {
           if (file.lines) {
             const fh = await fsStorage.resolveFile(file.path, { create: true });
@@ -323,6 +323,12 @@ async function handleRequest(request) {
             for (const line of file.lines) {
               await writable.write(JSON.stringify(line) + '\n');
             }
+            await writable.close();
+          } else if (file.content !== undefined) {
+            // Raw text content (e.g. .md, .html snapshot files)
+            const fh = await fsStorage.resolveFile(file.path, { create: true });
+            const writable = await fh.createWritable();
+            await writable.write(file.content);
             await writable.close();
           } else {
             const fh = await fsStorage.resolveFile(file.path, { create: true });

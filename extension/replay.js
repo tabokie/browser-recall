@@ -7,6 +7,7 @@ const REFERRER_CAP = 50;
 
 const PAGE_PREFIX = 'page:';
 const NOTE_PREFIX = 'note:';
+const SNAP_PREFIX = 'snap:';
 const SHALLOW_PREFIX = 'shallow:';
 
 /**
@@ -24,6 +25,11 @@ export function getAffectedKeys(entry) {
   if (entry.action === 'page' && entry.referrerId) {
     const parentKey = entry.referrerId; // already page:slug format
     if (parentKey !== PAGE_PREFIX + entrySlug) keys.add(parentKey);
+  }
+
+  // Snap/del_snap/restore_snap affect parent pages
+  if ((entry.action === 'snap' || entry.action === 'del_snap' || entry.action === 'restore_snap') && entry.parentIds) {
+    for (const parentKey of entry.parentIds) keys.add(parentKey);
   }
 
   return keys;
@@ -278,6 +284,59 @@ export async function effectOf(entry, load) {
     return result;
   }
 
+  // --- snap: wire snapshot as child of parent page (content is on disk, not in log) ---
+  if (entry.action === 'snap') {
+    const snapKey = `${SNAP_PREFIX}${entry.slug}`;
+    if (entry.parentIds) {
+      for (const parentKey of entry.parentIds) {
+        const parent = await load(parentKey);
+        if (!parent) { result[parentKey] = null; continue; }
+        const childIds = [...(parent.childIds || [])];
+        if (!childIds.includes(snapKey)) childIds.push(snapKey);
+        result[parentKey] = { ...parent, childIds };
+      }
+    }
+    return result;
+  }
+
+  // --- del_snap: unlink snapshot from parents + add to orphaned list ---
+  if (entry.action === 'del_snap') {
+    const snapKey = `${SNAP_PREFIX}${entry.slug}`;
+    if (entry.parentIds) {
+      for (const parentKey of entry.parentIds) {
+        const parent = await load(parentKey);
+        if (!parent) { result[parentKey] = null; continue; }
+        const childIds = (parent.childIds || []).filter(c => c !== snapKey);
+        result[parentKey] = { ...parent, childIds };
+      }
+    }
+    // Add to orphaned list
+    const orphaned = await loadOrDefault('list:system/orphaned', load);
+    const keys = [...(orphaned.keys || [])];
+    if (!keys.includes(snapKey)) keys.push(snapKey);
+    result['list:system/orphaned'] = { ...orphaned, timestamp: entry.timestamp, keys };
+    return result;
+  }
+
+  // --- restore_snap: re-link snapshot to parents + remove from orphaned list ---
+  if (entry.action === 'restore_snap') {
+    const snapKey = `${SNAP_PREFIX}${entry.slug}`;
+    if (entry.parentIds) {
+      for (const parentKey of entry.parentIds) {
+        const parent = await load(parentKey);
+        if (!parent) { result[parentKey] = null; continue; }
+        const childIds = [...(parent.childIds || [])];
+        if (!childIds.includes(snapKey)) childIds.push(snapKey);
+        result[parentKey] = { ...parent, childIds };
+      }
+    }
+    // Remove from orphaned list
+    const orphaned = await loadOrDefault('list:system/orphaned', load);
+    const keys = (orphaned.keys || []).filter(k => k !== snapKey);
+    result['list:system/orphaned'] = { ...orphaned, timestamp: entry.timestamp, keys };
+    return result;
+  }
+
   // --- restore_list: re-add to listOrder, clear deleted flag, restore page parentIds ---
   if (entry.action === 'restore_list') {
     const listKey = `list:${entry.id}`;
@@ -476,6 +535,13 @@ export function applyLogToPage(page, entry) {
         if (!parentIds.includes(pid)) parentIds.push(pid);
       }
       updated.parentIds = parentIds;
+    }
+    if (entry.visitDates?.length) {
+      const visitDates = [...(updated.visitDates || [])];
+      for (const d of entry.visitDates) {
+        if (!visitDates.includes(d)) visitDates.push(d);
+      }
+      updated.visitDates = visitDates;
     }
     updated.timestamp = Math.max(updated.timestamp || 0, entry.timestamp);
     return updated;

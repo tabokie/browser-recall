@@ -10,9 +10,9 @@ console.log('Background script loading...');
 const DRAIN_INTERVAL_MS = 5000; // 5 seconds — data is safe in chrome.storage.local until drained
 const HISTORY_RECENT_DAYS = 7; // days of past history to cache for multi-day checks
 
-// In-memory Set of URLs from history:recent (past days) for O(1) multi-day lookups.
+// In-memory Map of URL → visitDates (YYYYMMDD[]) from history:recent (past days).
 // Populated during hydration, immutable until next browser restart.
-let recentUrls = new Set();
+let recentUrls = new Map();
 
 // Session storage: in-memory IPC, survives SW termination, cleared on browser restart.
 // hydrateCache() re-populates from filesystem on every startup.
@@ -397,7 +397,7 @@ async function hydrateCache() {
     const fromStr = dateKeyFromTimestamp(fromDate.getTime());
     const toStr = dateKeyFromTimestamp(yesterday.getTime());
 
-    recentUrls = new Set();
+    recentUrls = new Map();
     if (fromStr <= toStr) {
       // Load the full range, then split into per-date keys
       const recentResp = await requestOffscreen({ action: 'loadHistoryRange', from: fromStr, to: toStr });
@@ -426,10 +426,17 @@ async function hydrateCache() {
         cur.setDate(cur.getDate() + 1);
       }
 
-      // Build in-memory URL set for O(1) multi-day lookups
+      // Build in-memory URL → visitDates map for O(1) multi-day lookups
       for (const entry of recentEntries) {
         if ((entry.action === 'page' || !entry.action) && entry.url) {
-          recentUrls.add(entry.url);
+          const d = new Date(entry.timestamp);
+          const yyyymmdd = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+          const dates = recentUrls.get(entry.url);
+          if (dates) {
+            if (!dates.includes(yyyymmdd)) dates.push(yyyymmdd);
+          } else {
+            recentUrls.set(entry.url, [yyyymmdd]);
+          }
         }
       }
 
@@ -807,7 +814,7 @@ async function resolveShallowIds(ids) {
 // Ensure a page checkpoint exists in cache or disk; creates one if missing.
 // When the caller cannot provide title/parentIds, searches SPI and recent history.
 
-async function ensureCheckpointIfMissing(url, title) {
+async function ensureCheckpointIfMissing(url, title, visitDates) {
   if (!url) return;
   const slug = generateSlugFromUrl(url);
   const key = 'page:' + slug;
@@ -827,6 +834,7 @@ async function ensureCheckpointIfMissing(url, title) {
         if (found.user_title) entry.user_title = found.user_title;
         if (found.parentIds.length) entry.parentIds = found.parentIds;
       }
+      if (visitDates?.length) entry.visitDates = visitDates;
       await addLog(entry);
     }
   }
@@ -927,6 +935,11 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
     mdPath: `pages/${slug}/${timestamp}.md`,
     htmlPath: `pages/${slug}/${timestamp}.html`
   });
+  await addLog({
+    timestamp: timestamp + 1, action: 'snap',
+    slug: `${slug}/${timestamp}`,
+    parentIds: [`page:${slug}`]
+  });
   notifyMutation('snapshot', { slug });
 }
 
@@ -1002,7 +1015,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
           }
 
-          const snapshotsResp = await requestOffscreen({ action: 'listSnapshots', slug });
+          // Snapshots: read from page.childIds filtered for snap: prefix
+          const snapRefs = (page?.childIds || []).filter(c => c.startsWith('snap:'));
+          const snapshots = snapRefs.map(ref => {
+            const ts = parseInt(ref.split('/').pop(), 10);
+            return { timestamp: ts, hasMd: true, hasHtml: true };
+          }).sort((a, b) => b.timestamp - a.timestamp);
 
           // Notes: read from page.childIds via readCacheable (session cache → disk).
           // This surfaces notes created via addLog that haven't drained to disk yet.
@@ -1019,7 +1037,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             interaction: page ? { url: page.url, title: page.title, user_title: page.user_title,
               scrollDepth: page.scrollDepth, timeOnPage: page.timeOnPage, likes: page.likes,
               timestamp: page.timestamp, slug } : null,
-            snapshots: snapshotsResp?.snapshots || [],
+            snapshots,
             notes
           });
           break;
@@ -1095,9 +1113,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (entry) {
               // First-visit extras: checkpoints before the visit entry
               if (request.isInitialLoad) {
-                // Multi-day visit checkpoint: check in-memory recentUrls set (built from history:recent)
-                if (recentUrls.has(url)) {
-                  await ensureCheckpointIfMissing(url, entry.title);
+                // Multi-day visit checkpoint: check in-memory recentUrls map (built from history:recent)
+                const recentVisitDates = recentUrls.get(url);
+                if (recentVisitDates) {
+                  await ensureCheckpointIfMissing(url, entry.title, recentVisitDates);
                 }
 
                 // Parent checkpoint for referrer
@@ -1219,9 +1238,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'listSnapshots': {
           const t0 = performance.now();
-          const resp = await requestOffscreen({ action: 'listSnapshots', slug: request.slug });
-          console.debug(`[I/O] listSnapshots(${request.slug}): ${(performance.now() - t0).toFixed(1)}ms`);
-          sendResponse(resp);
+          const slug = request.slug;
+          const page = await readCacheable('page:' + slug);
+          const snapRefs = (page?.childIds || []).filter(c => c.startsWith('snap:'));
+          const snapshots = snapRefs.map(ref => {
+            const ts = parseInt(ref.split('/').pop(), 10);
+            return { timestamp: ts, hasMd: true, hasHtml: true };
+          }).sort((a, b) => b.timestamp - a.timestamp);
+          console.debug(`[I/O] listSnapshots(${slug}): ${snapshots.length} from entity in ${(performance.now() - t0).toFixed(1)}ms`);
+          sendResponse({ success: true, snapshots });
           break;
         }
 
@@ -1302,8 +1327,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               }
             }
 
-            // Children: from page.childIds (filter out notes, keep only pages/shallow) + shallowPageIndex inverse lookup
-            const childRefs = (page.childIds || []).filter(c => !c.startsWith('note:'));
+            // Children: from page.childIds (filter out notes and snaps, keep only pages/shallow) + shallowPageIndex inverse lookup
+            const childRefs = (page.childIds || []).filter(c => !c.startsWith('note:') && !c.startsWith('snap:'));
             let children = await resolveRefs(childRefs);
             // Also check shallowPageIndex for non-checkpointed children
             const spForChildren = await readCacheable('list:system/shallow-page');
@@ -1519,6 +1544,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
+        case 'restoreSnapshot': {
+          const snapSlug = request.snapSlug; // e.g. 'page-slug/1234567890'
+          const pageSlug = snapSlug.split('/').slice(0, -1).join('/');
+          await addLog({
+            timestamp: Date.now(),
+            action: 'restore_snap',
+            slug: snapSlug,
+            parentIds: [`page:${pageSlug}`],
+          });
+          sendResponse({ success: true });
+          notifyMutation('orphaned');
+          notifyMutation('snapshot', { slug: pageSlug });
+          break;
+        }
+
         case 'restoreList': {
           const listId = request.listId;
           // Load list entity (include deleted) to get name and pins
@@ -1552,6 +1592,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           } else if (key.startsWith('list:')) {
             const id = key.slice('list:'.length);
             await requestOffscreen({ action: 'deleteListFile', listId: id });
+          } else if (key.startsWith('snap:')) {
+            // snap:<pageSlug>/<timestamp> — physically delete snapshot files
+            const snapSlug = key.slice('snap:'.length);
+            const lastSlash = snapSlug.lastIndexOf('/');
+            const pageSlug = snapSlug.slice(0, lastSlash);
+            const timestamp = parseInt(snapSlug.slice(lastSlash + 1), 10);
+            await requestOffscreen({ action: 'deleteSnapshot', slug: pageSlug, timestamp });
           }
           // 3. Update orphaned list: remove the key
           const orphaned = await readCacheable('list:system/orphaned') || { timestamp: 0, keys: [] };
@@ -1585,6 +1632,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             } else if (key.startsWith('list:')) {
               const id = key.slice('list:'.length);
               await requestOffscreen({ action: 'deleteListFile', listId: id });
+            } else if (key.startsWith('snap:')) {
+              const snapSlug = key.slice('snap:'.length);
+              const lastSlash = snapSlug.lastIndexOf('/');
+              const pageSlug = snapSlug.slice(0, lastSlash);
+              const timestamp = parseInt(snapSlug.slice(lastSlash + 1), 10);
+              await requestOffscreen({ action: 'deleteSnapshot', slug: pageSlug, timestamp });
             }
             await cacheRemove(key);
           }
@@ -1606,13 +1659,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'deleteSnapshot': {
-          const resp = await requestOffscreen({
-            action: 'deleteSnapshot',
-            slug: request.slug,
-            timestamp: request.timestamp
+          const slug = request.slug;
+          const timestamp = request.timestamp;
+          await addLog({
+            timestamp: Date.now(), action: 'del_snap',
+            slug: `${slug}/${timestamp}`,
+            parentIds: [`page:${slug}`]
           });
-          sendResponse(resp);
-          notifyMutation('snapshot', { slug: request.slug });
+          sendResponse({ success: true });
+          notifyMutation('snapshot', { slug });
+          notifyMutation('orphaned');
           break;
         }
 
@@ -1634,7 +1690,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // 2. Clear entity cache (session storage + in-memory LRU)
           await cacheClear();
           // 3. Reset ALL in-memory state (SW survives across tests)
-          recentUrls = new Set();
+          recentUrls = new Map();
           for (const key of Object.keys(gatewayDetection)) delete gatewayDetection[key];
           if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
           // 4. Tell offscreen to wipe directory and reset drain state
@@ -1652,7 +1708,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           logBuffer = [];
           await chrome.storage.local.set({ logBuffer });
           await cacheClear();
-          recentUrls = new Set();
+          recentUrls = new Map();
           if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
           hydrationDone = hydrateCache();
           await hydrationDone;

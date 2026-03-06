@@ -136,9 +136,10 @@ All inter-entity references use typed keys with a prefix indicating the entity k
 | `page:<slug>` | Checkpointed page (has `pages/{slug}.json`) | `page:github-facebook-rocksdb-s3z2s3` |
 | `shallow:<url>` | Non-checkpointed page (no entity file) | `shallow:https://example.com/article` |
 | `note:<slug>` | Note entity (has `notes/{slug}.json`) | `note:my-note-abc123` |
+| `snap:<slug>/<ts>` | Snapshot (no entity file — exists only in page `childIds` and `list:system/orphaned`) | `snap:github-facebook-rocksdb-s3z2s3/1700000000000` |
 | `list:<id>` | List entity (has `lists/{id}.json`) | `list:rust-lang-ffnyqr` |
 
-Used in: `page.parentIds` (includes `page:<slug>` from referrers and `list:<id>` from list membership), `page.childIds`, `note.parentIds`, `note.childIds`, list pin `id` fields, log entry `referrerId`/`ids`/`parentIds`/`childIds` fields.
+Used in: `page.parentIds` (includes `page:<slug>` from referrers and `list:<id>` from list membership), `page.childIds` (includes `note:<slug>` and `snap:<slug>/<ts>`), `note.parentIds`, `note.childIds`, list pin `id` fields, log entry `referrerId`/`ids`/`parentIds`/`childIds` fields.
 
 **Resolution**: `page:<slug>` refs are resolved to URLs via `loadPageBatch`. `shallow:<url>` refs have the URL embedded (extract via `ref.slice(8)`). When a shallow page becomes checkpointed, `effectOf`'s page_checkpoint branch resolves `shallow:<url>` → `page:<slug>` in parentIds/childIds and upgrades `shallow:` pin IDs to `page:` in affected list entities.
 
@@ -259,7 +260,7 @@ These bypass the background→offscreen pipeline. The tradeoff is acceptable bec
 
 ### Design: Unlink + Orphan (No Physical File Moves)
 
-Deletion is a **logical operation**, not a physical one. Deleting a note or list appends a log entry (`del_note` or `del_list`) that unlinks the entity from its parents and adds its key to the `list:system/orphaned` tracking list. The entity file on disk (`notes/{slug}.json`, `lists/{id}.json`) is never touched.
+Deletion is a **logical operation**, not a physical one. Deleting a note, list, or snapshot appends a log entry (`del_note`, `del_list`, or `del_snap`) that unlinks the entity from its parents and adds its key to the `list:system/orphaned` tracking list. The entity file on disk (`notes/{slug}.json`, `lists/{id}.json`) or snapshot files (`pages/{slug}/{ts}.md|.html`) are never touched.
 
 This design exists because of the event-sourced architecture. The JSONL history is the source of truth, and entity files are derived checkpoints rebuilt by replaying history. If deletion moved or removed files, replaying history would attempt to reference files that no longer exist at their expected paths — breaking replay idempotency. By keeping deletion as a pure relation change in the log, replay can be run any number of times and always produce a consistent result.
 
@@ -270,6 +271,11 @@ This design exists because of the event-sourced architecture. The JSONL history 
 2. Adds `note:<slug>` to `list:system/orphaned`
 3. File `notes/{slug}.json` stays on disk
 
+**`del_snap` (replay.js):**
+1. Unlinks `snap:<slug>/<ts>` from each parent page's `childIds`
+2. Adds `snap:<slug>/<ts>` to `list:system/orphaned`
+3. Snapshot files `pages/{slug}/{ts}.md|.html` stay on disk
+
 **`del_list` (replay.js):**
 1. Removes the list from `settings.listOrder` (sidebar disappears)
 2. Removes `list:<id>` from `parentIds` of all checkpointed pages that were pinned
@@ -277,11 +283,11 @@ This design exists because of the event-sourced architecture. The JSONL history 
 4. Adds `list:<id>` to `list:system/orphaned`
 5. File `lists/{id}.json` stays on disk
 
-Both handlers use `effectOf` in replay.js — all side-effects are computed in a single replay pass, not as separate log entries.
+All handlers use `effectOf` in replay.js — all side-effects are computed in a single replay pass, not as separate log entries.
 
 ### The Orphaned List
 
-`list:system/orphaned` (`lists/system/orphaned.json`) holds an array of entity keys (`note:<slug>`, `list:<id>`) for deleted items. This serves as a "recycle bin" manifest: the keys are unlinked from the entity graph but the underlying files are intact and could be restored.
+`list:system/orphaned` (`lists/system/orphaned.json`) holds an array of entity keys (`note:<slug>`, `snap:<slug>/<ts>`, `list:<id>`) for deleted items. This serves as a "recycle bin" manifest: the keys are unlinked from the entity graph but the underlying files are intact and could be restored.
 
 ### File Persistence and Its Consequences
 
@@ -294,6 +300,7 @@ Currently, `loadNote()` in filesystem-storage.js returns `null` for missing file
 | Entity | Deletion supported | Log action | Notes |
 |--------|-------------------|------------|-------|
 | Note | Yes | `del_note` | Unlinks from parent page `childIds` |
+| Snapshot | Yes | `del_snap` | Unlinks from parent page `childIds`; no entity file (key-only) |
 | List | Yes | `del_list` | Unlinks from all pinned pages, removes from sidebar |
 | Page | No | — | Pages are never deleted; they either exist as checkpoints or as shallow entries |
 | Shallow page | No | — | Entries in SPI are pruned when absorbed into a checkpoint, but not user-deletable |

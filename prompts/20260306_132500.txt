@@ -1,0 +1,42 @@
+- Implement capture snapshot deletion similar to note and list deletion. (1) Use unified key "snap:<page_slug>/<timestamp>" to reference both html and md snapshots. (2) Snapshots is part of childIds, we maintain a list of snapshots in page checkpoint, do not rely on file system scan to get snapshot list. (3) Use a "del_snap" to soft delete snapshots. (4) Search still directly finds snapshots markdown from file system, but we apply a filter similar to note search.
+- listSnapshots should read from childIds. Migrating script. del_snap goes to orphan list.
+- run migration
+- Reload token
+- Why isn't ~/portal-data/pages/webvpn-zju-edu-https-777264767-rq4zbq.json updated to include snapshot as child?
+- That doesn't sound right. I thought snapshot should ensure a checkopoint exist by appending page_checkpoint before itself?
+- Not sure why, but after reloading (full reload by disabling and enabling) the extension, "Daily Bread" list shows two identical pins, even though its checkpoint file correctly contains only one pin.
+- Tell me about how we append "page_checkpoint" for page opened directly from Portal UI
+- For the first path, we should pass the date of visit in `recentUrls` to the checkpoint as well
+- The duplicate pin issue still persist. I am disabling and re-enabling the extension, so the issue must be from storage.local. But I believe storage.local only holds log-buffer, which should be empty after drained. How to recover or diagnose?
+- It says "logBuffer length: 0
+VM35:6 Jandan-related: []"
+
+Then why is there duplicate pin?
+- The first command returns "undefined", no "pins: .." printed.
+The second returns
+undefined
+VM32:3 list:jandan-3ohvjd → pins: 1 [{"id":"page:jandan-p-122060-htkys1","pinnedAt":1771575549926}]
+VM32:3 listCache:jandan-3ohvjd → pins: undefined undefined
+- Can we read the session storage in terminal?
+- It returns:
+
+undefined
+VM36:3 fullPinned count: 2
+VM36:4 [
+  {
+    "url": "https://jandan.net/p/122060",
+    "title": "为什么40岁开始是人生最累的十年 - 煎蛋"
+  },
+  {
+    "url": "https://jandan.net/p/122060",
+    "title": "为什么40岁开始是人生最累的十年 - 煎蛋"
+  }
+]
+- I removed it, and confirmed it is removed, then I reload extension, the list still contains two pins
+- I don't understand why we need to call `evaluateQueryStream` to display pins. Aren't pins already listed in list checkpoint? We simply have to get the title and URL for each pin.
+- Did you add E2E tests for the multi-day pin case?
+- /finish 
+- Handle 1 & 3, for 2, tell me the Chrome terminal command to clear it manually
+- y
+- Add it to the comments of evaluateQueryStream
+- continue

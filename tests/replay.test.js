@@ -601,6 +601,28 @@ describe('applyLogToPage — page_checkpoint', () => {
     const result = applyLogToPage(page, entry);
     expect(result.user_title).toBe('Original');
   });
+
+  it('sets visitDates from checkpoint entry', () => {
+    const page = { timestamp: 0 };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://x.com', title: 'X', visitDates: [20260210, 20260211] };
+    const result = applyLogToPage(page, entry);
+    expect(result.visitDates).toEqual([20260210, 20260211]);
+  });
+
+  it('merges visitDates without duplicates', () => {
+    const slug = generateSlugFromUrl('https://x.com');
+    const page = { slug, timestamp: 100, url: 'https://x.com', title: 'X', visitDates: [20260210] };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://x.com', visitDates: [20260210, 20260212] };
+    const result = applyLogToPage(page, entry);
+    expect(result.visitDates).toEqual([20260210, 20260212]);
+  });
+
+  it('does not set visitDates when entry has none', () => {
+    const page = { timestamp: 0 };
+    const entry = { timestamp: 500, action: 'page_checkpoint', url: 'https://x.com', title: 'X' };
+    const result = applyLogToPage(page, entry);
+    expect(result.visitDates).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1275,6 +1297,174 @@ describe('effectOf scope', () => {
       load,
     );
     expect(result['list:system/orphaned'].keys.filter(k => k === 'note:n1')).toHaveLength(1);
+  });
+
+  // --- snap: wire snapshot into parent page childIds ---
+
+  it('snap wires snapshot into parent page childIds', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: [] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'snap', slug: 'p1/1234567890', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(Object.keys(result)).toEqual(['page:p1']);
+    expect(result['page:p1'].childIds).toContain('snap:p1/1234567890');
+  });
+
+  it('snap deduplicates in childIds', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['snap:p1/1234567890'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'snap', slug: 'p1/1234567890', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['page:p1'].childIds.filter(c => c === 'snap:p1/1234567890')).toHaveLength(1);
+  });
+
+  it('snap skips missing parents', async () => {
+    const result = await effectOf(
+      { timestamp: 100, action: 'snap', slug: 'p1/1234567890', parentIds: ['page:missing'] },
+      nullLoad,
+    );
+    expect(result['page:missing']).toBeNull();
+  });
+
+  // --- del_snap: remove snapshot from parent page childIds ---
+
+  it('del_snap removes snapshot from parent page childIds', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['snap:p1/1234567890', 'note:n1'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_snap', slug: 'p1/1234567890', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['page:p1'].childIds).toEqual(['note:n1']);
+    expect(result['page:p1'].childIds).not.toContain('snap:p1/1234567890');
+  });
+
+  it('del_snap is safe when snapshot not in childIds', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['note:n1'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_snap', slug: 'p1/1234567890', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['page:p1'].childIds).toEqual(['note:n1']);
+  });
+
+  it('del_snap skips missing parents', async () => {
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_snap', slug: 'p1/1234567890', parentIds: ['page:missing'] },
+      nullLoad,
+    );
+    expect(result['page:missing']).toBeNull();
+  });
+
+  it('del_snap adds snapshot key to system/orphaned list', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['snap:p1/1234567890'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_snap', slug: 'p1/1234567890', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['list:system/orphaned']).toBeTruthy();
+    expect(result['list:system/orphaned'].keys).toContain('snap:p1/1234567890');
+    expect(result['list:system/orphaned'].timestamp).toBe(100);
+  });
+
+  it('del_snap does not duplicate key in orphaned list', async () => {
+    const orphaned = { timestamp: 50, keys: ['snap:p1/1234567890'] };
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['snap:p1/1234567890'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_snap', slug: 'p1/1234567890', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['list:system/orphaned'].keys.filter(k => k === 'snap:p1/1234567890')).toHaveLength(1);
+  });
+
+  // --- restore_snap: re-link snapshot to parent page childIds ---
+
+  it('restore_snap re-adds snapshot to parent page childIds', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['note:n1'] };
+    const orphaned = { timestamp: 50, keys: ['snap:p1/1234567890'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_snap', slug: 'p1/1234567890', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['page:p1'].childIds).toContain('snap:p1/1234567890');
+    expect(result['page:p1'].childIds).toContain('note:n1');
+  });
+
+  it('restore_snap removes snapshot key from system/orphaned', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: [] };
+    const orphaned = { timestamp: 50, keys: ['snap:p1/1234567890', 'note:n1'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_snap', slug: 'p1/1234567890', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['list:system/orphaned'].keys).not.toContain('snap:p1/1234567890');
+    expect(result['list:system/orphaned'].keys).toContain('note:n1');
+    expect(result['list:system/orphaned'].timestamp).toBe(100);
+  });
+
+  it('restore_snap deduplicates in childIds', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['snap:p1/1234567890'] };
+    const orphaned = { timestamp: 50, keys: ['snap:p1/1234567890'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_snap', slug: 'p1/1234567890', parentIds: ['page:p1'] },
+      load,
+    );
+    expect(result['page:p1'].childIds.filter(c => c === 'snap:p1/1234567890')).toHaveLength(1);
+  });
+
+  it('restore_snap skips missing parents', async () => {
+    const orphaned = { timestamp: 50, keys: ['snap:p1/1234567890'] };
+    const load = async (key) => {
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_snap', slug: 'p1/1234567890', parentIds: ['page:missing'] },
+      load,
+    );
+    expect(result['page:missing']).toBeNull();
+    expect(result['list:system/orphaned'].keys).not.toContain('snap:p1/1234567890');
   });
 
 });

@@ -68,10 +68,8 @@ let gatewayOriginsLoaded = false;
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
 // pinnedFilterCtx removed — pinned section no longer has related pages
 const EXPLORE_LIST_ID = 'explore';
-// List results and page data are cached in chrome.storage.session
-// (managed by background for pages, by options for list results).
-// Keys: 'page:{slug}' for pages, 'listCache:{slug}' for list results.
-let listCacheKeys = []; // tracks which listCache:* keys exist in session
+// Page data cached in chrome.storage.session (managed by background).
+// Keys: 'page:{slug}' for pages.
 
 // --- Query builder state ---
 let qbRoot = null;        // tree root (null = empty)
@@ -337,11 +335,6 @@ function resetHistory() {
   historyLoading = false;
   cachedFieldRanges = null;
   capturesMatchCache = null;
-  // Invalidate list results in session
-  if (listCacheKeys.length > 0) {
-    chrome.storage.session.remove(listCacheKeys.map(id => 'listCache:' + id));
-    listCacheKeys = [];
-  }
   allListPins = {};
 
   gatewayOriginsCache = [];
@@ -491,12 +484,21 @@ async function showRecycleBin() {
 
     // Load entity to get display name
     let displayName = key;
-    try {
-      const entity = await sendAction({ action: 'readCacheable', key, includeDeleted: true });
-      if (entity) {
-        displayName = entity.name || entity.excerpt || entity.title || entity.slug || key;
-      }
-    } catch {}
+    if (key.startsWith('snap:')) {
+      // snap:<pageSlug>/<timestamp> — derive display name from key
+      const snapSlug = key.slice('snap:'.length);
+      const lastSlash = snapSlug.lastIndexOf('/');
+      const pageSlug = snapSlug.slice(0, lastSlash);
+      const ts = parseInt(snapSlug.slice(lastSlash + 1), 10);
+      displayName = `${pageSlug} — ${new Date(ts).toLocaleString()}`;
+    } else {
+      try {
+        const entity = await sendAction({ action: 'readCacheable', key, includeDeleted: true });
+        if (entity) {
+          displayName = entity.name || entity.excerpt || entity.title || entity.slug || key;
+        }
+      } catch {}
+    }
 
     const card = document.createElement('div');
     card.className = 'recycle-card';
@@ -510,7 +512,10 @@ async function showRecycleBin() {
       <button class="restore-btn">Restore</button>
     `;
     card.querySelector('.restore-btn').addEventListener('click', async () => {
-      if (key.startsWith('note:')) {
+      if (key.startsWith('snap:')) {
+        const snapSlug = key.slice('snap:'.length);
+        await sendAction({ action: 'restoreSnapshot', snapSlug });
+      } else if (key.startsWith('note:')) {
         const slug = key.slice('note:'.length);
         await sendAction({ action: 'restoreNote', noteSlug: slug });
       } else if (key.startsWith('list:')) {
@@ -1093,6 +1098,8 @@ function qbUpdateNode(nodeId, updates) {
 }
 
 // --- Stream-evaluate a qbTree against all JSONL files ---
+// Deduplicates per-day: the same URL visited on different days produces separate
+// results. Consumers must not assume results are unique by URL/slug.
 async function evaluateQueryStream(qbTree) {
   const filesResp = await sendAction({ action: 'listInteractionFiles' });
   const files = filesResp.files;
@@ -1909,15 +1916,8 @@ async function showList(list) {
       return enriched;
     }
 
-    // --- Pinned+Related section: cache in session or async fetch ---
-    const listCacheKey = 'listCache:' + listId;
-    const cachedPinned = (await chrome.storage.session.get(listCacheKey))[listCacheKey] || null;
-    if (cachedPinned) {
-      renderPinnedSection(cachedPinned.fullPinned, listId);
-    } else {
-      renderPinnedSection(pinsResolved.map(enrichResult), listId);
-      fetchListResults(list, listId, pinsResolved, enrichResult);
-    }
+    // --- Pinned section: render directly from entity pins ---
+    renderPinnedSection(pinsResolved.map(enrichResult), listId);
 
     // --- Explore section: always immediate ---
     renderListExplore(list);
@@ -1979,37 +1979,6 @@ async function refreshListPages(listId, pins) {
   }
 }
 
-// Async: fetch search results, compute pinned+related, cache, and render both sections
-async function fetchListResults(list, listId, pins, enrichResult) {
-  // Yield to browser so Phase 1 paints first
-  await new Promise(resolve => setTimeout(resolve, 0));
-  if (activeView.type !== 'list' || activeView.id !== listId) return;
-
-  try {
-    let searchResults = [];
-
-    if (list.qbTrees && list.qbTrees.length > 0) {
-      searchResults = await evaluateQueryStream(list.qbTrees[0]);
-    }
-
-    if (activeView.type !== 'list' || activeView.id !== listId) return;
-
-    // Enrich pinned pages with search result data where available
-    const pinnedSlugs = new Set(pins.map(p => p.slug || generateSlugFromUrl(p.url)));
-    const searchResultSlugs = new Set(searchResults.map(r => generateSlugFromUrl(r.url)));
-    const pinnedInResults = searchResults.filter(r => pinnedSlugs.has(generateSlugFromUrl(r.url))).map(enrichResult);
-    const pinnedOnly = pins.filter(p => !searchResultSlugs.has(p.slug || generateSlugFromUrl(p.url))).map(enrichResult);
-    const fullPinned = [...pinnedInResults, ...pinnedOnly];
-
-    // Cache pinned in session
-    if (!listCacheKeys.includes(listId)) listCacheKeys.push(listId);
-    chrome.storage.session.set({ ['listCache:' + listId]: { fullPinned } });
-
-    renderPinnedSection(fullPinned, listId);
-  } catch (error) {
-    console.error('List fetch error:', error);
-  }
-}
 
 // Render pinned rows (no related pages, no time chart)
 function renderPinnedSection(allPinned, listId) {
@@ -2694,8 +2663,6 @@ async function renderLists() {
       await chrome.runtime.sendMessage({ action: 'deleteList', listId: lst.slug });
       // Clean up local state
       delete allListPins[lst.slug];
-      chrome.storage.session.remove('listCache:' + lst.slug);
-      listCacheKeys = listCacheKeys.filter(id => id !== lst.slug);
       renderLists();
       if (activeView.type === 'list' && activeView.id === lst.slug) {
         showExplore();
@@ -3410,15 +3377,9 @@ chrome.runtime.onMessage.addListener((request) => {
       : (activeView.type === 'list' ? activeView.id : null);
     if (request.listId) {
       delete allListPins[request.listId];
-      chrome.storage.session.remove('listCache:' + request.listId);
-      listCacheKeys = listCacheKeys.filter(id => id !== request.listId);
       if (request.listId === activeListId) refreshCurrentView();
     } else {
       allListPins = {};
-      if (listCacheKeys.length > 0) {
-        chrome.storage.session.remove(listCacheKeys.map(id => 'listCache:' + id));
-        listCacheKeys = [];
-      }
       if (activeListId) refreshCurrentView();
     }
   } else if (type === 'lists') {
@@ -3443,12 +3404,8 @@ chrome.runtime.onMessage.addListener((request) => {
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible') return;
 
-  // Invalidate pin and list caches (may have been modified in popup)
+  // Invalidate pin caches (may have been modified in popup)
   allListPins = {};
-  if (listCacheKeys.length > 0) {
-    chrome.storage.session.remove(listCacheKeys.map(id => 'listCache:' + id));
-    listCacheKeys = [];
-  }
 
   // Refresh sidebar lists (may have been created/deleted in popup)
   renderLists();

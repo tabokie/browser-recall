@@ -56,6 +56,44 @@ test.describe('List operations', () => {
     await options.close();
   });
 
+  test('pinned page visited on multiple days shows exactly one pin row', async ({ extContext, extensionId, setupDir }) => {
+    const day1 = new Date('2026-02-10').getTime();
+    const day2 = new Date('2026-03-01').getTime();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: {
+        trimRules: [],
+        listOrder: [{ id: 'list:reading', name: 'Reading List' }],
+      }},
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', timestamp: day2,
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: day1 }],
+        qbTrees: [{ field: 'url', id: 1, predicateType: 'keyword', type: 'predicate', value: 'example' }],
+      }},
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: day2,
+        parentIds: [], childIds: [], visitDates: [20260210, 20260301],
+      }},
+      { path: 'history/2026-02-10.jsonl', lines: [
+        { timestamp: day1, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      ]},
+      { path: 'history/2026-03-01.jsonl', lines: [
+        { timestamp: day2, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    // Wait for pinned row to appear, then verify exactly one
+    const pinnedRows = options.locator('#pinnedResults .result-row');
+    await expect(pinnedRows.first()).toBeVisible({ timeout: 5000 });
+    await expect(pinnedRows).toHaveCount(1);
+    await options.close();
+  });
+
   test('pin a page via toggleListPin, appears in already-open list view via mutation notification', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [

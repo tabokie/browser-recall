@@ -105,8 +105,8 @@ describe('Callsite correctness — callers pass raw values, no coercion', () => 
     expect(bgSource).toMatch(/await ensureCheckpointIfMissing\(tab\.url, tab\.title\);/);
   });
 
-  it('multi-day visit passes url and entry.title', () => {
-    expect(bgSource).toMatch(/await ensureCheckpointIfMissing\(url, entry\.title\);/);
+  it('multi-day visit passes url, entry.title, and recentVisitDates', () => {
+    expect(bgSource).toMatch(/await ensureCheckpointIfMissing\(url, entry\.title, recentVisitDates\);/);
   });
 
   it('note drain passes sender tab url and title', () => {
