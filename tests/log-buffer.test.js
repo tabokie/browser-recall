@@ -149,12 +149,12 @@ describe('Log buffer', () => {
     it('appendLog works for mutation entries with action field', async () => {
       const lb = createLogBuffer(storage);
 
-      await lb.appendLog({ timestamp: 1000, action: 'set', key: 'listOrder', value: ['list:a'] });
+      await lb.appendLog({ timestamp: 1000, action: 'list_meta', id: 'test', name: 'Test' });
       await lb.appendLog({ timestamp: 2000, action: 'highlight', slug: 'a', highlight: { text: 'hello' } });
 
       const { logBuffer } = await storage.get(['logBuffer']);
       expect(logBuffer).toHaveLength(2);
-      expect(logBuffer[0].action).toBe('set');
+      expect(logBuffer[0].action).toBe('list_meta');
       expect(logBuffer[1].action).toBe('highlight');
     });
 
@@ -223,7 +223,7 @@ describe('Log buffer', () => {
       storage._seed({
         logBuffer: [
           { timestamp: 1000, url: 'https://a.com', title: 'A', slug: 'a' },
-          { timestamp: 2000, action: 'set', key: 'listOrder', value: [] },
+          { timestamp: 2000, action: 'list_meta', id: 'test', name: 'Test' },
         ],
       });
 
@@ -236,7 +236,7 @@ describe('Log buffer', () => {
       // Must preserve old entries + add new one
       expect(logBuffer).toHaveLength(3);
       expect(logBuffer[0].url).toBe('https://a.com');
-      expect(logBuffer[1].action).toBe('set');
+      expect(logBuffer[1].action).toBe('list_meta');
       expect(logBuffer[2].action).toBe('highlight');
     });
   });
@@ -246,7 +246,7 @@ describe('Log buffer', () => {
       const lb = createLogBuffer(storage);
 
       await lb.appendVisit(makeVisit('https://a.com', 1000));
-      await lb.appendLog({ timestamp: 2000, action: 'set', key: 'listOrder', value: ['list:a'] });
+      await lb.appendLog({ timestamp: 2000, action: 'list_meta', id: 'test', name: 'Test' });
       await lb.appendLog({ timestamp: 3000, action: 'highlight', slug: 'a', highlight: { text: 'hi' } });
       await lb.appendLog({ timestamp: 4000, action: 'list', id: 'user/c1', op: 'clear', urls: [] });
       await lb.appendLog({ timestamp: 5000, action: 'list', id: 'permanent-deletes', op: 'add', urls: ['https://gone.com'] });
@@ -259,7 +259,7 @@ describe('Log buffer', () => {
       expect(logBuffer[0].url).toBe('https://a.com');
 
       // Mutations: have action
-      expect(logBuffer[1].action).toBe('set');
+      expect(logBuffer[1].action).toBe('list_meta');
       expect(logBuffer[2].action).toBe('highlight');
       expect(logBuffer[3].action).toBe('list');
       expect(logBuffer[4].action).toBe('list');

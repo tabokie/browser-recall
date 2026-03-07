@@ -11,7 +11,7 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const noteSlug = '260304-restore-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       // Page with empty childIds (note was unlinked by del_note)
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -53,14 +53,14 @@ test.describe('Recycle bin', () => {
     await helper.close();
   });
 
-  // 2. restoreList re-adds to listOrder and restores page parentIds
-  test('restoreList re-adds to listOrder and restores page parentIds', async ({ extContext, extensionId, setupDir }) => {
+  // 2. restoreList re-adds to root childLists and restores page parentIds
+  test('restoreList re-adds to root childLists and restores page parentIds', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const listId = 'restore-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
-        trimRules: [],
-        listOrder: [],  // list was removed from listOrder by del_list
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: [],  // list was removed from root by del_list
       }},
       // Deleted list entity still on disk with deleted: true
       { path: `lists/${listId}.json`, data: {
@@ -69,6 +69,7 @@ test.describe('Recycle bin', () => {
           { id: `page:${TEST_SLUG}`, pinnedAt: now },
         ],
         qbTrees: [], deleted: true,
+        parentList: 'list:system/root', childLists: [],
       }},
       // Page that lost the list from parentIds
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -89,12 +90,12 @@ test.describe('Recycle bin', () => {
     , listId);
     expect(restoreResp.success).toBe(true);
 
-    // Verify settings.listOrder has the entry back
-    const settingsResp = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'settings' })
+    // Verify root's childLists has the entry back
+    const rootResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
     );
-    expect(settingsResp.success).toBe(true);
-    expect(settingsResp.value.listOrder.some(e => e.id === `list:${listId}`)).toBe(true);
+    expect(rootResp.success).toBe(true);
+    expect(rootResp.value.childLists).toContain(`list:${listId}`);
 
     // Verify page parentIds has the list back
     const pageResp = await helper.evaluate((key) =>
@@ -127,7 +128,7 @@ test.describe('Recycle bin', () => {
     const today = new Date(now).toISOString().slice(0, 10);
     const noteSlug = '260304-perm-del-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
@@ -177,7 +178,7 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const listId = 'perm-del-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       // Deleted list entity on disk
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Doomed List', timestamp: now,
@@ -219,7 +220,7 @@ test.describe('Recycle bin', () => {
     const noteSlug = '260304-bulk-note';
     const listId = 'bulk-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       { path: `notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Bulk delete', note: 'Gone', cssPath: 'p',
         parentIds: [], childIds: [], timestamp: now,
@@ -268,7 +269,7 @@ test.describe('Recycle bin', () => {
     const noteSlug = '260304-ui-note';
     const listId = 'ui-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       { path: `notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'UI test note', note: 'Visible', cssPath: 'p',
         parentIds: [], childIds: [], timestamp: now,
@@ -307,7 +308,7 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const noteSlug = '260304-restore-ui-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
@@ -350,7 +351,7 @@ test.describe('Recycle bin', () => {
     const noteSlug = '260304-empty-note';
     const listId = 'empty-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       { path: `notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Empty me', note: 'Gone', cssPath: 'p',
         parentIds: [], childIds: [], timestamp: now,

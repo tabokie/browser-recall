@@ -266,11 +266,22 @@ async function readCacheable(key, includeDeleted = false) {
   return value;
 }
 
-// Read listOrder from settings. Each entry is { id: 'list:<slug>', name }.
-async function getListOrder() {
+// Traverse the list tree (BFS) and return all list keys.
+async function getAllListKeys() {
   await hydrationDone;
-  const settings = await readCacheable('settings');
-  return settings.listOrder || [];
+  const root = await readCacheable('list:system/root');
+  const result = [];
+  const queue = [...(root?.childLists || [])];
+  const visited = new Set();
+  while (queue.length > 0) {
+    const key = queue.shift();
+    if (visited.has(key)) continue;
+    visited.add(key);
+    result.push(key);
+    const entity = await readCacheable(key);
+    if (entity?.childLists) queue.push(...entity.childLists);
+  }
+  return result;
 }
 
 function assertOffscreenSuccess(resp, key) {
@@ -366,6 +377,11 @@ async function hydrateCache() {
       }
     }
   } catch (e) { console.warn('List metadata load failed:', e.message); }
+
+  try {
+    const rootResp = await requestOffscreen({ action: 'loadListEntity', listId: 'system/root' });
+    if (rootResp?.success && rootResp.entity) await cacheSet('list:system/root', rootResp.entity);
+  } catch (e) { console.warn('Root entity load failed:', e.message); }
 
   try {
     const spResp = await requestOffscreen({ action: 'loadShallowPageIndex' });
@@ -1315,15 +1331,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             // Parents: lists containing this URL
             const parentLists = [];
-            const listOrder = await getListOrder();
-            for (const entry of listOrder) {
-              const listSlug = entry.id.startsWith('list:') ? entry.id.slice(5) : entry.id;
-              const listEntity = await readCacheable('list:' + listSlug);
+            const allListKeys = await getAllListKeys();
+            for (const listKey of allListKeys) {
+              const listSlug = listKey.startsWith('list:') ? listKey.slice(5) : listKey;
+              const listEntity = await readCacheable(listKey);
               if (listEntity?.pins) {
                 const pageId = 'page:' + slug;
                 const shallowId = 'shallow:' + url;
                 const inPinned = listEntity.pins.some(p => p.id === pageId || p.id === shallowId);
-                if (inPinned) parentLists.push({ slug: listSlug, name: entry.name, type: 'pin' });
+                if (inPinned) parentLists.push({ slug: listSlug, name: listEntity.name, type: 'pin' });
               }
             }
 
@@ -1527,7 +1543,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'deleteList': {
-          await addLog({ timestamp: Date.now(), action: 'del_list', id: request.listId });
+          const listKey = 'list:' + request.listId;
+          const entity = await readCacheable(listKey);
+          // Collect all descendant keys (BFS)
+          const subtreeKeys = [];
+          const delQueue = [...(entity?.childLists || [])];
+          const delVisited = new Set();
+          while (delQueue.length > 0) {
+            const k = delQueue.shift();
+            if (delVisited.has(k)) continue;
+            delVisited.add(k);
+            subtreeKeys.push(k);
+            const e = await readCacheable(k);
+            if (e?.childLists) delQueue.push(...e.childLists);
+          }
+          await addLog({ timestamp: Date.now(), action: 'del_list', id: request.listId, subtreeKeys });
+          sendResponse({ success: true });
+          notifyMutation('lists');
+          break;
+        }
+
+        case 'reparentList': {
+          // request: { listId, fromParent, toParent, index }
+          await addLog({
+            timestamp: Date.now(), action: 'list_meta', id: request.listId,
+            reparent: { from: request.fromParent, to: request.toParent, index: request.index }
+          });
           sendResponse({ success: true });
           notifyMutation('lists');
           break;
@@ -1568,16 +1609,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'restoreList': {
           const listId = request.listId;
-          // Load list entity (include deleted) to get name and pins
+          // Load list entity (include deleted) to get name, pins, childLists
           const entity = await readCacheable('list:' + listId, true);
           const name = entity?.name || listId;
           const pins = entity?.pins || [];
+          // Collect all descendant keys (BFS, include deleted)
+          const restoreSubtreeKeys = [];
+          const restoreQueue = [...(entity?.childLists || [])];
+          const restoreVisited = new Set();
+          while (restoreQueue.length > 0) {
+            const k = restoreQueue.shift();
+            if (restoreVisited.has(k)) continue;
+            restoreVisited.add(k);
+            restoreSubtreeKeys.push(k);
+            const child = await readCacheable(k, true);
+            if (child?.childLists) restoreQueue.push(...child.childLists);
+          }
           await addLog({
             timestamp: Date.now(),
             action: 'restore_list',
             id: listId,
             name,
             pins,
+            subtreeKeys: restoreSubtreeKeys,
           });
           sendResponse({ success: true });
           notifyMutation('orphaned');

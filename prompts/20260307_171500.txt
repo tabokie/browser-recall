@@ -1,0 +1,20 @@
+- Let's support hierarchical lists. A list can contain other lists as its children. We store them in a different field "childLists". In Portal UI sidebar, we display the relations between lists similar to a directory tree. Note that in Focus UI, list is parent to its pins, and list is also parent to its "childLists".
+
+There is an invisible list "root" that contains all first-level lists. We use it to replace the old "listOrder" in settings. "lists:system/root" contains the first-level lists { childLists: ["lists:<user_list>",..] }.
+
+User is able to move list to become other list's child using drag-and-drop.
+
+By default, all nested lists are folded. User click on a little "+" button to unfold a list. If total width of unfolded lists are too large, we show horizontal scrollbar.
+
++ parent-1
+- parent-2
+  + child-1-with-children
+   child-2-without-child
+- Data migrated?
+- Give me the Chrome terminal commands to clear all session caches
+- /finish 
+- n
+- Fix the remaining items you mentioned earlier first
+- /finish 
+- n
+- go on

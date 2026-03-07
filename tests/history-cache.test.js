@@ -142,7 +142,7 @@ describe('multi-day visit check', () => {
     const recentUrls = buildRecentUrls({
       '2026-02-27': [
         { timestamp: 1000, action: 'list', id: 'my-list', op: 'add', ids: ['page:example-com'] },
-        { timestamp: 2000, action: 'set', key: 'listOrder', value: [] },
+        { timestamp: 2000, action: 'list_meta', id: 'test', name: 'Test' },
       ],
     });
     expect(recentUrls.has('https://example.com')).toBe(false);

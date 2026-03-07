@@ -19,7 +19,7 @@ test.describe('Deletion guardrails', () => {
     const now = Date.now();
     const noteSlug = '260301-guardrail-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`],
@@ -55,7 +55,7 @@ test.describe('Deletion guardrails', () => {
     const today = new Date(now).toISOString().slice(0, 10);
     const noteSlug = '260301-ui-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`],
@@ -99,12 +99,11 @@ test.describe('Deletion guardrails', () => {
   test('deleted list entity returns null from readCacheable', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
-        trimRules: [],
-        listOrder: [{ id: 'list:to-delete', name: 'To Delete' }],
-      }},
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:to-delete'] } },
       { path: 'lists/to-delete.json', data: {
         slug: 'to-delete', name: 'To Delete', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
     ]);
 
@@ -131,10 +130,7 @@ test.describe('Deletion guardrails', () => {
   test('deleted list stays hidden after rehydration', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
-        trimRules: [],
-        listOrder: [],  // already removed by del_list effectOf
-      }},
+      { path: 'settings.json', data: { trimRules: [] } },
       // Disk checkpoint already has deleted: true (written by previous drain)
       { path: 'lists/rehydrate-del.json', data: {
         slug: 'rehydrate-del', name: 'Rehydrate Del', timestamp: now,
@@ -160,18 +156,19 @@ test.describe('Deletion guardrails', () => {
 
   // Fix 3: replay guard on orphaned list resurrection.
   // After del_list, a subsequent toggleListPin should NOT resurrect the list
-  // entity or re-add it to listOrder via effectOf replay.
+  // entity or re-add it to root's childLists via effectOf replay.
   test('pinning to a deleted list does not resurrect it', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const pageUrl = 'https://example.com/pinme';
     const pageSlug = getSlugForUrl(pageUrl);
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
-        trimRules: [],
-        listOrder: [{ id: 'list:doomed', name: 'Doomed' }],
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:doomed'],
       }},
       { path: 'lists/doomed.json', data: {
         slug: 'doomed', name: 'Doomed', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${pageSlug}.json`, data: {
         slug: pageSlug, url: pageUrl, title: 'Pin Target', timestamp: now,
@@ -186,11 +183,11 @@ test.describe('Deletion guardrails', () => {
       chrome.runtime.sendMessage({ action: 'deleteList', listId: 'doomed' })
     );
 
-    // Verify list is deleted from listOrder
-    let settings = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'settings' })
+    // Verify list is deleted from root's childLists
+    let root = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
     );
-    expect(settings.value.listOrder.find(e => e.id === 'list:doomed')).toBeUndefined();
+    expect(root.value.childLists).not.toContain('list:doomed');
 
     // Now try to pin a page to the deleted list
     await helper.evaluate((url) =>
@@ -209,11 +206,11 @@ test.describe('Deletion guardrails', () => {
     const shallowId = `shallow:${pageUrl}`;
     expect(pins.some(p => p.id === pageId || p.id === shallowId)).toBe(false);
 
-    // listOrder should still not contain the deleted list
-    settings = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'settings' })
+    // root's childLists should still not contain the deleted list
+    root = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
     );
-    expect(settings.value.listOrder.find(e => e.id === 'list:doomed')).toBeUndefined();
+    expect(root.value.childLists).not.toContain('list:doomed');
 
     await helper.close();
   });

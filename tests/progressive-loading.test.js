@@ -92,6 +92,8 @@ const TEST_LIST = {
   slug: 'col-rust',
   query: 'rust',
   name: 'Rust Lang',
+  parentList: 'list:system/root',
+  childLists: [],
 };
 
 // List whose query matches NO interactions in metadata (like "AI Core")
@@ -100,6 +102,8 @@ const TEST_LIST_NOHIT = {
   slug: 'col-nohit',
   query: 'xyzzy nonexistent query',
   name: 'No-Hit Query',
+  parentList: 'list:system/root',
+  childLists: [],
 };
 
 const TEST_LIST_PINS = {
@@ -124,12 +128,16 @@ const KNOWN_PIN_URLS = [
 const SLUG_TO_URL = new Map(KNOWN_PIN_URLS.map(url => [generateSlugFromUrl(url), url]));
 
 const TEST_SETTINGS = {
-  listOrder: [{ id: 'list:col-rust', name: 'Rust Lang' }, { id: 'list:col-nohit', name: 'No-Hit Query' }],
   captureContent: true,
   captureAttention: true,
   archiveQuality: 'medium',
   urlBlacklist: [],
   titleTrimRules: [],
+};
+
+const TEST_ROOT = {
+  timestamp: 0,
+  childLists: ['list:col-rust', 'list:col-nohit'],
 };
 
 const FILES_NEWEST_FIRST = [
@@ -320,6 +328,7 @@ describe('Progressive loading', () => {
       case 'readCacheable':
         switch (msg.key) {
           case 'settings': return { success: true, value: TEST_SETTINGS };
+          case 'list:system/root': return { success: true, value: TEST_ROOT };
           case 'list:system/gateways': return { success: true, value: { timestamp: 0, origins: [] } };
           case 'list:system/shallow-page': return { success: true, value: { timestamp: 0, index: {} } };
           case 'list:system/orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
@@ -343,6 +352,7 @@ describe('Progressive loading', () => {
   function populateCache() {
     sessionData = {
       settings: TEST_SETTINGS,
+      'list:system/root': { ...TEST_ROOT },
       'list:system/gateways': { timestamp: 0, origins: [] },
     };
     // Individual list entity keys (include pins for session cache hits)
@@ -472,13 +482,15 @@ describe('Progressive loading', () => {
     await tick(50);
   });
 
-  it('Test 2: sidebar lists render from listOrder even when individual entity keys are absent', async () => {
-    // Cache settings (with listOrder containing { id, name }) but NOT individual list:<slug> keys.
-    // loadLists() reads from settings.listOrder directly, so sidebar renders immediately.
+  it('Test 2: sidebar lists render from list:system/root even when individual entity keys are absent from session', async () => {
+    // Cache list:system/root but NOT individual list:<slug> keys in session.
+    // loadListTree() reads list:system/root, then readCacheable falls back to
+    // the message handler for each child entity key.
     sessionData = {
       settings: TEST_SETTINGS,
+      'list:system/root': { ...TEST_ROOT },
       'list:system/gateways': { timestamp: 0, origins: [] },
-      // individual list:<slug> keys intentionally missing
+      // individual list:<slug> keys intentionally missing from session
     };
     localData = { logBuffer: [] };
 
@@ -491,7 +503,7 @@ describe('Progressive loading', () => {
     // Explore view rendered
     expect(mainTitle()).toBe('Explore');
 
-    // Sidebar lists render immediately from listOrder (no need for individual entity keys)
+    // Sidebar lists render via readCacheable fallback (session miss → message handler)
     expect(sidebarLists()).toContain('col-rust');
 
     await importDone;

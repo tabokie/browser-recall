@@ -9,10 +9,13 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading List' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: Date.now(), childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: Date.now(), pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
     ]);
 
@@ -28,11 +31,14 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading List' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -62,12 +68,15 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading List' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: day2, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: day2,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: day1 }],
         qbTrees: [{ field: 'url', id: 1, predicateType: 'keyword', type: 'predicate', value: 'example' }],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: day2,
@@ -99,10 +108,13 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading List' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -139,11 +151,14 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading List' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -175,7 +190,10 @@ test.describe('List operations', () => {
 
   test('create a new list via saveListMeta alone, appears in sidebar', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: Date.now(), childLists: [],
+      }},
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -210,11 +228,14 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:filtered', name: 'Filtered' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:filtered'],
       }},
       { path: 'lists/filtered.json', data: {
         slug: 'filtered', name: 'Filtered', timestamp: now,
         pins: [], qbTrees: [qbTree],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: 'history/2026-03-01.jsonl', lines: [
         { timestamp: now - 1000, action: 'page', url: noMatchUrl, title: 'No Match' },
@@ -257,11 +278,14 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:research', name: 'Research' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:research'],
       }},
       { path: 'lists/research.json', data: {
         slug: 'research', name: 'Research', timestamp: now,
         pins: [{ id: `shallow:${url}`, pinnedAt: now }], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/system/shallow-page.json', data: {
         timestamp: now,
@@ -308,10 +332,13 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Immediate Pin', timestamp: now,
@@ -341,30 +368,32 @@ test.describe('List operations', () => {
   });
 
   // Bug: createListAndPin in popup sent saveListMeta (whose effectOf already
-  // appends to listOrder) AND then manually appended via saveSettingsKey — double entry.
-  // Fix: popup now relies solely on saveListMeta's effectOf for listOrder.
-  // This test verifies saveListMeta alone produces exactly one listOrder entry.
-  test('saveListMeta appends exactly one listOrder entry', async ({ extContext, extensionId, setupDir }) => {
+  // adds to root's childLists) AND then manually appended — double entry.
+  // Fix: popup now relies solely on saveListMeta's effectOf for root childLists.
+  // This test verifies saveListMeta alone produces exactly one entry in root's childLists.
+  test('saveListMeta adds to root childLists exactly once', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: Date.now(), childLists: [],
+      }},
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
 
-    // saveListMeta — effectOf should append to listOrder
+    // saveListMeta — effectOf should add to root's childLists
     await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'saveListMeta', listId: 'my-list', name: 'My List' })
     );
 
-    const order = await helper.evaluate(async () => {
-      const resp = await chrome.runtime.sendMessage({ action: 'readCacheable', key: 'settings' });
-      return resp.value.listOrder || [];
+    const root = await helper.evaluate(async () => {
+      const resp = await chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' });
+      return resp.value;
     });
     await helper.close();
 
-    const matches = order.filter(e => e.id === 'list:my-list');
+    const matches = root.childLists.filter(id => id === 'list:my-list');
     expect(matches.length).toBe(1);
-    expect(matches[0].name).toBe('My List');
   });
 
   // Bug: pinning a shallow page to a list creates SPI entry with title=null
@@ -379,10 +408,13 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `history/${today}.jsonl`, lines: [
         { timestamp: now, action: 'page', url, title: 'SPI Title Test Page' },
@@ -416,10 +448,13 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `history/${today}.jsonl`, lines: [
         { timestamp: now - 1000, action: 'page', url: url1, title: 'Bulk Page One' },
@@ -450,17 +485,18 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [
-          { id: 'list:source', name: 'Source' },
-          { id: 'list:target', name: 'Target' },
-        ],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:source', 'list:target'],
       }},
       { path: 'lists/source.json', data: {
         slug: 'source', name: 'Source', timestamp: now,
         pins: [{ id: `shallow:${url}`, pinnedAt: now }], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/target.json', data: {
         slug: 'target', name: 'Target', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `history/${today}.jsonl`, lines: [
         { timestamp: now, action: 'page', url, title: 'Copy Pin Page' },
@@ -494,16 +530,19 @@ test.describe('List operations', () => {
   // but requires content script navigation + workspace.listIds configuration.
   // The effectOf fix covers it via the same code path as the tests above.
 
-  // Bug 20260228: list_meta rename should update listOrder entry name via effectOf
-  test('saveListMeta rename updates listOrder name', async ({ extContext, extensionId, setupDir }) => {
+  // Bug 20260228: list_meta rename should update list entity name via effectOf
+  test('saveListMeta rename updates list entity name', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
     ]);
 
@@ -512,33 +551,33 @@ test.describe('List operations', () => {
       chrome.runtime.sendMessage({ action: 'saveListMeta', listId: 'reading', name: 'Research' })
     );
 
-    const order = await helper.evaluate(async () => {
-      const resp = await chrome.runtime.sendMessage({ action: 'readCacheable', key: 'settings' });
-      return resp.value.listOrder || [];
+    const listEntity = await helper.evaluate(async () => {
+      const resp = await chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' });
+      return resp.value;
     });
     await helper.close();
 
-    const entry = order.find(e => e.id === 'list:reading');
-    expect(entry).toBeDefined();
-    expect(entry.name).toBe('Research');
+    expect(listEntity).toBeDefined();
+    expect(listEntity.name).toBe('Research');
   });
 
-  // Bug 20260220: del_list should remove entry from listOrder via effectOf
-  test('deleteList removes entry from listOrder', async ({ extContext, extensionId, setupDir }) => {
+  // Bug 20260220: del_list should remove entry from root's childLists via effectOf
+  test('deleteList removes entry from root childLists', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [
-          { id: 'list:keep', name: 'Keep' },
-          { id: 'list:remove', name: 'Remove' },
-        ],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:keep', 'list:remove'],
       }},
       { path: 'lists/keep.json', data: {
         slug: 'keep', name: 'Keep', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/remove.json', data: {
         slug: 'remove', name: 'Remove', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
     ]);
 
@@ -547,15 +586,15 @@ test.describe('List operations', () => {
       chrome.runtime.sendMessage({ action: 'deleteList', listId: 'remove' })
     );
 
-    const order = await helper.evaluate(async () => {
-      const resp = await chrome.runtime.sendMessage({ action: 'readCacheable', key: 'settings' });
-      return resp.value.listOrder || [];
+    const root = await helper.evaluate(async () => {
+      const resp = await chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' });
+      return resp.value;
     });
     await helper.close();
 
-    expect(order.length).toBe(1);
-    expect(order[0].id).toBe('list:keep');
-    expect(order.find(e => e.id === 'list:remove')).toBeUndefined();
+    expect(root.childLists.length).toBe(1);
+    expect(root.childLists[0]).toBe('list:keep');
+    expect(root.childLists).not.toContain('list:remove');
   });
 
   test('deleteList adds list key to orphaned list', async ({ extContext, extensionId, setupDir }) => {
@@ -563,10 +602,13 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:doomed', name: 'Doomed' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:doomed'],
       }},
       { path: 'lists/doomed.json', data: {
         slug: 'doomed', name: 'Doomed', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
     ]);
 
@@ -597,7 +639,9 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now,
@@ -605,6 +649,7 @@ test.describe('List operations', () => {
           { id: `page:${slug1}`, pinnedAt: now },
           { id: `page:${slug2}`, pinnedAt: now },
         ], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug1}.json`, data: {
         slug: slug1, url: url1, title: 'Pin One', timestamp: now,
@@ -641,10 +686,13 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -674,11 +722,14 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -711,7 +762,9 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:doomed', name: 'Doomed' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:doomed'],
       }},
       { path: 'lists/doomed.json', data: {
         slug: 'doomed', name: 'Doomed', timestamp: now,
@@ -719,6 +772,7 @@ test.describe('List operations', () => {
           { id: `page:${TEST_SLUG}`, pinnedAt: now },
           { id: `page:${slug2}`, pinnedAt: now },
         ], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -758,13 +812,16 @@ test.describe('List operations', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
-        listOrder: [{ id: 'list:reading', name: 'Reading List' }],
+      }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
         qbTrees: [{ field: 'url', id: 1, predicateType: 'keyword', type: 'predicate', value: 'example' }],
         autoEnabled: { 'Children of pins': true, 'Parents of pins': false, 'Similar to pins': false },
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -805,5 +862,196 @@ test.describe('List operations', () => {
     await expect(manualBlock).toBeVisible();
 
     await options.close();
+  });
+
+  // --- Hierarchical list tests ---
+
+  test('nested list renders with indentation in sidebar', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:parent'],
+      }},
+      { path: 'lists/parent.json', data: {
+        slug: 'parent', name: 'Parent List', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: ['list:child'],
+      }},
+      { path: 'lists/child.json', data: {
+        slug: 'child', name: 'Child List', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:parent', childLists: [],
+      }},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    const parentItem = options.locator('.sidebar-item[data-list-id="parent"]');
+    const childItem = options.locator('.sidebar-item[data-list-id="child"]');
+    await expect(parentItem).toBeVisible({ timeout: 5000 });
+    await expect(childItem).toBeVisible({ timeout: 5000 });
+
+    // Child should have more padding (indentation)
+    const parentPadding = await parentItem.evaluate(el => parseInt(el.style.paddingLeft));
+    const childPadding = await childItem.evaluate(el => parseInt(el.style.paddingLeft));
+    expect(childPadding).toBeGreaterThan(parentPadding);
+    await options.close();
+  });
+
+  test('fold toggle hides/shows nested children', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:parent'],
+      }},
+      { path: 'lists/parent.json', data: {
+        slug: 'parent', name: 'Parent', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: ['list:child'],
+      }},
+      { path: 'lists/child.json', data: {
+        slug: 'child', name: 'Child', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:parent', childLists: [],
+      }},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    const childItem = options.locator('.sidebar-item[data-list-id="child"]');
+    await expect(childItem).toBeVisible({ timeout: 5000 });
+
+    // Click fold toggle on parent to collapse
+    const foldBtn = options.locator('.sidebar-item[data-list-id="parent"] .fold-toggle');
+    await foldBtn.click();
+    await expect(childItem).toBeHidden();
+
+    // Click again to expand
+    await foldBtn.click();
+    await expect(childItem).toBeVisible();
+    await options.close();
+  });
+
+  test('reparentList moves list between parents', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:a', 'list:b'],
+      }},
+      { path: 'lists/a.json', data: {
+        slug: 'a', name: 'List A', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: ['list:child'],
+      }},
+      { path: 'lists/b.json', data: {
+        slug: 'b', name: 'List B', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'lists/child.json', data: {
+        slug: 'child', name: 'Child', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:a', childLists: [],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Reparent child from list:a to list:b at index 0
+    const result = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'reparentList', listId: 'child', fromParent: 'a', toParent: 'b', index: 0 })
+    );
+    expect(result.success).toBe(true);
+
+    // Verify: list:a should not have child in childLists, list:b should
+    const entityA = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:a' })
+    );
+    const entityB = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:b' })
+    );
+    const childEntity = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:child' })
+    );
+    await helper.close();
+
+    expect(entityA.value.childLists).not.toContain('list:child');
+    expect(entityB.value.childLists).toContain('list:child');
+    expect(childEntity.value.parentList).toBe('list:b');
+  });
+
+  test('deleteList with children soft-deletes entire subtree', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:parent'],
+      }},
+      { path: 'lists/parent.json', data: {
+        slug: 'parent', name: 'Parent', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: ['list:child'],
+      }},
+      { path: 'lists/child.json', data: {
+        slug: 'child', name: 'Child', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:parent', childLists: [],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'deleteList', listId: 'parent' })
+    );
+
+    // Both parent and child should be in orphaned list
+    const orphaned = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+    );
+    expect(orphaned.value.keys).toContain('list:parent');
+    expect(orphaned.value.keys).toContain('list:child');
+
+    // Root should not contain parent
+    const root = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
+    );
+    await helper.close();
+    expect(root.value.childLists).not.toContain('list:parent');
+  });
+
+  test('restoreList with children restores entire subtree', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:parent'],
+      }},
+      { path: 'lists/parent.json', data: {
+        slug: 'parent', name: 'Parent', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: ['list:child'],
+      }},
+      { path: 'lists/child.json', data: {
+        slug: 'child', name: 'Child', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:parent', childLists: [],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Delete first
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'deleteList', listId: 'parent' })
+    );
+
+    // Restore
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'restoreList', listId: 'parent' })
+    );
+
+    // Both should be unorphaned
+    const orphaned = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+    );
+    expect(orphaned.value.keys).not.toContain('list:parent');
+    expect(orphaned.value.keys).not.toContain('list:child');
+
+    // Root should contain parent again
+    const root = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
+    );
+    await helper.close();
+    expect(root.value.childLists).toContain('list:parent');
   });
 });

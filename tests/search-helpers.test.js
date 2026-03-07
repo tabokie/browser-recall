@@ -58,7 +58,7 @@ describe('extractInteractionBuffer (logBuffer format)', () => {
   it('extracts visit entries (no action field) from logBuffer', () => {
     const logBuffer = [
       { timestamp: 1, url: 'https://a.com', title: 'A', slug: 'a' },
-      { timestamp: 2, action: 'set', key: 'listOrder', value: [] },
+      { timestamp: 2, action: 'list_meta', id: 'test', name: 'Test' },
       { timestamp: 3, url: 'https://b.com', title: 'B', slug: 'b' },
       { timestamp: 4, action: 'highlight', slug: 'a', highlight: { text: 'hi' } },
     ];
@@ -72,7 +72,7 @@ describe('extractInteractionBuffer (logBuffer format)', () => {
 
   it('returns empty array for buffer with no visit entries', () => {
     const logBuffer = [
-      { timestamp: 1, action: 'set', key: 'listOrder', value: [] },
+      { timestamp: 1, action: 'list_meta', id: 'test', name: 'Test' },
       { timestamp: 2, action: 'highlight', slug: 'x', highlight: {} },
     ];
 
@@ -86,7 +86,7 @@ describe('extractInteractionBuffer (logBuffer format)', () => {
     ];
     const logBuffer = [
       { timestamp: 2, url: 'https://new.com', title: 'New', slug: 'new' },
-      { timestamp: 3, action: 'set', key: 'listOrder', value: [] },
+      { timestamp: 3, action: 'list_meta', id: 'test', name: 'Test' },
     ];
 
     const extracted = extractInteractionBuffer(logBuffer);

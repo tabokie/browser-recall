@@ -11,8 +11,9 @@ test.describe('Round-trip persistence', () => {
   test('pin via helper page visible in options list view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [{ id: 'list:reading', name: 'Reading' }] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [], parentList: 'list:system/root', childLists: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -44,7 +45,7 @@ test.describe('Round-trip persistence', () => {
 
   test('new list via helper page visible in options sidebar', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -63,7 +64,7 @@ test.describe('Round-trip persistence', () => {
   test('note created via helper page visible in getPageInfo', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -97,8 +98,9 @@ test.describe('Accumulation correctness', () => {
     const slugs = urls.map(u => getSlugForUrl(u));
 
     const files = [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [{ id: 'list:bulk', name: 'Bulk' }] } },
-      { path: 'lists/bulk.json', data: { slug: 'bulk', name: 'Bulk', timestamp: now, pins: [], qbTrees: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:bulk'] } },
+      { path: 'lists/bulk.json', data: { slug: 'bulk', name: 'Bulk', timestamp: now, pins: [], qbTrees: [], parentList: 'list:system/root', childLists: [] } },
       ...slugs.map((slug, i) => ({
         path: `pages/${slug}.json`,
         data: { slug, url: urls[i], title: `Page ${i}`, timestamp: now, parentIds: [], childIds: [] },
@@ -134,7 +136,7 @@ test.describe('Accumulation correctness', () => {
     localServer.addPage('/bounce', { title: 'Bounce', body: '<p>Bounce</p>' });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], blacklist: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     const url = localServer.url('/tall-page');
@@ -185,20 +187,17 @@ test.describe('Cross-entity interference', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
-        trimRules: [],
-        listOrder: [
-          { id: 'list:alpha', name: 'Alpha' },
-          { id: 'list:beta', name: 'Beta' },
-        ],
-      }},
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:alpha', 'list:beta'] } },
       { path: 'lists/alpha.json', data: {
         slug: 'alpha', name: 'Alpha', timestamp: now,
         pins: [{ id: `page:${slug}`, pinnedAt: now }], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/beta.json', data: {
         slug: 'beta', name: 'Beta', timestamp: now,
         pins: [{ id: `page:${slug}`, pinnedAt: now }], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Shared', timestamp: now, parentIds: [], childIds: [],
@@ -232,20 +231,19 @@ test.describe('Cross-entity interference', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
-        trimRules: [],
-        listOrder: [
-          { id: 'list:doomed', name: 'Doomed' },
-          { id: 'list:safe', name: 'Safe' },
-        ],
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:doomed', 'list:safe'],
       }},
       { path: 'lists/doomed.json', data: {
         slug: 'doomed', name: 'Doomed', timestamp: now,
         pins: [{ id: `page:${slug}`, pinnedAt: now }], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/safe.json', data: {
         slug: 'safe', name: 'Safe', timestamp: now,
         pins: [{ id: `page:${slug}`, pinnedAt: now }], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Shared Page', timestamp: now, parentIds: [], childIds: [],
@@ -262,15 +260,14 @@ test.describe('Cross-entity interference', () => {
     const safeResult = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:safe' })
     );
-    const settings = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'settings' })
+    const root = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
     );
     await helper.close();
 
     expect((safeResult.value?.pins || []).length).toBe(1);
-    const order = settings.value.listOrder;
-    expect(order.length).toBe(1);
-    expect(order[0].id).toBe('list:safe');
+    expect(root.value.childLists).toContain('list:safe');
+    expect(root.value.childLists).not.toContain('list:doomed');
   });
 
   test('two child pages sharing a parent via navigation — each shows parent independently', async ({ extContext, extensionId, setupDir, localServer }) => {
@@ -282,7 +279,7 @@ test.describe('Cross-entity interference', () => {
     localServer.addPage('/child-b', { title: 'Child B', body: '<p>B</p>' });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], blacklist: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     // Navigate parent → child-a via link click

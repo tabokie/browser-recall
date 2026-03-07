@@ -70,7 +70,7 @@ const FILE_MAP = {
 };
 
 const TEST_SETTINGS = {
-  listOrder: [],
+  trimRules: [],
   captureContent: true,
   captureAttention: true,
   archiveQuality: 'medium',

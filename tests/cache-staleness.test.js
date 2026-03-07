@@ -65,9 +65,9 @@ const FILE1_INTERACTIONS = makeFileInteractions(FILE1_DATE, 0, 20, 'Today');
 const FILE2_INTERACTIONS = makeFileInteractions(FILE2_DATE, 20, 20, 'Yesterday');
 const FILE3_INTERACTIONS = makeFileInteractions(FILE3_DATE, 40, 20, 'OldDay');
 
-const TEST_LIST = { slug: 'col-rust', query: 'rust', name: 'Rust Lang' };
+const TEST_LIST = { slug: 'col-rust', query: 'rust', name: 'Rust Lang', parentList: 'list:system/root', childLists: [] };
 // List with no query — only pinned pages, pins on same domain as history
-const TEST_LIST_NOQUERY = { slug: 'col-noq', query: '', name: 'No Query List' };
+const TEST_LIST_NOQUERY = { slug: 'col-noq', query: '', name: 'No Query List', parentList: 'list:system/root', childLists: [] };
 
 const TEST_LIST_PINS = {
   'col-rust': [
@@ -98,12 +98,16 @@ const KNOWN_PIN_URLS = [
 const SLUG_TO_URL = new Map(KNOWN_PIN_URLS.map(url => [generateSlugFromUrl(url), url]));
 
 const TEST_SETTINGS = {
-  listOrder: [{ id: 'list:col-rust', name: 'Rust Lang' }, { id: 'list:col-noq', name: 'No Query List' }],
   captureContent: true,
   captureAttention: true,
   archiveQuality: 'medium',
   urlBlacklist: [],
   titleTrimRules: [],
+};
+
+const TEST_ROOT = {
+  timestamp: 0,
+  childLists: ['list:col-rust', 'list:col-noq'],
 };
 
 const FILES_NEWEST_FIRST = [
@@ -207,6 +211,8 @@ describe('Cache staleness', () => {
   let testListPins;
   /** Mutable SPI data — tests can override for shallow-page index responses */
   let testSpiData;
+  /** Mutable root data — tests can override to change list:system/root responses */
+  let testRootData;
   /** Mutable page entity data — tests can override to change readCacheable('page:*') responses.
    *  When removing a background.js handler (e.g. loadPageBatch), callers switch to
    *  readCacheable('page:slug'). Test mocks must add the new key type to the
@@ -239,6 +245,7 @@ describe('Cache staleness', () => {
     actionOverrides = {};
     testListPins = { ...TEST_LIST_PINS };
     testSpiData = null;
+    testRootData = null;
     testPageData = {};
 
     // Wire filesystem mock to use the same action handlers as sendMessage
@@ -317,6 +324,7 @@ describe('Cache staleness', () => {
         // Simulate background readCacheable: dispatch to known handlers
         switch (msg.key) {
           case 'settings': return { success: true, value: TEST_SETTINGS };
+          case 'list:system/root': return { success: true, value: testRootData || TEST_ROOT };
           case 'list:system/gateways': return { success: true, value: { timestamp: 0, origins: [] } };
           case 'list:system/shallow-page': return { success: true, value: testSpiData || { timestamp: 0, index: {} } };
           case 'list:system/orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
@@ -355,6 +363,7 @@ describe('Cache staleness', () => {
     // Session-cached keys (settings as single object, individual list keys, entity keys for system lists)
     sessionData = {
       settings: TEST_SETTINGS,
+      'list:system/root': { ...TEST_ROOT },
       'list:system/gateways': { timestamp: 0, origins: [] },
     };
     // Individual list entity keys (include pins for session cache hits)
@@ -602,8 +611,8 @@ describe('Cache staleness', () => {
     testListPins['col-buf'] = [
       pinFromUrl('https://buffered.com/page1', NOW),
     ];
-    sessionData['list:col-buf'] = { slug: 'col-buf', query: '', name: 'Buffered', pins: testListPins['col-buf'], qbTrees: [] };
-    sessionData.settings = { ...TEST_SETTINGS, listOrder: [...TEST_SETTINGS.listOrder, { id: 'list:col-buf', name: 'Buffered' }] };
+    sessionData['list:col-buf'] = { slug: 'col-buf', query: '', name: 'Buffered', pins: testListPins['col-buf'], qbTrees: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-buf'] };
 
     await importOptions();
     await tick(100);
@@ -732,8 +741,8 @@ describe('Cache staleness', () => {
     testListPins['col-today'] = [
       pinFromUrl('https://example.com/today0', NOW - DAY),
     ];
-    sessionData['list:col-today'] = { slug: 'col-today', query: 'today', name: 'Today Search', pins: testListPins['col-today'], qbTrees: [] };
-    sessionData.settings = { ...TEST_SETTINGS, listOrder: [{ id: 'list:col-today', name: 'Today Search' }] };
+    sessionData['list:col-today'] = { slug: 'col-today', query: 'today', name: 'Today Search', pins: testListPins['col-today'], qbTrees: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:system/root'] = { timestamp: 0, childLists: ['list:col-today'] };
 
     await importOptions();
     await tick(100);
@@ -983,6 +992,7 @@ describe('Cache staleness', () => {
     // Background would handle these actions after hydration
     actionOverrides['readCacheable'] = (msg) => {
       if (msg.key === 'settings') return { success: true, value: TEST_SETTINGS };
+      if (msg.key === 'list:system/root') return { success: true, value: TEST_ROOT };
       // Return individual list entities by slug
       for (const list of TEST_LISTS) {
         if (msg.key === 'list:' + list.slug) return { success: true, value: list };
@@ -1021,9 +1031,9 @@ describe('Cache staleness', () => {
       },
     };
 
-    // Add the shallow list to lists and listOrder (include pins for session cache hit)
-    sessionData['list:' + TEST_LIST_WITH_SHALLOW.slug] = { ...TEST_LIST_WITH_SHALLOW, pins: testListPins['col-shallow'] || [], qbTrees: [] };
-    sessionData.settings = { ...TEST_SETTINGS, listOrder: [...TEST_SETTINGS.listOrder, { id: 'list:col-shallow', name: 'Shallow List' }] };
+    // Add the shallow list to lists and list:system/root (include pins for session cache hit)
+    sessionData['list:' + TEST_LIST_WITH_SHALLOW.slug] = { ...TEST_LIST_WITH_SHALLOW, pins: testListPins['col-shallow'] || [], qbTrees: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-shallow'] };
 
     await importOptions();
     await tick(200);
@@ -1061,8 +1071,8 @@ describe('Cache staleness', () => {
     testPageData[PAGE_SLUG] = { slug: PAGE_SLUG, url: PAGE_URL, title: PAGE_TITLE, watermark: 1 };
 
     // Do NOT put 'page:<slug>' in sessionData — simulating empty session cache
-    sessionData['list:' + TEST_LIST_UNCACHED.slug] = { ...TEST_LIST_UNCACHED, pins: testListPins['col-uncached'] || [], qbTrees: [] };
-    sessionData.settings = { ...TEST_SETTINGS, listOrder: [...TEST_SETTINGS.listOrder, { id: 'list:col-uncached', name: 'Uncached List' }] };
+    sessionData['list:' + TEST_LIST_UNCACHED.slug] = { ...TEST_LIST_UNCACHED, pins: testListPins['col-uncached'] || [], qbTrees: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-uncached'] };
 
     await importOptions();
     await tick(200);
@@ -1101,8 +1111,8 @@ describe('Cache staleness', () => {
     };
 
     // Do NOT put shallowPageIndex in sessionData — simulating pre-hydration state
-    sessionData['list:' + TEST_LIST_SPI.slug] = { ...TEST_LIST_SPI, pins: testListPins['col-spi'], qbTrees: [] };
-    sessionData.settings = { ...TEST_SETTINGS, listOrder: [...TEST_SETTINGS.listOrder, { id: 'list:col-spi', name: 'SPI Fallback List' }] };
+    sessionData['list:' + TEST_LIST_SPI.slug] = { ...TEST_LIST_SPI, pins: testListPins['col-spi'], qbTrees: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-spi'] };
 
     await importOptions();
     await tick(200);

@@ -5,7 +5,6 @@
  * - Session hit returns cached value without offscreen call
  * - Session miss falls back to filesystem and caches the result
  * - Settings keys batch-load all keys on any single miss
- * - `listOrder` stores `{ id, name }` entries for direct consumption
  * - `await hydrationDone` blocks readCacheable until resolved
  *
  * Structural tests verify readCacheable/readFs exist in background.js.
@@ -85,12 +84,12 @@ function makeSessionStore(initial = {}) {
 describe('readCacheable / readFs', () => {
   let session;
   let offscreenCalls;
-  // Mimics the readCacheable/readFs/getListOrder functions from background.js
-  let readCacheable, readFs, getListOrder;
+  // Mimics the readCacheable/readFs/getAllListKeys functions from background.js
+  let readCacheable, readFs, getAllListKeys;
   let hydrationResolve;
   let hydrationDone;
 
-  const TEST_SETTINGS = { listOrder: [{ id: 'list:b', name: 'B' }, { id: 'list:a', name: 'A' }], urlBlacklist: [], titleTrimRules: [{ urlPrefix: 'https://x.com', action: 'remove_after_pipe' }], captureContent: true };
+  const TEST_SETTINGS = { urlBlacklist: [], titleTrimRules: [{ urlPrefix: 'https://x.com', action: 'remove_after_pipe' }], captureContent: true };
 
   function requestOffscreen(msg) {
     offscreenCalls.push(msg);
@@ -105,7 +104,10 @@ describe('readCacheable / readFs', () => {
         return { success: true, timestamp: 0, origins: ['https://docs.rs'] };
       case 'loadListEntity':
         if (msg.listId === 'my-custom-list') {
-          return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }] } };
+          return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] } };
+        }
+        if (msg.listId === 'system/root') {
+          return { success: true, entity: { timestamp: 0, childLists: ['list:b', 'list:a'] } };
         }
         return { success: true, entity: null };
       default:
@@ -160,10 +162,21 @@ describe('readCacheable / readFs', () => {
       return readFs(key);
     };
 
-    // Read listOrder from settings. Each entry is { id: 'list:<slug>', name }.
-    getListOrder = async () => {
-      const settings = await readCacheable('settings');
-      return settings?.listOrder || [];
+    // Traverse tree from root to get all list keys (mirrors background.js getAllListKeys)
+    getAllListKeys = async () => {
+      const root = await readCacheable('list:system/root');
+      const result = [];
+      const queue = [...(root?.childLists || [])];
+      const visited = new Set();
+      while (queue.length > 0) {
+        const key = queue.shift();
+        if (visited.has(key)) continue;
+        visited.add(key);
+        result.push(key);
+        const entity = await readCacheable(key);
+        if (entity?.childLists) queue.push(...entity.childLists);
+      }
+      return result;
     };
   });
 
@@ -175,19 +188,26 @@ describe('readCacheable / readFs', () => {
     expect(offscreenCalls).toEqual([]); // No offscreen call
   });
 
-  it('returns listOrder entries from cached settings without offscreen call', async () => {
-    await session.set({ settings: { listOrder: [{ id: 'list:x', name: 'X' }] } });
-    const result = await getListOrder();
-    expect(result).toEqual([{ id: 'list:x', name: 'X' }]);
+  it('getAllListKeys returns list keys from cached root without offscreen call', async () => {
+    await session.set({
+      'list:system/root': { timestamp: 0, childLists: ['list:x'] },
+      'list:x': { slug: 'x', name: 'X', parentList: 'list:system/root', childLists: [] },
+    });
+    const result = await getAllListKeys();
+    expect(result).toEqual(['list:x']);
     expect(offscreenCalls).toEqual([]);
   });
 
   // ── Session miss → filesystem fallback ───────────────────────────────
-  it('getListOrder falls back to filesystem for settings then returns listOrder', async () => {
-    // Settings not in session — triggers readFs('settings')
-    const result = await getListOrder();
-    expect(result).toEqual(TEST_SETTINGS.listOrder);
-    expect(offscreenCalls.some(c => c.action === 'loadSettings')).toBe(true);
+  it('getAllListKeys falls back to filesystem for root then traverses tree', async () => {
+    // Root not in session — triggers readFs('list:system/root')
+    await session.set({
+      'list:b': { slug: 'b', name: 'B', parentList: 'list:system/root', childLists: [] },
+      'list:a': { slug: 'a', name: 'A', parentList: 'list:system/root', childLists: [] },
+    });
+    const result = await getAllListKeys();
+    expect(result).toEqual(['list:b', 'list:a']);
+    expect(offscreenCalls.some(c => c.action === 'loadListEntity' && c.listId === 'system/root')).toBe(true);
   });
 
   it('falls back to filesystem for shallow-page and caches result', async () => {
@@ -224,20 +244,22 @@ describe('readCacheable / readFs', () => {
   });
 
   // ── Lists ordering ───────────────────────────────────────────────────
-  it('getListOrder returns entries in listOrder order', async () => {
+  it('getAllListKeys returns keys in childLists order', async () => {
     await session.set({
-      settings: { listOrder: [{ id: 'list:b', name: 'B' }, { id: 'list:a', name: 'A' }] },
+      'list:system/root': { timestamp: 0, childLists: ['list:b', 'list:a'] },
+      'list:b': { slug: 'b', name: 'B', parentList: 'list:system/root', childLists: [] },
+      'list:a': { slug: 'a', name: 'A', parentList: 'list:system/root', childLists: [] },
     });
-    const result = await getListOrder();
-    // 'b' should come before 'a' because listOrder = [b, a]
-    expect(result[0].id).toBe('list:b');
-    expect(result[1].id).toBe('list:a');
+    const result = await getAllListKeys();
+    // 'b' should come before 'a' because childLists = [list:b, list:a]
+    expect(result[0]).toBe('list:b');
+    expect(result[1]).toBe('list:a');
     expect(offscreenCalls).toEqual([]);
   });
 
-  it('returns empty array when listOrder is empty', async () => {
-    await session.set({ settings: { listOrder: [] } });
-    const result = await getListOrder();
+  it('returns empty array when root has no children', async () => {
+    await session.set({ 'list:system/root': { timestamp: 0, childLists: [] } });
+    const result = await getAllListKeys();
     expect(result).toEqual([]);
     expect(offscreenCalls).toEqual([]);
   });
@@ -257,7 +279,7 @@ describe('readCacheable / readFs', () => {
       return origReadFs(key);
     };
 
-    await session.set({ settings: { listOrder: [{ id: 'list:a', name: 'A' }] } });
+    await session.set({ settings: { urlBlacklist: ['chrome://'] } });
 
     const promise = readCacheable('settings').then(v => { resolved = true; return v; });
 
@@ -269,7 +291,7 @@ describe('readCacheable / readFs', () => {
     hydrationResolve();
     const result = await promise;
     expect(resolved).toBe(true);
-    expect(result).toEqual({ listOrder: [{ id: 'list:a', name: 'A' }] });
+    expect(result).toEqual({ urlBlacklist: ['chrome://'] });
   });
 
   // ── Unknown keys ─────────────────────────────────────────────────────
@@ -281,10 +303,10 @@ describe('readCacheable / readFs', () => {
   // ── #4: User list keys fall back to filesystem ─────────────────────
   it('falls back to filesystem for user list keys on session miss', async () => {
     const result = await readCacheable('list:my-custom-list');
-    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }] });
+    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
     expect(offscreenCalls.some(c => c.action === 'loadListEntity' && c.listId === 'my-custom-list')).toBe(true);
     // Should be cached after first load
-    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }] });
+    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
   });
 
   it('returns null for user list key that does not exist on disk', async () => {

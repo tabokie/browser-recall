@@ -799,55 +799,49 @@ describe('effectOf scope', () => {
     expect(Object.keys(result).sort()).toEqual(['list:c1', 'list:system/shallow-page'].sort());
   });
 
-  it('list_meta with name change also updates settings.listOrder', async () => {
-    const settings = { listOrder: [{ id: 'list:c1', name: 'Old Name' }, { id: 'list:c2', name: 'Other' }] };
-    const listEntity = { timestamp: 0, slug: 'c1', name: 'Old Name', qbTrees: [], pins: [] };
+  it('list_meta with name change does not affect root (already has parent)', async () => {
+    const root = { timestamp: 0, childLists: ['list:c1', 'list:c2'] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'Old Name', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
     const load = async (key) => {
-      if (key === 'settings') return settings;
+      if (key === 'list:system/root') return root;
       if (key === 'list:c1') return listEntity;
       return null;
     };
     const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'c1', name: 'New Name' }, load);
-    expect(Object.keys(result).sort()).toEqual(['list:c1', 'settings']);
+    expect(Object.keys(result).sort()).toEqual(['list:c1']);
     expect(result['list:c1'].name).toBe('New Name');
-    expect(result['settings'].listOrder[0]).toEqual({ id: 'list:c1', name: 'New Name' });
-    expect(result['settings'].listOrder[1]).toEqual({ id: 'list:c2', name: 'Other' });
+    expect(result['list:c1'].parentList).toBe('list:system/root');
   });
 
-  it('list_meta for new list adds entry to settings.listOrder', async () => {
-    const settings = { listOrder: [{ id: 'list:existing', name: 'Existing' }] };
+  it('list_meta for new list adds to root childLists and sets parentList', async () => {
+    const root = { timestamp: 0, childLists: ['list:existing'] };
     const load = async (key) => {
-      if (key === 'settings') return settings;
+      if (key === 'list:system/root') return root;
       if (key === 'list:brand-new') return null; // new list, not yet on disk
       return null;
     };
     const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'brand-new', name: 'Brand New' }, load);
-    expect(result['settings']).toBeTruthy();
-    expect(result['settings'].listOrder).toEqual([
-      { id: 'list:existing', name: 'Existing' },
-      { id: 'list:brand-new', name: 'Brand New' },
-    ]);
+    expect(result['list:system/root']).toBeTruthy();
+    expect(result['list:system/root'].childLists).toEqual(['list:existing', 'list:brand-new']);
+    expect(result['list:brand-new'].parentList).toBe('list:system/root');
   });
 
-  it('list_meta for new list with empty listOrder creates it', async () => {
-    const settings = { trimRules: [] }; // no listOrder key at all
+  it('list_meta for new list with no root creates root and adds entry', async () => {
     const load = async (key) => {
-      if (key === 'settings') return settings;
       if (key === 'list:first') return null;
-      return null;
+      return null; // root returns null → loadOrDefault creates default
     };
     const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'first', name: 'First List' }, load);
-    expect(result['settings']).toBeTruthy();
-    expect(result['settings'].listOrder).toEqual([
-      { id: 'list:first', name: 'First List' },
-    ]);
+    expect(result['list:system/root']).toBeTruthy();
+    expect(result['list:system/root'].childLists).toEqual(['list:first']);
+    expect(result['list:first'].parentList).toBe('list:system/root');
   });
 
-  it('list_meta without name change does not touch settings', async () => {
-    const settings = { listOrder: [{ id: 'list:c1', name: 'Same' }] };
-    const listEntity = { timestamp: 0, slug: 'c1', name: 'Same', qbTrees: [], pins: [] };
+  it('list_meta without reparent does not touch root when already has parent', async () => {
+    const root = { timestamp: 0, childLists: ['list:c1'] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'Same', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
     const load = async (key) => {
-      if (key === 'settings') return settings;
+      if (key === 'list:system/root') return root;
       if (key === 'list:c1') return listEntity;
       return null;
     };
@@ -855,23 +849,23 @@ describe('effectOf scope', () => {
     expect(Object.keys(result)).toEqual(['list:c1']);
   });
 
-  it('del_list removes entry from settings.listOrder', async () => {
-    const settings = { listOrder: [{ id: 'list:c1', name: 'A' }, { id: 'list:c2', name: 'B' }] };
-    const listEntity = { timestamp: 0, slug: 'c1', name: 'A', qbTrees: [], pins: [] };
+  it('del_list removes entry from root childLists', async () => {
+    const root = { timestamp: 0, childLists: ['list:c1', 'list:c2'] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
     const load = async (key) => {
-      if (key === 'settings') return settings;
+      if (key === 'list:system/root') return root;
       if (key === 'list:c1') return listEntity;
       return null;
     };
     const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, load);
-    expect(result['settings'].listOrder).toEqual([{ id: 'list:c2', name: 'B' }]);
+    expect(result['list:system/root'].childLists).toEqual(['list:c2']);
   });
 
   it('del_list adds list key to system/orphaned', async () => {
-    const settings = { listOrder: [{ id: 'list:c1', name: 'A' }] };
-    const listEntity = { timestamp: 0, slug: 'c1', name: 'A', qbTrees: [], pins: [] };
+    const root = { timestamp: 0, childLists: ['list:c1'] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
     const load = async (key) => {
-      if (key === 'settings') return settings;
+      if (key === 'list:system/root') return root;
       if (key === 'list:c1') return listEntity;
       return null;
     };
@@ -881,10 +875,11 @@ describe('effectOf scope', () => {
   });
 
   it('del_list removes list from shallow page SPI lists', async () => {
-    const settings = { listOrder: [{ id: 'list:c1', name: 'A' }] };
+    const root = { timestamp: 0, childLists: ['list:c1'] };
     const listEntity = {
       timestamp: 0, slug: 'c1', name: 'A', qbTrees: [],
       pins: [{ id: 'shallow:https://a.com', pinnedAt: 50 }],
+      parentList: 'list:system/root', childLists: [],
     };
     const spi = {
       timestamp: 50,
@@ -893,7 +888,7 @@ describe('effectOf scope', () => {
       },
     };
     const load = async (key) => {
-      if (key === 'settings') return settings;
+      if (key === 'list:system/root') return root;
       if (key === 'list:c1') return listEntity;
       if (key === 'list:system/shallow-page') return spi;
       return null;
@@ -905,16 +900,16 @@ describe('effectOf scope', () => {
     expect(entry.lists).toContain('list:other');
   });
 
-  it('affects list key and settings for list_meta entries without settings', async () => {
+  it('affects list key and root for list_meta entries without root', async () => {
     const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'c1', name: 'Test' }, nullLoad);
-    expect(Object.keys(result).sort()).toEqual(['list:c1', 'settings']);
-    // New list should be added to listOrder even when settings was null
-    expect(result['settings'].listOrder).toEqual([{ id: 'list:c1', name: 'Test' }]);
+    expect(Object.keys(result).sort()).toEqual(['list:c1', 'list:system/root']);
+    // New list should be added to root's childLists
+    expect(result['list:system/root'].childLists).toEqual(['list:c1']);
   });
 
-  it('affects list key + orphaned for del_list entries without settings', async () => {
+  it('affects list key + orphaned + root for del_list entries without root', async () => {
     const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, nullLoad);
-    expect(Object.keys(result).sort()).toEqual(['list:c1', 'list:system/orphaned']);
+    expect(Object.keys(result).sort()).toEqual(['list:c1', 'list:system/orphaned', 'list:system/root']);
   });
 
   // --- list→page parentIds wiring ---
@@ -980,14 +975,15 @@ describe('effectOf scope', () => {
       timestamp: 0, slug: 'c1', name: 'A', qbTrees: [], pins: [
         { id: 'page:a-slug', pinnedAt: 50 },
         { id: 'page:b-slug', pinnedAt: 60 },
-      ]
+      ],
+      parentList: 'list:system/root', childLists: [],
     };
-    const settings = { listOrder: [{ id: 'list:c1', name: 'A' }] };
+    const root = { timestamp: 0, childLists: ['list:c1'] };
     const load = async (key) => {
       if (key === 'list:c1') return listEntity;
       if (key === 'page:a-slug') return pageA;
       if (key === 'page:b-slug') return pageB;
-      if (key === 'settings') return settings;
+      if (key === 'list:system/root') return root;
       return null;
     };
     const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, load);
@@ -1000,12 +996,13 @@ describe('effectOf scope', () => {
   it('del_list skips shallow pins in parentIds cleanup', async () => {
     const listEntity = {
       timestamp: 0, slug: 'c1', name: 'A', qbTrees: [],
-      pins: [{ id: 'shallow:https://a.com', pinnedAt: 50 }]
+      pins: [{ id: 'shallow:https://a.com', pinnedAt: 50 }],
+      parentList: 'list:system/root', childLists: [],
     };
-    const settings = { listOrder: [{ id: 'list:c1', name: 'A' }] };
+    const root = { timestamp: 0, childLists: ['list:c1'] };
     const load = async (key) => {
       if (key === 'list:c1') return listEntity;
-      if (key === 'settings') return settings;
+      if (key === 'list:system/root') return root;
       return null;
     };
     const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, load);
@@ -1193,13 +1190,13 @@ describe('effectOf scope', () => {
     expect(result['list:system/orphaned'].keys).not.toContain('note:n1');
   });
 
-  // --- restore_list: re-add to listOrder, clear deleted, restore parentIds ---
+  // --- restore_list: re-add to root, clear deleted, restore parentIds ---
 
-  it('restore_list clears deleted flag and re-adds to listOrder', async () => {
-    const settings = { listOrder: [{ id: 'list:c2', name: 'B' }] };
+  it('restore_list clears deleted flag and re-adds to root childLists', async () => {
+    const root = { timestamp: 0, childLists: ['list:c2'] };
     const orphaned = { timestamp: 50, keys: ['list:c1'] };
     const load = async (key) => {
-      if (key === 'settings') return settings;
+      if (key === 'list:system/root') return root;
       if (key === 'list:system/orphaned') return orphaned;
       return null; // list:c1 returns null (readCacheable filters deleted)
     };
@@ -1209,16 +1206,17 @@ describe('effectOf scope', () => {
     );
     expect(result['list:c1'].deleted).toBe(false);
     expect(result['list:c1'].name).toBe('A');
-    expect(result['settings'].listOrder).toContainEqual({ id: 'list:c1', name: 'A' });
-    expect(result['settings'].listOrder).toContainEqual({ id: 'list:c2', name: 'B' });
+    expect(result['list:c1'].parentList).toBe('list:system/root');
+    expect(result['list:system/root'].childLists).toContain('list:c1');
+    expect(result['list:system/root'].childLists).toContain('list:c2');
   });
 
   it('restore_list restores page parentIds for checkpointed pins', async () => {
-    const settings = { listOrder: [] };
+    const root = { timestamp: 0, childLists: [] };
     const orphaned = { timestamp: 50, keys: ['list:c1'] };
     const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: [] };
     const load = async (key) => {
-      if (key === 'settings') return settings;
+      if (key === 'list:system/root') return root;
       if (key === 'list:system/orphaned') return orphaned;
       if (key === 'page:p1') return pageEntity;
       return null;
@@ -1231,11 +1229,11 @@ describe('effectOf scope', () => {
   });
 
   it('restore_list restores SPI lists for shallow pins', async () => {
-    const settings = { listOrder: [] };
+    const root = { timestamp: 0, childLists: [] };
     const orphaned = { timestamp: 50, keys: ['list:c1'] };
     const spi = { timestamp: 0, index: { 'https://example.com': { parentIds: [], lists: [], title: 'Example' } } };
     const load = async (key) => {
-      if (key === 'settings') return settings;
+      if (key === 'list:system/root') return root;
       if (key === 'list:system/orphaned') return orphaned;
       if (key === 'list:system/shallow-page') return spi;
       return null;
@@ -1248,10 +1246,10 @@ describe('effectOf scope', () => {
   });
 
   it('restore_list removes list key from system/orphaned', async () => {
-    const settings = { listOrder: [] };
+    const root = { timestamp: 0, childLists: [] };
     const orphaned = { timestamp: 50, keys: ['list:c1', 'note:n1'] };
     const load = async (key) => {
-      if (key === 'settings') return settings;
+      if (key === 'list:system/root') return root;
       if (key === 'list:system/orphaned') return orphaned;
       return null;
     };
@@ -1286,21 +1284,22 @@ describe('effectOf scope', () => {
 
   it('list_meta action on orphaned list is a no-op', async () => {
     const orphaned = { timestamp: 50, keys: ['list:c1'] };
-    const listEntity = { timestamp: 0, slug: 'c1', name: 'Deleted', qbTrees: [], pins: [], deleted: true };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'Deleted', qbTrees: [], pins: [], deleted: true, parentList: 'list:system/root', childLists: [] };
+    const root = { timestamp: 0, childLists: [] };
     const load = async (key) => {
       if (key === 'list:c1') return listEntity;
       if (key === 'list:system/orphaned') return orphaned;
-      if (key === 'settings') return { listOrder: [] };
+      if (key === 'list:system/root') return root;
       return null;
     };
     const result = await effectOf(
       { timestamp: 100, action: 'list_meta', id: 'c1', name: 'Resurrected' },
       load,
     );
-    // Should not resurrect the list in listOrder
-    const settings = result['settings'];
-    if (settings) {
-      expect(settings.listOrder.some(e => e.id === 'list:c1')).toBe(false);
+    // Should not resurrect the list in root's childLists
+    const rootResult = result['list:system/root'];
+    if (rootResult) {
+      expect(rootResult.childLists.includes('list:c1')).toBe(false);
     }
     // Entity should remain deleted
     if (result['list:c1']) {
@@ -1321,6 +1320,113 @@ describe('effectOf scope', () => {
       load,
     );
     expect(result['list:system/orphaned'].keys.filter(k => k === 'note:n1')).toHaveLength(1);
+  });
+
+  // --- hierarchical lists: reparent, subtree delete, subtree restore ---
+
+  it('list_meta reparent moves list between parents', async () => {
+    const root = { timestamp: 0, childLists: ['list:parent-a', 'list:parent-b'] };
+    const parentA = { timestamp: 0, slug: 'parent-a', name: 'Parent A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: ['list:child'] };
+    const parentB = { timestamp: 0, slug: 'parent-b', name: 'Parent B', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const child = { timestamp: 0, slug: 'child', name: 'Child', qbTrees: [], pins: [], parentList: 'list:parent-a', childLists: [] };
+    const load = async (key) => {
+      if (key === 'list:system/root') return root;
+      if (key === 'list:parent-a') return parentA;
+      if (key === 'list:parent-b') return parentB;
+      if (key === 'list:child') return child;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'list_meta', id: 'child', reparent: { from: 'parent-a', to: 'parent-b', index: 0 } },
+      load,
+    );
+    expect(result['list:parent-a'].childLists).not.toContain('list:child');
+    expect(result['list:parent-b'].childLists).toEqual(['list:child']);
+    expect(result['list:child'].parentList).toBe('list:parent-b');
+  });
+
+  it('list_meta reparent within same parent reorders', async () => {
+    const root = { timestamp: 0, childLists: ['list:a', 'list:b', 'list:c'] };
+    const a = { timestamp: 0, slug: 'a', name: 'A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const b = { timestamp: 0, slug: 'b', name: 'B', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const c = { timestamp: 0, slug: 'c', name: 'C', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const load = async (key) => {
+      if (key === 'list:system/root') return root;
+      if (key === 'list:a') return a;
+      if (key === 'list:b') return b;
+      if (key === 'list:c') return c;
+      return null;
+    };
+    // Move list:c to index 0 (before list:a)
+    const result = await effectOf(
+      { timestamp: 100, action: 'list_meta', id: 'c', reparent: { from: 'system/root', to: 'system/root', index: 0 } },
+      load,
+    );
+    expect(result['list:system/root'].childLists).toEqual(['list:c', 'list:a', 'list:b']);
+  });
+
+  it('del_list with subtreeKeys soft-deletes entire subtree', async () => {
+    const root = { timestamp: 0, childLists: ['list:parent', 'list:other'] };
+    const parent = { timestamp: 0, slug: 'parent', name: 'Parent', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: ['list:child'] };
+    const child = { timestamp: 0, slug: 'child', name: 'Child', qbTrees: [], pins: [], parentList: 'list:parent', childLists: [] };
+    const load = async (key) => {
+      if (key === 'list:system/root') return root;
+      if (key === 'list:parent') return parent;
+      if (key === 'list:child') return child;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_list', id: 'parent', subtreeKeys: ['list:child'] },
+      load,
+    );
+    // Parent deleted and removed from root
+    expect(result['list:parent'].deleted).toBe(true);
+    expect(result['list:system/root'].childLists).toEqual(['list:other']);
+    // Child soft-deleted and orphaned
+    expect(result['list:child'].deleted).toBe(true);
+    expect(result['list:system/orphaned'].keys).toContain('list:parent');
+    expect(result['list:system/orphaned'].keys).toContain('list:child');
+  });
+
+  it('restore_list with subtreeKeys restores entire subtree', async () => {
+    const root = { timestamp: 0, childLists: [] };
+    const orphaned = { timestamp: 50, keys: ['list:parent', 'list:child'] };
+    const load = async (key) => {
+      if (key === 'list:system/root') return root;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null; // entities return null (filtered by readCacheable)
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_list', id: 'parent', name: 'Parent', pins: [], subtreeKeys: ['list:child'] },
+      load,
+    );
+    // Parent restored and added to root
+    expect(result['list:parent'].deleted).toBe(false);
+    expect(result['list:parent'].parentList).toBe('list:system/root');
+    expect(result['list:system/root'].childLists).toContain('list:parent');
+    // Child restored and unorphaned
+    expect(result['list:child'].deleted).toBe(false);
+    expect(result['list:system/orphaned'].keys).not.toContain('list:parent');
+    expect(result['list:system/orphaned'].keys).not.toContain('list:child');
+  });
+
+  it('del_list preserves full entity shape (parentList, childLists)', async () => {
+    const root = { timestamp: 0, childLists: ['list:c1'] };
+    const listEntity = {
+      timestamp: 0, slug: 'c1', name: 'Test', qbTrees: [], pins: [{ id: 'page:p1', pinnedAt: 50 }],
+      parentList: 'list:system/root', childLists: ['list:sub1'],
+    };
+    const load = async (key) => {
+      if (key === 'list:system/root') return root;
+      if (key === 'list:c1') return listEntity;
+      return null;
+    };
+    const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, load);
+    // Entity should preserve parentList and childLists for potential restore
+    expect(result['list:c1'].deleted).toBe(true);
+    expect(result['list:c1'].parentList).toBe('list:system/root');
+    expect(result['list:c1'].childLists).toEqual(['list:sub1']);
+    expect(result['list:c1'].name).toBe('Test');
   });
 
   // --- snap: wire snapshot into parent page childIds ---
@@ -1514,9 +1620,12 @@ describe('defaultEntity', () => {
 
   it('returns list default with id', () => {
     const e = defaultEntity('list:uuid-1');
-    expect(e).toEqual({ timestamp: 0, slug: 'uuid-1', name: '', qbTrees: [], pins: [] });
+    expect(e).toEqual({ timestamp: 0, slug: 'uuid-1', name: '', qbTrees: [], pins: [], parentList: null, childLists: [] });
   });
 
+  it('returns root default', () => {
+    expect(defaultEntity('list:system/root')).toEqual({ timestamp: 0, childLists: [] });
+  });
 
   it('returns shallow_page default', () => {
     expect(defaultEntity('list:system/shallow-page')).toEqual({ timestamp: 0, index: {} });

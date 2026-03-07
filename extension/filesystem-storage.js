@@ -813,6 +813,8 @@ class FileSystemStorage {
             name: data.name || slug,
             qbTrees: data.qbTrees || [],
             pins: data.pins || [],
+            parentList: data.parentList || null,
+            childLists: data.childLists || [],
           };
           if (data.autoEnabled) listEntry.autoEnabled = data.autoEnabled;
           if (data.deleted) listEntry.deleted = true;

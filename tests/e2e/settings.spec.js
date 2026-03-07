@@ -57,7 +57,7 @@ test.describe('Settings persistence', () => {
   // After disable/re-enable, readCacheable should return gateway origins.
   test('seeded gateways available via readCacheable after rehydration', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       { path: 'lists/system/gateways.json', data: {
         timestamp: Date.now(),
         origins: ['https://example.com', 'https://news.ycombinator.com'],
@@ -83,7 +83,7 @@ test.describe('Settings persistence', () => {
     localServer.addPage('/gw-child-2', { title: 'Child 2', body: '<p>Page 2</p>' });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
     ]);
 
     // Visit 2 child pages of the same origin to trigger gateway promotion

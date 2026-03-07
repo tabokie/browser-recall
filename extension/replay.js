@@ -56,9 +56,10 @@ export function defaultEntity(key) {
   if (key === 'list:system/shallow-page') return { timestamp: 0, index: {} };
   if (key === 'list:system/gateways') return { timestamp: 0, origins: [] };
   if (key === 'list:system/orphaned') return { timestamp: 0, keys: [] };
+  if (key === 'list:system/root') return { timestamp: 0, childLists: [] };
   if (key.startsWith('list:')) {
     const slug = key.slice('list:'.length);
-    return { timestamp: 0, slug, name: '', qbTrees: [], pins: [] };
+    return { timestamp: 0, slug, name: '', qbTrees: [], pins: [], parentList: null, childLists: [] };
   }
   return null;
 }
@@ -109,14 +110,14 @@ export async function effectOf(entry, load) {
   }
 
   async function orphan(childKey, ts) {
-    const orphaned = await loadOrDefault('list:system/orphaned', load);
+    const orphaned = result['list:system/orphaned'] || await loadOrDefault('list:system/orphaned', load);
     const keys = [...(orphaned.keys || [])];
     if (!keys.includes(childKey)) keys.push(childKey);
     result['list:system/orphaned'] = { ...orphaned, timestamp: ts, keys };
   }
 
   async function unorphan(childKey, ts) {
-    const orphaned = await loadOrDefault('list:system/orphaned', load);
+    const orphaned = result['list:system/orphaned'] || await loadOrDefault('list:system/orphaned', load);
     const keys = (orphaned.keys || []).filter(k => k !== childKey);
     result['list:system/orphaned'] = { ...orphaned, timestamp: ts, keys };
   }
@@ -186,31 +187,52 @@ export async function effectOf(entry, load) {
       result['list:system/shallow-page'] = updatedSpi;
     }
 
-    // list_meta → sync listOrder in settings (add new entry or rename existing)
-    if (entry.action === 'list_meta' && entry.name && !listKey.startsWith('list:system/')) {
-      const settings = await load('settings') || {};
-      const listOrder = settings.listOrder || [];
-      const idx = listOrder.findIndex(e => e.id === listKey);
-      if (idx >= 0) {
-        if (listOrder[idx].name !== entry.name) {
-          const newOrder = [...listOrder];
-          newOrder[idx] = { ...newOrder[idx], name: entry.name };
-          result['settings'] = { ...settings, listOrder: newOrder };
+    // list_meta → sync root/parent for new lists + handle reparent
+    if (entry.action === 'list_meta' && !listKey.startsWith('list:system/')) {
+      const entity = result[listKey]; // already updated by applyLogToPins above
+
+      // NEW LIST: if entity has no parentList yet → add to root's childLists, set parentList
+      if (!entity.parentList) {
+        const root = result['list:system/root'] || await loadOrDefault('list:system/root', load);
+        if (!(root.childLists || []).includes(listKey)) {
+          result['list:system/root'] = { ...root, timestamp: entry.timestamp, childLists: [...(root.childLists || []), listKey] };
         }
-      } else {
-        // New list — append to listOrder
-        result['settings'] = { ...settings, listOrder: [...listOrder, { id: listKey, name: entry.name }] };
+        entity.parentList = 'list:system/root';
+        result[listKey] = entity;
+      }
+
+      // REPARENT: { from, to, index }
+      if (entry.reparent) {
+        const { from, to, index } = entry.reparent;
+        const fromKey = 'list:' + from;
+        const toKey = 'list:' + to;
+        // Remove from source parent's childLists
+        const fromEntity = result[fromKey] || await loadOrDefault(fromKey, load);
+        fromEntity.childLists = (fromEntity.childLists || []).filter(k => k !== listKey);
+        result[fromKey] = { ...fromEntity, timestamp: entry.timestamp };
+        // Add to destination parent's childLists at index
+        const toEntity = (toKey === fromKey) ? result[fromKey] : (result[toKey] || await loadOrDefault(toKey, load));
+        const cl = [...(toEntity.childLists || [])].filter(k => k !== listKey);
+        cl.splice(index, 0, listKey);
+        result[toKey] = { ...toEntity, timestamp: entry.timestamp, childLists: cl };
+        // Update child's parentList
+        entity.parentList = toKey;
+        result[listKey] = entity;
       }
     }
 
-    // del_list → remove entry from listOrder in settings
+    // del_list → remove from parent's childLists + soft-delete subtree descendants
     if (entry.action === 'del_list' && !listKey.startsWith('list:system/')) {
-      const settings = await load('settings');
-      if (settings?.listOrder) {
-        const newOrder = settings.listOrder.filter(e => e.id !== listKey);
-        if (newOrder.length !== settings.listOrder.length) {
-          result['settings'] = { ...settings, listOrder: newOrder };
-        }
+      const deletedEntity = result[listKey]; // already set by applyLogToPins with full shape
+      // 1. Remove from parent's childLists (parentList is on entity)
+      const parentKey = deletedEntity.parentList || 'list:system/root';
+      const parent = result[parentKey] || await loadOrDefault(parentKey, load);
+      result[parentKey] = { ...parent, timestamp: entry.timestamp, childLists: (parent.childLists || []).filter(k => k !== listKey) };
+      // 2. Soft-delete all descendants (subtreeKeys provided by handler)
+      for (const childKey of (entry.subtreeKeys || [])) {
+        const child = result[childKey] || await loadOrDefault(childKey, load);
+        result[childKey] = { ...child, timestamp: entry.timestamp, deleted: true };
+        await orphan(childKey, entry.timestamp);
       }
     }
 
@@ -308,7 +330,7 @@ export async function effectOf(entry, load) {
     return result;
   }
 
-  // --- restore_list: re-add to listOrder, clear deleted flag, restore page parentIds ---
+  // --- restore_list: re-add to root, clear deleted flag, restore subtree + page parentIds ---
   if (entry.action === 'restore_list') {
     const listKey = `list:${entry.id}`;
 
@@ -322,13 +344,20 @@ export async function effectOf(entry, load) {
     if (entry.pins) restored.pins = entry.pins;
     result[listKey] = restored;
 
-    // Re-add to settings.listOrder
-    const settings = await load('settings') || {};
-    const listOrder = [...(settings.listOrder || [])];
-    if (!listOrder.some(e => e.id === listKey)) {
-      listOrder.push({ id: listKey, name: entry.name || entity.name || '' });
+    // Re-add to root's childLists (restored lists always go to root)
+    const root = result['list:system/root'] || await loadOrDefault('list:system/root', load);
+    const rootCL = [...(root.childLists || [])];
+    if (!rootCL.includes(listKey)) rootCL.push(listKey);
+    result['list:system/root'] = { ...root, timestamp: entry.timestamp, childLists: rootCL };
+    // Update restored entity's parentList to root
+    restored.parentList = 'list:system/root';
+    result[listKey] = restored;
+    // Restore all descendants
+    for (const childKey of (entry.subtreeKeys || [])) {
+      const child = result[childKey] || await loadOrDefault(childKey, load);
+      result[childKey] = { ...child, deleted: false, timestamp: entry.timestamp };
+      await unorphan(childKey, entry.timestamp);
     }
-    result['settings'] = { ...settings, listOrder };
 
     // Restore page parentIds for checkpointed pins (use entry.pins — authoritative)
     const pins = entry.pins || restored.pins || [];
@@ -627,10 +656,12 @@ export function applyLogToPins(pinsEntity, entry) {
     if (entry.name !== undefined) updated.name = entry.name;
     if (entry.qbTrees !== undefined) updated.qbTrees = entry.qbTrees;
     if (entry.autoEnabled !== undefined) updated.autoEnabled = entry.autoEnabled;
+    if (entry.parentList !== undefined) updated.parentList = entry.parentList;
+    if (entry.childLists !== undefined) updated.childLists = entry.childLists;
     return updated;
   }
   if (entry.action === 'del_list' && entry.id === pinsEntity.slug) {
-    return { timestamp: entry.timestamp, deleted: true };
+    return { ...pinsEntity, timestamp: entry.timestamp, deleted: true };
   }
   return pinsEntity;
 }

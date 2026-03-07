@@ -241,9 +241,19 @@ document.getElementById('pageNote').addEventListener('input', (e) => {
 
 // Lists — pin current page to lists
 async function loadLists() {
-  const settings = await readCacheable('settings');
-  const listOrder = settings?.listOrder || [];
-  return listOrder.map(e => ({ slug: e.id.startsWith('list:') ? e.id.slice(5) : e.id, name: e.name }));
+  const root = await readCacheable('list:system/root');
+  const all = [], queue = [...(root?.childLists || [])], visited = new Set();
+  while (queue.length > 0) {
+    const key = queue.shift();
+    if (visited.has(key)) continue;
+    visited.add(key);
+    const entity = await readCacheable(key);
+    if (entity && !entity.deleted) {
+      all.push({ slug: entity.slug || key.slice(5), name: entity.name || '' });
+      if (entity.childLists) queue.push(...entity.childLists);
+    }
+  }
+  return all;
 }
 
 async function loadListPins() {
@@ -450,7 +460,7 @@ async function createListAndPin(name) {
   if (lists.some(c => c.name === name)) return;
 
   const listId = generateSlugFromTitle(name);
-  // saveListMeta's effectOf already appends to listOrder — no manual append needed.
+  // saveListMeta's effectOf already adds to root's childLists — no manual append needed.
   await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name });
 
   await toggleListPin(listId);

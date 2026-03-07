@@ -8,12 +8,13 @@ test.describe('Cross-context consistency', () => {
   test('pin from helper page reflects in already-open options list view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
-        trimRules: [],
-        listOrder: [{ id: 'list:research', name: 'Research' }],
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:research'],
       }},
       { path: 'lists/research.json', data: {
         slug: 'research', name: 'Research', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain',

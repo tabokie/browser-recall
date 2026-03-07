@@ -241,11 +241,11 @@ describe('readCacheable', () => {
   });
 
   it('returns value from session cache without sendMessage', async () => {
-    sessionStore.settings = { listOrder: [] };
+    sessionStore.settings = { trimRules: [] };
     // Dynamic import to pick up mocked chrome
     const { readCacheable } = await import('../extension/utils.js');
     const result = await readCacheable('settings');
-    expect(result).toEqual({ listOrder: [] });
+    expect(result).toEqual({ trimRules: [] });
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
 

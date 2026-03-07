@@ -2632,154 +2632,293 @@ function updateSidebarActive() {
 }
 
 // --- Lists (pinned searches) ---
+async function loadListTree() {
+  const root = await readCacheable('list:system/root');
+  return buildTreeLevel(root?.childLists || []);
+}
+async function buildTreeLevel(keys) {
+  const nodes = [];
+  for (const key of keys) {
+    const entity = await readCacheable(key);
+    if (!entity || entity.deleted) continue;
+    const slug = entity.slug || key.slice(5);
+    const children = entity.childLists?.length ? await buildTreeLevel(entity.childLists) : [];
+    nodes.push({ slug, name: entity.name || slug, children, parentList: entity.parentList || 'list:system/root' });
+  }
+  return nodes;
+}
+// Flatten tree for backward-compatible usage
 async function loadLists() {
-  const settings = await readCacheable('settings');
-  const listOrder = settings?.listOrder || [];
-  return listOrder.map(e => ({ slug: e.id.startsWith('list:') ? e.id.slice(5) : e.id, name: e.name }));
+  const tree = await loadListTree();
+  const flat = [];
+  function walk(nodes) {
+    for (const n of nodes) {
+      flat.push({ slug: n.slug, name: n.name });
+      walk(n.children);
+    }
+  }
+  walk(tree);
+  return flat;
 }
 
 // saveLists removed — use saveListMeta/deleteList messages instead
 
+// Fold state: slug → boolean (true = expanded). Persisted in session storage.
+let listFoldState = {};
+
+async function loadFoldState() {
+  try {
+    const { listFoldState: saved } = await chrome.storage.session.get(['listFoldState']);
+    if (saved) listFoldState = saved;
+  } catch (e) { /* ignore */ }
+}
+
+function saveFoldState() {
+  chrome.storage.session.set({ listFoldState }).catch(() => {});
+}
+
+// Cached tree for isDescendant lookups during drag-drop
+let lastRenderedTree = [];
+
+function isDescendant(ancestorSlug, targetSlug) {
+  function search(nodes) {
+    for (const n of nodes) {
+      if (n.slug === ancestorSlug) return findInSubtree(n.children, targetSlug);
+      if (search(n.children)) return true;
+    }
+    return false;
+  }
+  function findInSubtree(nodes, slug) {
+    for (const n of nodes) {
+      if (n.slug === slug) return true;
+      if (findInSubtree(n.children, slug)) return true;
+    }
+    return false;
+  }
+  return search(lastRenderedTree);
+}
+
 async function renderLists() {
-  const allLists = await loadLists();
+  const tree = await loadListTree();
+  lastRenderedTree = tree;
   const listEl = document.getElementById('listsList');
   const empty = document.getElementById('listsEmpty');
 
-  // Remove existing list items (keep the empty placeholder)
-  listEl.querySelectorAll('.sidebar-item').forEach(el => el.remove());
+  // Remove existing list items and children containers (keep the empty placeholder)
+  listEl.querySelectorAll('.sidebar-item, .sidebar-children').forEach(el => el.remove());
 
-  if (allLists.length === 0) {
+  if (tree.length === 0) {
     empty.style.display = 'block';
     return;
   }
 
   empty.style.display = 'none';
-  for (const lst of allLists) {
-    const item = document.createElement('div');
-    item.className = 'sidebar-item';
-    item.dataset.listId = lst.slug;
-    item.innerHTML = `
-      <span class="icon"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg></span>
-      <span class="label">${escapeHtml(listDisplayName(lst))}</span>
-      <button class="remove-list" title="Remove list">&times;</button>
-    `;
+  renderTreeLevel(listEl, tree, 0);
+  updateSidebarActive();
+}
 
-    item.draggable = true;
-    item.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('application/x-list-reorder', lst.slug);
-      e.dataTransfer.effectAllowed = 'move';
-      item.classList.add('dragging');
-    });
-    item.addEventListener('dragend', () => {
-      item.classList.remove('dragging');
-      listEl.querySelectorAll('.reorder-above, .reorder-below').forEach(el => {
-        el.classList.remove('reorder-above', 'reorder-below');
-      });
-    });
+function renderTreeLevel(container, nodes, depth) {
+  for (const node of nodes) {
+    const item = createSidebarItem(node, depth);
+    container.appendChild(item);
 
-    item.addEventListener('click', (e) => {
-      if (e.target.closest('.remove-list')) return;
-      showList(lst);
-    });
+    if (node.children.length > 0) {
+      const childContainer = document.createElement('div');
+      childContainer.className = 'sidebar-children';
+      childContainer.dataset.parentSlug = node.slug;
+      const expanded = listFoldState[node.slug] !== false; // default expanded
+      childContainer.style.display = expanded ? '' : 'none';
+      renderTreeLevel(childContainer, node.children, depth + 1);
+      container.appendChild(childContainer);
+    }
+  }
+}
 
-    item.querySelector('.remove-list').addEventListener('click', async (e) => {
+function createSidebarItem(node, depth) {
+  const lst = node;
+  const item = document.createElement('div');
+  item.className = 'sidebar-item';
+  item.dataset.listId = lst.slug;
+  item.style.paddingLeft = (20 + depth * 16) + 'px';
+
+  const hasChildren = node.children.length > 0;
+  const expanded = listFoldState[node.slug] !== false;
+
+  item.innerHTML = `
+    ${hasChildren
+      ? `<button class="fold-toggle" title="${expanded ? 'Collapse' : 'Expand'}">${expanded ? '\u25BE' : '\u25B8'}</button>`
+      : '<span class="fold-spacer"></span>'}
+    <span class="icon"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg></span>
+    <span class="label">${escapeHtml(listDisplayName(lst))}</span>
+    <button class="remove-list" title="Remove list">&times;</button>
+  `;
+
+  // Fold/unfold toggle
+  if (hasChildren) {
+    item.querySelector('.fold-toggle').addEventListener('click', (e) => {
       e.stopPropagation();
-      await chrome.runtime.sendMessage({ action: 'deleteList', listId: lst.slug });
-      // Clean up local state
-      delete allListPins[lst.slug];
-      renderLists();
-      if (activeView.type === 'list' && activeView.id === lst.slug) {
-        showExplore();
+      const newExpanded = listFoldState[node.slug] === false; // toggle
+      listFoldState[node.slug] = newExpanded;
+      saveFoldState();
+      const childContainer = item.nextElementSibling;
+      if (childContainer?.classList.contains('sidebar-children')) {
+        childContainer.style.display = newExpanded ? '' : 'none';
       }
+      const btn = item.querySelector('.fold-toggle');
+      btn.textContent = newExpanded ? '\u25BE' : '\u25B8';
+      btn.title = newExpanded ? 'Collapse' : 'Expand';
     });
-
-    // Drag-and-drop: list as drop target (counter prevents child-triggered dragleave)
-    let dragCounter = 0;
-    item.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      if (e.dataTransfer.types.includes('application/x-list-reorder')) {
-        e.dataTransfer.dropEffect = 'move';
-        const rect = item.getBoundingClientRect();
-        const midY = rect.top + rect.height / 2;
-        if (e.clientY < midY) {
-          item.classList.add('reorder-above');
-          item.classList.remove('reorder-below');
-        } else {
-          item.classList.add('reorder-below');
-          item.classList.remove('reorder-above');
-        }
-      } else {
-        e.dataTransfer.dropEffect = 'copy';
-      }
-    });
-    item.addEventListener('dragenter', (e) => {
-      e.preventDefault();
-      if (!e.dataTransfer.types.includes('application/x-list-reorder')) {
-        dragCounter++;
-        item.classList.add('drag-over');
-      }
-    });
-    item.addEventListener('dragleave', (e) => {
-      if (e.dataTransfer.types.includes('application/x-list-reorder')) {
-        item.classList.remove('reorder-above', 'reorder-below');
-      } else {
-        dragCounter--;
-        if (dragCounter <= 0) {
-          dragCounter = 0;
-          item.classList.remove('drag-over');
-        }
-      }
-    });
-    item.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      item.classList.remove('drag-over', 'reorder-above', 'reorder-below');
-
-      if (e.dataTransfer.types.includes('application/x-list-reorder')) {
-        // --- Reorder ---
-        const draggedId = e.dataTransfer.getData('application/x-list-reorder');
-        if (draggedId === lst.slug) return;
-        const allItems = await loadLists();
-        const fromIdx = allItems.findIndex(c => c.slug === draggedId);
-        if (fromIdx === -1) return;
-        const [moved] = allItems.splice(fromIdx, 1);
-        let toIdx = allItems.findIndex(c => c.slug === lst.slug);
-        const rect = item.getBoundingClientRect();
-        if (e.clientY >= rect.top + rect.height / 2) toIdx++;
-        allItems.splice(toIdx, 0, moved);
-        await saveSettingsValue('listOrder', allItems.map(c => ({ id: 'list:' + c.slug, name: c.name })));
-        await renderLists();
-      } else {
-        // --- Pin drop (existing logic) ---
-        dragCounter = 0;
-        try {
-          const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-          const items = data.items || [{ url: data.url, title: data.title }];
-          if (!allListPins[lst.slug]) allListPins[lst.slug] = [];
-          const pins = allListPins[lst.slug];
-          const newUrls = [];
-          for (const { url } of items) {
-            const pinId = 'page:' + generateSlugFromUrl(url);
-            if (url && !pins.some(p => p.id === pinId || p.id === 'shallow:' + url)) {
-              pins.push({ id: pinId, pinnedAt: Date.now() });
-              newUrls.push(url);
-            }
-          }
-          if (newUrls.length > 0) {
-            await chrome.runtime.sendMessage({ action: 'addListPins', listId: lst.slug, urls: newUrls });
-            if (activeView.type === 'list' && activeView.id === lst.slug) {
-              showList(lst);
-            }
-          }
-        } catch (err) {
-          console.error('Drop error:', err);
-        }
-      }
-    });
-
-    listEl.appendChild(item);
   }
 
-  updateSidebarActive();
+  item.draggable = true;
+  item.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('application/x-list-reorder', lst.slug);
+    e.dataTransfer.effectAllowed = 'move';
+    item.classList.add('dragging');
+  });
+  item.addEventListener('dragend', () => {
+    item.classList.remove('dragging');
+    document.querySelectorAll('.reorder-above, .reorder-below, .nest-target').forEach(el => {
+      el.classList.remove('reorder-above', 'reorder-below', 'nest-target');
+    });
+  });
+
+  item.addEventListener('click', (e) => {
+    if (e.target.closest('.remove-list') || e.target.closest('.fold-toggle')) return;
+    showList(lst);
+  });
+
+  item.querySelector('.remove-list').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await chrome.runtime.sendMessage({ action: 'deleteList', listId: lst.slug });
+    delete allListPins[lst.slug];
+    renderLists();
+    if (activeView.type === 'list' && activeView.id === lst.slug) {
+      showExplore();
+    }
+  });
+
+  // Three-zone drag-and-drop
+  let dragCounter = 0;
+  item.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer.types.includes('application/x-list-reorder')) {
+      const draggedId = e.dataTransfer.getData('application/x-list-reorder');
+      // Prevent dropping into own subtree
+      if (draggedId === lst.slug || isDescendant(draggedId, lst.slug)) {
+        e.dataTransfer.dropEffect = 'none';
+        return;
+      }
+      e.dataTransfer.dropEffect = 'move';
+      const rect = item.getBoundingClientRect();
+      const relY = (e.clientY - rect.top) / rect.height;
+      item.classList.remove('reorder-above', 'reorder-below', 'nest-target');
+      if (relY < 0.25) {
+        item.classList.add('reorder-above');
+      } else if (relY > 0.75) {
+        item.classList.add('reorder-below');
+      } else {
+        item.classList.add('nest-target');
+      }
+    } else {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  });
+  item.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    if (!e.dataTransfer.types.includes('application/x-list-reorder')) {
+      dragCounter++;
+      item.classList.add('drag-over');
+    }
+  });
+  item.addEventListener('dragleave', (e) => {
+    if (e.dataTransfer.types.includes('application/x-list-reorder')) {
+      item.classList.remove('reorder-above', 'reorder-below', 'nest-target');
+    } else {
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        item.classList.remove('drag-over');
+      }
+    }
+  });
+  item.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    item.classList.remove('drag-over', 'reorder-above', 'reorder-below', 'nest-target');
+
+    if (e.dataTransfer.types.includes('application/x-list-reorder')) {
+      const draggedId = e.dataTransfer.getData('application/x-list-reorder');
+      if (draggedId === lst.slug || isDescendant(draggedId, lst.slug)) return;
+
+      // Determine drop zone
+      const rect = item.getBoundingClientRect();
+      const relY = (e.clientY - rect.top) / rect.height;
+
+      // Get dragged entity's current parent
+      const draggedEntity = await readCacheable('list:' + draggedId);
+      const fromParent = draggedEntity?.parentList || 'list:system/root';
+      const fromParentSlug = fromParent.startsWith('list:') ? fromParent.slice(5) : fromParent;
+
+      if (relY >= 0.25 && relY <= 0.75) {
+        // --- Nest as child ---
+        const toParent = 'list:' + lst.slug;
+        const toEntity = await readCacheable(toParent);
+        const targetChildLists = toEntity?.childLists || [];
+        await chrome.runtime.sendMessage({
+          action: 'reparentList', listId: draggedId,
+          fromParent: fromParentSlug, toParent: lst.slug,
+          index: targetChildLists.length
+        });
+      } else {
+        // --- Reorder above/below ---
+        const targetParent = node.parentList || 'list:system/root';
+        const targetParentSlug = targetParent.startsWith('list:') ? targetParent.slice(5) : targetParent;
+        const parentEntity = await readCacheable(targetParent);
+        const siblings = parentEntity?.childLists || [];
+        let toIdx = siblings.indexOf('list:' + lst.slug);
+        if (toIdx === -1) toIdx = siblings.length;
+        if (relY >= 0.75) toIdx++;
+        // Adjust if dragged is already a sibling and comes before target
+        if (fromParentSlug === targetParentSlug) {
+          const fromIdx = siblings.indexOf('list:' + draggedId);
+          if (fromIdx !== -1 && fromIdx < toIdx) toIdx--;
+        }
+        await chrome.runtime.sendMessage({
+          action: 'reparentList', listId: draggedId,
+          fromParent: fromParentSlug, toParent: targetParentSlug,
+          index: toIdx
+        });
+      }
+      await renderLists();
+    } else {
+      // --- Pin drop (existing logic) ---
+      dragCounter = 0;
+      try {
+        const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+        const items = data.items || [{ url: data.url, title: data.title }];
+        if (!allListPins[lst.slug]) allListPins[lst.slug] = [];
+        const pins = allListPins[lst.slug];
+        const newUrls = [];
+        for (const { url } of items) {
+          const pinId = 'page:' + generateSlugFromUrl(url);
+          if (url && !pins.some(p => p.id === pinId || p.id === 'shallow:' + url)) {
+            pins.push({ id: pinId, pinnedAt: Date.now() });
+            newUrls.push(url);
+          }
+        }
+        if (newUrls.length > 0) {
+          await chrome.runtime.sendMessage({ action: 'addListPins', listId: lst.slug, urls: newUrls });
+          if (activeView.type === 'list' && activeView.id === lst.slug) {
+            showList(lst);
+          }
+        }
+      } catch (err) {
+        console.error('Drop error:', err);
+      }
+    }
+  });
+
+  return item;
 }
 
 async function saveExploreAsList() {
@@ -2797,8 +2936,6 @@ async function saveExploreAsList() {
       const listId = generateSlugFromTitle(name);
       const newList = { slug: listId, name, qbTrees };
       await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, qbTrees });
-      const order = (await readCacheable('settings')).listOrder || [];
-      await saveSettingsValue('listOrder', [...order, { id: 'list:' + listId, name }]);
       // Copy explore pins to the new list (if any)
       if (pins.length > 0) {
         await chrome.runtime.sendMessage({
@@ -3409,9 +3546,7 @@ chrome.runtime.onMessage.addListener((request) => {
   } else if (type === 'lists') {
     renderLists();
   } else if (type === 'settings') {
-    if (request.key === 'listOrder') {
-      renderLists();
-    }
+    // Settings changes that need UI updates handled here if needed
   } else if (type === 'note') {
     // Note created/deleted — invalidate cached notes and refresh view
   
@@ -4019,6 +4154,43 @@ function bindFocusContentDelegation(content) {
 }
 
 // --- Initialize ---
+// --- Sidebar resize ---
+function initSidebarResize() {
+  const handle = document.getElementById('sidebarResizeHandle');
+  if (!handle) return;
+  const sidebar = document.querySelector('.sidebar');
+  let startX, startWidth;
+  handle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    startX = e.clientX;
+    startWidth = sidebar.offsetWidth;
+    handle.classList.add('active');
+    const onMove = (ev) => {
+      sidebar.style.width = Math.max(180, Math.min(500, startWidth + ev.clientX - startX)) + 'px';
+      sidebar.style.minWidth = sidebar.style.width;
+    };
+    const onUp = () => {
+      handle.classList.remove('active');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      chrome.storage.session.set({ sidebarWidth: sidebar.offsetWidth }).catch(() => {});
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+async function restoreSidebarWidth() {
+  try {
+    const { sidebarWidth } = await chrome.storage.session.get(['sidebarWidth']);
+    if (sidebarWidth) {
+      const sidebar = document.querySelector('.sidebar');
+      sidebar.style.width = sidebarWidth + 'px';
+      sidebar.style.minWidth = sidebarWidth + 'px';
+    }
+  } catch (e) { /* ignore */ }
+}
+
 async function initialize() {
   const _t0 = performance.now();
   const _timer = (label) => console.debug(`[init-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
@@ -4034,6 +4206,12 @@ async function initialize() {
   qbRoot = qbCreatePlaceholder(KEYWORD_FIELDS);
   initCharts();
   _timer('initCharts');
+
+  // Load fold state and restore sidebar width before rendering lists
+  await loadFoldState();
+  restoreSidebarWidth();
+  initSidebarResize();
+  _timer('sidebarInit');
 
   // Render sidebar concurrently with heavy data (don't block on sidebar)
   renderLists().catch(err => showFatalError(err.message));

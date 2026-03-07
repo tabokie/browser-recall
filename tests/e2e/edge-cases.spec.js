@@ -9,7 +9,7 @@ test.describe('User journeys', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Journey Page', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -64,7 +64,7 @@ test.describe('User journeys', () => {
     });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], blacklist: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     // Navigate parent → child via link click
@@ -114,7 +114,7 @@ test.describe('User journeys', () => {
 test.describe('Empty and edge states', () => {
   test('fresh state — options explore renders without error', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -135,8 +135,9 @@ test.describe('Empty and edge states', () => {
     const url = 'https://example.com/never-visited';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [{ id: 'list:reading', name: 'Reading' }] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [], parentList: 'list:system/root', childLists: [] } },
       // No history, no page checkpoint — the URL has never been seen
     ]);
 
@@ -168,12 +169,13 @@ test.describe('Empty and edge states', () => {
   test('empty list renders list view without error', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
-        trimRules: [],
-        listOrder: [{ id: 'list:empty', name: 'Empty List' }],
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:empty'],
       }},
       { path: 'lists/empty.json', data: {
         slug: 'empty', name: 'Empty List', timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
     ]);
 
@@ -197,8 +199,9 @@ test.describe('Empty and edge states', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [{ id: 'list:reading', name: 'Reading' }] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [], parentList: 'list:system/root', childLists: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Complex URL Page', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -242,7 +245,7 @@ test.describe('Unicode and special characters', () => {
     const today = new Date(now).toISOString().slice(0, 10);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       { path: `history/${today}.jsonl`, lines: [
         { timestamp: now, action: 'page', url, title },
       ]},
@@ -260,12 +263,13 @@ test.describe('Unicode and special characters', () => {
     const name = '阅读清单 📚';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
-        trimRules: [],
-        listOrder: [{ id: 'list:unicode-list', name }],
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:unicode-list'],
       }},
       { path: 'lists/unicode-list.json', data: {
         slug: 'unicode-list', name, timestamp: now, pins: [], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
     ]);
 
@@ -283,7 +287,7 @@ test.describe('Unicode and special characters', () => {
     });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], blacklist: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     const page = await extContext.newPage();

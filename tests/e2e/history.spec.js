@@ -145,7 +145,7 @@ test.describe('History recording', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         titleTrimRules: [{ urlPrefix: 'http://127.0.0.1', action: 'remove_after_pipe' }],
-        blacklist: [], listOrder: [],
+        blacklist: [],
       }},
     ]);
 

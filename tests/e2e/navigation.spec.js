@@ -286,7 +286,7 @@ test.describe('Navigation and referrer tracking', () => {
 
     // Start with NO gateways — the origin will be auto-promoted after 2 child visits
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], blacklist: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     const origin = `http://127.0.0.1:${localServer.port}`;
@@ -333,7 +333,7 @@ test.describe('Navigation and referrer tracking', () => {
     const today = new Date(now).toISOString().slice(0, 10);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], listOrder: [] } },
+      { path: 'settings.json', data: { trimRules: [] } },
       // Page visited with title in history, but no checkpoint
       { path: `history/${today}.jsonl`, lines: [
         { timestamp: now, action: 'page', url, title: 'Enriched Title' },

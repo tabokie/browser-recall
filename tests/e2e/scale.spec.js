@@ -86,12 +86,12 @@ test.describe('Scale — larger data sets', () => {
 
   test('5 lists with 3 pins each all render correctly', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
-    const listOrder = [];
-    const files = [{ path: 'settings.json', data: { trimRules: [], listOrder } }];
+    const rootChildLists = [];
+    const files = [{ path: 'settings.json', data: { trimRules: [] } }];
 
     for (let l = 0; l < 5; l++) {
       const listSlug = `list-${l}`;
-      listOrder.push({ id: `list:${listSlug}`, name: `List ${l}` });
+      rootChildLists.push(`list:${listSlug}`);
 
       const pins = [];
       for (let p = 0; p < 3; p++) {
@@ -105,7 +105,7 @@ test.describe('Scale — larger data sets', () => {
       }
       files.push({
         path: `lists/${listSlug}.json`,
-        data: { slug: listSlug, name: `List ${l}`, timestamp: now, pins, qbTrees: [] },
+        data: { slug: listSlug, name: `List ${l}`, timestamp: now, pins, qbTrees: [], parentList: 'list:system/root', childLists: [] },
       });
     }
 
@@ -122,7 +122,7 @@ test.describe('Scale — larger data sets', () => {
       }
     }
     files.push({ path: 'history/2026-03-01.jsonl', lines: historyLines });
-    files[0].data.listOrder = listOrder; // update reference
+    files.push({ path: 'lists/system/root.json', data: { timestamp: now, childLists: rootChildLists } });
 
     await resetAndSeed(extContext, extensionId, files);
 
@@ -156,13 +156,14 @@ test.describe('Scale — larger data sets', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
-        trimRules: [],
-        listOrder: [{ id: 'list:research', name: 'Research' }],
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:research'],
       }},
       { path: 'lists/research.json', data: {
         slug: 'research', name: 'Research', timestamp: now,
         pins: [{ id: `page:${slug}`, pinnedAt: now }], qbTrees: [],
+        parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Pinned Page', timestamp: now, parentIds: [], childIds: [],
