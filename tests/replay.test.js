@@ -382,6 +382,30 @@ describe('applyLogToPins — list_meta', () => {
     const r2 = applyLogToPins(r1, entry);
     expect(r2).toEqual(r1);
   });
+
+  it('stores autoEnabled map on entity', () => {
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Test', qbTrees: [], pins: [] };
+    const autoEnabled = { 'Top domains': false, 'Similar to pins': true };
+    const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', name: 'Test', autoEnabled };
+    const result = applyLogToPins(entity, entry);
+    expect(result.autoEnabled).toEqual(autoEnabled);
+  });
+
+  it('preserves existing autoEnabled when entry omits it', () => {
+    const existing = { 'Top domains': false };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Test', qbTrees: [], autoEnabled: existing, pins: [] };
+    const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', name: 'Test' };
+    const result = applyLogToPins(entity, entry);
+    expect(result.autoEnabled).toEqual(existing);
+  });
+
+  it('preserves existing name when entry omits it', () => {
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Keep Me', qbTrees: [], pins: [] };
+    const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', qbTrees: [{ type: 'AND' }] };
+    const result = applyLogToPins(entity, entry);
+    expect(result.name).toBe('Keep Me');
+    expect(result.qbTrees).toEqual([{ type: 'AND' }]);
+  });
 });
 
 describe('applyLogToPins — del_list', () => {

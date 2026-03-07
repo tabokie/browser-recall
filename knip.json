@@ -17,7 +17,6 @@
     "tests/**/*.js"
   ],
   "ignore": [
-    "extension/pkg/**",
-    "scripts/**"
+    "extension/pkg/**"
   ]
 }

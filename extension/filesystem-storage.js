@@ -668,6 +668,20 @@ class FileSystemStorage {
     return match;
   }
 
+  // Read-merge-write a list entity file: reads existing JSON, shallow-merges updates, writes back.
+  async #readMergeWriteList(path, updates) {
+    let existing = {};
+    try {
+      const fh = await this.resolveFile(path);
+      const data = await this.readJson(fh);
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        existing = data;
+      }
+    } catch (error) { if (!isNotFound(error)) throw error; }
+    const fileHandle = await this.resolveFile(path, { create: true });
+    await this.writeJson(fileHandle, { ...existing, ...updates });
+  }
+
   // Resolve the file path for a list ID.
   // Filename is always the list ID itself (slug).
   #resolveListPath(listId) {
@@ -750,17 +764,7 @@ class FileSystemStorage {
       throw new Error('No permission to write');
     }
     const path = this.#resolveListPath(listId);
-    // Read existing entity to preserve metadata (name, query, qbTree)
-    let existing = {};
-    try {
-      const fh = await this.resolveFile(path);
-      const data = await this.readJson(fh);
-      if (data && typeof data === 'object' && !Array.isArray(data)) {
-        existing = data;
-      }
-    } catch (error) { if (!isNotFound(error)) throw error; }
-    const fileHandle = await this.resolveFile(path, { create: true });
-    await this.writeJson(fileHandle, { ...existing, timestamp, pins });
+    await this.#readMergeWriteList(path, { timestamp, pins });
   }
 
   // Save list metadata (name, qbTrees) without touching pins.
@@ -771,17 +775,7 @@ class FileSystemStorage {
       throw new Error('No permission to write');
     }
     const path = this.#resolveListPath(listId);
-    // Read-merge-write: preserve existing pins
-    let existing = { timestamp: 0, pins: [] };
-    try {
-      const fh = await this.resolveFile(path);
-      const data = await this.readJson(fh);
-      if (data && typeof data === 'object' && !Array.isArray(data)) {
-        existing = data;
-      }
-    } catch (error) { if (!isNotFound(error)) throw error; }
-    const fileHandle = await this.resolveFile(path, { create: true });
-    await this.writeJson(fileHandle, { ...existing, ...meta, timestamp });
+    await this.#readMergeWriteList(path, { ...meta, timestamp });
   }
 
   // Delete a list file (from lists/{id}.json)
@@ -820,6 +814,7 @@ class FileSystemStorage {
             qbTrees: data.qbTrees || [],
             pins: data.pins || [],
           };
+          if (data.autoEnabled) listEntry.autoEnabled = data.autoEnabled;
           if (data.deleted) listEntry.deleted = true;
           if (data.timestamp) listEntry.timestamp = data.timestamp;
           result.push(listEntry);
@@ -849,16 +844,7 @@ class FileSystemStorage {
         activeFilenames.add(id);
       }
 
-      let existing = {};
-      try {
-        const fh = await this.resolveFile(path);
-        const data = await this.readJson(fh);
-        if (data && typeof data === 'object' && !Array.isArray(data)) {
-          existing = data;
-        }
-      } catch (error) { if (!isNotFound(error)) throw error; }
-      const fileHandle = await this.resolveFile(path, { create: true });
-      await this.writeJson(fileHandle, { ...existing, timestamp: 0, pins: pinsArray });
+      await this.#readMergeWriteList(path, { timestamp: 0, pins: pinsArray });
     }
 
     // Soft-delete orphaned files in lists/ (skip system and special files)

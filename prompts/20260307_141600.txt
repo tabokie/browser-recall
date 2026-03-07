@@ -1,0 +1,11 @@
+- Give me a list of chrome.storage keys we current use. I want to check if there're similar cases to "listCache"
+- I believe "explore" is equal to other lists. If we want to preserve block state, then simply store the needed state in list checkpoint, and converge the path to "readCacheable"
+- Why call the new functions "xxExploreYy()"? Shouldn't they use "list"?
+- Similar to "note" log type, when generating "list_meta" log type, make sure only changes are written, if there're no changes at all, do not write a log.
+- Are there other log types that are susceptible to the same problem?
+- What is the difference between saveSettingsKey and saveSettings?
+- Remove dead code, and fix saveSettingsKey to avoid duplicate writes
+- Run Javascript lints in this project
+- Fix issues even though not introduced in this session
+- /finish 
+- n

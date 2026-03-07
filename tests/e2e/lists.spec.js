@@ -750,4 +750,60 @@ test.describe('List operations', () => {
     expect(page2.value.parentIds).not.toContain('list:doomed');
     expect(page2.value.parentIds).toEqual([]);
   });
+
+  test('list restores autoEnabled and qbTrees from entity', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const childUrl = 'https://child.example.com/';
+    const childSlug = getSlugForUrl(childUrl);
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: {
+        trimRules: [],
+        listOrder: [{ id: 'list:reading', name: 'Reading List' }],
+      }},
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', timestamp: now,
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
+        qbTrees: [{ field: 'url', id: 1, predicateType: 'keyword', type: 'predicate', value: 'example' }],
+        autoEnabled: { 'Children of pins': true, 'Parents of pins': false, 'Similar to pins': false },
+      }},
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [`page:${childSlug}`],
+      }},
+      { path: `pages/${childSlug}.json`, data: {
+        slug: childSlug, url: childUrl, title: 'Child Page', timestamp: now,
+        parentIds: [`page:${TEST_SLUG}`], childIds: [],
+      }},
+      { path: 'lists/system/shallow-page.json', data: { timestamp: now, index: {} }},
+      { path: `history/2026-03-06.jsonl`, data: [
+        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+        { timestamp: now + 1, action: 'page', url: childUrl, title: 'Child Page' },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    // Wait for explore blocks to render
+    await expect(options.locator('.explore-blocks')).toBeVisible({ timeout: 5000 });
+
+    // Check auto-block enabled/disabled states
+    const blocks = options.locator('.explore-block');
+    const childrenBlock = blocks.filter({ hasText: 'Children of pins' });
+    const parentsBlock = blocks.filter({ hasText: 'Parents of pins' });
+
+    // Children of pins should be enabled (not have .disabled class)
+    await expect(childrenBlock).not.toHaveClass(/disabled/);
+    // Parents of pins should be disabled
+    await expect(parentsBlock).toHaveClass(/disabled/);
+
+    // Manual block (Saved query) should be present
+    const manualBlock = blocks.filter({ hasText: 'Saved query' });
+    await expect(manualBlock).toBeVisible();
+
+    await options.close();
+  });
 });

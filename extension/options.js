@@ -1170,7 +1170,7 @@ async function runQuery() {
 
   if (!qbRoot || (qbRoot.type === 'predicate' && qbRoot.predicateType === null) || !treeHasConfiguredPredicate(qbRoot)) {
     if (inList) {
-      saveListQbTrees();
+      saveListBlockState();
       const relatedContainer = document.getElementById('relatedResults');
       relatedContainer.innerHTML = '<div class="no-results">Add filters to start querying</div>';
       document.getElementById('relatedChart').classList.remove('visible');
@@ -1187,7 +1187,7 @@ async function runQuery() {
 
   if (inList) {
     // Save updated qbTree to list storage
-    saveListQbTrees();
+    saveListBlockState();
     runListExploreQuery(matched);
     return;
   }
@@ -1230,12 +1230,30 @@ async function runQuery() {
 
 }
 
-async function saveListQbTrees() {
-  if (activeView.type !== 'list') return;
+function collectAutoEnabled(blocks) {
+  const map = {};
+  for (const block of blocks) {
+    if (block.type === 'auto') map[block.label] = block.enabled;
+  }
+  return map;
+}
+
+async function saveListBlockState() {
+  const isExplore = activeView.type === 'explore';
+  const isList = activeView.type === 'list';
+  if (!isExplore && !isList) return;
+
   const trees = collectQbTrees(exploreBlocks);
-  if (!qbTreesChanged(activeView.qbTrees, trees)) return;
+  const autoEnabled = collectAutoEnabled(exploreBlocks);
+  const treesChanged = qbTreesChanged(activeView.qbTrees, trees);
+  const autoChanged = JSON.stringify(activeView.autoEnabled) !== JSON.stringify(autoEnabled);
+  if (!treesChanged && !autoChanged) return;
+
   activeView.qbTrees = trees;
-  await chrome.runtime.sendMessage({ action: 'saveListMeta', listId: activeView.id, name: activeView.name, qbTrees: trees });
+  activeView.autoEnabled = autoEnabled;
+  const listId = isExplore ? EXPLORE_LIST_ID : activeView.id;
+  const name = activeView.name || null;
+  await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, qbTrees: trees, autoEnabled });
 }
 
 function runListExploreQuery(matched) {
@@ -1315,7 +1333,7 @@ function renderQueryBuilder() {
     const block = exploreBlocks.find(b => b.id === activeBlockId);
     if (block && block.type === 'manual') block.tree = qbRoot;
     renderExploreBlocks();
-    saveExploreBlockState();
+    saveListBlockState();
     return;
   }
 
@@ -1693,7 +1711,7 @@ async function showExplore() {
   const _t0 = performance.now();
   const _timer = (label) => console.debug(`[explore-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
 
-  activeView = { type: 'explore' };
+  activeView = { type: 'explore', qbTrees: [], autoEnabled: {}, name: null };
   updateSidebarActive();
   updateMainTitle('Explore');
   document.getElementById('pinSearchBtn').style.display = 'flex';
@@ -1703,11 +1721,11 @@ async function showExplore() {
   renderListSkeleton();
 
   const listId = EXPLORE_LIST_ID;
-  // Lazy-load explore pins (may have been invalidated by visibilitychange)
-  if (!allListPins[listId]) {
-    const listEntity = await readCacheable('list:' + listId);
-    allListPins[listId] = listEntity?.pins || [];
-  }
+  // Load explore entity for pins + saved explore state
+  const listEntity = await readCacheable('list:' + listId);
+  allListPins[listId] = listEntity?.pins || [];
+  activeView.qbTrees = listEntity?.qbTrees || [];
+  activeView.autoEnabled = listEntity?.autoEnabled || {};
   const pins = getExplorePins();
   _timer('load explore pins');
 
@@ -1755,26 +1773,23 @@ async function showExplore() {
   exploreBlocks = pins.length > 0 ? await buildExploreAutoBlocks(pins) : [];
   _timer('buildExploreAutoBlocks');
 
-  // Restore saved block state (enabled flags + manual blocks)
-  const { exploreBlockState } = await chrome.storage.session.get(['exploreBlockState']);
-  if (exploreBlockState) {
-    if (exploreBlockState.autoEnabled) {
-      for (const block of exploreBlocks) {
-        if (block.type === 'auto' && exploreBlockState.autoEnabled[block.label] !== undefined) {
-          block.enabled = exploreBlockState.autoEnabled[block.label];
-        }
+  // Restore saved block state from entity
+  if (activeView.autoEnabled) {
+    for (const block of exploreBlocks) {
+      if (block.type === 'auto' && activeView.autoEnabled[block.label] !== undefined) {
+        block.enabled = activeView.autoEnabled[block.label];
       }
     }
-    if (exploreBlockState.manualBlocks) {
-      for (const saved of exploreBlockState.manualBlocks) {
-        exploreBlocks.push({
-          id: ++exploreBlockIdCounter,
-          type: 'manual',
-          label: saved.label,
-          enabled: saved.enabled,
-          tree: saved.tree,
-        });
-      }
+  }
+  if (activeView.qbTrees && activeView.qbTrees.length > 0) {
+    for (const tree of activeView.qbTrees) {
+      exploreBlocks.push({
+        id: ++exploreBlockIdCounter,
+        type: 'manual',
+        label: 'Saved query',
+        enabled: true,
+        tree: JSON.parse(JSON.stringify(tree)),
+      });
     }
   }
 
@@ -1848,10 +1863,11 @@ async function showList(list) {
     try {
       const entity = await readCacheable('list:' + list.slug);
       if (entity?.qbTrees) list.qbTrees = entity.qbTrees;
+      if (entity?.autoEnabled) list.autoEnabled = entity.autoEnabled;
     } catch (err) { showErrorBubble(err.message); return; }
   }
   const displayName = listDisplayName(list);
-  activeView = { type: 'list', id: list.slug, qbTrees: list.qbTrees || [], name: list.name || null };
+  activeView = { type: 'list', id: list.slug, qbTrees: list.qbTrees || [], autoEnabled: list.autoEnabled || {}, name: list.name || null };
   updateSidebarActive();
   updateMainTitle(displayName);
   document.getElementById('pinSearchBtn').style.display = 'none';
@@ -2018,6 +2034,14 @@ async function renderListExplore(list) {
 
   // Build auto-blocks from list pins
   exploreBlocks = pins.length > 0 ? await buildExploreAutoBlocks(pins) : [];
+
+  // Restore autoEnabled flags on auto-blocks
+  const savedAutoEnabled = list.autoEnabled || activeView.autoEnabled || {};
+  for (const block of exploreBlocks) {
+    if (block.type === 'auto' && savedAutoEnabled[block.label] !== undefined) {
+      block.enabled = savedAutoEnabled[block.label];
+    }
+  }
 
   // Add saved qbTrees as manual blocks if present
   if (list.qbTrees && list.qbTrees.length > 0) {
@@ -3560,20 +3584,6 @@ async function buildExploreAutoBlocks(pins) {
   ];
 }
 
-function saveExploreBlockState() {
-  if (activeView.type !== 'explore') return;
-  const autoEnabled = {};
-  const manualBlocks = [];
-  for (const block of exploreBlocks) {
-    if (block.type === 'auto') {
-      autoEnabled[block.label] = block.enabled;
-    } else if (block.type === 'manual') {
-      manualBlocks.push({ label: block.label, enabled: block.enabled, tree: block.tree });
-    }
-  }
-  chrome.storage.session.set({ exploreBlockState: { autoEnabled, manualBlocks } });
-}
-
 function renderExploreBlocks() {
   const container = document.getElementById('listQueryBuilder');
   container.style.display = 'block';
@@ -3634,7 +3644,7 @@ function bindExploreBlockEvents(container) {
       if (!block) return;
       block.enabled = !block.enabled;
       renderExploreBlocks();
-      saveExploreBlockState();
+      saveListBlockState();
       runExploreBlockQuery();
     });
   });
@@ -3646,7 +3656,7 @@ function bindExploreBlockEvents(container) {
       const blockId = parseInt(btn.dataset.blockId);
       exploreBlocks = exploreBlocks.filter(b => b.id !== blockId);
       renderExploreBlocks();
-      saveExploreBlockState();
+      saveListBlockState();
       runExploreBlockQuery();
     });
   });
@@ -3664,7 +3674,7 @@ function bindExploreBlockEvents(container) {
       };
       exploreBlocks.push(newBlock);
       renderExploreBlocks();
-      saveExploreBlockState();
+      saveListBlockState();
     });
   }
 
@@ -3716,7 +3726,7 @@ async function runExploreBlockQuery() {
     listId = activeView.id;
     pinnedSlugs = new Set((allListPins[listId] || []).map(p => slugFromPinId(p.id)));
     // Sync manual block trees to list's qbTrees (skips save if unchanged)
-    saveListQbTrees();
+    saveListBlockState();
   }
 
   const enabledBlocks = exploreBlocks.filter(b => b.enabled);

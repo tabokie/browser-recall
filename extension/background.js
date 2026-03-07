@@ -1358,21 +1358,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'saveSettings': {
-          const s = request.settings;
-          const ts = Date.now();
-          for (const k of Object.keys(s)) {
-            await addLog({ timestamp: ts, action: 'set', key: k, value: s[k] });
+        case 'saveSettingsKey': {
+          const settings = await readCacheable('settings');
+          if (!settings || JSON.stringify(settings[request.key]) !== JSON.stringify(request.value)) {
+            await addLog({ timestamp: Date.now(), action: 'set', key: request.key, value: request.value });
+            notifyMutation('settings', { key: request.key });
           }
           sendResponse({ success: true });
-          notifyMutation('settings');
-          break;
-        }
-
-        case 'saveSettingsKey': {
-          await addLog({ timestamp: Date.now(), action: 'set', key: request.key, value: request.value });
-          sendResponse({ success: true });
-          notifyMutation('settings', { key: request.key });
           break;
         }
 
@@ -1511,11 +1503,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'saveListMeta': {
-          const metaEntry = { timestamp: Date.now(), action: 'list_meta', id: request.listId, name: request.name };
-          if (request.qbTrees !== undefined) metaEntry.qbTrees = request.qbTrees;
-          await addLog(metaEntry);
+          const cached = await readCacheable('list:' + request.listId);
+          const metaEntry = { timestamp: Date.now(), action: 'list_meta', id: request.listId };
+          let hasChange = false;
+          if (request.name !== undefined && (!cached || cached.name !== request.name)) {
+            metaEntry.name = request.name;
+            hasChange = true;
+          }
+          if (request.qbTrees !== undefined && (!cached || JSON.stringify(cached.qbTrees) !== JSON.stringify(request.qbTrees))) {
+            metaEntry.qbTrees = request.qbTrees;
+            hasChange = true;
+          }
+          if (request.autoEnabled !== undefined && (!cached || JSON.stringify(cached.autoEnabled) !== JSON.stringify(request.autoEnabled))) {
+            metaEntry.autoEnabled = request.autoEnabled;
+            hasChange = true;
+          }
+          if (hasChange) {
+            await addLog(metaEntry);
+            notifyMutation('lists');
+          }
           sendResponse({ success: true });
-          notifyMutation('lists');
           break;
         }
 

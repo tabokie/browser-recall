@@ -86,6 +86,41 @@ async function loadPage(key, load, canCreate) {
 export async function effectOf(entry, load) {
   const result = {};
 
+  // --- shared helpers for link/unlink/orphan across note, snap, and list branches ---
+  async function linkChild(childKey, parentIds) {
+    if (!parentIds) return;
+    for (const parentKey of parentIds) {
+      const parent = await load(parentKey);
+      if (!parent) { result[parentKey] = null; continue; }
+      const childIds = [...(parent.childIds || [])];
+      if (!childIds.includes(childKey)) childIds.push(childKey);
+      result[parentKey] = { ...parent, childIds };
+    }
+  }
+
+  async function unlinkChild(childKey, parentIds) {
+    if (!parentIds) return;
+    for (const parentKey of parentIds) {
+      const parent = await load(parentKey);
+      if (!parent) { result[parentKey] = null; continue; }
+      const childIds = (parent.childIds || []).filter(c => c !== childKey);
+      result[parentKey] = { ...parent, childIds };
+    }
+  }
+
+  async function orphan(childKey, ts) {
+    const orphaned = await loadOrDefault('list:system/orphaned', load);
+    const keys = [...(orphaned.keys || [])];
+    if (!keys.includes(childKey)) keys.push(childKey);
+    result['list:system/orphaned'] = { ...orphaned, timestamp: ts, keys };
+  }
+
+  async function unorphan(childKey, ts) {
+    const orphaned = await loadOrDefault('list:system/orphaned', load);
+    const keys = (orphaned.keys || []).filter(k => k !== childKey);
+    result['list:system/orphaned'] = { ...orphaned, timestamp: ts, keys };
+  }
+
   // --- settings ---
   if (entry.action === 'set') {
     const settings = await loadOrDefault('settings', load);
@@ -221,11 +256,7 @@ export async function effectOf(entry, load) {
         }
         result['list:system/shallow-page'] = { ...spi, timestamp: entry.timestamp, index };
       }
-      // Add to orphaned list
-      const orphaned = await loadOrDefault('list:system/orphaned', load);
-      const keys = [...(orphaned.keys || [])];
-      if (!keys.includes(listKey)) keys.push(listKey);
-      result['list:system/orphaned'] = { ...orphaned, timestamp: entry.timestamp, keys };
+      await orphan(listKey, entry.timestamp);
     }
 
     return result;
@@ -234,106 +265,46 @@ export async function effectOf(entry, load) {
   // --- note: wire note as child of parent pages (content is on disk, not in log) ---
   if (entry.action === 'note') {
     const noteKey = `${NOTE_PREFIX}${entry.slug}`;
-    if (entry.parentIds) {
-      for (const parentKey of entry.parentIds) {
-        const parent = await load(parentKey);
-        if (!parent) { result[parentKey] = null; continue; }
-        const childIds = [...(parent.childIds || [])];
-        if (!childIds.includes(noteKey)) childIds.push(noteKey);
-        result[parentKey] = { ...parent, childIds };
-      }
-    }
+    await linkChild(noteKey, entry.parentIds);
     return result;
   }
 
   // --- del_note: unlink note from parents + add to orphaned list ---
   if (entry.action === 'del_note') {
     const noteKey = `${NOTE_PREFIX}${entry.slug}`;
-    if (entry.parentIds) {
-      for (const parentKey of entry.parentIds) {
-        const parent = await load(parentKey);
-        if (!parent) { result[parentKey] = null; continue; }
-        const childIds = (parent.childIds || []).filter(c => c !== noteKey);
-        result[parentKey] = { ...parent, childIds };
-      }
-    }
-    // Add to orphaned list
-    const orphaned = await loadOrDefault('list:system/orphaned', load);
-    const keys = [...(orphaned.keys || [])];
-    if (!keys.includes(noteKey)) keys.push(noteKey);
-    result['list:system/orphaned'] = { ...orphaned, timestamp: entry.timestamp, keys };
+    await unlinkChild(noteKey, entry.parentIds);
+    await orphan(noteKey, entry.timestamp);
     return result;
   }
 
   // --- restore_note: re-link note to parents + remove from orphaned list ---
   if (entry.action === 'restore_note') {
     const noteKey = `${NOTE_PREFIX}${entry.slug}`;
-    if (entry.parentIds) {
-      for (const parentKey of entry.parentIds) {
-        const parent = await load(parentKey);
-        if (!parent) { result[parentKey] = null; continue; }
-        const childIds = [...(parent.childIds || [])];
-        if (!childIds.includes(noteKey)) childIds.push(noteKey);
-        result[parentKey] = { ...parent, childIds };
-      }
-    }
-    // Remove from orphaned list
-    const orphaned = await loadOrDefault('list:system/orphaned', load);
-    const keys = (orphaned.keys || []).filter(k => k !== noteKey);
-    result['list:system/orphaned'] = { ...orphaned, timestamp: entry.timestamp, keys };
+    await linkChild(noteKey, entry.parentIds);
+    await unorphan(noteKey, entry.timestamp);
     return result;
   }
 
   // --- snap: wire snapshot as child of parent page (content is on disk, not in log) ---
   if (entry.action === 'snap') {
     const snapKey = `${SNAP_PREFIX}${entry.slug}`;
-    if (entry.parentIds) {
-      for (const parentKey of entry.parentIds) {
-        const parent = await load(parentKey);
-        if (!parent) { result[parentKey] = null; continue; }
-        const childIds = [...(parent.childIds || [])];
-        if (!childIds.includes(snapKey)) childIds.push(snapKey);
-        result[parentKey] = { ...parent, childIds };
-      }
-    }
+    await linkChild(snapKey, entry.parentIds);
     return result;
   }
 
   // --- del_snap: unlink snapshot from parents + add to orphaned list ---
   if (entry.action === 'del_snap') {
     const snapKey = `${SNAP_PREFIX}${entry.slug}`;
-    if (entry.parentIds) {
-      for (const parentKey of entry.parentIds) {
-        const parent = await load(parentKey);
-        if (!parent) { result[parentKey] = null; continue; }
-        const childIds = (parent.childIds || []).filter(c => c !== snapKey);
-        result[parentKey] = { ...parent, childIds };
-      }
-    }
-    // Add to orphaned list
-    const orphaned = await loadOrDefault('list:system/orphaned', load);
-    const keys = [...(orphaned.keys || [])];
-    if (!keys.includes(snapKey)) keys.push(snapKey);
-    result['list:system/orphaned'] = { ...orphaned, timestamp: entry.timestamp, keys };
+    await unlinkChild(snapKey, entry.parentIds);
+    await orphan(snapKey, entry.timestamp);
     return result;
   }
 
   // --- restore_snap: re-link snapshot to parents + remove from orphaned list ---
   if (entry.action === 'restore_snap') {
     const snapKey = `${SNAP_PREFIX}${entry.slug}`;
-    if (entry.parentIds) {
-      for (const parentKey of entry.parentIds) {
-        const parent = await load(parentKey);
-        if (!parent) { result[parentKey] = null; continue; }
-        const childIds = [...(parent.childIds || [])];
-        if (!childIds.includes(snapKey)) childIds.push(snapKey);
-        result[parentKey] = { ...parent, childIds };
-      }
-    }
-    // Remove from orphaned list
-    const orphaned = await loadOrDefault('list:system/orphaned', load);
-    const keys = (orphaned.keys || []).filter(k => k !== snapKey);
-    result['list:system/orphaned'] = { ...orphaned, timestamp: entry.timestamp, keys };
+    await linkChild(snapKey, entry.parentIds);
+    await unorphan(snapKey, entry.timestamp);
     return result;
   }
 
@@ -382,10 +353,7 @@ export async function effectOf(entry, load) {
       }
     }
 
-    // Remove from orphaned list
-    const orphaned = await loadOrDefault('list:system/orphaned', load);
-    const keys = (orphaned.keys || []).filter(k => k !== listKey);
-    result['list:system/orphaned'] = { ...orphaned, timestamp: entry.timestamp, keys };
+    await unorphan(listKey, entry.timestamp);
 
     return result;
   }
@@ -656,8 +624,9 @@ export function applyLogToPins(pinsEntity, entry) {
   }
   if (entry.action === 'list_meta' && entry.id === pinsEntity.slug) {
     const updated = { ...pinsEntity, timestamp: entry.timestamp };
-    updated.name = entry.name;
+    if (entry.name !== undefined) updated.name = entry.name;
     if (entry.qbTrees !== undefined) updated.qbTrees = entry.qbTrees;
+    if (entry.autoEnabled !== undefined) updated.autoEnabled = entry.autoEnabled;
     return updated;
   }
   if (entry.action === 'del_list' && entry.id === pinsEntity.slug) {
