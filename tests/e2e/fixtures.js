@@ -43,23 +43,39 @@ export const test = base.extend({
   }, { scope: 'worker' }],
 
   setupDir: [async ({ extContext, extensionId }, use) => {
-    let done = timer('setupDir: open helper page');
-    const page = await extContext.newPage();
-    await page.goto(`chrome-extension://${extensionId}/test-helper.html`);
-    await page.waitForFunction(() => typeof chrome !== 'undefined' && chrome.runtime);
-    done();
+    const testHelperUrl = `chrome-extension://${extensionId}/test-helper.html`;
 
-    done = timer('setupDir: setTestDirectory');
-    const result = await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'setTestDirectory' })
-    );
+    async function trySetTestDirectory() {
+      const page = await extContext.newPage();
+      try {
+        await page.goto(testHelperUrl);
+        await page.waitForFunction(() => typeof chrome !== 'undefined' && chrome.runtime);
+        const result = await page.evaluate(() =>
+          chrome.runtime.sendMessage({ action: 'setTestDirectory' })
+        );
+        await page.close();
+        return result;
+      } catch (e) {
+        await page.close().catch(() => {});
+        throw e;
+      }
+    }
+
+    let done = timer('setupDir: setTestDirectory');
+    let result;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        result = await trySetTestDirectory();
+        break;
+      } catch (e) {
+        const isContextGone = e.message.includes('closed') || e.message.includes('destroyed') || e.message.includes('context');
+        if (attempt > 0 || !isContextGone) throw e;
+        console.warn('[setupDir] page context destroyed on attempt 1, retrying...');
+      }
+    }
     if (!result?.success) {
       throw new Error(`setTestDirectory failed: ${JSON.stringify(result)}`);
     }
-    done();
-
-    done = timer('setupDir: close helper page');
-    await page.close();
     done();
 
     await use('opfs://portal-test');

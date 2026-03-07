@@ -129,11 +129,11 @@ export async function effectOf(entry, load) {
     return result;
   }
 
-  // --- list / list_meta / del_list ---
-  if (entry.action === 'list' || entry.action === 'list_meta' || entry.action === 'del_list') {
+  // --- list / list_meta / reparent_list / del_list ---
+  if (entry.action === 'list' || entry.action === 'list_meta' || entry.action === 'reparent_list' || entry.action === 'del_list') {
     const listKey = `list:${entry.id}`;
 
-    // Guard: reject list/list_meta actions on orphaned (deleted) lists
+    // Guard: reject list/list_meta/reparent_list actions on orphaned (deleted) lists
     if (entry.action !== 'del_list' && !listKey.startsWith('list:system/')) {
       const orphaned = await loadOrDefault('list:system/orphaned', load);
       if ((orphaned.keys || []).includes(listKey)) {
@@ -187,7 +187,7 @@ export async function effectOf(entry, load) {
       result['list:system/shallow-page'] = updatedSpi;
     }
 
-    // list_meta → sync root/parent for new lists + handle reparent
+    // list_meta → sync root/parent for new lists
     if (entry.action === 'list_meta' && !listKey.startsWith('list:system/')) {
       const entity = result[listKey]; // already updated by applyLogToPins above
 
@@ -200,25 +200,25 @@ export async function effectOf(entry, load) {
         entity.parentList = 'list:system/root';
         result[listKey] = entity;
       }
+    }
 
-      // REPARENT: { from, to, index }
-      if (entry.reparent) {
-        const { from, to, index } = entry.reparent;
-        const fromKey = 'list:' + from;
-        const toKey = 'list:' + to;
-        // Remove from source parent's childLists
-        const fromEntity = result[fromKey] || await loadOrDefault(fromKey, load);
-        fromEntity.childLists = (fromEntity.childLists || []).filter(k => k !== listKey);
-        result[fromKey] = { ...fromEntity, timestamp: entry.timestamp };
-        // Add to destination parent's childLists at index
-        const toEntity = (toKey === fromKey) ? result[fromKey] : (result[toKey] || await loadOrDefault(toKey, load));
-        const cl = [...(toEntity.childLists || [])].filter(k => k !== listKey);
-        cl.splice(index, 0, listKey);
-        result[toKey] = { ...toEntity, timestamp: entry.timestamp, childLists: cl };
-        // Update child's parentList
-        entity.parentList = toKey;
-        result[listKey] = entity;
-      }
+    // reparent_list → move list between parents (drag-and-drop)
+    if (entry.action === 'reparent_list' && !listKey.startsWith('list:system/')) {
+      const entity = result[listKey];
+      const fromKey = 'list:' + entry.from;
+      const toKey = 'list:' + entry.to;
+      // Remove from source parent's childLists
+      const fromEntity = result[fromKey] || await loadOrDefault(fromKey, load);
+      fromEntity.childLists = (fromEntity.childLists || []).filter(k => k !== listKey);
+      result[fromKey] = { ...fromEntity, timestamp: entry.timestamp };
+      // Add to destination parent's childLists at index
+      const toEntity = (toKey === fromKey) ? result[fromKey] : (result[toKey] || await loadOrDefault(toKey, load));
+      const cl = [...(toEntity.childLists || [])].filter(k => k !== listKey);
+      cl.splice(entry.index, 0, listKey);
+      result[toKey] = { ...toEntity, timestamp: entry.timestamp, childLists: cl };
+      // Update child's parentList
+      entity.parentList = toKey;
+      result[listKey] = entity;
     }
 
     // del_list → remove from parent's childLists + soft-delete subtree descendants

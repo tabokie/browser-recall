@@ -1566,8 +1566,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'reparentList': {
           // request: { listId, fromParent, toParent, index }
           await addLog({
-            timestamp: Date.now(), action: 'list_meta', id: request.listId,
-            reparent: { from: request.fromParent, to: request.toParent, index: request.index }
+            timestamp: Date.now(), action: 'reparent_list', id: request.listId,
+            from: request.fromParent, to: request.toParent, index: request.index,
           });
           sendResponse({ success: true });
           notifyMutation('lists');

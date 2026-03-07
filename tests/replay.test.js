@@ -849,6 +849,46 @@ describe('effectOf scope', () => {
     expect(Object.keys(result)).toEqual(['list:c1']);
   });
 
+  // --- reparent_list ---
+
+  it('reparent_list moves list from root to nested parent', async () => {
+    const root = { timestamp: 0, childLists: ['list:parent', 'list:child'] };
+    const parentEntity = { timestamp: 0, slug: 'parent', name: 'Parent', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const childEntity = { timestamp: 0, slug: 'child', name: 'Child', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const load = async (key) => {
+      if (key === 'list:system/root') return root;
+      if (key === 'list:parent') return parentEntity;
+      if (key === 'list:child') return childEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'reparent_list', id: 'child', from: 'system/root', to: 'parent', index: 0 },
+      load,
+    );
+    // child removed from root
+    expect(result['list:system/root'].childLists).not.toContain('list:child');
+    expect(result['list:system/root'].childLists).toContain('list:parent');
+    // child nested under parent
+    expect(result['list:parent'].childLists).toContain('list:child');
+    // child's parentList updated
+    expect(result['list:child'].parentList).toBe('list:parent');
+  });
+
+  it('reparent_list reorders within the same parent', async () => {
+    const root = { timestamp: 0, childLists: ['list:a', 'list:b', 'list:c'] };
+    const aEntity = { timestamp: 0, slug: 'a', name: 'A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const load = async (key) => {
+      if (key === 'list:system/root') return root;
+      if (key === 'list:a') return aEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'reparent_list', id: 'a', from: 'system/root', to: 'system/root', index: 2 },
+      load,
+    );
+    expect(result['list:system/root'].childLists).toEqual(['list:b', 'list:c', 'list:a']);
+  });
+
   it('del_list removes entry from root childLists', async () => {
     const root = { timestamp: 0, childLists: ['list:c1', 'list:c2'] };
     const listEntity = { timestamp: 0, slug: 'c1', name: 'A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
@@ -1324,7 +1364,7 @@ describe('effectOf scope', () => {
 
   // --- hierarchical lists: reparent, subtree delete, subtree restore ---
 
-  it('list_meta reparent moves list between parents', async () => {
+  it('reparent_list moves list between non-root parents', async () => {
     const root = { timestamp: 0, childLists: ['list:parent-a', 'list:parent-b'] };
     const parentA = { timestamp: 0, slug: 'parent-a', name: 'Parent A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: ['list:child'] };
     const parentB = { timestamp: 0, slug: 'parent-b', name: 'Parent B', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
@@ -1337,7 +1377,7 @@ describe('effectOf scope', () => {
       return null;
     };
     const result = await effectOf(
-      { timestamp: 100, action: 'list_meta', id: 'child', reparent: { from: 'parent-a', to: 'parent-b', index: 0 } },
+      { timestamp: 100, action: 'reparent_list', id: 'child', from: 'parent-a', to: 'parent-b', index: 0 },
       load,
     );
     expect(result['list:parent-a'].childLists).not.toContain('list:child');
@@ -1345,7 +1385,7 @@ describe('effectOf scope', () => {
     expect(result['list:child'].parentList).toBe('list:parent-b');
   });
 
-  it('list_meta reparent within same parent reorders', async () => {
+  it('reparent_list reorders to front within same parent', async () => {
     const root = { timestamp: 0, childLists: ['list:a', 'list:b', 'list:c'] };
     const a = { timestamp: 0, slug: 'a', name: 'A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
     const b = { timestamp: 0, slug: 'b', name: 'B', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
@@ -1359,7 +1399,7 @@ describe('effectOf scope', () => {
     };
     // Move list:c to index 0 (before list:a)
     const result = await effectOf(
-      { timestamp: 100, action: 'list_meta', id: 'c', reparent: { from: 'system/root', to: 'system/root', index: 0 } },
+      { timestamp: 100, action: 'reparent_list', id: 'c', from: 'system/root', to: 'system/root', index: 0 },
       load,
     );
     expect(result['list:system/root'].childLists).toEqual(['list:c', 'list:a', 'list:b']);

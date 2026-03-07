@@ -1,0 +1,9 @@
+- What does "list_meta" do?
+- How do we add pins to a list?
+- Make list_meta { reparent } into its own log type: list_reparent. I want to keep "list_meta" simple: only changing fields of list entities.
+- Wait, call it reparent_list similar to del_list
+- You didn't run E2E tests and run data migration
+- Try to fix the flaky E2E test, it happens quite frequent
+- /finish 
+- n
+- n
