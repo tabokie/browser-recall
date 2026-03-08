@@ -123,7 +123,7 @@ They do NOT exist in:
 | `effectOf` replay (list pin/unpin) | Updates page `parentIds` with `list:<id>` | Updates SPI `lists` with `list:<id>` |
 | `effectOf` replay (page_checkpoint) | Updates watermark; absorbs shallow-page index data (parents, lists) into page, upgrades `shallow:` list pins to `page:` | Creates entity from `defaultEntity()` |
 | `getPageRelations` (background) | Reads `parentIds`/`childIds`, resolves typed refs | Falls back to `shallowPageIndex.index[url]` for parents |
-| `buildExploreAutoBlocks` (options.js) | Resolves `page:<slug>` refs via `loadPageBatch` | Resolves `shallow:<url>` refs via `shallowPageIndex` for URL+title |
+| `buildListMembershipIndex` (options.js) | Loads list entity pins, resolves `page:<slug>` slugs | Resolves `shallow:<url>` slugs via `generateSlugFromUrl` |
 | Pin display (options.js) | `resolvePageRef` → page entity from session cache | `resolvePageRef` → metadata from `shallowPageIndex`, or null if unreferenced |
 
 ### Typed References
@@ -164,7 +164,7 @@ Tracks metadata for non-checkpointed pages that are referenced by checkpointed e
 
 - **Populated by**: `applyLogToShallowPage` in replay.js — `page` entries (parents, title), `list` entries with `shallow:` ids (list membership). `effectOf` post-processes list entries to enrich `title: null` SPI entries from today's/yesterday's history cache.
 - **Pruned**: when a shallow page becomes checkpointed, its entry is removed, data (parents, lists) absorbed into the new page entity, and `shallow:` pin IDs in affected lists upgraded to `page:<slug>`
-- **Consumers**: `getPageRelations` (fallback for non-checkpointed children/parents), `buildExploreAutoBlocks` (resolve shallow refs to URLs+titles), `getPageInfo` (title fallback)
+- **Consumers**: `getPageRelations` (fallback for non-checkpointed children/parents), `buildListMembershipIndex` (resolve shallow pin slugs for list filter), `getPageInfo` (title fallback)
 
 ### Pin ID Resolution
 

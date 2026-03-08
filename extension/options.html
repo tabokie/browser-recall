@@ -1550,111 +1550,168 @@
       padding: 2px 0;
     }
 
-    /* ── Explore blocks ── */
-    .explore-blocks {
+    /* ── Search / Filter panel ── */
+    .search-filters-panel {
       padding: 8px 24px 12px;
       display: flex;
       flex-direction: column;
       gap: 6px;
     }
 
-    .explore-block {
+    .search-rows {
       display: flex;
-      border-radius: 8px;
-      background: #f1f3f4;
-      overflow: hidden;
+      flex-direction: column;
+      gap: 4px;
     }
 
-    .explore-block.disabled {
-      background: #f8f9fa;
-    }
-
-    /* Full-height side buttons (toggle left, remove right) */
-    .explore-block-toggle,
-    .explore-block-remove {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px;
-      flex-shrink: 0;
-      border: none;
-      background: none;
-      cursor: pointer;
-      padding: 0;
-      color: #5f6368;
-    }
-
-    .explore-block-toggle {
-      border-right: 1px solid #dadce0;
-    }
-    .explore-block-toggle svg { width: 16px; height: 16px; }
-    .explore-block-toggle.enabled svg { color: #1a73e8; }
-    .explore-block-toggle.disabled svg { color: #bdc1c6; }
-
-    .explore-block-toggle:hover { background: #e8eaed; }
-    .explore-block.disabled .explore-block-toggle:hover { background: #f1f3f4; }
-
-    .explore-block-remove {
-      border-left: 1px solid #dadce0;
-      visibility: hidden;
-    }
-    .explore-block-remove svg { width: 14px; height: 14px; }
-    .explore-block:hover .explore-block-remove { visibility: visible; }
-    .explore-block-remove:hover { background: #fce8e6; color: #d93025; }
-
-    /* Middle content area */
-    .explore-block-content {
-      flex: 1;
-      min-width: 0;
-      padding: 8px 10px;
-    }
-
-    .explore-block-label {
-      font-size: 12px;
-      font-weight: 500;
-      color: #202124;
+    .search-row {
       display: flex;
       align-items: center;
       gap: 4px;
     }
 
-    .explore-block.disabled .explore-block-label { color: #9aa0a6; }
-
-    .explore-block-count {
-      font-size: 11px;
-      color: #9aa0a6;
-      font-weight: 400;
+    .search-row-input {
+      flex: 1;
+      padding: 5px 8px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
     }
+    .search-row-input:focus { border-color: #1a73e8; }
 
-    .explore-block-body {
-      margin-top: 6px;
-    }
-
-    .explore-block.disabled .explore-block-body {
-      opacity: 0.4;
-      pointer-events: none;
-    }
-
-    /* Add-block button — dotted outline, block-shaped, no fill */
-    .explore-add-block {
+    .search-row-remove {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 100%;
-      padding: 10px 0;
-      border: 1.5px dashed #dadce0;
+      width: 24px;
+      height: 24px;
+      border: none;
       background: none;
-      border-radius: 8px;
-      font-size: 12px;
-      color: #9aa0a6;
       cursor: pointer;
+      color: #9aa0a6;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .search-row-remove svg { width: 14px; height: 14px; }
+    .search-row-remove:hover { background: #fce8e6; color: #d93025; }
+
+    .search-draft {
+      display: flex;
+      align-items: center;
+      gap: 4px;
     }
 
-    .explore-add-block:hover {
-      border-color: #1a73e8;
-      color: #1a73e8;
-      background: #f8f9fe;
+    .search-draft-input {
+      flex: 1;
+      padding: 5px 8px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
     }
+    .search-draft-input:focus { border-color: #1a73e8; }
+
+    .search-save-btn {
+      padding: 4px 10px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 12px;
+      color: #5f6368;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .search-save-btn:hover { background: #f1f3f4; color: #1a73e8; border-color: #1a73e8; }
+
+    .filter-toggle-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      background: #fff;
+      cursor: pointer;
+      flex-shrink: 0;
+      color: #9aa0a6;
+      padding: 0;
+    }
+    .filter-toggle-btn svg { width: 14px; height: 14px; }
+    .filter-toggle-btn:hover { background: #f1f3f4; color: #5f6368; }
+    .filter-toggle-btn.active { background: #e8f0fe; color: #1a73e8; border-color: #1a73e8; }
+    .filter-toggle-btn.has-filters { color: #1a73e8; border-color: #1a73e8; }
+
+    .filter-panel {
+      margin-top: 8px;
+      padding: 8px 0 4px;
+      border-top: 1px solid #eeeff1;
+    }
+
+    .filter-section {
+      margin-bottom: 8px;
+    }
+
+    .filter-section-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: #9aa0a6;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .filter-range {
+      margin-bottom: 8px;
+    }
+
+    .filter-range-label {
+      font-size: 11px;
+      color: #5f6368;
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .filter-checkboxes {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .filter-checkbox {
+      font-size: 12px;
+      color: #3c4043;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    .filter-checkbox input { margin: 0; cursor: pointer; }
+
+    .filter-bubbles {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .filter-bubble {
+      padding: 3px 10px;
+      border: 1px solid #dadce0;
+      border-radius: 12px;
+      background: #f1f3f4;
+      color: #5f6368;
+      font-size: 11px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .filter-bubble:hover { background: #e8eaed; }
+    .filter-bubble.active {
+      background: #e8f0fe;
+      color: #1a73e8;
+      border-color: #1a73e8;
+    }
+    .filter-bubble.active:hover { background: #d2e3fc; }
 
     /* ── Query builder ── */
     .query-builder {
@@ -2246,12 +2303,7 @@
       <div class="list-section" data-section="explore">
         <div class="section-header" data-collapse="explore"><span class="section-chevron">&#9654;</span> Explore</div>
         <div class="section-body">
-          <div class="query-builder list-qb" id="listQueryBuilder" style="display:none">
-            <div class="qb-header">
-              <span class="qb-title">Query</span>
-            </div>
-            <div class="qb-body" id="listQbBody"></div>
-          </div>
+          <div id="listQueryBuilder" style="display:none"></div>
           <div class="time-chart" id="relatedChart">
             <div class="chart-label">Explore results</div>
             <div class="chart-bars" id="relatedChartBars"></div>

@@ -98,14 +98,14 @@ describe('state preservation across re-renders', () => {
     expect(tail, 'sort handler should NOT call refreshCurrentView').not.toContain('refreshCurrentView');
   });
 
-  it('runExploreBlockQuery uses vs.updateData (not vs.setData)', () => {
-    const body = extractFunctionBody('runExploreBlockQuery');
-    expect(body, 'runExploreBlockQuery should use updateData').toContain('vs.updateData(');
-    expect(body, 'runExploreBlockQuery should NOT use vs.setData').not.toContain('vs.setData(');
+  it('runSearchFilterPipeline uses vs.updateData (not vs.setData)', () => {
+    const body = extractFunctionBody('runSearchFilterPipeline');
+    expect(body, 'runSearchFilterPipeline should use updateData').toContain('vs.updateData(');
+    expect(body, 'runSearchFilterPipeline should NOT use vs.setData').not.toContain('vs.setData(');
   });
 
-  it('interaction mutation uses runExploreBlockQuery for explore/list views', () => {
+  it('interaction mutation uses runSearchFilterPipeline for explore/list views', () => {
     const branch = extractMutationBranch('interaction');
-    expect(branch, 'interaction branch should call runExploreBlockQuery').toContain('runExploreBlockQuery()');
+    expect(branch, 'interaction branch should call runSearchFilterPipeline').toContain('runSearchFilterPipeline()');
   });
 });

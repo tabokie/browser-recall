@@ -86,18 +86,10 @@ export function generateSlugFromTitle(title) {
   return generateSlug(title, hashInput);
 }
 
-// Collect qbTrees from explore blocks for saving to list metadata.
-// Returns deep copies of all manual block trees.
-export function collectQbTrees(blocks) {
-  return blocks
-    .filter(b => b.type === 'manual' && b.tree)
-    .map(b => JSON.parse(JSON.stringify(b.tree)));
-}
-
-// Compare two qbTrees arrays for equality (deep comparison).
+// Compare two savedSearches arrays for equality (deep comparison).
 // Returns true if they differ and a save is needed.
-export function qbTreesChanged(oldTrees, newTrees) {
-  return JSON.stringify(oldTrees) !== JSON.stringify(newTrees);
+export function savedSearchesChanged(a, b) {
+  return JSON.stringify(a) !== JSON.stringify(b);
 }
 
 // Check if a URL is the root page of a gateway origin

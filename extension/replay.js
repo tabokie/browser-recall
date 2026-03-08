@@ -59,7 +59,7 @@ export function defaultEntity(key) {
   if (key === 'list:system/root') return { timestamp: 0, childLists: [] };
   if (key.startsWith('list:')) {
     const slug = key.slice('list:'.length);
-    return { timestamp: 0, slug, name: '', qbTrees: [], pins: [], parentList: null, childLists: [] };
+    return { timestamp: 0, slug, name: '', savedSearches: [], pins: [], parentList: null, childLists: [] };
   }
   return null;
 }
@@ -623,10 +623,10 @@ export function applyLogToPage(page, entry) {
 
 /**
  * Apply a log entry to a list entity (self-describing file).
- * Entity: { timestamp, id, name, qbTrees, pins: [...] }
+ * Entity: { timestamp, id, name, savedSearches, pins: [...] }
  * Handles:
  *   - list (id="{listId}", op=add/del/clear): granular pin operations (typed ids)
- *   - list_meta (id="{listId}"): list metadata (name, qbTrees)
+ *   - list_meta (id="{listId}"): list metadata (name, savedSearches)
  *   - del_list (id="{listId}"): mark entity as deleted
  * Returns new entity (or original if entry is irrelevant).
  */
@@ -654,8 +654,7 @@ export function applyLogToPins(pinsEntity, entry) {
   if (entry.action === 'list_meta' && entry.id === pinsEntity.slug) {
     const updated = { ...pinsEntity, timestamp: entry.timestamp };
     if (entry.name !== undefined) updated.name = entry.name;
-    if (entry.qbTrees !== undefined) updated.qbTrees = entry.qbTrees;
-    if (entry.autoEnabled !== undefined) updated.autoEnabled = entry.autoEnabled;
+    if (entry.savedSearches !== undefined) updated.savedSearches = entry.savedSearches;
     if (entry.parentList !== undefined) updated.parentList = entry.parentList;
     if (entry.childLists !== undefined) updated.childLists = entry.childLists;
     return updated;

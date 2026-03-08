@@ -14,7 +14,7 @@ test.describe('List operations', () => {
         timestamp: Date.now(), childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: Date.now(), pins: [], qbTrees: [],
+        slug: 'reading', name: 'Reading List', timestamp: Date.now(), pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
     ]);
@@ -37,7 +37,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
-        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], qbTrees: [],
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -75,7 +75,7 @@ test.describe('List operations', () => {
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: day2,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: day1 }],
-        qbTrees: [{ field: 'url', id: 1, predicateType: 'keyword', type: 'predicate', value: 'example' }],
+        savedSearches: [{ field: 'url', id: 1, predicateType: 'keyword', type: 'predicate', value: 'example' }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -113,7 +113,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now, pins: [], qbTrees: [],
+        slug: 'reading', name: 'Reading List', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -157,7 +157,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
-        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], qbTrees: [],
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -210,20 +210,11 @@ test.describe('List operations', () => {
     await options.close();
   });
 
-  // Bug: list view missing qbTrees after loadLists migration (552c517)
-  // showList() must load full entity via readCacheable to get qbTrees
-  test('list with qbTrees shows filtered explore results', async ({ extContext, extensionId, setupDir }) => {
+  // savedSearches: list with saved search keywords shows filtered explore results
+  test('list with savedSearches shows filtered explore results', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const matchUrl = 'https://example.com/match-page';
     const noMatchUrl = 'https://other.com/no-match';
-    const matchSlug = getSlugForUrl(matchUrl);
-    const noMatchSlug = getSlugForUrl(noMatchUrl);
-
-    // qbTree: keyword predicate matching "match-page" in title
-    const qbTree = {
-      id: 1, type: 'predicate', predicateType: 'keyword',
-      field: ['title'], value: 'Match Page',
-    };
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
@@ -234,7 +225,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/filtered.json', data: {
         slug: 'filtered', name: 'Filtered', timestamp: now,
-        pins: [], qbTrees: [qbTree],
+        pins: [], savedSearches: ['Match Page'],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'history/2026-03-01.jsonl', lines: [
@@ -284,7 +275,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/research.json', data: {
         slug: 'research', name: 'Research', timestamp: now,
-        pins: [{ id: `shallow:${url}`, pinnedAt: now }], qbTrees: [],
+        pins: [{ id: `shallow:${url}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/system/shallow-page.json', data: {
@@ -337,7 +328,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [],
+        slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug}.json`, data: {
@@ -413,7 +404,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [],
+        slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `history/${today}.jsonl`, lines: [
@@ -453,7 +444,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [],
+        slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `history/${today}.jsonl`, lines: [
@@ -491,11 +482,11 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/source.json', data: {
         slug: 'source', name: 'Source', timestamp: now,
-        pins: [{ id: `shallow:${url}`, pinnedAt: now }], qbTrees: [],
+        pins: [{ id: `shallow:${url}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/target.json', data: {
-        slug: 'target', name: 'Target', timestamp: now, pins: [], qbTrees: [],
+        slug: 'target', name: 'Target', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `history/${today}.jsonl`, lines: [
@@ -541,7 +532,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [],
+        slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
     ]);
@@ -572,11 +563,11 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:keep', 'list:remove'],
       }},
       { path: 'lists/keep.json', data: {
-        slug: 'keep', name: 'Keep', timestamp: now, pins: [], qbTrees: [],
+        slug: 'keep', name: 'Keep', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/remove.json', data: {
-        slug: 'remove', name: 'Remove', timestamp: now, pins: [], qbTrees: [],
+        slug: 'remove', name: 'Remove', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
     ]);
@@ -607,7 +598,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:doomed'],
       }},
       { path: 'lists/doomed.json', data: {
-        slug: 'doomed', name: 'Doomed', timestamp: now, pins: [], qbTrees: [],
+        slug: 'doomed', name: 'Doomed', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
     ]);
@@ -648,7 +639,7 @@ test.describe('List operations', () => {
         pins: [
           { id: `page:${slug1}`, pinnedAt: now },
           { id: `page:${slug2}`, pinnedAt: now },
-        ], qbTrees: [],
+        ], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug1}.json`, data: {
@@ -691,7 +682,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [],
+        slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -728,7 +719,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now,
-        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], qbTrees: [],
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -771,7 +762,7 @@ test.describe('List operations', () => {
         pins: [
           { id: `page:${TEST_SLUG}`, pinnedAt: now },
           { id: `page:${slug2}`, pinnedAt: now },
-        ], qbTrees: [],
+        ], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -805,10 +796,8 @@ test.describe('List operations', () => {
     expect(page2.value.parentIds).toEqual([]);
   });
 
-  test('list restores autoEnabled and qbTrees from entity', async ({ extContext, extensionId, setupDir }) => {
+  test('list restores savedSearches from entity', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
-    const childUrl = 'https://child.example.com/';
-    const childSlug = getSlugForUrl(childUrl);
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: {
         trimRules: [],
@@ -819,22 +808,16 @@ test.describe('List operations', () => {
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
-        qbTrees: [{ field: 'url', id: 1, predicateType: 'keyword', type: 'predicate', value: 'example' }],
-        autoEnabled: { 'Children of pins': true, 'Parents of pins': false, 'Similar to pins': false },
+        savedSearches: ['example', 'domain'],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
-        parentIds: [], childIds: [`page:${childSlug}`],
-      }},
-      { path: `pages/${childSlug}.json`, data: {
-        slug: childSlug, url: childUrl, title: 'Child Page', timestamp: now,
-        parentIds: [`page:${TEST_SLUG}`], childIds: [],
+        parentIds: [], childIds: [],
       }},
       { path: 'lists/system/shallow-page.json', data: { timestamp: now, index: {} }},
       { path: `history/2026-03-06.jsonl`, data: [
         { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
-        { timestamp: now + 1, action: 'page', url: childUrl, title: 'Child Page' },
       ]},
     ]);
 
@@ -844,22 +827,381 @@ test.describe('List operations', () => {
     await listItem.click();
     await waitForListView(options);
 
-    // Wait for explore blocks to render
-    await expect(options.locator('.explore-blocks')).toBeVisible({ timeout: 5000 });
+    // Saved search rows should be rendered
+    await expect(options.locator('.search-row')).toHaveCount(2, { timeout: 5000 });
+    const searchInputs = options.locator('.search-row input');
+    await expect(searchInputs.nth(0)).toHaveValue('example');
+    await expect(searchInputs.nth(1)).toHaveValue('domain');
 
-    // Check auto-block enabled/disabled states
-    const blocks = options.locator('.explore-block');
-    const childrenBlock = blocks.filter({ hasText: 'Children of pins' });
-    const parentsBlock = blocks.filter({ hasText: 'Parents of pins' });
+    await options.close();
+  });
 
-    // Children of pins should be enabled (not have .disabled class)
-    await expect(childrenBlock).not.toHaveClass(/disabled/);
-    // Parents of pins should be disabled
-    await expect(parentsBlock).toHaveClass(/disabled/);
+  test('filter panel toggles visibility', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', timestamp: now,
+        pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'lists/system/shallow-page.json', data: { timestamp: now, index: {} } },
+    ]);
 
-    // Manual block (Saved query) should be present
-    const manualBlock = blocks.filter({ hasText: 'Saved query' });
-    await expect(manualBlock).toBeVisible();
+    const options = await openOptionsPage(extContext, extensionId);
+    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    // Filter panel should be hidden initially
+    const filterPanel = options.locator('#filterPanel');
+    await expect(filterPanel).toBeHidden();
+
+    // Click filter toggle
+    const filterBtn = options.locator('#filterToggleBtn');
+    await expect(filterBtn).toBeVisible();
+    await filterBtn.click();
+
+    // Filter panel should now be visible
+    await expect(filterPanel).toBeVisible();
+
+    // Click again to hide
+    await filterBtn.click();
+    await expect(filterPanel).toBeHidden();
+
+    await options.close();
+  });
+
+  test('empty search shows all history', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', timestamp: now,
+        pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'history/2026-03-01.jsonl', lines: [
+        { timestamp: now - 2000, action: 'page', url: 'https://a.com/', title: 'Page A' },
+        { timestamp: now - 1000, action: 'page', url: 'https://b.com/', title: 'Page B' },
+        { timestamp: now, action: 'page', url: 'https://c.com/', title: 'Page C' },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    // No savedSearches → all history should be shown
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 3,
+      { timeout: 10000 }
+    );
+    const titles = await options.$$eval('#relatedResults .result-title', els =>
+      els.map(el => el.textContent.trim())
+    );
+    expect(titles).toContain('Page A');
+    expect(titles).toContain('Page B');
+    expect(titles).toContain('Page C');
+
+    await options.close();
+  });
+
+  test('adding search via UI persists across reload', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', timestamp: now,
+        pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'lists/system/shallow-page.json', data: { timestamp: now, index: {} } },
+      { path: 'history/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'page', url: 'https://example.com/', title: 'Example' },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    // Type a search and press Enter to save
+    const draftInput = options.locator('#searchDraftInput');
+    await expect(draftInput).toBeVisible({ timeout: 5000 });
+    await draftInput.fill('example');
+    await draftInput.press('Enter');
+
+    // Saved search row should appear
+    await expect(options.locator('.search-row')).toHaveCount(1, { timeout: 5000 });
+    await expect(options.locator('.search-row input').first()).toHaveValue('example');
+
+    // Reload — navigate away and back
+    const exploreBtn = options.locator('#exploreBtn');
+    await exploreBtn.click();
+    await options.waitForFunction(
+      () => document.getElementById('mainTitle')?.textContent?.trim() === 'Explore',
+      { timeout: 5000 }
+    );
+    await listItem.click();
+    await waitForListView(options);
+
+    // Saved search should persist
+    await expect(options.locator('.search-row')).toHaveCount(1, { timeout: 5000 });
+    await expect(options.locator('.search-row input').first()).toHaveValue('example');
+
+    await options.close();
+  });
+
+  test('last-seen range filter narrows results', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const DAY = 86400000;
+    const recentUrl = 'https://recent.com/';
+    const oldUrl = 'https://old.com/';
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', timestamp: now,
+        pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'history/2026-03-08.jsonl', lines: [
+        { timestamp: now, action: 'page', url: recentUrl, title: 'Recent Page' },
+      ]},
+      { path: 'history/2026-02-06.jsonl', lines: [
+        { timestamp: now - 30 * DAY, action: 'page', url: oldUrl, title: 'Old Page' },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    // Both pages should appear initially
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 2,
+      { timeout: 10000 }
+    );
+    let titles = await options.$$eval('#relatedResults .result-title', els =>
+      els.map(el => el.textContent.trim())
+    );
+    expect(titles).toContain('Recent Page');
+    expect(titles).toContain('Old Page');
+
+    // Open filter panel
+    const filterBtn = options.locator('#filterToggleBtn');
+    await filterBtn.click();
+    await expect(options.locator('#filterPanel')).toBeVisible();
+
+    // Verify slider thumbs are visible and interactive inside the track
+    const hiSlider = options.locator('.filter-range[data-key="lastSeen"] .filter-range-hi');
+    await expect(hiSlider).toBeVisible();
+    const loSlider = options.locator('.filter-range[data-key="lastSeen"] .filter-range-lo');
+    await expect(loSlider).toBeVisible();
+
+    // Use Playwright's fill() on the range input — fires native input event
+    await hiSlider.fill('7');
+
+    // Wait for debounced pipeline — "Old Page" (30d ago) should be excluded
+    await options.waitForFunction(
+      () => {
+        const rows = document.querySelectorAll('#relatedResults .result-row');
+        const t = [...rows].map(r => r.querySelector('.result-title')?.textContent?.trim());
+        return t.length > 0 && !t.includes('Old Page');
+      },
+      { timeout: 10000 }
+    );
+
+    titles = await options.$$eval('#relatedResults .result-title', els =>
+      els.map(el => el.textContent.trim())
+    );
+    expect(titles).toContain('Recent Page');
+    expect(titles).not.toContain('Old Page');
+
+    // Verify the hi label updated
+    const hiLabel = options.locator('.filter-range[data-key="lastSeen"] .qb-dual-range-hi-label');
+    await expect(hiLabel).toHaveText('7d ago');
+
+    await options.close();
+  });
+
+  test('has-highlights checkbox filter narrows results', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const highlightUrl = 'https://highlighted.com/';
+    const plainUrl = 'https://plain.com/';
+    const highlightSlug = getSlugForUrl(highlightUrl);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', timestamp: now,
+        pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: `pages/${highlightSlug}.json`, data: {
+        slug: highlightSlug, url: highlightUrl, title: 'Highlighted Page', timestamp: now,
+        parentIds: [], childIds: [],
+        notes: [{ excerpt: 'some highlight text', note: '', createdAt: now }],
+      }},
+      { path: 'history/2026-03-01.jsonl', lines: [
+        { timestamp: now - 1000, action: 'page', url: plainUrl, title: 'Plain Page' },
+        { timestamp: now, action: 'page', url: highlightUrl, title: 'Highlighted Page' },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    // Both pages should appear initially
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 2,
+      { timeout: 10000 }
+    );
+    let titles = await options.$$eval('#relatedResults .result-title', els =>
+      els.map(el => el.textContent.trim())
+    );
+    expect(titles).toContain('Highlighted Page');
+    expect(titles).toContain('Plain Page');
+
+    // Open filter panel
+    const filterBtn = options.locator('#filterToggleBtn');
+    await filterBtn.click();
+    await expect(options.locator('#filterPanel')).toBeVisible();
+
+    // Check the "Has highlights" checkbox via Playwright click (real user interaction)
+    const checkbox = options.locator('.filter-checkbox input[data-key="hasHighlights"]');
+    await expect(checkbox).toBeVisible();
+    await checkbox.check();
+    await expect(checkbox).toBeChecked();
+
+    // Wait for debounced pipeline — "Plain Page" has no highlights, should be excluded
+    await options.waitForFunction(
+      () => {
+        const rows = document.querySelectorAll('#relatedResults .result-row');
+        const t = [...rows].map(r => r.querySelector('.result-title')?.textContent?.trim());
+        return t.length > 0 && !t.includes('Plain Page');
+      },
+      { timeout: 10000 }
+    );
+
+    titles = await options.$$eval('#relatedResults .result-title', els =>
+      els.map(el => el.textContent.trim())
+    );
+    expect(titles).toContain('Highlighted Page');
+    expect(titles).not.toContain('Plain Page');
+
+    // Uncheck — both should reappear
+    await checkbox.uncheck();
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 2,
+      { timeout: 10000 }
+    );
+    titles = await options.$$eval('#relatedResults .result-title', els =>
+      els.map(el => el.textContent.trim())
+    );
+    expect(titles).toContain('Highlighted Page');
+    expect(titles).toContain('Plain Page');
+
+    await options.close();
+  });
+
+  test('list bubble filter restricts results to enabled lists', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const rustUrl = 'https://rust-lang.org/';
+    const goUrl = 'https://go.dev/';
+    const rustSlug = getSlugForUrl(rustUrl);
+    const goSlug = getSlugForUrl(goUrl);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:rust', 'list:golang'] } },
+      { path: 'lists/rust.json', data: {
+        slug: 'rust', name: 'Rust', timestamp: now,
+        pins: [{ id: `page:${rustSlug}`, pinnedAt: now }], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'lists/golang.json', data: {
+        slug: 'golang', name: 'Go', timestamp: now,
+        pins: [{ id: `page:${goSlug}`, pinnedAt: now }], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: `pages/${rustSlug}.json`, data: {
+        slug: rustSlug, url: rustUrl, title: 'Rust Lang', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: `pages/${goSlug}.json`, data: {
+        slug: goSlug, url: goUrl, title: 'Go Dev', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: 'lists/system/shallow-page.json', data: { timestamp: now, index: {} } },
+      { path: 'history/2026-03-01.jsonl', lines: [
+        { timestamp: now - 1000, action: 'page', url: rustUrl, title: 'Rust Lang' },
+        { timestamp: now, action: 'page', url: goUrl, title: 'Go Dev' },
+      ]},
+    ]);
+
+    // Open Explore view — both results shown (no bubbles active)
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 2,
+      { timeout: 10000 }
+    );
+
+    // Open filter panel
+    const filterBtn = options.locator('#filterToggleBtn');
+    await filterBtn.click();
+    await expect(options.locator('#filterPanel')).toBeVisible();
+
+    // Both bubbles visible, neither active
+    const goBubble = options.locator('.filter-bubble[data-list-slug="golang"]');
+    await expect(goBubble).toBeVisible();
+    await expect(goBubble).not.toHaveClass(/active/);
+
+    // Enable "Go" bubble → only Go list items shown
+    await goBubble.click();
+    await expect(goBubble).toHaveClass(/active/);
+
+    await options.waitForFunction(
+      () => {
+        const rows = document.querySelectorAll('#relatedResults .result-row');
+        const t = [...rows].map(r => r.querySelector('.result-title')?.textContent?.trim());
+        return t.length > 0 && !t.includes('Rust Lang');
+      },
+      { timeout: 10000 }
+    );
+    let titles = await options.$$eval('#relatedResults .result-title', els =>
+      els.map(el => el.textContent.trim())
+    );
+    expect(titles).toContain('Go Dev');
+    expect(titles).not.toContain('Rust Lang');
+
+    // Deactivate "Go" bubble → all results again
+    await goBubble.click();
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 2,
+      { timeout: 10000 }
+    );
+    titles = await options.$$eval('#relatedResults .result-title', els =>
+      els.map(el => el.textContent.trim())
+    );
+    expect(titles).toContain('Rust Lang');
+    expect(titles).toContain('Go Dev');
 
     await options.close();
   });
@@ -874,11 +1216,11 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:parent'],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent List', timestamp: now, pins: [], qbTrees: [],
+        slug: 'parent', name: 'Parent List', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: ['list:child'],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child List', timestamp: now, pins: [], qbTrees: [],
+        slug: 'child', name: 'Child List', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:parent', childLists: [],
       }},
     ]);
@@ -904,11 +1246,11 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:parent'],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent', timestamp: now, pins: [], qbTrees: [],
+        slug: 'parent', name: 'Parent', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: ['list:child'],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [], qbTrees: [],
+        slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:parent', childLists: [],
       }},
     ]);
@@ -936,15 +1278,15 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:a', 'list:b'],
       }},
       { path: 'lists/a.json', data: {
-        slug: 'a', name: 'List A', timestamp: now, pins: [], qbTrees: [],
+        slug: 'a', name: 'List A', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: ['list:child'],
       }},
       { path: 'lists/b.json', data: {
-        slug: 'b', name: 'List B', timestamp: now, pins: [], qbTrees: [],
+        slug: 'b', name: 'List B', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [], qbTrees: [],
+        slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:a', childLists: [],
       }},
     ]);
@@ -982,11 +1324,11 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:parent'],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent', timestamp: now, pins: [], qbTrees: [],
+        slug: 'parent', name: 'Parent', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: ['list:child'],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [], qbTrees: [],
+        slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:parent', childLists: [],
       }},
     ]);
@@ -1019,11 +1361,11 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:parent'],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent', timestamp: now, pins: [], qbTrees: [],
+        slug: 'parent', name: 'Parent', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: ['list:child'],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [], qbTrees: [],
+        slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:parent', childLists: [],
       }},
     ]);

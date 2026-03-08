@@ -68,7 +68,7 @@ test.describe('Recycle bin', () => {
         pins: [
           { id: `page:${TEST_SLUG}`, pinnedAt: now },
         ],
-        qbTrees: [], deleted: true,
+        savedSearches: [], deleted: true,
         parentList: 'list:system/root', childLists: [],
       }},
       // Page that lost the list from parentIds
@@ -182,7 +182,7 @@ test.describe('Recycle bin', () => {
       // Deleted list entity on disk
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Doomed List', timestamp: now,
-        pins: [], qbTrees: [], deleted: true,
+        pins: [], savedSearches: [], deleted: true,
       }},
       { path: 'lists/system/orphaned.json', data: {
         timestamp: now, keys: [`list:${listId}`],
@@ -227,7 +227,7 @@ test.describe('Recycle bin', () => {
       }},
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Bulk List', timestamp: now,
-        pins: [], qbTrees: [], deleted: true,
+        pins: [], savedSearches: [], deleted: true,
       }},
       { path: 'lists/system/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`, `list:${listId}`],
@@ -276,7 +276,7 @@ test.describe('Recycle bin', () => {
       }},
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'UI List', timestamp: now,
-        pins: [], qbTrees: [], deleted: true,
+        pins: [], savedSearches: [], deleted: true,
       }},
       { path: 'lists/system/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`, `list:${listId}`],
@@ -358,7 +358,7 @@ test.describe('Recycle bin', () => {
       }},
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Empty List', timestamp: now,
-        pins: [], qbTrees: [], deleted: true,
+        pins: [], savedSearches: [], deleted: true,
       }},
       { path: 'lists/system/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`, `list:${listId}`],

@@ -1,0 +1,64 @@
+- I plan to make "note" a first-class concept as "page". In lists and in search results, notes are not subordinate to page, they show up as their own card items. But there is a remaining question of how to organize the search block and query trees. Right now they target page using concepts such as "url", "title". Notes have a different set of query operators (e.g. create time, modify time, text). Do you have ideas on how to design a unified search experience?
+- I am actually thinking about something else:
+
+We remove qbTree (keep the core functionality/UI code just in case we need it in the future, but make it dead code). And replace it with two sections: queries and filters.
+
+One query are simple text search just like a Google search UI. We support exact match for quoted string. When there are multiple words in a query, we search for item that has all of the words (AND operator).
+
+Different from Google search, we support saving a search, and save multiple searches. Results from different searches are OR-ed together.
+
+Filters differ from search in that they are pre-defined. To start, we have filters like (1) toggle whether display notes, toggle whether display pages, (2) a range slider for creation time, a range slider for modified time / referenced time, (3) a set of bubble toggle of list names, which are the lists the results belong to. When page toggle is selected, additional filters such as (1) boolean predicates (have highlights, visited multiple times, have children, etc) (2) range slider for attention such as like count.
+
+Conceptually, the time chart is a part of filters.
+
+The final UI looks something like this:
+
+[ "saved search 1"                      ] x
+[ "search 2"                            ] x
+[ // empty text input                   ] <save button>
+|             time chart                  |
+<filter icon>
+create time  ----------------*======*------
+(list-1)  (list-2)  (list-3)
+[x] note
+[ ] page
+
+Filters are hidden by default, controlled by the filter icon button.
+
+What do you think? Are there any flaws of this design I didn't think of?
+- > (3) If a user unchecks both, show nothing? Or treat it as "show all"?
+In fact, I want no surprises. Both toggled off means no result. Initially they are both toggled (show full results). The same logic applies to list filters. All list bubbles are selected by default (full results).
+
+> 4. Time chart ↔ time range sliders
+This is a great question. Actually, let's converge "visit" "create" "modify" into one "seen" concept. The time chart display all traces of items. And the sliders control first-seen and last-seen. They are not equivalent.
+
+> In the Google-like model, do you want -word syntax for exclusion?
+Keep a low-priority TODO, I believe this is a rarely used functionality.
+
+> 6. List filter in list context.
+In a specific list, we don't display the list itself in the filters. But we do need to display other lists that are parent of results because one page/note can belong to multiple lists.
+
+>A future title:foo prefix syntax could add it back if needed.
+Great idea, make it a TODO.
+
+One more thing. This time, we need to remove the old "Similar to pins", "Parents of pins", "Children of pins". Because that is a confusing mental model. But keep the core code to retrieve them, I might move this functionality to a different UI later.
+- > Time chart shows all traces but is not directly linked to sliders.
+Just making sure there is no misunderstanding. The time chart will show traces of all searched and filtered items. Using time chart to further filter does not change the other slider filters.
+
+In fact, I want to keep time chart in the bottom. That explains the pipeline order better. The UI will display searches, filters, then time chart. 
+- Run migration
+- Where are the filters? I didn't see any on UI
+- Do that
+- Are there E2E tests for the filters?
+- Go ahead
+- But it doesn't work: (1) There is no slider to slide (double ended sliders like the one in old qbTree), (2) Selecting a toggle removes all results. 
+- Reload token
+- Why E2E tests didn't catch the two issues?
+- Make sure the E2E tests are solid now
+- Reload token
+- /finish 
+- Do 1, 4, 5
+- Reload token
+- Save this. Then slightly rework list bubble filters. I want it all bubbles to be default off (meaning all results), when one or more bubbles are toggled, only lists belonging to those lists are shown.
+- no
+- continue

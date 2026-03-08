@@ -13,7 +13,7 @@ test.describe('Round-trip persistence', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [], parentList: 'list:system/root', childLists: [] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -100,7 +100,7 @@ test.describe('Accumulation correctness', () => {
     const files = [
       { path: 'settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:bulk'] } },
-      { path: 'lists/bulk.json', data: { slug: 'bulk', name: 'Bulk', timestamp: now, pins: [], qbTrees: [], parentList: 'list:system/root', childLists: [] } },
+      { path: 'lists/bulk.json', data: { slug: 'bulk', name: 'Bulk', timestamp: now, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: [] } },
       ...slugs.map((slug, i) => ({
         path: `pages/${slug}.json`,
         data: { slug, url: urls[i], title: `Page ${i}`, timestamp: now, parentIds: [], childIds: [] },
@@ -191,12 +191,12 @@ test.describe('Cross-entity interference', () => {
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:alpha', 'list:beta'] } },
       { path: 'lists/alpha.json', data: {
         slug: 'alpha', name: 'Alpha', timestamp: now,
-        pins: [{ id: `page:${slug}`, pinnedAt: now }], qbTrees: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/beta.json', data: {
         slug: 'beta', name: 'Beta', timestamp: now,
-        pins: [{ id: `page:${slug}`, pinnedAt: now }], qbTrees: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug}.json`, data: {
@@ -237,12 +237,12 @@ test.describe('Cross-entity interference', () => {
       }},
       { path: 'lists/doomed.json', data: {
         slug: 'doomed', name: 'Doomed', timestamp: now,
-        pins: [{ id: `page:${slug}`, pinnedAt: now }], qbTrees: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/safe.json', data: {
         slug: 'safe', name: 'Safe', timestamp: now,
-        pins: [{ id: `page:${slug}`, pinnedAt: now }], qbTrees: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug}.json`, data: {

@@ -712,7 +712,7 @@ class FileSystemStorage {
   }
 
   // Load the full self-describing entity for a single list.
-  // Returns { timestamp, id, name, qbTrees, pins: [...] }
+  // Returns { timestamp, id, name, savedSearches, pins: [...] }
   async loadListPinsEntity(listId) {
     const path = this.#resolveListPath(listId);
     try {
@@ -767,7 +767,7 @@ class FileSystemStorage {
     await this.#readMergeWriteList(path, { timestamp, pins });
   }
 
-  // Save list metadata (name, qbTrees) without touching pins.
+  // Save list metadata (name, savedSearches) without touching pins.
   // Read-merge-write to preserve existing pins.
   // If name changes, the file is renamed (old deleted, new created).
   async saveListMeta(listId, meta, timestamp = 0) {
@@ -792,7 +792,7 @@ class FileSystemStorage {
   }
 
   // Load metadata for all lists from lists/ files.
-  // Returns [{ slug, name, qbTrees, pins }] — skips explore, system/, and index/ files.
+  // Returns [{ slug, name, savedSearches, pins }] — skips explore, system/, and index/ files.
   // Filenames are always the list slug.
   async loadAllListMetadata() {
     if (!(await this.verifyPermission())) {
@@ -811,12 +811,11 @@ class FileSystemStorage {
           const listEntry = {
             slug,
             name: data.name || slug,
-            qbTrees: data.qbTrees || [],
+            savedSearches: data.savedSearches || [],
             pins: data.pins || [],
             parentList: data.parentList || null,
             childLists: data.childLists || [],
           };
-          if (data.autoEnabled) listEntry.autoEnabled = data.autoEnabled;
           if (data.deleted) listEntry.deleted = true;
           if (data.timestamp) listEntry.timestamp = data.timestamp;
           result.push(listEntry);

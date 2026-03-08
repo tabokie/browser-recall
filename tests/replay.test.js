@@ -299,7 +299,7 @@ describe('applyLogToPage — capture (via page)', () => {
 
 describe('applyLogToPins — list operations', () => {
   it('adds pins and preserves metadata', () => {
-    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Rust', qbTrees: [], pins: [{ id: 'page:old-slug', pinnedAt: 50 }] };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Rust', savedSearches: [], pins: [{ id: 'page:old-slug', pinnedAt: 50 }] };
     const entry = { timestamp: 100, action: 'list', id: 'uuid-1', op: 'add', ids: ['shallow:https://new.com'] };
     const result = applyLogToPins(entity, entry);
     expect(result.pins).toHaveLength(2);
@@ -351,7 +351,7 @@ describe('applyLogToPins — list operations', () => {
 
 describe('applyLogToPins — list_meta', () => {
   it('merges metadata fields and preserves pins', () => {
-    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Old Name', qbTrees: [], pins: [{ id: 'page:a-slug', pinnedAt: 50 }] };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Old Name', savedSearches: [], pins: [{ id: 'page:a-slug', pinnedAt: 50 }] };
     const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', name: 'New Name' };
     const result = applyLogToPins(entity, entry);
     expect(result.name).toBe('New Name');
@@ -360,51 +360,34 @@ describe('applyLogToPins — list_meta', () => {
     expect(result.timestamp).toBe(100);
   });
 
-  it('sets qbTrees', () => {
-    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Test', qbTrees: [], pins: [] };
-    const tree = { type: 'AND', children: [{ type: 'keyword', value: 'rust' }] };
-    const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', name: 'Test', qbTrees: [tree] };
+  it('sets savedSearches', () => {
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Test', savedSearches: [], pins: [] };
+    const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', name: 'Test', savedSearches: ['rust', 'wasm'] };
     const result = applyLogToPins(entity, entry);
-    expect(result.qbTrees).toEqual([tree]);
+    expect(result.savedSearches).toEqual(['rust', 'wasm']);
   });
 
   it('ignores wrong id', () => {
-    const entity = { timestamp: 0, slug: 'c1', name: 'Test', qbTrees: [], pins: [] };
+    const entity = { timestamp: 0, slug: 'c1', name: 'Test', savedSearches: [], pins: [] };
     const entry = { timestamp: 100, action: 'list_meta', id: 'c2', name: 'Updated' };
     const result = applyLogToPins(entity, entry);
     expect(result).toBe(entity);
   });
 
   it('is idempotent', () => {
-    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Test', qbTrees: [], pins: [] };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Test', savedSearches: [], pins: [] };
     const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', name: 'Updated' };
     const r1 = applyLogToPins(entity, entry);
     const r2 = applyLogToPins(r1, entry);
     expect(r2).toEqual(r1);
   });
 
-  it('stores autoEnabled map on entity', () => {
-    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Test', qbTrees: [], pins: [] };
-    const autoEnabled = { 'Top domains': false, 'Similar to pins': true };
-    const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', name: 'Test', autoEnabled };
-    const result = applyLogToPins(entity, entry);
-    expect(result.autoEnabled).toEqual(autoEnabled);
-  });
-
-  it('preserves existing autoEnabled when entry omits it', () => {
-    const existing = { 'Top domains': false };
-    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Test', qbTrees: [], autoEnabled: existing, pins: [] };
-    const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', name: 'Test' };
-    const result = applyLogToPins(entity, entry);
-    expect(result.autoEnabled).toEqual(existing);
-  });
-
   it('preserves existing name when entry omits it', () => {
-    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Keep Me', qbTrees: [], pins: [] };
-    const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', qbTrees: [{ type: 'AND' }] };
+    const entity = { timestamp: 0, slug: 'uuid-1', name: 'Keep Me', savedSearches: [], pins: [] };
+    const entry = { timestamp: 100, action: 'list_meta', id: 'uuid-1', savedSearches: ['react'] };
     const result = applyLogToPins(entity, entry);
     expect(result.name).toBe('Keep Me');
-    expect(result.qbTrees).toEqual([{ type: 'AND' }]);
+    expect(result.savedSearches).toEqual(['react']);
   });
 });
 
@@ -801,7 +784,7 @@ describe('effectOf scope', () => {
 
   it('list_meta with name change does not affect root (already has parent)', async () => {
     const root = { timestamp: 0, childLists: ['list:c1', 'list:c2'] };
-    const listEntity = { timestamp: 0, slug: 'c1', name: 'Old Name', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'Old Name', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: [] };
     const load = async (key) => {
       if (key === 'list:system/root') return root;
       if (key === 'list:c1') return listEntity;
@@ -839,13 +822,13 @@ describe('effectOf scope', () => {
 
   it('list_meta without reparent does not touch root when already has parent', async () => {
     const root = { timestamp: 0, childLists: ['list:c1'] };
-    const listEntity = { timestamp: 0, slug: 'c1', name: 'Same', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'Same', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: [] };
     const load = async (key) => {
       if (key === 'list:system/root') return root;
       if (key === 'list:c1') return listEntity;
       return null;
     };
-    const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'c1', name: 'Same', qbTrees: [{ type: 'AND' }] }, load);
+    const result = await effectOf({ timestamp: 100, action: 'list_meta', id: 'c1', name: 'Same', savedSearches: [{ type: 'AND' }] }, load);
     expect(Object.keys(result)).toEqual(['list:c1']);
   });
 
@@ -853,8 +836,8 @@ describe('effectOf scope', () => {
 
   it('reparent_list moves list from root to nested parent', async () => {
     const root = { timestamp: 0, childLists: ['list:parent', 'list:child'] };
-    const parentEntity = { timestamp: 0, slug: 'parent', name: 'Parent', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
-    const childEntity = { timestamp: 0, slug: 'child', name: 'Child', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const parentEntity = { timestamp: 0, slug: 'parent', name: 'Parent', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const childEntity = { timestamp: 0, slug: 'child', name: 'Child', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: [] };
     const load = async (key) => {
       if (key === 'list:system/root') return root;
       if (key === 'list:parent') return parentEntity;
@@ -876,7 +859,7 @@ describe('effectOf scope', () => {
 
   it('reparent_list reorders within the same parent', async () => {
     const root = { timestamp: 0, childLists: ['list:a', 'list:b', 'list:c'] };
-    const aEntity = { timestamp: 0, slug: 'a', name: 'A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const aEntity = { timestamp: 0, slug: 'a', name: 'A', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: [] };
     const load = async (key) => {
       if (key === 'list:system/root') return root;
       if (key === 'list:a') return aEntity;
@@ -891,7 +874,7 @@ describe('effectOf scope', () => {
 
   it('del_list removes entry from root childLists', async () => {
     const root = { timestamp: 0, childLists: ['list:c1', 'list:c2'] };
-    const listEntity = { timestamp: 0, slug: 'c1', name: 'A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'A', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: [] };
     const load = async (key) => {
       if (key === 'list:system/root') return root;
       if (key === 'list:c1') return listEntity;
@@ -903,7 +886,7 @@ describe('effectOf scope', () => {
 
   it('del_list adds list key to system/orphaned', async () => {
     const root = { timestamp: 0, childLists: ['list:c1'] };
-    const listEntity = { timestamp: 0, slug: 'c1', name: 'A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'A', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: [] };
     const load = async (key) => {
       if (key === 'list:system/root') return root;
       if (key === 'list:c1') return listEntity;
@@ -917,7 +900,7 @@ describe('effectOf scope', () => {
   it('del_list removes list from shallow page SPI lists', async () => {
     const root = { timestamp: 0, childLists: ['list:c1'] };
     const listEntity = {
-      timestamp: 0, slug: 'c1', name: 'A', qbTrees: [],
+      timestamp: 0, slug: 'c1', name: 'A', savedSearches: [],
       pins: [{ id: 'shallow:https://a.com', pinnedAt: 50 }],
       parentList: 'list:system/root', childLists: [],
     };
@@ -1012,7 +995,7 @@ describe('effectOf scope', () => {
     const pageA = { slug: 'a-slug', timestamp: 0, parentIds: ['list:c1', 'page:ref'], childIds: [] };
     const pageB = { slug: 'b-slug', timestamp: 0, parentIds: ['list:c1'], childIds: [] };
     const listEntity = {
-      timestamp: 0, slug: 'c1', name: 'A', qbTrees: [], pins: [
+      timestamp: 0, slug: 'c1', name: 'A', savedSearches: [], pins: [
         { id: 'page:a-slug', pinnedAt: 50 },
         { id: 'page:b-slug', pinnedAt: 60 },
       ],
@@ -1035,7 +1018,7 @@ describe('effectOf scope', () => {
 
   it('del_list skips shallow pins in parentIds cleanup', async () => {
     const listEntity = {
-      timestamp: 0, slug: 'c1', name: 'A', qbTrees: [],
+      timestamp: 0, slug: 'c1', name: 'A', savedSearches: [],
       pins: [{ id: 'shallow:https://a.com', pinnedAt: 50 }],
       parentList: 'list:system/root', childLists: [],
     };
@@ -1305,7 +1288,7 @@ describe('effectOf scope', () => {
 
   it('list action on orphaned list is a no-op', async () => {
     const orphaned = { timestamp: 50, keys: ['list:c1'] };
-    const listEntity = { timestamp: 0, slug: 'c1', name: 'Deleted', qbTrees: [], pins: [], deleted: true };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'Deleted', savedSearches: [], pins: [], deleted: true };
     const load = async (key) => {
       if (key === 'list:c1') return listEntity;
       if (key === 'list:system/orphaned') return orphaned;
@@ -1324,7 +1307,7 @@ describe('effectOf scope', () => {
 
   it('list_meta action on orphaned list is a no-op', async () => {
     const orphaned = { timestamp: 50, keys: ['list:c1'] };
-    const listEntity = { timestamp: 0, slug: 'c1', name: 'Deleted', qbTrees: [], pins: [], deleted: true, parentList: 'list:system/root', childLists: [] };
+    const listEntity = { timestamp: 0, slug: 'c1', name: 'Deleted', savedSearches: [], pins: [], deleted: true, parentList: 'list:system/root', childLists: [] };
     const root = { timestamp: 0, childLists: [] };
     const load = async (key) => {
       if (key === 'list:c1') return listEntity;
@@ -1366,9 +1349,9 @@ describe('effectOf scope', () => {
 
   it('reparent_list moves list between non-root parents', async () => {
     const root = { timestamp: 0, childLists: ['list:parent-a', 'list:parent-b'] };
-    const parentA = { timestamp: 0, slug: 'parent-a', name: 'Parent A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: ['list:child'] };
-    const parentB = { timestamp: 0, slug: 'parent-b', name: 'Parent B', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
-    const child = { timestamp: 0, slug: 'child', name: 'Child', qbTrees: [], pins: [], parentList: 'list:parent-a', childLists: [] };
+    const parentA = { timestamp: 0, slug: 'parent-a', name: 'Parent A', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: ['list:child'] };
+    const parentB = { timestamp: 0, slug: 'parent-b', name: 'Parent B', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const child = { timestamp: 0, slug: 'child', name: 'Child', savedSearches: [], pins: [], parentList: 'list:parent-a', childLists: [] };
     const load = async (key) => {
       if (key === 'list:system/root') return root;
       if (key === 'list:parent-a') return parentA;
@@ -1387,9 +1370,9 @@ describe('effectOf scope', () => {
 
   it('reparent_list reorders to front within same parent', async () => {
     const root = { timestamp: 0, childLists: ['list:a', 'list:b', 'list:c'] };
-    const a = { timestamp: 0, slug: 'a', name: 'A', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
-    const b = { timestamp: 0, slug: 'b', name: 'B', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
-    const c = { timestamp: 0, slug: 'c', name: 'C', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const a = { timestamp: 0, slug: 'a', name: 'A', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const b = { timestamp: 0, slug: 'b', name: 'B', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: [] };
+    const c = { timestamp: 0, slug: 'c', name: 'C', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: [] };
     const load = async (key) => {
       if (key === 'list:system/root') return root;
       if (key === 'list:a') return a;
@@ -1407,8 +1390,8 @@ describe('effectOf scope', () => {
 
   it('del_list with subtreeKeys soft-deletes entire subtree', async () => {
     const root = { timestamp: 0, childLists: ['list:parent', 'list:other'] };
-    const parent = { timestamp: 0, slug: 'parent', name: 'Parent', qbTrees: [], pins: [], parentList: 'list:system/root', childLists: ['list:child'] };
-    const child = { timestamp: 0, slug: 'child', name: 'Child', qbTrees: [], pins: [], parentList: 'list:parent', childLists: [] };
+    const parent = { timestamp: 0, slug: 'parent', name: 'Parent', savedSearches: [], pins: [], parentList: 'list:system/root', childLists: ['list:child'] };
+    const child = { timestamp: 0, slug: 'child', name: 'Child', savedSearches: [], pins: [], parentList: 'list:parent', childLists: [] };
     const load = async (key) => {
       if (key === 'list:system/root') return root;
       if (key === 'list:parent') return parent;
@@ -1453,7 +1436,7 @@ describe('effectOf scope', () => {
   it('del_list preserves full entity shape (parentList, childLists)', async () => {
     const root = { timestamp: 0, childLists: ['list:c1'] };
     const listEntity = {
-      timestamp: 0, slug: 'c1', name: 'Test', qbTrees: [], pins: [{ id: 'page:p1', pinnedAt: 50 }],
+      timestamp: 0, slug: 'c1', name: 'Test', savedSearches: [], pins: [{ id: 'page:p1', pinnedAt: 50 }],
       parentList: 'list:system/root', childLists: ['list:sub1'],
     };
     const load = async (key) => {
@@ -1660,7 +1643,7 @@ describe('defaultEntity', () => {
 
   it('returns list default with id', () => {
     const e = defaultEntity('list:uuid-1');
-    expect(e).toEqual({ timestamp: 0, slug: 'uuid-1', name: '', qbTrees: [], pins: [], parentList: null, childLists: [] });
+    expect(e).toEqual({ timestamp: 0, slug: 'uuid-1', name: '', savedSearches: [], pins: [], parentList: null, childLists: [] });
   });
 
   it('returns root default', () => {
@@ -1787,7 +1770,7 @@ describe('effectOf apply', () => {
   it('applies list entry to list entity', async () => {
     const entry = { timestamp: 100, action: 'list', id: 'c1', op: 'add', ids: ['page:a-slug'] };
     const result = await effectOf(entry, async (key) =>
-      key === 'list:c1' ? { timestamp: 0, slug: 'c1', name: 'Test', qbTrees: [], pins: [] } : null
+      key === 'list:c1' ? { timestamp: 0, slug: 'c1', name: 'Test', savedSearches: [], pins: [] } : null
     );
     expect(result['list:c1'].pins).toHaveLength(1);
     expect(result['list:c1'].pins[0].id).toBe('page:a-slug');
@@ -2109,7 +2092,7 @@ describe('page_checkpoint absorption upgrades list pins', () => {
   it('effectOf upgrades shallow: pin to page: in affected lists on page_checkpoint', async () => {
     // Setup: a list has a shallow pin, SPI has the entry with list membership
     const listEntity = {
-      timestamp: 50, slug: 'my-list', name: 'My List', qbTrees: [],
+      timestamp: 50, slug: 'my-list', name: 'My List', savedSearches: [],
       pins: [{ id: `shallow:${testUrl}`, pinnedAt: 50 }],
     };
     const spiEntity = {

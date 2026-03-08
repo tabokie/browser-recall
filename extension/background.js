@@ -1526,12 +1526,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             metaEntry.name = request.name;
             hasChange = true;
           }
-          if (request.qbTrees !== undefined && (!cached || JSON.stringify(cached.qbTrees) !== JSON.stringify(request.qbTrees))) {
-            metaEntry.qbTrees = request.qbTrees;
-            hasChange = true;
-          }
-          if (request.autoEnabled !== undefined && (!cached || JSON.stringify(cached.autoEnabled) !== JSON.stringify(request.autoEnabled))) {
-            metaEntry.autoEnabled = request.autoEnabled;
+          if (request.savedSearches !== undefined && (!cached || JSON.stringify(cached.savedSearches) !== JSON.stringify(request.savedSearches))) {
+            metaEntry.savedSearches = request.savedSearches;
             hasChange = true;
           }
           if (hasChange) {

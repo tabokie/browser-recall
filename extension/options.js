@@ -3,10 +3,8 @@
 import { FileSystemStorage } from './filesystem-storage.js';
 import init, { Interaction, SearchEngine, searchBatch } from './pkg/portal_extension.js';
 import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine, extractInteractionBuffer } from './search-helpers.js';
-import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, collectQbTrees, qbTreesChanged, isGatewayRoot, escapeHtml } from './utils.js';
-import { findRelatedPages } from './related-scoring.js';
+import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, savedSearchesChanged, isGatewayRoot, escapeHtml } from './utils.js';
 import { attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
-import { qbCreatePredicate, qbCreateOperator, qbCreatePlaceholder, qbFindNode, qbCollapseTree, qbFlattenSameOp, qbToTree, qbFlatten } from './qb-tree.js';
 import { initCharts, renderTimeChart, renderTimeChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './time-chart.js';
 import { VirtualScroller } from './virtual-scroller.js';
 import { entityTypeLabel } from './entity-types.js';
@@ -71,15 +69,20 @@ const EXPLORE_LIST_ID = 'explore';
 // Page data cached in chrome.storage.session (managed by background).
 // Keys: 'page:{slug}' for pages.
 
-// --- Query builder state ---
-let qbRoot = null;        // tree root (null = empty)
-let qbDebounceTimer = null;
-let savedExploreQbRoot = null;  // saved global explore QB state when viewing a list
-
-// --- Explore blocks state ---
-let exploreBlocks = []; // [{ id, type:'auto'|'manual', label, enabled, urls?:Set, tree? }]
-let exploreBlockIdCounter = 0;
-let activeBlockId = null; // which block's QB tree is currently being edited
+// --- Search/filter state ---
+let savedSearches = [];           // string[] — persisted to entity
+let currentSearchInput = '';      // unsaved draft (also participates in live search)
+let filterState = {
+  firstSeen: { lo: null, hi: null },  // null = unbounded (days ago)
+  lastSeen: { lo: null, hi: null },
+  lists: {},                      // { listSlug: true } — only stores enabled lists; empty = show all (no filter)
+  hasHighlights: null,            // null=any, true=require
+  visitedMultipleTimes: null,
+  hasChildren: null,
+  attentionRange: { lo: null, hi: null },
+};
+let filterVisible = false;
+let exploreDebounceTimer = null;
 
 const KEYWORD_FIELDS = ['title', 'url', 'captures', 'highlights', 'notes'];
 const KEYWORD_FIELD_LABELS = { title: 'Title', url: 'URL', captures: 'Captures', highlights: 'Highlights', notes: 'Notes' };
@@ -224,34 +227,6 @@ async function pipelinedSearch(query) {
   return allResults;
 }
 
-// --- Pre-compute captures matches for QB ---
-function extractCapturesQueries(node) {
-  const queries = new Set();
-  if (!node) return queries;
-  if (node.type === 'operator') {
-    for (const child of node.children) {
-      for (const q of extractCapturesQueries(child)) queries.add(q);
-    }
-    return queries;
-  }
-  if (node.predicateType === 'keyword' && node.value && node.value.trim()) {
-    const fields = normalizeFieldToArray(node.field);
-    if (fields.includes('captures')) {
-      queries.add(node.value.trim());
-    }
-  }
-  return queries;
-}
-
-async function precomputeCapturesMatches(queries) {
-  const cache = new Map();
-  for (const query of queries) {
-    const results = await pipelinedSearch(query);
-    const urlSet = new Set(results.map(r => r.url));
-    cache.set(query, urlSet);
-  }
-  return cache;
-}
 
 // --- Demand-loaded history ---
 
@@ -430,7 +405,6 @@ async function toggleResultPin(listId, url, title) {
 
 // --- Layout switching (list vs normal vs recycle bin) ---
 function showListLayout() {
-  saveExploreQbState();
   document.getElementById('timeChart').classList.remove('visible');
   document.getElementById('resultsWrapper').style.display = 'none';
   document.getElementById('listLayout').classList.add('visible');
@@ -442,11 +416,9 @@ function showNormalLayout() {
   document.getElementById('resultsWrapper').style.display = '';
   document.getElementById('listLayout').classList.remove('visible');
   document.getElementById('recycleBinLayout').classList.remove('visible');
-  restoreExploreQbState();
 }
 
 function showRecycleBinLayout() {
-  saveExploreQbState();
   document.getElementById('timeChart').classList.remove('visible');
   document.getElementById('resultsWrapper').style.display = 'none';
   document.getElementById('listLayout').classList.remove('visible');
@@ -543,17 +515,112 @@ async function updateRecycleBinBadge() {
   badge.textContent = count > 0 ? String(count) : '';
 }
 
-function saveExploreQbState() {
-  if (savedExploreQbRoot === null) {
-    savedExploreQbRoot = qbRoot;
+// Search parsing and matching functions
+
+function parseSearchWords(query) {
+  if (!query || !query.trim()) return [];
+  const words = [];
+  const re = /"([^"]+)"|(\S+)/g;
+  let m;
+  while ((m = re.exec(query)) !== null) {
+    if (m[1]) words.push({ q: m[1], exact: true });
+    else words.push({ q: m[2], exact: false });
   }
+  return words;
 }
 
-function restoreExploreQbState() {
-  if (savedExploreQbRoot !== null) {
-    qbRoot = savedExploreQbRoot;
-    savedExploreQbRoot = null;
+function wordsMatchItem(words, item) {
+  if (words.length === 0) return true;
+  return words.every(({ q, exact }) => {
+    const fields = [item.user_title, item.title, item.url];
+    return fields.some(f => {
+      if (!f) return false;
+      if (exact) return f.includes(q);
+      return f.toLowerCase().includes(q.toLowerCase());
+    });
+  });
+}
+
+function isDefaultFilterState(state) {
+  return state.firstSeen.lo === null && state.firstSeen.hi === null
+    && state.lastSeen.lo === null && state.lastSeen.hi === null
+    && Object.keys(state.lists || {}).length === 0
+    && state.hasHighlights === null && state.visitedMultipleTimes === null
+    && state.hasChildren === null
+    && state.attentionRange.lo === null && state.attentionRange.hi === null;
+}
+
+async function applyFilters(results) {
+  if (isDefaultFilterState(filterState)) return results;
+  const now = Date.now();
+  // Build list membership index if any list bubbles are enabled
+  const enabledLists = Object.entries(filterState.lists || {}).filter(([, v]) => v === true).map(([k]) => k);
+  let listIndex = null;
+  if (enabledLists.length > 0) {
+    listIndex = await buildListMembershipIndex();
   }
+  return results.filter(item => {
+    // List membership filter: when bubbles are active, only show items in at least one enabled list
+    if (listIndex && enabledLists.length > 0) {
+      const memberOf = listIndex.get(item.slug);
+      if (!memberOf || !enabledLists.some(ls => memberOf.has(ls))) return false;
+    }
+    // Time filters (days ago)
+    if (filterState.lastSeen.lo !== null || filterState.lastSeen.hi !== null) {
+      const lastTs = item.timestamps?.[0] || now;
+      const daysAgo = (now - lastTs) / 86400000;
+      if (filterState.lastSeen.lo !== null && daysAgo < filterState.lastSeen.lo) return false;
+      if (filterState.lastSeen.hi !== null && daysAgo > filterState.lastSeen.hi) return false;
+    }
+    if (filterState.firstSeen.lo !== null || filterState.firstSeen.hi !== null) {
+      const firstTs = item.firstTimestamp || item.timestamps?.[item.timestamps.length - 1] || now;
+      const daysAgo = (now - firstTs) / 86400000;
+      if (filterState.firstSeen.lo !== null && daysAgo < filterState.firstSeen.lo) return false;
+      if (filterState.firstSeen.hi !== null && daysAgo > filterState.firstSeen.hi) return false;
+    }
+    // Page-specific booleans
+    if (filterState.hasHighlights === true) {
+      if (!item.notes || !item.notes.some(n => n.excerpt !== null)) return false;
+    }
+    if (filterState.visitedMultipleTimes === true) {
+      if (!item.visitCount || item.visitCount <= 1) return false;
+    }
+    if (filterState.hasChildren === true) {
+      if (!item.childIds || item.childIds.length === 0) return false;
+    }
+    // Attention range (timeOnPage in seconds)
+    if (filterState.attentionRange.lo !== null || filterState.attentionRange.hi !== null) {
+      const tp = item.attDetail?.timeOnPage || item.timeOnPage || 0;
+      if (filterState.attentionRange.lo !== null && tp < filterState.attentionRange.lo) return false;
+      if (filterState.attentionRange.hi !== null && tp > filterState.attentionRange.hi) return false;
+    }
+    return true;
+  });
+}
+
+function saveFilterState() {
+  const key = activeView.type === 'explore' ? 'exploreFilterState' : 'listFilterState:' + activeView.id;
+  chrome.storage.session.set({ [key]: filterState });
+}
+
+async function loadFilterState() {
+  const key = activeView.type === 'explore' ? 'exploreFilterState' : 'listFilterState:' + activeView.id;
+  try {
+    const data = await chrome.storage.session.get(key);
+    if (data[key]) {
+      filterState = data[key];
+      return;
+    }
+  } catch { /* session miss */ }
+  filterState = {
+    firstSeen: { lo: null, hi: null },
+    lastSeen: { lo: null, hi: null },
+    lists: {},
+    hasHighlights: null,
+    visitedMultipleTimes: null,
+    hasChildren: null,
+    attentionRange: { lo: null, hi: null },
+  };
 }
 
 // --- Sort helpers ---
@@ -813,7 +880,7 @@ function refreshCurrentView() {
   if (activeView.type === 'category') {
     showCategory(activeView.value);
   } else if (activeView.type === 'list') {
-    showList({ slug: activeView.id, qbTrees: activeView.qbTrees, name: activeView.name });
+    showList({ slug: activeView.id, savedSearches: activeView.savedSearches, name: activeView.name });
   } else if (activeView.type === 'explore') {
     showExplore();
   } else if (activeView.type === 'recycle-bin') {
@@ -954,778 +1021,58 @@ function matchKeyword(item, field, value) {
   return false;
 }
 
-function matchSmartFilter(item, filterName) {
-  if (filterName === 'gateways') return isGatewayOrigin(item.url);
-  return false;
-}
-
-function matchRange(item, field, op, value, value2) {
-  const cfg = RANGE_CONFIGS[field];
-  let v = item[field] || 0;
-  if (cfg?.isDaysAgo) {
-    v = (Date.now() - v) / 86400000;
-  }
-  if (value != null && value2 != null) return v >= value && v <= value2;
-  return false;
-}
-
-// --- Query builder: Tree evaluation ---
-function isNodeConfigured(node) {
-  if (!node) return false;
-  if (node.type === 'operator') return node.children.some(c => isNodeConfigured(c));
-  if (!node.predicateType) return false;
-  if (node.predicateType === 'keyword') return !!(node.value && node.value.trim());
-  return true;
-}
-
-function evaluateNode(node, item) {
-  if (!isNodeConfigured(node)) return false;
-  if (node.type === 'operator') {
-    const configured = node.children.filter(c => isNodeConfigured(c));
-    if (configured.length === 0) return false;
-    if (node.op === 'OR')  return configured.some(c => evaluateNode(c, item));
-    if (node.op === 'AND') return configured.every(c => evaluateNode(c, item));
-  }
-  // Leaf predicate
-  let result = false;
-  if (node.predicateType === 'keyword')     result = matchKeyword(item, node.field, node.value);
-  else if (node.predicateType === 'smartFilter') result = matchSmartFilter(item, node.filter);
-  else if (node.predicateType === 'range')       result = matchRange(item, node.field, node.op, node.value, node.value2);
-  return node.negated ? !result : result;
-}
-
-// --- Query builder: Relevance scoring ---
-function keywordRelevance(item, field, value) {
-  if (!value) return 0;
-  const { q, exact } = parseKeywordQuery(value);
-  const fields = normalizeFieldToArray(field);
-  let score = 0;
-  if (fields.includes('title') && (textMatches(item.user_title, q, exact) || textMatches(item.title, q, exact))) score += 2.0;
-  if (fields.includes('url') && textMatches(item.url, q, exact)) score += 1.0;
-  if (fields.includes('captures')) {
-    const trimmed = value.trim();
-    if (capturesMatchCache && capturesMatchCache.has(trimmed)) {
-      if (capturesMatchCache.get(trimmed).has(item.url)) score += 1.0;
-    }
-  }
-  if (fields.includes('highlights') && item.notes && item.notes.some(n => {
-    if (n.excerpt === null) return false; // skip global notes
-    const quotes = Array.isArray(n.excerpt) ? n.excerpt : [n.excerpt || ''];
-    return quotes.some(t => textMatches(t, q, exact));
-  })) score += 1.5;
-  if (fields.includes('notes') && item.notes && item.notes.some(n => textMatches(n.note, q, exact))) score += 1.5;
-  return score;
-}
-
-function computeRelevance(node, item) {
-  if (!node) return 0;
-  if (node.type === 'operator') return node.children.reduce((sum, c) => sum + computeRelevance(c, item), 0);
-  if (node.predicateType === 'keyword' && node.value) return keywordRelevance(item, node.field, node.value);
-  return 0;
-}
-
-// --- Query builder: Tree helpers ---
-
-function treeHasKeyword(node) {
-  if (!node) return false;
-  if (node.type === 'operator') return node.children.some(c => treeHasKeyword(c));
-  return node.predicateType === 'keyword' && !!node.value;
-}
-
-function treeHasConfiguredPredicate(node) {
-  if (!node) return false;
-  if (node.type === 'operator') return node.children.some(c => treeHasConfiguredPredicate(c));
-  if (!node.predicateType) return false;
-  if (node.predicateType === 'keyword') return !!(node.value && node.value.trim());
-  return true;
-}
 
 // --- Query builder: Tree manipulation (n-ary operators) ---
-function qbInsertOnEdge(leafId, op) {
-  const placeholder = qbCreatePlaceholder(KEYWORD_FIELDS);
-  if (!qbRoot || qbRoot.id === leafId) {
-    // Root leaf — wrap in requested op
-    qbRoot = qbCreateOperator(op, [qbRoot || placeholder, qbCreatePlaceholder(KEYWORD_FIELDS)]);
-    renderQueryBuilder();
-    return;
-  }
-  const found = qbFindNode(qbRoot, leafId);
-  if (!found || !found.parent) return;
-  const parent = found.parent;
-  if (parent.op === op) {
-    // Same op as parent — add sibling next to this leaf
-    parent.children.splice(found.childIndex + 1, 0, placeholder);
-  } else {
-    // Different op — wrap each in its own parent-op group:
-    // e.g. "*" inside OR → AND(OR(leaf), OR(placeholder))
-    const leafGroup = qbCreateOperator(parent.op, [found.node]);
-    const phGroup = qbCreateOperator(parent.op, [placeholder]);
-    const wrapper = qbCreateOperator(op, [leafGroup, phGroup]);
-    parent.children[found.childIndex] = wrapper;
-  }
-  renderQueryBuilder();
-}
-
-// Add a new placeholder child to an existing operator node
-function qbAddChild(nodeId) {
-  const found = qbFindNode(qbRoot, nodeId);
-  if (!found) return;
-  const node = found.node;
-  if (node.type !== 'operator') return;
-  node.children.push(qbCreatePlaceholder(KEYWORD_FIELDS));
-  renderQueryBuilder();
-}
-
-function qbRemoveLeaf(nodeId) {
-  if (!qbRoot) return;
-  if (qbRoot.id === nodeId) {
-    qbRoot = qbCreatePlaceholder(KEYWORD_FIELDS);
-    renderQueryBuilder();
-    return;
-  }
-  const found = qbFindNode(qbRoot, nodeId);
-  if (!found?.parent) return;
-  found.parent.children.splice(found.childIndex, 1);
-  // Cascade collapse: single-child → unwrap, empty → remove
-  qbRoot = qbCollapseTree(qbRoot);
-  if (!qbRoot) qbRoot = qbCreatePlaceholder(KEYWORD_FIELDS); // only at root level
-  renderQueryBuilder();
-}
-
-function qbUpdateNode(nodeId, updates) {
-  const found = qbFindNode(qbRoot, nodeId);
-  if (found) Object.assign(found.node, updates);
-}
 
 // --- Stream-evaluate a qbTree against all JSONL files ---
 // Deduplicates per-day: the same URL visited on different days produces separate
 // results. Consumers must not assume results are unique by URL/slug.
-async function evaluateQueryStream(qbTree) {
-  const filesResp = await sendAction({ action: 'listInteractionFiles' });
-  const files = filesResp.files;
-  const notesMap = {};
-  await loadGatewayDomains();
 
-  const capturesQueries = extractCapturesQueries(qbTree);
-  if (capturesQueries.size > 0) {
-    capturesMatchCache = await precomputeCapturesMatches(capturesQueries);
-  } else {
-    capturesMatchCache = null;
-  }
 
-  // Merge today's entries (session cache has disk + undrained via addLog)
-  const todayEntries = await readCacheable('history:' + new Date().toISOString().slice(0, 10)) || [];
-  const interactionBuffer = todayEntries.filter(e => (e.action === 'page' || !e.action) && e.url);
-  const seenByDay = new Map(); // YYYYMMDD → Set<url>
-  const results = [];
-
-  function dayKey(ts) {
-    const d = new Date(ts);
-    return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
-  }
-
-  function tryAdd(item) {
-    const day = dayKey(item.timestamp);
-    if (!seenByDay.has(day)) seenByDay.set(day, new Set());
-    const daySet = seenByDay.get(day);
-    if (daySet.has(item.url)) return;
-    daySet.add(item.url);
-    const enriched = enrichSingle(item, notesMap);
-    if (evaluateNode(qbTree, enriched)) results.push(enriched);
-  }
-
-  // Process buffer entries first (newest)
-  for (const entry of interactionBuffer) tryAdd(entry);
-
-  for (let fi = 0; fi < files.length; fi += 10) {
-    const batchResp = await sendAction({ action: 'loadInteractionBatch', files: files.slice(fi, fi + 10) });
-    const batchItems = batchResp.interactions;
-    for (const item of batchItems) tryAdd(item);
-  }
-  return results;
-}
-
-// Enrich a single interaction for QB evaluation
-function enrichSingle(item, notesMap) {
-  const slug = item.slug || '';
-  const notes = (slug && notesMap && notesMap[slug]) || [];
-  const attScore = attentionStrength(item);
-  return {
-    url: item.url, title: item.title, user_title: item.user_title, slug, timestamps: [item.timestamp],
-    attScore, attDetail: item,
-    notes,
-    visitCount: 1,
-    lastVisit: item.timestamp,
-    firstVisit: item.timestamp,
-    timeOnPage: item.timeOnPage || 0,
-    scrollDepth: item.scrollDepth || 0,
-    clicks: item.clicks || 0,
-    intent: item.intent || '',
-  };
-}
-
-// --- Query builder: Query execution ---
-async function runQuery() {
-  const inList = activeView.type === 'list';
-
-  if (!qbRoot || (qbRoot.type === 'predicate' && qbRoot.predicateType === null) || !treeHasConfiguredPredicate(qbRoot)) {
-    if (inList) {
-      saveListBlockState();
-      const relatedContainer = document.getElementById('relatedResults');
-      relatedContainer.innerHTML = '<div class="no-results">Add filters to start querying</div>';
-      document.getElementById('relatedChart').classList.remove('visible');
-    } else {
-      displayMessage(!qbRoot || (qbRoot.type === 'predicate' && qbRoot.predicateType === null)
-        ? 'Add filters to start querying' : 'Configure at least one filter');
-    }
-    return;
-  }
-
-  if (!inList) renderResultsSkeleton();
-
-  const matched = await evaluateQueryStream(qbRoot);
-
-  if (inList) {
-    // Save updated qbTree to list storage
-    saveListBlockState();
-    runListExploreQuery(matched);
-    return;
-  }
-
-  if (matched.length === 0) {
-    displayMessage('No results match your query');
-    return;
-  }
-
-  const hasKeywords = treeHasKeyword(qbRoot);
-  const results = matched.map(item => ({
-    ...item,
-    relevance: hasKeywords ? computeRelevance(qbRoot, item) : 0,
-    notes: [], // will lazy-load on expand
-  }));
-
-  const effectiveSort = currentSortState.column ? currentSortState
-    : hasKeywords ? { column: 'relevance', direction: 'desc' }
-    : { column: 'lastVisit', direction: 'desc' };
-  const sorted = applySortOrder(results, effectiveSort);
-  const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
-  const maxRel = Math.max(...sorted.map(r => r.relevance), 0.001);
-
-  const normalized = sorted.map(r => ({
-    ...r,
-    relevance: hasKeywords ? r.relevance / maxRel : undefined,
-  }));
-
-  const vs = getOrCreateGlobalScroller();
-  vs._headerHtml = columnHeaderHtml('global', { hasPin: false, showRelevance: hasKeywords });
-  vs.setData(normalized, (r) =>
-    resultRowHtml(r.user_title || r.title, r.url, {
-      attScore: r.attScore, maxAtt, attDetail: r.attDetail,
-      notes: r.notes, timestamps: r.timestamps, context: 'global', relevance: r.relevance
-    })
-  );
-
-  // Render time chart for matched results
-  renderTimeChart(matched.map(r => ({ url: r.url, timestamp: r.lastVisit || Date.now(), attention: '' })));
-
-}
-
-function collectAutoEnabled(blocks) {
-  const map = {};
-  for (const block of blocks) {
-    if (block.type === 'auto') map[block.label] = block.enabled;
-  }
-  return map;
-}
-
-async function saveListBlockState() {
+async function saveSearchState() {
   const isExplore = activeView.type === 'explore';
   const isList = activeView.type === 'list';
   if (!isExplore && !isList) return;
 
-  const trees = collectQbTrees(exploreBlocks);
-  const autoEnabled = collectAutoEnabled(exploreBlocks);
-  const treesChanged = qbTreesChanged(activeView.qbTrees, trees);
-  const autoChanged = JSON.stringify(activeView.autoEnabled) !== JSON.stringify(autoEnabled);
-  if (!treesChanged && !autoChanged) return;
+  if (!savedSearchesChanged(activeView.savedSearches, savedSearches)) return;
 
-  activeView.qbTrees = trees;
-  activeView.autoEnabled = autoEnabled;
+  activeView.savedSearches = [...savedSearches];
   const listId = isExplore ? EXPLORE_LIST_ID : activeView.id;
   const name = activeView.name || null;
-  await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, qbTrees: trees, autoEnabled });
+  await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, savedSearches });
 }
 
-function runListExploreQuery(matched) {
-  const listId = activeView.id;
-  const pinnedSlugs = new Set((allListPins[listId] || []).map(p => slugFromPinId(p.id)));
-  const relatedContainer = document.getElementById('relatedResults');
-
-  if (!matched || matched.length === 0) {
-    relatedContainer.innerHTML = '<div class="no-results">No results match this query</div>';
-    document.getElementById('relatedChart').classList.remove('visible');
-    return;
-  }
-
-  // Filter out pinned results from explore
-  const exploreMatched = matched.filter(r => !pinnedSlugs.has(generateSlugFromUrl(r.url)));
-
-  if (exploreMatched.length === 0) {
-    relatedContainer.innerHTML = '<div class="no-results">All matching results are already pinned</div>';
-    document.getElementById('relatedChart').classList.remove('visible');
-    return;
-  }
-
-  const hasKeywords = treeHasKeyword(qbRoot);
-  const results = exploreMatched.map(item => ({
-    ...item,
-    relevance: hasKeywords ? computeRelevance(qbRoot, item) : 0,
-    notes: item.notes || [],
-  }));
-
-  const effectiveSort = relatedSortState.column ? relatedSortState
-    : hasKeywords ? { column: 'relevance', direction: 'desc' }
-    : { column: 'lastVisit', direction: 'desc' };
-  const sorted = applySortOrder(results, effectiveSort);
-  const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
-  const maxRel = Math.max(...sorted.map(r => r.relevance), 0.001);
-
-  const normalized = sorted.map(r => ({
-    ...r,
-    relevance: hasKeywords ? r.relevance / maxRel : undefined,
-  }));
-
-  const vs = getOrCreateRelatedScroller();
-  vs._headerHtml = columnHeaderHtml('related', { hasPin: true, showRelevance: hasKeywords });
-  vs.setData(normalized, (r) =>
-    resultRowHtml(r.user_title || r.title, r.url, {
-      pinned: isResultPinned(listId, r.url),
-      attScore: r.attScore, maxAtt, attDetail: r.attDetail,
-      notes: r.notes, timestamps: r.timestamps, context: 'related', relevance: r.relevance,
-    })
-  );
-  bindPinClicks(relatedContainer, listId);
-
-  // Time chart for explore results — use enriched data directly
-  const chartData = exploreMatched.map(r => ({ url: r.url, timestamp: r.lastVisit || Date.now(), attention: '' }));
-  renderTimeChartInto(
-    document.getElementById('relatedChart'),
-    document.getElementById('relatedChartBars'),
-    chartData,
-    'Explore results'
-  );
-  bindChartBarClick(document.getElementById('relatedChart'), document.getElementById('relatedResults'));
-
-}
 
 // --- Query builder: Rendering ---
-function getActiveQbBody() {
-  if (activeView.type === 'list') {
-    return document.getElementById('listQbBody');
-  }
-  return document.getElementById('qbBody');
-}
-
-function renderQueryBuilder() {
-  // In explore/list view, always use block layout
-  if (activeView.type === 'explore' || activeView.type === 'list') {
-    // Copy mutated qbRoot back to active block's tree
-    const block = exploreBlocks.find(b => b.id === activeBlockId);
-    if (block && block.type === 'manual') block.tree = qbRoot;
-    renderExploreBlocks();
-    saveListBlockState();
-    return;
-  }
-
-  const body = getActiveQbBody();
-  if (!body) return;
-
-  body.classList.add('qb-mode-pro');
-  body.innerHTML = renderTreeNodePro(qbRoot);
-  bindQueryBuilderEvents(body);
-}
-
-function renderPredicateInputs(node) {
-  const nodeId = node.id;
-
-  let html = `<select class="qb-type-select" data-node-id="${nodeId}">
-    <option value="keyword"${node.predicateType === 'keyword' || !node.predicateType ? ' selected' : ''}>Keyword</option>
-    <option value="smartFilter"${node.predicateType === 'smartFilter' ? ' selected' : ''}>Smart Filter</option>
-    <option value="range"${node.predicateType === 'range' ? ' selected' : ''}>Range</option>
-  </select>`;
-
-  if (node.predicateType === 'keyword' || !node.predicateType) {
-    const fields = normalizeFieldToArray(node.field);
-    const isAll = fields.length === KEYWORD_FIELDS.length;
-    const label = isAll ? 'All' : fields.map(f => KEYWORD_FIELD_LABELS[f] || f).join(', ');
-    html += `<div class="qb-field-multi" data-node-id="${nodeId}">`;
-    html += `<div class="qb-field-toggle">${escapeHtml(label)}</div>`;
-    html += `<div class="qb-field-dropdown">`;
-    html += `<label class="qb-field-option all-option"><input type="checkbox" value="all"${isAll ? ' checked' : ''}> All</label>`;
-    for (const f of KEYWORD_FIELDS) {
-      const checked = fields.includes(f);
-      html += `<label class="qb-field-option"><input type="checkbox" value="${f}"${checked ? ' checked' : ''}> ${KEYWORD_FIELD_LABELS[f]}</label>`;
-    }
-    html += `</div></div>`;
-    html += `<input type="text" class="qb-value-input" data-node-id="${nodeId}" placeholder="Search text..." value="${escapeHtml(node.value || '')}">`;
-  } else if (node.predicateType === 'smartFilter') {
-    const filter = node.filter || 'gateways';
-    html += `<select class="qb-filter-select" data-node-id="${nodeId}">
-      <option value="gateways"${filter === 'gateways' ? ' selected' : ''}>Gateways</option>
-    </select>`;
-  } else if (node.predicateType === 'range') {
-    const field = node.field || 'lastVisit';
-    const cfg = getRangeConfig(field);
-    const lo = node.value != null ? Math.max(node.value, cfg.min) : cfg.min;
-    const hi = node.value2 != null ? Math.min(node.value2, cfg.max) : cfg.max;
-    const range = cfg.max - cfg.min;
-    const loPercent = range > 0 ? ((lo - cfg.min) / range * 100) : 0;
-    const hiPercent = range > 0 ? ((cfg.max - hi) / range * 100) : 0;
-    html += `<select class="qb-range-field-select" data-node-id="${nodeId}">
-      <option value="lastVisit"${field === 'lastVisit' ? ' selected' : ''}>Last Visit</option>
-      <option value="firstVisit"${field === 'firstVisit' ? ' selected' : ''}>First Visit</option>
-      <option value="visitCount"${field === 'visitCount' ? ' selected' : ''}>Visit Count</option>
-      <option value="timeOnPage"${field === 'timeOnPage' ? ' selected' : ''}>Time on Page</option>
-      <option value="scrollDepth"${field === 'scrollDepth' ? ' selected' : ''}>Scroll Depth</option>
-      <option value="clicks"${field === 'clicks' ? ' selected' : ''}>Clicks</option>
-    </select>`;
-    html += `<div class="qb-dual-range" data-node-id="${nodeId}">
-      <span class="qb-dual-range-label qb-dual-range-lo-label">${cfg.format(lo)}</span>
-      <div class="qb-dual-range-track">
-        <div class="qb-dual-range-fill" style="left:${loPercent}%;right:${hiPercent}%"></div>
-        <input type="range" class="qb-dual-range-lo" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${lo}">
-        <input type="range" class="qb-dual-range-hi" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${hi}">
-      </div>
-      <span class="qb-dual-range-label qb-dual-range-hi-label">${cfg.format(hi)}</span>
-    </div>`;
-  }
-
-  return html;
-}
 
 
-function qbCountLeaves(node) {
-  if (!node) return 0;
-  if (node.type === 'predicate') return 1;
-  if (node.type === 'operator') return node.children.reduce((sum, c) => sum + qbCountLeaves(c), 0);
-  return 0;
-}
-
-function qbLeafButtons(depth, parentOp, singleLeafTree) {
-  if (depth === 0) {
-    // Single-node tree: only AND (use separate blocks for OR)
-    if (singleLeafTree) return ['AND'];
-    return ['OR', 'AND'];
-  }
-  // Always offer the opposite of parent — alternating pattern
-  // Same-op nesting would just merge into parent, so only opposite is useful
-  return parentOp === 'OR' ? ['AND'] : ['OR'];
-}
-
-function renderTreeNodePro(node, depth = 0, parentOp = null, singleLeafTree = null) {
-  if (!node) return '<span style="color:#9aa0a6;font-size:12px">empty</span>';
-  // Compute once at root level
-  if (singleLeafTree === null) singleLeafTree = qbCountLeaves(node) <= 1;
-
-  if (node.type === 'predicate') {
-    let html = `<div class="qt-leaf" data-node-id="${node.id}">`;
-    const buttons = qbLeafButtons(depth, parentOp, singleLeafTree);
-    html += `<div class="qt-edge-btns">`;
-    for (let bi = 0; bi < buttons.length; bi++) {
-      if (bi > 0) html += `<span class="qt-line"></span>`;
-      const btn = buttons[bi];
-      if (btn === 'OR') html += `<button class="qt-op-btn" data-leaf-id="${node.id}" data-op="OR" title="Add OR"><span class="qt-sym qt-sym-or"></span></button>`;
-      if (btn === 'AND') html += `<button class="qt-op-btn" data-leaf-id="${node.id}" data-op="AND" title="Add AND"><span class="qt-sym qt-sym-and"></span></button>`;
-    }
-    if (buttons.length > 0) html += `<span class="qt-line"></span>`;
-    const notActive = node.negated ? ' active' : '';
-    html += `<button class="qt-not-btn${notActive}" data-node-id="${node.id}" title="Negate"><span class="qt-sym qt-sym-not"></span></button>`;
-    html += `<span class="qt-line"></span>`;
-    html += `</div>`;
-    html += renderPredicateInputs(node);
-    // Hide remove button for the sole root placeholder (removing it just recreates it)
-    const isRootPlaceholder = depth === 0 && !parentOp && node.predicateType === null;
-    if (!isRootPlaceholder) {
-      html += `<button class="qb-remove-btn" data-node-id="${node.id}" title="Remove">&times;</button>`;
-    }
-    html += `</div>`;
-    return html;
-  }
-
-  if (node.type === 'operator') {
-    // Single-child: transparent wrapper — just render the child at depth+1
-    if (node.children.length === 1) {
-      return renderTreeNodePro(node.children[0], depth + 1, parentOp, singleLeafTree);
-    }
-    // Multi-child: branching operator — clickable to add another child
-    const opCls = node.op === 'OR' ? 'qt-sym-or' : 'qt-sym-and';
-    let html = `<div class="qt-op" data-node-id="${node.id}">`;
-    html += `<button class="qt-op-parent-btn" data-node-id="${node.id}" data-op="${node.op}" title="Add child"><span class="qt-sym ${opCls}"></span></button>`;
-    html += `<div class="qt-children">`;
-    for (const child of node.children) {
-      html += `<div class="qt-branch">${renderTreeNodePro(child, depth + 1, node.op, singleLeafTree)}</div>`;
-    }
-    html += `</div>`;
-    html += `</div>`;
-    return html;
-  }
-
-  return '';
-}
 
 
-function bindQueryBuilderEvents(body) {
-  // Type selector change
-  body.querySelectorAll('.qb-type-select').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const nodeId = parseInt(sel.dataset.nodeId);
-      const newType = sel.value || null;
-      const found = qbFindNode(qbRoot, nodeId);
-      if (!found) return;
-      // Reset the node to new type with defaults
-      found.node.predicateType = newType;
-      if (newType === 'keyword') {
-        found.node.field = [...KEYWORD_FIELDS];
-        found.node.value = '';
-        delete found.node.filter;
-        delete found.node.op;
-        delete found.node.value2;
-      } else if (newType === 'smartFilter') {
-        found.node.filter = 'gateways';
-        delete found.node.field;
-        delete found.node.value;
-        delete found.node.op;
-        delete found.node.value2;
-      } else if (newType === 'range') {
-        found.node.field = 'lastVisit';
-        found.node.op = 'between';
-        const cfg = getRangeConfig('lastVisit');
-        found.node.value = cfg.min;
-        found.node.value2 = cfg.max;
-        delete found.node.filter;
-      }
-      renderQueryBuilder();
-      debouncedRunQuery();
-    });
-  });
 
-  // Keyword field multi-select dropdown
-  body.querySelectorAll('.qb-field-multi').forEach(container => {
-    const nodeId = parseInt(container.dataset.nodeId);
-    const toggle = container.querySelector('.qb-field-toggle');
-    const dropdown = container.querySelector('.qb-field-dropdown');
-    const allCheckbox = dropdown.querySelector('input[value="all"]');
-    const fieldCheckboxes = [...dropdown.querySelectorAll('input:not([value="all"])')];
 
-    toggle.addEventListener('click', (e) => {
-      e.stopPropagation();
-      // Close other open dropdowns
-      body.querySelectorAll('.qb-field-dropdown.open').forEach(d => { if (d !== dropdown) d.classList.remove('open'); });
-      dropdown.classList.toggle('open');
-      if (dropdown.classList.contains('open')) {
-        const rect = toggle.getBoundingClientRect();
-        dropdown.style.top = rect.bottom + 2 + 'px';
-        dropdown.style.left = rect.left + 'px';
-      }
-    });
 
-    function syncFromCheckboxes() {
-      const selected = fieldCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
-      const isAll = selected.length === KEYWORD_FIELDS.length;
-      allCheckbox.checked = isAll;
-      toggle.textContent = isAll ? 'All' : (selected.length === 0 ? 'None' : selected.map(f => KEYWORD_FIELD_LABELS[f] || f).join(', '));
-      qbUpdateNode(nodeId, { field: isAll ? [...KEYWORD_FIELDS] : selected });
-    
-      debouncedRunQuery();
-    }
 
-    allCheckbox.addEventListener('change', (e) => {
-      e.stopPropagation();
-      fieldCheckboxes.forEach(cb => { cb.checked = allCheckbox.checked; });
-      syncFromCheckboxes();
-    });
-
-    fieldCheckboxes.forEach(cb => {
-      cb.addEventListener('change', (e) => {
-        e.stopPropagation();
-        syncFromCheckboxes();
-      });
-    });
-  });
-
-  // Close field dropdowns on outside click
-  function closeFieldDropdowns(e) {
-    if (!e.target.closest('.qb-field-multi')) {
-      body.querySelectorAll('.qb-field-dropdown.open').forEach(d => d.classList.remove('open'));
-    }
-  }
-  document.removeEventListener('click', body._closeFieldDropdowns);
-  body._closeFieldDropdowns = closeFieldDropdowns;
-  document.addEventListener('click', closeFieldDropdowns);
-
-  // Keyword value input
-  body.querySelectorAll('.qb-value-input').forEach(input => {
-    input.addEventListener('input', () => {
-      const nodeId = parseInt(input.dataset.nodeId);
-      qbUpdateNode(nodeId, { value: input.value });
-      debouncedRunQuery();
-    });
-  });
-
-  // Smart filter selector
-  body.querySelectorAll('.qb-filter-select').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const nodeId = parseInt(sel.dataset.nodeId);
-      qbUpdateNode(nodeId, { filter: sel.value });
-      debouncedRunQuery();
-    });
-  });
-
-  // Range field selector — reset slider bounds on field change
-  body.querySelectorAll('.qb-range-field-select').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const nodeId = parseInt(sel.dataset.nodeId);
-      const cfg = getRangeConfig(sel.value);
-      qbUpdateNode(nodeId, { field: sel.value, op: 'between', value: cfg.min, value2: cfg.max });
-      renderQueryBuilder();
-      debouncedRunQuery();
-    });
-  });
-
-  // Dual-range sliders
-  body.querySelectorAll('.qb-dual-range').forEach(container => {
-    const nodeId = parseInt(container.dataset.nodeId);
-    const loInput = container.querySelector('.qb-dual-range-lo');
-    const hiInput = container.querySelector('.qb-dual-range-hi');
-    const fill = container.querySelector('.qb-dual-range-fill');
-    const loLabel = container.querySelector('.qb-dual-range-lo-label');
-    const hiLabel = container.querySelector('.qb-dual-range-hi-label');
-    const min = parseFloat(loInput.min), max = parseFloat(loInput.max), range = max - min;
-
-    function updateSlider() {
-      let lo = parseFloat(loInput.value), hi = parseFloat(hiInput.value);
-      if (lo > hi) { const t = lo; lo = hi; hi = t; loInput.value = lo; hiInput.value = hi; }
-      fill.style.left = (range > 0 ? (lo - min) / range * 100 : 0) + '%';
-      fill.style.right = (range > 0 ? (max - hi) / range * 100 : 0) + '%';
-      const found = qbFindNode(qbRoot, nodeId);
-      if (found) {
-        const cfg = RANGE_CONFIGS[found.node.field || 'lastVisit'];
-        loLabel.textContent = cfg.format(lo);
-        hiLabel.textContent = cfg.format(hi);
-      }
-      qbUpdateNode(nodeId, { value: lo, value2: hi, op: 'between' });
-      debouncedRunQuery();
-    }
-    loInput.addEventListener('input', () => {
-      if (parseFloat(loInput.value) > parseFloat(hiInput.value)) loInput.value = hiInput.value;
-      updateSlider();
-    });
-    hiInput.addEventListener('input', () => {
-      if (parseFloat(hiInput.value) < parseFloat(loInput.value)) hiInput.value = loInput.value;
-      updateSlider();
-    });
-  });
-
-  // Remove button — use mousedown to avoid focus/blur swallowing the click
-  body.querySelectorAll('.qb-remove-btn').forEach(btn => {
-    btn.addEventListener('mousedown', (e) => {
-      e.preventDefault(); // prevent focus shift
-      const nodeId = parseInt(btn.dataset.nodeId);
-      qbRemoveLeaf(nodeId);
-      debouncedRunQuery();
-    });
-  });
-
-  // Leaf edge buttons (insert on edge)
-  body.querySelectorAll('.qt-op-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const leafId = parseInt(btn.dataset.leafId);
-      qbInsertOnEdge(leafId, btn.dataset.op);
-    });
-  });
-
-  // NOT toggle (negate leaf)
-  body.querySelectorAll('.qt-not-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const nodeId = parseInt(btn.dataset.nodeId);
-      const found = qbFindNode(qbRoot, nodeId);
-      if (found) {
-        found.node.negated = !found.node.negated;
-        btn.classList.toggle('active', found.node.negated);
-        debouncedRunQuery();
-      }
-    });
-  });
-
-  // Parent operator buttons (add child to existing operator)
-  body.querySelectorAll('.qt-op-parent-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const nodeId = parseInt(btn.dataset.nodeId);
-      qbAddChild(nodeId);
-    });
-  });
-
-}
-
-function debouncedRunQuery() {
-  if (qbDebounceTimer) clearTimeout(qbDebounceTimer);
-  qbDebounceTimer = setTimeout(() => {
-    // In explore/list view, always use block query
-    if (activeView.type === 'explore' || activeView.type === 'list') {
-      runExploreBlockQuery();
-    } else {
-      runQuery();
-    }
-  }, 300);
-}
 
 // Summarize a query tree into a short display name for lists
-function qbSummarize(node) {
-  if (!node) return 'Empty query';
-  if (node.type === 'predicate') {
-    if (node.predicateType === null) return '...';
-    if (node.predicateType === 'keyword') {
-      const fields = normalizeFieldToArray(node.field);
-      const isAll = fields.length === KEYWORD_FIELDS.length;
-      const prefix = isAll ? '' : fields.join('+') + ':';
-      return node.value ? `${prefix}"${node.value}"` : 'keyword';
-    }
-    if (node.predicateType === 'smartFilter') return node.filter || 'filter';
-    if (node.predicateType === 'range') {
-      const cfg = RANGE_CONFIGS[node.field];
-      const lo = node.value != null ? cfg.format(node.value) : '?';
-      const hi = node.value2 != null ? cfg.format(node.value2) : '?';
-      return `${node.field} ${lo}–${hi}`;
-    }
-    return '...';
-  }
-  if (node.type === 'operator') {
-    const parts = node.children.map(c => qbSummarize(c));
-    const full = parts.join(` ${node.op} `);
-    return full.length > 50 ? full.substring(0, 47) + '...' : full;
-  }
-  return 'query';
-}
 
 async function showExplore() {
   const _t0 = performance.now();
   const _timer = (label) => console.debug(`[explore-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
 
-  activeView = { type: 'explore', qbTrees: [], autoEnabled: {}, name: null };
+  activeView = { type: 'explore', savedSearches: [], name: null };
   updateSidebarActive();
   updateMainTitle('Explore');
   document.getElementById('pinSearchBtn').style.display = 'flex';
 
-  // Always use list layout with block-based explore
   showListLayout();
   renderListSkeleton();
 
   const listId = EXPLORE_LIST_ID;
-  // Load explore entity for pins + saved explore state
   const listEntity = await readCacheable('list:' + listId);
   allListPins[listId] = listEntity?.pins || [];
-  activeView.qbTrees = listEntity?.qbTrees || [];
-  activeView.autoEnabled = listEntity?.autoEnabled || {};
+  savedSearches = listEntity?.savedSearches || [];
+  activeView.savedSearches = [...savedSearches];
+  currentSearchInput = '';
   const pins = getExplorePins();
   _timer('load explore pins');
 
@@ -1763,44 +1110,20 @@ async function showExplore() {
     _timer('render pinned section');
   }
 
-  // Load history for block evaluation and fallback display
   await initHistoryFiles();
   _timer('initHistoryFiles');
   await loadHistoryBatch();
   _timer('loadHistoryBatch');
 
-  // Build auto-blocks from pins (empty array if no pins)
-  exploreBlocks = pins.length > 0 ? await buildExploreAutoBlocks(pins) : [];
-  _timer('buildExploreAutoBlocks');
-
-  // Restore saved block state from entity
-  if (activeView.autoEnabled) {
-    for (const block of exploreBlocks) {
-      if (block.type === 'auto' && activeView.autoEnabled[block.label] !== undefined) {
-        block.enabled = activeView.autoEnabled[block.label];
-      }
-    }
-  }
-  if (activeView.qbTrees && activeView.qbTrees.length > 0) {
-    for (const tree of activeView.qbTrees) {
-      exploreBlocks.push({
-        id: ++exploreBlockIdCounter,
-        type: 'manual',
-        label: 'Saved query',
-        enabled: true,
-        tree: JSON.parse(JSON.stringify(tree)),
-      });
-    }
-  }
-
-  renderExploreBlocks();
-  _timer('renderExploreBlocks');
-  runExploreBlockQuery();
-  _timer('runExploreBlockQuery (fired)');
+  await loadFilterState();
+  renderSearchPanel();
+  _timer('renderSearchPanel');
+  runSearchFilterPipeline();
+  _timer('runSearchFilterPipeline (fired)');
   document.body.dataset.ready = 'true';
 }
 
-// Incremental refresh after pin toggle — preserves scroll position and block selection state
+// Incremental refresh after pin toggle — preserves scroll position and search state
 async function refreshExplorePins() {
   const listId = EXPLORE_LIST_ID;
   const pins = getExplorePins();
@@ -1837,37 +1160,21 @@ async function refreshExplorePins() {
   }
 
   updateExploreBadge();
-
-  // Rebuild auto-blocks from new pins, preserving enabled/disabled state of existing blocks
-  const oldEnabledMap = new Map();
-  for (const block of exploreBlocks) {
-    oldEnabledMap.set(block.label, block.enabled);
-  }
-  // Keep manual blocks as-is
-  const manualBlocks = exploreBlocks.filter(b => b.type === 'manual');
-  const newAutoBlocks = pins.length > 0 ? await buildExploreAutoBlocks(pins) : [];
-  // Restore enabled state from old auto-blocks
-  for (const block of newAutoBlocks) {
-    if (oldEnabledMap.has(block.label)) {
-      block.enabled = oldEnabledMap.get(block.label);
-    }
-  }
-  exploreBlocks = [...newAutoBlocks, ...manualBlocks];
-  renderExploreBlocks();
-  runExploreBlockQuery();
+  runSearchFilterPipeline();
 }
 
 async function showList(list) {
-  // loadLists() returns { slug, name } only — load full entity for qbTrees
-  if (!list.qbTrees) {
+  // loadLists() returns { slug, name } only — load full entity for savedSearches
+  if (!list.savedSearches) {
     try {
       const entity = await readCacheable('list:' + list.slug);
-      if (entity?.qbTrees) list.qbTrees = entity.qbTrees;
-      if (entity?.autoEnabled) list.autoEnabled = entity.autoEnabled;
+      if (entity?.savedSearches) list.savedSearches = entity.savedSearches;
     } catch (err) { showErrorBubble(err.message); return; }
   }
   const displayName = listDisplayName(list);
-  activeView = { type: 'list', id: list.slug, qbTrees: list.qbTrees || [], autoEnabled: list.autoEnabled || {}, name: list.name || null };
+  activeView = { type: 'list', id: list.slug, savedSearches: list.savedSearches || [], name: list.name || null };
+  savedSearches = activeView.savedSearches ? [...activeView.savedSearches] : [];
+  currentSearchInput = '';
   updateSidebarActive();
   updateMainTitle(displayName);
   document.getElementById('pinSearchBtn').style.display = 'none';
@@ -1935,8 +1242,8 @@ async function showList(list) {
     // --- Pinned section: render directly from entity pins ---
     renderPinnedSection(pinsResolved.map(enrichResult), listId);
 
-    // --- Explore section: always immediate ---
-    renderListExplore(list);
+    // --- Explore section: search/filter panel ---
+    renderListSearchFilters(list);
 
     // Fire-and-forget: refresh pages in background and update pin file
     refreshListPages(listId, pins);
@@ -2024,40 +1331,13 @@ function renderPinnedSection(allPinned, listId) {
 
 // recalculateRelatedResults removed — pinned section no longer has related pages
 
-async function renderListExplore(list) {
-  const listId = list.slug;
-  const pins = allListPins[listId] || [];
-
-  // Load history for block evaluation
+async function renderListSearchFilters(list) {
   await initHistoryFiles();
   await loadHistoryBatch();
 
-  // Build auto-blocks from list pins
-  exploreBlocks = pins.length > 0 ? await buildExploreAutoBlocks(pins) : [];
-
-  // Restore autoEnabled flags on auto-blocks
-  const savedAutoEnabled = list.autoEnabled || activeView.autoEnabled || {};
-  for (const block of exploreBlocks) {
-    if (block.type === 'auto' && savedAutoEnabled[block.label] !== undefined) {
-      block.enabled = savedAutoEnabled[block.label];
-    }
-  }
-
-  // Add saved qbTrees as manual blocks if present
-  if (list.qbTrees && list.qbTrees.length > 0) {
-    for (const tree of list.qbTrees) {
-      exploreBlocks.push({
-        id: ++exploreBlockIdCounter,
-        type: 'manual',
-        label: 'Saved query',
-        enabled: true,
-        tree: JSON.parse(JSON.stringify(tree)),
-      });
-    }
-  }
-
-  renderExploreBlocks();
-  runExploreBlockQuery();
+  await loadFilterState();
+  renderSearchPanel();
+  runSearchFilterPipeline();
 }
 
 // Convert raw interactions to display entries with date-boundary dedup.
@@ -2132,6 +1412,29 @@ async function enrichFromEntityStorage(entries) {
       const spiEntry = spi?.index?.[entry.url];
       if (spiEntry?.title) entry.title = spiEntry.title;
       if (spiEntry?.user_title) entry.user_title = spiEntry.user_title;
+    }
+  }
+}
+
+// Enrich results with page entity fields needed by filters (notes, childIds, visitCount).
+// Only called when non-default filters are active.
+async function enrichForFilters(entries) {
+  const slugs = [...new Set(entries.map(r => r.slug).filter(Boolean))];
+  if (slugs.length === 0) return;
+  const loaded = await Promise.all(slugs.map(s => readCacheable('page:' + s)));
+  const pages = {};
+  for (let i = 0; i < slugs.length; i++) {
+    if (loaded[i]) pages[slugs[i]] = loaded[i];
+  }
+  for (const entry of entries) {
+    const page = pages[entry.slug];
+    if (!page) continue;
+    if (page.notes && page.notes.length > 0) entry.notes = page.notes;
+    if (page.childIds) entry.childIds = page.childIds;
+    // visitCount: count from historyAllEntries
+    if (entry.visitCount === undefined) {
+      const count = historyAllEntries.filter(h => h.url === entry.url).length;
+      entry.visitCount = count;
     }
   }
 }
@@ -2497,7 +1800,7 @@ function bindPinClicks(container, listId) {
     } else if (cid === EXPLORE_LIST_ID) {
       showExplore();
     } else {
-      const lst = { id: cid, qbTrees: activeView.qbTrees, name: activeView.name };
+      const lst = { id: cid, savedSearches: activeView.savedSearches, name: activeView.name };
       showList(lst);
     }
   });
@@ -2925,17 +2228,14 @@ async function saveExploreAsList() {
   if (activeView.type !== 'explore') return;
   const pins = getExplorePins();
 
-  // Collect manual block trees as qbTrees for the new list
-  const qbTrees = exploreBlocks
-    .filter(b => b.type === 'manual' && b.tree && treeHasConfiguredPredicate(b.tree))
-    .map(b => JSON.parse(JSON.stringify(b.tree)));
+  const newSavedSearches = [...savedSearches];
 
   enterTitleEditMode('', async (name) => {
     if (!name) return;
     try {
       const listId = generateSlugFromTitle(name);
-      const newList = { slug: listId, name, qbTrees };
-      await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, qbTrees });
+      const newList = { slug: listId, name, savedSearches: newSavedSearches };
+      await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, savedSearches: newSavedSearches });
       // Copy explore pins to the new list (if any)
       if (pins.length > 0) {
         await chrome.runtime.sendMessage({
@@ -3526,7 +2826,7 @@ chrome.runtime.onMessage.addListener((request) => {
       }
       if (changed) {
         if (activeView.type === 'explore' || activeView.type === 'list') {
-          runExploreBlockQuery();
+          runSearchFilterPipeline();
         } else {
           refreshCurrentView();
         }
@@ -3616,243 +2916,303 @@ function updateExploreBadge() {
 
 // --- Explore Blocks ---
 
-async function buildExploreAutoBlocks(pins) {
-  const pinnedSlugs = new Set(pins.map(p => slugFromPinId(p.id)));
 
-  // Load pages for all pins via readCacheable (session cache → filesystem fallback)
-  const pinSlugs = pins.map(p => slugFromPinId(p.id));
-  const pageData = {};
-  if (pinSlugs.length > 0) {
-    const loaded = await Promise.all(pinSlugs.map(s => readCacheable('page:' + s)));
-    for (let i = 0; i < pinSlugs.length; i++) {
-      if (loaded[i]) pageData['page:' + pinSlugs[i]] = loaded[i];
-    }
-  }
-
-  // Helper: resolve typed refs (page:<slug> | shallow:<url>) → URLs
-  async function resolveTypedRefs(refs) {
-    const urls = [];
-    const slugs = [];
-    for (const ref of refs) {
-      if (ref.startsWith('shallow:')) { urls.push(ref.slice(8)); continue; }
-      if (ref.startsWith('page:')) { slugs.push(ref.slice(5)); continue; }
-    }
-    if (slugs.length > 0) {
-      const loaded = await Promise.all(slugs.map(s => readCacheable('page:' + s)));
-      for (let i = 0; i < slugs.length; i++) {
-        if (loaded[i]?.url) urls.push(loaded[i].url);
-      }
-    }
-    return urls;
-  }
-
-  // Children of pins: from page.childIds (typed keys, filter out notes) + shallowPageIndex inverse
-  const allChildRefs = [];
-  for (const slug of pinSlugs) {
-    const page = pageData['page:' + slug];
-    if (page && page.childIds) {
-      for (const c of page.childIds) {
-        if (!c.startsWith('note:')) allChildRefs.push(c); // Skip note children
-      }
-    }
-  }
-  const resolvedChildUrls = await resolveTypedRefs(allChildRefs);
-  const childrenUrls = new Set(resolvedChildUrls.filter(u => !pinnedSlugs.has(generateSlugFromUrl(u))));
-  // Also check shallowPageIndex for non-checkpointed children
-  const spiData = await readCacheable('list:system/shallow-page');
-  const pinSlugSet = new Set(pinSlugs);
-  for (const [childUrl, entry] of Object.entries(spiData.index)) {
-    if (pinnedSlugs.has(generateSlugFromUrl(childUrl))) continue;
-    const parentIds = entry.parentIds || [];
-    if (parentIds.some(p => pinSlugSet.has(p.startsWith('page:') ? p.slice(5) : p))) childrenUrls.add(childUrl);
-  }
-
-  // Parents of pins: from page.parentIds (typed keys) + shallowPageIndex fallback
-  const allParentRefs = [];
-  for (let i = 0; i < pinSlugs.length; i++) {
-    const page = pageData['page:' + pinSlugs[i]];
-    if (page && page.parentIds && page.parentIds.length > 0) {
-      for (const p of page.parentIds) allParentRefs.push(p);
-    } else {
-      // Non-checkpointed pin: check shallowPageIndex for its parentIds
-      const pinUrl = pins[i].id.startsWith('shallow:') ? pins[i].id.slice(8) : (pageData['page:' + pinSlugs[i]]?.url || '');
-      const spiEntry = spiData.index[pinUrl];
-      if (spiEntry && spiEntry.parentIds) {
-        for (const ps of spiEntry.parentIds) allParentRefs.push(ps);
-      }
-    }
-  }
-  const resolvedParentUrls = await resolveTypedRefs(allParentRefs);
-  const parentUrls = new Set(resolvedParentUrls.filter(u => !pinnedSlugs.has(generateSlugFromUrl(u))));
-
-  // Similar to pins: use findRelatedPages
-  const allEnriched = Array.from(historyByUrl.values()).map(r => ({
-    ...r, timestamps: [r.timestamp || Date.now()], attScore: 0, attDetail: null, notes: [],
-  }));
-  const seedEnriched = allEnriched.filter(e => pinnedSlugs.has(generateSlugFromUrl(e.url)));
-  const candidateEnriched = allEnriched.filter(e => !pinnedSlugs.has(generateSlugFromUrl(e.url)));
-  const similarResults = findRelatedPages(seedEnriched, candidateEnriched, relatedPagesLimit);
-  const similarUrls = new Set(similarResults.map(r => r.url));
-
-  return [
-    {
-      id: ++exploreBlockIdCounter,
-      type: 'auto',
-      label: 'Children of pins',
-      enabled: false,
-      urls: childrenUrls,
-    },
-    {
-      id: ++exploreBlockIdCounter,
-      type: 'auto',
-      label: 'Parents of pins',
-      enabled: false,
-      urls: parentUrls,
-    },
-    {
-      id: ++exploreBlockIdCounter,
-      type: 'auto',
-      label: 'Similar to pins',
-      enabled: false,
-      urls: similarUrls,
-    },
-  ];
-}
-
-function renderExploreBlocks() {
+function renderSearchPanel() {
   const container = document.getElementById('listQueryBuilder');
   container.style.display = 'block';
 
-  let html = '<div class="explore-blocks">';
-
-  const eyeOpenSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-  const eyeClosedSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
   const removeSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+  const filterSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
 
-  for (const block of exploreBlocks) {
-    const enabledClass = block.enabled ? 'enabled' : 'disabled';
-    const blockClass = block.enabled ? '' : ' disabled';
-    const countLabel = '';
-
-    html += `<div class="explore-block${blockClass}" data-block-id="${block.id}">`;
-
-    // Left: full-height toggle
-    html += `<button class="explore-block-toggle ${enabledClass}" data-block-id="${block.id}" title="${block.enabled ? 'Disable' : 'Enable'}">${block.enabled ? eyeOpenSvg : eyeClosedSvg}</button>`;
-
-    // Middle: content
-    html += `<div class="explore-block-content">`;
-    html += `<span class="explore-block-label">${escapeHtml(block.label)} <span class="explore-block-count">${countLabel}</span></span>`;
-
-    if (block.type === 'manual' && block.tree) {
-      html += `<div class="explore-block-body">`;
-      html += `<div class="qb-body qb-mode-pro" data-block-id="${block.id}">`;
-      html += renderTreeNodePro(block.tree);
-      html += `</div></div>`;
-    }
-    html += `</div>`;
-
-    // Right: full-height remove (manual blocks only; auto blocks are derived from pins)
-    if (block.type === 'manual') {
-      html += `<button class="explore-block-remove" data-block-id="${block.id}" title="Remove">${removeSvg}</button>`;
-    }
-
+  let html = '<div class="search-filters-panel" id="searchFiltersPanel">';
+  html += '<div class="search-rows" id="searchRows">';
+  for (let i = 0; i < savedSearches.length; i++) {
+    html += `<div class="search-row" data-index="${i}">`;
+    html += `<input type="text" class="search-row-input" value="${escapeHtml(savedSearches[i])}" data-index="${i}">`;
+    html += `<button class="search-row-remove" data-index="${i}" title="Remove">${removeSvg}</button>`;
     html += `</div>`;
   }
-
-  html += `<button class="explore-add-block">+ Add query block</button>`;
+  html += '</div>';
+  html += '<div class="search-draft">';
+  html += `<input type="text" class="search-draft-input" id="searchDraftInput" placeholder="Search..." value="${escapeHtml(currentSearchInput)}">`;
+  html += '<button class="search-save-btn" id="searchSaveBtn" title="Save search">Save</button>';
+  html += `<button class="filter-toggle-btn${filterVisible ? ' active' : ''}${!isDefaultFilterState(filterState) ? ' has-filters' : ''}" id="filterToggleBtn" title="Filters">${filterSvg}</button>`;
   html += '</div>';
 
-  // Replace qb-header and qb-body with block layout
-  container.innerHTML = html;
+  // Filter panel
+  html += `<div class="filter-panel" id="filterPanel" style="display:${filterVisible ? 'block' : 'none'}">`;
+  html += renderFilterPanelHtml();
+  html += '</div>';
 
-  // Bind events
-  bindExploreBlockEvents(container);
+  html += '</div>';
+
+  container.innerHTML = html;
+  bindSearchEvents(container);
+  if (filterVisible) bindFilterEvents(container);
 }
 
-function bindExploreBlockEvents(container) {
-  // Toggle buttons
-  container.querySelectorAll('.explore-block-toggle').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const blockId = parseInt(btn.dataset.blockId);
-      const block = exploreBlocks.find(b => b.id === blockId);
-      if (!block) return;
-      block.enabled = !block.enabled;
-      renderExploreBlocks();
-      saveListBlockState();
-      runExploreBlockQuery();
+function renderFilterPanelHtml() {
+  let html = '';
+
+  // List membership bubbles
+  const lists = collectFilterLists();
+  if (lists.length > 0) {
+    html += '<div class="filter-section"><div class="filter-section-label">Lists</div>';
+    html += '<div class="filter-bubbles">';
+    for (const { slug, name } of lists) {
+      const active = filterState.lists?.[slug] === true;
+      html += `<button class="filter-bubble${active ? ' active' : ''}" data-list-slug="${escapeHtml(slug)}">${escapeHtml(name)}</button>`;
+    }
+    html += '</div></div>';
+  }
+
+  // Time filters
+  html += '<div class="filter-section"><div class="filter-section-label">Time</div>';
+  html += renderDualRangeFilter('lastSeen', 'Last seen', filterState.lastSeen);
+  html += renderDualRangeFilter('firstSeen', 'First seen', filterState.firstSeen);
+  html += '</div>';
+
+  // Page-specific booleans
+  html += '<div class="filter-section"><div class="filter-section-label">Page properties</div>';
+  html += '<div class="filter-checkboxes">';
+  html += renderCheckboxFilter('hasHighlights', 'Has highlights', filterState.hasHighlights);
+  html += renderCheckboxFilter('visitedMultipleTimes', 'Visited multiple times', filterState.visitedMultipleTimes);
+  html += renderCheckboxFilter('hasChildren', 'Has child pages', filterState.hasChildren);
+  html += '</div>';
+  html += '</div>';
+
+  // Attention range
+  html += '<div class="filter-section"><div class="filter-section-label">Attention</div>';
+  html += renderDualRangeFilter('attentionRange', 'Time on page', filterState.attentionRange, 'timeOnPage');
+  html += '</div>';
+
+  return html;
+}
+
+// Collect list names for filter bubbles. In list context, exclude the current list.
+function collectFilterLists() {
+  const lists = [];
+  function walk(nodes) {
+    for (const node of nodes) {
+      lists.push({ slug: node.slug, name: node.name });
+      if (node.children) walk(node.children);
+    }
+  }
+  walk(lastRenderedTree);
+  // In list view, exclude the active list
+  if (activeView.type === 'list') {
+    return lists.filter(l => l.slug !== activeView.id);
+  }
+  return lists;
+}
+
+// Build reverse index: slug → Set of list slugs.
+// Loads all list entities to get pins (allListPins may not have them all).
+async function buildListMembershipIndex() {
+  const index = new Map(); // slug → Set<listSlug>
+  const lists = collectFilterLists();
+  // Load entities for any lists not already in allListPins
+  const toLoad = lists.filter(l => !allListPins[l.slug]);
+  if (toLoad.length > 0) {
+    const loaded = await Promise.all(toLoad.map(l => readCacheable('list:' + l.slug)));
+    for (let i = 0; i < toLoad.length; i++) {
+      if (loaded[i]?.pins) allListPins[toLoad[i].slug] = loaded[i].pins;
+    }
+  }
+  for (const { slug: listSlug } of lists) {
+    const pins = allListPins[listSlug] || [];
+    for (const pin of pins) {
+      const slug = slugFromPinId(pin.id);
+      if (!slug) continue;
+      if (!index.has(slug)) index.set(slug, new Set());
+      index.get(slug).add(listSlug);
+    }
+  }
+  return index;
+}
+
+function renderDualRangeFilter(stateKey, label, state, rangeField) {
+  const field = rangeField || (stateKey === 'lastSeen' ? 'lastVisit' : stateKey === 'firstSeen' ? 'firstVisit' : 'timeOnPage');
+  const cfg = getRangeConfig(field);
+  const lo = state.lo !== null ? state.lo : cfg.min;
+  const hi = state.hi !== null ? state.hi : cfg.max;
+  const range = cfg.max - cfg.min;
+  const loPercent = range > 0 ? ((lo - cfg.min) / range) * 100 : 0;
+  const hiPercent = range > 0 ? ((cfg.max - hi) / range) * 100 : 0;
+
+  let html = `<div class="filter-range" data-key="${stateKey}">`;
+  html += `<span class="filter-range-label">${escapeHtml(label)}</span>`;
+  html += `<div class="qb-dual-range">`;
+  html += `<span class="qb-dual-range-label qb-dual-range-lo-label">${cfg.format(lo)}</span>`;
+  html += `<div class="qb-dual-range-track">`;
+  html += `<div class="qb-dual-range-fill" style="left:${loPercent}%;right:${hiPercent}%"></div>`;
+  html += `<input type="range" class="filter-range-lo" data-key="${stateKey}" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${lo}">`;
+  html += `<input type="range" class="filter-range-hi" data-key="${stateKey}" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${hi}">`;
+  html += `</div>`;
+  html += `<span class="qb-dual-range-label qb-dual-range-hi-label">${cfg.format(hi)}</span>`;
+  html += `</div></div>`;
+  return html;
+}
+
+function renderCheckboxFilter(stateKey, label, value) {
+  const checked = value === true ? ' checked' : '';
+  return `<label class="filter-checkbox"><input type="checkbox" data-key="${stateKey}"${checked}> ${escapeHtml(label)}</label>`;
+}
+
+function bindSearchEvents(container) {
+  // Saved search row inputs — edit inline
+  container.querySelectorAll('.search-row-input').forEach(input => {
+    input.addEventListener('input', () => {
+      const idx = parseInt(input.dataset.index);
+      savedSearches[idx] = input.value;
+      debouncedRunSearchPipeline();
+    });
+    input.addEventListener('change', () => {
+      saveSearchState();
     });
   });
 
   // Remove buttons
-  container.querySelectorAll('.explore-block-remove').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const blockId = parseInt(btn.dataset.blockId);
-      exploreBlocks = exploreBlocks.filter(b => b.id !== blockId);
-      renderExploreBlocks();
-      saveListBlockState();
-      runExploreBlockQuery();
+  container.querySelectorAll('.search-row-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.index);
+      savedSearches.splice(idx, 1);
+      renderSearchPanel();
+      saveSearchState();
+      debouncedRunSearchPipeline();
     });
   });
 
-  // Add block button
-  const addBtn = container.querySelector('.explore-add-block');
-  if (addBtn) {
-    addBtn.addEventListener('click', () => {
-      const newBlock = {
-        id: ++exploreBlockIdCounter,
-        type: 'manual',
-        label: 'Custom query',
-        enabled: true,
-        tree: qbCreatePlaceholder(KEYWORD_FIELDS),
-      };
-      exploreBlocks.push(newBlock);
-      renderExploreBlocks();
-      saveListBlockState();
+  // Draft input — live search
+  const draftInput = container.querySelector('#searchDraftInput');
+  if (draftInput) {
+    draftInput.addEventListener('input', () => {
+      currentSearchInput = draftInput.value;
+      debouncedRunSearchPipeline();
+    });
+    draftInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && draftInput.value.trim()) {
+        savedSearches.push(draftInput.value.trim());
+        currentSearchInput = '';
+        renderSearchPanel();
+        saveSearchState();
+        runSearchFilterPipeline();
+        // Focus the new draft input
+        container.querySelector('#searchDraftInput')?.focus();
+      }
     });
   }
 
-  // Bind QB events on each manual block's body
-  // For block-scoped QB, we swap qbRoot to the block's tree during event binding.
-  // The events that call qbUpdateNode/debouncedRunQuery will work because those
-  // search the tree for node IDs. The debouncedRunQuery checks the context.
-  // However, tree-structure mutations (insert/remove/add child) also call
-  // renderQueryBuilder() which we need to redirect to renderExploreBlocks().
-  container.querySelectorAll('.qb-body[data-block-id]').forEach(body => {
-    const blockId = parseInt(body.dataset.blockId);
-    const block = exploreBlocks.find(b => b.id === blockId);
-    if (!block || block.type !== 'manual') return;
+  // Save button
+  const saveBtn = container.querySelector('#searchSaveBtn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', () => {
+      const draftInput = container.querySelector('#searchDraftInput');
+      if (draftInput && draftInput.value.trim()) {
+        savedSearches.push(draftInput.value.trim());
+        currentSearchInput = '';
+        renderSearchPanel();
+        saveSearchState();
+        runSearchFilterPipeline();
+        container.querySelector('#searchDraftInput')?.focus();
+      }
+    });
+  }
 
-    // Swap qbRoot to block's tree for binding.
-    // QB mutation functions (qbInsertOnEdge, etc.) reference qbRoot globally.
-    // They call renderQueryBuilder() which checks the explore context and
-    // copies qbRoot back to the active block's tree.
-    const savedRoot = qbRoot;
-    qbRoot = block.tree;
-    activeBlockId = blockId;
-    bindQueryBuilderEvents(body);
-    qbRoot = savedRoot;
-    activeBlockId = null;
+  // Filter toggle
+  const filterBtn = container.querySelector('#filterToggleBtn');
+  if (filterBtn) {
+    filterBtn.addEventListener('click', () => {
+      filterVisible = !filterVisible;
+      const panel = container.querySelector('#filterPanel');
+      if (panel) {
+        panel.style.display = filterVisible ? 'block' : 'none';
+        filterBtn.classList.toggle('active', filterVisible);
+        if (filterVisible) bindFilterEvents(container);
+      }
+    });
+  }
+}
 
-    // Wrap the interactive elements to swap qbRoot before their handlers fire
-    body.addEventListener('click', () => { qbRoot = block.tree; activeBlockId = blockId; }, true);
-    body.addEventListener('mousedown', () => { qbRoot = block.tree; activeBlockId = blockId; }, true);
-    body.addEventListener('input', () => { qbRoot = block.tree; activeBlockId = blockId; }, true);
-    body.addEventListener('change', () => { qbRoot = block.tree; activeBlockId = blockId; }, true);
+function bindFilterEvents(container) {
+  // Dual-range sliders
+  container.querySelectorAll('.filter-range-lo, .filter-range-hi').forEach(input => {
+    input.addEventListener('input', () => {
+      const key = input.dataset.key;
+      const rangeDiv = input.closest('.filter-range');
+      const loInput = rangeDiv.querySelector('.filter-range-lo');
+      const hiInput = rangeDiv.querySelector('.filter-range-hi');
+      let lo = parseFloat(loInput.value);
+      let hi = parseFloat(hiInput.value);
+      // Prevent crossover
+      if (lo > hi) {
+        if (input.classList.contains('filter-range-lo')) { lo = hi; loInput.value = lo; }
+        else { hi = lo; hiInput.value = hi; }
+      }
+      const field = key === 'lastSeen' ? 'lastVisit' : key === 'firstSeen' ? 'firstVisit' : 'timeOnPage';
+      const cfg = getRangeConfig(field);
+      // Update fill bar
+      const fill = rangeDiv.querySelector('.qb-dual-range-fill');
+      if (fill) {
+        fill.style.left = ((lo - cfg.min) / (cfg.max - cfg.min)) * 100 + '%';
+        fill.style.right = (100 - ((hi - cfg.min) / (cfg.max - cfg.min)) * 100) + '%';
+      }
+      // Update labels
+      const loLabel = rangeDiv.querySelector('.qb-dual-range-lo-label');
+      const hiLabel = rangeDiv.querySelector('.qb-dual-range-hi-label');
+      if (loLabel) loLabel.textContent = cfg.format(lo);
+      if (hiLabel) hiLabel.textContent = cfg.format(hi);
+      // Update state: null if at boundary (= unbounded)
+      filterState[key] = {
+        lo: lo > cfg.min ? lo : null,
+        hi: hi < cfg.max ? hi : null,
+      };
+      saveFilterState();
+      debouncedRunSearchPipeline();
+    });
+  });
+
+  // Checkbox filters
+  container.querySelectorAll('.filter-checkbox input').forEach(input => {
+    input.addEventListener('change', () => {
+      const key = input.dataset.key;
+      filterState[key] = input.checked ? true : null;
+      saveFilterState();
+      // Update filter-toggle-btn indicator
+      const btn = container.querySelector('#filterToggleBtn');
+      if (btn) btn.classList.toggle('has-filters', !isDefaultFilterState(filterState));
+      debouncedRunSearchPipeline();
+    });
+  });
+
+  // List bubble toggles — default off (show all); click to enable (restrict to enabled lists)
+  container.querySelectorAll('.filter-bubble').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const slug = btn.dataset.listSlug;
+      if (!filterState.lists) filterState.lists = {};
+      if (filterState.lists[slug] === true) {
+        delete filterState.lists[slug]; // deactivate
+        btn.classList.remove('active');
+      } else {
+        filterState.lists[slug] = true; // activate
+        btn.classList.add('active');
+      }
+      saveFilterState();
+      const toggleBtn = container.querySelector('#filterToggleBtn');
+      if (toggleBtn) toggleBtn.classList.toggle('has-filters', !isDefaultFilterState(filterState));
+      debouncedRunSearchPipeline();
+    });
   });
 }
 
-let exploreBlockDebounceTimer = null;
-function debouncedRunExploreBlockQuery() {
-  if (exploreBlockDebounceTimer) clearTimeout(exploreBlockDebounceTimer);
-  exploreBlockDebounceTimer = setTimeout(() => runExploreBlockQuery(), 300);
+function debouncedRunSearchPipeline() {
+  if (exploreDebounceTimer) clearTimeout(exploreDebounceTimer);
+  exploreDebounceTimer = setTimeout(() => runSearchFilterPipeline(), 300);
 }
 
-async function runExploreBlockQuery() {
+async function runSearchFilterPipeline() {
   if (activeView.type !== 'explore' && activeView.type !== 'list') return;
 
-  // Derive pinned slugs and listId from active view
   let pinnedSlugs, listId;
   if (activeView.type === 'explore') {
     listId = EXPLORE_LIST_ID;
@@ -3860,66 +3220,48 @@ async function runExploreBlockQuery() {
   } else {
     listId = activeView.id;
     pinnedSlugs = new Set((allListPins[listId] || []).map(p => slugFromPinId(p.id)));
-    // Sync manual block trees to list's qbTrees (skips save if unchanged)
-    saveListBlockState();
   }
 
-  const enabledBlocks = exploreBlocks.filter(b => b.enabled);
+  // Collect all queries: saved searches + current draft
+  const allQueries = [...savedSearches];
+  if (currentSearchInput.trim()) allQueries.push(currentSearchInput.trim());
+
   let results;
   let showAllHistory = false;
 
-  if (enabledBlocks.length === 0) {
-    if (activeView.type === 'explore') {
-      // Explore: show entire history when no blocks enabled (date-boundary dedup)
-      showAllHistory = true;
-      results = processInteractionsForDisplay(
-        historyAllEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
-      ).map(item => ({ ...item, relevance: 0 }));
-      await enrichFromEntityStorage(results);
-    } else {
-      // List: show empty state when no blocks enabled
-      const relatedContainer = document.getElementById('relatedResults');
-      relatedContainer.innerHTML = '<div class="no-results">Enable a block or add a query</div>';
-      document.getElementById('relatedChart').classList.remove('visible');
-      return;
-    }
+  if (allQueries.length === 0 || allQueries.every(q => !q.trim())) {
+    // No search queries → show all history
+    showAllHistory = true;
+    results = processInteractionsForDisplay(
+      historyAllEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
+    ).map(item => ({ ...item, relevance: 0 }));
+    await enrichFromEntityStorage(results);
   } else {
-    const mergedUrls = new Set();
-
-    // Collect URLs from auto blocks
-    for (const block of enabledBlocks) {
-      if (block.type === 'auto' && block.urls) {
-        for (const url of block.urls) {
-          if (!pinnedSlugs.has(generateSlugFromUrl(url))) mergedUrls.add(url);
+    // OR across queries: item matches if ANY query matches (AND within each query)
+    const matchedUrls = new Set();
+    for (const query of allQueries) {
+      if (!query.trim()) continue;
+      const words = parseSearchWords(query);
+      for (const item of historyAllEntries) {
+        if (!item.url || pinnedSlugs.has(generateSlugFromUrl(item.url))) continue;
+        if (wordsMatchItem(words, item)) {
+          matchedUrls.add(item.url);
         }
       }
     }
 
-    // Evaluate manual blocks
-    let matchAll = false;
-    for (const block of enabledBlocks) {
-      if (block.type === 'manual') {
-        if (!block.tree || !treeHasConfiguredPredicate(block.tree)) {
-          // Uninitialized block = no filter = all history
-          matchAll = true;
-          showAllHistory = true;
-          break;
-        }
-        const matched = await evaluateQueryStream(block.tree);
-        for (const item of matched) {
-          if (!pinnedSlugs.has(generateSlugFromUrl(item.url))) mergedUrls.add(item.url);
-        }
-      }
-    }
-
-    // Build result items — global dedup for filtered results, day-wise for all-history
-    const filteredEntries = historyAllEntries.filter(item => {
-      if (!item.url || pinnedSlugs.has(generateSlugFromUrl(item.url))) return false;
-      return matchAll || mergedUrls.has(item.url);
-    });
-    results = processInteractionsForDisplay(filteredEntries, { globalDedup: !showAllHistory }).map(item => ({ ...item, relevance: 0 }));
+    const filteredEntries = historyAllEntries.filter(item =>
+      item.url && matchedUrls.has(item.url)
+    );
+    results = processInteractionsForDisplay(filteredEntries, { globalDedup: true }).map(item => ({ ...item, relevance: 0 }));
     await enrichFromEntityStorage(results);
   }
+
+  // Enrich with page entity data when filters need it, then apply filters
+  if (!isDefaultFilterState(filterState)) {
+    await enrichForFilters(results);
+  }
+  results = await applyFilters(results);
 
   const relatedContainer = document.getElementById('relatedResults');
   if (results.length === 0) {
@@ -4128,7 +3470,7 @@ function bindFocusContentDelegation(content) {
       if (activeView.type === 'explore') {
         refreshExplorePins();
       } else if (activeView.type === 'list') {
-        const lst = { id: cid, qbTrees: activeView.qbTrees, name: activeView.name };
+        const lst = { id: cid, savedSearches: activeView.savedSearches, name: activeView.name };
         showList(lst);
       }
       return;
@@ -4202,8 +3544,7 @@ async function initialize() {
   document.getElementById('historyFileBatch').value = historyFileBatch;
   _timer('loadSettings');
 
-  // Initialize query builder and chart tooltips
-  qbRoot = qbCreatePlaceholder(KEYWORD_FIELDS);
+  // Initialize chart tooltips
   initCharts();
   _timer('initCharts');
 

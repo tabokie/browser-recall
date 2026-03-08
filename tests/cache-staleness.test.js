@@ -339,7 +339,7 @@ describe('Cache staleness', () => {
               const listId = msg.key.slice('list:'.length);
               const list = TEST_LISTS.find(l => l.slug === listId);
               if (list) {
-                return { success: true, value: { ...list, pins: testListPins[listId] || [], qbTrees: list.qbTrees || [] } };
+                return { success: true, value: { ...list, pins: testListPins[listId] || [], savedSearches: list.savedSearches || [] } };
               }
               // Check dynamically-added lists in sessionData
               if (sessionData[msg.key]) {
@@ -368,10 +368,10 @@ describe('Cache staleness', () => {
     };
     // Individual list entity keys (include pins for session cache hits)
     for (const list of TEST_LISTS) {
-      sessionData['list:' + list.slug] = { ...list, pins: testListPins[list.slug] || [], qbTrees: list.qbTrees || [] };
+      sessionData['list:' + list.slug] = { ...list, pins: testListPins[list.slug] || [], savedSearches: list.savedSearches || [] };
     }
     // Explore list entity (system list used by Explore view)
-    sessionData['list:explore'] = { slug: 'explore', name: 'Explore', pins: testListPins['explore'] || [], qbTrees: [] };
+    sessionData['list:explore'] = { slug: 'explore', name: 'Explore', pins: testListPins['explore'] || [], savedSearches: [] };
     // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
     for (const [slug, url] of SLUG_TO_URL) {
       sessionData['page:' + slug] = { slug, url, watermark: 0 };
@@ -611,7 +611,7 @@ describe('Cache staleness', () => {
     testListPins['col-buf'] = [
       pinFromUrl('https://buffered.com/page1', NOW),
     ];
-    sessionData['list:col-buf'] = { slug: 'col-buf', query: '', name: 'Buffered', pins: testListPins['col-buf'], qbTrees: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:col-buf'] = { slug: 'col-buf', query: '', name: 'Buffered', pins: testListPins['col-buf'], savedSearches: [], parentList: 'list:system/root', childLists: [] };
     sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-buf'] };
 
     await importOptions();
@@ -627,11 +627,9 @@ describe('Cache staleness', () => {
     // Pinned section shows the pin
     expect(pinnedOnlyRows().length).toBe(1);
 
-    // Auto-blocks should include "Similar to pins" — the second buffered entry
-    // shares hostname (buffered.com) with the pin, so findRelatedPages finds it
-    const blockEls = document.querySelectorAll('.explore-block');
-    const blockLabels = [...blockEls].map(el => el.textContent.trim());
-    expect(blockLabels.some(l => l.includes('Similar to pins'))).toBe(true);
+    // Search panel should be rendered (no saved searches = shows all history)
+    const searchPanel = document.querySelector('.search-filters-panel');
+    expect(searchPanel).not.toBeNull();
   });
 
   // ---------------------------------------------------------------------------
@@ -654,10 +652,9 @@ describe('Cache staleness', () => {
     const pinnedRows = pinnedOnlyRows();
     expect(pinnedRows.length).toBe(2);
 
-    // Auto-blocks should include "Similar to pins" — example.com pins match history
-    const blockEls = document.querySelectorAll('.explore-block');
-    const blockLabels = [...blockEls].map(el => el.textContent.trim());
-    expect(blockLabels.some(l => l.includes('Similar to pins'))).toBe(true);
+    // Search panel should be rendered (no saved searches = shows all history)
+    const searchPanel = document.querySelector('.search-filters-panel');
+    expect(searchPanel).not.toBeNull();
   });
 
   // ---------------------------------------------------------------------------
@@ -699,7 +696,7 @@ describe('Cache staleness', () => {
     // col-noq has query '' and pins on example.com (same domain as history)
     // Give it a query so it goes through pipelinedSearch path
     // Override session cache with modified list (include pins)
-    sessionData['list:col-noq'] = { slug: 'col-noq', query: 'example', name: 'Example List', pins: testListPins['col-noq'] || [], qbTrees: [] };
+    sessionData['list:col-noq'] = { slug: 'col-noq', query: 'example', name: 'Example List', pins: testListPins['col-noq'] || [], savedSearches: [] };
 
     mockSearchBatchFn.mockImplementation(async () => {
       throw new Error('RuntimeError: memory access out of bounds');
@@ -718,9 +715,9 @@ describe('Cache staleness', () => {
     expect(pinnedOnlyRows().length).toBe(2);
 
     // Auto-blocks should include "Similar to pins" — hostname match with example.com history
-    const blockEls = document.querySelectorAll('.explore-block');
-    const blockLabels = [...blockEls].map(el => el.textContent.trim());
-    expect(blockLabels.some(l => l.includes('Similar to pins'))).toBe(true);
+    // Search panel should be rendered (no saved searches = shows all history)
+    const searchPanel = document.querySelector('.search-filters-panel');
+    expect(searchPanel).not.toBeNull();
   });
 
   // ---------------------------------------------------------------------------
@@ -741,7 +738,7 @@ describe('Cache staleness', () => {
     testListPins['col-today'] = [
       pinFromUrl('https://example.com/today0', NOW - DAY),
     ];
-    sessionData['list:col-today'] = { slug: 'col-today', query: 'today', name: 'Today Search', pins: testListPins['col-today'], qbTrees: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:col-today'] = { slug: 'col-today', query: 'today', name: 'Today Search', pins: testListPins['col-today'], savedSearches: [], parentList: 'list:system/root', childLists: [] };
     sessionData['list:system/root'] = { timestamp: 0, childLists: ['list:col-today'] };
 
     await importOptions();
@@ -913,45 +910,26 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T14: visibilitychange does not full-re-render explore view
   // ---------------------------------------------------------------------------
-  it('T14: visibilitychange preserves explore block state', async () => {
+  it('T14: visibilitychange preserves search panel state', async () => {
     populateCache();
-    // Add referrerIndex so auto-blocks "Children of pins" is non-empty
-    sessionData.referrerIndex = {
-      'https://explore.example.com/a': ['https://example.com/today0'],
-    };
 
     await importOptions();
     await tick(200);
 
     expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
 
-    // Verify auto-blocks were created (at least "Children of pins")
-    const blockEls = document.querySelectorAll('.explore-block');
-    expect(blockEls.length).toBeGreaterThan(0);
-
-    // All blocks start disabled
-    const toggleBtn = blockEls[0].querySelector('.explore-block-toggle');
-    expect(toggleBtn.classList.contains('disabled')).toBe(true);
-
-    // Enable the first block
-    toggleBtn.click();
-    await tick(200);
-
-    // Verify block is now enabled
-    const toggleAfterClick = document.querySelector('.explore-block .explore-block-toggle');
-    expect(toggleAfterClick.classList.contains('enabled')).toBe(true);
+    // Search panel should be rendered
+    const searchPanel = document.querySelector('.search-filters-panel');
+    expect(searchPanel).not.toBeNull();
 
     // Dispatch visibilitychange
     Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: true, configurable: true });
     document.dispatchEvent(new Event('visibilitychange'));
     await tick(500);
 
-    // Block should still be enabled (not reset by full re-render)
-    const toggleAfterVis = document.querySelector('.explore-block .explore-block-toggle');
-    expect(toggleAfterVis).not.toBeNull();
-    expect(toggleAfterVis.classList.contains('enabled'),
-      'block should still be enabled after visibilitychange'
-    ).toBe(true);
+    // Search panel should still be present after visibilitychange
+    const searchPanelAfter = document.querySelector('.search-filters-panel');
+    expect(searchPanelAfter).not.toBeNull();
   });
 
   // ---------------------------------------------------------------------------
@@ -1032,7 +1010,7 @@ describe('Cache staleness', () => {
     };
 
     // Add the shallow list to lists and list:system/root (include pins for session cache hit)
-    sessionData['list:' + TEST_LIST_WITH_SHALLOW.slug] = { ...TEST_LIST_WITH_SHALLOW, pins: testListPins['col-shallow'] || [], qbTrees: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:' + TEST_LIST_WITH_SHALLOW.slug] = { ...TEST_LIST_WITH_SHALLOW, pins: testListPins['col-shallow'] || [], savedSearches: [], parentList: 'list:system/root', childLists: [] };
     sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-shallow'] };
 
     await importOptions();
@@ -1071,7 +1049,7 @@ describe('Cache staleness', () => {
     testPageData[PAGE_SLUG] = { slug: PAGE_SLUG, url: PAGE_URL, title: PAGE_TITLE, watermark: 1 };
 
     // Do NOT put 'page:<slug>' in sessionData — simulating empty session cache
-    sessionData['list:' + TEST_LIST_UNCACHED.slug] = { ...TEST_LIST_UNCACHED, pins: testListPins['col-uncached'] || [], qbTrees: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:' + TEST_LIST_UNCACHED.slug] = { ...TEST_LIST_UNCACHED, pins: testListPins['col-uncached'] || [], savedSearches: [], parentList: 'list:system/root', childLists: [] };
     sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-uncached'] };
 
     await importOptions();
@@ -1111,7 +1089,7 @@ describe('Cache staleness', () => {
     };
 
     // Do NOT put shallowPageIndex in sessionData — simulating pre-hydration state
-    sessionData['list:' + TEST_LIST_SPI.slug] = { ...TEST_LIST_SPI, pins: testListPins['col-spi'], qbTrees: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:' + TEST_LIST_SPI.slug] = { ...TEST_LIST_SPI, pins: testListPins['col-spi'], savedSearches: [], parentList: 'list:system/root', childLists: [] };
     sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-spi'] };
 
     await importOptions();

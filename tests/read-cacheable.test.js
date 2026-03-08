@@ -104,7 +104,7 @@ describe('readCacheable / readFs', () => {
         return { success: true, timestamp: 0, origins: ['https://docs.rs'] };
       case 'loadListEntity':
         if (msg.listId === 'my-custom-list') {
-          return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] } };
+          return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', savedSearches: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] } };
         }
         if (msg.listId === 'system/root') {
           return { success: true, entity: { timestamp: 0, childLists: ['list:b', 'list:a'] } };
@@ -303,10 +303,10 @@ describe('readCacheable / readFs', () => {
   // ── #4: User list keys fall back to filesystem ─────────────────────
   it('falls back to filesystem for user list keys on session miss', async () => {
     const result = await readCacheable('list:my-custom-list');
-    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
+    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', savedSearches: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
     expect(offscreenCalls.some(c => c.action === 'loadListEntity' && c.listId === 'my-custom-list')).toBe(true);
     // Should be cached after first load
-    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', qbTrees: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
+    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', savedSearches: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
   });
 
   it('returns null for user list key that does not exist on disk', async () => {

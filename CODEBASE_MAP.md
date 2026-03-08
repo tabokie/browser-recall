@@ -35,7 +35,7 @@
 | `extension/search-helpers.js` | ~70 | `extractInteractionBuffer`, `mergeBufferIntoInteractions`, `getBufferContentMap`, `buildInteractionsForEngine` — pure helpers for flat log entries |
 | `src/lib.rs` | ~336 | WASM: `Interaction` struct, `InteractionData` (JSONL deser), `SearchResult`, `SearchEngine` with 5 ranking algorithms, `searchBatch` async fn (File System Access API bindings, reads JSONL + content directly, parallel search) |
 | `Cargo.toml` | 23 | Rust deps: wasm-bindgen, wasm-bindgen-futures, serde, js-sys, web-sys (console only) |
-| `tests/utils.test.js` | ~280 | Vitest: slug generation, collectQbTrees, qbTreesChanged, isGatewayRoot, readCacheable behavioral tests (session hit/miss, sendMessage fallback), loadSettingsValue defaultValue delegation |
+| `tests/utils.test.js` | ~280 | Vitest: slug generation, collectQbTrees, savedSearchesChanged, isGatewayRoot, readCacheable behavioral tests (session hit/miss, sendMessage fallback), loadSettingsValue defaultValue delegation |
 | `tests/replay.test.js` | ~1471 | Vitest: tests for replay.js — effectOf scope (which keys affected per action), effectOf apply (entity mutations per action), effectOf integration (drain simulations, round-cache, referrer wiring, absorption), per-entity appliers (settings, page parentIds/childIds/visitDates/capture/page_checkpoint/attention with typed refs, note parentIds wiring only, del_note unlinking + orphaned, pins with `{id, pinnedAt}` format and `entry.ids` + page parentIds updates, del_list with page parentIds/SPI cleanup + orphaned, shallowPage index tracking parents/lists/title); idempotency + sequence replay; entity storage title resolution (last-write-wins, buffer replay, user_title); page_checkpoint absorption with list pin upgrade (shallow:→page:) |
 | `tests/log-buffer.test.js` | ~160 | Vitest: 10 tests for background.js log buffer — appendLog, appendVisit, watermark pruning, SW restart recovery, mixed entry types |
 | `tests/search-helpers.test.js` | 144 | Vitest: merge + engine-builder tests (flat log entry format) |
@@ -139,7 +139,7 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **Buffer merge**: `search-helpers.js` `mergeBufferIntoInteractions()` — dedup by URL, sort by timestamp; `getBufferContentMap()` extracts buffer content separately
 
 ### Lists (Pinned Searches) — formerly "Collections" / "Topics"
-- **Storage**: Self-describing files `lists/{id}.json` — each file contains `{slug, timestamp, name, qbTrees: [...], pins: [{id, pinnedAt}, ...], parentList, childLists}`. Pin `id` is typed ref (`page:<slug>` or `shallow:<url>`). Tree structure rooted at `list:system/root` (entity with `childLists` array). Each list has `parentList` (parent key) and `childLists` (ordered child keys). Session cache hydrated from files by background.
+- **Storage**: Self-describing files `lists/{id}.json` — each file contains `{slug, timestamp, name, savedSearches: [...], pins: [{id, pinnedAt}, ...], parentList, childLists}`. Pin `id` is typed ref (`page:<slug>` or `shallow:<url>`). Tree structure rooted at `list:system/root` (entity with `childLists` array). Each list has `parentList` (parent key) and `childLists` (ordered child keys). Session cache hydrated from files by background.
 - **Display name**: `listDisplayName(list)` → `name || query`; `name` always present in self-describing files
 - **Create/update**: `options.js` sends `saveListMeta` message to background (which updates session cache + appends `list_meta` log entry); new lists auto-added to root's `childLists` by `effectOf`
 - **Delete**: `options.js` sends `deleteList` message to background (which collects subtree keys, removes from parent's `childLists` + appends `del_list` log entry with `subtreeKeys`; entire subtree soft-deleted)
@@ -150,38 +150,22 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **Title editing**: `options.js` `enterTitleEditMode()` — inline edit with confirm/cancel; used for pin naming and double-click rename
 - **List view**: `options.js` `showList()` — pinned section (no chart, no related), Explore section with interactive query builder; double-click title to rename
 - **Related pages scoring**: `related-scoring.js` `findRelatedPages(seeds, candidates, poolLimit)` — pool-based: processes seeds iteratively, fills shared pool up to configurable limit (default 50, settings `relatedPagesLimit`); weights: hostname 0.30, title 0.30, temporal 0.25, intent 0.15; imported by options.js (used by explore auto-blocks)
-- **List explore**: `options.js` `renderListExplore()` — builds auto-blocks from list pins (children/parents/similar) + saved qbTrees as manual blocks, uses same block-based UI as Explore
-- **QB context-aware**: `renderQueryBuilder()`/`debouncedRunQuery()` detect explore/list views and redirect to `renderExploreBlocks()`/`runExploreBlockQuery()`; `saveExploreQbState()`/`restoreExploreQbState()` swap global qbRoot on view transitions
+- **List explore**: `options.js` `renderListSearchFilters()` — renders search panel with saved searches, runs search/filter pipeline
+- **Search context-aware**: `debouncedRunQuery()` detects explore/list views and calls `runSearchFilterPipeline()`
 - **Popup list chips**: `popup.js` `renderListChips()` — shows top 5 most-recently-active lists as chips, `+` button opens search/create picker dropdown (`openListPicker()`)
 - **Popup list picker**: `popup.js` `openListPicker()` — dropdown with search input, filtered rows with checkmarks, create option for new names; `toggleListPin()`, `createListAndPin()` helpers
 
-### Explore View — Composable Query Builder
+### Explore View — Searches + Filters
 - **Explore button**: sidebar top, opens explore view (landing page — replaces History)
-- **Landing page**: always shows list layout with block-based query UI (add-block button); when no blocks enabled, shows entire history with demand-loading
-- **Query builder**: always tree mode (n-ary tree with AND/OR), no Normal/Pro toggle
-- **N-ary operators**: `{ type:'operator', op:'OR'|'AND', children:[...] }` — supports any number of children
-- **Alternating structure**: inserting different-op wraps with 2 levels (e.g. "*" inside OR → AND(OR(leaf, ph)))
-- **Predicate types**: keyword (field + text), smartFilter (gateways), range (field + op + value)
-- **Tree mode**: n-ary tree visualization, depth-based buttons: d0=both, d1-2=opposite, d3=same, d4+=none
-- **Tree ops**: `qbInsertOnEdge` (same=sibling, diff=2-level wrap), `qbRemoveLeaf` (cascade collapse), `qbCollapseTree`, `qbFlattenSameOp`
-- **Evaluation**: `evaluateNode(node, item)` recursively evaluates tree (children.some/every); `computeRelevance()` scores keyword matches
-- **Enrichment**: `enrichSingle(item, notesMap)` enriches a single interaction for QB evaluation; `evaluateQueryStream(qbTree)` streams through all JSONL files batch-by-batch, enriching and evaluating each entry
-- **Notes in search**: WASM engine returns relevance scores for note-related predicates directly
-- **List persistence**: `pinCurrentSearch()` deep-clones qbTrees; `showList()` evaluates saved qbTrees
-- **Entry**: `options.js` `showExplore()` — lazy-loads explore pins if missing from cache, landing page (all history if no pins, block-based queries if pins exist)
-- **State**: `qbRoot` (n-ary tree), `exploreBlocks` (array of query blocks), `exploreBlockIdCounter`, `activeBlockId`
-
-### Explore Block-Based Queries
-- **Data model**: `exploreBlocks = [{ id, type: 'auto'|'manual', label, enabled, tree, urlSet }]`
-- **Auto-blocks**: generated by `buildExploreAutoBlocks(pins)` from explore pins:
-  - "Children of pins": from each pin's `page.childIds` typed refs — `page:<slug>` resolved via `readCacheable`, `shallow:<url>` resolved via `shallowPageIndex`
-  - "Parents of pins": from each pin's `page.parentIds` typed refs — same resolution pattern
-  - "Similar to pins": URLs from `findRelatedPages()` with pins as seeds
-- **Manual blocks**: user-added, each with its own QB tree; edited via `renderQueryBuilder()` scoped per-block
-- **Rendering**: `renderExploreBlocks()` — block list with toggle (blue=enabled, gray=disabled), label, count badge, remove button; manual blocks show QB tree
-- **Events**: `bindExploreBlockEvents()` — toggle on/off, remove block, add new manual block, QB tree events scoped per-block (capture-phase listeners swap `qbRoot` to block's tree)
-- **Evaluation**: `runExploreBlockQuery()` — works for both explore and list views; ORs all enabled blocks (auto-blocks use `urlSet`, manual blocks use `evaluateQueryStream`), deduplicates, displays merged results; auto-saves list qbTrees from saved query blocks
-- **QB scoping**: when editing manual block QB, `qbRoot` is swapped to `block.tree`; on QB change, mutated tree is copied back; `debouncedRunQuery()` detects explore context and calls `runExploreBlockQuery()`
+- **Landing page**: list layout with search panel; no queries = shows all history with demand-loading
+- **Search model**: `savedSearches: string[]` persisted to entity, `currentSearchInput` for live draft; OR across queries, AND within each query (quoted exact match supported)
+- **Pipeline**: `runSearchFilterPipeline()` — collects saved + draft queries, OR-matches across history, `processInteractionsForDisplay()` → `enrichFromEntityStorage()` → render results + time chart
+- **Rendering**: `renderSearchPanel()` — saved search rows with edit/remove, draft input with save button
+- **Events**: `bindSearchEvents()` — inline edit, remove, draft input (Enter to save), debounced pipeline
+- **Persistence**: `saveSearchState()` — sends `savedSearches` via `saveListMeta` when changed
+- **State**: `savedSearches` (string[]), `currentSearchInput` (draft), `exploreDebounceTimer`
+- **Entry**: `options.js` `showExplore()` — loads explore pins, savedSearches from entity, renders search panel, runs pipeline
+- **List explore**: `renderListSearchFilters(list)` — same flow scoped to list
 
 ### Workspace / Private Mode
 - **State**: `settings.json` key `workspace` `{mode: 'default'|'workspace'|'private', listIds, autoSnapshot}`; cached in session as part of `settings` object
@@ -248,7 +232,7 @@ Lists                 ← section label
 - **Content**: `pages/{slug}/{timestamp}.md|.html` (versioned snapshots)
 - **Legacy**: `pages/{slug}.md` flat files coexist via fallback reads
 - **Notes**: `notes/{slug}.json` — per-note entity `{ slug, timestamp, excerpt, note, cssPath, parentIds, childIds }`; `loadPageNotes(pageSlug)` returns all notes whose parent is the given page
-- **List files**: `lists/{listId}.json` — self-describing entity `{ id, timestamp, name, qbTrees: [...], pins: [{id, pinnedAt}, ...] }`; pin `id` is typed ref (`page:<slug>` or `shallow:<url>`); `loadListPinsById(id)` returns just pins, `loadListPinsEntity(id)` returns full entity; `saveListPinsById(id, pins, timestamp)` preserves metadata (read-merge-write); `saveListMeta(id, meta, timestamp)` preserves pins; `loadAllListMetadata()` scans all files; `deleteListFile(id)` removes file
+- **List files**: `lists/{listId}.json` — self-describing entity `{ id, timestamp, name, savedSearches: [...], pins: [{id, pinnedAt}, ...] }`; pin `id` is typed ref (`page:<slug>` or `shallow:<url>`); `loadListPinsById(id)` returns just pins, `loadListPinsEntity(id)` returns full entity; `saveListPinsById(id, pins, timestamp)` preserves metadata (read-merge-write); `saveListMeta(id, meta, timestamp)` preserves pins; `loadAllListMetadata()` scans all files; `deleteListFile(id)` removes file
 - **Note deletion**: `deleteNote(slug)` — softDelete to `deleted/`
 - **Orphaned list**: `lists/system/orphaned.json` — `{ timestamp, keys: [...] }` — tracks deleted entity keys
 - **Settings**: `settings.json` — derived checkpoint with `timestamp` watermark
@@ -337,7 +321,7 @@ Visit entries contain url/title/slug/referrerId (typed ref, always `page:<slug>`
 
 ### List (in lists/{listId}.json — self-describing entity)
 ```json
-{ "id": "uuid", "timestamp": 0, "name": "Rust Lang", "qbTrees": [], "pins": [{ "id": "page:slug", "pinnedAt": 1234 }, { "id": "shallow:https://...", "pinnedAt": 1234 }] }
+{ "id": "uuid", "timestamp": 0, "name": "Rust Lang", "savedSearches": [], "pins": [{ "id": "page:slug", "pinnedAt": 1234 }, { "id": "shallow:https://...", "pinnedAt": 1234 }] }
 ```
 Pin `id` is a typed reference: `page:<slug>` for checkpointed pages, `shallow:<url>` for non-checkpointed pages.
 
@@ -373,7 +357,7 @@ Only checkpointed for pages with: rich data (notes/snapshots/reports), multi-day
 {"timestamp":1234,"action":"list","id":"uuid","op":"del","ids":["page:slug"]}
 {"timestamp":1234,"action":"list","id":"uuid","op":"clear","ids":[]}
 // List metadata
-{"timestamp":1234,"action":"list_meta","id":"uuid","name":"...","qbTrees":[]}
+{"timestamp":1234,"action":"list_meta","id":"uuid","name":"...","savedSearches":[]}
 // List delete
 {"timestamp":1234,"action":"del_list","id":"uuid"}
 ```

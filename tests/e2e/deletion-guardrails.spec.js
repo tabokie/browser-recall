@@ -102,7 +102,7 @@ test.describe('Deletion guardrails', () => {
       { path: 'settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:to-delete'] } },
       { path: 'lists/to-delete.json', data: {
-        slug: 'to-delete', name: 'To Delete', timestamp: now, pins: [], qbTrees: [],
+        slug: 'to-delete', name: 'To Delete', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
     ]);
@@ -134,7 +134,7 @@ test.describe('Deletion guardrails', () => {
       // Disk checkpoint already has deleted: true (written by previous drain)
       { path: 'lists/rehydrate-del.json', data: {
         slug: 'rehydrate-del', name: 'Rehydrate Del', timestamp: now,
-        pins: [], qbTrees: [], deleted: true,
+        pins: [], savedSearches: [], deleted: true,
       }},
       // Orphaned list tracks it
       { path: 'lists/system/orphaned.json', data: {
@@ -167,7 +167,7 @@ test.describe('Deletion guardrails', () => {
         timestamp: now, childLists: ['list:doomed'],
       }},
       { path: 'lists/doomed.json', data: {
-        slug: 'doomed', name: 'Doomed', timestamp: now, pins: [], qbTrees: [],
+        slug: 'doomed', name: 'Doomed', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${pageSlug}.json`, data: {

@@ -336,7 +336,7 @@ describe('Progressive loading', () => {
             // Return individual list entities by slug with pins
             for (const list of TEST_LISTS) {
               if (msg.key === 'list:' + list.slug) {
-                return { success: true, value: { ...list, pins: TEST_LIST_PINS[list.slug] || [], qbTrees: list.qbTrees || [] } };
+                return { success: true, value: { ...list, pins: TEST_LIST_PINS[list.slug] || [], savedSearches: list.savedSearches || [] } };
               }
             }
             return { success: true, value: undefined };
@@ -357,7 +357,7 @@ describe('Progressive loading', () => {
     };
     // Individual list entity keys (include pins for session cache hits)
     for (const list of TEST_LISTS) {
-      sessionData['list:' + list.slug] = { ...list, pins: TEST_LIST_PINS[list.slug] || [], qbTrees: list.qbTrees || [] };
+      sessionData['list:' + list.slug] = { ...list, pins: TEST_LIST_PINS[list.slug] || [], savedSearches: list.savedSearches || [] };
     }
     // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
     for (const [slug, url] of SLUG_TO_URL) {
@@ -581,9 +581,10 @@ describe('Progressive loading', () => {
     // from cached fields + pageReadCache, no blocking I/O).
     expect(pinnedOnlyRows().length).toBe(3);
 
-    // Explore section renders immediately (decoupled from pinned search)
-    // List has no qbTree and no enabled blocks, so shows empty-state prompt
-    expect(relatedResultsContent()).toContain('Enable a block or add a query');
+    // Explore section renders immediately (no saved searches = shows all history)
+    // Search panel should be visible
+    const searchPanel = document.querySelector('.search-filters-panel');
+    expect(searchPanel).not.toBeNull();
 
     // Clean up
     searchDeferred.resolve();
@@ -712,11 +713,8 @@ describe('Progressive loading', () => {
     // Phase 1: the single pin should render
     expect(pinnedOnlyRows().length).toBe(1);
 
-    // Auto-blocks should include "Similar to pins" — the pin on example.com
-    // shares hostname with loaded history, so findRelatedPages finds candidates.
-    // Blocks start disabled; verify they were created with matching URLs.
-    const blockEls = document.querySelectorAll('.explore-block');
-    const blockLabels = [...blockEls].map(el => el.textContent.trim());
-    expect(blockLabels.some(l => l.includes('Similar to pins'))).toBe(true);
+    // Search panel should be rendered (no saved searches = shows all history)
+    const searchPanel = document.querySelector('.search-filters-panel');
+    expect(searchPanel).not.toBeNull();
   });
 });

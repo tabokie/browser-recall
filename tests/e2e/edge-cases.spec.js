@@ -137,7 +137,7 @@ test.describe('Empty and edge states', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [], parentList: 'list:system/root', childLists: [] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: [] } },
       // No history, no page checkpoint — the URL has never been seen
     ]);
 
@@ -174,7 +174,7 @@ test.describe('Empty and edge states', () => {
         timestamp: now, childLists: ['list:empty'],
       }},
       { path: 'lists/empty.json', data: {
-        slug: 'empty', name: 'Empty List', timestamp: now, pins: [], qbTrees: [],
+        slug: 'empty', name: 'Empty List', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
     ]);
@@ -201,7 +201,7 @@ test.describe('Empty and edge states', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], qbTrees: [], parentList: 'list:system/root', childLists: [] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Complex URL Page', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -268,7 +268,7 @@ test.describe('Unicode and special characters', () => {
         timestamp: now, childLists: ['list:unicode-list'],
       }},
       { path: 'lists/unicode-list.json', data: {
-        slug: 'unicode-list', name, timestamp: now, pins: [], qbTrees: [],
+        slug: 'unicode-list', name, timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
     ]);

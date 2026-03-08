@@ -13,7 +13,7 @@ test.describe('Cross-context consistency', () => {
         timestamp: now, childLists: ['list:research'],
       }},
       { path: 'lists/research.json', data: {
-        slug: 'research', name: 'Research', timestamp: now, pins: [], qbTrees: [],
+        slug: 'research', name: 'Research', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {

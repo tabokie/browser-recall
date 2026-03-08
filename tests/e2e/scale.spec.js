@@ -105,7 +105,7 @@ test.describe('Scale — larger data sets', () => {
       }
       files.push({
         path: `lists/${listSlug}.json`,
-        data: { slug: listSlug, name: `List ${l}`, timestamp: now, pins, qbTrees: [], parentList: 'list:system/root', childLists: [] },
+        data: { slug: listSlug, name: `List ${l}`, timestamp: now, pins, savedSearches: [], parentList: 'list:system/root', childLists: [] },
       });
     }
 
@@ -162,7 +162,7 @@ test.describe('Scale — larger data sets', () => {
       }},
       { path: 'lists/research.json', data: {
         slug: 'research', name: 'Research', timestamp: now,
-        pins: [{ id: `page:${slug}`, pinnedAt: now }], qbTrees: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug}.json`, data: {
