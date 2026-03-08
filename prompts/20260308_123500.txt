@@ -1,0 +1,11 @@
+- Take a look at prompts/20260308_130000.txt. In the last session/commit, we didn't have time to finish the initial task around "note". Figure out the remaining tasks.
+- Do you think it is better to implement them in one shot, or split to multiple plan sessions?
+- Implement data layer now
+- When we delete a page, we set "page_json.deleted=true". We should do the same for note. You should also understand why we need this flag.
+Your reasoning around restore makes sense, but right now listPins are unused dead code. For now we can add a TODO to restore the original pin timestamp. You should add the TODO right now to restore_page context. And check that there is no similar dead code in del_page.
+- Data migration?
+- go
+- /finish 
+- n
+- n
+- continue

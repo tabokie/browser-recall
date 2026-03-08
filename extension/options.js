@@ -333,12 +333,13 @@ function pinIdToUrl(id) {
 function slugFromPinId(id) {
   if (id.startsWith('page:')) return id.slice(5);
   if (id.startsWith('shallow:')) return generateSlugFromUrl(id.slice(8));
+  if (id.startsWith('note:')) return id.slice(5);
 }
 
 // Resolve a typed page reference to entity-like data, or null.
 // page:<slug> → page entity from pageSnap. shallow:<url> → metadata from shallowPageIndex.
 // Unreferenced shallow pages return null.
-function resolvePageRef(refId, pageSnap, spi) {
+function resolvePageRef(refId, pageSnap, spi, noteSnap) {
   if (!refId) return null;
   if (refId.startsWith('page:')) {
     return pageSnap?.get(refId.slice(5)) || null;
@@ -349,6 +350,11 @@ function resolvePageRef(refId, pageSnap, spi) {
     if (!entry) return null;
     return { url, title: entry.title || null, user_title: entry.user_title || null, parentIds: entry.parentIds || [], lists: entry.lists || [] };
   }
+  if (refId.startsWith('note:')) {
+    const note = noteSnap?.get(refId.slice(5));
+    if (!note) return null;
+    return { url: null, title: note.excerpt || 'Note', user_title: null, isNote: true, note };
+  }
   return null;
 }
 
@@ -356,10 +362,12 @@ function resolvePageRef(refId, pageSnap, spi) {
 // Session cache first, filesystem fallback for page: slugs not in session.
 async function loadPinContext(pins) {
   const pagePinSlugs = [];
+  const notePinSlugs = [];
   for (const p of pins) {
     if (p.id?.startsWith('page:')) pagePinSlugs.push(p.id.slice(5));
+    else if (p.id?.startsWith('note:')) notePinSlugs.push(p.id.slice(5));
   }
-  const sessionKeys = [...pagePinSlugs.map(s => 'page:' + s), 'list:system/shallow-page'];
+  const sessionKeys = [...pagePinSlugs.map(s => 'page:' + s), ...notePinSlugs.map(s => 'note:' + s), 'list:system/shallow-page'];
   const sessionBatch = sessionKeys.length > 0 ? await chrome.storage.session.get(sessionKeys) : {};
   let spi = sessionBatch['list:system/shallow-page'];
   if (!spi) {
@@ -378,7 +386,20 @@ async function loadPinContext(pins) {
       if (pages[i]) pageSnap.set(missingSlugs[i], pages[i]);
     }
   }
-  return { pageSnap, spi };
+  const noteSnap = new Map();
+  const missingNoteSlugs = [];
+  for (const slug of notePinSlugs) {
+    const note = sessionBatch['note:' + slug];
+    if (note) noteSnap.set(slug, note);
+    else missingNoteSlugs.push(slug);
+  }
+  if (missingNoteSlugs.length > 0) {
+    const notes = await Promise.all(missingNoteSlugs.map(s => readCacheable('note:' + s)));
+    for (let i = 0; i < missingNoteSlugs.length; i++) {
+      if (notes[i]) noteSnap.set(missingNoteSlugs[i], notes[i]);
+    }
+  }
+  return { pageSnap, spi, noteSnap };
 }
 
 function isResultPinned(listId, url) {
@@ -1081,10 +1102,10 @@ async function showExplore() {
   if (pins.length === 0) {
     pinnedSection.style.display = 'none';
   } else {
-    const { pageSnap, spi } = await loadPinContext(pins);
+    const { pageSnap, spi, noteSnap } = await loadPinContext(pins);
     const pinsResolved = pins.map(p => {
-      const ref = resolvePageRef(p.id, pageSnap, spi);
-      return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null };
+      const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
+      return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null, isNote: ref?.isNote || false };
     });
 
     function enrichResult(r) {
@@ -1133,10 +1154,10 @@ async function refreshExplorePins() {
   if (pins.length === 0) {
     pinnedSection.style.display = 'none';
   } else {
-    const { pageSnap, spi } = await loadPinContext(pins);
+    const { pageSnap, spi, noteSnap } = await loadPinContext(pins);
     const pinsResolved = pins.map(p => {
-      const ref = resolvePageRef(p.id, pageSnap, spi);
-      return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null };
+      const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
+      return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null, isNote: ref?.isNote || false };
     });
     function enrichResult(r) {
       const slug = r.slug || generateSlugFromUrl(r.url);
@@ -1208,10 +1229,10 @@ async function showList(list) {
     allListPins[listId] = listEntity?.pins || [];
     const pins = allListPins[listId];
 
-    const { pageSnap, spi } = await loadPinContext(pins);
+    const { pageSnap, spi, noteSnap } = await loadPinContext(pins);
     const pinsResolved = pins.map(p => {
-      const ref = resolvePageRef(p.id, pageSnap, spi);
-      return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null };
+      const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
+      return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null, isNote: ref?.isNote || false };
     });
 
     // Enrich from cached pin fields + session page cache (no further I/O)
@@ -3368,9 +3389,9 @@ async function openListFocusPanel(listId, listName) {
       html += '<div class="focus-empty">No pinned pages</div>';
     } else {
       const maxAtt = 0.1;
-      const { pageSnap: fpSnap, spi: fpSpi } = await loadPinContext(pins);
+      const { pageSnap: fpSnap, spi: fpSpi, noteSnap: fpNoteSnap } = await loadPinContext(pins);
       html += pins.map(p => {
-        const ref = resolvePageRef(p.id, fpSnap, fpSpi);
+        const ref = resolvePageRef(p.id, fpSnap, fpSpi, fpNoteSnap);
         const title = ref?.user_title || ref?.title || 'Untitled';
         const url = ref?.url || '';
         return resultRowHtml(title, url, {

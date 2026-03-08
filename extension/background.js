@@ -1459,6 +1459,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'toggleListPin': {
           try {
             const { listId, url, id: requestId } = request;
+            // note: IDs (e.g. 'note:slug') are valid — passed directly as requestId.
             let pinId = requestId || (url ? await resolvePageId(url) : null);
             // Re-check shallow IDs — see resolveShallowIds comment.
             if (pinId?.startsWith('shallow:')) {
@@ -1572,9 +1573,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'restoreNote': {
           const noteSlug = request.noteSlug;
-          // Load note from disk to get its parentIds for re-linking
-          const noteResp = await requestOffscreen({ action: 'loadNote', noteSlug });
-          const noteData = noteResp.note;
+          // Use readCacheable with includeDeleted=true to get the most up-to-date
+          // entity (includes parentIds with list keys set by effectOf during drain/replay)
+          const noteData = await readCacheable('note:' + noteSlug, true);
           const parentIds = noteData?.parentIds || [];
           await addLog({
             timestamp: Date.now(),

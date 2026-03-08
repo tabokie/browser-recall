@@ -435,6 +435,10 @@ async function drainQueue() {
         } catch {
           roundCache.set(key, defaultEntity(key));
         }
+      } else if (key.startsWith('note:')) {
+        const slug = key.slice(5);
+        const note = await fsStorage.loadNote(slug);
+        roundCache.set(key, note || null);
       } else if (key === 'list:system/shallow-page') {
         try {
           roundCache.set(key, await fsStorage.loadShallowPageIndex());
@@ -500,6 +504,9 @@ async function drainQueue() {
       if (key.startsWith('page:')) {
         const slug = key.slice(5);
         await withLock('pages/' + slug + '.json', () => fsStorage.savePage(slug, entity));
+      } else if (key.startsWith('note:')) {
+        const slug = key.slice(5);
+        await withLock('notes/' + slug + '.json', () => fsStorage.saveNote(slug, entity));
       } else if (key === 'settings') {
         await withLock('settings.json', () => fsStorage.saveSettings(entity));
       } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {

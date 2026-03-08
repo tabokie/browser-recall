@@ -1033,6 +1033,145 @@ describe('effectOf scope', () => {
     expect(Object.keys(result).some(k => k.startsWith('page:'))).toBe(false);
   });
 
+  // --- list→note parentIds wiring ---
+
+  it('list op:add adds list key to pinned note parentIds', async () => {
+    const noteEntity = { slug: 'n1', timestamp: 0, parentIds: ['page:p1'], childIds: [] };
+    const load = async (key) => {
+      if (key === 'note:n1') return noteEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'list', id: 'my-list', op: 'add', ids: ['note:n1'] },
+      load,
+    );
+    expect(result['note:n1']).toBeTruthy();
+    expect(result['note:n1'].parentIds).toContain('list:my-list');
+    // Existing parentIds preserved
+    expect(result['note:n1'].parentIds).toContain('page:p1');
+  });
+
+  it('list op:del removes list key from note parentIds', async () => {
+    const noteEntity = { slug: 'n1', timestamp: 0, parentIds: ['page:p1', 'list:my-list'], childIds: [] };
+    const load = async (key) => {
+      if (key === 'note:n1') return noteEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'list', id: 'my-list', op: 'del', ids: ['note:n1'] },
+      load,
+    );
+    expect(result['note:n1']).toBeTruthy();
+    expect(result['note:n1'].parentIds).not.toContain('list:my-list');
+    expect(result['note:n1'].parentIds).toContain('page:p1');
+  });
+
+  it('del_list removes list key from all pinned note parentIds', async () => {
+    const pageA = { slug: 'a-slug', timestamp: 0, parentIds: ['list:c1'], childIds: [] };
+    const noteN = { slug: 'n1', timestamp: 0, parentIds: ['page:p1', 'list:c1'], childIds: [] };
+    const listEntity = {
+      timestamp: 0, slug: 'c1', name: 'A', savedSearches: [], pins: [
+        { id: 'page:a-slug', pinnedAt: 50 },
+        { id: 'note:n1', pinnedAt: 60 },
+      ],
+      parentList: 'list:system/root', childLists: [],
+    };
+    const root = { timestamp: 0, childLists: ['list:c1'] };
+    const load = async (key) => {
+      if (key === 'list:c1') return listEntity;
+      if (key === 'page:a-slug') return pageA;
+      if (key === 'note:n1') return noteN;
+      if (key === 'list:system/root') return root;
+      return null;
+    };
+    const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, load);
+    expect(result['page:a-slug'].parentIds).not.toContain('list:c1');
+    expect(result['note:n1'].parentIds).not.toContain('list:c1');
+    expect(result['note:n1'].parentIds).toContain('page:p1');
+  });
+
+  it('restore_list restores note parentIds for note pins', async () => {
+    const root = { timestamp: 0, childLists: [] };
+    const orphaned = { timestamp: 50, keys: ['list:c1'] };
+    const noteEntity = { slug: 'n1', timestamp: 0, parentIds: ['page:p1'], childIds: [] };
+    const load = async (key) => {
+      if (key === 'list:system/root') return root;
+      if (key === 'list:system/orphaned') return orphaned;
+      if (key === 'note:n1') return noteEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_list', id: 'c1', name: 'A', pins: [{ id: 'note:n1', pinnedAt: 50 }] },
+      load,
+    );
+    expect(result['note:n1'].parentIds).toContain('list:c1');
+    expect(result['note:n1'].parentIds).toContain('page:p1');
+  });
+
+  it('del_note sets deleted:true and removes note pin from lists', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['note:n1'] };
+    const noteEntity = { slug: 'n1', timestamp: 0, parentIds: ['page:p1', 'list:my-list'], childIds: [] };
+    const listEntity = {
+      timestamp: 0, slug: 'my-list', name: 'A', savedSearches: [],
+      pins: [{ id: 'note:n1', pinnedAt: 50 }, { id: 'page:p2', pinnedAt: 60 }],
+      parentList: 'list:system/root', childLists: [],
+    };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      if (key === 'note:n1') return noteEntity;
+      if (key === 'list:my-list') return listEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_note', slug: 'n1', parentIds: ['page:p1', 'list:my-list'] },
+      load,
+    );
+    // Note entity should be marked deleted
+    expect(result['note:n1'].deleted).toBe(true);
+    expect(result['note:n1'].timestamp).toBe(100);
+    // List should no longer have the note pin
+    expect(result['list:my-list'].pins.some(p => p.id === 'note:n1')).toBe(false);
+    // Other pins preserved
+    expect(result['list:my-list'].pins.some(p => p.id === 'page:p2')).toBe(true);
+    // Page childIds should have note removed
+    expect(result['page:p1'].childIds).not.toContain('note:n1');
+    // Orphaned
+    expect(result['list:system/orphaned'].keys).toContain('note:n1');
+  });
+
+  it('restore_note clears deleted flag and re-adds note pin to lists', async () => {
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: [] };
+    const noteEntity = { slug: 'n1', timestamp: 0, parentIds: ['page:p1', 'list:my-list'], childIds: [], deleted: true };
+    const listEntity = {
+      timestamp: 0, slug: 'my-list', name: 'A', savedSearches: [],
+      pins: [{ id: 'page:p2', pinnedAt: 60 }],
+      parentList: 'list:system/root', childLists: [],
+    };
+    const orphaned = { timestamp: 50, keys: ['note:n1'] };
+    const load = async (key) => {
+      if (key === 'page:p1') return pageEntity;
+      if (key === 'note:n1') return noteEntity;
+      if (key === 'list:my-list') return listEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_note', slug: 'n1', parentIds: ['page:p1', 'list:my-list'] },
+      load,
+    );
+    // Note entity should have deleted cleared
+    expect(result['note:n1'].deleted).toBe(false);
+    expect(result['note:n1'].timestamp).toBe(100);
+    // List should have note pin re-added
+    expect(result['list:my-list'].pins.some(p => p.id === 'note:n1')).toBe(true);
+    // Other pins preserved
+    expect(result['list:my-list'].pins.some(p => p.id === 'page:p2')).toBe(true);
+    // Page childIds should have note re-added
+    expect(result['page:p1'].childIds).toContain('note:n1');
+    // Un-orphaned
+    expect(result['list:system/orphaned'].keys).not.toContain('note:n1');
+  });
+
   it('affects page + shallow_page keys for page entry with title', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const result = await effectOf({ timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' }, nullLoad);

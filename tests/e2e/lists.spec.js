@@ -1396,4 +1396,206 @@ test.describe('List operations', () => {
     await helper.close();
     expect(root.value.childLists).toContain('list:parent');
   });
+
+  // --- Note-to-list pinning ---
+
+  const NOTE_SLUG = 'test-note-abc';
+
+  test('pin note via toggleListPin adds note to list and list to note parentIds', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
+      }},
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading', timestamp: now,
+        pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: `notes/${NOTE_SLUG}.json`, data: {
+        slug: NOTE_SLUG, excerpt: 'Test note', note: 'Content', cssPath: 'p',
+        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+      }},
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [`note:${NOTE_SLUG}`],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Pin note to the list
+    const pinResult = await helper.evaluate((noteId) =>
+      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'reading', id: noteId })
+    , `note:${NOTE_SLUG}`);
+    expect(pinResult.success).toBe(true);
+    expect(pinResult.pinned).toBe(true);
+
+    // List should have the note pin
+    const list = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+    );
+    expect(list.value.pins.some(p => p.id === `note:${NOTE_SLUG}`)).toBe(true);
+
+    // Note should have list:reading in parentIds
+    const note = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `note:${NOTE_SLUG}`);
+    await helper.close();
+
+    expect(note.value).toBeTruthy();
+    expect(note.value.parentIds).toContain('list:reading');
+  });
+
+  test('unpin note via toggleListPin removes note from list and list from note parentIds', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
+      }},
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading', timestamp: now,
+        pins: [{ id: `note:${NOTE_SLUG}`, pinnedAt: now }], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: `notes/${NOTE_SLUG}.json`, data: {
+        slug: NOTE_SLUG, excerpt: 'Test note', note: 'Content', cssPath: 'p',
+        parentIds: [`page:${TEST_SLUG}`, 'list:reading'], childIds: [], timestamp: now,
+      }},
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [`note:${NOTE_SLUG}`],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Unpin note from list (toggle)
+    const unpinResult = await helper.evaluate((noteId) =>
+      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'reading', id: noteId })
+    , `note:${NOTE_SLUG}`);
+    expect(unpinResult.success).toBe(true);
+    expect(unpinResult.pinned).toBe(false);
+
+    // List should no longer have the note pin
+    const list = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+    );
+    expect(list.value.pins.some(p => p.id === `note:${NOTE_SLUG}`)).toBe(false);
+
+    // Note should not have list:reading in parentIds
+    const note = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `note:${NOTE_SLUG}`);
+    await helper.close();
+
+    expect(note.value).toBeTruthy();
+    expect(note.value.parentIds).not.toContain('list:reading');
+  });
+
+  test('deleteNote removes note pin from list', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
+      }},
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading', timestamp: now,
+        pins: [{ id: `note:${NOTE_SLUG}`, pinnedAt: now }, { id: `page:${TEST_SLUG}`, pinnedAt: now }],
+        savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: `notes/${NOTE_SLUG}.json`, data: {
+        slug: NOTE_SLUG, excerpt: 'Doomed note', note: 'Content', cssPath: 'p',
+        parentIds: [`page:${TEST_SLUG}`, 'list:reading'], childIds: [], timestamp: now,
+      }},
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: ['list:reading'], childIds: [`note:${NOTE_SLUG}`],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Delete the note
+    await helper.evaluate((noteSlug) =>
+      chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug })
+    , NOTE_SLUG);
+
+    // List should no longer have the note pin (page pin preserved)
+    const list = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+    );
+    expect(list.value.pins.some(p => p.id === `note:${NOTE_SLUG}`)).toBe(false);
+    expect(list.value.pins.some(p => p.id === `page:${TEST_SLUG}`)).toBe(true);
+
+    // Note should be marked deleted
+    const note = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key, includeDeleted: true })
+    , `note:${NOTE_SLUG}`);
+    await helper.close();
+
+    expect(note.value).toBeTruthy();
+    expect(note.value.deleted).toBe(true);
+  });
+
+  test('restoreNote re-adds note pin to list', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] }},
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:reading'],
+      }},
+      { path: 'lists/system/orphaned.json', data: {
+        timestamp: now, keys: [`note:${NOTE_SLUG}`],
+      }},
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading', timestamp: now,
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: `notes/${NOTE_SLUG}.json`, data: {
+        slug: NOTE_SLUG, excerpt: 'Restore me', note: 'Content', cssPath: 'p',
+        parentIds: [`page:${TEST_SLUG}`, 'list:reading'], childIds: [], timestamp: now,
+        deleted: true,
+      }},
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: ['list:reading'], childIds: [],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Restore the note
+    await helper.evaluate((noteSlug) =>
+      chrome.runtime.sendMessage({ action: 'restoreNote', noteSlug })
+    , NOTE_SLUG);
+
+    // List should have note pin re-added
+    const list = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+    );
+    expect(list.value.pins.some(p => p.id === `note:${NOTE_SLUG}`)).toBe(true);
+    // Original page pin preserved
+    expect(list.value.pins.some(p => p.id === `page:${TEST_SLUG}`)).toBe(true);
+
+    // Note should no longer be deleted
+    const note = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `note:${NOTE_SLUG}`);
+
+    // Note should be un-orphaned
+    const orphaned = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+    );
+    await helper.close();
+
+    expect(note.value).toBeTruthy();
+    expect(note.value.deleted).toBe(false);
+    expect(orphaned.value.keys).not.toContain(`note:${NOTE_SLUG}`);
+  });
 });

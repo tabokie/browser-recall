@@ -251,6 +251,21 @@ export async function effectOf(entry, load) {
         }
         result[pageKey] = { ...page, parentIds };
       }
+
+      // note: pins — update note entity parentIds with list:<id>
+      const noteIds = entry.ids.filter(id => id.startsWith(NOTE_PREFIX));
+      for (const noteKey of noteIds) {
+        const note = await load(noteKey);
+        if (!note) continue;
+        const parentIds = [...(note.parentIds || [])];
+        if (entry.op === 'add') {
+          if (!parentIds.includes(listKey)) parentIds.push(listKey);
+        } else if (entry.op === 'del') {
+          const idx = parentIds.indexOf(listKey);
+          if (idx >= 0) parentIds.splice(idx, 1);
+        }
+        result[noteKey] = { ...note, parentIds };
+      }
     }
 
     // del_list → remove list:<id> from all pinned page parentIds + clean SPI + orphan
@@ -265,6 +280,11 @@ export async function effectOf(entry, load) {
           result[pin.id] = { ...page, parentIds };
         } else if (pin.id.startsWith(SHALLOW_PREFIX)) {
           shallowUrls.push(pin.id.slice(SHALLOW_PREFIX.length));
+        } else if (pin.id.startsWith(NOTE_PREFIX)) {
+          const note = await load(pin.id);
+          if (!note) continue;
+          const parentIds = (note.parentIds || []).filter(p => p !== listKey);
+          result[pin.id] = { ...note, parentIds };
         }
       }
       // Remove list from SPI lists for shallow pins
@@ -291,18 +311,47 @@ export async function effectOf(entry, load) {
     return result;
   }
 
-  // --- del_note: unlink note from parents + add to orphaned list ---
+  // --- del_note: unlink from pages, remove list pins, set deleted, orphan ---
   if (entry.action === 'del_note') {
     const noteKey = `${NOTE_PREFIX}${entry.slug}`;
-    await unlinkChild(noteKey, entry.parentIds);
+    // Unlink from parent pages
+    const pageParents = (entry.parentIds || []).filter(p => p.startsWith(PAGE_PREFIX));
+    await unlinkChild(noteKey, pageParents);
+    // Remove note pin from lists
+    const listParents = (entry.parentIds || []).filter(p => p.startsWith('list:') && !p.startsWith('list:system/'));
+    for (const lk of listParents) {
+      const list = await load(lk);
+      if (!list) continue;
+      result[lk] = { ...list, pins: (list.pins || []).filter(p => p.id !== noteKey) };
+    }
+    // Mark deleted (note entity retains parentIds for restore)
+    const note = await loadOrDefault(noteKey, load);
+    result[noteKey] = { ...note, deleted: true, timestamp: entry.timestamp };
     await orphan(noteKey, entry.timestamp);
     return result;
   }
 
-  // --- restore_note: re-link note to parents + remove from orphaned list ---
+  // --- restore_note: re-link to pages, re-add list pins, clear deleted, unorphan ---
   if (entry.action === 'restore_note') {
     const noteKey = `${NOTE_PREFIX}${entry.slug}`;
-    await linkChild(noteKey, entry.parentIds);
+    // Re-link to parent pages
+    const pageParents = (entry.parentIds || []).filter(p => p.startsWith(PAGE_PREFIX));
+    await linkChild(noteKey, pageParents);
+    // Re-add note to lists
+    // TODO: preserve original pinnedAt — currently uses entry.timestamp
+    const listParents = (entry.parentIds || []).filter(p => p.startsWith('list:') && !p.startsWith('list:system/'));
+    for (const lk of listParents) {
+      const list = await load(lk);
+      if (!list) continue;
+      const pins = [...(list.pins || [])];
+      if (!pins.some(p => p.id === noteKey)) {
+        pins.push({ id: noteKey, pinnedAt: entry.timestamp });
+      }
+      result[lk] = { ...list, pins };
+    }
+    // Clear deleted flag (use loadOrDefault — load() may return null for deleted entities)
+    const note = await loadOrDefault(noteKey, load);
+    result[noteKey] = { ...note, deleted: false, timestamp: entry.timestamp };
     await unorphan(noteKey, entry.timestamp);
     return result;
   }
@@ -379,6 +428,13 @@ export async function effectOf(entry, load) {
           index[url] = { ...index[url], lists };
         }
         result['list:system/shallow-page'] = { ...spi, timestamp: entry.timestamp, index };
+      } else if (pin.id.startsWith(NOTE_PREFIX)) {
+        // Re-add list to note parentIds
+        const note = await load(pin.id);
+        if (!note) continue;
+        const parentIds = [...(note.parentIds || [])];
+        if (!parentIds.includes(listKey)) parentIds.push(listKey);
+        result[pin.id] = { ...note, parentIds };
       }
     }
 

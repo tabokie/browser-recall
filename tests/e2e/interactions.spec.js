@@ -244,12 +244,13 @@ test.describe('Interactions — likes, notes, attention', () => {
     expect(pageEntity.value).toBeTruthy();
     expect(pageEntity.value.childIds).not.toContain(`note:${noteSlug}`);
 
-    // Note file should still exist on disk (not physically deleted)
+    // Note entity should still exist with deleted:true (not physically deleted)
     const noteOnDisk = await helper.evaluate((slug) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: `note:${slug}` })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: `note:${slug}`, includeDeleted: true })
     , noteSlug);
     expect(noteOnDisk.value).toBeTruthy();
     expect(noteOnDisk.value.excerpt).toBe('Hello');
+    expect(noteOnDisk.value.deleted).toBe(true);
 
     // Note should be in orphaned list
     const orphaned = await helper.evaluate(() =>
