@@ -151,6 +151,73 @@ test.describe('Navigation and referrer tracking', () => {
     await page.close();
   });
 
+  test('blacklisted URL: "Capture It" overrides blacklist, revisit is tracked', async ({ extContext, extensionId, setupDir, localServer }) => {
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: {
+        trimRules: [],
+        urlBlacklist: [localServer.url('/page-c')],
+      }},
+    ]);
+
+    const url = localServer.url('/page-c');
+    const page = await extContext.newPage();
+
+    // Step 1: Visit blacklisted URL — should NOT be recorded
+    await page.goto(localServer.url('/'));
+    await page.waitForTimeout(500);
+    await page.goto(url);
+    await page.waitForTimeout(500);
+
+    let helper = await openHelperPage(extContext, extensionId);
+    let info = await helper.evaluate((u) =>
+      chrome.runtime.sendMessage({ action: 'getPageInfo', url: u })
+    , url);
+    expect(info.interaction).toBeNull();
+
+    // Step 2: "Capture It" — simulates popup's bypassBlacklist reportPage + checkpoint
+    // (real flow: reportPage → captureCurrentPageFromPopup → ensureCheckpointIfMissing)
+    const captureResult = await helper.evaluate((u) =>
+      chrome.runtime.sendMessage({
+        action: 'reportPage',
+        url: u,
+        title: 'Page C',
+        isInitialLoad: true,
+        bypassBlacklist: true,
+      })
+    , url);
+    expect(captureResult.success).toBe(true);
+
+    // ensurePageCheckpoint creates the page entity (in real flow, captureAndLog does this)
+    const cpResult = await helper.evaluate((u) =>
+      chrome.runtime.sendMessage({ action: 'ensurePageCheckpoint', url: u, title: 'Page C' })
+    , url);
+    expect(cpResult.success).toBe(true);
+
+    // Verify the page is now recorded
+    info = await helper.evaluate((u) =>
+      chrome.runtime.sendMessage({ action: 'getPageInfo', url: u })
+    , url);
+    expect(info.interaction).not.toBeNull();
+    expect(info.interaction.url).toBe(url);
+    await helper.close();
+
+    // Step 3: Navigate away and revisit — should still be tracked (already in DB)
+    await page.goto(localServer.url('/'));
+    await page.waitForTimeout(500);
+    await page.goto(url);
+    await page.waitForTimeout(1000);
+
+    helper = await openHelperPage(extContext, extensionId);
+    info = await helper.evaluate((u) =>
+      chrome.runtime.sendMessage({ action: 'getPageInfo', url: u })
+    , url);
+    expect(info.interaction).not.toBeNull();
+    expect(info.interaction.url).toBe(url);
+    await helper.close();
+
+    await page.close();
+  });
+
   test('scroll depth and time on page recorded after navigation away', async ({ extContext, extensionId, setupDir, localServer }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: { trimRules: [], blacklist: [] } },

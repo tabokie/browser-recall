@@ -797,13 +797,14 @@ async function showDashboard(tab) {
       try {
         const slug = generateSlugFromUrl(tab.url);
 
-        // Record page visit
+        // Record page visit (bypassBlacklist: explicit user override)
         await chrome.runtime.sendMessage({
           action: 'reportPage',
           url: tab.url,
           title: tab.title || 'Untitled',
           slug,
-          isInitialLoad: true
+          isInitialLoad: true,
+          bypassBlacklist: true,
         });
 
         // Capture snapshot (content script extracts page, background forwards to offscreen)

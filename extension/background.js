@@ -1070,13 +1070,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const rpSettings = await readCacheable('settings');
             const urlBlacklist = rpSettings.urlBlacklist;
             const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
-            if (blacklist.some(prefix => url.startsWith(prefix))) {
+            if (!request.bypassBlacklist && blacklist.some(prefix => url.startsWith(prefix))) {
               if (request.isInitialLoad) {
-                const existing = await requestOffscreen({ action: 'loadInteractionByUrl', url });
-                if (!existing || !existing.interaction) {
-                  console.log(`Skipping blacklisted URL (not in database): ${url}`);
-                  sendResponse({ success: true });
-                  return;
+                // Check session cache first (includes undrained logBuffer entries),
+                // then fall back to disk scan for older history.
+                const todayKey = 'history:' + dateKeyFromTimestamp(Date.now());
+                const todayEntries = await readCacheable(todayKey) || [];
+                const inSession = todayEntries.some(e => e.url === url);
+                if (!inSession) {
+                  const existing = await requestOffscreen({ action: 'loadInteractionByUrl', url });
+                  if (!existing || !existing.interaction) {
+                    console.log(`Skipping blacklisted URL (not in database): ${url}`);
+                    sendResponse({ success: true });
+                    return;
+                  }
                 }
                 console.log(`Blacklisted URL but already in database, continuing: ${url}`);
               } else {

@@ -1,0 +1,9 @@
+- URl black list is not respected
+- "https://gitlab.corp.metabit-trading.com/", clear all existing traces of it in ~/portal-data, then we will see if it behaves correctly
+- Make sure this functionality is covered in E2E. (1) blacklisted, (2) "Capture It", (3) visit again
+- /finish
+- You should readCacheable(history:<today>)
+- n
+- n
+- n
+- continue
