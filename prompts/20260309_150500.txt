@@ -1,0 +1,25 @@
+- a3259e2 introduced a breaking change to the old "Gateways" list. I want to fix it like this:
+
+Introduce a auto list concept. It is stored in "lists/auto/gateways.json", referenced by "lists:auto/gateways". The system automatically pins page that matches the criterion to the list, but otherwise, it behaves just like an ordinary list (i.e. user can pin to it and unpin from it).
+
+Given the old gateways entity has lost all data, figure out a way to reconstruct it from history.
+- 1: Great. So the metadata is not lost. Just we cannot recall it in UI.
+2: Yes.
+3: Convert the old system gateways to the new auto list. There is one single path and that is to auto-pin the root origin.
+4: auto namespace. In fact, I changed my mind, let's organize auto list using the existing hierarchical list. I.e. "auto" is a list, its children contains "gateways". In the list entities, we need to set "auto=true", and disallow user from deleting any auto list or folder.
+5: Replace old system entity.
+- Reload token
+- Run migration
+- Many of the pages in Gateways list shows up "Untitled". I suspect they are not included in shallow-page index?
+- Remove ones with null titles, give me a list of them, I will visit them now to see if gateway is properly updated
+- Are they removed from SPI too?
+- There are still Untitled pages (e.g. https://app.mokahr.com/), and when I visited "https://bandcamp.com/", no gateway pin is added
+- Where do we keep track of the counter?
+- I visited twice now. A pin is added to Gateway, but it has no URL or title
+- What I see is, gateways added "daily-bandcamp-p8q37i", when the page is not checkpointed. Why?
+- I am confused. background.js has all the information it needs to determine whether the page is checkpointed or not? It should deterministically decide whether to use shallow or full page key, just like what normal list add does
+- Actually, let's change the implementation. Now, when we visit a page that looks like a root domain (the old checks, isSearchQuery, isRoot, etc), and it is not in Gateways list, we will look at recent history (already cached in "history:<date>" to see if there are visits with the same origin), if so, we add it to Gateways list, along with title information from visit (not from manual fetch).
+- /finish
+- n
+- n
+- n

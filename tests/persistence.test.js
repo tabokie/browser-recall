@@ -153,8 +153,8 @@ async function hydrateCache(fsStorage, chromeStorage) {
   if (Object.keys(cacheUpdate).length > 0) await chromeStorage.set(cacheUpdate);
 
   // Load gateway origins from entity file
-  const gwData = await fsStorage.loadGateways();
-  await chromeStorage.set({ 'list:system/gateways': gwData });
+  const gwData = await fsStorage.loadListPinsEntity('auto/gateways');
+  if (gwData) await chromeStorage.set({ 'list:auto/gateways': gwData });
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +251,7 @@ describe('Persistence round-trip', () => {
 
       // Snapshot the cache
       const cacheBefore = { ...(await chromeStorage.get(null)) };
-      delete cacheBefore['list:system/gateways']; // tested separately
+      delete cacheBefore['list:auto/gateways']; // auto lists tested separately
 
       // 3. Simulate reload: nuke chrome.storage.local
       await chromeStorage.clear();
@@ -261,7 +261,7 @@ describe('Persistence round-trip', () => {
       await hydrateCache(fs, chromeStorage);
 
       const cacheAfter = { ...(await chromeStorage.get(null)) };
-      delete cacheAfter['list:system/gateways'];
+      delete cacheAfter['list:auto/gateways'];
 
       expect(cacheAfter).toEqual(cacheBefore);
     });
@@ -291,15 +291,6 @@ describe('Persistence round-trip', () => {
 
       const { logBuffer } = await chromeStorage.get(['logBuffer']);
       expect(logBuffer).toBeUndefined();
-    });
-  });
-
-  // ---- Gateway origins persistence ----
-
-  describe('gateway persistence', () => {
-    it('loadGateways returns empty when file missing', async () => {
-      const data = await fs.loadGateways();
-      expect(data).toEqual({ timestamp: 0, origins: [] });
     });
   });
 

@@ -1,6 +1,6 @@
 // Background service worker for Portal extension
 // Central authority for reads and mutations. Offscreen is a pure filesystem I/O worker.
-import { generateSlugFromUrl, generateNoteSlug, dateKeyFromTimestamp } from './utils.js';
+import { generateSlugFromUrl, generateNoteSlug, dateKeyFromTimestamp, isGatewayOriginFromPins } from './utils.js';
 import { effectOf, applyLogToPage } from './replay.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark, cacheClear } from './entity-cache.js';
@@ -303,12 +303,6 @@ async function readFs(key) {
       const r = await requestOffscreen({ action: 'loadShallowPageIndex' });
       assertOffscreenSuccess(r, key);
       value = { timestamp: r.timestamp, index: r.index };
-      break;
-    }
-    case 'list:system/gateways': {
-      const r = await requestOffscreen({ action: 'loadGateways' });
-      assertOffscreenSuccess(r, key);
-      value = { timestamp: r.timestamp, origins: r.origins };
       break;
     }
     case 'list:system/orphaned': {
@@ -661,10 +655,8 @@ async function processPageReport(delta) {
 }
 
 // ─── Gateway Domain Registry ──────────────────────────────────────────
-// Transient detection state: tracks child page counts per origin within the
-// current service worker lifetime. Not persisted — only used to decide when
-// an origin qualifies as a gateway (childCount >= 2).
-const gatewayDetection = {}; // { [origin]: { childCount, promoted } }
+// Promotes an origin to the gateways list when we visit a root-like page
+// and recent history already contains visits from the same origin.
 
 async function updateGatewayRegistry(url) {
   try {
@@ -673,59 +665,38 @@ async function updateGatewayRegistry(url) {
     const isSearchQuery = parsed.searchParams.has('q') || parsed.searchParams.has('query') || parsed.searchParams.has('search');
     const isRoot = parsed.pathname === '/' || parsed.pathname === '' || parsed.pathname === '/index.html' || parsed.pathname === '/index.htm';
 
-    // Check if origin is already a gateway (persisted via log/replay)
-    const gateways = await readCacheable('list:system/gateways');
-    if (gateways.origins.includes(origin)) return;
+    // Only trigger on root-like pages
+    if (!isRoot && !isSearchQuery) return;
 
-    if (!gatewayDetection[origin]) {
-      gatewayDetection[origin] = { childCount: 0, promoted: false };
-    }
-    const det = gatewayDetection[origin];
-    if (det.promoted) return;
+    // Check if origin is already a gateway
+    const gwEntity = await readCacheable('list:auto/gateways');
+    const rootUrl = origin + '/';
+    if (gwEntity && isGatewayOriginFromPins(rootUrl, gwEntity.pins || [])) return;
 
-    if (isSearchQuery || !isRoot) {
-      det.childCount++;
-    }
+    // Check recent history for other visits from this origin
+    const today = new Date().toISOString().slice(0, 10);
+    const todayHistory = await readCacheable('history:' + today) || [];
+    const hasOriginVisits = todayHistory.some(e => {
+      try { return e.url && new URL(e.url).origin === origin && e.url !== url; }
+      catch { return false; }
+    });
+    if (!hasOriginVisits) return;
 
-    if (det.childCount >= 2) {
-      det.promoted = true;
-      await addLog({
-        timestamp: Date.now(),
-        action: 'list',
-        id: 'system/gateways',
-        op: 'add',
-        origins: [origin]
-      });
-      console.log(`Gateway: promoted ${origin}`);
-      // Create a synthetic page visit for the root so it appears in Explore history
-      fetchAndCreateGatewayRoot(origin);
-    }
+    // Promote: use resolvePageId to pick page: or shallow: deterministically
+    const pinId = await resolvePageId(rootUrl);
+    await addLog({
+      timestamp: Date.now(),
+      action: 'list',
+      id: 'auto/gateways',
+      op: 'add',
+      ids: [pinId]
+    });
+    console.log(`Gateway: promoted ${origin} (pin: ${pinId})`);
   } catch (e) {
     console.warn('Gateway registry update failed:', e.message);
   }
 }
 
-async function fetchAndCreateGatewayRoot(origin) {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    const resp = await fetch(origin + '/', { signal: controller.signal });
-    clearTimeout(timeoutId);
-
-    if (!resp.ok) return;
-
-    const html = await resp.text();
-    const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-    const rootUrl = origin + '/';
-    const rawTitle = titleMatch ? titleMatch[1].trim() : origin;
-    const title = await trimTitle(rawTitle, rootUrl);
-
-    await appendVisit({ timestamp: Date.now(), url: rootUrl, title });
-    console.log(`Gateway: created synthetic root visit for ${origin}`);
-  } catch (e) {
-    console.warn(`Gateway: failed to fetch root for ${origin}:`, e.message);
-  }
-}
 
 // ─── Supplementary referrer detection ─────────────────────────────────
 // Sites that suppress document.referrer via Referrer-Policy or rel="noreferrer"
@@ -1540,6 +1511,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'deleteList': {
+          if (request.listId.startsWith('auto/')) {
+            sendResponse({ success: false, error: 'Cannot delete auto lists' });
+            break;
+          }
           const listKey = 'list:' + request.listId;
           const entity = await readCacheable(listKey);
           // Collect all descendant keys (BFS)
@@ -1749,7 +1724,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           await cacheClear();
           // 3. Reset ALL in-memory state (SW survives across tests)
           recentUrls = new Map();
-          for (const key of Object.keys(gatewayDetection)) delete gatewayDetection[key];
           if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
           // 4. Tell offscreen to wipe directory and reset drain state
           await requestOffscreen({ action: 'resetDirectory' });

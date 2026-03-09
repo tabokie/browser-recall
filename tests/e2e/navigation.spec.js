@@ -277,51 +277,53 @@ test.describe('Navigation and referrer tracking', () => {
     await page.close();
   });
 
-  // Bug 20260227: gateway promotion should create ONE synthetic root visit
-  // at promotion time, but NOT on subsequent child visits.
-  test('gateway promotion creates synthetic root visit only once', async ({ extContext, extensionId, setupDir, localServer }) => {
+  // Gateway promotion: visit child pages, then visit root → promoted.
+  // Visiting root again should not create a duplicate pin.
+  test('gateway promotion triggers on root visit when history has same-origin pages', async ({ extContext, extensionId, setupDir, localServer }) => {
     localServer.addPage('/gw-a', { title: 'GW Child A', body: '<p>a</p>' });
     localServer.addPage('/gw-b', { title: 'GW Child B', body: '<p>b</p>' });
-    localServer.addPage('/gw-c', { title: 'GW Child C', body: '<p>c</p>' });
 
-    // Start with NO gateways — the origin will be auto-promoted after 2 child visits
+    // Seed the auto/gateways list entity (empty pins) so it exists for promotion
     await resetAndSeed(extContext, extensionId, [
       { path: 'settings.json', data: { trimRules: [], blacklist: [] } },
+      { path: 'lists/auto.json', data: { slug: 'auto', name: 'Auto', auto: true, parentList: 'list:system/root', childLists: ['list:auto/gateways'], pins: [], savedSearches: [], timestamp: 1 } },
+      { path: 'lists/auto/gateways.json', data: { slug: 'auto/gateways', name: 'Gateways', auto: true, parentList: 'list:auto', childLists: [], pins: [], savedSearches: [], timestamp: 1 } },
+      { path: 'lists/system/root.json', data: { timestamp: 1, childLists: ['list:auto'] } },
     ]);
 
-    const origin = `http://127.0.0.1:${localServer.port}`;
-    const rootUrl = origin + '/';
     const page = await extContext.newPage();
 
-    // Visit 2 child pages → triggers gateway promotion (childCount >= 2)
+    // Visit child pages first (builds history for this origin)
     await page.goto(localServer.url('/gw-a'));
-    await page.waitForTimeout(300);
+    await page.waitForSelector('p');
     await page.goto(localServer.url('/gw-b'));
-    await page.waitForTimeout(300);
+    await page.waitForSelector('p');
+
+    // Visit root page → triggers gateway promotion (history has same-origin visits)
+    await page.goto(localServer.url('/'));
+    await page.waitForSelector('h1');
 
     const helper = await openHelperPage(extContext, extensionId);
 
-    // Wait for promotion: origin should appear in gateways
-    await helper.waitForFunction((o) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/gateways' })
-        .then(r => r.value?.origins && r.value.origins.includes(o))
-    , origin, { timeout: 5000 });
+    // Wait for promotion: pin should appear in auto/gateways
+    await helper.waitForFunction(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:auto/gateways' })
+        .then(r => r.value?.pins && r.value.pins.length > 0)
+    , null, { timeout: 5000 });
 
-    // Visit a 3rd child page — should NOT create another synthetic root visit
-    await page.goto(localServer.url('/gw-c'));
+    // Visit root again — should NOT create a duplicate pin
+    await page.goto(localServer.url('/'));
+    await page.waitForSelector('h1');
     await page.waitForTimeout(500);
 
-    // Count root URL entries in today's history
-    const today = new Date().toISOString().slice(0, 10);
-    const hist = await helper.evaluate(({ dateKey }) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'history:' + dateKey })
-    , { dateKey: today });
+    const gw = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:auto/gateways' })
+    );
     await helper.close();
     await page.close();
 
-    const rootEntries = (hist.value || []).filter(e => e.url === rootUrl);
-    // At most 1 synthetic root visit (from promotion), not repeated
-    expect(rootEntries.length).toBeLessThanOrEqual(1);
+    // Exactly 1 pin for this origin
+    expect(gw.value.pins.length).toBe(1);
   });
 
   // Bug 20260301: ensurePageCheckpoint without title should search SPI and

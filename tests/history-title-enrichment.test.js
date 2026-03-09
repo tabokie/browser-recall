@@ -216,9 +216,6 @@ describe('History title enrichment', () => {
       case 'loadContentBatch':
         return { success: true, contentMap: {} };
 
-      case 'loadGateways':
-        return { success: true, watermark: 0, domains: {} };
-
       case 'processGatewaysIncremental':
         return { success: true, domains: {}, newWatermark: 0 };
 
@@ -231,7 +228,7 @@ describe('History title enrichment', () => {
       case 'readCacheable':
         switch (msg.key) {
           case 'settings': return { success: true, value: TEST_SETTINGS };
-          case 'list:system/gateways': return { success: true, value: { timestamp: 0, origins: [] } };
+          case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] } };
           case 'list:system/shallow-page': return { success: true, value: SPI_DATA };
           case 'list:system/orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
           default: {
@@ -274,7 +271,7 @@ describe('History title enrichment', () => {
   function populateCache() {
     sessionData = {
       settings: TEST_SETTINGS,
-      'list:system/gateways': { timestamp: 0, origins: [] },
+      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
       'list:system/shallow-page': SPI_DATA,
     };
     localData = { logBuffer: [] };

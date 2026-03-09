@@ -92,11 +92,14 @@ export function savedSearchesChanged(a, b) {
   return JSON.stringify(a) !== JSON.stringify(b);
 }
 
-// Check if a URL is the root page of a gateway origin
-export function isGatewayRoot(url, origins) {
+// Check if a URL's origin root is pinned in an auto-gateways pin list.
+// pins: [{ id: 'page:<slug>' | 'shallow:<url>', pinnedAt }]
+export function isGatewayOriginFromPins(url, pins) {
   try {
-    const urlObj = new URL(url);
-    return origins.includes(urlObj.origin) && (urlObj.pathname === '/' || urlObj.pathname === '') && urlObj.search === '';
+    const origin = new URL(url).origin;
+    const rootUrl = origin + '/';
+    const rootSlug = generateSlugFromUrl(rootUrl);
+    return pins.some(p => p.id === `shallow:${rootUrl}` || p.id === `page:${rootSlug}`);
   } catch {
     return false;
   }

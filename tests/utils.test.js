@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { generateSlugFromUrl, savedSearchesChanged, isGatewayRoot } from '../extension/utils.js';
+import { generateSlugFromUrl, savedSearchesChanged, isGatewayOriginFromPins } from '../extension/utils.js';
 
 describe('generateSlugFromUrl', () => {
   it('produces a slug from a simple URL', () => {
@@ -68,50 +68,43 @@ describe('savedSearchesChanged', () => {
 });
 
 // ---------------------------------------------------------------------------
-// isGatewayRoot
+// isGatewayOriginFromPins
 // ---------------------------------------------------------------------------
 
-describe('isGatewayRoot', () => {
-  const origins = ['https://github.com', 'https://docs.rs'];
+describe('isGatewayOriginFromPins', () => {
+  const ghSlug = generateSlugFromUrl('https://github.com/');
+  const docsSlug = generateSlugFromUrl('https://docs.rs/');
+  const pins = [
+    { id: `page:${ghSlug}`, pinnedAt: 100 },
+    { id: 'shallow:https://docs.rs/', pinnedAt: 200 },
+  ];
 
-  it('matches root URL of a gateway domain', () => {
-    expect(isGatewayRoot('https://github.com/', origins)).toBe(true);
+  it('matches root URL of a checkpointed gateway (page: pin)', () => {
+    expect(isGatewayOriginFromPins('https://github.com/', pins)).toBe(true);
   });
 
-  it('matches root URL without trailing slash', () => {
-    expect(isGatewayRoot('https://github.com', origins)).toBe(true);
+  it('matches root URL of a shallow gateway (shallow: pin)', () => {
+    expect(isGatewayOriginFromPins('https://docs.rs/', pins)).toBe(true);
   });
 
-  it('rejects child page of a gateway domain', () => {
-    expect(isGatewayRoot('https://github.com/some/repo', origins)).toBe(false);
+  it('matches child page whose origin root is pinned', () => {
+    expect(isGatewayOriginFromPins('https://github.com/user/repo', pins)).toBe(true);
   });
 
   it('rejects URL from a non-gateway domain', () => {
-    expect(isGatewayRoot('https://example.com/', origins)).toBe(false);
+    expect(isGatewayOriginFromPins('https://example.com/', pins)).toBe(false);
   });
 
-  it('matches second gateway origin', () => {
-    expect(isGatewayRoot('https://docs.rs/', origins)).toBe(true);
-  });
-
-  it('rejects child page of second gateway', () => {
-    expect(isGatewayRoot('https://docs.rs/tokio/latest', origins)).toBe(false);
+  it('matches child page of shallow gateway', () => {
+    expect(isGatewayOriginFromPins('https://docs.rs/tokio/latest', pins)).toBe(true);
   });
 
   it('returns false for invalid URL', () => {
-    expect(isGatewayRoot('not-a-url', origins)).toBe(false);
+    expect(isGatewayOriginFromPins('not-a-url', pins)).toBe(false);
   });
 
-  it('returns false when origins is empty', () => {
-    expect(isGatewayRoot('https://github.com/', [])).toBe(false);
-  });
-
-  it('rejects gateway origin with query parameters', () => {
-    expect(isGatewayRoot('https://github.com/?q=test', origins)).toBe(false);
-  });
-
-  it('rejects gateway origin with complex query string', () => {
-    expect(isGatewayRoot('https://docs.rs/?dateRange=pastWeek&page=0&query=2028', origins)).toBe(false);
+  it('returns false when pins is empty', () => {
+    expect(isGatewayOriginFromPins('https://github.com/', [])).toBe(false);
   });
 });
 
@@ -158,11 +151,11 @@ describe('readCacheable', () => {
   });
 
   it('sends readCacheable action on session miss and returns resp.value', async () => {
-    sendMessageMock.mockResolvedValue({ success: true, value: ['https://docs.rs'] });
+    sendMessageMock.mockResolvedValue({ success: true, value: { timestamp: 0, pins: [] } });
     const { readCacheable } = await import('../extension/utils.js');
-    const result = await readCacheable('list:system/gateways');
-    expect(sendMessageMock).toHaveBeenCalledWith({ action: 'readCacheable', key: 'list:system/gateways', includeDeleted: false });
-    expect(result).toEqual(['https://docs.rs']);
+    const result = await readCacheable('list:auto/gateways');
+    expect(sendMessageMock).toHaveBeenCalledWith({ action: 'readCacheable', key: 'list:auto/gateways', includeDeleted: false });
+    expect(result).toEqual({ timestamp: 0, pins: [] });
   });
 
   it('returns undefined when both session and background miss', async () => {

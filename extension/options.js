@@ -3,7 +3,7 @@
 import { FileSystemStorage } from './filesystem-storage.js';
 import init, { Interaction, SearchEngine, searchBatch } from './pkg/portal_extension.js';
 import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine, extractInteractionBuffer } from './search-helpers.js';
-import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, savedSearchesChanged, isGatewayRoot, escapeHtml } from './utils.js';
+import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, savedSearchesChanged, escapeHtml } from './utils.js';
 import { attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
 import { initCharts, renderTimeChart, renderTimeChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './time-chart.js';
 import { VirtualScroller } from './virtual-scroller.js';
@@ -61,8 +61,6 @@ let activeView = { type: 'category', value: 'all' }; // or { type: 'search', que
 let allListPins = {}; // listId -> [{ url, title, pinnedAt }]
 let lastClickedRow = null; // for shift-click range select
 let marqueeActive = false; // suppress click during marquee drag
-let gatewayOriginsCache = []; // [origin, ...]
-let gatewayOriginsLoaded = false;
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
 // pinnedFilterCtx removed — pinned section no longer has related pages
 const EXPLORE_LIST_ID = 'system/explore';
@@ -312,8 +310,6 @@ function resetHistory() {
   capturesMatchCache = null;
   allListPins = {};
 
-  gatewayOriginsCache = [];
-  gatewayOriginsLoaded = false;
   bufferContentMap = {};
 }
 
@@ -940,23 +936,10 @@ function filterByCategory(interactions, category) {
     }
     case 'highlighted':
       return interactions.filter(i => (i.likes > 0));
-    case 'gateways':
-      return interactions.filter(i => isGatewayOrigin(i.url));
     case 'all':
     default:
       return interactions;
   }
-}
-
-async function loadGatewayDomains() {
-  if (gatewayOriginsLoaded) return;
-  const gateways = await readCacheable('list:system/gateways');
-  gatewayOriginsCache = gateways.origins;
-  gatewayOriginsLoaded = true;
-}
-
-function isGatewayOrigin(url) {
-  return isGatewayRoot(url, gatewayOriginsCache);
 }
 
 // Time chart tooltips initialized via initCharts() in initialize()
@@ -966,15 +949,13 @@ function isGatewayOrigin(url) {
 async function showCategory(category) {
   activeView = { type: 'category', value: category };
   updateSidebarActive();
-  const categoryLabels = { all: 'History', today: 'Today', week: 'This Week', highlighted: 'Highlighted', gateways: 'Gateways', explore: 'Explore' };
+  const categoryLabels = { all: 'History', today: 'Today', week: 'This Week', highlighted: 'Highlighted', explore: 'Explore' };
   updateMainTitle(categoryLabels[category] || category);
   document.getElementById('pinSearchBtn').style.display = 'none';
   document.getElementById('queryBuilder').style.display = 'none';
 
   renderResultsSkeleton();
   showNormalLayout();
-
-  if (category === 'gateways') await loadGatewayDomains();
 
   // Demand-load history
   await initHistoryFiles();
@@ -1875,7 +1856,9 @@ async function buildTreeLevel(keys) {
     if (!entity || entity.deleted) continue;
     const slug = entity.slug || key.slice(5);
     const children = entity.childLists?.length ? await buildTreeLevel(entity.childLists) : [];
-    nodes.push({ slug, name: entity.name || slug, children, parentList: entity.parentList || 'list:system/root' });
+    const node = { slug, name: entity.name || slug, children, parentList: entity.parentList || 'list:system/root' };
+    if (entity.auto) node.auto = true;
+    nodes.push(node);
   }
   return nodes;
 }
@@ -1985,6 +1968,12 @@ function createSidebarItem(node, depth) {
     <button class="remove-list" title="Remove list">&times;</button>
   `;
 
+  // Hide remove button for auto lists
+  if (node.auto) {
+    const removeBtn = item.querySelector('.remove-list');
+    if (removeBtn) removeBtn.style.display = 'none';
+  }
+
   // Fold/unfold toggle
   if (hasChildren) {
     item.querySelector('.fold-toggle').addEventListener('click', (e) => {
@@ -2002,18 +1991,20 @@ function createSidebarItem(node, depth) {
     });
   }
 
-  item.draggable = true;
-  item.addEventListener('dragstart', (e) => {
-    e.dataTransfer.setData('application/x-list-reorder', lst.slug);
-    e.dataTransfer.effectAllowed = 'move';
-    item.classList.add('dragging');
-  });
-  item.addEventListener('dragend', () => {
-    item.classList.remove('dragging');
-    document.querySelectorAll('.reorder-above, .reorder-below, .nest-target').forEach(el => {
-      el.classList.remove('reorder-above', 'reorder-below', 'nest-target');
+  if (!node.auto) {
+    item.draggable = true;
+    item.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('application/x-list-reorder', lst.slug);
+      e.dataTransfer.effectAllowed = 'move';
+      item.classList.add('dragging');
     });
-  });
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      document.querySelectorAll('.reorder-above, .reorder-below, .nest-target').forEach(el => {
+        el.classList.remove('reorder-above', 'reorder-below', 'nest-target');
+      });
+    });
+  }
 
   item.addEventListener('click', (e) => {
     if (e.target.closest('.remove-list') || e.target.closest('.fold-toggle')) return;
@@ -2392,7 +2383,7 @@ function formatBytes(bytes) {
 const SESSION_CACHE_KEYS = [
   { key: 'settings', label: 'Settings' },
   { key: 'lists', label: 'Lists' },
-  { key: 'list:system/gateways', label: 'Gateway Origins' },
+  { key: 'list:auto/gateways', label: 'Auto Gateways' },
   { key: 'list:system/shallow-page', label: 'Shallow Page Index' },
 ];
 const LOCAL_CACHE_KEYS = [
@@ -3486,7 +3477,7 @@ async function initialize() {
 
   // Load metadata in parallel (history is demand-loaded in showCategory, pins loaded per-list)
   await Promise.all([
-    initHistoryFiles(), loadGatewayDomains(),
+    initHistoryFiles(),
     readCacheable('list:' + EXPLORE_LIST_ID).then(entity => { allListPins[EXPLORE_LIST_ID] = entity?.pins || []; }),
   ]);
   _timer('parallel metadata load');

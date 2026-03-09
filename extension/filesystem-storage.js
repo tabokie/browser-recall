@@ -369,21 +369,6 @@ class FileSystemStorage {
     return interactions;
   }
 
-  // Load all markdown content from pages/ directory (latest snapshot per slug)
-  // Load gateway origins from lists/system/gateways.json
-  async loadGateways() {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to read directory');
-    }
-    try {
-      const fileHandle = await this.resolveFile('lists/system/gateways.json');
-      return this.readJson(fileHandle);
-    } catch (error) {
-      if (isNotFound(error)) return { timestamp: 0, origins: [] };
-      throw error;
-    }
-  }
-
   // Load shallow page index from lists/system/shallow-page.json
   async loadShallowPageIndex() {
     if (!(await this.verifyPermission())) {
@@ -750,6 +735,18 @@ class FileSystemStorage {
           allPins[id] = data.pins;
         }
       }
+      // Scan lists/auto/ subdirectory
+      try {
+        const autoDir = await listsDir.getDirectoryHandle('auto');
+        for await (const entry of autoDir.values()) {
+          if (entry.kind === 'file' && entry.name.endsWith('.json')) {
+            const id = 'auto/' + entry.name.replace('.json', '');
+            const file = await entry.getFile();
+            const data = JSON.parse(await file.text());
+            allPins[id] = data.pins;
+          }
+        }
+      } catch (error) { if (!isNotFound(error)) throw error; }
     } catch (error) { if (!isNotFound(error)) throw error; }
     return allPins;
   }
@@ -790,34 +787,51 @@ class FileSystemStorage {
 
   // Load metadata for all lists from lists/ files.
   // Returns [{ slug, name, savedSearches, pins }] — skips explore, system/, and index/ files.
+  // Also scans lists/auto/ for auto-list entities.
   // Filenames are always the list slug.
   async loadAllListMetadata() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
     const result = [];
+    const parseListEntry = (slug, data) => {
+      const listEntry = {
+        slug,
+        name: data.name || slug,
+        savedSearches: data.savedSearches || [],
+        pins: data.pins || [],
+        parentList: data.parentList || null,
+        childLists: data.childLists || [],
+      };
+      if (data.auto) listEntry.auto = true;
+      if (data.deleted) listEntry.deleted = true;
+      if (data.timestamp) listEntry.timestamp = data.timestamp;
+      return listEntry;
+    };
     try {
       const listsDir = await this.resolveDir('lists');
       for await (const entry of listsDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
           const slug = entry.name.replace('.json', '');
           // Skip system and special files
-          if (slug === 'gateways' || slug.startsWith('system') || slug.startsWith('index')) continue;
+          if (slug.startsWith('system') || slug.startsWith('index')) continue;
           const file = await entry.getFile();
           const data = JSON.parse(await file.text());
-          const listEntry = {
-            slug,
-            name: data.name || slug,
-            savedSearches: data.savedSearches || [],
-            pins: data.pins || [],
-            parentList: data.parentList || null,
-            childLists: data.childLists || [],
-          };
-          if (data.deleted) listEntry.deleted = true;
-          if (data.timestamp) listEntry.timestamp = data.timestamp;
-          result.push(listEntry);
+          result.push(parseListEntry(slug, data));
         }
       }
+      // Scan lists/auto/ subdirectory for auto-list entities
+      try {
+        const autoDir = await listsDir.getDirectoryHandle('auto');
+        for await (const entry of autoDir.values()) {
+          if (entry.kind === 'file' && entry.name.endsWith('.json')) {
+            const slug = 'auto/' + entry.name.replace('.json', '');
+            const file = await entry.getFile();
+            const data = JSON.parse(await file.text());
+            result.push(parseListEntry(slug, data));
+          }
+        }
+      } catch (error) { if (!isNotFound(error)) throw error; }
     } catch (error) { if (!isNotFound(error)) throw error; }
     return result;
   }

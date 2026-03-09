@@ -100,14 +100,15 @@ describe('readCacheable / readFs', () => {
         return { success: true, lists: [{ slug: 'a', name: 'A' }, { slug: 'b', name: 'B' }] };
       case 'loadShallowPageIndex':
         return { success: true, timestamp: 42, index: { 'https://a.com': { parentIds: ['s1'] } } };
-      case 'loadGateways':
-        return { success: true, timestamp: 0, origins: ['https://docs.rs'] };
       case 'loadListEntity':
         if (msg.listId === 'my-custom-list') {
           return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', savedSearches: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] } };
         }
         if (msg.listId === 'system/root') {
           return { success: true, entity: { timestamp: 0, childLists: ['list:b', 'list:a'] } };
+        }
+        if (msg.listId === 'auto/gateways') {
+          return { success: true, entity: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [{ id: 'page:docs-rs-abc', pinnedAt: 1 }], savedSearches: [], parentList: 'list:auto', childLists: [] } };
         }
         return { success: true, entity: null };
       default:
@@ -136,10 +137,6 @@ describe('readCacheable / readFs', () => {
         case 'list:system/shallow-page': {
           const r = requestOffscreen({ action: 'loadShallowPageIndex' });
           value = r?.success ? { timestamp: r.timestamp || 0, index: r.index || {} } : { timestamp: 0, index: {} }; break;
-        }
-        case 'list:system/gateways': {
-          const r = requestOffscreen({ action: 'loadGateways' });
-          value = { timestamp: r.timestamp, origins: r.origins }; break;
         }
         default: {
           if (key.startsWith('list:')) {
@@ -182,9 +179,9 @@ describe('readCacheable / readFs', () => {
 
   // ── Session hit ──────────────────────────────────────────────────────
   it('returns cached value from session without offscreen call', async () => {
-    await session.set({ 'list:system/gateways': { timestamp: 0, origins: ['https://example.com'] } });
-    const result = await readCacheable('list:system/gateways');
-    expect(result).toEqual({ timestamp: 0, origins: ['https://example.com'] });
+    await session.set({ 'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [{ id: 'page:example-abc', pinnedAt: 1 }], savedSearches: [], parentList: 'list:auto', childLists: [] } });
+    const result = await readCacheable('list:auto/gateways');
+    expect(result).toEqual({ timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [{ id: 'page:example-abc', pinnedAt: 1 }], savedSearches: [], parentList: 'list:auto', childLists: [] });
     expect(offscreenCalls).toEqual([]); // No offscreen call
   });
 
@@ -218,10 +215,10 @@ describe('readCacheable / readFs', () => {
   });
 
   it('falls back to filesystem for gateways and caches result', async () => {
-    const result = await readCacheable('list:system/gateways');
-    expect(result).toEqual({ timestamp: 0, origins: ['https://docs.rs'] });
-    expect(offscreenCalls.some(c => c.action === 'loadGateways')).toBe(true);
-    expect(session._store['list:system/gateways']).toEqual({ timestamp: 0, origins: ['https://docs.rs'] });
+    const result = await readCacheable('list:auto/gateways');
+    expect(result).toEqual({ timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [{ id: 'page:docs-rs-abc', pinnedAt: 1 }], savedSearches: [], parentList: 'list:auto', childLists: [] });
+    expect(offscreenCalls.some(c => c.action === 'loadListEntity')).toBe(true);
+    expect(session._store['list:auto/gateways']).toEqual({ timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [{ id: 'page:docs-rs-abc', pinnedAt: 1 }], savedSearches: [], parentList: 'list:auto', childLists: [] });
   });
 
   // ── Settings batch-load ──────────────────────────────────────────────
@@ -435,13 +432,3 @@ describe('background.js readFs handles user list keys', () => {
 // offscreen.js field mismatch — structural verification
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// options.js loadGatewayDomains — structural verification
-// ---------------------------------------------------------------------------
-describe('options.js loadGatewayDomains uses readCacheable', () => {
-  const optionsSource = readFileSync(resolve(extDir, 'options.js'), 'utf-8');
-
-  it('reads gateways via readCacheable with entity key', () => {
-    expect(optionsSource).toMatch(/readCacheable\s*\(\s*'list:system\/gateways'\s*\)/);
-  });
-});

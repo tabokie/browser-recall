@@ -313,9 +313,6 @@ describe('Progressive loading', () => {
         // Return empty content — search still works via title matching
         return { success: true, contentMap: {} };
 
-      case 'loadGateways':
-        return { success: true, watermark: 0, domains: {} };
-
       case 'processGatewaysIncremental':
         return { success: true, domains: {}, newWatermark: 0 };
 
@@ -329,7 +326,7 @@ describe('Progressive loading', () => {
         switch (msg.key) {
           case 'settings': return { success: true, value: TEST_SETTINGS };
           case 'list:system/root': return { success: true, value: TEST_ROOT };
-          case 'list:system/gateways': return { success: true, value: { timestamp: 0, origins: [] } };
+          case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] } };
           case 'list:system/shallow-page': return { success: true, value: { timestamp: 0, index: {} } };
           case 'list:system/orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
           default: {
@@ -353,7 +350,7 @@ describe('Progressive loading', () => {
     sessionData = {
       settings: TEST_SETTINGS,
       'list:system/root': { ...TEST_ROOT },
-      'list:system/gateways': { timestamp: 0, origins: [] },
+      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
     };
     // Individual list entity keys (include pins for session cache hits)
     for (const list of TEST_LISTS) {
@@ -489,7 +486,7 @@ describe('Progressive loading', () => {
     sessionData = {
       settings: TEST_SETTINGS,
       'list:system/root': { ...TEST_ROOT },
-      'list:system/gateways': { timestamp: 0, origins: [] },
+      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
       // individual list:<slug> keys intentionally missing from session
     };
     localData = { logBuffer: [] };

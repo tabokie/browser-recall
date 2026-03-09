@@ -13,7 +13,6 @@ import {
   applyLogToPage,
   applyLogToPins,
   applyLogToShallowPage,
-  applyLogToGateways,
 } from '../extension/replay.js';
 import { generateSlugFromUrl } from '../extension/utils.js';
 
@@ -755,7 +754,7 @@ describe('sequence replay', () => {
     expect(r2).toBe(page);
 
     // System list entry should not affect page
-    const r3 = applyLogToPage(page, { timestamp: 300, action: 'list', id: 'system/gateways', op: 'add', origins: ['https://a.com'] });
+    const r3 = applyLogToPage(page, { timestamp: 300, action: 'list', id: 'auto/gateways', op: 'add', ids: ['page:a-slug'] });
     expect(r3).toBe(page);
   });
 });
@@ -1897,7 +1896,7 @@ describe('effectOf apply', () => {
       [`page:${childSlug}`]: { slug: childSlug, url: 'https://github.com/user/repo', timestamp: 0, parentIds: [], childIds: [] },
       [`page:${parentSlug}`]: { slug: parentSlug, url: 'https://github.com/', timestamp: 50, parentIds: [], childIds: [] },
       'list:system/shallow-page': { timestamp: 0, index: {} },
-      'list:system/gateways': { timestamp: 0, origins: ['https://github.com'] },
+      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [{ id: `page:${parentSlug}`, pinnedAt: 10 }], savedSearches: [], parentList: 'list:auto', childLists: [] },
     };
     const result = await effectOf(entry, async (key) => store[key] ?? null);
     // Child still gets parentIds
@@ -2273,77 +2272,41 @@ describe('page_checkpoint absorption upgrades list pins', () => {
 });
 
 // ---------------------------------------------------------------------------
-// applyLogToGateways
+// effectOf — auto/gateways uses standard applyLogToPins
 // ---------------------------------------------------------------------------
 
-describe('applyLogToGateways', () => {
-  it('adds origins', () => {
-    const entity = { timestamp: 0, origins: [] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/gateways', op: 'add', origins: ['https://example.com'] };
-    const result = applyLogToGateways(entity, entry);
-    expect(result.origins).toEqual(['https://example.com']);
-    expect(result.timestamp).toBe(100);
-  });
-
-  it('adds multiple origins', () => {
-    const entity = { timestamp: 0, origins: ['https://a.com'] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/gateways', op: 'add', origins: ['https://b.com', 'https://c.com'] };
-    const result = applyLogToGateways(entity, entry);
-    expect(result.origins).toEqual(['https://a.com', 'https://b.com', 'https://c.com']);
-  });
-
-  it('removes origins', () => {
-    const entity = { timestamp: 0, origins: ['https://a.com', 'https://b.com'] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/gateways', op: 'del', origins: ['https://a.com'] };
-    const result = applyLogToGateways(entity, entry);
-    expect(result.origins).toEqual(['https://b.com']);
-  });
-
-  it('clears origins', () => {
-    const entity = { timestamp: 0, origins: ['https://a.com'] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/gateways', op: 'clear' };
-    const result = applyLogToGateways(entity, entry);
-    expect(result.origins).toEqual([]);
-  });
-
-  it('ignores irrelevant entries', () => {
-    const entity = { timestamp: 0, origins: [] };
-    const entry = { timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' };
-    const result = applyLogToGateways(entity, entry);
-    expect(result).toBe(entity);
-  });
-
-  it('ignores wrong id', () => {
-    const entity = { timestamp: 0, origins: [] };
-    const entry = { timestamp: 100, action: 'list', id: 'some-list', op: 'add', ids: ['page:a'] };
-    const result = applyLogToGateways(entity, entry);
-    expect(result).toBe(entity);
-  });
-
-  it('is idempotent for add', () => {
-    const entity = { timestamp: 0, origins: [] };
-    const entry = { timestamp: 100, action: 'list', id: 'system/gateways', op: 'add', origins: ['https://a.com'] };
-    const r1 = applyLogToGateways(entity, entry);
-    const r2 = applyLogToGateways(r1, entry);
-    expect(r2.origins).toEqual(['https://a.com']);
-  });
-
-  it('default entity has empty origins', () => {
-    const entity = defaultEntity('list:system/gateways');
-    expect(entity).toEqual({ timestamp: 0, origins: [] });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// effectOf — gateways dispatch
-// ---------------------------------------------------------------------------
-
-describe('effectOf — gateways', () => {
-  it('dispatches list entry for system/gateways to applyLogToGateways', async () => {
-    const entry = { timestamp: 100, action: 'list', id: 'system/gateways', op: 'add', origins: ['https://example.com'] };
+describe('effectOf — auto/gateways', () => {
+  it('applies list entry for auto/gateways via applyLogToPins', async () => {
+    const pinId = 'page:' + generateSlugFromUrl('https://example.com/');
+    const entry = { timestamp: 100, action: 'list', id: 'auto/gateways', op: 'add', ids: [pinId] };
     const result = await effectOf(entry, async () => null);
-    const gw = result['list:system/gateways'];
-    expect(gw.origins).toEqual(['https://example.com']);
+    const gw = result['list:auto/gateways'];
+    expect(gw.pins).toHaveLength(1);
+    expect(gw.pins[0].id).toBe(pinId);
     expect(gw.timestamp).toBe(100);
+  });
+
+  it('del_list is blocked for auto/ lists', async () => {
+    const entry = { timestamp: 100, action: 'del_list', id: 'auto/gateways' };
+    const store = {
+      'list:auto/gateways': { timestamp: 50, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
+      'list:system/orphaned': { timestamp: 0, keys: [] },
+    };
+    const result = await effectOf(entry, async (key) => store[key] ?? null);
+    // del_list should not orphan auto lists — entity only gets deleted:true via applyLogToPins but no parent cleanup
+    expect(result['list:system/orphaned']).toBeUndefined();
+  });
+
+  it('reparent_list is blocked for auto/ lists', async () => {
+    const entry = { timestamp: 100, action: 'reparent_list', id: 'auto/gateways', from: 'auto', to: 'system/root', index: 0 };
+    const store = {
+      'list:auto/gateways': { timestamp: 50, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
+      'list:auto': { timestamp: 50, slug: 'auto', name: 'Auto', auto: true, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: ['list:auto/gateways'] },
+      'list:system/root': { timestamp: 50, childLists: ['list:auto'] },
+    };
+    const result = await effectOf(entry, async (key) => store[key] ?? null);
+    // reparent should be a no-op for auto lists — parent unchanged
+    expect(result['list:auto']).toBeUndefined();
+    expect(result['list:system/root']).toBeUndefined();
   });
 });

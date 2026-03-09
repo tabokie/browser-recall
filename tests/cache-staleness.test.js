@@ -290,9 +290,6 @@ describe('Cache staleness', () => {
       case 'loadContentBatch':
         return { success: true, contentMap: {} };
 
-      case 'loadGateways':
-        return { success: true, watermark: 0, domains: {} };
-
       case 'processGatewaysIncremental':
         return { success: true, domains: {}, newWatermark: 0 };
 
@@ -325,7 +322,7 @@ describe('Cache staleness', () => {
         switch (msg.key) {
           case 'settings': return { success: true, value: TEST_SETTINGS };
           case 'list:system/root': return { success: true, value: testRootData || TEST_ROOT };
-          case 'list:system/gateways': return { success: true, value: { timestamp: 0, origins: [] } };
+          case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] } };
           case 'list:system/shallow-page': return { success: true, value: testSpiData || { timestamp: 0, index: {} } };
           case 'list:system/orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
           default: {
@@ -364,7 +361,7 @@ describe('Cache staleness', () => {
     sessionData = {
       settings: TEST_SETTINGS,
       'list:system/root': { ...TEST_ROOT },
-      'list:system/gateways': { timestamp: 0, origins: [] },
+      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
     };
     // Individual list entity keys (include pins for session cache hits)
     for (const list of TEST_LISTS) {
@@ -559,40 +556,7 @@ describe('Cache staleness', () => {
     expect(loadBatchCalls).toBeGreaterThan(0);
   });
 
-  // ---------------------------------------------------------------------------
-  // T4: resetHistory clears gateway cache
-  // ---------------------------------------------------------------------------
-  it('T4: resetHistory clears gateway cache', async () => {
-    populateCache();
-    sessionData['list:system/gateways'] = { timestamp: 0, origins: ['https://docs.rs'] };
-
-    await importOptions();
-    await tick(100);
-
-    // initialize() calls loadGatewayDomains → sets gatewayOriginsLoaded = true
-    const initialGwCalls = chrome.storage.session.get.mock.calls
-      .filter(c => c[0] && (c[0].includes?.('list:system/gateways') || c[0][0] === 'list:system/gateways'));
-    expect(initialGwCalls.length).toBeGreaterThanOrEqual(1);
-
-    // Trigger resetHistory via selectDirBtn (selectDirectory → resetHistory → showCategory)
-    chrome.storage.session.get.mockClear();
-    const selectDirBtn = document.getElementById('selectDirBtn');
-    expect(selectDirBtn).not.toBeNull();
-    selectDirBtn.click();
-    await tick(200);
-
-    // resetHistory clears all caches. Verify historyFiles was cleared
-    // by checking initHistoryFiles re-ran (reads history:<today> via session cache).
-    // Since all caches are cleared in the same function, this proves
-    // gatewayOriginsLoaded was also reset.
-    const historyCalls = chrome.storage.session.get.mock.calls
-      .filter(c => {
-        const keys = c[0];
-        if (Array.isArray(keys)) return keys.some(k => k.startsWith('history:'));
-        return typeof keys === 'string' && keys.startsWith('history:');
-      });
-    expect(historyCalls.length).toBeGreaterThanOrEqual(1);
-  });
+  // T4 removed — gateway cache no longer exists in options.js (auto-list entity)
 
   // ---------------------------------------------------------------------------
   // T5: logBuffer entries → history loads correctly

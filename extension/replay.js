@@ -1,7 +1,7 @@
 // replay.js — pure functions for applying log entries to entity state.
 // Imported by both background.js (cache-miss replay) and offscreen.js (checkpoint).
 // Each function is idempotent — safe to replay the same entry twice.
-import { generateSlugFromUrl, isGatewayRoot } from './utils.js';
+import { generateSlugFromUrl, isGatewayOriginFromPins } from './utils.js';
 
 const REFERRER_CAP = 50;
 
@@ -54,7 +54,6 @@ export function defaultEntity(key) {
   }
   if (key === 'settings') return { timestamp: 0 };
   if (key === 'list:system/shallow-page') return { timestamp: 0, index: {} };
-  if (key === 'list:system/gateways') return { timestamp: 0, origins: [] };
   if (key === 'list:system/orphaned') return { timestamp: 0, keys: [] };
   if (key === 'list:system/root') return { timestamp: 0, childLists: [] };
   if (key.startsWith('list:')) {
@@ -142,11 +141,7 @@ export async function effectOf(entry, load) {
     }
 
     const entity = await loadOrDefault(listKey, load);
-    if (listKey === 'list:system/gateways') {
-      result[listKey] = applyLogToGateways(entity, entry);
-    } else {
-      result[listKey] = applyLogToPins(entity, entry);
-    }
+    result[listKey] = applyLogToPins(entity, entry);
 
     // List entries with shallow: ids also update the shallow-page index
     if (entry.action === 'list' && entry.ids?.some(id => id.startsWith(SHALLOW_PREFIX))) {
@@ -203,7 +198,7 @@ export async function effectOf(entry, load) {
     }
 
     // reparent_list → move list between parents (drag-and-drop)
-    if (entry.action === 'reparent_list' && !listKey.startsWith('list:system/')) {
+    if (entry.action === 'reparent_list' && !listKey.startsWith('list:system/') && !listKey.startsWith('list:auto/')) {
       const entity = result[listKey];
       const fromKey = 'list:' + entry.from;
       const toKey = 'list:' + entry.to;
@@ -222,7 +217,7 @@ export async function effectOf(entry, load) {
     }
 
     // del_list → remove from parent's childLists + soft-delete subtree descendants
-    if (entry.action === 'del_list' && !listKey.startsWith('list:system/')) {
+    if (entry.action === 'del_list' && !listKey.startsWith('list:system/') && !listKey.startsWith('list:auto/')) {
       const deletedEntity = result[listKey]; // already set by applyLogToPins with full shape
       // 1. Remove from parent's childLists (parentList is on entity)
       const parentKey = deletedEntity.parentList || 'list:system/root';
@@ -269,7 +264,7 @@ export async function effectOf(entry, load) {
     }
 
     // del_list → remove list:<id> from all pinned page parentIds + clean SPI + orphan
-    if (entry.action === 'del_list' && !listKey.startsWith('list:system/')) {
+    if (entry.action === 'del_list' && !listKey.startsWith('list:system/') && !listKey.startsWith('list:auto/')) {
       const pins = entity.pins || [];
       const shallowUrls = [];
       for (const pin of pins) {
@@ -446,15 +441,15 @@ export async function effectOf(entry, load) {
   // --- page ---
   if (entry.action === 'page') {
     // Skip parent-side childIds accumulation when parent is a gateway root
-    const gatewayOrigins = entry.referrerId
-      ? (await loadOrDefault('list:system/gateways', load)).origins || []
+    const gwPins = entry.referrerId
+      ? (await loadOrDefault('list:auto/gateways', load)).pins || []
       : [];
     // Apply to each affected page (entry's own page + referrer parent)
     for (const pageKey of getAffectedKeys(entry)) {
       const page = await load(pageKey);
       if (!page) { result[pageKey] = null; continue; }
       // Skip parent-side update for gateway roots (too many children)
-      if (pageKey === entry.referrerId && page.url && isGatewayRoot(page.url, gatewayOrigins)) continue;
+      if (pageKey === entry.referrerId && page.url && isGatewayOriginFromPins(page.url, gwPins)) continue;
       result[pageKey] = applyLogToPage(page, entry);
     }
 
@@ -800,33 +795,3 @@ export function applyLogToShallowPage(shallowPageIndex, entry) {
   return shallowPageIndex;
 }
 
-/**
- * Apply a log entry to a gateways entity.
- * Entity: { timestamp, origins: [...] }
- * Entry: { timestamp, action: 'list', id: 'system/gateways', op: 'add'|'del'|'clear', origins: [...] }
- * Returns new entity (or original if entry is irrelevant).
- */
-export function applyLogToGateways(gatewaysEntity, entry) {
-  if (entry.action !== 'list' || entry.id !== 'system/gateways') return gatewaysEntity;
-
-  const updated = { timestamp: entry.timestamp };
-  let origins = [...(gatewaysEntity.origins || [])];
-
-  if (entry.op === 'clear') {
-    updated.origins = [];
-  } else if (entry.op === 'add' && entry.origins) {
-    for (const origin of entry.origins) {
-      if (!origins.includes(origin)) {
-        origins.push(origin);
-      }
-    }
-    updated.origins = origins;
-  } else if (entry.op === 'del' && entry.origins) {
-    origins = origins.filter(o => !entry.origins.includes(o));
-    updated.origins = origins;
-  } else {
-    updated.origins = origins;
-  }
-
-  return updated;
-}
