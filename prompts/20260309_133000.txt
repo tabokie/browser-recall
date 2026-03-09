@@ -1,0 +1,17 @@
+- When I enter workspace mode, then open Portal UI, the workspace mode state is lost
+- 1, yes, I mean open options. 2, I mean b, the workspace mode is reset to default.
+- Just write a E2E test to verify my claim
+- When I unpin a list in list UI, the options page refreshes and go to the default explore UI. I don't want to UI to flicker and change page.
+- Couldn't explore and normal list use the same rendering functions?
+- Go ahead
+- Are there any remaining differences? Let's triage one by one
+- I meant difference between explore and list rendering paths
+- 1: List should hide pin section.
+2: They should be the same path. Explain the rationale of not unifying them first.
+3: Search should be the same path too. Explain the ratinonale of not unifying them first.
+4: All should catch errors and show errors to user.
+- Go
+- /finish
+- Update all
+- I deleted the function_graph.*, they are stale artifacts. Continue with the rest
+- n

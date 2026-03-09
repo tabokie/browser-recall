@@ -475,7 +475,7 @@ describe('Cache staleness', () => {
     // The updated list entity returns 4 pins now
     expect(pinnedOnlyRows().length).toBe(4);
 
-    // refreshListPages no longer persists enrichment — it only updates in-memory pin fields.
+    // Pin enrichment happens at render time via enrichPinResult (no background refresh).
     // The assertion above (pinnedOnlyRows().length === 4) verifies the UI is correct.
   });
 

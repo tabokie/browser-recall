@@ -1066,8 +1066,30 @@ async function saveSearchState() {
 
 // --- Query builder: Rendering ---
 
-
-
+// Shared pin enrichment: merges cached page data, attention scores, and pin timestamps.
+// Uses historyByUrl fallback for attention when page entity lacks it (showList behavior).
+function enrichPinResult(r, pins, pageSnap) {
+  const slug = r.slug || generateSlugFromUrl(r.url);
+  const cached = pageSnap.get(slug);
+  const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
+  let attSource = source.attDetail || source;
+  // Fallback: use attention from loaded history when page lacks it
+  if (attSource.scrollDepth === undefined && attSource.timeOnPage === undefined) {
+    const histEntry = historyByUrl.get(r.url);
+    if (histEntry) attSource = histEntry;
+  }
+  const attScore = attentionStrength(attSource) || (source.attScore || 0);
+  const rSlug = slug;
+  const pin = pins.find(p => slugFromPinId(p.id) === rSlug);
+  const enriched = {
+    ...r, slug, attScore, attDetail: attSource,
+    notes: source.notes || r.notes || [],
+    timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
+    pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
+  };
+  if (source.user_title) enriched.user_title = source.user_title;
+  return enriched;
+}
 
 
 
@@ -1088,66 +1110,47 @@ async function showExplore() {
   showListLayout();
   renderListSkeleton();
 
-  const listId = EXPLORE_LIST_ID;
-  const listEntity = await readCacheable('list:' + listId);
-  allListPins[listId] = listEntity?.pins || [];
-  savedSearches = listEntity?.savedSearches || [];
-  activeView.savedSearches = [...savedSearches];
-  currentSearchInput = '';
-  const pins = getExplorePins();
-  _timer('load explore pins');
+  try {
+    const listId = EXPLORE_LIST_ID;
+    const listEntity = await readCacheable('list:' + listId);
+    allListPins[listId] = listEntity?.pins || [];
+    savedSearches = listEntity?.savedSearches || [];
+    activeView.savedSearches = [...savedSearches];
+    currentSearchInput = '';
+    const pins = getExplorePins();
+    _timer('load explore pins');
 
-  // Hide pinned section when no pins
-  const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
-  if (pins.length === 0) {
-    pinnedSection.style.display = 'none';
-  } else {
-    const { pageSnap, spi, noteSnap } = await loadPinContext(pins);
-    const pinsResolved = pins.map(p => {
-      const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
-      return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null, isNote: ref?.isNote || false };
-    });
+    // Hide pinned section when no pins
+    const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
+    if (pins.length === 0) {
+      pinnedSection.style.display = 'none';
+    } else {
+      const { pageSnap, spi, noteSnap } = await loadPinContext(pins);
+      const pinsResolved = pins.map(p => {
+        const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
+        return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null, isNote: ref?.isNote || false };
+      });
 
-    function enrichResult(r) {
-      const slug = r.slug || generateSlugFromUrl(r.url);
-      const cached = pageSnap.get(slug);
-      const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
-      const attScore = source.attDetail ? attentionStrength(source.attDetail) : (source.attScore || attentionStrength(source));
-      const attDetail = source.attDetail || source;
-      const rSlug = slug;
-      const pin = pins.find(p => slugFromPinId(p.id) === rSlug);
-      const enriched = {
-        ...r, slug, attScore, attDetail,
-        notes: source.notes || r.notes || [],
-        timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
-        pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
-      };
-      if (source.user_title) enriched.user_title = source.user_title;
-      return enriched;
+      const fullPinned = pinsResolved.map(r => enrichPinResult(r, pins, pageSnap));
+      renderPinnedSection(fullPinned, listId);
+      _timer('render pinned section');
     }
 
-    const fullPinned = pinsResolved.map(enrichResult);
-    renderPinnedSection(fullPinned, listId);
-    _timer('render pinned section');
+    await renderListSearchFilters();
+    _timer('renderListSearchFilters');
+  } catch (error) {
+    console.error('Explore load error:', error);
+    document.getElementById('pinnedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
   }
-
-  await initHistoryFiles();
-  _timer('initHistoryFiles');
-  await loadHistoryBatch();
-  _timer('loadHistoryBatch');
-
-  await loadFilterState();
-  renderSearchPanel();
-  _timer('renderSearchPanel');
-  runSearchFilterPipeline();
-  _timer('runSearchFilterPipeline (fired)');
   document.body.dataset.ready = 'true';
 }
 
-// Incremental refresh after pin toggle — preserves scroll position and search state
-async function refreshExplorePins() {
-  const listId = EXPLORE_LIST_ID;
-  const pins = getExplorePins();
+// Incremental refresh after pin toggle — preserves scroll position and search state.
+// Works for both explore and list views by deriving listId from activeView.
+async function refreshPins() {
+  const isExplore = activeView.type === 'explore';
+  const listId = isExplore ? EXPLORE_LIST_ID : activeView.id;
+  const pins = allListPins[listId] || [];
 
   // Re-render pinned section
   const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
@@ -1159,28 +1162,11 @@ async function refreshExplorePins() {
       const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
       return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null, isNote: ref?.isNote || false };
     });
-    function enrichResult(r) {
-      const slug = r.slug || generateSlugFromUrl(r.url);
-      const cached = pageSnap.get(slug);
-      const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
-      const attScore = source.attDetail ? attentionStrength(source.attDetail) : (source.attScore || attentionStrength(source));
-      const attDetail = source.attDetail || source;
-      const rSlug = slug;
-      const pin = pins.find(p => slugFromPinId(p.id) === rSlug);
-      const enriched = {
-        ...r, slug, attScore, attDetail,
-        notes: source.notes || r.notes || [],
-        timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
-        pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
-      };
-      if (source.user_title) enriched.user_title = source.user_title;
-      return enriched;
-    }
-    const fullPinned = pinsResolved.map(enrichResult);
+    const fullPinned = pinsResolved.map(r => enrichPinResult(r, pins, pageSnap));
     renderPinnedSection(fullPinned, listId);
   }
 
-  updateExploreBadge();
+  if (isExplore) updateExploreBadge();
   runSearchFilterPipeline();
 }
 
@@ -1229,97 +1215,26 @@ async function showList(list) {
     allListPins[listId] = listEntity?.pins || [];
     const pins = allListPins[listId];
 
-    const { pageSnap, spi, noteSnap } = await loadPinContext(pins);
-    const pinsResolved = pins.map(p => {
-      const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
-      return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null, isNote: ref?.isNote || false };
-    });
+    // Hide pinned section when no pins
+    const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
+    if (pins.length === 0) {
+      pinnedSection.style.display = 'none';
+    } else {
+      const { pageSnap, spi, noteSnap } = await loadPinContext(pins);
+      const pinsResolved = pins.map(p => {
+        const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
+        return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null, isNote: ref?.isNote || false };
+      });
 
-    // Enrich from cached pin fields + session page cache (no further I/O)
-    function enrichResult(r) {
-      const slug = r.slug || generateSlugFromUrl(r.url);
-      const cached = pageSnap.get(slug);
-      // Use session page if available and newer than pin's watermark, else use pin's cached fields
-      const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
-      let attSource = source.attDetail || source;
-      // Fallback: use attention from loaded history when page lacks it
-      if (attSource.scrollDepth === undefined && attSource.timeOnPage === undefined) {
-        const histEntry = historyByUrl.get(r.url);
-        if (histEntry) attSource = histEntry;
-      }
-      const attScore = attentionStrength(attSource) || (source.attScore || 0);
-      const rSlug = slug;
-      const pin = pins.find(p => slugFromPinId(p.id) === rSlug);
-      const enriched = {
-        ...r, slug, attScore, attDetail: attSource,
-        notes: source.notes || r.notes || [],
-        timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
-        pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
-      };
-      if (source.user_title) enriched.user_title = source.user_title;
-      return enriched;
+      // --- Pinned section: render directly from entity pins ---
+      renderPinnedSection(pinsResolved.map(r => enrichPinResult(r, pins, pageSnap)), listId);
     }
 
-    // --- Pinned section: render directly from entity pins ---
-    renderPinnedSection(pinsResolved.map(enrichResult), listId);
-
-    // --- Explore section: search/filter panel ---
-    renderListSearchFilters(list);
-
-    // Fire-and-forget: refresh pages in background and update pin file
-    refreshListPages(listId, pins);
+    // --- Search/filter panel ---
+    await renderListSearchFilters();
   } catch (error) {
     console.error('List load error:', error);
     document.getElementById('pinnedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
-  }
-}
-
-// Background refresh: load fresh pages and update pin file + cache
-async function refreshListPages(listId, pins) {
-  try {
-    const slugs = pins.map(p => slugFromPinId(p.id));
-    if (slugs.length === 0) return;
-    // Read pages: session cache (dirty/recent) → filesystem (cold)
-    const pages = {};
-    const uncachedSlugs = [];
-    const pageKeys = slugs.map(s => 'page:' + s);
-    const sessionPages = pageKeys.length > 0 ? await chrome.storage.session.get(pageKeys) : {};
-    for (const slug of slugs) {
-      const cached = sessionPages['page:' + slug];
-      if (cached) pages[slug] = cached;
-      else uncachedSlugs.push(slug);
-    }
-    if (uncachedSlugs.length > 0) {
-      const loaded = await Promise.all(uncachedSlugs.map(s => readCacheable('page:' + s)));
-      for (let i = 0; i < uncachedSlugs.length; i++) {
-        if (loaded[i]) pages[uncachedSlugs[i]] = loaded[i];
-      }
-    }
-    let changed = false;
-    for (const pin of pins) {
-      const slug = slugFromPinId(pin.id);
-      const page = pages[slug];
-      if (!page) continue;
-      if ((page.watermark || 0) > (pin.watermark || 0)) {
-        let attSource = page;
-        // Fallback: use attention from loaded history when page lacks it
-        if (attSource.scrollDepth === undefined && attSource.timeOnPage === undefined) {
-          const pinUrl = pin.id.startsWith('shallow:') ? pin.id.slice(8) : (page.url || '');
-          const histEntry = historyByUrl.get(pinUrl);
-          if (histEntry) attSource = histEntry;
-        }
-        pin.attScore = attentionStrength(attSource);
-        pin.attDetail = attSource;
-        pin.notes = []; // Notes loaded separately when needed for search
-        pin.watermark = page.watermark;
-        changed = true;
-      }
-    }
-    if (changed) {
-      allListPins[listId] = pins;
-    }
-  } catch (error) {
-    console.debug('refreshListPages failed:', error.message);
   }
 }
 
@@ -1352,7 +1267,7 @@ function renderPinnedSection(allPinned, listId) {
 
 // recalculateRelatedResults removed — pinned section no longer has related pages
 
-async function renderListSearchFilters(list) {
+async function renderListSearchFilters() {
   await initHistoryFiles();
   await loadHistoryBatch();
 
@@ -1816,14 +1731,7 @@ function bindPinClicks(container, listId) {
     const title = pinBtn.dataset.pinTitle;
     const cid = container._pinListId;
     await toggleResultPin(cid, url, title);
-    if (cid === EXPLORE_LIST_ID && activeView.type === 'explore') {
-      refreshExplorePins();
-    } else if (cid === EXPLORE_LIST_ID) {
-      showExplore();
-    } else {
-      const lst = { id: cid, savedSearches: activeView.savedSearches, name: activeView.name };
-      showList(lst);
-    }
+    refreshPins();
   });
 }
 
@@ -3488,12 +3396,7 @@ function bindFocusContentDelegation(content) {
       // Update pin button appearance
       pinBtn.classList.toggle('pinned');
       // Refresh background UI
-      if (activeView.type === 'explore') {
-        refreshExplorePins();
-      } else if (activeView.type === 'list') {
-        const lst = { id: cid, savedSearches: activeView.savedSearches, name: activeView.name };
-        showList(lst);
-      }
+      refreshPins();
       return;
     }
   });

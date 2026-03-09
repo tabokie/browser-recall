@@ -165,7 +165,7 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **Persistence**: `saveSearchState()` — sends `savedSearches` via `saveListMeta` when changed
 - **State**: `savedSearches` (string[]), `currentSearchInput` (draft), `exploreDebounceTimer`
 - **Entry**: `options.js` `showExplore()` — loads explore pins, savedSearches from entity, renders search panel, runs pipeline
-- **List explore**: `renderListSearchFilters(list)` — same flow scoped to list
+- **List explore**: `renderListSearchFilters()` — shared by both explore and list views
 
 ### Workspace / Private Mode
 - **State**: `settings.json` key `workspace` `{mode: 'default'|'workspace'|'private', listIds, autoSnapshot}`; cached in session as part of `settings` object
@@ -186,7 +186,8 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 ### Options Page Views
 - **Category filters**: `options.js` `filterByCategory()` — today, week, highlighted, gateways
 - **Explore view**: `options.js` `showExplore()` — landing page; always shows list layout with block-based query UI and add-block button; if pins exist: pinned section + auto-blocks (children/parents/similar); when no blocks enabled: shows entire history with demand-loading; explore badge shows pin count
-- **List view**: `options.js` `showList()` — lazy-loads pins per-list (cached in `allListPins`), renders from cached pin fields + session page cache (no blocking I/O), fire-and-forget `refreshListPages()` updates page cache + pin file in background; pinned section (no chart/related), column header sort
+- **List view**: `options.js` `showList()` — lazy-loads pins per-list (cached in `allListPins`), renders from cached pin fields + session page cache via `enrichPinResult()` (shared with explore); pinned section (no chart/related), column header sort
+- **Pin refresh**: `options.js` `refreshPins()` — lightweight incremental re-render after pin toggle; derives listId from `activeView`, re-resolves + enriches pins, updates pinned section and search pipeline without full view reload
 - **Virtual scrolling**: `virtual-scroller.js` `VirtualScroller` class — viewport-only rendering (~50-80 DOM nodes at any time); `appendData(newItems)` for demand-loading (items pre-sorted before append), `onLoadMore` callback triggers near end of data; imported by options.js, instances for global results and list explore
 - **Event delegation**: `bindResultDelegation(container)` — single container-level click/dblclick/dragstart handler, replaces per-row listeners; dragstart collects all `.selected` rows for multi-drag
 - **Multi-drag drop**: list sidebar `drop` handler processes `{ items: [...] }` array, bulk-adds pins with single `saveAllListPins()` call
