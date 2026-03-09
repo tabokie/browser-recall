@@ -1041,8 +1041,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ success: true, timestamp });
           } catch (error) {
             console.warn('[capture-popup] ERROR:', error.message, error);
-            const [errTab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
-            if (errTab) chrome.tabs.sendMessage(errTab.id, { action: 'showErrorNotification', message: error.message }).catch(() => {});
             sendResponse({ success: false, error: error.message });
           }
           break;

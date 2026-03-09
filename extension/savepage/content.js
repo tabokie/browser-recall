@@ -1831,6 +1831,14 @@ function loadSuccess(index,reason,content,mimetype,charset)
     var i,resourceURL,frameURL,csstext,baseuri,regex,documentURL;
     var matches = [];
 
+    /* Guard against undefined resource slot (e.g. CSP blocked base-uri injection) */
+
+    if (!resourceMimeType[index])
+    {
+        loadFailure(index,"mime");
+        return;
+    }
+
     /* Process file based on expected MIME type */
 
     switch (resourceMimeType[index].toLowerCase())  /* expected MIME type */

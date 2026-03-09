@@ -1,0 +1,13 @@
+- There is a problem when I tried to capture snapshot.
+
+1. Console errors:
+
+ Setting the document's base URI to 'https://open.weixin.qq.com/pcopensdk/frame' violates the following Content Security Policy directive: "base-uri 'self'". The action has been blocked.
+ 
+ Error in event handler: TypeError: Cannot read properties of undefined (reading 'toLowerCase')
+    at loadSuccess (chrome-extension://hcndiohpnnmmojlkjbldbnhglaolfhgn/savepage/content.js:1836:37)
+    at chrome-extension://hcndiohpnnmmojlkjbldbnhglaolfhgn/savepage/content.js:350:17
+
+2. No error is bubbled to user via UI
+- Go, the error should reuse the same notification path as `showErrorNotification`
+- /finish

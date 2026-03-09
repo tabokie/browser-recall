@@ -644,9 +644,13 @@ document.getElementById('captureBtn').addEventListener('click', async () => {
       renderSnapshots(snapshotsResp.snapshots || []);
     } else {
       console.warn('[popup] Capture failed:', resp);
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab) chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: resp?.error || 'Capture failed' }).catch(() => {});
     }
   } catch (error) {
     console.error('[popup] Capture error:', error);
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+    if (tab) chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: error.message || 'Capture failed' }).catch(() => {});
   }
 
   btn.disabled = false;
@@ -808,11 +812,15 @@ async function showDashboard(tab) {
         });
 
         // Capture snapshot (content script extracts page, background forwards to offscreen)
-        await chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' });
+        const resp = await chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' });
+        if (resp && !resp.success) {
+          chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: resp.error || 'Capture failed' }).catch(() => {});
+        }
 
         console.log('[popup] Capture once completed for blacklisted page');
       } catch (error) {
         console.error('[popup] Capture once failed:', error);
+        chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: error.message || 'Capture failed' }).catch(() => {});
       }
 
       // Transition to full dashboard
