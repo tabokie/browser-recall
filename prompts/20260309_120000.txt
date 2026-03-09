@@ -1,0 +1,6 @@
+- After I add a new list, root.json is not updated, and a "explore" list shows up on Portal UI side panel
+- Good, except explore should be renamed to list:system/explore. I want you to figure out why E2E tests didn't catch the bugs first, then perform fixes
+- Migrate data, including explore list key changes, and fix the "root.json"
+- I was not expecting the reparent to have issue too (root.json having extras). Is the issue covered and fixed?
+- Are you sonnet or opus?
+- /finish

@@ -1598,4 +1598,123 @@ test.describe('List operations', () => {
     expect(note.value.deleted).toBe(false);
     expect(orphaned.value.keys).not.toContain(`note:${NOTE_SLUG}`);
   });
+
+  // Bug: root.json not persisted to disk after saveListMeta adds a new list.
+  // The drain in offscreen.js was missing a case for list:system/root.
+  test('new list creation persists root.json through drain + rehydrate', async ({ extContext, extensionId, setupDir }) => {
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: Date.now(), childLists: [],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Create a new list via saveListMeta
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'saveListMeta', listId: 'persisted', name: 'Persisted' })
+    );
+
+    // Flush (drain dirty entities to disk)
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+    );
+
+    // Rehydrate (clears session cache, re-reads from disk)
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+    );
+
+    // root.json should have survived the round-trip
+    const root = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
+    );
+    await helper.close();
+
+    expect(root.value).toBeTruthy();
+    expect(root.value.childLists).toContain('list:persisted');
+  });
+
+  // Bug: reparenting a child list to root updates root.json childLists, but
+  // the drain was missing the list:system/root case so it never persisted.
+  test('reparentList to root persists root.json through drain + rehydrate', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:parent'],
+      }},
+      { path: 'lists/parent.json', data: {
+        slug: 'parent', name: 'Parent', timestamp: now, pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: ['list:child'],
+      }},
+      { path: 'lists/child.json', data: {
+        slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
+        parentList: 'list:parent', childLists: [],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Reparent child from parent → root
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'reparentList', listId: 'child', fromParent: 'parent', toParent: 'system/root', index: 0 })
+    );
+
+    // Flush + rehydrate
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+    );
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+    );
+
+    const root = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
+    );
+    const parent = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:parent' })
+    );
+    await helper.close();
+
+    expect(root.value.childLists).toContain('list:child');
+    expect(parent.value.childLists).not.toContain('list:child');
+  });
+
+  // Bug: explore list entity (list:system/explore) must not appear in sidebar tree.
+  // The explore entity is a system entity — it should never leak into root's childLists.
+  test('explore pins do not leak into root childLists or sidebar', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'lists/system/explore.json', data: {
+        slug: 'system/explore', name: '', timestamp: now, pins: [
+          { id: `page:${TEST_SLUG}`, pinnedAt: now },
+        ], savedSearches: [],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Verify root's childLists does NOT contain explore
+    const root = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
+    );
+    expect(root.value.childLists).not.toContain('list:explore');
+    expect(root.value.childLists).not.toContain('list:system/explore');
+
+    // Verify explore entity is loadable as a system entity
+    const explore = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/explore' })
+    );
+    await helper.close();
+    expect(explore.value).toBeTruthy();
+    expect(explore.value.pins.length).toBe(1);
+  });
 });

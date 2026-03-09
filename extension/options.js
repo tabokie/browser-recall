@@ -65,7 +65,7 @@ let gatewayOriginsCache = []; // [origin, ...]
 let gatewayOriginsLoaded = false;
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
 // pinnedFilterCtx removed — pinned section no longer has related pages
-const EXPLORE_LIST_ID = 'explore';
+const EXPLORE_LIST_ID = 'system/explore';
 // Page data cached in chrome.storage.session (managed by background).
 // Keys: 'page:{slug}' for pages.
 

@@ -81,7 +81,7 @@ const TEST_LIST_PINS = {
     pinFromUrl('https://example.com/today1', NOW - DAY),
   ],
   // Explore pins — used by T12
-  'explore': [
+  'system/explore': [
     pinFromUrl('https://explore.example.com/a', NOW - DAY),
     pinFromUrl('https://explore.example.com/b', NOW - DAY),
   ],
@@ -371,7 +371,7 @@ describe('Cache staleness', () => {
       sessionData['list:' + list.slug] = { ...list, pins: testListPins[list.slug] || [], savedSearches: list.savedSearches || [] };
     }
     // Explore list entity (system list used by Explore view)
-    sessionData['list:explore'] = { slug: 'explore', name: 'Explore', pins: testListPins['explore'] || [], savedSearches: [] };
+    sessionData['list:system/explore'] = { slug: 'system/explore', name: 'Explore', pins: testListPins['system/explore'] || [], savedSearches: [] };
     // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
     for (const [slug, url] of SLUG_TO_URL) {
       sessionData['page:' + slug] = { slug, url, watermark: 0 };
@@ -947,10 +947,10 @@ describe('Cache staleness', () => {
 
     // Simulate background mutation notification for pins
     // This is what happens after toggleListPin/addListPins resolves:
-    // background sends notifyMutation('pins', { listId: 'explore' })
+    // background sends notifyMutation('pins', { listId: 'system/explore' })
     const listeners = chrome.runtime.onMessage.addListener.mock.calls.map(c => c[0]);
     for (const listener of listeners) {
-      listener({ action: 'mutation', type: 'pins', listId: 'explore' });
+      listener({ action: 'mutation', type: 'pins', listId: 'system/explore' });
     }
     await tick(500);
 

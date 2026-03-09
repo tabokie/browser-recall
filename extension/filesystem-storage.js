@@ -685,9 +685,6 @@ class FileSystemStorage {
   // Resolve the file path for a list ID.
   // Filename is always the list ID itself (slug).
   #resolveListPath(listId) {
-    if (listId === 'explore') {
-      return 'lists/system/explore.json';
-    }
     if (listId.startsWith('system/') || listId.startsWith('index/')) {
       return `lists/${listId}.json`;
     }
@@ -737,7 +734,7 @@ class FileSystemStorage {
     try {
       const fh = await this.resolveFile('lists/system/explore.json');
       const data = await this.readJson(fh);
-      allPins['explore'] = data.pins;
+      allPins['system/explore'] = data.pins;
     } catch (error) { if (!isNotFound(error)) throw error; }
 
     // Load user lists from lists/ — filename is the list slug
@@ -841,7 +838,7 @@ class FileSystemStorage {
       const path = this.#resolveListPath(id);
 
       // Track active IDs for cleanup (only for user lists)
-      if (!id.startsWith('system') && !id.startsWith('index') && id !== 'explore') {
+      if (!id.startsWith('system') && !id.startsWith('index')) {
         activeFilenames.add(id);
       }
 

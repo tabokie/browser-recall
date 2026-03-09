@@ -269,9 +269,9 @@ Lists                 ← section label
 - **Multi-day visits**: background detects multi-day visits (from cached page `visitDates` or logBuffer) and emits `page_checkpoint` before the visit
 - **Focus panel / getPageRelations**: parents from `page.parentIds` (typed refs — `page:<slug>` resolved via `readCacheable`, `shallow:<url>` URL extracted directly), fallback to `shallowPageIndex.index[url]`; children from `page.childIds` (same resolution pattern)
 
-### Explore as Special List
-- **List ID**: `EXPLORE_LIST_ID = 'explore'` — Explore is a regular list with a well-known ID
-- **Storage**: `lists/user/explore.json` — same `[{id, pinnedAt}]` format as any list; uses `addListPins`/`readCacheable('list:explore')`
+### Explore as System List
+- **List ID**: `EXPLORE_LIST_ID = 'system/explore'` — Explore is a system list entity keyed as `list:system/explore`
+- **Storage**: `lists/system/explore.json` — same `[{id, pinnedAt}]` format as any list; uses `addListPins`/`readCacheable('list:system/explore')`
 - **Unified pin button**: one `.result-pin` button on all result rows; pins to active list (`getActivePinListId()` — Explore when in explore/other views, list ID when in list view)
 - **Badge**: `updateExploreBadge()` reads `allListPins[EXPLORE_LIST_ID]`
 - **Drag-to-explore**: drop result rows on Explore button to pin via `toggleResultPin(EXPLORE_LIST_ID, ...)`
