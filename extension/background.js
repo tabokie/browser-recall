@@ -182,16 +182,21 @@ async function appendLog(entry) {
 
 // Read an entity from session cache by replay key.
 // Returns entity or null (null = not cached / doesn't exist).
-async function sessionLoad(key) {
-  return await readCacheable(key);
+async function sessionLoad(key, opts) {
+  return await readCacheable(key, opts?.includeDeleted);
 }
 
 // Like sessionLoad but without the hydrationDone guard.
 // Used during hydrateCache() where awaiting hydrationDone would deadlock.
-async function sessionLoadDuringHydration(key) {
+async function sessionLoadDuringHydration(key, opts) {
   const cached = await cacheGet(key);
-  if (cached !== null) return cached;
-  return readFs(key);
+  if (cached !== null) {
+    if (!opts?.includeDeleted && cached.deleted) return null;
+    return cached;
+  }
+  const value = await readFs(key);
+  if (!opts?.includeDeleted && value?.deleted) return null;
+  return value;
 }
 
 // Write effectOf results back to session cache.

@@ -64,8 +64,8 @@ export function defaultEntity(key) {
 }
 
 /** Load entity, falling back to defaultEntity for non-page/non-note keys. */
-async function loadOrDefault(key, load) {
-  return (await load(key)) ?? defaultEntity(key);
+async function loadOrDefault(key, load, opts) {
+  return (await load(key, opts)) ?? defaultEntity(key);
 }
 
 /** Load a page entity; only page_checkpoint can create from null. */
@@ -140,7 +140,10 @@ export async function effectOf(entry, load) {
       }
     }
 
-    const entity = await loadOrDefault(listKey, load);
+    const entity = await loadOrDefault(listKey, load,
+      entry.action === 'del_list' ? { includeDeleted: true } : undefined);
+    // Noop if already deleted
+    if (entry.action === 'del_list' && entity.deleted) return result;
     result[listKey] = applyLogToPins(entity, entry);
 
     // List entries with shallow: ids also update the shallow-page index
@@ -309,6 +312,9 @@ export async function effectOf(entry, load) {
   // --- del_note: unlink from pages, remove list pins, set deleted, orphan ---
   if (entry.action === 'del_note') {
     const noteKey = `${NOTE_PREFIX}${entry.slug}`;
+    // Load with includeDeleted; noop if already deleted
+    const note = await loadOrDefault(noteKey, load, { includeDeleted: true });
+    if (note.deleted) return result;
     // Unlink from parent pages
     const pageParents = (entry.parentIds || []).filter(p => p.startsWith(PAGE_PREFIX));
     await unlinkChild(noteKey, pageParents);
@@ -320,7 +326,6 @@ export async function effectOf(entry, load) {
       result[lk] = { ...list, pins: (list.pins || []).filter(p => p.id !== noteKey) };
     }
     // Mark deleted (note entity retains parentIds for restore)
-    const note = await loadOrDefault(noteKey, load);
     result[noteKey] = { ...note, deleted: true, timestamp: entry.timestamp };
     await orphan(noteKey, entry.timestamp);
     return result;
@@ -344,8 +349,8 @@ export async function effectOf(entry, load) {
       }
       result[lk] = { ...list, pins };
     }
-    // Clear deleted flag (use loadOrDefault — load() may return null for deleted entities)
-    const note = await loadOrDefault(noteKey, load);
+    // Clear deleted flag — load with includeDeleted to preserve original entity fields
+    const note = await loadOrDefault(noteKey, load, { includeDeleted: true });
     result[noteKey] = { ...note, deleted: false, timestamp: entry.timestamp };
     await unorphan(noteKey, entry.timestamp);
     return result;
@@ -378,13 +383,11 @@ export async function effectOf(entry, load) {
   if (entry.action === 'restore_list') {
     const listKey = `list:${entry.id}`;
 
-    // Load list entity — may be null if readCacheable filters deleted: true.
-    // Fall back to default, then overlay with entry data (name, pins from handler).
-    const entity = await loadOrDefault(listKey, load);
+    // Load list entity with includeDeleted to preserve original fields
+    const entity = await loadOrDefault(listKey, load, { includeDeleted: true });
     // Clear deleted flag and update timestamp
     const restored = { ...entity, deleted: false, timestamp: entry.timestamp };
     if (entry.name) restored.name = entry.name;
-    // Restore pins from log entry (handler passes them since load may filter deleted entities)
     if (entry.pins) restored.pins = entry.pins;
     result[listKey] = restored;
 
@@ -398,7 +401,7 @@ export async function effectOf(entry, load) {
     result[listKey] = restored;
     // Restore all descendants
     for (const childKey of (entry.subtreeKeys || [])) {
-      const child = result[childKey] || await loadOrDefault(childKey, load);
+      const child = result[childKey] || await loadOrDefault(childKey, load, { includeDeleted: true });
       result[childKey] = { ...child, deleted: false, timestamp: entry.timestamp };
       await unorphan(childKey, entry.timestamp);
     }

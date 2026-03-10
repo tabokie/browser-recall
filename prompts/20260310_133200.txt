@@ -1,0 +1,7 @@
+- You once said "readCacheable filters deleted: true entities by default. When writing effectOf branches that load deleted entities (restore_note, del_note), use loadOrDefault instead of load — the load closure calls readCacheable without includeDeleted, returning null for deleted entities. Same pattern as restore_list uses." Why do you call the function `loadOrDefault` instead of `loadIncludeDeleted"? I want to know are you applying to deleted entity or default entity.
+- Does it mean, the old tombstone entity is erased then?
+- I think we need to change this behavior, it should simply reset deleted=false, and re-links it to parents or children.
+- The latter. TDD
+- /finish
+- Update memory note, Add E2E tests, del_list should includeDeleted and becomes noop if already deleted.
+- n

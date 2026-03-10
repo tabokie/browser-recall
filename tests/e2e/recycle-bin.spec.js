@@ -122,6 +122,95 @@ test.describe('Recycle bin', () => {
     await helper.close();
   });
 
+  // 2b. restoreNote preserves original entity fields (content, childIds, etc.)
+  test('restoreNote preserves original entity fields after restore', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const noteSlug = '260310-restore-fields';
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      // Note on disk with original fields + deleted: true
+      { path: `notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: 'My excerpt', note: 'Important content', cssPath: 'div.main > p',
+        parentIds: [`page:${TEST_SLUG}`], childIds: ['snap:some/123'], timestamp: now, deleted: true,
+      }},
+      { path: 'lists/system/orphaned.json', data: {
+        timestamp: now, keys: [`note:${noteSlug}`],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Restore the note
+    const restoreResp = await helper.evaluate((slug) =>
+      chrome.runtime.sendMessage({ action: 'restoreNote', noteSlug: slug })
+    , noteSlug);
+    expect(restoreResp.success).toBe(true);
+
+    // Verify original fields are preserved (not replaced with blank defaults)
+    const noteResp = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `note:${noteSlug}`);
+    expect(noteResp.success).toBe(true);
+    expect(noteResp.value.deleted).toBeFalsy();
+    expect(noteResp.value.excerpt).toBe('My excerpt');
+    expect(noteResp.value.note).toBe('Important content');
+    expect(noteResp.value.cssPath).toBe('div.main > p');
+    expect(noteResp.value.childIds).toContain('snap:some/123');
+
+    await helper.close();
+  });
+
+  // 2c. restoreList preserves original entity fields (savedSearches, childLists, etc.)
+  test('restoreList preserves original entity fields after restore', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const listId = 'restore-fields-list';
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: [],
+      }},
+      // Deleted list with rich fields on disk
+      { path: `lists/${listId}.json`, data: {
+        slug: listId, name: 'Rich List', timestamp: now,
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
+        savedSearches: [{ query: 'test search', createdAt: now }],
+        deleted: true,
+        parentList: 'list:system/root', childLists: ['list:sub-child'],
+      }},
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: 'lists/system/orphaned.json', data: {
+        timestamp: now, keys: [`list:${listId}`],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Restore the list
+    const restoreResp = await helper.evaluate((id) =>
+      chrome.runtime.sendMessage({ action: 'restoreList', listId: id })
+    , listId);
+    expect(restoreResp.success).toBe(true);
+
+    // Verify original fields are preserved
+    const listResp = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `list:${listId}`);
+    expect(listResp.success).toBe(true);
+    expect(listResp.value.deleted).toBeFalsy();
+    expect(listResp.value.savedSearches).toHaveLength(1);
+    expect(listResp.value.savedSearches[0].query).toBe('test search');
+    expect(listResp.value.childLists).toContain('list:sub-child');
+
+    await helper.close();
+  });
+
   // 3. permanentDelete removes note file after drain
   test('permanentDelete removes note file after drain', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();

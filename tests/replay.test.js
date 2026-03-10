@@ -1171,6 +1171,86 @@ describe('effectOf scope', () => {
     expect(result['list:system/orphaned'].keys).not.toContain('note:n1');
   });
 
+  it('restore_note preserves original entity fields when load filters deleted', async () => {
+    // Simulate background sessionLoad: load() returns null for deleted entities,
+    // but the entity exists on disk with original fields (content, parentIds, etc.)
+    const deletedNote = { slug: 'n1', timestamp: 50, parentIds: ['page:p1'], childIds: ['snap:n1/123'], content: 'my note content', deleted: true };
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: [] };
+    const orphaned = { timestamp: 50, keys: ['note:n1'] };
+    const load = async (key, opts) => {
+      // Without includeDeleted, returns null (simulates readCacheable default)
+      if (key === 'note:n1') return opts?.includeDeleted ? deletedNote : null;
+      if (key === 'page:p1') return pageEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_note', slug: 'n1', parentIds: ['page:p1'] },
+      load,
+    );
+    // Original fields must be preserved
+    expect(result['note:n1'].content).toBe('my note content');
+    expect(result['note:n1'].childIds).toEqual(['snap:n1/123']);
+    expect(result['note:n1'].slug).toBe('n1');
+    // deleted cleared
+    expect(result['note:n1'].deleted).toBe(false);
+  });
+
+  it('restore_list preserves original entity fields when load filters deleted', async () => {
+    const deletedList = {
+      slug: 'c1', timestamp: 50, name: 'Original Name', savedSearches: [{ query: 'test' }],
+      pins: [{ id: 'page:p1', pinnedAt: 30 }],
+      parentList: 'list:system/root', childLists: ['list:child1'],
+      deleted: true,
+    };
+    const root = { timestamp: 0, childLists: [] };
+    const orphaned = { timestamp: 50, keys: ['list:c1'] };
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: [] };
+    const load = async (key, opts) => {
+      if (key === 'list:c1') return opts?.includeDeleted ? deletedList : null;
+      if (key === 'list:system/root') return root;
+      if (key === 'list:system/orphaned') return orphaned;
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_list', id: 'c1', name: 'Original Name', pins: [{ id: 'page:p1', pinnedAt: 30 }] },
+      load,
+    );
+    // Original fields preserved
+    expect(result['list:c1'].savedSearches).toEqual([{ query: 'test' }]);
+    expect(result['list:c1'].childLists).toEqual(['list:child1']);
+    expect(result['list:c1'].deleted).toBe(false);
+  });
+
+  it('restore_list subtreeKeys preserves original child entity fields', async () => {
+    const deletedParent = {
+      slug: 'parent', timestamp: 50, name: 'Parent', savedSearches: [],
+      pins: [], parentList: 'list:system/root', childLists: ['list:child'], deleted: true,
+    };
+    const deletedChild = {
+      slug: 'child', timestamp: 50, name: 'Child', savedSearches: [{ query: 'q' }],
+      pins: [], parentList: 'list:parent', childLists: [], deleted: true,
+    };
+    const root = { timestamp: 0, childLists: [] };
+    const orphaned = { timestamp: 50, keys: ['list:parent', 'list:child'] };
+    const load = async (key, opts) => {
+      if (key === 'list:parent') return opts?.includeDeleted ? deletedParent : null;
+      if (key === 'list:child') return opts?.includeDeleted ? deletedChild : null;
+      if (key === 'list:system/root') return root;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'restore_list', id: 'parent', name: 'Parent', pins: [], subtreeKeys: ['list:child'] },
+      load,
+    );
+    // Child's original fields preserved
+    expect(result['list:child'].savedSearches).toEqual([{ query: 'q' }]);
+    expect(result['list:child'].name).toBe('Child');
+    expect(result['list:child'].deleted).toBe(false);
+  });
+
   it('affects page + shallow_page keys for page entry with title', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const result = await effectOf({ timestamp: 100, action: 'page', url: 'https://a.com', title: 'A' }, nullLoad);
@@ -1569,6 +1649,47 @@ describe('effectOf scope', () => {
     expect(result['list:child'].deleted).toBe(false);
     expect(result['list:system/orphaned'].keys).not.toContain('list:parent');
     expect(result['list:system/orphaned'].keys).not.toContain('list:child');
+  });
+
+  it('del_list is noop when entity is already deleted', async () => {
+    const root = { timestamp: 0, childLists: ['list:other'] };
+    const deletedList = {
+      timestamp: 50, slug: 'c1', name: 'Already Deleted', savedSearches: [],
+      pins: [{ id: 'page:p1', pinnedAt: 30 }],
+      parentList: 'list:system/root', childLists: [], deleted: true,
+    };
+    const orphaned = { timestamp: 50, keys: ['list:c1'] };
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: ['list:c1'], childIds: [] };
+    const load = async (key, opts) => {
+      if (key === 'list:c1') return opts?.includeDeleted ? deletedList : null;
+      if (key === 'list:system/root') return root;
+      if (key === 'list:system/orphaned') return orphaned;
+      if (key === 'page:p1') return pageEntity;
+      return null;
+    };
+    const result = await effectOf({ timestamp: 100, action: 'del_list', id: 'c1' }, load);
+    // Should be empty — no changes when already deleted
+    expect(Object.keys(result)).toHaveLength(0);
+  });
+
+  it('del_note is noop when entity is already deleted', async () => {
+    const deletedNote = {
+      slug: 'n1', timestamp: 50, parentIds: ['page:p1'], childIds: [], deleted: true,
+    };
+    const pageEntity = { slug: 'p1', timestamp: 0, parentIds: [], childIds: ['note:n1'] };
+    const orphaned = { timestamp: 50, keys: ['note:n1'] };
+    const load = async (key, opts) => {
+      if (key === 'note:n1') return opts?.includeDeleted ? deletedNote : null;
+      if (key === 'page:p1') return pageEntity;
+      if (key === 'list:system/orphaned') return orphaned;
+      return null;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'del_note', slug: 'n1', parentIds: ['page:p1'] },
+      load,
+    );
+    // Should be empty — no changes when already deleted
+    expect(Object.keys(result)).toHaveLength(0);
   });
 
   it('del_list preserves full entity shape (parentList, childLists)', async () => {
