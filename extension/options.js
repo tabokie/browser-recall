@@ -332,6 +332,25 @@ function slugFromPinId(id) {
   if (id.startsWith('note:')) return id.slice(5);
 }
 
+// Resolve an array of pins to display-ready objects with title/url populated.
+// Loads entity context, resolves each pin via resolvePageRef, falls back to
+// historyByUrl for shallow pins with null SPI title.
+// Returns { pinsResolved, pageSnap } — pageSnap is needed by enrichPinResult.
+async function resolvePinsForDisplay(pins) {
+  const { pageSnap, spi, noteSnap } = await loadPinContext(pins);
+  const pinsResolved = pins.map(p => {
+    const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
+    let url = ref?.url || '';
+    let title = ref?.title || '';
+    if (!title && url) {
+      const hist = historyByUrl.get(url);
+      if (hist?.title) title = hist.title;
+    }
+    return { ...p, url, title, user_title: ref?.user_title || null, isNote: ref?.isNote || false };
+  });
+  return { pinsResolved, pageSnap };
+}
+
 // Resolve a typed page reference to entity-like data, or null.
 // page:<slug> → page entity from pageSnap. shallow:<url> → metadata from shallowPageIndex.
 // Unreferenced shallow pages return null.
@@ -406,18 +425,11 @@ function isResultPinned(listId, url) {
 }
 
 async function toggleResultPin(listId, url, title) {
-  if (!allListPins[listId]) allListPins[listId] = [];
-  const pins = allListPins[listId];
-  const slug = generateSlugFromUrl(url);
-  const pageId = `page:${slug}`;
-  const shallowId = 'shallow:' + url;
-  const idx = pins.findIndex(p => p.id === pageId || p.id === shallowId || p.url === url);
-  if (idx !== -1) {
-    pins.splice(idx, 1);
-  } else {
-    pins.push({ id: pageId, pinnedAt: Date.now() });
-  }
   await chrome.runtime.sendMessage({ action: 'toggleListPin', listId, url });
+  // Invalidate local cache — the entity now has the authoritative pin state.
+  // The mutation notification will also invalidate, but callers that call
+  // refreshPins() inline need the cache cleared before that runs.
+  delete allListPins[listId];
 }
 
 // --- Layout switching (list vs normal vs recycle bin) ---
@@ -1106,12 +1118,7 @@ async function showExplore() {
     if (pins.length === 0) {
       pinnedSection.style.display = 'none';
     } else {
-      const { pageSnap, spi, noteSnap } = await loadPinContext(pins);
-      const pinsResolved = pins.map(p => {
-        const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
-        return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null, isNote: ref?.isNote || false };
-      });
-
+      const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
       const fullPinned = pinsResolved.map(r => enrichPinResult(r, pins, pageSnap));
       renderPinnedSection(fullPinned, listId);
       _timer('render pinned section');
@@ -1131,18 +1138,18 @@ async function showExplore() {
 async function refreshPins() {
   const isExplore = activeView.type === 'explore';
   const listId = isExplore ? EXPLORE_LIST_ID : activeView.id;
-  const pins = allListPins[listId] || [];
+  if (!allListPins[listId]) {
+    const entity = await readCacheable('list:' + listId);
+    allListPins[listId] = entity?.pins || [];
+  }
+  const pins = allListPins[listId];
 
   // Re-render pinned section
   const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
   if (pins.length === 0) {
     pinnedSection.style.display = 'none';
   } else {
-    const { pageSnap, spi, noteSnap } = await loadPinContext(pins);
-    const pinsResolved = pins.map(p => {
-      const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
-      return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null, isNote: ref?.isNote || false };
-    });
+    const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
     const fullPinned = pinsResolved.map(r => enrichPinResult(r, pins, pageSnap));
     renderPinnedSection(fullPinned, listId);
   }
@@ -1201,11 +1208,7 @@ async function showList(list) {
     if (pins.length === 0) {
       pinnedSection.style.display = 'none';
     } else {
-      const { pageSnap, spi, noteSnap } = await loadPinContext(pins);
-      const pinsResolved = pins.map(p => {
-        const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
-        return { ...p, url: ref?.url || '', title: ref?.title || '', user_title: ref?.user_title || null, isNote: ref?.isNote || false };
-      });
+      const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
 
       // --- Pinned section: render directly from entity pins ---
       renderPinnedSection(pinsResolved.map(r => enrichPinResult(r, pins, pageSnap)), listId);
@@ -3288,13 +3291,11 @@ async function openListFocusPanel(listId, listName) {
       html += '<div class="focus-empty">No pinned pages</div>';
     } else {
       const maxAtt = 0.1;
-      const { pageSnap: fpSnap, spi: fpSpi, noteSnap: fpNoteSnap } = await loadPinContext(pins);
-      html += pins.map(p => {
-        const ref = resolvePageRef(p.id, fpSnap, fpSpi, fpNoteSnap);
-        const title = ref?.user_title || ref?.title || 'Untitled';
-        const url = ref?.url || '';
-        return resultRowHtml(title, url, {
-          deletable: false, attScore: 0, maxAtt, timestamps: [p.pinnedAt || Date.now()], context: 'global', noFocusButton: true
+      const { pinsResolved } = await resolvePinsForDisplay(pins);
+      html += pinsResolved.map(r => {
+        const title = r.user_title || r.title || 'Untitled';
+        return resultRowHtml(title, r.url, {
+          deletable: false, attScore: 0, maxAtt, timestamps: [r.pinnedAt || Date.now()], context: 'global', noFocusButton: true
         });
       }).join('');
     }

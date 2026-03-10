@@ -618,6 +618,145 @@ test.describe('List operations', () => {
     await helper.close();
   });
 
+  // Bug: clicking the pin button on a search result in the list view appends a
+  // 'del' log instead of 'add', and the pinned section shows "Untitled" without URL.
+  // Scenario: page is not checkpointed (no page entity file) — only exists in history.
+  // UI constructs page:<slug> optimistically, but background resolves to shallow:<url>.
+  test('pin a non-checkpointed searched page via UI pin button appends add log and shows correct title', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const pageUrl = 'https://example.com/shallow-only';
+    const pageSlug = getSlugForUrl(pageUrl);
+
+    // Seed: NO page entity file — page exists only in history (shallow)
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', timestamp: now,
+        pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'history/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'page', url: pageUrl, title: 'Shallow Page' },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Navigate to the list
+    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    // Wait for the page to appear in related results (all-history mode, no saved searches)
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 1,
+      { timeout: 10000 }
+    );
+
+    // Click the pin button on the search result
+    const pinBtn = options.locator('#relatedResults .result-row .result-pin').first();
+    await expect(pinBtn).toBeVisible();
+    await pinBtn.click();
+
+    // Wait for the pinned section to show the page
+    const pinnedRow = options.locator('#pinnedResults .result-row').first();
+    await expect(pinnedRow).toBeVisible({ timeout: 10000 });
+
+    // Verify the log entry has op: 'add' (not 'del')
+    const helper = await openHelperPage(extContext, extensionId);
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const history = await helper.evaluate((dk) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'history:' + dk })
+    , dateKey);
+    await helper.close();
+
+    const listLogEntries = (history.value || []).filter(
+      e => e.action === 'list' && e.id === 'reading'
+    );
+    expect(listLogEntries.length).toBeGreaterThanOrEqual(1);
+    const pinEntry = listLogEntries[listLogEntries.length - 1];
+    expect(pinEntry.op).toBe('add');
+
+    // Verify pinned page has URL in data attribute (not empty)
+    const pinnedUrl = await pinnedRow.getAttribute('data-url');
+    expect(pinnedUrl).toContain('example.com/shallow-only');
+
+    // Verify pinned page shows correct title (not "Untitled")
+    const pinnedTitle = await pinnedRow.locator('.result-title').textContent();
+    expect(pinnedTitle).toContain('Shallow Page');
+
+    await options.close();
+  });
+
+  // Bug: after pinning a non-checkpointed page from search results, clicking
+  // the pin button on the now-"Untitled" pinned row sends a second toggleListPin
+  // that produces a 'del' log because background sees the pin already exists.
+  test('pin non-checkpointed page from search — re-clicking Untitled pin does not produce del log', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const pageUrl = 'https://example.com/shallow-reclick';
+    const pageSlug = getSlugForUrl(pageUrl);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', timestamp: now,
+        pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'history/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'page', url: pageUrl, title: 'Shallow Reclick' },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Navigate to the list
+    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    // Wait for the page to appear in related results
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 1,
+      { timeout: 10000 }
+    );
+
+    // Click the pin button on the search result
+    const pinBtn = options.locator('#relatedResults .result-row .result-pin').first();
+    await expect(pinBtn).toBeVisible();
+    await pinBtn.click();
+
+    // Wait for the pinned section to show (even if "Untitled")
+    const pinnedRow = options.locator('#pinnedResults .result-row').first();
+    await expect(pinnedRow).toBeVisible({ timeout: 10000 });
+
+    // Verify the entity has exactly one pin with op: 'add'
+    const helper = await openHelperPage(extContext, extensionId);
+    const listEntity = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+    );
+    expect(listEntity.value.pins.length).toBe(1);
+
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const history = await helper.evaluate((dk) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'history:' + dk })
+    , dateKey);
+    await helper.close();
+
+    const listLogs = (history.value || []).filter(e => e.action === 'list' && e.id === 'reading');
+    // Should have exactly 1 list log entry (the add), no del
+    expect(listLogs.length).toBe(1);
+    expect(listLogs[0].op).toBe('add');
+    // No 'del' entries should exist
+    expect(listLogs.filter(e => e.op === 'del').length).toBe(0);
+
+    await options.close();
+  });
+
   // Bug 20260226: unpin should emit a single 'del' op, not 'clear' then 'add'.
   // Verify by checking that after unpin, the other pins remain intact.
   test('unpin one page leaves other pins intact', async ({ extContext, extensionId, setupDir }) => {

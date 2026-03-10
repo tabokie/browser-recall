@@ -1,0 +1,10 @@
+- When I try to pin a searched page to list (in the list's own UI), a "del" log is appended, and the list UI refreshes to only show an "Untitled" pin without URL. Reproduce this bug in E2E test.
+- I can now pin a page. But initially it still shows up as "Untitled", only to have correct data after refresh
+- Oh, I misunderstand. Now fix the bug please
+- Run lints
+- /finish
+- Explain the gaps. Are they real issues or not? Can we unify them to use the same code paths?
+- /finish
+- n
+- n
+- continu
