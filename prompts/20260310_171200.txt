@@ -1,0 +1,61 @@
+- Take a look at TODO.md, examine what has already been done and what to do next
+- Remove finished items
+- Work on exploration items
+- For item 1, go ahead. For item 2, why couldn't you open a test PDF in playwrite and check it yourself?
+- Migrate my existing snapshot at ~/portal-data to have the special meta marker
+- Why there could be folder with markdown but no html? Figure out (1) how we entered this state, (2) how will the system handle it now
+- I see. Remove that broken snapshot from the data (both history and checkpoints). For ".pdf", show an error notification right away instead of requesting a capture.
+- Actually, for direct file view (*.<ext>), can we skip the capture and use direct download? Will it work?
+- Save this as a TODO, i.e. save raw binary file as snapshot
+- For pdf highlighting, can it be done using right-click menu? I see many extensions have their own item in right-click menu. And selection and right-click still works in a PDF viewer.
+- Implement now. If possible, for the case where highlight rendering is blocked, I want to show a hover panel over the native PDF viewer that lists current highlights and has input box for notes.
+- No need to print selected string, it could be very long. "Highlight Selected" is enough
+- I used it on a local PDF, no highlight is saved, and no hover window is shown
+- Logs:
+
+[context-menu] Highlight error: Error in invocation of tabs.sendMessage(integer tabId, any message, optional object options, optional function callback): Error at parameter 'tabId': Value must be at least 0. TypeError: Error in invocation of tabs.sendMessage(integer tabId, any message, optional object options, optional function callback): Error at parameter 'tabId': Value must be at least 0.
+    at handleContextMenuHighlight (background.js:992:17)
+    at async background.js:1024:5
+(匿名) @ background.js:1027
+background.js:1028  Uncaught (in promise) TypeError: Error in invocation of tabs.sendMessage(integer tabId, any message, optional object options, optional function callback): Error at parameter 'tabId': Value must be at least 0.
+    at background.js:1028:17
+- No, file url is wrong. Take a look at ~/portal-data/pages/mhjfbmdgcfjbbpaeojofohoefgiehj-b8wddt.json. Maybe we need to ban local file once and for all
+- What is the test PDF you used for E2E test earlier, let me use it for manual test
+- Doesn't work either. The URL is wrong. Let's ban all pdf files. And clean up ~/portal-data file for this URL and for page:mhjfbmdgcfjbbpaeojofohoefgiehj-b8wddt
+- Remove context manu, now that we drop support for PDF
+- Actually, is it possible to get URL or title and passed to background.js within the context manu?
+- Yes, let's write a simple handler in background.js that simply logs the payload, and I will manual test
+- [context-menu] info: {"selectionText":"PDF","pageUrl":"chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/edge_pdf/index.html","frameUrl":"chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/edge_pdf/index.html","frameId":0}
+background.js:959 [context-menu] tab: {"id":-1,"url":"chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/edge_pdf/index.html","title":"dummy.pdf"}
+
+Any other info that we can pass?
+- It is working!
+
+[context-menu] callback tab: {"id":-1,"url":"chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/edge_pdf/index.html","title":"dummy.pdf"}
+background.js:958 [context-menu] active tab: {"id":1545210970,"url":"https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf","title":"dummy.pdf"}
+
+Is there possibility of race? E.g. active tab changed before the listener is invoked
+- Go ahead
+- Show the hover window unconditionally if we are viewing PDF, and the window will hint user to right click to highlight
+- Great, I finished testing, remove the test history and checkpoints. Search for all .pdf traces in today's history
+- Does it work (highlighting) for local PDF?
+- It seems to work, but there are two issues: (1) On initial visit, the default hover window doesn't show, (2) After highlighting, the hover window show the highlight, but after refresh page, the highlight is gone.
+- Remove the last few test PDF history
+- Is there blacklist logic for local files now? Lift them up?
+- (1) You missed "260310-拓扑学-od5mtm" note earlier in the cleanup. (2) When user click off the hover window, it reappears after scrolling. We want it to persist for the duration of the visit, only reappear after page refresh. (3) I noticed, in extension initialization, there is this error:
+
+background.js:1873  Error handling message: Error: Cannot read properties of null (reading 'getDirectoryHandle')
+    at assertOffscreenSuccess (background.js:294:11)
+    at readFs (background.js:335:9)
+    at async readCacheable (background.js:269:17)
+    at async background.js:1294:24
+
+Examine why and if it needs fixing.
+- Reload token
+- Both items in ~/portal-data/lists/system/orphaned.json should be cleaned, thoroughly
+- Something is wrong. I reloaded the extension, and portal UI doesn't show any lists
+- The root.json is reset to empty... Earlier by some changes, probably with the changes around load
+- /finish
+- Fix 1. Update 3.
+- 1
+- continue

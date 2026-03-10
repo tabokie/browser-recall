@@ -168,7 +168,12 @@ function extractMarkdown() {
 }
 
 // Generate slug from the current page URL (inline version of utils.js generateSlugFromUrl)
+// For snapshot blob: tabs, reads the embedded x-portal-slug meta tag instead.
 function getSlugForCurrentPage() {
+  // Check for embedded slug identity (snapshot viewer)
+  const meta = document.querySelector('meta[name="x-portal-slug"]');
+  if (meta && meta.content) return meta.content;
+
   const url = window.location.href;
   try {
     const parsed = new URL(url);
@@ -882,6 +887,96 @@ function showErrorNotification(message) {
   setTimeout(() => host.remove(), 2500);
 }
 
+// ─── Highlights Panel (for pages where visual marks can't render) ─────
+
+function showHighlightsPanel(notes, pageSlug, { hint } = {}) {
+  const existing = document.getElementById('portal-highlights-panel');
+  if (existing) existing.remove();
+
+  const excerptNotes = notes.filter(n => n.excerpt !== null);
+  if (excerptNotes.length === 0 && !hint) return;
+
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  const host = document.createElement('div');
+  host.id = 'portal-highlights-panel';
+  host.style.cssText = 'position: fixed; z-index: 2147483647; top: 16px; right: 16px;';
+
+  const shadow = host.attachShadow({ mode: 'open' });
+  shadow.innerHTML = `
+    <style>
+      .panel { width: 300px; max-height: 400px; overflow-y: auto; background: white; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.18); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; }
+      .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #eee; font-weight: 600; font-size: 12px; color: #444; cursor: move; user-select: none; }
+      .close-btn { background: none; border: none; cursor: pointer; color: #888; font-size: 16px; padding: 0 4px; line-height: 1; }
+      .close-btn:hover { color: #333; }
+      .highlight-item { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }
+      .highlight-item:last-child { border-bottom: none; }
+      .excerpt { font-size: 12px; color: #222; background: #fff8dc; padding: 4px 6px; border-radius: 3px; border-left: 3px solid #f0c040; margin-bottom: 4px; line-height: 1.4; word-break: break-word; }
+      .note-row { display: flex; align-items: flex-start; gap: 4px; }
+      textarea { flex: 1; min-height: 24px; height: 24px; border: 1px solid #e0e0e0; border-radius: 4px; padding: 3px 6px; font-family: inherit; font-size: 11px; resize: none; box-sizing: border-box; line-height: 16px; overflow: hidden; }
+      textarea:focus { outline: none; border-color: #4285f4; }
+      .delete-btn { flex-shrink: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: none; border: 1px solid transparent; border-radius: 3px; cursor: pointer; color: #aaa; padding: 0; }
+      .delete-btn:hover { background: #fce8e6; color: #c5221f; border-color: #c5221f; }
+      .delete-btn svg { width: 14px; height: 14px; fill: currentColor; }
+      .hint { padding: 8px 12px; font-size: 11px; color: #888; line-height: 1.4; }
+    </style>
+    <div class="panel">
+      <div class="panel-header">
+        <span>Highlights${excerptNotes.length ? ' (' + excerptNotes.length + ')' : ''}</span>
+        <button class="close-btn" title="Close">&times;</button>
+      </div>
+      ${excerptNotes.map(n => {
+        const text = Array.isArray(n.excerpt) ? n.excerpt.join(' ') : n.excerpt;
+        return `<div class="highlight-item" data-note-slug="${n.slug}">
+          <div class="excerpt">${esc(text)}</div>
+          <div class="note-row">
+            <textarea placeholder="Add a note...">${esc(n.note || '')}</textarea>
+            <button class="delete-btn" title="Delete"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>
+          </div>
+        </div>`;
+      }).join('')}
+      ${hint ? `<div class="hint">${esc(hint)}</div>` : ''}
+    </div>
+  `;
+
+  document.body.appendChild(host);
+
+  shadow.querySelector('.close-btn').addEventListener('click', () => {
+    window.__portalPanelDismissed = true;
+    host.remove();
+  });
+
+  shadow.querySelectorAll('textarea').forEach(ta => {
+    function autoResize() { ta.style.height = '24px'; if (ta.scrollHeight > 24) ta.style.height = ta.scrollHeight + 'px'; }
+    if (ta.value) autoResize();
+    ta.addEventListener('input', autoResize);
+  });
+
+  shadow.querySelectorAll('.highlight-item').forEach(item => {
+    const noteSlug = item.dataset.noteSlug;
+    const ta = item.querySelector('textarea');
+    const origValue = ta.value;
+    ta.addEventListener('blur', () => {
+      if (ta.value !== origValue) chrome.runtime.sendMessage({ action: 'updateNote', noteSlug, note: ta.value }).catch(() => {});
+    });
+    ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') ta.blur(); });
+    item.querySelector('.delete-btn').addEventListener('click', () => {
+      chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug }).catch(() => {});
+      item.remove();
+      const remaining = shadow.querySelectorAll('.highlight-item').length;
+      shadow.querySelector('.panel-header span').textContent = `Highlights (${remaining})`;
+      if (remaining === 0) host.remove();
+    });
+  });
+
+  // Drag support
+  let isDragging = false, dragX = 0, dragY = 0;
+  const header = shadow.querySelector('.panel-header');
+  header.addEventListener('mousedown', (e) => { isDragging = true; dragX = e.clientX - host.getBoundingClientRect().left; dragY = e.clientY - host.getBoundingClientRect().top; e.preventDefault(); });
+  document.addEventListener('mousemove', (e) => { if (!isDragging) return; host.style.left = (e.clientX - dragX) + 'px'; host.style.top = (e.clientY - dragY) + 'px'; host.style.right = 'auto'; });
+  document.addEventListener('mouseup', () => { isDragging = false; });
+}
+
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Skip Save Page WE messages (use `type` field, handled by savepage/content.js)
@@ -990,6 +1085,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     }
     sendResponse({ success: true });
+  } else if (request.action === 'showHighlightsPanel') {
+    window.__portalPanelDismissed = false; // Reset so new highlight shows panel
+    showHighlightsPanel(request.notes || [], request.pageSlug);
+    sendResponse({ success: true });
   } else if (request.action === 'showCaptureNotification') {
     showCaptureNotification();
     sendResponse({ success: true });
@@ -1006,6 +1105,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // Re-apply highlights on page load
 reapplyHighlights();
+
+// On PDF pages, show highlights panel with hint.
+// Delay to let Chrome's PDF viewer finish initializing (it replaces DOM after content script runs).
+try {
+  if (/\.pdf(\?|#|$)/i.test(new URL(window.location.href).pathname)) {
+    const pdfSlug = getSlugForCurrentPage();
+    function showPdfPanel() {
+      chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: pdfSlug }).then(resp => {
+        if (resp?.success === false) { showHighlightsPanel([], pdfSlug, { hint: 'Select text and right-click to highlight' }); return; }
+        const notes = resp?.notes || [];
+        showHighlightsPanel(notes, pdfSlug, { hint: 'Select text and right-click to highlight' });
+      }).catch(() => {
+        showHighlightsPanel([], pdfSlug, { hint: 'Select text and right-click to highlight' });
+      });
+    }
+    // Initial show after PDF viewer settles
+    setTimeout(showPdfPanel, 1500);
+    // Re-show if PDF viewer destroys the panel (but not if user dismissed it)
+    new MutationObserver(() => {
+      if (!document.getElementById('portal-highlights-panel') && !window.__portalPanelDismissed) {
+        setTimeout(showPdfPanel, 500);
+      }
+    }).observe(document.body, { childList: true });
+  }
+} catch {}
 
 // Before unload, send final attention report
 window.addEventListener('beforeunload', () => {

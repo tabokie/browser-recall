@@ -66,6 +66,11 @@ function withLock(key, fn) {
 // ─── Request Handler ──────────────────────────────────────────────────
 
 async function handleRequest(request) {
+  // Wait for initial directory handle load before processing filesystem requests.
+  // Skip for actions that handle init themselves.
+  if (request.action !== 'initializeFilesystem' && request.action !== 'setTestDirectory') {
+    await initDone;
+  }
   try {
     switch (request.action) {
       case 'initializeFilesystem': {
@@ -566,4 +571,4 @@ async function initialize() {
   }
 }
 
-initialize();
+const initDone = initialize();

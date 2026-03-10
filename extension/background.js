@@ -740,6 +740,13 @@ const getReferrer = (() => {
 
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('Portal extension installed');
+
+  chrome.contextMenus.create({
+    id: 'portal-highlight',
+    title: 'Highlight Selected',
+    contexts: ['selection'],
+  });
+
   await ensureOffscreenPort();
   await ensureLogBuffer();
   console.log('Storage initialized');
@@ -910,6 +917,10 @@ function searchHistoryEntries(entries, url, result) {
 // ─── Snapshot Capture ─────────────────────────────────────────────────
 
 async function captureAndLog(tabId, slug, timestamp, url, title) {
+  // PDF pages render via a native plugin — no extractable content
+  if (url && /\.pdf(\?|#|$)/i.test(new URL(url).pathname)) {
+    throw new Error('Cannot capture PDF pages');
+  }
   // Ensure page exists before capture
   if (url) await ensureCheckpointIfMissing(url, title);
   const mdResp = await chrome.tabs.sendMessage(tabId, { action: 'extractMarkdown' });
@@ -934,6 +945,83 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
   });
   notifyMutation('snapshot', { slug });
 }
+
+// ─── Context Menu ─────────────────────────────────────────────────────
+
+async function handleContextMenuHighlight(url, title, selectionText, tabId) {
+  const slug = generateSlugFromUrl(url);
+  await ensureCheckpointIfMissing(url, title);
+
+  const timestamp = Date.now();
+  const noteSlug = generateNoteSlug(timestamp, selectionText);
+
+  await requestOffscreen({
+    action: 'saveNote',
+    slug: noteSlug,
+    data: {
+      slug: noteSlug,
+      excerpt: selectionText,
+      note: '',
+      cssPath: null,
+      parentIds: [`page:${slug}`],
+      childIds: [],
+      timestamp
+    }
+  });
+
+  await addLog({
+    timestamp,
+    action: 'note',
+    slug: noteSlug,
+    parentIds: [`page:${slug}`]
+  });
+
+  notifyMutation('note', { pageSlug: slug, noteSlug });
+
+  // Show highlights panel in the tab's content script
+  if (tabId > 0) {
+    const page = await readCacheable('page:' + slug);
+    const noteRefs = (page?.childIds || []).filter(c => c.startsWith('note:'));
+    const notes = [];
+    for (const ref of noteRefs) {
+      const note = await readCacheable(ref);
+      if (note) notes.push(note);
+    }
+    chrome.tabs.sendMessage(tabId, {
+      action: 'showHighlightsPanel',
+      notes,
+      pageSlug: slug,
+    }).catch(() => {});
+  }
+
+  return { success: true, noteSlug };
+}
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== 'portal-highlight') return;
+  if (!info.selectionText) return;
+
+  // The callback's tab object has wrong URL/id for PDF viewer tabs.
+  // Query the real active tab instead; guard with title match.
+  const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!activeTab?.url) return;
+  if (tab?.title && activeTab.title !== tab.title) {
+    console.warn('[context-menu] Active tab title mismatch, skipping');
+    return;
+  }
+
+  try {
+    await handleContextMenuHighlight(activeTab.url, activeTab.title, info.selectionText.trim(), activeTab.id);
+  } catch (error) {
+    console.warn('[context-menu] Highlight error:', error.message);
+    if (activeTab.id > 0) {
+      chrome.tabs.sendMessage(activeTab.id, {
+        action: 'showErrorNotification',
+        message: error.message
+      }).catch(() => {});
+    }
+  }
+});
 
 // ─── Keyboard Shortcuts ───────────────────────────────────────────────
 
@@ -1348,6 +1436,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         // ── Writes (session cache + log buffer) ──
+
+        case 'contextMenuHighlight': {
+          try {
+            const tabs = await chrome.tabs.query({ url: request.url });
+            const tabId = tabs?.[0]?.id || null;
+            const result = await handleContextMenuHighlight(
+              request.url, request.title, request.selectionText, tabId
+            );
+            sendResponse(result);
+          } catch (error) {
+            sendResponse({ success: false, error: error.message });
+          }
+          break;
+        }
 
         case 'ensurePageCheckpoint': {
           await ensureCheckpointIfMissing(request.url, request.title);

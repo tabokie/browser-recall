@@ -424,9 +424,12 @@ class FileSystemStorage {
     }
 
     if (html) {
+      // Embed slug identity so content.js can identify the page in blob: tabs
+      const metaTag = `<meta name="x-portal-slug" content="${slug}">`;
+      const taggedHtml = html.replace(/<head([^>]*)>/i, `<head$1>${metaTag}`);
       const htmlHandle = await slugDir.getFileHandle(`${timestamp}.html`, { create: true });
       const htmlWritable = await htmlHandle.createWritable();
-      await htmlWritable.write(html);
+      await htmlWritable.write(taggedHtml === html ? metaTag + html : taggedHtml);
       await htmlWritable.close();
     }
   }
