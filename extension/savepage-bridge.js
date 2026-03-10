@@ -37,6 +37,15 @@ export function captureSavePage(tabId) {
 }
 
 async function loadSavepageResource(tabId, index, location, referrer, referrerPolicy) {
+  // Skip video URLs before fetching (SPWE treats loadFailure as "skip resource")
+  if (/\.(mp4|webm|ogg|mov|avi|m4v)(\?|#|$)/i.test(location)) {
+    const s = await chrome.storage.session.get('settings');
+    if (s.settings?.captureSnapshotVideo !== true) {
+      chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'blocked*' });
+      return;
+    }
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => { controller.abort(); }, 10 * 1000); // maxResourceTime
 
@@ -68,6 +77,15 @@ async function loadSavepageResource(tabId, index, location, referrer, referrerPo
           mimetype !== 'application/octet-stream') {
         chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'blocked*' });
         return;
+      }
+
+      // Also catch videos by MIME type (URL extension check above may miss some)
+      if (mimetype.startsWith('video/')) {
+        const s = await chrome.storage.session.get('settings');
+        if (s.settings?.captureSnapshotVideo !== true) {
+          chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'blocked*' });
+          return;
+        }
       }
 
       const buffer = await response.arrayBuffer();

@@ -1,0 +1,14 @@
+- Help me breakdown understand the space usage of ~/portal-data/pages, it is larger than I expected.
+- How to reduce snapshot size?
+- Go deep in analyzing the largest snapshots, figure out which resources is the culprits, and let me decide if they are worth keeping
+- Point me to snapshots with videos, let me check if they can play.
+For the CSS strip, could you experiment and save to another file so that I can manuall compare before and after?
+- You didn't not point me to the file locations
+- The CSS changes made it kind of ugly.. Let's add a setting flag to disable video snapshot
+- Default off. Change existing snapshots to be as if created with the flag off.
+- No, i meant by default video are not captured. The flag should be [ ] capture video.
+- And I don't really understand the changes in savepage.js. Why report a failure? It should silently drop the video
+- What's with the sendMessage('loadFailure')? Would user receive an warning notification?
+- /finish
+- Update markdowns.
+- n

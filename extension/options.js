@@ -2531,6 +2531,11 @@ document.getElementById('historyFileBatch').addEventListener('change', async () 
   showStatus('Settings saved', 'success');
 });
 
+document.getElementById('captureSnapshotVideo').addEventListener('change', async () => {
+  await saveSettingsValue('captureSnapshotVideo', document.getElementById('captureSnapshotVideo').checked);
+  showStatus('Settings saved', 'success');
+});
+
 // Clear all data
 document.getElementById('clearBtn').addEventListener('click', async () => {
   if (!confirm('WARNING: This will DELETE ALL FILES in your storage directory!\n\nThis cannot be undone. Are you absolutely sure?')) {
@@ -3458,6 +3463,7 @@ async function initialize() {
   document.getElementById('relatedPagesLimit').value = relatedPagesLimit;
   historyFileBatch = await loadSettingsValue('historyFileBatch', 10);
   document.getElementById('historyFileBatch').value = historyFileBatch;
+  document.getElementById('captureSnapshotVideo').checked = await loadSettingsValue('captureSnapshotVideo', false);
   _timer('loadSettings');
 
   // Initialize chart tooltips
