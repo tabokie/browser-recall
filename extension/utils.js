@@ -1,7 +1,7 @@
 // Shared utility functions
 
 // Unified cache read: session cache → background readCacheable fallback.
-// Keys use entity key format: 'settings', 'list:system/recycle-bin', etc.
+// Keys use entity key format: 'manifest:settings', 'manifest:orphaned', 'list:reading', etc.
 export async function readCacheable(key, includeDeleted = false) {
   try {
     const cached = await chrome.storage.session.get([key]);
@@ -19,7 +19,7 @@ export async function readCacheable(key, includeDeleted = false) {
 
 // Read a settings sub-key from the unified settings entity.
 export async function loadSettingsValue(key, defaultValue) {
-  const settings = await readCacheable('settings');
+  const settings = await readCacheable('manifest:settings');
   const v = settings?.[key];
   return v !== undefined ? v : defaultValue;
 }
@@ -44,7 +44,7 @@ export async function saveSettingsValue(key, value) {
 // Generic slug generation: normalize text + hash for uniqueness
 function generateSlug(text, hashInput) {
   if (!text || text.trim() === '') {
-    text = 'untitled';
+    throw new Error('generateSlug: text must be non-empty');
   }
   // Normalize: lowercase, replace non-alphanumeric with hyphens, trim to 30 chars
   const base = text.toLowerCase()
@@ -65,18 +65,14 @@ function generateSlug(text, hashInput) {
 
 // Generate slug from URL for content file naming
 export function generateSlugFromUrl(url) {
-  try {
-    const parsed = new URL(url);
-    let domain = parsed.hostname.toLowerCase();
-    if (domain.startsWith('www.')) domain = domain.slice(4);
-    const lastDot = domain.lastIndexOf('.');
-    if (lastDot > 0) domain = domain.slice(0, lastDot);
-    const text = domain + parsed.pathname;
-    // Hash the full URL for uniqueness (includes query params, fragments, etc.)
-    return generateSlug(text, url);
-  } catch {
-    return 'untitled';
-  }
+  const parsed = new URL(url);
+  let domain = parsed.hostname.toLowerCase();
+  if (domain.startsWith('www.')) domain = domain.slice(4);
+  const lastDot = domain.lastIndexOf('.');
+  if (lastDot > 0) domain = domain.slice(0, lastDot);
+  const text = domain + parsed.pathname;
+  // Hash the full URL for uniqueness (includes query params, fragments, etc.)
+  return generateSlug(text, url);
 }
 
 // Generate slug from list title for list file naming
@@ -93,13 +89,13 @@ export function savedSearchesChanged(a, b) {
 }
 
 // Check if a URL's origin root is pinned in an auto-gateways pin list.
-// pins: [{ id: 'page:<slug>' | 'shallow:<url>', pinnedAt }]
+// pins: [{ id: 'page:<slug>', pinnedAt }]
 export function isGatewayOriginFromPins(url, pins) {
   try {
     const origin = new URL(url).origin;
     const rootUrl = origin + '/';
     const rootSlug = generateSlugFromUrl(rootUrl);
-    return pins.some(p => p.id === `shallow:${rootUrl}` || p.id === `page:${rootSlug}`);
+    return pins.some(p => p.id === `page:${rootSlug}`);
   } catch {
     return false;
   }

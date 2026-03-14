@@ -8,15 +8,15 @@ test.describe('Scale — larger data sets', () => {
     for (let i = 0; i < 20; i++) {
       entries.push({
         timestamp: now - (20 - i) * 1000,
-        action: 'page',
+        action: 'visit_page',
         url: `https://example.com/page-${i}`,
         title: `Page ${i}`,
       });
     }
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
-      { path: 'history/2026-03-01.jsonl', lines: entries },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'data/logs/2026-03-01.jsonl', lines: entries },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -50,7 +50,7 @@ test.describe('Scale — larger data sets', () => {
     for (let i = 0; i < 10; i++) {
       day1.push({
         timestamp: day1Base + i * 1000,
-        action: 'page',
+        action: 'visit_page',
         url: `https://example.com/day1-page-${i}`,
         title: `Day1 Page ${i}`,
       });
@@ -58,16 +58,16 @@ test.describe('Scale — larger data sets', () => {
     for (let i = 0; i < 10; i++) {
       day2.push({
         timestamp: day2Base + i * 1000,
-        action: 'page',
+        action: 'visit_page',
         url: `https://example.com/day2-page-${i}`,
         title: `Day2 Page ${i}`,
       });
     }
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
-      { path: 'history/2026-02-28.jsonl', lines: day1 },
-      { path: 'history/2026-03-01.jsonl', lines: day2 },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'data/logs/2026-02-28.jsonl', lines: day1 },
+      { path: 'data/logs/2026-03-01.jsonl', lines: day2 },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -87,7 +87,7 @@ test.describe('Scale — larger data sets', () => {
   test('5 lists with 3 pins each all render correctly', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const rootChildLists = [];
-    const files = [{ path: 'settings.json', data: { trimRules: [] } }];
+    const files = [{ path: 'manifest/settings.json', data: { trimRules: [] } }];
 
     for (let l = 0; l < 5; l++) {
       const listSlug = `list-${l}`;
@@ -115,13 +115,13 @@ test.describe('Scale — larger data sets', () => {
       for (let p = 0; p < 3; p++) {
         historyLines.push({
           timestamp: now + l * 100 + p,
-          action: 'page',
+          action: 'visit_page',
           url: `https://example.com/list${l}-page${p}`,
           title: `L${l} Page ${p}`,
         });
       }
     }
-    files.push({ path: 'history/2026-03-01.jsonl', lines: historyLines });
+    files.push({ path: 'data/logs/2026-03-01.jsonl', lines: historyLines });
     files.push({ path: 'lists/system/root.json', data: { timestamp: now, childLists: rootChildLists } });
 
     await resetAndSeed(extContext, extensionId, files);
@@ -156,7 +156,7 @@ test.describe('Scale — larger data sets', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:research'],
       }},
@@ -165,8 +165,9 @@ test.describe('Scale — larger data sets', () => {
         pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Research': 'research' } } },
       { path: `pages/${slug}.json`, data: {
-        slug, url, title: 'Pinned Page', timestamp: now, parentIds: [], childIds: [],
+        slug, url, title: 'Pinned Page', timestamp: now, parentIds: ['list:research'], childIds: [],
       }},
     ]);
 

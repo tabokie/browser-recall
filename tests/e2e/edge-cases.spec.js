@@ -9,37 +9,39 @@ test.describe('User journeys', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Journey Page', timestamp: now, parentIds: [], childIds: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url, title: 'Journey Page' },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url, title: 'Journey Page' },
       ]},
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
 
-    // Step 1: Create a new list
-    await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'saveListMeta', listId: 'journey-list', name: 'My Journey' })
+    // Step 1: Create a new list (returns generated listId)
+    const createResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'saveListMeta', name: 'My Journey' })
     );
+    const listId = createResult.listId;
+    expect(listId).toBeTruthy();
 
     // Step 2: Pin the page to it
-    const pinResult = await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'journey-list', url: u })
-    , url);
+    const pinResult = await helper.evaluate(({ lid, u }) =>
+      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: lid, url: u })
+    , { lid: listId, u: url });
     expect(pinResult.pinned).toBe(true);
 
     // Step 3: Rename the list
-    await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'saveListMeta', listId: 'journey-list', name: 'Renamed Journey' })
-    );
+    await helper.evaluate((lid) =>
+      chrome.runtime.sendMessage({ action: 'saveListMeta', listId: lid, name: 'Renamed Journey' })
+    , listId);
     await helper.close();
 
     // Step 4: Verify in options page
     const options = await openOptionsPage(extContext, extensionId);
-    const listItem = options.locator('.sidebar-item[data-list-id="journey-list"]');
+    const listItem = options.locator(`.sidebar-item[data-list-id="${listId}"]`);
     await expect(listItem).toBeVisible({ timeout: 5000 });
     await expect(listItem.locator('.label')).toHaveText('Renamed Journey');
 
@@ -53,7 +55,7 @@ test.describe('User journeys', () => {
     await options.close();
   });
 
-  test('navigate parent → child → checkpoint child → bidirectional relations', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('navigate parent → child → pin child → bidirectional relations', async ({ extContext, extensionId, setupDir, localServer }) => {
     localServer.addPage('/j-parent', {
       title: 'Journey Parent',
       body: '<a href="/j-child">Go to child</a>',
@@ -63,13 +65,28 @@ test.describe('User journeys', () => {
       body: '<p>Child content</p>',
     });
 
+    const parentUrl = localServer.url('/j-parent');
+    const childUrl = localServer.url('/j-child');
+    const parentSlug = getSlugForUrl(parentUrl);
+    const childSlug = getSlugForUrl(childUrl);
+    const now = Date.now();
+
+    // Seed page entities so visit_page can enrich them with referrer relations
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], blacklist: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+      { path: `pages/${parentSlug}.json`, data: {
+        slug: parentSlug, url: parentUrl, title: 'Journey Parent', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: `pages/${childSlug}.json`, data: {
+        slug: childSlug, url: childUrl, title: 'Journey Child', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
     ]);
 
     // Navigate parent → child via link click
     const page = await extContext.newPage();
-    await page.goto(localServer.url('/j-parent'));
+    await page.goto(parentUrl);
     await page.waitForTimeout(300);
     await page.click('a[href="/j-child"]');
     await page.waitForURL('**/j-child');
@@ -77,36 +94,26 @@ test.describe('User journeys', () => {
 
     const helper = await openHelperPage(extContext, extensionId);
 
-    // Wait for child to be recorded
+    // Wait for child visit to be recorded with referrer
     await helper.waitForFunction((u) =>
-      chrome.runtime.sendMessage({ action: 'getPageInfo', url: u })
-        .then(r => r.success && r.slug)
-    , localServer.url('/j-child'), { timeout: 5000 });
-
-    // Checkpoint the child page
-    await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'ensurePageCheckpoint', url: u, title: 'Journey Child' })
-    , localServer.url('/j-child'));
+      chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
+        .then(r => r.success && r.parents.referrers.length > 0)
+    , childUrl, { timeout: 5000 });
 
     // Verify child → parent relation
     const childRels = await helper.evaluate((u) =>
       chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
-    , localServer.url('/j-child'));
+    , childUrl);
 
     // Verify parent → child relation
-    // First checkpoint the parent so getPageRelations can find it
-    await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'ensurePageCheckpoint', url: u, title: 'Journey Parent' })
-    , localServer.url('/j-parent'));
-
     const parentRels = await helper.evaluate((u) =>
       chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
-    , localServer.url('/j-parent'));
+    , parentUrl);
     await helper.close();
     await page.close();
 
-    expect(childRels.parents.referrers).toContain(localServer.url('/j-parent'));
-    expect(parentRels.children).toContain(localServer.url('/j-child'));
+    expect(childRels.parents.referrers).toContain(parentUrl);
+    expect(parentRels.children).toContain(childUrl);
   });
 });
 
@@ -114,7 +121,7 @@ test.describe('User journeys', () => {
 test.describe('Empty and edge states', () => {
   test('fresh state — options explore renders without error', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -130,14 +137,16 @@ test.describe('Empty and edge states', () => {
     await options.close();
   });
 
-  test('pin a never-visited URL — creates SPI entry without crash', async ({ extContext, extensionId, setupDir }) => {
+  test('pin a never-visited URL — creates page entity without crash', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const url = 'https://example.com/never-visited';
+    const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
       // No history, no page checkpoint — the URL has never been seen
     ]);
 
@@ -150,10 +159,10 @@ test.describe('Empty and edge states', () => {
     expect(r.success).toBe(true);
     expect(r.pinned).toBe(true);
 
-    // SPI should have an entry (with null title since never visited)
-    const spiResult = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/shallow-page' })
-    );
+    // Page entity should have been created by pin_to_list effectOf
+    const pageResult = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${slug}`);
 
     // Pin should be retrievable
     const listResult = await helper.evaluate(() =>
@@ -161,15 +170,15 @@ test.describe('Empty and edge states', () => {
     );
     await helper.close();
 
-    expect(spiResult.value.index[url]).toBeDefined();
-    expect(spiResult.value.index[url].lists).toContain('list:reading');
+    expect(pageResult.value).toBeTruthy();
+    expect(pageResult.value.url).toBe(url);
     expect((listResult.value?.pins || []).length).toBe(1);
   });
 
   test('empty list renders list view without error', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:empty'],
       }},
@@ -199,9 +208,10 @@ test.describe('Empty and edge states', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Complex URL Page', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -245,9 +255,9 @@ test.describe('Unicode and special characters', () => {
     const today = new Date(now).toISOString().slice(0, 10);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
-      { path: `history/${today}.jsonl`, lines: [
-        { timestamp: now, action: 'page', url, title },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: `data/logs/${today}.jsonl`, lines: [
+        { timestamp: now, action: 'visit_page', url, title },
       ]},
     ]);
 
@@ -263,7 +273,7 @@ test.describe('Unicode and special characters', () => {
     const name = '阅读清单 📚';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:unicode-list'],
       }},
@@ -287,7 +297,7 @@ test.describe('Unicode and special characters', () => {
     });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], blacklist: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     const page = await extContext.newPage();
@@ -299,12 +309,12 @@ test.describe('Unicode and special characters', () => {
 
     // Wait for the visit to be recorded
     await helper.waitForFunction(({ u, dateKey }) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'history:' + dateKey })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dateKey })
         .then(r => r.value && r.value.some(e => e.url === u && e.title))
     , { u: url, dateKey: today }, { timeout: 5000 });
 
     const hist = await helper.evaluate(({ dateKey }) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'history:' + dateKey })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dateKey })
     , { dateKey: today });
     await helper.close();
     await page.close();

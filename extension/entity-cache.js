@@ -15,10 +15,10 @@ const EVICTION_LIMIT = 500; // max unpinned keys before eviction
 // Returns true if key should be pinned by default (never evicted).
 
 function defaultPinned(key) {
-  if (key === 'settings') return true;
   if (key === 'workspace') return true;
+  if (key.startsWith('manifest:')) return true; // settings, orphaned, name-to-id — small metadata, always needed
   if (key.startsWith('list:')) return true; // user lists + system lists — small metadata
-  // page:*, note:*, history:* → not pinned by default
+  // page:*, note:*, log:* → not pinned by default
   return false;
 }
 

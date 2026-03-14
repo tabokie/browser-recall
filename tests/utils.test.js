@@ -19,8 +19,8 @@ describe('generateSlugFromUrl', () => {
     expect(a).not.toBe(b);
   });
 
-  it('returns "untitled" for invalid URLs', () => {
-    expect(generateSlugFromUrl('not-a-url')).toBe('untitled');
+  it('throws for invalid URLs', () => {
+    expect(() => generateSlugFromUrl('not-a-url')).toThrow();
   });
 
   it('truncates long slugs to 80 chars', () => {
@@ -32,7 +32,7 @@ describe('generateSlugFromUrl', () => {
   it('handles unicode in hostname', () => {
     const slug = generateSlugFromUrl('https://例え.jp/ページ');
     expect(slug.length).toBeGreaterThan(0);
-    expect(slug).not.toBe('untitled');
+    expect(slug.length).toBeGreaterThan(0);
   });
 
   it('is deterministic', () => {
@@ -76,14 +76,14 @@ describe('isGatewayOriginFromPins', () => {
   const docsSlug = generateSlugFromUrl('https://docs.rs/');
   const pins = [
     { id: `page:${ghSlug}`, pinnedAt: 100 },
-    { id: 'shallow:https://docs.rs/', pinnedAt: 200 },
+    { id: `page:${docsSlug}`, pinnedAt: 200 },
   ];
 
   it('matches root URL of a checkpointed gateway (page: pin)', () => {
     expect(isGatewayOriginFromPins('https://github.com/', pins)).toBe(true);
   });
 
-  it('matches root URL of a shallow gateway (shallow: pin)', () => {
+  it('matches root URL of another gateway (page: pin)', () => {
     expect(isGatewayOriginFromPins('https://docs.rs/', pins)).toBe(true);
   });
 
@@ -95,7 +95,7 @@ describe('isGatewayOriginFromPins', () => {
     expect(isGatewayOriginFromPins('https://example.com/', pins)).toBe(false);
   });
 
-  it('matches child page of shallow gateway', () => {
+  it('matches child page of gateway', () => {
     expect(isGatewayOriginFromPins('https://docs.rs/tokio/latest', pins)).toBe(true);
   });
 
@@ -142,10 +142,10 @@ describe('readCacheable', () => {
   });
 
   it('returns value from session cache without sendMessage', async () => {
-    sessionStore.settings = { trimRules: [] };
+    sessionStore['manifest:settings'] = { trimRules: [] };
     // Dynamic import to pick up mocked chrome
     const { readCacheable } = await import('../extension/utils.js');
-    const result = await readCacheable('settings');
+    const result = await readCacheable('manifest:settings');
     expect(result).toEqual({ trimRules: [] });
     expect(sendMessageMock).not.toHaveBeenCalled();
   });
@@ -202,7 +202,7 @@ describe('loadSettingsValue delegates to readCacheable', () => {
   });
 
   it('returns value from readCacheable when present', async () => {
-    sessionStore.settings = { archiveQuality: 'high' };
+    sessionStore['manifest:settings'] = { archiveQuality: 'high' };
     const { loadSettingsValue } = await import('../extension/utils.js');
     const result = await loadSettingsValue('archiveQuality', 'medium');
     expect(result).toBe('high');

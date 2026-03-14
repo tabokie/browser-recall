@@ -4,7 +4,7 @@ import { resetAndSeed, openHelperPage, openOptionsPage } from './helpers.js';
 test.describe('Workspace mode persistence', () => {
   test('workspace mode survives opening options page', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
     ]);
 
     // Simulate popup setting workspace mode via chrome.storage.session

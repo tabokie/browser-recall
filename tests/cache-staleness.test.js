@@ -209,8 +209,8 @@ describe('Cache staleness', () => {
   let actionOverrides;
   /** Mutable list pins data — tests can override to change pin responses */
   let testListPins;
-  /** Mutable SPI data — tests can override for shallow-page index responses */
-  let testSpiData;
+  /** Mutable name-map data — tests can override for name-map responses */
+  let testNameMapData;
   /** Mutable root data — tests can override to change list:system/root responses */
   let testRootData;
   /** Mutable page entity data — tests can override to change readCacheable('page:*') responses.
@@ -244,7 +244,7 @@ describe('Cache staleness', () => {
     deferreds = {};
     actionOverrides = {};
     testListPins = { ...TEST_LIST_PINS };
-    testSpiData = null;
+    testNameMapData = null;
     testRootData = null;
     testPageData = {};
 
@@ -320,11 +320,11 @@ describe('Cache staleness', () => {
       case 'readCacheable':
         // Simulate background readCacheable: dispatch to known handlers
         switch (msg.key) {
-          case 'settings': return { success: true, value: TEST_SETTINGS };
+          case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
           case 'list:system/root': return { success: true, value: testRootData || TEST_ROOT };
           case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] } };
-          case 'list:system/shallow-page': return { success: true, value: testSpiData || { timestamp: 0, index: {} } };
-          case 'list:system/orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
+          case 'manifest:name-to-id': return { success: true, value: testNameMapData || { timestamp: 0, paths: {} } };
+          case 'manifest:orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
           default: {
             // Resolve page entity keys from testPageData (filesystem fallback)
             if (msg.key && msg.key.startsWith('page:')) {
@@ -359,7 +359,7 @@ describe('Cache staleness', () => {
   function populateCache() {
     // Session-cached keys (settings as single object, individual list keys, entity keys for system lists)
     sessionData = {
-      settings: TEST_SETTINGS,
+      'manifest:settings': TEST_SETTINGS,
       'list:system/root': { ...TEST_ROOT },
       'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
     };
@@ -565,9 +565,9 @@ describe('Cache staleness', () => {
     populateCache();
     // Today's history entries (simulates session cache populated by addLog)
     const todayStr = new Date().toISOString().slice(0, 10);
-    sessionData['history:' + todayStr] = [
+    sessionData['log:' + todayStr] = [
       { timestamp: Date.now(), url: 'https://buffered.com/page1', title: 'Buffered Page 1', slug: 'buffered-page1',  attention: '' },
-      { timestamp: Date.now(), action: 'set', key: 'workspace', value: {} },
+      { timestamp: Date.now(), action: 'update_setting', key: 'workspace', value: {} },
       { timestamp: Date.now() + 1, url: 'https://buffered.com/page2', title: 'Buffered Page 2', slug: 'buffered-page2',  attention: '' },
     ];
 
@@ -933,7 +933,7 @@ describe('Cache staleness', () => {
 
     // Background would handle these actions after hydration
     actionOverrides['readCacheable'] = (msg) => {
-      if (msg.key === 'settings') return { success: true, value: TEST_SETTINGS };
+      if (msg.key === 'manifest:settings') return { success: true, value: TEST_SETTINGS };
       if (msg.key === 'list:system/root') return { success: true, value: TEST_ROOT };
       // Return individual list entities by slug
       for (const list of TEST_LISTS) {
@@ -951,47 +951,43 @@ describe('Cache staleness', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // T17: shallow pins show title from shallowPageIndex, not "Untitled"
+  // T17: pins show title from page entity, not "Untitled"
   // ---------------------------------------------------------------------------
-  it('T17: shallow pins show title from shallowPageIndex', async () => {
+  it('T17: pins show title from page entity', async () => {
     populateCache();
 
-    const SHALLOW_URL = 'https://shallow.example.com/article';
-    const SHALLOW_TITLE = 'Shallow Article Title';
+    const PIN_URL = 'https://pinned.example.com/article';
+    const PIN_TITLE = 'Pinned Article Title';
+    const PIN_SLUG = generateSlugFromUrl(PIN_URL);
 
-    // Add a list with one shallow pin
-    const TEST_LIST_WITH_SHALLOW = { slug: 'col-shallow', query: '', name: 'Shallow List' };
-    testListPins['col-shallow'] = [
-      { id: 'shallow:' + SHALLOW_URL, pinnedAt: NOW - DAY },
+    // Add a list with one pin
+    const TEST_LIST_WITH_PIN = { slug: 'col-pinned', query: '', name: 'Pinned List' };
+    testListPins['col-pinned'] = [
+      { id: 'page:' + PIN_SLUG, pinnedAt: NOW - DAY },
     ];
 
-    // Put shallow-page entity in session cache with the title
-    sessionData['list:system/shallow-page'] = {
-      timestamp: 0,
-      index: {
-        [SHALLOW_URL]: { parentIds: [], lists: ['list:col-shallow'], title: SHALLOW_TITLE, user_title: null },
-      },
-    };
+    // Put page entity in testPageData (filesystem fallback for readCacheable)
+    testPageData[PIN_SLUG] = { slug: PIN_SLUG, url: PIN_URL, title: PIN_TITLE, watermark: 1 };
 
-    // Add the shallow list to lists and list:system/root (include pins for session cache hit)
-    sessionData['list:' + TEST_LIST_WITH_SHALLOW.slug] = { ...TEST_LIST_WITH_SHALLOW, pins: testListPins['col-shallow'] || [], savedSearches: [], parentList: 'list:system/root', childLists: [] };
-    sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-shallow'] };
+    // Add the list to lists and list:system/root (include pins for session cache hit)
+    sessionData['list:' + TEST_LIST_WITH_PIN.slug] = { ...TEST_LIST_WITH_PIN, pins: testListPins['col-pinned'] || [], savedSearches: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-pinned'] };
 
     await importOptions();
     await tick(200);
 
-    // Click on the shallow list in sidebar
+    // Click on the list in sidebar
     const sidebarItems = document.querySelectorAll('#listsList .sidebar-item');
-    const shallowListItem = [...sidebarItems].find(el => el.textContent.includes('Shallow List'));
-    expect(shallowListItem, 'shallow list sidebar item should exist').toBeTruthy();
-    shallowListItem.click();
+    const listItem = [...sidebarItems].find(el => el.textContent.includes('Pinned List'));
+    expect(listItem, 'pinned list sidebar item should exist').toBeTruthy();
+    listItem.click();
     await tick(300);
 
-    // Check pinned rows — the shallow pin should show the title, not "Untitled"
+    // Check pinned rows — the pin should show the title, not "Untitled"
     const rows = pinnedOnlyRows();
     expect(rows.length, 'should have 1 pinned row').toBe(1);
     const titleEl = rows[0].querySelector('.result-title');
-    expect(titleEl.textContent, 'shallow pin should show title from shallowPageIndex').toBe(SHALLOW_TITLE);
+    expect(titleEl.textContent, 'pin should show title from page entity').toBe(PIN_TITLE);
   });
 
   // ---------------------------------------------------------------------------
@@ -1032,42 +1028,38 @@ describe('Cache staleness', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // T19: shallow pin resolves via readCacheable SPI when SPI not in session
+  // T19: page pin resolves via readCacheable when page entity not in session
   // ---------------------------------------------------------------------------
-  it('T19: shallow pin falls back to readCacheable SPI when SPI not in session', async () => {
+  it('T19: page pin falls back to readCacheable when page entity not in session', async () => {
     populateCache();
 
-    const SHALLOW_URL = 'https://shallow-fallback.example.com/page';
-    const SHALLOW_TITLE = 'Shallow Fallback Title';
+    const FALLBACK_URL = 'https://fallback.example.com/page';
+    const FALLBACK_TITLE = 'Fallback Page Title';
+    const FALLBACK_SLUG = generateSlugFromUrl(FALLBACK_URL);
 
-    const TEST_LIST_SPI = { slug: 'col-spi', query: '', name: 'SPI Fallback List' };
-    testListPins['col-spi'] = [
-      { id: 'shallow:' + SHALLOW_URL, pinnedAt: NOW - DAY },
+    const TEST_LIST_FALLBACK = { slug: 'col-fallback', query: '', name: 'Fallback List' };
+    testListPins['col-fallback'] = [
+      { id: 'page:' + FALLBACK_SLUG, pinnedAt: NOW - DAY },
     ];
-    // readCacheable handler returns SPI (filesystem fallback via background)
-    testSpiData = {
-      timestamp: 0,
-      index: {
-        [SHALLOW_URL]: { parentIds: [], lists: ['list:col-spi'], title: SHALLOW_TITLE, user_title: null },
-      },
-    };
+    // Page entity on disk (filesystem fallback for readCacheable session miss)
+    testPageData[FALLBACK_SLUG] = { slug: FALLBACK_SLUG, url: FALLBACK_URL, title: FALLBACK_TITLE, watermark: 1 };
 
-    // Do NOT put shallowPageIndex in sessionData — simulating pre-hydration state
-    sessionData['list:' + TEST_LIST_SPI.slug] = { ...TEST_LIST_SPI, pins: testListPins['col-spi'], savedSearches: [], parentList: 'list:system/root', childLists: [] };
-    sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-spi'] };
+    // Do NOT put page entity in sessionData — simulating pre-hydration state
+    sessionData['list:' + TEST_LIST_FALLBACK.slug] = { ...TEST_LIST_FALLBACK, pins: testListPins['col-fallback'], savedSearches: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-fallback'] };
 
     await importOptions();
     await tick(200);
 
     const sidebarItems = document.querySelectorAll('#listsList .sidebar-item');
-    const listItem = [...sidebarItems].find(el => el.textContent.includes('SPI Fallback List'));
-    expect(listItem, 'SPI fallback list sidebar item should exist').toBeTruthy();
+    const listItem = [...sidebarItems].find(el => el.textContent.includes('Fallback List'));
+    expect(listItem, 'fallback list sidebar item should exist').toBeTruthy();
     listItem.click();
     await tick(300);
 
     const rows = pinnedOnlyRows();
     expect(rows.length, 'should have 1 pinned row').toBe(1);
     const titleEl = rows[0].querySelector('.result-title');
-    expect(titleEl.textContent, 'shallow pin should resolve via readCacheable SPI fallback').toBe(SHALLOW_TITLE);
+    expect(titleEl.textContent, 'page pin should resolve via readCacheable fallback').toBe(FALLBACK_TITLE);
   });
 });

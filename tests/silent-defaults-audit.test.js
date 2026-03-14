@@ -115,8 +115,8 @@ describe('No silent response defaults — options.js', () => {
     expect(optionsSource).not.toMatch(/fpResp\?\.pins\s*\|\|\s*\[\]/);
   });
 
-  it('does not coerce ensurePageCheckpoint title with || ""', () => {
-    expect(optionsSource).not.toMatch(/ensurePageCheckpoint.*title:\s*row\.dataset\.title\s*\|\|\s*''/);
+  it('does not reference ensurePageCheckpoint', () => {
+    expect(optionsSource).not.toMatch(/ensurePageCheckpoint/);
   });
 
   it('enrichFromEntityStorage does not silently swallow errors with catch {}', () => {

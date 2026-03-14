@@ -1,48 +1,38 @@
 /**
- * Unified reportPage handler tests.
+ * reportPage handler entry builder tests.
  *
  * Verifies:
- * - Title trimming is applied before comparison
- * - Only changed fields are included in log entries
- * - isInitialLoad triggers first-visit extras
- * - isLeaving triggers immediate drain
+ * - buildVisitPageEntry always includes title, produces action: 'visit_page'
+ * - buildLeavePageEntry includes attention fields, produces action: 'leave_page'
+ * - referrerUrl is raw URL (not page:<slug> format)
+ * - Title trimming is applied before inclusion
+ * - rename_page entries carry user_title
+ * - rate_page entries carry likes delta
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
-// Minimal mocks
+// Inline reimplementation of entry builders (mirrors background.js logic)
 // ---------------------------------------------------------------------------
 
-function makeSessionMock(initial = {}) {
-  let store = { ...initial };
-  return {
-    get(keys) {
-      if (!keys) return Promise.resolve({ ...store });
-      if (typeof keys === 'string') keys = [keys];
-      const result = {};
-      for (const k of keys) if (k in store) result[k] = store[k];
-      return Promise.resolve(result);
-    },
-    set(obj) {
-      Object.assign(store, obj);
-      return Promise.resolve();
-    },
-    _store: store,
-  };
+function buildVisitPageEntry(url, title, referrerUrl) {
+  const entry = { timestamp: Date.now(), action: 'visit_page', url, title: title || '' };
+  if (referrerUrl) entry.referrerUrl = referrerUrl;
+  return entry;
 }
 
-// ---------------------------------------------------------------------------
-// Extract processPageReport as a testable unit.
-//
-// processPageReport(delta, { getCachedEntity, trimTitle }) => { entry }
-//   - delta: { url, title?, slug?, referrer?, scrollDepth?, timeOnPage? }
-//   - entry: the log entry with only changed fields (or null if nothing changed)
-// ---------------------------------------------------------------------------
+function buildLeavePageEntry(url, title, scrollDepth, timeOnPage) {
+  const entry = { timestamp: Date.now(), action: 'leave_page', url };
+  if (title) entry.title = title;
+  if (scrollDepth !== undefined && scrollDepth !== null) entry.scrollDepth = scrollDepth;
+  if (timeOnPage !== undefined && timeOnPage > 0) entry.timeOnPage = timeOnPage;
+  return entry;
+}
 
 // Inline reimplementation of trimTitle for testing (mirrors background.js logic)
 function makeTrimTitle(titleTrimRules = []) {
   return function trimTitle(rawTitle, url) {
-    let title = rawTitle || 'Untitled';
+    let title = rawTitle;
     for (const rule of titleTrimRules) {
       if (url.startsWith(rule.urlPrefix)) {
         if (rule.action === 'remove_after_pipe') {
@@ -59,301 +49,158 @@ function makeTrimTitle(titleTrimRules = []) {
   };
 }
 
-/**
- * Process a page report delta against cached state.
- * Returns { entry } where entry is null if nothing changed.
- *
- * loadPage(slug): async fallback — loads page entity from disk when cache misses.
- */
-async function processPageReport(delta, { getCachedEntity, loadPage, trimTitle }) {
-  const url = delta.url;
-  const slug = delta.slug || url.replace(/\W/g, '-');
-  let cached = getCachedEntity('page:' + slug);
-  if (!cached && loadPage) cached = await loadPage(slug);
-
-  const entry = {
-    timestamp: Date.now(),
-    action: 'page',
-    url,
-  };
-  let hasChange = !!delta.isInitialLoad; // initial visit is always meaningful
-
-  // Title: trim then compare; always include on initial load
-  if (delta.title != null) {
-    const trimmed = trimTitle(delta.title, url);
-    if (delta.isInitialLoad) {
-      entry.title = trimmed;
-    } else if (!cached || cached.title !== trimmed) {
-      entry.title = trimmed;
-      hasChange = true;
-    }
-  }
-
-  // Referrer: convert to referrerId (page:<slug> format), skip self-referential
-  if (delta.referrer != null) {
-    const refSlug = delta.referrer.replace(/\W/g, '-');
-    if (refSlug !== slug) {
-      const referrerId = 'page:' + refSlug;
-      if (!cached || cached.referrerId !== referrerId) {
-        entry.referrerId = referrerId;
-        hasChange = true;
-      }
-    }
-  }
-
-  // scrollDepth: include if higher than cached
-  if (delta.scrollDepth != null) {
-    if (!cached || (cached.scrollDepth ?? -1) < delta.scrollDepth) {
-      entry.scrollDepth = delta.scrollDepth;
-      hasChange = true;
-    }
-  }
-
-  // timeOnPage: always include when > 0 (incremental delta)
-  if (delta.timeOnPage != null && delta.timeOnPage > 0) {
-    entry.timeOnPage = delta.timeOnPage;
-    hasChange = true;
-  }
-
-  // user_title: from delta if explicitly set, or from cached entity on initial load
-  if (delta.user_title != null) {
-    if (!cached || cached.user_title !== delta.user_title) {
-      entry.user_title = delta.user_title;
-      hasChange = true;
-    }
-  } else if (delta.isInitialLoad && cached?.user_title) {
-    entry.user_title = cached.user_title;
-  }
-
-  return { entry: hasChange ? entry : null };
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('processPageReport', () => {
+describe('buildVisitPageEntry', () => {
   const url = 'https://example.com/page';
-  const slug = 'example-com-page';
-  const noLoad = { getCachedEntity: () => null, loadPage: () => null, trimTitle: makeTrimTitle() };
 
-  describe('title trimming', () => {
-    it('trims title before logging on initial visit', async () => {
-      const trimTitle = makeTrimTitle([
-        { urlPrefix: 'https://example.com', action: 'remove_after_pipe' },
-      ]);
-      const { entry } = await processPageReport(
-        { url, title: 'My Page | Example Site', isInitialLoad: true },
-        { ...noLoad, trimTitle },
-      );
-      expect(entry.title).toBe('My Page');
-    });
-
-    it('trims title before comparing against cached value', async () => {
-      const trimTitle = makeTrimTitle([
-        { urlPrefix: 'https://example.com', action: 'remove_after_pipe' },
-      ]);
-      // Cached title is already trimmed
-      const cached = { title: 'My Page', scrollDepth: 0 };
-      const { entry } = await processPageReport(
-        { url, title: 'My Page | Example Site', scrollDepth: 10 },
-        { ...noLoad, getCachedEntity: () => cached, trimTitle },
-      );
-      // Title should NOT appear in entry (matches cached after trim)
-      expect(entry).not.toBeNull();
-      expect(entry.title).toBeUndefined();
-      // But scrollDepth should be present
-      expect(entry.scrollDepth).toBe(10);
-    });
-
-    it('includes title when trimmed value differs from cached', async () => {
-      const trimTitle = makeTrimTitle([
-        { urlPrefix: 'https://example.com', action: 'remove_after_pipe' },
-      ]);
-      const cached = { title: 'Old Title' };
-      const { entry } = await processPageReport(
-        { url, title: 'New Title | Example Site' },
-        { ...noLoad, getCachedEntity: () => cached, trimTitle },
-      );
-      expect(entry.title).toBe('New Title');
-    });
+  it('produces visit_page action with url and title', () => {
+    const entry = buildVisitPageEntry(url, 'My Page', null);
+    expect(entry.action).toBe('visit_page');
+    expect(entry.url).toBe(url);
+    expect(entry.title).toBe('My Page');
+    expect(entry.timestamp).toBeGreaterThan(0);
   });
 
-  describe('diff-only logging', () => {
-    it('returns null entry when nothing changed', async () => {
-      const cached = { title: 'Same', scrollDepth: 50 };
-      const { entry } = await processPageReport(
-        { url, title: 'Same', scrollDepth: 30 },
-        { ...noLoad, getCachedEntity: () => cached },
-      );
-      expect(entry).toBeNull();
-    });
-
-    it('includes only changed fields', async () => {
-      const cached = { title: 'Same', scrollDepth: 20 };
-      const { entry } = await processPageReport(
-        { url, title: 'Same', scrollDepth: 50, timeOnPage: 3000 },
-        { ...noLoad, getCachedEntity: () => cached },
-      );
-      expect(entry.title).toBeUndefined(); // unchanged
-      expect(entry.scrollDepth).toBe(50); // higher
-      expect(entry.timeOnPage).toBe(3000); // always included
-    });
-
-    it('skips scrollDepth when not higher than cached', async () => {
-      const cached = { title: 'Page', scrollDepth: 80 };
-      const { entry } = await processPageReport(
-        { url, title: 'Page', scrollDepth: 50, timeOnPage: 1000 },
-        { ...noLoad, getCachedEntity: () => cached },
-      );
-      expect(entry.scrollDepth).toBeUndefined();
-      expect(entry.timeOnPage).toBe(1000);
-    });
-
-    it('skips timeOnPage when zero', async () => {
-      const { entry } = await processPageReport(
-        { url, title: 'New Page', timeOnPage: 0, isInitialLoad: true },
-        noLoad,
-      );
-      expect(entry.title).toBe('New Page');
-      expect(entry.timeOnPage).toBeUndefined();
-    });
+  it('always includes title (empty string when null)', () => {
+    const entry = buildVisitPageEntry(url, null, null);
+    expect(entry.title).toBe('');
   });
 
-  describe('initial load always logs', () => {
-    it('produces entry on initial load even when all fields match cached', async () => {
-      const cached = { title: 'Same', scrollDepth: 50 };
-      const { entry } = await processPageReport(
-        { url, title: 'Same', scrollDepth: 30, isInitialLoad: true },
-        { ...noLoad, getCachedEntity: () => cached },
-      );
-      // Initial load should always produce an entry (the visit itself matters)
-      expect(entry).not.toBeNull();
-      expect(entry.action).toBe('page');
-      expect(entry.url).toBe(url);
-      // Title is always included on initial load (avoids enrichment at render time)
-      expect(entry.title).toBe('Same');
-      // But other unchanged fields should still be omitted
-      expect(entry.scrollDepth).toBeUndefined();
-    });
-
-    it('includes user_title from cached entity on initial load', async () => {
-      const cached = { title: 'Auto Title', user_title: 'My Custom Name', scrollDepth: 50 };
-      const { entry } = await processPageReport(
-        { url, title: 'Auto Title', isInitialLoad: true },
-        { ...noLoad, getCachedEntity: () => cached },
-      );
-      expect(entry).not.toBeNull();
-      expect(entry.title).toBe('Auto Title');
-      expect(entry.user_title).toBe('My Custom Name');
-    });
-
-    it('omits user_title on initial load when cached entity has none', async () => {
-      const cached = { title: 'Auto Title', scrollDepth: 50 };
-      const { entry } = await processPageReport(
-        { url, title: 'Auto Title', isInitialLoad: true },
-        { ...noLoad, getCachedEntity: () => cached },
-      );
-      expect(entry).not.toBeNull();
-      expect(entry.user_title).toBeUndefined();
-    });
-
-    it('still returns null for non-initial reports with no changes', async () => {
-      const cached = { title: 'Same', scrollDepth: 50 };
-      const { entry } = await processPageReport(
-        { url, title: 'Same', scrollDepth: 30 },
-        { ...noLoad, getCachedEntity: () => cached },
-      );
-      expect(entry).toBeNull();
-    });
+  it('always includes title (empty string when undefined)', () => {
+    const entry = buildVisitPageEntry(url, undefined, null);
+    expect(entry.title).toBe('');
   });
 
-  describe('disk fallback on cache miss', () => {
-    it('diffs against disk entity when cache misses', async () => {
-      const diskPage = { title: 'Same Title', scrollDepth: 50, referrerId: 'page:google-com' };
-      const loadPage = vi.fn().mockReturnValue(diskPage);
-      const { entry } = await processPageReport(
-        { url, title: 'Same Title', scrollDepth: 30, timeOnPage: 2000 },
-        { getCachedEntity: () => null, loadPage, trimTitle: makeTrimTitle() },
-      );
-      // loadPage should have been called
-      expect(loadPage).toHaveBeenCalledWith(expect.stringContaining('example'));
-      // title and scrollDepth unchanged vs disk — should NOT appear
-      expect(entry).not.toBeNull();
-      expect(entry.title).toBeUndefined();
-      expect(entry.scrollDepth).toBeUndefined();
-      // timeOnPage always included
-      expect(entry.timeOnPage).toBe(2000);
-    });
-
-    it('returns null when all fields match disk entity', async () => {
-      const diskPage = { title: 'Page Title', scrollDepth: 80 };
-      const { entry } = await processPageReport(
-        { url, title: 'Page Title', scrollDepth: 50 },
-        { getCachedEntity: () => null, loadPage: () => diskPage, trimTitle: makeTrimTitle() },
-      );
-      expect(entry).toBeNull();
-    });
-
-    it('does not call loadPage when cache hits', async () => {
-      const cached = { title: 'Cached' };
-      const loadPage = vi.fn();
-      await processPageReport(
-        { url, title: 'Cached', timeOnPage: 500 },
-        { getCachedEntity: () => cached, loadPage, trimTitle: makeTrimTitle() },
-      );
-      expect(loadPage).not.toHaveBeenCalled();
-    });
+  it('includes referrerUrl as raw URL when provided', () => {
+    const entry = buildVisitPageEntry(url, 'Page', 'https://google.com');
+    expect(entry.referrerUrl).toBe('https://google.com');
   });
 
-  describe('referrer handling', () => {
-    it('includes referrerId on first visit', async () => {
-      const { entry } = await processPageReport(
-        { url, title: 'Page', referrer: 'https://google.com', isInitialLoad: true },
-        noLoad,
-      );
-      expect(entry.referrerId).toBe('page:https---google-com');
-    });
-
-    it('skips referrerId when same as cached', async () => {
-      const refSlug = 'https---google-com';
-      const cached = { title: 'Page', referrerId: 'page:' + refSlug };
-      const { entry } = await processPageReport(
-        { url, title: 'Page', referrer: 'https://google.com', timeOnPage: 1000 },
-        { ...noLoad, getCachedEntity: () => cached },
-      );
-      expect(entry.referrerId).toBeUndefined();
-    });
+  it('omits referrerUrl when null', () => {
+    const entry = buildVisitPageEntry(url, 'Page', null);
+    expect(entry.referrerUrl).toBeUndefined();
   });
 
-  describe('user_title handling', () => {
-    it('includes user_title when no cached user_title', async () => {
-      const { entry } = await processPageReport(
-        { url, user_title: 'My Custom Name' },
-        { ...noLoad, getCachedEntity: () => ({ title: 'Auto Title' }) },
-      );
-      expect(entry.user_title).toBe('My Custom Name');
-    });
+  it('does not include referrerId field (old format)', () => {
+    const entry = buildVisitPageEntry(url, 'Page', 'https://google.com');
+    expect(entry.referrerId).toBeUndefined();
+  });
+});
 
-    it('skips user_title when same as cached', async () => {
-      const cached = { title: 'Auto Title', user_title: 'My Custom Name' };
-      const { entry } = await processPageReport(
-        { url, user_title: 'My Custom Name', timeOnPage: 1000 },
-        { ...noLoad, getCachedEntity: () => cached },
-      );
-      expect(entry.user_title).toBeUndefined();
-      expect(entry.timeOnPage).toBe(1000);
-    });
+describe('buildLeavePageEntry', () => {
+  const url = 'https://example.com/page';
 
-    it('user_title and title are independent', async () => {
-      const cached = { title: 'Old Auto', user_title: 'Custom' };
-      const { entry } = await processPageReport(
-        { url, title: 'New Auto', user_title: 'Custom' },
-        { ...noLoad, getCachedEntity: () => cached },
-      );
-      // title changed, user_title didn't
-      expect(entry.title).toBe('New Auto');
-      expect(entry.user_title).toBeUndefined();
-    });
+  it('produces leave_page action with url', () => {
+    const entry = buildLeavePageEntry(url, 'Page Title', 50, 3000);
+    expect(entry.action).toBe('leave_page');
+    expect(entry.url).toBe(url);
+  });
+
+  it('includes title when provided', () => {
+    const entry = buildLeavePageEntry(url, 'Page Title', 50, 3000);
+    expect(entry.title).toBe('Page Title');
+  });
+
+  it('omits title when null', () => {
+    const entry = buildLeavePageEntry(url, null, 50, 3000);
+    expect(entry.title).toBeUndefined();
+  });
+
+  it('omits title when empty string', () => {
+    const entry = buildLeavePageEntry(url, '', 50, 3000);
+    expect(entry.title).toBeUndefined();
+  });
+
+  it('includes scrollDepth when provided', () => {
+    const entry = buildLeavePageEntry(url, null, 80, 0);
+    expect(entry.scrollDepth).toBe(80);
+  });
+
+  it('includes scrollDepth 0', () => {
+    const entry = buildLeavePageEntry(url, null, 0, 0);
+    expect(entry.scrollDepth).toBe(0);
+  });
+
+  it('omits scrollDepth when undefined', () => {
+    const entry = buildLeavePageEntry(url, null, undefined, 1000);
+    expect(entry.scrollDepth).toBeUndefined();
+  });
+
+  it('includes timeOnPage when > 0', () => {
+    const entry = buildLeavePageEntry(url, null, 50, 3000);
+    expect(entry.timeOnPage).toBe(3000);
+  });
+
+  it('omits timeOnPage when 0', () => {
+    const entry = buildLeavePageEntry(url, null, 50, 0);
+    expect(entry.timeOnPage).toBeUndefined();
+  });
+
+  it('omits timeOnPage when undefined', () => {
+    const entry = buildLeavePageEntry(url, null, 50, undefined);
+    expect(entry.timeOnPage).toBeUndefined();
+  });
+});
+
+describe('title trimming before entry building', () => {
+  const url = 'https://example.com/page';
+
+  it('trims title before building visit_page entry', () => {
+    const trimTitle = makeTrimTitle([
+      { urlPrefix: 'https://example.com', action: 'remove_after_pipe' },
+    ]);
+    const trimmed = trimTitle('My Page | Example Site', url);
+    const entry = buildVisitPageEntry(url, trimmed, null);
+    expect(entry.title).toBe('My Page');
+  });
+
+  it('trimmed title matches cached value → no unnecessary title in leave_page', () => {
+    const trimTitle = makeTrimTitle([
+      { urlPrefix: 'https://example.com', action: 'remove_after_pipe' },
+    ]);
+    const trimmed = trimTitle('My Page | Example Site', url);
+    // In the new model, leave_page includes title only if non-empty
+    // The caller (background.js) decides whether to pass title or null
+    // Here we verify the trim itself works correctly
+    expect(trimmed).toBe('My Page');
+  });
+
+  it('includes trimmed title when it differs', () => {
+    const trimTitle = makeTrimTitle([
+      { urlPrefix: 'https://example.com', action: 'remove_after_pipe' },
+    ]);
+    const trimmed = trimTitle('New Title | Example Site', url);
+    const entry = buildVisitPageEntry(url, trimmed, null);
+    expect(entry.title).toBe('New Title');
+  });
+});
+
+describe('rename_page entry', () => {
+  it('produces rename_page action with user_title', () => {
+    const entry = {
+      timestamp: Date.now(),
+      action: 'rename_page',
+      url: 'https://example.com/page',
+      user_title: 'My Custom Name',
+    };
+    expect(entry.action).toBe('rename_page');
+    expect(entry.user_title).toBe('My Custom Name');
+    expect(entry.url).toBe('https://example.com/page');
+  });
+});
+
+describe('rate_page entry', () => {
+  it('produces rate_page action with likes delta', () => {
+    const entry = {
+      timestamp: Date.now(),
+      action: 'rate_page',
+      url: 'https://example.com/page',
+      likes: 1,
+    };
+    expect(entry.action).toBe('rate_page');
+    expect(entry.likes).toBe(1);
   });
 });

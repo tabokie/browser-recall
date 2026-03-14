@@ -1,7 +1,7 @@
 // Background service worker for Portal extension
 // Central authority for reads and mutations. Offscreen is a pure filesystem I/O worker.
 import { generateSlugFromUrl, generateNoteSlug, dateKeyFromTimestamp, isGatewayOriginFromPins } from './utils.js';
-import { effectOf, applyLogToPage } from './replay.js';
+import { effectOf } from './replay.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark, cacheClear } from './entity-cache.js';
 
@@ -109,17 +109,6 @@ function withLock(key, fn) {
   return next;
 }
 
-// ─── Log Buffer Replay Helper ─────────────────────────────────────────
-// Replays pending logBuffer entries against a page entity to bring it up-to-date.
-// Pure function: non-matching entries are no-ops (applyLogToPage handles slug matching).
-
-function replayBufferOver(page) {
-  let current = page;
-  for (const entry of logBuffer) {
-    current = applyLogToPage(current, entry);
-  }
-  return current;
-}
 
 // ─── Mutation Notifications ───────────────────────────────────────────
 // Notify extension pages (options, popup) after data mutations so they can refresh.
@@ -200,9 +189,16 @@ async function sessionLoadDuringHydration(key, opts) {
 }
 
 // Write effectOf results back to session cache.
+// Sentinel value for GC'd entities — distinct from cache miss (null).
+// Prevents readCacheable from reloading a GC'd entity from disk before drain.
+const GC_TOMBSTONE = { __gc: true };
+
 async function sessionWrite(effects) {
   for (const [key, entity] of Object.entries(effects)) {
-    if (entity === null) continue;
+    if (entity === null) {
+      await cacheSet(key, GC_TOMBSTONE);
+      continue;
+    }
     await cacheSet(key, entity);
   }
 }
@@ -223,7 +219,7 @@ async function addLog(entry) {
   // Pin the key: today's session data includes unflushed entries from addLog that
   // are newer than the on-disk JSONL file, so evicting it would lose data.
   // Also covers date rollover (new date key created mid-session).
-  const todayKey = 'history:' + dateKeyFromTimestamp(entry.timestamp);
+  const todayKey = 'log:' + dateKeyFromTimestamp(entry.timestamp);
   cacheGet(todayKey).then(async today => {
     if (today == null) {
       // Cache miss — load from disk. Should not happen after hydration.
@@ -242,15 +238,21 @@ async function addLog(entry) {
   return effects;
 }
 
-async function appendVisit(interaction) {
-  const entry = {
-    timestamp: interaction.timestamp,
-    action: 'page',
-    url: interaction.url,
-    title: interaction.title,
-  };
-  if (interaction.referrerId) entry.referrerId = interaction.referrerId;
-  await addLog(entry);
+// Build a visit_page log entry. Title omitted when absent (slow-loading pages).
+function buildVisitPageEntry(url, title, referrerUrl) {
+  const entry = { timestamp: Date.now(), action: 'visit_page', url };
+  if (title) entry.title = title;
+  if (referrerUrl) entry.referrerUrl = referrerUrl;
+  return entry;
+}
+
+// Build a leave_page log entry with attention data.
+function buildLeavePageEntry(url, title, scrollDepth, timeOnPage) {
+  const entry = { timestamp: Date.now(), action: 'leave_page', url };
+  if (title) entry.title = title;
+  if (scrollDepth !== undefined && scrollDepth !== null) entry.scrollDepth = scrollDepth;
+  if (timeOnPage !== undefined && timeOnPage > 0) entry.timeOnPage = timeOnPage;
+  return entry;
 }
 
 // ─── Settings Keys ───────────────────────────────────────────────────
@@ -263,6 +265,7 @@ async function readCacheable(key, includeDeleted = false) {
   await hydrationDone;
   const cached = await cacheGet(key);
   if (cached !== null) {
+    if (cached.__gc) return null; // GC'd entity — tombstone prevents disk reload
     if (!includeDeleted && cached.deleted) return null;
     return cached;
   }
@@ -298,32 +301,32 @@ function assertOffscreenSuccess(resp, key) {
 async function readFs(key) {
   let value;
   switch (key) {
-    case 'settings': {
+    case 'manifest:settings': {
       const resp = await requestOffscreen({ action: 'loadSettings' });
       assertOffscreenSuccess(resp, key);
       value = resp.settings;
       break;
     }
-    case 'list:system/shallow-page': {
-      const r = await requestOffscreen({ action: 'loadShallowPageIndex' });
+    case 'manifest:name-to-id': {
+      const r = await requestOffscreen({ action: 'loadNameMap' });
       assertOffscreenSuccess(r, key);
-      value = { timestamp: r.timestamp, index: r.index };
+      value = r.entity || { timestamp: 0, paths: {} };
       break;
     }
-    case 'list:system/orphaned': {
+    case 'manifest:orphaned': {
       const r = await requestOffscreen({ action: 'loadOrphaned' });
       assertOffscreenSuccess(r, key);
       value = r.entity;
       break;
     }
     default: {
-      if (key.startsWith('history:')) {
+      if (key.startsWith('log:')) {
         // Disk-only read (no logBuffer replay). Safe because:
         // - Today's key is pinned (never evicted, never reaches readFs post-hydration)
         // - Past keys with undrained logBuffer entries have timestamp > persistWatermark,
         //   so watermark-gated eviction won't evict them until drain completes
         // - Past keys fully drained: disk is complete, no replay needed
-        const dateStr = key.slice('history:'.length);
+        const dateStr = key.slice('log:'.length);
         const r = await requestOffscreen({ action: 'loadHistoryRange', from: dateStr, to: dateStr });
         assertOffscreenSuccess(r, key);
         value = r.entries || [];
@@ -364,7 +367,7 @@ async function hydrateCache() {
   try {
     const resp = await requestOffscreen({ action: 'loadSettings' });
     if (resp?.success && resp.settings) {
-      await cacheSet('settings', resp.settings);
+      await cacheSet('manifest:settings', resp.settings);
     }
   } catch (e) { console.warn('Settings load failed:', e.message); }
 
@@ -383,11 +386,11 @@ async function hydrateCache() {
   } catch (e) { console.warn('Root entity load failed:', e.message); }
 
   try {
-    const spResp = await requestOffscreen({ action: 'loadShallowPageIndex' });
-    if (spResp?.success) {
-      await cacheSet('list:system/shallow-page', { timestamp: spResp.timestamp, index: spResp.index });
+    const nmResp = await requestOffscreen({ action: 'loadNameMap' });
+    if (nmResp?.success && nmResp.entity) {
+      await cacheSet('manifest:name-to-id', nmResp.entity);
     }
-  } catch (e) { console.warn('Shallow page index load failed:', e.message); }
+  } catch (e) { console.warn('Name-map load failed:', e.message); }
 
   // Phase 1.5: History cache — per-date keys history:YYYY-MM-DD
   try {
@@ -396,9 +399,9 @@ async function hydrateCache() {
     // Load today's history — pinned because addLog appends entries here that are
     // newer than the on-disk JSONL file; evicting would lose unflushed data.
     const todayResp = await requestOffscreen({ action: 'loadHistoryRange', from: todayStr, to: todayStr });
-    assertOffscreenSuccess(todayResp, 'history:' + todayStr);
+    assertOffscreenSuccess(todayResp, 'log:' + todayStr);
     const todayEntries = todayResp.entries || [];
-    const todayKey = 'history:' + todayStr;
+    const todayKey = 'log:' + todayStr;
     const todayMaxTs = todayEntries.length ? todayEntries[todayEntries.length - 1].timestamp : 0;
     await cacheSet(todayKey, todayEntries, { timestamp: todayMaxTs });
     cachePin(todayKey);
@@ -416,7 +419,7 @@ async function hydrateCache() {
     if (fromStr <= toStr) {
       // Load the full range, then split into per-date keys
       const recentResp = await requestOffscreen({ action: 'loadHistoryRange', from: fromStr, to: toStr });
-      assertOffscreenSuccess(recentResp, `history:${fromStr}..${toStr}`);
+      assertOffscreenSuccess(recentResp, `log:${fromStr}..${toStr}`);
       const recentEntries = recentResp.entries || [];
       const recentFiles = recentResp.files || [];
 
@@ -434,7 +437,7 @@ async function hydrateCache() {
       while (cur <= end) {
         const d = dateKeyFromTimestamp(cur.getTime());
         const entries = byDate.get(d) || [];
-        const hKey = 'history:' + d;
+        const hKey = 'log:' + d;
         const maxTs = entries.length ? entries[entries.length - 1].timestamp : 0;
         await cacheSet(hKey, entries, { timestamp: maxTs });
         cachePin(hKey);
@@ -443,7 +446,7 @@ async function hydrateCache() {
 
       // Build in-memory URL → visitDates map for O(1) multi-day lookups
       for (const entry of recentEntries) {
-        if ((entry.action === 'page' || !entry.action) && entry.url) {
+        if ((entry.action === 'visit_page' || !entry.action) && entry.url) {
           const d = new Date(entry.timestamp);
           const yyyymmdd = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
           const dates = recentUrls.get(entry.url);
@@ -468,7 +471,7 @@ async function hydrateCache() {
       for (const f of allFiles) {
         const d = f.replace('.jsonl', '');
         if (d < fromStr) {
-          const oldKey = 'history:' + d;
+          const oldKey = 'log:' + d;
           cacheUnpin(oldKey); // evictable if still in session
         }
       }
@@ -482,7 +485,7 @@ async function hydrateCache() {
 
   // Dedup logBuffer against today's history (entries already flushed to disk)
   {
-    const todayKey = 'history:' + dateKeyFromTimestamp(Date.now());
+    const todayKey = 'log:' + dateKeyFromTimestamp(Date.now());
     let todayForDedup = await cacheGet(todayKey);
     if (todayForDedup == null) {
       // Cache miss — load from disk. Should not happen after hydration.
@@ -546,7 +549,7 @@ async function hydrateCache() {
   // Today's key is also pinned (Phase 1.5 + addLog) as an extra safeguard.
   for (const entry of logBuffer) {
     const dk = dateKeyFromTimestamp(entry.timestamp);
-    const hk = 'history:' + dk;
+    const hk = 'log:' + dk;
     let entries = await cacheGet(hk);
     if (entries == null) entries = [];
     entries.push(entry);
@@ -559,8 +562,8 @@ async function hydrateCache() {
 // ─── Title Trimming ───────────────────────────────────────────────────
 
 async function trimTitle(rawTitle, url) {
-  let title = rawTitle || 'Untitled';
-  const titleTrimRules = (await readCacheable('settings')).titleTrimRules || [];
+  let title = rawTitle;
+  const titleTrimRules = (await readCacheable('manifest:settings')).titleTrimRules || [];
   for (const rule of titleTrimRules) {
     if (url.startsWith(rule.urlPrefix)) {
       if (rule.action === 'remove_after_pipe') {
@@ -574,89 +577,6 @@ async function trimTitle(rawTitle, url) {
     }
   }
   return title.trim();
-}
-
-// ─── Page Report Processing ──────────────────────────────────────────
-
-/**
- * Process a page report delta against cached state.
- * Trims title, compares each field, returns only diffs.
- *
- * @param {Object} delta - { url, title?, slug?, referrer?, scrollDepth?, timeOnPage?, isInitialLoad?, isLeaving? }
- * @returns {{ entry: Object|null }}
- */
-async function processPageReport(delta) {
-  const url = delta.url;
-  const slug = delta.slug || generateSlugFromUrl(url);
-  const key = 'page:' + slug;
-  let cached = await cacheGet(key);
-  if (!cached) {
-    // Disk fallback: cache miss (SW restart, LRU eviction) → load from filesystem
-    const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
-    const diskPage = resp?.pages?.[slug];
-    if (diskPage) {
-      await cacheSet(key, diskPage);
-      cached = diskPage;
-    }
-  }
-
-  const entry = {
-    timestamp: Date.now(),
-    action: 'page',
-    url,
-  };
-  let hasChange = !!delta.isInitialLoad; // initial visit is always meaningful
-
-  // Title: trim then compare; always include on initial load
-  if (delta.title != null) {
-    const trimmed = await trimTitle(delta.title, url);
-    if (delta.isInitialLoad) {
-      entry.title = trimmed;
-    } else if (!cached || cached.title !== trimmed) {
-      entry.title = trimmed;
-      hasChange = true;
-    }
-  }
-
-  // Referrer: convert to referrerId (page:<slug> format), skip self-referential
-  if (delta.referrer != null) {
-    const refSlug = generateSlugFromUrl(delta.referrer);
-    if (refSlug !== slug) {
-      const referrerId = 'page:' + refSlug;
-      if (!cached || cached.referrerId !== referrerId) {
-        entry.referrerId = referrerId;
-        hasChange = true;
-      }
-    }
-  }
-
-  // scrollDepth: include if higher than cached
-  if (delta.scrollDepth != null) {
-    if (!cached || (cached.scrollDepth ?? -1) < delta.scrollDepth) {
-      entry.scrollDepth = delta.scrollDepth;
-      hasChange = true;
-    }
-  }
-
-  // timeOnPage: always include when > 0 (incremental delta)
-  if (delta.timeOnPage != null && delta.timeOnPage > 0) {
-    entry.timeOnPage = delta.timeOnPage;
-    hasChange = true;
-  }
-
-  // user_title: from delta if explicitly set, or from cached entity on initial load
-  if (delta.user_title != null) {
-    if (!cached || cached.user_title !== delta.user_title) {
-      entry.user_title = delta.user_title;
-      hasChange = true;
-    }
-  } else if (delta.isInitialLoad && cached?.user_title) {
-    // Content script doesn't know user_title; pull from cached entity
-    // (already loaded via cacheGet + disk fallback above)
-    entry.user_title = cached.user_title;
-  }
-
-  return { entry: hasChange ? entry : null };
 }
 
 // ─── Gateway Domain Registry ──────────────────────────────────────────
@@ -680,23 +600,21 @@ async function updateGatewayRegistry(url) {
 
     // Check recent history for other visits from this origin
     const today = new Date().toISOString().slice(0, 10);
-    const todayHistory = await readCacheable('history:' + today) || [];
+    const todayHistory = await readCacheable('log:' + today) || [];
     const hasOriginVisits = todayHistory.some(e => {
       try { return e.url && new URL(e.url).origin === origin && e.url !== url; }
       catch { return false; }
     });
     if (!hasOriginVisits) return;
 
-    // Promote: use resolvePageId to pick page: or shallow: deterministically
-    const pinId = await resolvePageId(rootUrl);
+    // Promote: pin root URL to auto/gateways list
     await addLog({
       timestamp: Date.now(),
-      action: 'list',
-      id: 'auto/gateways',
-      op: 'add',
-      ids: [pinId]
+      action: 'pin_to_list',
+      parents: [], name: 'auto/gateways',
+      items: [rootUrl]
     });
-    console.log(`Gateway: promoted ${origin} (pin: ${pinId})`);
+    console.log(`Gateway: promoted ${origin}`);
   } catch (e) {
     console.warn('Gateway registry update failed:', e.message);
   }
@@ -781,137 +699,24 @@ chrome.runtime.onStartup.addListener(async () => {
 // ─── Save Page WE Integration ─────────────────────────────────────────
 initSavepageBridge();
 
-// ─── Pin ID Resolution ───────────────────────────────────────────────
-// Resolve a URL to its authoritative pin ID by checking cache then disk.
-// Returns 'page:<slug>' if the page is checkpointed, 'shallow:<url>' otherwise.
+// ─── List Name Path Resolution ───────────────────────────────────────
+// Resolve a list internal ID to its name path using the name-map.
 
-async function resolvePageId(url) {
-  const slug = generateSlugFromUrl(url);
-  const key = 'page:' + slug;
-  if (await cacheGet(key)) return key;
-  const resp = await requestOffscreen({ action: 'pageExists', slug });
-  return resp?.exists ? key : 'shallow:' + url;
-}
-
-// Ensure each ID in the array is authoritative. Shallow IDs are re-checked
-// against cache and disk because a race between page capture (which creates
-// the checkpoint) and the pin message (which references the URL) can cause
-// callers to send 'shallow:<url>' for a page that was checkpointed in between.
-async function resolveShallowIds(ids) {
-  const resolved = [];
-  for (const id of ids) {
-    if (id.startsWith('shallow:')) {
-      resolved.push(await resolvePageId(id.slice(8)));
-    } else {
-      resolved.push(id);
+async function getListParentsAndName(listId) {
+  // System/auto lists: name IS the ID
+  if (listId.startsWith('system/') || listId.startsWith('auto/')) {
+    return { parents: [], name: listId };
+  }
+  const nameToId = await readCacheable('manifest:name-to-id');
+  if (!nameToId?.paths) return null;
+  for (const [path, id] of Object.entries(nameToId.paths)) {
+    if (id === listId) {
+      const parts = path.split('/');
+      const name = parts.pop();
+      return { parents: parts, name };
     }
   }
-  return resolved;
-}
-
-// ─── Checkpoint Helper ────────────────────────────────────────────────
-// Ensure a page checkpoint exists in cache or disk; creates one if missing.
-// When the caller cannot provide title/parentIds, searches SPI and recent history.
-
-async function ensureCheckpointIfMissing(url, title, visitDates) {
-  if (!url) return;
-  const slug = generateSlugFromUrl(url);
-  const key = 'page:' + slug;
-  const cached = await cacheGet(key);
-  if (!cached) {
-    const existsResp = await requestOffscreen({ action: 'pageExists', slug });
-    if (!existsResp?.exists) {
-      const entry = {
-        timestamp: Date.now(),
-        action: 'page_checkpoint',
-        url,
-        title: title || null
-      };
-      if (!title) {
-        const found = await searchPageContext(url);
-        if (found.title) entry.title = found.title;
-        if (found.user_title) entry.user_title = found.user_title;
-        if (found.parentIds.length) entry.parentIds = found.parentIds;
-      }
-      if (visitDates?.length) entry.visitDates = visitDates;
-      await addLog(entry);
-    }
-  }
-}
-
-// Search SPI and recent history cache for page context.
-// Called only when creating a new checkpoint without caller-provided context.
-//
-// SPI record fields (see applyLogToShallowPage in replay.js):
-//   - title        (string|null)  — auto-detected page title
-//   - user_title   (string|null)  — user-assigned custom title
-//   - parentIds    (string[])     — referrer IDs in page:<slug> format
-//   - lists        (string[])     — list IDs this page is pinned to (not used here)
-//
-// SPI completeness guarantee (documented in applyLogToShallowPage):
-//   If a page has parentIds, belongs to a list, or has user_title, it MUST
-//   have an SPI entry. Therefore user_title and parentIds are authoritative
-//   from SPI alone — only title needs a history fallback (a page may have
-//   been visited with a title but without any of the (a)–(c) criteria).
-async function searchPageContext(url) {
-  const result = { title: null, user_title: null, parentIds: [] };
-
-  // 1. Shallow page index — authoritative for user_title and parentIds
-  try {
-    const spi = await readCacheable('list:system/shallow-page');
-    const rec = spi?.index?.[url];
-    if (rec) {
-      if (rec.title) result.title = rec.title;
-      if (rec.user_title) result.user_title = rec.user_title;
-      if (rec.parentIds?.length) result.parentIds = [...rec.parentIds];
-    }
-  } catch (error) {
-    // SPI not available; continue to next source
-  }
-
-  // 2. Recent history cache — only for title and parentIds not yet found.
-  //    user_title is NOT searched here: per SPI completeness guarantee,
-  //    if a page has user_title it is already in SPI.
-  if (!result.title || !result.parentIds.length) {
-    try {
-      const todayStr = new Date().toISOString().slice(0, 10);
-      const todayEntries = await cacheGet('history:' + todayStr) || [];
-      searchHistoryEntries(todayEntries, url, result);
-
-      if (!result.title || !result.parentIds.length) {
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const fromDate = new Date();
-        fromDate.setDate(fromDate.getDate() - HISTORY_RECENT_DAYS);
-        const cur = new Date(fromDate);
-        while (cur <= yesterday && (!result.title || !result.parentIds.length)) {
-          const dateKey = 'history:' + dateKeyFromTimestamp(cur.getTime());
-          const entries = await cacheGet(dateKey) || [];
-          searchHistoryEntries(entries, url, result);
-          cur.setDate(cur.getDate() + 1);
-        }
-      }
-    } catch (error) {
-      // History cache miss; continue
-    }
-  }
-
-  if (!result.title) {
-    console.warn(`[checkpoint] No title found in SPI or history for: ${url}`);
-  }
-  return result;
-}
-
-// Scan history entries for title and referrerId matching the given URL.
-// user_title is NOT extracted here — it is authoritative from SPI only.
-function searchHistoryEntries(entries, url, result) {
-  for (const entry of entries) {
-    if (entry.url !== url) continue;
-    if (!result.title && entry.title) result.title = entry.title;
-    if (entry.referrerId && !result.parentIds.includes(entry.referrerId)) {
-      result.parentIds.push(entry.referrerId);
-    }
-  }
+  return null;
 }
 
 // ─── Snapshot Capture ─────────────────────────────────────────────────
@@ -921,8 +726,6 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
   if (url && /\.pdf(\?|#|$)/i.test(new URL(url).pathname)) {
     throw new Error('Cannot capture PDF pages');
   }
-  // Ensure page exists before capture
-  if (url) await ensureCheckpointIfMissing(url, title);
   const mdResp = await chrome.tabs.sendMessage(tabId, { action: 'extractMarkdown' });
   const html = await captureSavePage(tabId);
   const markdown = mdResp?.markdown || '';
@@ -933,15 +736,10 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
     action: 'captureSnapshot', slug, timestamp,
     markdown, html: html || ''
   });
+  // Single create_snapshot event — entity creation + child linking handled by effectOf
   await addLog({
-    timestamp, action: 'page', url,
-    mdPath: `pages/${slug}/${timestamp}.md`,
-    htmlPath: `pages/${slug}/${timestamp}.html`
-  });
-  await addLog({
-    timestamp: timestamp + 1, action: 'snap',
-    slug: `${slug}/${timestamp}`,
-    parentIds: [`page:${slug}`]
+    timestamp, action: 'create_snapshot', url,
+    path: `snapshots/${slug}-${timestamp}`
   });
   notifyMutation('snapshot', { slug });
 }
@@ -950,7 +748,6 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
 
 async function handleContextMenuHighlight(url, title, selectionText, tabId) {
   const slug = generateSlugFromUrl(url);
-  await ensureCheckpointIfMissing(url, title);
 
   const timestamp = Date.now();
   const noteSlug = generateNoteSlug(timestamp, selectionText);
@@ -969,11 +766,12 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
     }
   });
 
+  // create_note — effectOf ensures page entity exists
   await addLog({
     timestamp,
-    action: 'note',
-    slug: noteSlug,
-    parentIds: [`page:${slug}`]
+    action: 'create_note',
+    url,
+    path: `notes/${noteSlug}.json`
   });
 
   notifyMutation('note', { pageSlug: slug, noteSlug });
@@ -1058,8 +856,7 @@ chrome.commands.onCommand.addListener(async (command) => {
   } else if (command === 'like-page' || command === 'dislike-page') {
     const delta = command === 'like-page' ? 1 : -1;
     try {
-      await ensureCheckpointIfMissing(tab.url, tab.title);
-      await addLog({ timestamp: Date.now(), action: 'page', url: tab.url, likes: delta });
+      await addLog({ timestamp: Date.now(), action: 'rate_page', url: tab.url, likes: delta });
       notifyMutation('interaction', { url: tab.url });
       chrome.tabs.sendMessage(tab.id, { action: 'showLikeNotification', delta }).catch(() => {});
     } catch (error) {
@@ -1085,20 +882,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const key = 'page:' + slug;
 
           // Entity storage: session cache → filesystem fallback
-          let page = await cacheGet(key);
-          if (!page) {
-            const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
-            if (resp?.pages?.[slug]) {
-              await ensureLogBuffer();
-              page = replayBufferOver(resp.pages[slug]);
-              await cacheSet(key, page);
-            }
-          }
+          let page = await readCacheable(key);
 
-          // Snapshots: read from page.childIds filtered for snap: prefix
-          const snapRefs = (page?.childIds || []).filter(c => c.startsWith('snap:'));
+          // Snapshots: read from page.childIds filtered for snapshot: prefix
+          const snapRefs = (page?.childIds || []).filter(c => c.startsWith('snapshot:'));
           const snapshots = snapRefs.map(ref => {
-            const ts = parseInt(ref.split('/').pop(), 10);
+            const ts = parseInt(ref.slice(ref.lastIndexOf('-') + 1), 10);
             return { timestamp: ts, hasMd: true, hasHtml: true };
           }).sort((a, b) => b.timestamp - a.timestamp);
 
@@ -1111,7 +900,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (note) notes.push(note);
           }
 
-          // page is null for shallow pages (no checkpoint) — popup uses tab.title as fallback
+          // page is null for pages without entities — popup uses tab.title as fallback
           sendResponse({
             success: true, slug,
             interaction: page ? { url: page.url, title: page.title, user_title: page.user_title,
@@ -1158,14 +947,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
 
             // Check blacklist
-            const rpSettings = await readCacheable('settings');
+            const rpSettings = await readCacheable('manifest:settings');
             const urlBlacklist = rpSettings.urlBlacklist;
             const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
             if (!request.bypassBlacklist && blacklist.some(prefix => url.startsWith(prefix))) {
               if (request.isInitialLoad) {
-                // Check session cache first (includes undrained logBuffer entries),
-                // then fall back to disk scan for older history.
-                const todayKey = 'history:' + dateKeyFromTimestamp(Date.now());
+                const todayKey = 'log:' + dateKeyFromTimestamp(Date.now());
                 const todayEntries = await readCacheable(todayKey) || [];
                 const inSession = todayEntries.some(e => e.url === url);
                 if (!inSession) {
@@ -1183,80 +970,78 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               }
             }
 
-            // Augment referrer from webNavigation fallback
-            const delta = { ...request };
-            delete delta.action;
-            delete delta.isLeaving;
-            if (!delta.referrer && request.isInitialLoad && sender.tab?.id != null) {
-              const bgRef = getReferrer(sender.tab.id);
-              if (bgRef) delta.referrer = bgRef;
-            }
-
-            // Diff against cached state — only log changed fields
-            const { entry } = await processPageReport(delta);
-
-            if (entry) {
-              // First-visit extras: checkpoints before the visit entry
-              if (request.isInitialLoad) {
-                // Multi-day visit checkpoint: check in-memory recentUrls map (built from history:recent)
-                const recentVisitDates = recentUrls.get(url);
-                if (recentVisitDates) {
-                  await ensureCheckpointIfMissing(url, entry.title, recentVisitDates);
-                }
-
-                // Parent checkpoint for referrer
-                if (entry.referrerId) {
-                  await ensureCheckpointIfMissing(delta.referrer);
-                }
+            if (request.isInitialLoad) {
+              // visit_page: always includes title, referrerUrl is raw URL
+              let referrerUrl = request.referrer || null;
+              if (!referrerUrl && sender.tab?.id != null) {
+                const bgRef = getReferrer(sender.tab.id);
+                if (bgRef) referrerUrl = bgRef;
+              }
+              // Skip self-referential
+              if (referrerUrl) {
+                const refSlug = generateSlugFromUrl(referrerUrl);
+                const selfSlug = generateSlugFromUrl(url);
+                if (refSlug === selfSlug) referrerUrl = null;
               }
 
+              const title = request.title ? await trimTitle(request.title, url) : '';
+              const entry = buildVisitPageEntry(url, title, referrerUrl);
               await addLog(entry);
 
               // First-visit extras: gateway + workspace
-              if (request.isInitialLoad) {
-                const slug = delta.slug || generateSlugFromUrl(url);
-                const title = entry.title || '';
-                const timestamp = entry.timestamp;
+              const slug = request.slug || generateSlugFromUrl(url);
+              updateGatewayRegistry(url);
 
-                updateGatewayRegistry(url);
-
-                const wsListIds = rpWorkspace?.listIds || [];
-                if (rpWorkspace && rpWorkspace.mode === 'workspace' && wsListIds.length > 0) {
-                  try {
-                    for (const listKey of wsListIds) {
-                      const listSlug = listKey.startsWith('list:') ? listKey.slice(5) : listKey;
-                      const listEntry = await readCacheable('list:' + listSlug);
-                      const listPins = listEntry?.pins || [];
-                      const pinId = await resolvePageId(url);
-                      const already = listPins.some(p => p.id === pinId);
-                      if (!already) {
+              const wsListIds = rpWorkspace?.listIds || [];
+              if (rpWorkspace && rpWorkspace.mode === 'workspace' && wsListIds.length > 0) {
+                try {
+                  for (const listKey of wsListIds) {
+                    const listSlug = listKey.startsWith('list:') ? listKey.slice(5) : listKey;
+                    const listEntry = await readCacheable('list:' + listSlug);
+                    const listPins = listEntry?.pins || [];
+                    const pageKey = 'page:' + generateSlugFromUrl(url);
+                    const already = listPins.some(p => p.id === pageKey);
+                    if (!already) {
+                      const pn = await getListParentsAndName(listSlug);
+                      if (pn) {
                         await addLog({
                           timestamp: Date.now(),
-                          action: 'list',
-                          id: listSlug,
-                          op: 'add',
-                          ids: [pinId]
+                          action: 'pin_to_list',
+                          parents: pn.parents, name: pn.name,
+                          items: [url]
                         });
-                        console.log(`Workspace: auto-pinned ${pinId} to list ${listSlug}`);
+                        console.log(`Workspace: auto-pinned ${url} to ${pn.name}`);
                       }
                     }
-
-                    if (rpWorkspace.autoSnapshot && sender.tab) {
-                      captureAndLog(sender.tab.id, slug, timestamp, url, title).catch(err => {
-                        console.warn('[auto-snapshot] ERROR:', err.message, err);
-                      });
-                    }
-                  } catch (err) {
-                    console.warn('Workspace: auto-pin/snapshot error:', err.message);
                   }
-                }
 
-                notifyMutation('interaction', { url });
+                  if (rpWorkspace.autoSnapshot && sender.tab) {
+                    captureAndLog(sender.tab.id, slug, entry.timestamp, url, title).catch(err => {
+                      console.warn('[auto-snapshot] ERROR:', err.message, err);
+                    });
+                  }
+                } catch (err) {
+                  console.warn('Workspace: auto-pin/snapshot error:', err.message);
+                }
               }
+
+              notifyMutation('interaction', { url });
+            } else if (request.isLeaving) {
+              // leave_page: attention data + latest title
+              const title = request.title ? await trimTitle(request.title, url) : null;
+              const entry = buildLeavePageEntry(url, title, request.scrollDepth, request.timeOnPage);
+              await addLog(entry);
+              drainNow();
+            } else if (request.user_title !== undefined) {
+              // rename_page: user-initiated title change from popup
+              await addLog({
+                timestamp: Date.now(),
+                action: 'rename_page',
+                url,
+                user_title: request.user_title
+              });
             }
 
-            // Explicit drain on page leave
-            if (request.isLeaving) drainNow();
             console.log(`Processed page report: ${url} (initial=${!!request.isInitialLoad}, leaving=${!!request.isLeaving})`);
             sendResponse({ success: true });
           } catch (error) {
@@ -1325,9 +1110,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const t0 = performance.now();
           const slug = request.slug;
           const page = await readCacheable('page:' + slug);
-          const snapRefs = (page?.childIds || []).filter(c => c.startsWith('snap:'));
+          const snapRefs = (page?.childIds || []).filter(c => c.startsWith('snapshot:'));
           const snapshots = snapRefs.map(ref => {
-            const ts = parseInt(ref.split('/').pop(), 10);
+            const ts = parseInt(ref.slice(ref.lastIndexOf('-') + 1), 10);
             return { timestamp: ts, hasMd: true, hasHtml: true };
           }).sort((a, b) => b.timestamp - a.timestamp);
           console.debug(`[I/O] listSnapshots(${slug}): ${snapshots.length} from entity in ${(performance.now() - t0).toFixed(1)}ms`);
@@ -1369,18 +1154,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const slug = generateSlugFromUrl(url);
 
             // Load page
-            const key = 'page:' + slug;
-            let page = await cacheGet(key);
-            if (!page) {
-              const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
-              page = resp?.pages?.[slug] || {}; // Empty page is valid (no checkpoint yet)
-            }
+            const page = await readCacheable('page:' + slug) || {};
 
-            // Resolve typed refs: page:<slug> → URL via readCacheable, shallow:<url> → extract URL
+            // Resolve typed refs: page:<slug> → URL
             async function resolveRefs(refs) {
               const urls = [];
               for (const ref of refs) {
-                if (ref.startsWith('shallow:')) { urls.push(ref.slice(8)); continue; }
                 if (ref.startsWith('page:')) {
                   const p = await readCacheable(ref);
                   if (p && p.url) urls.push(p.url);
@@ -1389,40 +1168,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               return urls;
             }
 
-            // Parents: from page.parentIds, fallback to shallowPageIndex for non-checkpointed pages
-            let parentRefs = page.parentIds || [];
-            if (parentRefs.length === 0) {
-              const spIndex = await readCacheable('list:system/shallow-page');
-              const shallowEntry = spIndex.index[url];
-              if (shallowEntry) parentRefs = shallowEntry.parentIds || [];
-            }
-            const parentReferrers = await resolveRefs(parentRefs);
+            // Parents: referrer pages from parentIds (filter for page: refs)
+            const pageParentRefs = (page.parentIds || []).filter(p => p.startsWith('page:'));
+            const parentReferrers = await resolveRefs(pageParentRefs);
 
-            // Parents: lists containing this URL
+            // Parents: lists containing this page
             const parentLists = [];
-            const allListKeys = await getAllListKeys();
-            for (const listKey of allListKeys) {
-              const listSlug = listKey.startsWith('list:') ? listKey.slice(5) : listKey;
+            const listParentRefs = (page.parentIds || []).filter(p => p.startsWith('list:') && !p.startsWith('list:system/'));
+            for (const listKey of listParentRefs) {
               const listEntity = await readCacheable(listKey);
-              if (listEntity?.pins) {
-                const pageId = 'page:' + slug;
-                const shallowId = 'shallow:' + url;
-                const inPinned = listEntity.pins.some(p => p.id === pageId || p.id === shallowId);
-                if (inPinned) parentLists.push({ slug: listSlug, name: listEntity.name, type: 'pin' });
+              if (listEntity) {
+                const listSlug = listKey.startsWith('list:') ? listKey.slice(5) : listKey;
+                parentLists.push({ slug: listSlug, name: listEntity.name, type: 'pin' });
               }
             }
 
-            // Children: from page.childIds (filter out notes and snaps, keep only pages/shallow) + shallowPageIndex inverse lookup
-            const childRefs = (page.childIds || []).filter(c => !c.startsWith('note:') && !c.startsWith('snap:'));
-            let children = await resolveRefs(childRefs);
-            // Also check shallowPageIndex for non-checkpointed children
-            const spForChildren = await readCacheable('list:system/shallow-page');
-            for (const [childUrl, shallowEntry] of Object.entries(spForChildren.index)) {
-              const parentKey = 'page:' + slug;
-              if ((shallowEntry.parentIds || []).includes(parentKey) && !children.includes(childUrl)) {
-                children.push(childUrl);
-              }
-            }
+            // Children: from page.childIds (filter out notes and snaps, keep only pages)
+            const childRefs = (page.childIds || []).filter(c => c.startsWith('page:'));
+            const children = await resolveRefs(childRefs);
 
             sendResponse({
               success: true,
@@ -1451,16 +1214,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'ensurePageCheckpoint': {
-          await ensureCheckpointIfMissing(request.url, request.title);
-          sendResponse({ success: true });
-          break;
-        }
-
         case 'saveSettingsKey': {
-          const settings = await readCacheable('settings');
+          const settings = await readCacheable('manifest:settings');
           if (!settings || JSON.stringify(settings[request.key]) !== JSON.stringify(request.value)) {
-            await addLog({ timestamp: Date.now(), action: 'set', key: request.key, value: request.value });
+            await addLog({ timestamp: Date.now(), action: 'update_setting', key: request.key, value: request.value });
             notifyMutation('settings', { key: request.key });
           }
           sendResponse({ success: true });
@@ -1472,8 +1229,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const timestamp = Date.now();
           const noteSlug = generateNoteSlug(timestamp, request.excerpt);
 
-          // Ensure parent page has a checkpoint so drain can update its children
-          await ensureCheckpointIfMissing(sender?.tab?.url, sender?.tab?.title);
+          // Resolve page URL: entity → explicit request.url → sender tab
+          const cnPageEntity = await readCacheable('page:' + pageSlug);
+          const pageUrl = cnPageEntity?.url || request.url || sender?.tab?.url;
+          if (!pageUrl) {
+            sendResponse({ success: false, error: 'Cannot determine page URL for note' });
+            break;
+          }
 
           // 1. Write note content to filesystem first (not inlined in log)
           await requestOffscreen({
@@ -1490,12 +1252,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
           });
 
-          // 2. Log only the relation (wire note as child of page)
+          // 2. Log create_note — effectOf ensures page entity exists
           await addLog({
             timestamp,
-            action: 'note',
-            slug: noteSlug,
-            parentIds: [`page:${pageSlug}`]
+            action: 'create_note',
+            url: pageUrl,
+            path: `notes/${noteSlug}.json`
           });
 
           const notes = await requestOffscreen({ action: 'loadPageNotes', slug: pageSlug });
@@ -1507,19 +1269,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'deleteNote': {
           const noteSlug = request.noteSlug;
 
-          // Load note to get its parentIds for relation cleanup
+          // Load note to get parent page URL
           const noteResp = await requestOffscreen({ action: 'loadNote', noteSlug });
           const noteData = noteResp.note;
-          const parentIds = noteData?.parentIds || [];
+          const pageParent = (noteData?.parentIds || []).find(p => p.startsWith('page:'));
+          let pageUrl = null;
+          if (pageParent) {
+            const pageEntity = await readCacheable(pageParent);
+            pageUrl = pageEntity?.url;
+          }
 
-          // Log unlinks note from parents + adds to orphaned list.
-          // Note file stays on disk (replay idempotency).
-          await addLog({
-            timestamp: Date.now(),
-            action: 'del_note',
-            slug: noteSlug,
-            parentIds
-          });
+          const dnEntry = { timestamp: Date.now(), action: 'delete_note', path: `notes/${noteSlug}.json` };
+          if (pageUrl) dnEntry.url = pageUrl;
+          await addLog(dnEntry);
 
           sendResponse({ success: true });
           notifyMutation('note', { noteSlug });
@@ -1542,26 +1304,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'toggleListPin': {
           try {
             const { listId, url, id: requestId } = request;
-            // note: IDs (e.g. 'note:slug') are valid — passed directly as requestId.
-            let pinId = requestId || (url ? await resolvePageId(url) : null);
-            // Re-check shallow IDs — see resolveShallowIds comment.
-            if (pinId?.startsWith('shallow:')) {
-              pinId = await resolvePageId(pinId.slice(8));
+            const pn = await getListParentsAndName(listId);
+            if (!pn) { sendResponse({ success: false, error: 'List not found' }); break; }
+
+            // Determine the item to pin/unpin: notes use path format, pages use URL
+            let pinItem;
+            if (requestId?.startsWith('note:')) {
+              const noteSlug = requestId.slice('note:'.length);
+              pinItem = `notes/${noteSlug}.json`;
+            } else {
+              pinItem = url;
             }
+
+            // Check if already pinned
             const list = await readCacheable('list:' + listId);
             const pins = list?.pins || [];
-            // Check both page:<slug> and shallow:<url> forms — a pin may have been
-            // stored as shallow:<url> before the page was checkpointed.
-            const altId = pinId.startsWith('page:')
-              ? (url ? 'shallow:' + url : null)
-              : (pinId.startsWith('shallow:') ? 'page:' + generateSlugFromUrl(pinId.slice(8)) : null);
-            const matchIdx = pins.findIndex(p => p.id === pinId || (altId && p.id === altId));
-            const isPinned = matchIdx !== -1;
-            // When removing, use the ID actually stored in the pin
-            const logId = isPinned ? pins[matchIdx].id : pinId;
+            let pinKey;
+            if (requestId?.startsWith('note:')) {
+              pinKey = requestId;
+            } else {
+              pinKey = 'page:' + generateSlugFromUrl(pinItem);
+            }
+            const isPinned = pins.some(p => p.id === pinKey);
+
             await addLog({
-              timestamp: Date.now(), action: 'list', id: listId,
-              op: isPinned ? 'del' : 'add', ids: [logId]
+              timestamp: Date.now(),
+              action: isPinned ? 'unpin_from_list' : 'pin_to_list',
+              parents: pn.parents, name: pn.name,
+              items: [pinItem]
             });
             sendResponse({ success: true, pinned: !isPinned });
             notifyMutation('pins', { listId });
@@ -1572,11 +1342,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'addListPins': {
-          const ids = await Promise.all(request.urls.map(u => resolvePageId(u)));
-          if (ids.length > 0) {
+          const pn = await getListParentsAndName(request.listId);
+          if (pn && request.urls.length > 0) {
             await addLog({
-              timestamp: Date.now(), action: 'list',
-              id: request.listId, op: 'add', ids
+              timestamp: Date.now(),
+              action: 'pin_to_list',
+              parents: pn.parents, name: pn.name,
+              items: request.urls
             });
           }
           sendResponse({ success: true });
@@ -1587,11 +1359,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'copyListPins': {
           try {
             const source = await readCacheable('list:' + request.fromListId);
-            const ids = (source?.pins || []).map(p => p.id);
-            if (ids.length > 0) {
+            const pn = await getListParentsAndName(request.toListId);
+            // Resolve pin IDs back to items for the event format
+            const items = [];
+            for (const pin of (source?.pins || [])) {
+              if (pin.id.startsWith('page:')) {
+                const page = await readCacheable(pin.id);
+                if (page?.url) items.push(page.url);
+              } else if (pin.id.startsWith('note:')) {
+                const noteSlug = pin.id.slice('note:'.length);
+                items.push(`notes/${noteSlug}.json`);
+              }
+            }
+            if (pn && items.length > 0) {
               await addLog({
-                timestamp: Date.now(), action: 'list',
-                id: request.toListId, op: 'add', ids
+                timestamp: Date.now(),
+                action: 'pin_to_list',
+                parents: pn.parents, name: pn.name,
+                items
               });
             }
             sendResponse({ success: true });
@@ -1603,20 +1388,47 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'saveListMeta': {
-          const cached = await readCacheable('list:' + request.listId);
-          const metaEntry = { timestamp: Date.now(), action: 'list_meta', id: request.listId };
-          let hasChange = false;
-          if (request.name !== undefined && (!cached || cached.name !== request.name)) {
-            metaEntry.name = request.name;
-            hasChange = true;
-          }
-          if (request.savedSearches !== undefined && (!cached || JSON.stringify(cached.savedSearches) !== JSON.stringify(request.savedSearches))) {
-            metaEntry.savedSearches = request.savedSearches;
-            hasChange = true;
-          }
-          if (hasChange) {
-            await addLog(metaEntry);
-            notifyMutation('lists');
+          const cached = request.listId ? await readCacheable('list:' + request.listId) : null;
+          const pn = request.listId ? await getListParentsAndName(request.listId) : null;
+
+          if (!cached) {
+            // New list: create_list event
+            // Derive parents from request.parentPath: 'root' → [], 'root/Foo' → ['root', 'Foo']
+            let parents = [];
+            if (request.parentPath && request.parentPath !== 'root') {
+              parents = request.parentPath.split('/');
+            }
+            if (request.name) {
+              await addLog({
+                timestamp: Date.now(),
+                action: 'create_list',
+                name: request.name,
+                parents,
+              });
+              // Look up the generated listId from name-to-id map
+              const fullPath = parents.length === 0 ? `root/${request.name}` : `${parents.join('/')}/${request.name}`;
+              const nameToId = await readCacheable('manifest:name-to-id');
+              const generatedId = nameToId?.paths?.[fullPath];
+              sendResponse({ success: true, listId: generatedId });
+              notifyMutation('lists');
+              break;
+            }
+          } else if (pn) {
+            // Existing list: update_list event
+            const entry = { timestamp: Date.now(), action: 'update_list', parents: pn.parents, name: pn.name };
+            let hasChange = false;
+            if (request.name !== undefined && cached.name !== request.name) {
+              entry.newName = request.name;
+              hasChange = true;
+            }
+            if (request.savedSearches !== undefined && JSON.stringify(cached.savedSearches) !== JSON.stringify(request.savedSearches)) {
+              entry.savedSearches = request.savedSearches;
+              hasChange = true;
+            }
+            if (hasChange) {
+              await addLog(entry);
+              notifyMutation('lists');
+            }
           }
           sendResponse({ success: true });
           break;
@@ -1627,21 +1439,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ success: false, error: 'Cannot delete auto lists' });
             break;
           }
-          const listKey = 'list:' + request.listId;
-          const entity = await readCacheable(listKey);
-          // Collect all descendant keys (BFS)
-          const subtreeKeys = [];
-          const delQueue = [...(entity?.childLists || [])];
-          const delVisited = new Set();
-          while (delQueue.length > 0) {
-            const k = delQueue.shift();
-            if (delVisited.has(k)) continue;
-            delVisited.add(k);
-            subtreeKeys.push(k);
-            const e = await readCacheable(k);
-            if (e?.childLists) delQueue.push(...e.childLists);
+          const pnDel = await getListParentsAndName(request.listId);
+          if (!pnDel) {
+            sendResponse({ success: false, error: 'List not found in name-to-id' });
+            break;
           }
-          await addLog({ timestamp: Date.now(), action: 'del_list', id: request.listId, subtreeKeys });
+          // Just parents+name — effectOf derives cascade from entity state
+          await addLog({ timestamp: Date.now(), action: 'delete_list', parents: pnDel.parents, name: pnDel.name });
           sendResponse({ success: true });
           notifyMutation('lists');
           break;
@@ -1649,9 +1453,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'reparentList': {
           // request: { listId, fromParent, toParent, index }
+          const pnRep = await getListParentsAndName(request.listId);
+          let toParents;
+          if (request.toParent === 'system/root') {
+            toParents = [];
+          } else {
+            const toPn = await getListParentsAndName(request.toParent);
+            if (!toPn) { sendResponse({ success: false, error: 'Target parent not found in name-to-id' }); break; }
+            toParents = [...toPn.parents, toPn.name];
+          }
+          if (!pnRep) {
+            sendResponse({ success: false, error: 'List not found in name-to-id' });
+            break;
+          }
+
+          // Build childNames: full ordered child list of destination parent after move
+          const toParentKey = 'list:' + request.toParent;
+          const toParentEntity = await readCacheable(toParentKey);
+          const existingChildren = [...(toParentEntity?.childLists || [])].filter(k => k !== 'list:' + request.listId);
+          existingChildren.splice(request.index, 0, 'list:' + request.listId);
+          const childNames = [];
+          for (const ck of existingChildren) {
+            const ce = await readCacheable(ck);
+            if (ce?.name) childNames.push(ce.name);
+          }
+
           await addLog({
-            timestamp: Date.now(), action: 'reparent_list', id: request.listId,
-            from: request.fromParent, to: request.toParent, index: request.index,
+            timestamp: Date.now(),
+            action: 'reparent_list',
+            parents: pnRep.parents, name: pnRep.name,
+            toParents,
+            childNames,
           });
           sendResponse({ success: true });
           notifyMutation('lists');
@@ -1660,16 +1492,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'restoreNote': {
           const noteSlug = request.noteSlug;
-          // Use readCacheable with includeDeleted=true to get the most up-to-date
-          // entity (includes parentIds with list keys set by effectOf during drain/replay)
           const noteData = await readCacheable('note:' + noteSlug, true);
-          const parentIds = noteData?.parentIds || [];
-          await addLog({
-            timestamp: Date.now(),
-            action: 'restore_note',
-            slug: noteSlug,
-            parentIds,
-          });
+          const pageParent = (noteData?.parentIds || []).find(p => p.startsWith('page:'));
+          let pageUrl = null;
+          if (pageParent) {
+            const pageEntity = await readCacheable(pageParent);
+            pageUrl = pageEntity?.url || null;
+          }
+          const rnEntry = { timestamp: Date.now(), action: 'restore_note', path: `notes/${noteSlug}.json` };
+          if (pageUrl) rnEntry.url = pageUrl;
+          await addLog(rnEntry);
           sendResponse({ success: true });
           notifyMutation('orphaned');
           notifyMutation('note', { noteSlug });
@@ -1677,13 +1509,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'restoreSnapshot': {
-          const snapSlug = request.snapSlug; // e.g. 'page-slug/1234567890'
-          const pageSlug = snapSlug.split('/').slice(0, -1).join('/');
+          const snapStem = request.snapSlug; // e.g. 'page-slug-1234567890'
+          // Parse: everything before the last dash is pageSlug, after is timestamp
+          const lastDash = snapStem.lastIndexOf('-');
+          const pageSlug = snapStem.slice(0, lastDash);
+          const page = await readCacheable('page:' + pageSlug);
+          if (!page?.url) {
+            sendResponse({ success: false, error: 'Page entity not found for snapshot' });
+            break;
+          }
           await addLog({
             timestamp: Date.now(),
-            action: 'restore_snap',
-            slug: snapSlug,
-            parentIds: [`page:${pageSlug}`],
+            action: 'restore_snapshot',
+            url: page.url,
+            path: `snapshots/${snapStem}`,
           });
           sendResponse({ success: true });
           notifyMutation('orphaned');
@@ -1693,29 +1532,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'restoreList': {
           const listId = request.listId;
-          // Load list entity (include deleted) to get name, pins, childLists
           const entity = await readCacheable('list:' + listId, true);
           const name = entity?.name || listId;
-          const pins = entity?.pins || [];
-          // Collect all descendant keys (BFS, include deleted)
-          const restoreSubtreeKeys = [];
-          const restoreQueue = [...(entity?.childLists || [])];
-          const restoreVisited = new Set();
-          while (restoreQueue.length > 0) {
-            const k = restoreQueue.shift();
-            if (restoreVisited.has(k)) continue;
-            restoreVisited.add(k);
-            restoreSubtreeKeys.push(k);
-            const child = await readCacheable(k, true);
-            if (child?.childLists) restoreQueue.push(...child.childLists);
-          }
           await addLog({
             timestamp: Date.now(),
             action: 'restore_list',
-            id: listId,
-            name,
-            pins,
-            subtreeKeys: restoreSubtreeKeys,
+            parents: [], name,
           });
           sendResponse({ success: true });
           notifyMutation('orphaned');
@@ -1737,23 +1559,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           } else if (key.startsWith('list:')) {
             const id = key.slice('list:'.length);
             await requestOffscreen({ action: 'deleteListFile', listId: id });
-          } else if (key.startsWith('snap:')) {
-            // snap:<pageSlug>/<timestamp> — physically delete snapshot files
-            const snapSlug = key.slice('snap:'.length);
-            const lastSlash = snapSlug.lastIndexOf('/');
-            const pageSlug = snapSlug.slice(0, lastSlash);
-            const timestamp = parseInt(snapSlug.slice(lastSlash + 1), 10);
+          } else if (key.startsWith('snapshot:')) {
+            // snapshot:<pageSlug>-<timestamp> — physically delete snapshot files
+            const snapStem = key.slice('snapshot:'.length);
+            const lastDash = snapStem.lastIndexOf('-');
+            const pageSlug = snapStem.slice(0, lastDash);
+            const timestamp = parseInt(snapStem.slice(lastDash + 1), 10);
             await requestOffscreen({ action: 'deleteSnapshot', slug: pageSlug, timestamp });
           }
           // 3. Update orphaned list: remove the key
-          const orphaned = await readCacheable('list:system/orphaned') || { timestamp: 0, keys: [] };
+          const orphaned = await readCacheable('manifest:orphaned') || { timestamp: 0, keys: [] };
           const updatedOrphaned = {
             ...orphaned,
             timestamp: Date.now(),
             keys: orphaned.keys.filter(k => k !== key),
           };
-          await requestOffscreen({ action: 'saveJson', path: 'lists/system/orphaned.json', data: updatedOrphaned });
-          await cacheSet('list:system/orphaned', updatedOrphaned);
+          await requestOffscreen({ action: 'saveJson', path: 'manifest/orphaned.json', data: updatedOrphaned });
+          await cacheSet('manifest:orphaned', updatedOrphaned);
           // 4. Clear session cache for the deleted entity
           await cacheRemove(key);
           sendResponse({ success: true });
@@ -1768,7 +1590,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           await requestOffscreen({ action: 'flushLogBuffer', entries: logBuffer });
           await new Promise(r => setTimeout(r, 100));
           // 2. Load orphaned list
-          const orphaned = await readCacheable('list:system/orphaned') || { timestamp: 0, keys: [] };
+          const orphaned = await readCacheable('manifest:orphaned') || { timestamp: 0, keys: [] };
           // 3. Delete each file
           for (const key of orphaned.keys) {
             if (key.startsWith('note:')) {
@@ -1777,19 +1599,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             } else if (key.startsWith('list:')) {
               const id = key.slice('list:'.length);
               await requestOffscreen({ action: 'deleteListFile', listId: id });
-            } else if (key.startsWith('snap:')) {
-              const snapSlug = key.slice('snap:'.length);
-              const lastSlash = snapSlug.lastIndexOf('/');
-              const pageSlug = snapSlug.slice(0, lastSlash);
-              const timestamp = parseInt(snapSlug.slice(lastSlash + 1), 10);
+            } else if (key.startsWith('snapshot:')) {
+              const snapStem = key.slice('snapshot:'.length);
+              const lastDash = snapStem.lastIndexOf('-');
+              const pageSlug = snapStem.slice(0, lastDash);
+              const timestamp = parseInt(snapStem.slice(lastDash + 1), 10);
               await requestOffscreen({ action: 'deleteSnapshot', slug: pageSlug, timestamp });
             }
             await cacheRemove(key);
           }
           // 4. Save empty orphaned list
           const emptyOrphaned = { timestamp: Date.now(), keys: [] };
-          await requestOffscreen({ action: 'saveJson', path: 'lists/system/orphaned.json', data: emptyOrphaned });
-          await cacheSet('list:system/orphaned', emptyOrphaned);
+          await requestOffscreen({ action: 'saveJson', path: 'manifest/orphaned.json', data: emptyOrphaned });
+          await cacheSet('manifest:orphaned', emptyOrphaned);
           sendResponse({ success: true });
           notifyMutation('orphaned');
           break;
@@ -1805,11 +1627,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'deleteSnapshot': {
           const slug = request.slug;
-          const timestamp = request.timestamp;
+          const snapTimestamp = request.timestamp;
+          const page = await readCacheable('page:' + slug);
+          if (!page?.url) {
+            sendResponse({ success: false, error: 'Page entity not found for snapshot' });
+            break;
+          }
           await addLog({
-            timestamp: Date.now(), action: 'del_snap',
-            slug: `${slug}/${timestamp}`,
-            parentIds: [`page:${slug}`]
+            timestamp: Date.now(),
+            action: 'delete_snapshot',
+            url: page.url,
+            path: `snapshots/${slug}-${snapTimestamp}`,
           });
           sendResponse({ success: true });
           notifyMutation('snapshot', { slug });

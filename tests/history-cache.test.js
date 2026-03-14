@@ -5,7 +5,7 @@
  * - loadInteractionFileRange filters files by date range
  * - Multi-day visit check uses recentUrls Set (built from per-date history keys)
  * - logBuffer dedup against today's history date key
- * - addLog appends to today's history:YYYY-MM-DD key
+ * - addLog appends to today's log:YYYY-MM-DD key
  * - ensurePageCheckpoint message handler
  * - Per-date history keys with pin/unpin policy
  */
@@ -71,10 +71,10 @@ describe('loadInteractionFileRange', () => {
 
   it('returns only entries within date range', async () => {
     const fs = createFsStorage({
-      '2026-02-25.jsonl': [{ timestamp: 1, url: 'https://a.com', action: 'page' }],
-      '2026-02-26.jsonl': [{ timestamp: 2, url: 'https://b.com', action: 'page' }],
-      '2026-02-27.jsonl': [{ timestamp: 3, url: 'https://c.com', action: 'page' }],
-      '2026-02-28.jsonl': [{ timestamp: 4, url: 'https://d.com', action: 'page' }],
+      '2026-02-25.jsonl': [{ timestamp: 1, url: 'https://a.com', action: 'visit_page' }],
+      '2026-02-26.jsonl': [{ timestamp: 2, url: 'https://b.com', action: 'visit_page' }],
+      '2026-02-27.jsonl': [{ timestamp: 3, url: 'https://c.com', action: 'visit_page' }],
+      '2026-02-28.jsonl': [{ timestamp: 4, url: 'https://d.com', action: 'visit_page' }],
     });
     const result = await fs.loadInteractionFileRange('2026-02-26', '2026-02-27');
     expect(result.files).toHaveLength(2);
@@ -115,7 +115,7 @@ describe('multi-day visit check', () => {
     const recentUrls = new Set();
     for (const entries of Object.values(perDateEntries)) {
       for (const e of entries) {
-        if ((e.action === 'page' || !e.action) && e.url) {
+        if ((e.action === 'visit_page' || !e.action) && e.url) {
           recentUrls.add(e.url);
         }
       }
@@ -125,15 +125,15 @@ describe('multi-day visit check', () => {
 
   it('returns true when URL found in past-day history', () => {
     const recentUrls = buildRecentUrls({
-      '2026-02-27': [{ timestamp: 1000, action: 'page', url: 'https://example.com' }],
-      '2026-02-26': [{ timestamp: 2000, action: 'page', url: 'https://other.com' }],
+      '2026-02-27': [{ timestamp: 1000, action: 'visit_page', url: 'https://example.com' }],
+      '2026-02-26': [{ timestamp: 2000, action: 'visit_page', url: 'https://other.com' }],
     });
     expect(recentUrls.has('https://example.com')).toBe(true);
   });
 
   it('returns false when URL not in past-day history', () => {
     const recentUrls = buildRecentUrls({
-      '2026-02-27': [{ timestamp: 1000, action: 'page', url: 'https://other.com' }],
+      '2026-02-27': [{ timestamp: 1000, action: 'visit_page', url: 'https://other.com' }],
     });
     expect(recentUrls.has('https://example.com')).toBe(false);
   });
@@ -157,10 +157,10 @@ describe('multi-day visit check', () => {
 
   it('aggregates URLs across multiple date keys', () => {
     const recentUrls = buildRecentUrls({
-      '2026-02-25': [{ timestamp: 1000, action: 'page', url: 'https://a.com' }],
-      '2026-02-26': [{ timestamp: 2000, action: 'page', url: 'https://b.com' }],
+      '2026-02-25': [{ timestamp: 1000, action: 'visit_page', url: 'https://a.com' }],
+      '2026-02-26': [{ timestamp: 2000, action: 'visit_page', url: 'https://b.com' }],
       '2026-02-27': [
-        { timestamp: 3000, action: 'page', url: 'https://c.com' },
+        { timestamp: 3000, action: 'visit_page', url: 'https://c.com' },
         { timestamp: 4000, action: 'list', id: 'x', op: 'add' },
       ],
     });
@@ -183,13 +183,13 @@ describe('logBuffer dedup against today history', () => {
 
   it('removes entries with matching timestamps', () => {
     const logBuffer = [
-      { timestamp: 1000, action: 'page', url: 'https://a.com' },
-      { timestamp: 2000, action: 'page', url: 'https://b.com' },
-      { timestamp: 3000, action: 'page', url: 'https://c.com' },
+      { timestamp: 1000, action: 'visit_page', url: 'https://a.com' },
+      { timestamp: 2000, action: 'visit_page', url: 'https://b.com' },
+      { timestamp: 3000, action: 'visit_page', url: 'https://c.com' },
     ];
     const todayHistory = [
-      { timestamp: 1000, action: 'page', url: 'https://a.com' },
-      { timestamp: 2000, action: 'page', url: 'https://b.com' },
+      { timestamp: 1000, action: 'visit_page', url: 'https://a.com' },
+      { timestamp: 2000, action: 'visit_page', url: 'https://b.com' },
     ];
     const result = dedupLogBuffer(logBuffer, todayHistory);
     expect(result).toHaveLength(1);
@@ -198,10 +198,10 @@ describe('logBuffer dedup against today history', () => {
 
   it('preserves all entries when no overlap', () => {
     const logBuffer = [
-      { timestamp: 3000, action: 'page', url: 'https://c.com' },
+      { timestamp: 3000, action: 'visit_page', url: 'https://c.com' },
     ];
     const todayHistory = [
-      { timestamp: 1000, action: 'page', url: 'https://a.com' },
+      { timestamp: 1000, action: 'visit_page', url: 'https://a.com' },
     ];
     const result = dedupLogBuffer(logBuffer, todayHistory);
     expect(result).toHaveLength(1);
@@ -209,10 +209,10 @@ describe('logBuffer dedup against today history', () => {
 
   it('returns empty when all entries already flushed', () => {
     const logBuffer = [
-      { timestamp: 1000, action: 'page', url: 'https://a.com' },
+      { timestamp: 1000, action: 'visit_page', url: 'https://a.com' },
     ];
     const todayHistory = [
-      { timestamp: 1000, action: 'page', url: 'https://a.com' },
+      { timestamp: 1000, action: 'visit_page', url: 'https://a.com' },
     ];
     const result = dedupLogBuffer(logBuffer, todayHistory);
     expect(result).toHaveLength(0);
@@ -220,7 +220,7 @@ describe('logBuffer dedup against today history', () => {
 
   it('handles empty today history gracefully', () => {
     const logBuffer = [
-      { timestamp: 1000, action: 'page', url: 'https://a.com' },
+      { timestamp: 1000, action: 'visit_page', url: 'https://a.com' },
     ];
     const result = dedupLogBuffer(logBuffer, []);
     expect(result).toHaveLength(1);
@@ -233,17 +233,17 @@ describe('logBuffer dedup against today history', () => {
 
 describe('addLog updates today history date key', () => {
   const todayStr = new Date().toISOString().slice(0, 10);
-  const todayKey = 'history:' + todayStr;
+  const todayKey = 'log:' + todayStr;
 
   it('appends new entry to today date key', async () => {
     const session = makeSessionMock({
       [todayKey]: [
-        { timestamp: 1000, action: 'page', url: 'https://a.com' },
+        { timestamp: 1000, action: 'visit_page', url: 'https://a.com' },
       ],
     });
 
     // Simulate addLog's history update
-    const entry = { timestamp: 2000, action: 'page', url: 'https://b.com' };
+    const entry = { timestamp: 2000, action: 'visit_page', url: 'https://b.com' };
     const data = await session.get([todayKey]);
     const arr = data[todayKey] || [];
     arr.push(entry);
@@ -257,7 +257,7 @@ describe('addLog updates today history date key', () => {
   it('creates today date key if not present', async () => {
     const session = makeSessionMock({});
 
-    const entry = { timestamp: 1000, action: 'page', url: 'https://a.com' };
+    const entry = { timestamp: 1000, action: 'visit_page', url: 'https://a.com' };
     const data = await session.get([todayKey]);
     const arr = data[todayKey] || [];
     arr.push(entry);
@@ -276,44 +276,7 @@ describe('addLog updates today history date key', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. ensurePageCheckpoint handler
-// ---------------------------------------------------------------------------
-
-describe('ensurePageCheckpoint handler', () => {
-  function generateSlugFromUrl(url) {
-    try {
-      const u = new URL(url);
-      let base = u.hostname.replace(/^www\./, '') + u.pathname;
-      base = base.replace(/\/+$/, '');
-      return base.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
-    } catch {
-      return url.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
-    }
-  }
-
-  it('generates correct slug and calls ensureCheckpointIfMissing', async () => {
-    const ensureCheckpointIfMissing = vi.fn();
-    const url = 'https://example.com/article';
-    const title = 'An Article';
-    const slug = generateSlugFromUrl(url);
-
-    await ensureCheckpointIfMissing(slug, url, title);
-
-    expect(ensureCheckpointIfMissing).toHaveBeenCalledWith(slug, url, title);
-  });
-
-  it('uses empty string for missing title', async () => {
-    const ensureCheckpointIfMissing = vi.fn();
-    const url = 'https://example.com/page';
-    const slug = generateSlugFromUrl(url);
-    await ensureCheckpointIfMissing(slug, url, '');
-
-    expect(ensureCheckpointIfMissing).toHaveBeenCalledWith(slug, url, '');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 6. Per-date history keys with pin/unpin policy
+// 5. Per-date history keys with pin/unpin policy
 // ---------------------------------------------------------------------------
 
 describe('per-date history keys', () => {
@@ -323,18 +286,18 @@ describe('per-date history keys', () => {
     // Simulate hydration: set per-date keys for Feb 25-28
     const dates = ['2026-02-25', '2026-02-26', '2026-02-27', '2026-02-28'];
     const data = {
-      '2026-02-25': [{ timestamp: 100, action: 'page', url: 'https://a.com' }],
+      '2026-02-25': [{ timestamp: 100, action: 'visit_page', url: 'https://a.com' }],
       '2026-02-26': [],  // no file for this date → empty array
-      '2026-02-27': [{ timestamp: 300, action: 'page', url: 'https://c.com' }],
-      '2026-02-28': [{ timestamp: 400, action: 'page', url: 'https://d.com' }],
+      '2026-02-27': [{ timestamp: 300, action: 'visit_page', url: 'https://c.com' }],
+      '2026-02-28': [{ timestamp: 400, action: 'visit_page', url: 'https://d.com' }],
     };
     for (const d of dates) {
-      await session.set({ ['history:' + d]: data[d] });
+      await session.set({ ['log:' + d]: data[d] });
     }
 
     // Verify each key exists
     for (const d of dates) {
-      const key = 'history:' + d;
+      const key = 'log:' + d;
       const result = (await session.get([key]))[key];
       expect(result).toEqual(data[d]);
     }
@@ -342,9 +305,9 @@ describe('per-date history keys', () => {
 
   it('empty array for dates with no file (cache hit = "checked, nothing there")', async () => {
     const session = makeSessionMock();
-    await session.set({ 'history:2026-02-26': [] });
+    await session.set({ 'log:2026-02-26': [] });
 
-    const result = (await session.get(['history:2026-02-26']))['history:2026-02-26'];
+    const result = (await session.get(['log:2026-02-26']))['log:2026-02-26'];
     expect(result).toEqual([]);
     expect(result).not.toBeNull();
   });
@@ -352,10 +315,10 @@ describe('per-date history keys', () => {
   it('builds recentUrls from per-date keys (excluding today)', () => {
     // Simulate: today is 2026-02-28, past 7 days are 2026-02-21 to 2026-02-27
     const perDateEntries = {
-      '2026-02-25': [{ timestamp: 500, action: 'page', url: 'https://a.com' }],
+      '2026-02-25': [{ timestamp: 500, action: 'visit_page', url: 'https://a.com' }],
       '2026-02-26': [{ timestamp: 600, action: 'list', id: 'x', op: 'add' }],
       '2026-02-27': [
-        { timestamp: 700, action: 'page', url: 'https://b.com' },
+        { timestamp: 700, action: 'visit_page', url: 'https://b.com' },
         { timestamp: 800, url: 'https://c.com' },
       ],
     };
@@ -363,7 +326,7 @@ describe('per-date history keys', () => {
     const recentUrls = new Set();
     for (const entries of Object.values(perDateEntries)) {
       for (const e of entries) {
-        if ((e.action === 'page' || !e.action) && e.url) {
+        if ((e.action === 'visit_page' || !e.action) && e.url) {
           recentUrls.add(e.url);
         }
       }
@@ -380,8 +343,8 @@ describe('per-date history keys', () => {
     const pinnedKeys = new Set();
     const RECENT_DAYS = 7;
 
-    function pinDate(dateStr) { pinnedKeys.add('history:' + dateStr); }
-    function unpinDate(dateStr) { pinnedKeys.delete('history:' + dateStr); }
+    function pinDate(dateStr) { pinnedKeys.add('log:' + dateStr); }
+    function unpinDate(dateStr) { pinnedKeys.delete('log:' + dateStr); }
 
     // Pin recent 7 days
     const today = new Date('2026-02-28');
@@ -391,14 +354,14 @@ describe('per-date history keys', () => {
       pinDate(d.toISOString().slice(0, 10));
     }
 
-    expect(pinnedKeys.has('history:2026-02-28')).toBe(true); // today
-    expect(pinnedKeys.has('history:2026-02-21')).toBe(true); // 7 days ago
+    expect(pinnedKeys.has('log:2026-02-28')).toBe(true); // today
+    expect(pinnedKeys.has('log:2026-02-21')).toBe(true); // 7 days ago
 
     // Old date not in pinned set
-    expect(pinnedKeys.has('history:2026-02-15')).toBe(false);
+    expect(pinnedKeys.has('log:2026-02-15')).toBe(false);
 
     // Explicitly unpin an old date
     unpinDate('2026-02-15');
-    expect(pinnedKeys.has('history:2026-02-15')).toBe(false);
+    expect(pinnedKeys.has('log:2026-02-15')).toBe(false);
   });
 });

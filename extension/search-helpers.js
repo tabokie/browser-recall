@@ -2,11 +2,11 @@
 
 /**
  * Extract visit entries from the logBuffer.
- * The logBuffer contains entries of different types: visits (action: 'page')
+ * The logBuffer contains entries of different types: visits (action: 'visit_page')
  * and mutations (other action values). This returns only visit entries.
  */
 export function extractInteractionBuffer(logBuffer) {
-  return logBuffer.filter(e => !e.action || e.action === 'page');
+  return logBuffer.filter(e => !e.action || e.action === 'visit_page' || e.action === 'leave_page');
 }
 
 /**

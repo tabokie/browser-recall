@@ -2,7 +2,7 @@
 // Importable by options.js (ES module).
 
 export function entityTypeLabel(key) {
-  if (key.startsWith('snap:')) return 'Snapshot';
+  if (key.startsWith('snapshot:')) return 'Snapshot';
   if (key.startsWith('note:')) return 'Note';
   if (key.startsWith('list:')) return 'List';
   if (key.startsWith('page:')) return 'Page';

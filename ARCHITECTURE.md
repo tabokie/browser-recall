@@ -2,6 +2,35 @@
 
 > Keep up-to-date after changes, like CODEBASE_MAP.md.
 
+## Directory Structure
+
+```
+<root>/
+  data/                              # PUBLIC. Immutable/append-only. Other apps can read.
+    logs/<YYYY-MM-DD>.jsonl          #   Event history (source of truth)
+    snapshots/<slug>-<ts>/           #   Snapshot files (index.html, index.md, assets)
+    notes/<noteSlug>.json            #   Notes and highlights (same format)
+
+  lists/                             # INTERNAL. List entity files.
+    <listId>.json
+    system/
+      root.json                      #   Tree root (childLists)
+      explore.json                   #   Explore smart list
+      gateways.json                  #   Gateway domain registry
+
+  pages/                             # INTERNAL. Per-page entity files. GC'd when ineligible.
+    <slug>.json
+
+  manifest/                          # INTERNAL. Irregular-shape manifests.
+    list-name-to-id.json             #   list [parents, name] → internal ID
+    settings.json                    #   User settings
+    orphaned.json                    #   Tracks deleted entity keys (recycle bin)
+```
+
+**`data/` is public**: We surrender read permission to all potential apps outside our domain. Content inside it is generally immutable/append-only. Internal data (entities, system lists, manifests) that contain internal concepts live in separate folders (`lists/`, `pages/`, `manifest/`).
+
+**Event fields** reference only things in `data/`: URLs for pages, relative paths (`snapshots/...`, `notes/...`) for files. Internal folders are never mentioned in events.
+
 ## Entity Storage Layer
 
 Entity storage is the **single source of truth** for entity data. All consumers read entities through this layer, never from raw JSONL history.
@@ -10,25 +39,12 @@ Entity storage is the **single source of truth** for entity data. All consumers 
 
 ```
 session cache (hot)  →  filesystem checkpoints (cold)
-   chrome.storage.session        pages/{slug}.json
+   chrome.storage.session        pages/<slug>.json, manifest/*.json
    via entity-cache.js           via offscreen loadPageBatch
 ```
 
 - **Session cache**: in-memory IPC via `chrome.storage.session`, managed by `entity-cache.js` (500-entry LRU with watermark-gated eviction). Survives SW termination, cleared on browser restart.
-- **Filesystem checkpoints**: `pages/{slug}.json` files on disk. Loaded via offscreen `loadPageBatch`.
-
-### Buffer Replay Bridge
-
-Between the filesystem checkpoint watermark and the current state, there may be un-drained logBuffer entries. `replayBufferOver(page)` bridges this gap:
-
-```
-filesystem checkpoint (watermark T₁)  +  logBuffer entries (T₁..T₂)  →  current entity state
-```
-
-This is applied:
-- In `loadPageBatch` handler — after loading from filesystem, before caching
-- In `getPageInfo` handler — for filesystem fallback when not in session cache
-- In `hydrateCache` Phase 1.5 — pre-loads pages referenced by logBuffer before Phase 2 replay
+- **Filesystem checkpoints**: `pages/<slug>.json` files on disk. Loaded via offscreen `loadPageBatch`.
 
 ### Read Path
 
@@ -44,7 +60,7 @@ cacheSet(key, page)           ← populate session cache for next read
 
 ### UI Read Path (Cacheable Keys)
 
-UI pages read cached data via `utils.js` `readCacheable(key)`, where `key` is an entity key (e.g., `'lists'`, `'list:system/orphaned'`, `'list:system/shallow-page'`, `'settings'`). Session cache stores entities under their entity keys and settings as a single `'settings'` object. Background's `readFs` handles key→filesystem resolution:
+UI pages read cached data via `utils.js` `readCacheable(key)`, where `key` is an entity key (e.g., `'lists'`, `'list:system/root'`, `'settings'`). Session cache stores entities under their entity keys and settings as a single `'settings'` object. Background's `readFs` handles key→filesystem resolution:
 
 ```
 chrome.storage.session.get([key])     ← local session cache hit (fast, no IPC to background)
@@ -78,114 +94,50 @@ Phase 1.5:  Pre-load page entities referenced by logBuffer from filesystem
 Phase 2:    Replay ALL logBuffer entries via effectOf (brings session cache up-to-date)
 ```
 
-## Shallow Pages vs Checkpointed Pages
+## Page Entities
 
-### Definitions
+### Entity Creation
 
-- **Checkpointed page**: has a `pages/{slug}.json` file on disk. Created by `page_checkpoint` log action. Full entity with url, title, parentIds, childIds, visitDates, attention, etc. Referenced as `page:<slug>` in typed refs.
-- **Shallow page**: appears in JSONL history but has **no checkpoint file**. Never becomes an entity object — entity storage returns `null` for it. Referenced as `shallow:<url>` in typed refs. Metadata (parents, list membership, title) tracked in `lists/system/shallow-page.json`.
+Page entities are created **only by explicit user actions** — never by passive visits. The following actions create a page entity in `pages/<slug>.json` if one doesn't exist:
 
-### Checkpoint Creation
+- `create_snapshot` — user captures a snapshot
+- `create_note` — user creates a note on a page
+- `pin_to_list` — user pins a page to a list
+- `rename_page` — user sets a custom title
+- `rate_page` — user likes/unlikes a page
 
-The **only gateway** from shallow → checkpointed is `ensureCheckpointIfMissing()`, triggered by:
+`visit_page` and `leave_page` **only enrich existing entities** (title, attention data, referrer links). Passive visits that don't match an existing entity leave no entity footprint — they exist only as JSONL history entries.
 
-1. **Multi-day visit** — page has `visitDates` spanning multiple calendar days
-2. **Referrer present** — cross-site navigation (parent page is also checkpointed)
-3. **Note creation** — parent page must exist for note's `childIds` wiring on parent
+### Page Eligibility GC
 
-Each creates a `page_checkpoint` log entry, which `effectOf()` in replay.js handles as the only action that can create a page entity from null.
+Page entities are garbage-collected when they become **ineligible**. A page is eligible if ANY of:
+- `parentIds` contains at least one `list:` key (pinned to a user list)
+- `childIds` contains at least one `note:` or `snapshot:` key
+- `user_title` is set and truthy
+- `likes` is set and non-zero
 
-### How Shallow Pages Appear
+GC triggers during replay when an action removes the last eligible criterion:
+- `unpin_from_list` — removes list parent; page GC'd if no other criteria
+- `delete_note` — removes note child from page; page GC'd if no other criteria
+- `delete_snapshot` — removes snapshot child from page; page GC'd if no other criteria
+- `delete_list` — removes list parent from all pinned pages; pages GC'd if no other criteria
 
-Shallow pages exist as:
-- **Raw JSONL entries** in `history/YYYY-MM-DD.jsonl` files
-- **Transient display objects** built by `processInteractionsForDisplay()` in options.js
-- **Typed references** (`shallow:<url>`) in page `childIds`, list pin `id` fields, and log entry `ids` fields
-- **Shallow-page index entries** in `lists/system/shallow-page.json` — `{ parents, lists, title, user_title }`
+GC'd pages are set to `null` in replay results. `sessionWrite` stores a GC tombstone in session cache (prevents disk reload before drain). Offscreen drain deletes the `pages/<slug>.json` file via `fsStorage.deletePage()`.
 
-They do NOT exist in:
-- Session cache (entity storage returns null)
-- Filesystem (no `pages/{slug}.json`)
+### Typed References (Internal)
 
-### Consumer Behavior at the Boundary
+Internal entity references use typed keys with a prefix indicating the entity kind:
 
-| Consumer | Checkpointed page | Shallow page |
-|----------|-------------------|--------------|
-| `getPageInfo` (popup) | Returns `interaction` with entity data | Returns `interaction: null`; popup uses `tab.title` fallback; background falls back to `shallowPageIndex` for title |
-| `enrichFromEntityStorage` (options.js) | Overwrites display title with entity title | Skips — keeps JSONL title |
-| `loadPageBatch` (background) | Returns entity from cache/filesystem | Absent from result |
-| `effectOf` replay (page action) | Updates existing entity | Returns null (no-op); updates `shallowPageIndex` with parents/title |
-| `effectOf` replay (note action) | Wires `note:<slug>` into parent page `childIds` only (note entity not created/updated by replay — content is on disk) | N/A |
-| `effectOf` replay (del_note action) | Unlinks `note:<slug>` from parent page `childIds`, adds `note:<slug>` to `list:system/orphaned` | N/A |
-| `effectOf` replay (restore_note action) | Re-links `note:<slug>` to parent page `childIds`, removes from `list:system/orphaned` | N/A |
-| `effectOf` replay (del_list action) | Removes from parent's `childLists`, removes `list:<id>` from page `parentIds` (checkpointed pins), removes list from SPI `lists` (shallow pins), adds `list:<id>` to `list:system/orphaned`, soft-deletes subtree via `subtreeKeys` | N/A |
-| `effectOf` replay (restore_list action) | Clears `deleted` flag, re-adds to root's `childLists`, restores page `parentIds` (checkpointed pins) + SPI `lists` (shallow pins), removes from `list:system/orphaned`, restores subtree via `subtreeKeys`. Pins passed in log entry (readCacheable filters deleted entities). | N/A |
-| `effectOf` replay (list pin/unpin) | Updates page `parentIds` with `list:<id>` | Updates SPI `lists` with `list:<id>` |
-| `effectOf` replay (page_checkpoint) | Updates watermark; absorbs shallow-page index data (parents, lists) into page, upgrades `shallow:` list pins to `page:` | Creates entity from `defaultEntity()` |
-| `getPageRelations` (background) | Reads `parentIds`/`childIds`, resolves typed refs | Falls back to `shallowPageIndex.index[url]` for parents |
-| `buildListMembershipIndex` (options.js) | Loads list entity pins, resolves `page:<slug>` slugs | Resolves `shallow:<url>` slugs via `generateSlugFromUrl` |
-| Pin display (options.js) | `resolvePageRef` → page entity from session cache | `resolvePageRef` → metadata from `shallowPageIndex`, or null if unreferenced |
+| Prefix | Meaning | File Location |
+|--------|---------|---------------|
+| `page:<slug>` | Page entity | `pages/<slug>.json` |
+| `note:<slug>` | Note entity | `data/notes/<noteSlug>.json` |
+| `snap:<slug>-<ts>` | Snapshot (no entity file — exists in page `childIds` and `manifest/orphaned.json`) | `data/snapshots/<slug>-<ts>/` |
+| `list:<id>` | List entity | `lists/<id>.json` |
 
-### Typed References
+Used internally in: `page.parentIds`, `page.childIds`, `note.parentIds`, list pin `id` fields.
 
-All inter-entity references use typed keys with a prefix indicating the entity kind:
-
-| Prefix | Meaning | Example |
-|--------|---------|---------|
-| `page:<slug>` | Checkpointed page (has `pages/{slug}.json`) | `page:github-facebook-rocksdb-s3z2s3` |
-| `shallow:<url>` | Non-checkpointed page (no entity file) | `shallow:https://example.com/article` |
-| `note:<slug>` | Note entity (has `notes/{slug}.json`) | `note:my-note-abc123` |
-| `snap:<slug>/<ts>` | Snapshot (no entity file — exists only in page `childIds` and `list:system/orphaned`) | `snap:github-facebook-rocksdb-s3z2s3/1700000000000` |
-| `list:<id>` | List entity (has `lists/{id}.json`) | `list:rust-lang-ffnyqr` |
-
-Used in: `page.parentIds` (includes `page:<slug>` from referrers and `list:<id>` from list membership), `page.childIds` (includes `note:<slug>` and `snap:<slug>/<ts>`), `note.parentIds`, `note.childIds`, list pin `id` fields, log entry `referrerId`/`ids`/`parentIds`/`childIds` fields.
-
-**Resolution**: `page:<slug>` refs are resolved to URLs via `loadPageBatch`. `shallow:<url>` refs have the URL embedded (extract via `ref.slice(8)`). When a shallow page becomes checkpointed, `effectOf`'s page_checkpoint branch resolves `shallow:<url>` → `page:<slug>` in parentIds/childIds and upgrades `shallow:` pin IDs to `page:` in affected list entities.
-
-### Shallow-Page Index
-
-`lists/system/shallow-page.json` — entity key `list:system/shallow-page`
-
-Tracks metadata for non-checkpointed pages that are referenced by checkpointed entities:
-
-```json
-{
-  "timestamp": 1234,
-  "index": {
-    "https://example.com/child": {
-      "parents": ["page:parent-slug"],
-      "lists": ["list:my-list"],
-      "title": "Example Page",
-      "user_title": null
-    }
-  }
-}
-```
-
-- **Populated by**: `applyLogToShallowPage` in replay.js — `page` entries (parents, title), `list` entries with `shallow:` ids (list membership). `effectOf` post-processes list entries to enrich `title: null` SPI entries from today's/yesterday's history cache.
-- **Pruned**: when a shallow page becomes checkpointed, its entry is removed, data (parents, lists) absorbed into the new page entity, and `shallow:` pin IDs in affected lists upgraded to `page:<slug>`
-- **Consumers**: `getPageRelations` (fallback for non-checkpointed children/parents), `buildListMembershipIndex` (resolve shallow pin slugs for list filter), `getPageInfo` (title fallback)
-
-### Pin ID Resolution
-
-When a page is pinned to a list, the pin ID must be authoritative: `page:<slug>` if checkpointed, `shallow:<url>` if not. A race condition exists between page capture (which creates the checkpoint) and the pin operation (which references the URL) — the caller may compute `shallow:<url>` for a page that was checkpointed in between.
-
-**Resolution chain** (background.js `resolvePageId(url)`):
-```
-cacheGet('page:' + slug)            ← session cache hit (fast)
-  ↓ miss
-requestOffscreen({ pageExists })    ← filesystem check (definitive)
-  ↓ exists? → 'page:<slug>'
-  ↓ not?   → 'shallow:<url>'
-```
-
-**Write-time re-validation** (`resolveShallowIds(ids)`): Every `shallow:<url>` ID in a list pin operation is re-checked against cache+disk before writing to the log. This ensures the log always contains the authoritative pin ID, regardless of what the caller computed.
-
-Applied in: `toggleListPin` handler (re-checks any shallow ID), `addListPins` handler (re-checks all IDs via `resolveShallowIds`).
-
-### Design Rationale
-
-Most visited pages are one-time visits that don't need rich entity state. Selective checkpointing keeps the filesystem lean — only pages with meaningful relationships (referrers, notes, multi-day engagement) get checkpoint files. Shallow pages still appear in history views via JSONL data. The typed reference system (`page:<slug>` vs `shallow:<url>`) makes it explicit whether a referenced page is materialized, and the shallow-page index provides a lightweight way to track parent/list/title metadata for non-checkpointed pages without creating full entity files.
+**Events never use typed references.** Events reference pages by URL, notes/snapshots by relative path (`notes/...`, `snapshots/...`), and lists by `parents` array + `name`. `effectOf` translates between event fields and internal typed references.
 
 ## Module Responsibilities
 
@@ -259,35 +211,35 @@ These bypass the background→offscreen pipeline. The tradeoff is acceptable bec
 
 ### Design: Unlink + Orphan (No Physical File Moves)
 
-Deletion is a **logical operation**, not a physical one. Deleting a note, list, or snapshot appends a log entry (`del_note`, `del_list`, or `del_snap`) that unlinks the entity from its parents and adds its key to the `list:system/orphaned` tracking list. The entity file on disk (`notes/{slug}.json`, `lists/{id}.json`) or snapshot files (`pages/{slug}/{ts}.md|.html`) are never touched.
+Deletion is a **logical operation**, not a physical one. Deleting a note, list, or snapshot appends a log entry (`delete_note`, `delete_list`, or `delete_snapshot`) that unlinks the entity from its parents and adds its key to `manifest/orphaned.json`. The entity file on disk (`data/notes/<slug>.json`, `lists/<id>.json`) or snapshot files (`data/snapshots/<slug>-<ts>/`) are never touched.
 
 This design exists because of the event-sourced architecture. The JSONL history is the source of truth, and entity files are derived checkpoints rebuilt by replaying history. If deletion moved or removed files, replaying history would attempt to reference files that no longer exist at their expected paths — breaking replay idempotency. By keeping deletion as a pure relation change in the log, replay can be run any number of times and always produce a consistent result.
 
 ### What Each Deletion Does
 
-**`del_note` (replay.js):**
+**`delete_note` (replay.js):**
 1. Unlinks `note:<slug>` from each parent page's `childIds`
-2. Adds `note:<slug>` to `list:system/orphaned`
-3. File `notes/{slug}.json` stays on disk
+2. Adds `note:<slug>` to `manifest/orphaned.json`
+3. File `data/notes/<slug>.json` stays on disk
 
-**`del_snap` (replay.js):**
-1. Unlinks `snap:<slug>/<ts>` from each parent page's `childIds`
-2. Adds `snap:<slug>/<ts>` to `list:system/orphaned`
-3. Snapshot files `pages/{slug}/{ts}.md|.html` stay on disk
+**`delete_snapshot` (replay.js):**
+1. Unlinks `snap:<slug>-<ts>` from each parent page's `childIds`
+2. Adds `snap:<slug>-<ts>` to `manifest/orphaned.json`
+3. Snapshot directory `data/snapshots/<slug>-<ts>/` stays on disk
 
-**`del_list` (replay.js):**
+**`delete_list` (replay.js):**
 1. Removes the list from parent's `childLists` (sidebar disappears)
-2. Removes `list:<id>` from `parentIds` of all checkpointed pages that were pinned
-3. Removes `list:<id>` from `lists` arrays in the shallow-page index for shallow-pinned pages
-4. Soft-deletes all descendant lists via `subtreeKeys` in log entry
-4. Adds `list:<id>` to `list:system/orphaned`
-5. File `lists/{id}.json` stays on disk
+2. Removes `list:<id>` from `parentIds` of all pinned pages
+3. Cascades delete to all descendant lists (computed from entity state by `effectOf`)
+4. Adds `list:<id>` to `manifest/orphaned.json`
+5. Removes list and descendants from `manifest/list-name-to-id.json`
+6. File `lists/<id>.json` stays on disk
 
 All handlers use `effectOf` in replay.js — all side-effects are computed in a single replay pass, not as separate log entries.
 
-### The Orphaned List
+### The Orphaned Manifest
 
-`list:system/orphaned` (`lists/system/orphaned.json`) holds an array of entity keys (`note:<slug>`, `snap:<slug>/<ts>`, `list:<id>`) for deleted items. This serves as a "recycle bin" manifest: the keys are unlinked from the entity graph but the underlying files are intact and could be restored.
+`manifest/orphaned.json` holds an array of entity keys (`note:<slug>`, `snap:<slug>-<ts>`, `list:<id>`) for deleted items. This serves as a "recycle bin" manifest: the keys are unlinked from the entity graph but the underlying files are intact and could be restored.
 
 ### File Persistence and Its Consequences
 
@@ -299,11 +251,10 @@ Currently, `loadNote()` in filesystem-storage.js returns `null` for missing file
 
 | Entity | Deletion supported | Log action | Notes |
 |--------|-------------------|------------|-------|
-| Note | Yes | `del_note` | Unlinks from parent page `childIds` |
-| Snapshot | Yes | `del_snap` | Unlinks from parent page `childIds`; no entity file (key-only) |
-| List | Yes | `del_list` | Unlinks from all pinned pages, removes from sidebar |
-| Page | No | — | Pages are never deleted; they either exist as checkpoints or as shallow entries |
-| Shallow page | No | — | Entries in SPI are pruned when absorbed into a checkpoint, but not user-deletable |
+| Note | Yes | `delete_note` | Unlinks from parent page `childIds` |
+| Snapshot | Yes | `delete_snapshot` | Unlinks from parent page `childIds`; no entity file (key-only) |
+| List | Yes | `delete_list` | Unlinks from all pinned pages, removes from sidebar, cascades to descendants |
+| Page | Automatic (GC) | — | Pages are GC'd during replay when they become ineligible (see Page Eligibility GC) |
 
 **options.js direct chrome.storage.local** — Three call sites remain:
 1. **WASM search** (`pipelinedSearch`): reads undrained logBuffer entries to search separately from on-disk JSONL (see "Pending Buffer for WASM Search" above).

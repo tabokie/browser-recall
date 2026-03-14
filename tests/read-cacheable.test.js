@@ -34,7 +34,7 @@ describe('utils.js structural checks', () => {
   it('loadSettingsValue delegates to readCacheable for settings', () => {
     const fnBody = utilsSource.match(/export async function loadSettingsValue[\s\S]*?\n\}/);
     expect(fnBody).not.toBeNull();
-    expect(fnBody[0]).toMatch(/readCacheable\s*\(\s*'settings'\s*\)/);
+    expect(fnBody[0]).toMatch(/readCacheable\s*\(\s*'manifest:settings'\s*\)/);
   });
 });
 
@@ -98,8 +98,8 @@ describe('readCacheable / readFs', () => {
         return { success: true, settings: TEST_SETTINGS };
       case 'loadAllListMetadata':
         return { success: true, lists: [{ slug: 'a', name: 'A' }, { slug: 'b', name: 'B' }] };
-      case 'loadShallowPageIndex':
-        return { success: true, timestamp: 42, index: { 'https://a.com': { parentIds: ['s1'] } } };
+      case 'loadNameMap':
+        return { success: true, entity: { timestamp: 42, paths: { 'my-list': 'My List' } } };
       case 'loadListEntity':
         if (msg.listId === 'my-custom-list') {
           return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', savedSearches: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] } };
@@ -129,14 +129,14 @@ describe('readCacheable / readFs', () => {
     readFs = async (key) => {
       let value;
       switch (key) {
-        case 'settings': {
+        case 'manifest:settings': {
           const resp = requestOffscreen({ action: 'loadSettings' });
           value = resp?.settings || {};
           break;
         }
-        case 'list:system/shallow-page': {
-          const r = requestOffscreen({ action: 'loadShallowPageIndex' });
-          value = r?.success ? { timestamp: r.timestamp || 0, index: r.index || {} } : { timestamp: 0, index: {} }; break;
+        case 'manifest:name-to-id': {
+          const r = requestOffscreen({ action: 'loadNameMap' });
+          value = r?.entity || { timestamp: 0, paths: {} }; break;
         }
         default: {
           if (key.startsWith('list:')) {
@@ -207,11 +207,11 @@ describe('readCacheable / readFs', () => {
     expect(offscreenCalls.some(c => c.action === 'loadListEntity' && c.listId === 'system/root')).toBe(true);
   });
 
-  it('falls back to filesystem for shallow-page and caches result', async () => {
-    const result = await readCacheable('list:system/shallow-page');
-    expect(result).toEqual({ timestamp: 42, index: { 'https://a.com': { parentIds: ['s1'] } } });
-    expect(offscreenCalls.some(c => c.action === 'loadShallowPageIndex')).toBe(true);
-    expect(session._store['list:system/shallow-page']).toEqual({ timestamp: 42, index: { 'https://a.com': { parentIds: ['s1'] } } });
+  it('falls back to filesystem for name-to-id and caches result', async () => {
+    const result = await readCacheable('manifest:name-to-id');
+    expect(result).toEqual({ timestamp: 42, paths: { 'my-list': 'My List' } });
+    expect(offscreenCalls.some(c => c.action === 'loadNameMap')).toBe(true);
+    expect(session._store['manifest:name-to-id']).toEqual({ timestamp: 42, paths: { 'my-list': 'My List' } });
   });
 
   it('falls back to filesystem for gateways and caches result', async () => {
@@ -223,19 +223,19 @@ describe('readCacheable / readFs', () => {
 
   // ── Settings batch-load ──────────────────────────────────────────────
   it('loads full settings object on miss', async () => {
-    const result = await readCacheable('settings');
+    const result = await readCacheable('manifest:settings');
     expect(result).toEqual(TEST_SETTINGS);
     // Full settings object should be cached
-    expect(session._store.settings).toEqual(TEST_SETTINGS);
+    expect(session._store['manifest:settings']).toEqual(TEST_SETTINGS);
     // Only ONE loadSettings call
     const settingsCalls = offscreenCalls.filter(c => c.action === 'loadSettings');
     expect(settingsCalls.length).toBe(1);
   });
 
   it('second settings read hits session cache (no second offscreen call)', async () => {
-    await readCacheable('settings');
+    await readCacheable('manifest:settings');
     offscreenCalls = []; // clear
-    const result = await readCacheable('settings');
+    const result = await readCacheable('manifest:settings');
     expect(result).toEqual(TEST_SETTINGS);
     expect(offscreenCalls).toEqual([]); // No additional offscreen call
   });
@@ -276,9 +276,9 @@ describe('readCacheable / readFs', () => {
       return origReadFs(key);
     };
 
-    await session.set({ settings: { urlBlacklist: ['chrome://'] } });
+    await session.set({ 'manifest:settings': { urlBlacklist: ['chrome://'] } });
 
-    const promise = readCacheable('settings').then(v => { resolved = true; return v; });
+    const promise = readCacheable('manifest:settings').then(v => { resolved = true; return v; });
 
     // Should not have resolved yet
     await new Promise(r => setTimeout(r, 10));
@@ -336,17 +336,19 @@ describe('options.js toggleResultPin sends url to background', () => {
 });
 
 // ---------------------------------------------------------------------------
-// #2: toggleListPin handler checks both page:<slug> and shallow:<url> forms
+// #2: toggleListPin handler resolves pin ID from URL
 // ---------------------------------------------------------------------------
-describe('background.js toggleListPin handles both pin ID forms', () => {
+describe('background.js toggleListPin resolves pin ID', () => {
   const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
 
-  it('toggleListPin checks both page: and shallow: forms for isPinned', () => {
-    const caseBlock = bgSource.match(/case\s+'toggleListPin'\s*:\s*\{([\s\S]*?)break;\s*\}/);
-    expect(caseBlock).not.toBeNull();
-    const handler = caseBlock[1];
-    // Should check for shallow: variant when resolving pin match
-    expect(handler).toMatch(/shallow:/);
+  it('toggleListPin uses getListParentsAndName and addLog for pin toggle', () => {
+    // Extract a larger chunk since case block has nested break statements
+    const startIdx = bgSource.indexOf("case 'toggleListPin'");
+    expect(startIdx).toBeGreaterThan(-1);
+    const handler = bgSource.substring(startIdx, startIdx + 1500);
+    // Should use getListParentsAndName to resolve list name and addLog to write pin action
+    expect(handler).toMatch(/getListParentsAndName/);
+    expect(handler).toMatch(/addLog/);
   });
 });
 
@@ -362,10 +364,11 @@ describe('background.js addListPins accepts urls', () => {
     expect(caseBlock[1]).toMatch(/request\.urls/);
   });
 
-  it('addListPins resolves urls via resolvePageId', () => {
+  it('addListPins uses getListParentsAndName and addLog', () => {
     const caseBlock = bgSource.match(/case\s+'addListPins'\s*:\s*\{([\s\S]*?)break;\s*\}/);
     expect(caseBlock).not.toBeNull();
-    expect(caseBlock[1]).toMatch(/resolvePageId/);
+    expect(caseBlock[1]).toMatch(/getListParentsAndName/);
+    expect(caseBlock[1]).toMatch(/addLog/);
   });
 });
 
@@ -410,7 +413,7 @@ describe('background.js getPageRelations reads list entities', () => {
     const caseBlock = bgSource.match(/case\s+'getPageRelations'\s*:\s*\{([\s\S]*?)break;\s*\}/);
     expect(caseBlock).not.toBeNull();
     // Should use readCacheable (which has disk fallback) for list entities
-    expect(caseBlock[1]).toMatch(/readCacheable\s*\(\s*'list:/);
+    expect(caseBlock[1]).toMatch(/readCacheable\s*\(\s*listKey\s*\)/);
   });
 });
 

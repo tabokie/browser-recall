@@ -8,7 +8,7 @@ test.describe('Cross-context consistency', () => {
   test('pin from helper page reflects in already-open options list view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:research'],
       }},
@@ -16,12 +16,13 @@ test.describe('Cross-context consistency', () => {
         slug: 'research', name: 'Research', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Research': 'research' } } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain',
         timestamp: now, parentIds: [], childIds: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
     ]);
 
@@ -49,7 +50,7 @@ test.describe('Cross-context consistency', () => {
 
   test('new page visit notification updates explore view in already-open options', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], blacklist: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);

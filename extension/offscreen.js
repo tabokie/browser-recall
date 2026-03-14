@@ -189,7 +189,7 @@ async function handleRequest(request) {
 
       case 'loadOrphaned': {
         try {
-          const fh = await fsStorage.resolveFile('lists/system/orphaned.json');
+          const fh = await fsStorage.resolveFile('manifest/orphaned.json');
           const entity = await fsStorage.readJson(fh);
           return { success: true, entity };
         } catch {
@@ -204,11 +204,16 @@ async function handleRequest(request) {
         return { success: true, settings };
       }
 
-      case 'loadShallowPageIndex': {
+      case 'loadNameMap': {
         const t0 = performance.now();
-        const data = await fsStorage.loadShallowPageIndex();
-        console.debug(`[I/O] loadShallowPageIndex: ${(performance.now() - t0).toFixed(1)}ms`);
-        return { success: true, ...data };
+        try {
+          const fh = await fsStorage.resolveFile('manifest/list-name-to-id.json');
+          const entity = await fsStorage.readJson(fh);
+          console.debug(`[I/O] loadNameMap: ${(performance.now() - t0).toFixed(1)}ms`);
+          return { success: true, entity };
+        } catch {
+          return { success: true, entity: { timestamp: 0, paths: {} } };
+        }
       }
 
       case 'listInteractionFiles': {
@@ -413,16 +418,16 @@ async function drainQueue() {
         } else {
           roundCache.set(key, null);
         }
-      } else if (key === 'settings') {
+      } else if (key === 'manifest:settings') {
         let s = await fsStorage.loadSettings();
         if (!s.timestamp) s.timestamp = 0;
         roundCache.set(key, s);
       } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
         const listId = key.slice('list:'.length);
         roundCache.set(key, await fsStorage.loadListPinsEntity(listId));
-      } else if (key === 'list:system/orphaned') {
+      } else if (key === 'manifest:orphaned') {
         try {
-          const fh = await fsStorage.resolveFile('lists/system/orphaned.json');
+          const fh = await fsStorage.resolveFile('manifest/orphaned.json');
           roundCache.set(key, await fsStorage.readJson(fh));
         } catch {
           roundCache.set(key, defaultEntity(key));
@@ -431,9 +436,10 @@ async function drainQueue() {
         const slug = key.slice(5);
         const note = await fsStorage.loadNote(slug);
         roundCache.set(key, note || null);
-      } else if (key === 'list:system/shallow-page') {
+      } else if (key === 'manifest:name-to-id') {
         try {
-          roundCache.set(key, await fsStorage.loadShallowPageIndex());
+          const fh = await fsStorage.resolveFile('manifest/list-name-to-id.json');
+          roundCache.set(key, await fsStorage.readJson(fh));
         } catch {
           roundCache.set(key, defaultEntity(key));
         }
@@ -441,10 +447,14 @@ async function drainQueue() {
     };
 
     // ── Sequential replay: process entries in log order ──
-    // load closure: reads from round cache, populating lazily from filesystem
-    const load = async (key) => {
+    // load closure: reads from round cache, populating lazily from filesystem.
+    // Mirrors background's sessionLoad contract: filters deleted entities unless
+    // opts.includeDeleted is set.
+    const load = async (key, opts) => {
       await ensureLoaded(key);
-      return roundCache.get(key) ?? null;
+      const entity = roundCache.get(key) ?? null;
+      if (!opts?.includeDeleted && entity?.deleted) return null;
+      return entity;
     };
 
     for (const entry of logBuffer) {
@@ -461,7 +471,7 @@ async function drainQueue() {
         const prev = roundCache.get(key);
         if (entity !== prev) {
           roundCache.set(key, entity);
-          if (entity !== null) dirtyKeys.add(key);
+          dirtyKeys.add(key);
         }
       }
 
@@ -469,7 +479,7 @@ async function drainQueue() {
     }
 
     // 1. Batch append to JSONL history files (proper append: keepExistingData + seek)
-    const historyDir = await fsStorage.resolveDir('history');
+    const historyDir = await fsStorage.resolveDir('data/logs');
     for (const [dateKey, entries] of entriesByDate) {
       try {
         const fh = await historyDir.getFileHandle(`${dateKey}.jsonl`, { create: true });
@@ -491,29 +501,36 @@ async function drainQueue() {
     // 2. Flush dirty entities from round cache to disk (pure save, no post-processing)
     for (const key of dirtyKeys) {
       const entity = roundCache.get(key);
-      if (entity === null) continue;
+      if (entity === null || entity === undefined) {
+        // GC'd page entity — delete its checkpoint file
+        if (key.startsWith('page:')) {
+          const slug = key.slice(5);
+          await withLock('pages/' + slug + '.json', () => fsStorage.deletePage(slug));
+        }
+        continue;
+      }
 
       if (key.startsWith('page:')) {
         const slug = key.slice(5);
         await withLock('pages/' + slug + '.json', () => fsStorage.savePage(slug, entity));
       } else if (key.startsWith('note:')) {
         const slug = key.slice(5);
-        await withLock('notes/' + slug + '.json', () => fsStorage.saveNote(slug, entity));
-      } else if (key === 'settings') {
-        await withLock('settings.json', () => fsStorage.saveSettings(entity));
+        await withLock('data/notes/' + slug + '.json', () => fsStorage.saveNote(slug, entity));
+      } else if (key === 'manifest:settings') {
+        await withLock('manifest/settings.json', () => fsStorage.saveSettings(entity));
       } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
         const listId = key.slice('list:'.length);
         await withLock('lists/' + listId + '.json', async () => {
           await fsStorage.saveListMeta(listId, entity, entity.timestamp);
         });
-      } else if (key === 'list:system/orphaned') {
-        await withLock('lists/system/orphaned.json', async () => {
-          const fh = await fsStorage.resolveFile('lists/system/orphaned.json', { create: true });
+      } else if (key === 'manifest:orphaned') {
+        await withLock('manifest/orphaned.json', async () => {
+          const fh = await fsStorage.resolveFile('manifest/orphaned.json', { create: true });
           await fsStorage.writeJson(fh, entity);
         });
-      } else if (key === 'list:system/shallow-page') {
-        await withLock('lists/system/shallow-page.json', async () => {
-          const fh = await fsStorage.resolveFile('lists/system/shallow-page.json', { create: true });
+      } else if (key === 'manifest:name-to-id') {
+        await withLock('manifest/list-name-to-id.json', async () => {
+          const fh = await fsStorage.resolveFile('manifest/list-name-to-id.json', { create: true });
           await fsStorage.writeJson(fh, entity);
         });
       } else if (key === 'list:system/root') {

@@ -19,12 +19,12 @@ test.describe('Deletion guardrails', () => {
     const now = Date.now();
     const noteSlug = '260301-guardrail-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`],
       }},
-      { path: `notes/${noteSlug}.json`, data: {
+      { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'To be deleted', note: 'Gone', cssPath: 'p',
         parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
       }},
@@ -55,17 +55,17 @@ test.describe('Deletion guardrails', () => {
     const today = new Date(now).toISOString().slice(0, 10);
     const noteSlug = '260301-ui-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`],
       }},
-      { path: `notes/${noteSlug}.json`, data: {
+      { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Visible note', note: 'Annotation', cssPath: 'p',
         parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
       }},
-      { path: `history/${today}.jsonl`, lines: [
-        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      { path: `data/logs/${today}.jsonl`, lines: [
+        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
     ]);
 
@@ -99,12 +99,13 @@ test.describe('Deletion guardrails', () => {
   test('deleted list entity returns null from readCacheable', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:to-delete'] } },
       { path: 'lists/to-delete.json', data: {
         slug: 'to-delete', name: 'To Delete', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/To Delete': 'to-delete' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -130,14 +131,14 @@ test.describe('Deletion guardrails', () => {
   test('deleted list stays hidden after rehydration', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Disk checkpoint already has deleted: true (written by previous drain)
       { path: 'lists/rehydrate-del.json', data: {
         slug: 'rehydrate-del', name: 'Rehydrate Del', timestamp: now,
         pins: [], savedSearches: [], deleted: true,
       }},
       // Orphaned list tracks it
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: ['list:rehydrate-del'],
       }},
     ]);
@@ -162,7 +163,7 @@ test.describe('Deletion guardrails', () => {
     const pageUrl = 'https://example.com/pinme';
     const pageSlug = getSlugForUrl(pageUrl);
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:doomed'],
       }},
@@ -170,6 +171,7 @@ test.describe('Deletion guardrails', () => {
         slug: 'doomed', name: 'Doomed', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Doomed': 'doomed' } } },
       { path: `pages/${pageSlug}.json`, data: {
         slug: pageSlug, url: pageUrl, title: 'Pin Target', timestamp: now,
         parentIds: [], childIds: [],

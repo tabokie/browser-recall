@@ -15,7 +15,6 @@ function initContentScript() {
 let currentInteractionId = null;
 let maxScrollDepth = 0;
 let startTime = Date.now();
-let lastReportTime = Date.now();
 
 // Track scroll depth
 window.addEventListener('scroll', () => {
@@ -191,7 +190,7 @@ function getSlugForCurrentPage() {
     }
     return `${base}-${Math.abs(hash).toString(36)}`.substring(0, 80);
   } catch (e) {
-    return 'untitled';
+    return null;
   }
 }
 
@@ -292,6 +291,7 @@ function showGlobalNoteOverlay(existingNote, existingNoteSlug, pageSlug) {
         chrome.runtime.sendMessage({
           action: 'createNote',
           pageSlug,
+          url: window.location.href,
           excerpt: null,
           note,
           cssPath: null
@@ -539,6 +539,7 @@ function attachMarkClickHandler(mark) {
     const noteSlug = mark.dataset.noteSlug;
     const text = mark.dataset.highlightText || mark.textContent;
     const pageSlug = getSlugForCurrentPage();
+    if (!pageSlug) return;
 
     if (!noteSlug) {
       showHighlightEditOverlay(mark, text, null, '', pageSlug);
@@ -560,7 +561,7 @@ function attachMarkClickHandler(mark) {
 // Re-apply saved notes on page load
 async function reapplyHighlights() {
   const slug = getSlugForCurrentPage();
-  if (slug === 'untitled') return;
+  if (!slug) return;
 
   try {
     const response = await chrome.runtime.sendMessage({ action: 'loadPageNotes', slug });
@@ -731,8 +732,6 @@ function unwrapHighlightMark(mark) {
 }
 
 // ─── Page Reporting ───────────────────────────────────────────────────
-// Unified report(delta) sends partial updates to background's reportPage handler.
-// Background trims title, diffs against cache, and logs only changes.
 
 function report(delta) {
   const url = window.location.href;
@@ -740,15 +739,14 @@ function report(delta) {
   chrome.runtime.sendMessage({ action: 'reportPage', url, ...delta }).catch(() => {});
 }
 
-function reportAttention() {
-  const now = Date.now();
-  const incrementalTime = now - lastReportTime;
-  lastReportTime = now;
+// Track latest title locally; included in leave_page report.
+let latestTitle = document.title;
 
+function onLeavePage() {
   report({
-    title: document.title,
+    title: latestTitle,
     scrollDepth: Math.round(maxScrollDepth),
-    timeOnPage: incrementalTime,
+    timeOnPage: Date.now() - startTime,
     isLeaving: true,
   });
 }
@@ -764,25 +762,37 @@ const ref = document.referrer;
 if (ref) initialDelta.referrer = ref;
 report(initialDelta);
 
-// Title changes: report immediately
+// Title changes: cache locally so leave_page includes the latest title.
+function observeTitle(el) {
+  new MutationObserver(() => {
+    latestTitle = document.title;
+  }).observe(el, { childList: true, characterData: true, subtree: true });
+}
 const titleEl = document.querySelector('title');
 if (titleEl) {
-  new MutationObserver(() => {
-    report({ title: document.title });
-  }).observe(titleEl, {
-    childList: true, characterData: true, subtree: true
+  observeTitle(titleEl);
+} else if (document.head) {
+  // No <title> yet — watch <head> for its addition.
+  const headObs = new MutationObserver(() => {
+    const added = document.querySelector('title');
+    if (added) {
+      headObs.disconnect();
+      latestTitle = document.title;
+      observeTitle(added);
+    }
   });
+  headObs.observe(document.head, { childList: true });
 }
 
 // Page leave: visibility hidden / freeze
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
-    reportAttention();
+    onLeavePage();
   }
 });
 
 document.addEventListener('freeze', () => {
-  reportAttention();
+  onLeavePage();
 });
 
 // ─── Capture notification bubble ──────────────────────────────────────
@@ -998,6 +1008,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const element = container.nodeType === 3 ? container.parentElement : container;
       const cssPath = getCssPath(element);
       const slug = getSlugForCurrentPage();
+      if (!slug) { sendResponse({ success: false }); return; }
       const timestamp = Date.now();
 
       if (isCrossBlock(range)) {
@@ -1011,6 +1022,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           chrome.runtime.sendMessage({
             action: 'createNote',
             pageSlug: slug,
+            url: window.location.href,
             excerpt: storedText,
             note: '',
             cssPath
@@ -1036,6 +1048,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         chrome.runtime.sendMessage({
           action: 'createNote',
           pageSlug: slug,
+          url: window.location.href,
           excerpt: selectedText,
           note: '',
           cssPath
@@ -1060,6 +1073,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // No selection — open global page note
       console.log('[content] No text selected, opening global note');
       const slug = getSlugForCurrentPage();
+      if (!slug) { sendResponse({ success: false }); return; }
       chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }).then(resp => {
         if (resp?.success === false) { console.warn('[content] loadPageNotes failed:', resp.error); return; }
         const notes = resp?.notes || [];
@@ -1133,6 +1147,6 @@ try {
 
 // Before unload, send final attention report
 window.addEventListener('beforeunload', () => {
-  reportAttention();
+  onLeavePage();
 });
 } // end initContentScript

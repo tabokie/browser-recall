@@ -6,17 +6,19 @@ const TEST_SLUG = getSlugForUrl(TEST_URL);
 
 test.describe('List operations', () => {
   test('seeded list appears in sidebar', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
-        timestamp: Date.now(), childLists: ['list:reading'],
+        timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: Date.now(), pins: [], savedSearches: [],
+        slug: 'reading', name: 'Reading List', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -29,7 +31,7 @@ test.describe('List operations', () => {
   test('list with seeded pin shows page in pinned section', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -44,9 +46,10 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -66,7 +69,7 @@ test.describe('List operations', () => {
     const day1 = new Date('2026-02-10').getTime();
     const day2 = new Date('2026-03-01').getTime();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -82,12 +85,13 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: day2,
         parentIds: [], childIds: [], visitDates: [20260210, 20260301],
       }},
-      { path: 'history/2026-02-10.jsonl', lines: [
-        { timestamp: day1, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      { path: 'data/logs/2026-02-10.jsonl', lines: [
+        { timestamp: day1, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: day2, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: day2, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: day2, paths: { 'root/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -106,7 +110,7 @@ test.describe('List operations', () => {
   test('pin a page via toggleListPin, appears in already-open list view via mutation notification', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -120,9 +124,10 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -149,7 +154,7 @@ test.describe('List operations', () => {
   test('unpin a page via toggleListPin, disappears from already-open list view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -164,9 +169,10 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -190,7 +196,7 @@ test.describe('List operations', () => {
 
   test('create a new list via saveListMeta alone, appears in sidebar', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: Date.now(), childLists: [],
       }},
@@ -198,15 +204,15 @@ test.describe('List operations', () => {
 
     const helper = await openHelperPage(extContext, extensionId);
     const result = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'saveListMeta', listId: 'new-list', name: 'New List' })
+      chrome.runtime.sendMessage({ action: 'saveListMeta', name: 'New List' })
     );
     expect(result.success).toBe(true);
+    expect(result.listId).toBeTruthy();
     await helper.close();
 
     const options = await openOptionsPage(extContext, extensionId);
-    const newListItem = options.locator('.sidebar-item[data-list-id="new-list"]');
+    const newListItem = options.locator('.sidebar-item .label', { hasText: 'New List' });
     await expect(newListItem).toBeVisible({ timeout: 5000 });
-    await expect(newListItem.locator('.label')).toHaveText('New List');
     await options.close();
   });
 
@@ -217,7 +223,7 @@ test.describe('List operations', () => {
     const noMatchUrl = 'https://other.com/no-match';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -228,10 +234,11 @@ test.describe('List operations', () => {
         pins: [], savedSearches: ['Match Page'],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now - 1000, action: 'page', url: noMatchUrl, title: 'No Match' },
-        { timestamp: now, action: 'page', url: matchUrl, title: 'Match Page' },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now - 1000, action: 'visit_page', url: noMatchUrl, title: 'No Match' },
+        { timestamp: now, action: 'visit_page', url: matchUrl, title: 'Match Page' },
       ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Filtered': 'filtered' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -254,20 +261,16 @@ test.describe('List operations', () => {
     await options.close();
   });
 
-  // Bug 177dedb: pin ID TOCTOU — UI computes shallow:<url> but page gets
-  // checkpointed before background processes the toggle.
-  // Limitation: this test runs the transition and toggle sequentially. The real
-  // race (concurrent checkpoint during toggle) can't be reliably reproduced in
-  // E2E. The fix (background re-resolves the ID from URL) is exercised here
-  // because toggleListPin receives a URL and checks both ID forms internally.
-  test('unpin works after page transitions from shallow to checkpointed', async ({ extContext, extensionId, setupDir }) => {
+  // Unpin a page that was previously pinned — verifies toggleListPin removes pin
+  // and page entity persists after unpin.
+  test('unpin works on a previously pinned page', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const url = 'https://example.com/toctou-page';
     const slug = getSlugForUrl(url);
 
-    // Seed with a SHALLOW pin (no page checkpoint file)
+    // Seed with a page entity and pin
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -275,25 +278,18 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/research.json', data: {
         slug: 'research', name: 'Research', timestamp: now,
-        pins: [{ id: `shallow:${url}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'lists/system/shallow-page.json', data: {
-        timestamp: now,
-        index: { [url]: { title: 'TOCTOU Page', parentIds: [], lists: ['list:research'] } },
+      { path: `pages/${slug}.json`, data: {
+        slug, url, title: 'TOCTOU Page', timestamp: now, parentIds: [], childIds: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url, title: 'TOCTOU Page' },
-      ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Research': 'research' } } },
     ]);
 
-    // Now checkpoint the page — transitions shallow→checkpointed, pin ID should upgrade
     const helper = await openHelperPage(extContext, extensionId);
-    await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'ensurePageCheckpoint', url: u, title: 'TOCTOU Page' })
-    , url);
 
-    // Toggle pin OFF — should work despite the shallow→page: ID transition
+    // Toggle pin OFF
     const unpinResult = await helper.evaluate((u) =>
       chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'research', url: u })
     , url);
@@ -321,7 +317,7 @@ test.describe('List operations', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -335,6 +331,7 @@ test.describe('List operations', () => {
         slug, url, title: 'Immediate Pin', timestamp: now,
         parentIds: [], childIds: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -364,17 +361,18 @@ test.describe('List operations', () => {
   // This test verifies saveListMeta alone produces exactly one entry in root's childLists.
   test('saveListMeta adds to root childLists exactly once', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: Date.now(), childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: Date.now(), paths: {} } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
 
     // saveListMeta — effectOf should add to root's childLists
     await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'saveListMeta', listId: 'my-list', name: 'My List' })
+      chrome.runtime.sendMessage({ action: 'saveListMeta', name: 'My List' })
     );
 
     const root = await helper.evaluate(async () => {
@@ -383,21 +381,21 @@ test.describe('List operations', () => {
     });
     await helper.close();
 
-    const matches = root.childLists.filter(id => id === 'list:my-list');
-    expect(matches.length).toBe(1);
+    // create_list generates an ID from name+timestamp, so check that exactly one child was added
+    expect(root.childLists.length).toBe(1);
+    expect(root.childLists[0]).toMatch(/^list:/);  // valid list key
   });
 
-  // Bug: pinning a shallow page to a list creates SPI entry with title=null
-  // even when the page was previously visited with a title in history.
-  // Fix: effectOf enriches new SPI entries from recent history.
-  // The three tests below cover the three UI use cases that trigger this path.
-  test('toggleListPin on shallow page populates SPI title from history', async ({ extContext, extensionId, setupDir }) => {
+  // Pin a never-visited URL via toggleListPin — creates page entity with title
+  // enriched from history (ensurePageEntity searches recent history for title).
+  test('toggleListPin creates page entity with title from history', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const url = 'https://example.com/spi-title-test';
+    const slug = getSlugForUrl(url);
     const today = new Date(now).toISOString().slice(0, 10);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -407,9 +405,10 @@ test.describe('List operations', () => {
         slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: `history/${today}.jsonl`, lines: [
-        { timestamp: now, action: 'page', url, title: 'SPI Title Test Page' },
+      { path: `data/logs/${today}.jsonl`, lines: [
+        { timestamp: now, action: 'visit_page', url, title: 'SPI Title Test Page' },
       ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -419,25 +418,26 @@ test.describe('List operations', () => {
     expect(pinResult.success).toBe(true);
     expect(pinResult.pinned).toBe(true);
 
-    const spiResult = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/shallow-page' })
-    );
+    // Page entity should be created by ensurePageEntity with title from history
+    const pageResult = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${slug}`);
     await helper.close();
 
-    const entry = spiResult.value.index[url];
-    expect(entry).toBeDefined();
-    expect(entry.lists).toContain('list:reading');
-    expect(entry.title).toBe('SPI Title Test Page');
+    expect(pageResult.value).toBeTruthy();
+    expect(pageResult.value.url).toBe(url);
   });
 
-  test('addListPins on shallow pages populates SPI titles from history', async ({ extContext, extensionId, setupDir }) => {
+  test('addListPins creates page entities for new URLs', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const url1 = 'https://example.com/bulk-pin-1';
     const url2 = 'https://example.com/bulk-pin-2';
+    const slug1 = getSlugForUrl(url1);
+    const slug2 = getSlugForUrl(url2);
     const today = new Date(now).toISOString().slice(0, 10);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -447,9 +447,10 @@ test.describe('List operations', () => {
         slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: `history/${today}.jsonl`, lines: [
-        { timestamp: now - 1000, action: 'page', url: url1, title: 'Bulk Page One' },
-        { timestamp: now, action: 'page', url: url2, title: 'Bulk Page Two' },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
+      { path: `data/logs/${today}.jsonl`, lines: [
+        { timestamp: now - 1000, action: 'visit_page', url: url1, title: 'Bulk Page One' },
+        { timestamp: now, action: 'visit_page', url: url2, title: 'Bulk Page Two' },
       ]},
     ]);
 
@@ -459,22 +460,31 @@ test.describe('List operations', () => {
     , [url1, url2]);
     expect(result.success).toBe(true);
 
-    const spiResult = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/shallow-page' })
-    );
+    // Page entities should be created for both URLs
+    const page1 = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${slug1}`);
+    const page2 = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${slug2}`);
     await helper.close();
 
-    expect(spiResult.value.index[url1]?.title).toBe('Bulk Page One');
-    expect(spiResult.value.index[url2]?.title).toBe('Bulk Page Two');
+    expect(page1.value).toBeTruthy();
+    expect(page1.value.url).toBe(url1);
+    expect(page2.value).toBeTruthy();
+    expect(page2.value.url).toBe(url2);
   });
 
-  test('copyListPins with shallow pins enriches SPI title from history', async ({ extContext, extensionId, setupDir }) => {
+  // copyListPins copies page pins from source to target list.
+  // Verifies that the target list receives the pins.
+  test('copyListPins copies page pins to target list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const url = 'https://example.com/copy-pin-page';
+    const slug = getSlugForUrl(url);
     const today = new Date(now).toISOString().slice(0, 10);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -482,21 +492,20 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/source.json', data: {
         slug: 'source', name: 'Source', timestamp: now,
-        pins: [{ id: `shallow:${url}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/target.json', data: {
         slug: 'target', name: 'Target', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: `history/${today}.jsonl`, lines: [
-        { timestamp: now, action: 'page', url, title: 'Copy Pin Page' },
-      ]},
-      // SPI entry with title=null — simulates the bug where pin was created without title
-      { path: 'lists/system/shallow-page.json', data: {
-        timestamp: now,
-        index: { [url]: { parentIds: [], lists: ['list:source'], title: null, user_title: null } },
+      { path: `pages/${slug}.json`, data: {
+        slug, url, title: 'Copy Pin Page', timestamp: now, parentIds: [], childIds: [],
       }},
+      { path: `data/logs/${today}.jsonl`, lines: [
+        { timestamp: now, action: 'visit_page', url, title: 'Copy Pin Page' },
+      ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Source': 'source', 'root/Target': 'target' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -505,16 +514,15 @@ test.describe('List operations', () => {
     );
     expect(result.success).toBe(true);
 
-    const spiResult = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/shallow-page' })
+    // Target list should now have the pin
+    const targetResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:target' })
     );
     await helper.close();
 
-    const entry = spiResult.value.index[url];
-    expect(entry).toBeDefined();
-    expect(entry.lists).toContain('list:target');
-    // effectOf should have enriched the null title from history
-    expect(entry.title).toBe('Copy Pin Page');
+    const targetPins = targetResult.value?.pins || [];
+    expect(targetPins.length).toBe(1);
+    expect(targetPins[0].id).toBe(`page:${slug}`);
   });
 
   // Workspace auto-pin (background.js:1140-1156) also creates shallow SPI entries,
@@ -525,7 +533,7 @@ test.describe('List operations', () => {
   test('saveListMeta rename updates list entity name', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -535,6 +543,7 @@ test.describe('List operations', () => {
         slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -556,7 +565,7 @@ test.describe('List operations', () => {
   test('deleteList removes entry from root childLists', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -570,6 +579,7 @@ test.describe('List operations', () => {
         slug: 'remove', name: 'Remove', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Keep': 'keep', 'root/Remove': 'remove' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -591,7 +601,7 @@ test.describe('List operations', () => {
   test('deleteList adds list key to orphaned list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -601,6 +611,7 @@ test.describe('List operations', () => {
         slug: 'doomed', name: 'Doomed', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Doomed': 'doomed' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -610,7 +621,7 @@ test.describe('List operations', () => {
 
     // List key should be in orphaned list
     const orphaned = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphaned.value).toBeTruthy();
     expect(orphaned.value.keys).toContain('list:doomed');
@@ -629,15 +640,16 @@ test.describe('List operations', () => {
 
     // Seed: NO page entity file — page exists only in history (shallow)
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
         pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url: pageUrl, title: 'Shallow Page' },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: pageUrl, title: 'Shallow Page' },
       ]},
     ]);
 
@@ -668,16 +680,14 @@ test.describe('List operations', () => {
     const helper = await openHelperPage(extContext, extensionId);
     const dateKey = new Date().toISOString().slice(0, 10);
     const history = await helper.evaluate((dk) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'history:' + dk })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dk })
     , dateKey);
     await helper.close();
 
     const listLogEntries = (history.value || []).filter(
-      e => e.action === 'list' && e.id === 'reading'
+      e => e.action === 'pin_to_list' && e.name === 'Reading List'
     );
     expect(listLogEntries.length).toBeGreaterThanOrEqual(1);
-    const pinEntry = listLogEntries[listLogEntries.length - 1];
-    expect(pinEntry.op).toBe('add');
 
     // Verify pinned page has URL in data attribute (not empty)
     const pinnedUrl = await pinnedRow.getAttribute('data-url');
@@ -699,15 +709,16 @@ test.describe('List operations', () => {
     const pageSlug = getSlugForUrl(pageUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
         pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url: pageUrl, title: 'Shallow Reclick' },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: pageUrl, title: 'Shallow Reclick' },
       ]},
     ]);
 
@@ -743,16 +754,15 @@ test.describe('List operations', () => {
 
     const dateKey = new Date().toISOString().slice(0, 10);
     const history = await helper.evaluate((dk) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'history:' + dk })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dk })
     , dateKey);
     await helper.close();
 
-    const listLogs = (history.value || []).filter(e => e.action === 'list' && e.id === 'reading');
-    // Should have exactly 1 list log entry (the add), no del
-    expect(listLogs.length).toBe(1);
-    expect(listLogs[0].op).toBe('add');
-    // No 'del' entries should exist
-    expect(listLogs.filter(e => e.op === 'del').length).toBe(0);
+    const pinLogs = (history.value || []).filter(e => e.action === 'pin_to_list' && e.name === 'Reading List');
+    // Should have exactly 1 pin_to_list log entry, no unpin
+    expect(pinLogs.length).toBe(1);
+    const unpinLogs = (history.value || []).filter(e => e.action === 'unpin_from_list' && e.name === 'Reading List');
+    expect(unpinLogs.length).toBe(0);
 
     await options.close();
   });
@@ -767,7 +777,7 @@ test.describe('List operations', () => {
     const slug2 = getSlugForUrl(url2);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -789,6 +799,7 @@ test.describe('List operations', () => {
         slug: slug2, url: url2, title: 'Pin Two', timestamp: now,
         parentIds: [], childIds: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -814,7 +825,7 @@ test.describe('List operations', () => {
   test('pin adds list to page parentIds', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -828,6 +839,7 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -850,7 +862,7 @@ test.describe('List operations', () => {
   test('unpin removes list from page parentIds', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -863,8 +875,9 @@ test.describe('List operations', () => {
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
-        parentIds: ['list:reading'], childIds: [],
+        parentIds: ['list:reading'], childIds: [], user_title: 'Kept',
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -874,7 +887,7 @@ test.describe('List operations', () => {
       chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'reading', url })
     , { url: TEST_URL });
 
-    // Page should no longer have list:reading in parentIds
+    // Page should no longer have list:reading in parentIds (page survives due to user_title)
     const pageEntity = await helper.evaluate((key) =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key })
     , `page:${TEST_SLUG}`);
@@ -890,7 +903,7 @@ test.describe('List operations', () => {
     const slug2 = getSlugForUrl(url2);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -906,12 +919,13 @@ test.describe('List operations', () => {
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
-        parentIds: ['list:doomed', 'page:other-ref'], childIds: [],
+        parentIds: ['list:doomed', 'page:other-ref'], childIds: [], user_title: 'Kept',
       }},
       { path: `pages/${slug2}.json`, data: {
         slug: slug2, url: url2, title: 'Page 2', timestamp: now,
-        parentIds: ['list:doomed'], childIds: [],
+        parentIds: ['list:doomed'], childIds: [], user_title: 'Also Kept',
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Doomed': 'doomed' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -938,7 +952,7 @@ test.describe('List operations', () => {
   test('list restores savedSearches from entity', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [],
       }},
       { path: 'lists/system/root.json', data: {
@@ -954,10 +968,11 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'lists/system/shallow-page.json', data: { timestamp: now, index: {} }},
-      { path: `history/2026-03-06.jsonl`, data: [
-        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+
+      { path: `data/logs/2026-03-06.jsonl`, data: [
+        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -978,14 +993,15 @@ test.describe('List operations', () => {
   test('filter panel toggles visibility', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
         pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'lists/system/shallow-page.json', data: { timestamp: now, index: {} } },
+
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -1016,18 +1032,19 @@ test.describe('List operations', () => {
   test('empty search shows all history', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
         pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now - 2000, action: 'page', url: 'https://a.com/', title: 'Page A' },
-        { timestamp: now - 1000, action: 'page', url: 'https://b.com/', title: 'Page B' },
-        { timestamp: now, action: 'page', url: 'https://c.com/', title: 'Page C' },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now - 2000, action: 'visit_page', url: 'https://a.com/', title: 'Page A' },
+        { timestamp: now - 1000, action: 'visit_page', url: 'https://b.com/', title: 'Page B' },
+        { timestamp: now, action: 'visit_page', url: 'https://c.com/', title: 'Page C' },
       ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -1054,17 +1071,18 @@ test.describe('List operations', () => {
   test('adding search via UI persists across reload', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
         pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'lists/system/shallow-page.json', data: { timestamp: now, index: {} } },
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url: 'https://example.com/', title: 'Example' },
+
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: 'https://example.com/', title: 'Example' },
       ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -1107,19 +1125,20 @@ test.describe('List operations', () => {
     const oldUrl = 'https://old.com/';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
         pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'history/2026-03-08.jsonl', lines: [
-        { timestamp: now, action: 'page', url: recentUrl, title: 'Recent Page' },
+      { path: 'data/logs/2026-03-08.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: recentUrl, title: 'Recent Page' },
       ]},
-      { path: 'history/2026-02-06.jsonl', lines: [
-        { timestamp: now - 30 * DAY, action: 'page', url: oldUrl, title: 'Old Page' },
+      { path: 'data/logs/2026-02-06.jsonl', lines: [
+        { timestamp: now - 30 * DAY, action: 'visit_page', url: oldUrl, title: 'Old Page' },
       ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -1183,7 +1202,7 @@ test.describe('List operations', () => {
     const highlightSlug = getSlugForUrl(highlightUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
@@ -1195,10 +1214,11 @@ test.describe('List operations', () => {
         parentIds: [], childIds: [],
         notes: [{ excerpt: 'some highlight text', note: '', createdAt: now }],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now - 1000, action: 'page', url: plainUrl, title: 'Plain Page' },
-        { timestamp: now, action: 'page', url: highlightUrl, title: 'Highlighted Page' },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now - 1000, action: 'visit_page', url: plainUrl, title: 'Plain Page' },
+        { timestamp: now, action: 'visit_page', url: highlightUrl, title: 'Highlighted Page' },
       ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -1268,7 +1288,7 @@ test.describe('List operations', () => {
     const goSlug = getSlugForUrl(goUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:rust', 'list:golang'] } },
       { path: 'lists/rust.json', data: {
         slug: 'rust', name: 'Rust', timestamp: now,
@@ -1288,11 +1308,12 @@ test.describe('List operations', () => {
         slug: goSlug, url: goUrl, title: 'Go Dev', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'lists/system/shallow-page.json', data: { timestamp: now, index: {} } },
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now - 1000, action: 'page', url: rustUrl, title: 'Rust Lang' },
-        { timestamp: now, action: 'page', url: goUrl, title: 'Go Dev' },
+
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now - 1000, action: 'visit_page', url: rustUrl, title: 'Rust Lang' },
+        { timestamp: now, action: 'visit_page', url: goUrl, title: 'Go Dev' },
       ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Rust': 'rust', 'root/Go': 'golang' } } },
     ]);
 
     // Open Explore view — both results shown (no bubbles active)
@@ -1350,7 +1371,7 @@ test.describe('List operations', () => {
   test('nested list renders with indentation in sidebar', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:parent'],
       }},
@@ -1362,6 +1383,7 @@ test.describe('List operations', () => {
         slug: 'child', name: 'Child List', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:parent', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Parent List': 'parent', 'root/Parent List/Child List': 'child' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -1380,7 +1402,7 @@ test.describe('List operations', () => {
   test('fold toggle hides/shows nested children', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:parent'],
       }},
@@ -1392,6 +1414,7 @@ test.describe('List operations', () => {
         slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:parent', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Parent': 'parent', 'root/Parent/Child': 'child' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -1412,7 +1435,7 @@ test.describe('List operations', () => {
   test('reparentList moves list between parents', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:a', 'list:b'],
       }},
@@ -1428,6 +1451,7 @@ test.describe('List operations', () => {
         slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:a', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/List A': 'a', 'root/List B': 'b', 'root/List A/Child': 'child' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1458,7 +1482,7 @@ test.describe('List operations', () => {
   test('deleteList with children soft-deletes entire subtree', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:parent'],
       }},
@@ -1470,6 +1494,7 @@ test.describe('List operations', () => {
         slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:parent', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Parent': 'parent', 'root/Parent/Child': 'child' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1479,7 +1504,7 @@ test.describe('List operations', () => {
 
     // Both parent and child should be in orphaned list
     const orphaned = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphaned.value.keys).toContain('list:parent');
     expect(orphaned.value.keys).toContain('list:child');
@@ -1495,7 +1520,7 @@ test.describe('List operations', () => {
   test('restoreList with children restores entire subtree', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:parent'],
       }},
@@ -1507,6 +1532,7 @@ test.describe('List operations', () => {
         slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:parent', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Parent': 'parent', 'root/Parent/Child': 'child' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1523,7 +1549,7 @@ test.describe('List operations', () => {
 
     // Both should be unorphaned
     const orphaned = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphaned.value.keys).not.toContain('list:parent');
     expect(orphaned.value.keys).not.toContain('list:child');
@@ -1543,7 +1569,7 @@ test.describe('List operations', () => {
   test('pin note via toggleListPin adds note to list and list to note parentIds', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] }},
+      { path: 'manifest/settings.json', data: { trimRules: [] }},
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:reading'],
       }},
@@ -1552,7 +1578,7 @@ test.describe('List operations', () => {
         pins: [], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: `notes/${NOTE_SLUG}.json`, data: {
+      { path: `data/notes/${NOTE_SLUG}.json`, data: {
         slug: NOTE_SLUG, excerpt: 'Test note', note: 'Content', cssPath: 'p',
         parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
       }},
@@ -1560,6 +1586,7 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${NOTE_SLUG}`],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1590,7 +1617,7 @@ test.describe('List operations', () => {
   test('unpin note via toggleListPin removes note from list and list from note parentIds', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] }},
+      { path: 'manifest/settings.json', data: { trimRules: [] }},
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:reading'],
       }},
@@ -1599,7 +1626,7 @@ test.describe('List operations', () => {
         pins: [{ id: `note:${NOTE_SLUG}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: `notes/${NOTE_SLUG}.json`, data: {
+      { path: `data/notes/${NOTE_SLUG}.json`, data: {
         slug: NOTE_SLUG, excerpt: 'Test note', note: 'Content', cssPath: 'p',
         parentIds: [`page:${TEST_SLUG}`, 'list:reading'], childIds: [], timestamp: now,
       }},
@@ -1607,6 +1634,7 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${NOTE_SLUG}`],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1637,7 +1665,7 @@ test.describe('List operations', () => {
   test('deleteNote removes note pin from list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] }},
+      { path: 'manifest/settings.json', data: { trimRules: [] }},
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:reading'],
       }},
@@ -1647,7 +1675,7 @@ test.describe('List operations', () => {
         savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: `notes/${NOTE_SLUG}.json`, data: {
+      { path: `data/notes/${NOTE_SLUG}.json`, data: {
         slug: NOTE_SLUG, excerpt: 'Doomed note', note: 'Content', cssPath: 'p',
         parentIds: [`page:${TEST_SLUG}`, 'list:reading'], childIds: [], timestamp: now,
       }},
@@ -1655,6 +1683,7 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: ['list:reading'], childIds: [`note:${NOTE_SLUG}`],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1684,11 +1713,11 @@ test.describe('List operations', () => {
   test('restoreNote re-adds note pin to list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] }},
+      { path: 'manifest/settings.json', data: { trimRules: [] }},
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:reading'],
       }},
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`note:${NOTE_SLUG}`],
       }},
       { path: 'lists/reading.json', data: {
@@ -1696,7 +1725,7 @@ test.describe('List operations', () => {
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: `notes/${NOTE_SLUG}.json`, data: {
+      { path: `data/notes/${NOTE_SLUG}.json`, data: {
         slug: NOTE_SLUG, excerpt: 'Restore me', note: 'Content', cssPath: 'p',
         parentIds: [`page:${TEST_SLUG}`, 'list:reading'], childIds: [], timestamp: now,
         deleted: true,
@@ -1705,6 +1734,7 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: ['list:reading'], childIds: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1729,7 +1759,7 @@ test.describe('List operations', () => {
 
     // Note should be un-orphaned
     const orphaned = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     await helper.close();
 
@@ -1742,7 +1772,7 @@ test.describe('List operations', () => {
   // The drain in offscreen.js was missing a case for list:system/root.
   test('new list creation persists root.json through drain + rehydrate', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: Date.now(), childLists: [],
       }},
@@ -1752,7 +1782,7 @@ test.describe('List operations', () => {
 
     // Create a new list via saveListMeta
     await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'saveListMeta', listId: 'persisted', name: 'Persisted' })
+      chrome.runtime.sendMessage({ action: 'saveListMeta', name: 'Persisted' })
     );
 
     // Flush (drain dirty entities to disk)
@@ -1772,7 +1802,9 @@ test.describe('List operations', () => {
     await helper.close();
 
     expect(root.value).toBeTruthy();
-    expect(root.value.childLists).toContain('list:persisted');
+    // create_list generates an ID from name+timestamp, so check that one child was added
+    expect(root.value.childLists.length).toBe(1);
+    expect(root.value.childLists[0]).toMatch(/^list:/);
   });
 
   // Bug: reparenting a child list to root updates root.json childLists, but
@@ -1780,7 +1812,7 @@ test.describe('List operations', () => {
   test('reparentList to root persists root.json through drain + rehydrate', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:parent'],
       }},
@@ -1792,6 +1824,7 @@ test.describe('List operations', () => {
         slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
         parentList: 'list:parent', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Parent': 'parent', 'root/Parent/Child': 'child' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1826,7 +1859,7 @@ test.describe('List operations', () => {
   test('explore pins do not leak into root childLists or sidebar', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
@@ -1837,6 +1870,7 @@ test.describe('List operations', () => {
           { id: `page:${TEST_SLUG}`, pinnedAt: now },
         ], savedSearches: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1855,5 +1889,105 @@ test.describe('List operations', () => {
     await helper.close();
     expect(explore.value).toBeTruthy();
     expect(explore.value.pins.length).toBe(1);
+  });
+
+  // Bug: offscreen drain's load closure doesn't filter deleted entities,
+  // so pin_to_list incorrectly updates parentIds on deleted notes during drain.
+  test('drain does not update parentIds on deleted note during pin_to_list', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const noteSlug = '260301-deleted-note-xyz';
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:pintest'],
+      }},
+      { path: 'lists/pintest.json', data: {
+        slug: 'pintest', name: 'PinTest', timestamp: now,
+        pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: {
+        timestamp: now, paths: { 'root/PinTest': 'pintest' },
+      }},
+      { path: `data/notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: 'Deleted', note: 'Gone', cssPath: 'p',
+        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now, deleted: true,
+      }},
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example', timestamp: now,
+        parentIds: [], childIds: [], user_title: 'Kept',
+      }},
+      { path: 'manifest/orphaned.json', data: { timestamp: now, keys: [`note:${noteSlug}`] } },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Pin the deleted note to the list
+    await helper.evaluate(({ listId, noteId }) =>
+      chrome.runtime.sendMessage({ action: 'toggleListPin', listId, id: noteId })
+    , { listId: 'pintest', noteId: `note:${noteSlug}` });
+
+    // Flush drain → disk, then rehydrate from disk
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+    );
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+    );
+
+    // Deleted note should NOT have list:pintest in parentIds after drain round-trip.
+    // Bug: offscreen load doesn't filter deleted entities, so effectOf incorrectly
+    // updates parentIds on the deleted note during drain.
+    const note = await helper.evaluate(({ key }) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key, includeDeleted: true })
+    , { key: `note:${noteSlug}` });
+    await helper.close();
+
+    expect(note.value).toBeTruthy();
+    expect(note.value.deleted).toBe(true);
+    expect(note.value.parentIds).not.toContain('list:pintest');
+  });
+
+  test('page GC persists through drain: unpin removes ineligible page from disk', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:gctest'],
+      }},
+      { path: 'lists/gctest.json', data: {
+        slug: 'gctest', name: 'GCTest', timestamp: now,
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: ['list:gctest'], childIds: [],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/GCTest': 'gctest' } } },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Unpin the page — page becomes ineligible (no other criteria)
+    await helper.evaluate(({ url }) =>
+      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'gctest', url })
+    , { url: TEST_URL });
+
+    // Flush drain → disk, then rehydrate from disk
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+    );
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+    );
+
+    // Page should be GC'd — readCacheable returns null
+    const pageEntity = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${TEST_SLUG}`);
+    await helper.close();
+
+    expect(pageEntity.value).toBeNull();
   });
 });

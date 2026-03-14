@@ -89,7 +89,7 @@ vi.mock('../extension/utils.js', () => ({
       let hash = 0;
       for (let i = 0; i < url.length; i++) hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0;
       return `${base}-${Math.abs(hash).toString(36)}`.substring(0, 80);
-    } catch { return 'untitled'; }
+    } catch { throw new Error('generateSlugFromUrl: invalid URL'); }
   },
 }));
 
@@ -144,7 +144,7 @@ function pinFromUrl(url, pinnedAt) {
 async function hydrateCache(fsStorage, chromeStorage) {
   const settings = await fsStorage.loadSettings();
   const cacheUpdate = {};
-  if (Object.keys(settings).length > 0) cacheUpdate.settings = settings;
+  if (Object.keys(settings).length > 0) cacheUpdate['manifest:settings'] = settings;
 
   // Load lists from self-describing files
   const lists = await fsStorage.loadAllListMetadata();
@@ -278,10 +278,10 @@ describe('Persistence round-trip', () => {
       await hydrateCache(fs, chromeStorage);
 
       const cached = await chromeStorage.get([
-        'settings', 'lists',
+        'manifest:settings', 'lists',
       ]);
 
-      expect(cached.settings).toEqual(initialSettings);
+      expect(cached['manifest:settings']).toEqual(initialSettings);
       expect(cached.lists).toEqual(listMeta);
     });
 

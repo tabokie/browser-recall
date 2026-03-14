@@ -7,30 +7,31 @@ const REFERRER_CAP = 50;
 
 const PAGE_PREFIX = 'page:';
 const NOTE_PREFIX = 'note:';
-const SNAP_PREFIX = 'snap:';
-const SHALLOW_PREFIX = 'shallow:';
+const SNAPSHOT_PREFIX = 'snapshot:';
 
 /**
  * Return the set of page keys that an entry affects.
- * A visit entry with a referrerId affects both its own key (child-side: parentIds, visitDates)
- * and the referrer's key (parent-side: childIds accumulation).
- * All other entry types affect only the entry's own key.
+ * Used by hydration to pre-load page entities referenced by logBuffer entries.
  */
 export function getAffectedKeys(entry) {
   const keys = new Set();
-  const entrySlug = entry.slug || (entry.url ? generateSlugFromUrl(entry.url) : null);
-  if (entrySlug) keys.add(PAGE_PREFIX + entrySlug);
-
-  // Page entries with referrerId also affect the parent page
-  if (entry.action === 'page' && entry.referrerId) {
-    const parentKey = entry.referrerId; // already page:slug format
-    if (parentKey !== PAGE_PREFIX + entrySlug) keys.add(parentKey);
+  const url = entry.url;
+  if (url) {
+    keys.add(PAGE_PREFIX + generateSlugFromUrl(url));
   }
 
-  // Snap/del_snap/restore_snap affect parent pages
-  if ((entry.action === 'snap' || entry.action === 'del_snap' || entry.action === 'restore_snap') && entry.parentIds) {
-    for (const parentKey of entry.parentIds) keys.add(parentKey);
+  // visit_page with referrerUrl also affects the parent page
+  if (entry.action === 'visit_page' && entry.referrerUrl) {
+    const parentKey = PAGE_PREFIX + generateSlugFromUrl(entry.referrerUrl);
+    const childKey = url ? PAGE_PREFIX + generateSlugFromUrl(url) : null;
+    if (parentKey !== childKey) keys.add(parentKey);
   }
+
+  // create_snapshot/delete_snapshot/restore_snapshot: url IS the parent page
+  // (already added above via entry.url)
+
+  // create_note/delete_note/restore_note: url IS the parent page
+  // (already added above via entry.url)
 
   return keys;
 }
@@ -52,10 +53,10 @@ export function defaultEntity(key) {
     const slug = key.slice(NOTE_PREFIX.length);
     return { slug, timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
   }
-  if (key === 'settings') return { timestamp: 0 };
-  if (key === 'list:system/shallow-page') return { timestamp: 0, index: {} };
-  if (key === 'list:system/orphaned') return { timestamp: 0, keys: [] };
+  if (key === 'manifest:settings') return { timestamp: 0 };
+  if (key === 'manifest:orphaned') return { timestamp: 0, keys: [] };
   if (key === 'list:system/root') return { timestamp: 0, childLists: [] };
+  if (key === 'manifest:name-to-id') return { timestamp: 0, paths: {} };
   if (key.startsWith('list:')) {
     const slug = key.slice('list:'.length);
     return { timestamp: 0, slug, name: '', savedSearches: [], pins: [], parentList: null, childLists: [] };
@@ -68,11 +69,19 @@ async function loadOrDefault(key, load, opts) {
   return (await load(key, opts)) ?? defaultEntity(key);
 }
 
-/** Load a page entity; only page_checkpoint can create from null. */
-async function loadPage(key, load, canCreate) {
-  const entity = await load(key);
-  if (entity) return entity;
-  return canCreate ? defaultEntity(key) : null;
+/**
+ * A page entity is eligible for retention if ANY of:
+ * - parentIds contains at least one list: key (pinned to a user list)
+ * - childIds contains at least one note: or snapshot: key
+ * - user_title is set and truthy
+ * - likes is set and non-zero
+ */
+export function isPageEligible(entity) {
+  if (entity.parentIds?.some(id => id.startsWith('list:'))) return true;
+  if (entity.childIds?.some(id => id.startsWith('note:') || id.startsWith('snapshot:'))) return true;
+  if (entity.user_title) return true;
+  if (entity.likes) return true;
+  return false;
 }
 
 /**
@@ -90,7 +99,7 @@ export async function effectOf(entry, load) {
   async function linkChild(childKey, parentIds) {
     if (!parentIds) return;
     for (const parentKey of parentIds) {
-      const parent = await load(parentKey);
+      const parent = result[parentKey] !== undefined ? result[parentKey] : await load(parentKey);
       if (!parent) { result[parentKey] = null; continue; }
       const childIds = [...(parent.childIds || [])];
       if (!childIds.includes(childKey)) childIds.push(childKey);
@@ -101,7 +110,7 @@ export async function effectOf(entry, load) {
   async function unlinkChild(childKey, parentIds) {
     if (!parentIds) return;
     for (const parentKey of parentIds) {
-      const parent = await load(parentKey);
+      const parent = result[parentKey] !== undefined ? result[parentKey] : await load(parentKey);
       if (!parent) { result[parentKey] = null; continue; }
       const childIds = (parent.childIds || []).filter(c => c !== childKey);
       result[parentKey] = { ...parent, childIds };
@@ -109,217 +118,224 @@ export async function effectOf(entry, load) {
   }
 
   async function orphan(childKey, ts) {
-    const orphaned = result['list:system/orphaned'] || await loadOrDefault('list:system/orphaned', load);
+    const orphaned = result['manifest:orphaned'] || await loadOrDefault('manifest:orphaned', load);
     const keys = [...(orphaned.keys || [])];
     if (!keys.includes(childKey)) keys.push(childKey);
-    result['list:system/orphaned'] = { ...orphaned, timestamp: ts, keys };
+    result['manifest:orphaned'] = { ...orphaned, timestamp: ts, keys };
   }
 
   async function unorphan(childKey, ts) {
-    const orphaned = result['list:system/orphaned'] || await loadOrDefault('list:system/orphaned', load);
+    const orphaned = result['manifest:orphaned'] || await loadOrDefault('manifest:orphaned', load);
     const keys = (orphaned.keys || []).filter(k => k !== childKey);
-    result['list:system/orphaned'] = { ...orphaned, timestamp: ts, keys };
+    result['manifest:orphaned'] = { ...orphaned, timestamp: ts, keys };
   }
 
-  // --- settings ---
-  if (entry.action === 'set') {
-    const settings = await loadOrDefault('settings', load);
-    result['settings'] = applyLogToSettings(settings, entry);
+  /**
+   * Resolve a list from parents array + name to its internal list key via manifest:name-to-id.
+   * System/auto lists use their name directly as the ID.
+   * Returns null if user list not found in name-to-id.
+   */
+  async function resolveListKey(parents, name) {
+    if (!name) return null;
+    // System and auto lists: name IS the ID
+    if (name.startsWith('system/') || name.startsWith('auto/')) {
+      return `list:${name}`;
+    }
+    // User lists: resolve via manifest:name-to-id
+    const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
+    const path = parents.length === 0 ? `root/${name}` : `${parents.join('/')}/${name}`;
+    const id = nameToId.paths?.[path];
+    return id ? `list:${id}` : null;
+  }
+
+  /**
+   * Ensure a page entity exists for the given URL. Creates one if missing.
+   * Used by explicit user actions (pin, rate, snapshot, note, rename) that
+   * require an entity to exist.
+   */
+  async function ensurePageEntity(url, ts) {
+    const slug = generateSlugFromUrl(url);
+    const pageKey = PAGE_PREFIX + slug;
+    let page = result[pageKey] !== undefined ? result[pageKey] : await load(pageKey);
+    if (!page) {
+      page = { ...defaultEntity(pageKey), url };
+    }
+    result[pageKey] = page;
+    return { pageKey, page };
+  }
+
+  // --- update_setting ---
+  if (entry.action === 'update_setting') {
+    const settings = await loadOrDefault('manifest:settings', load);
+    result['manifest:settings'] = { ...settings, [entry.key]: entry.value, timestamp: entry.timestamp };
     return result;
   }
 
-  // --- list / list_meta / reparent_list / del_list ---
-  if (entry.action === 'list' || entry.action === 'list_meta' || entry.action === 'reparent_list' || entry.action === 'del_list') {
-    const listKey = `list:${entry.id}`;
+  // --- visit_page ---
+  // Enriches existing page entities only. Passive visits do NOT create entities.
+  if (entry.action === 'visit_page') {
+    const slug = generateSlugFromUrl(entry.url);
+    const pageKey = PAGE_PREFIX + slug;
+    const page = await load(pageKey);
 
-    // Guard: reject list/list_meta/reparent_list actions on orphaned (deleted) lists
-    if (entry.action !== 'del_list' && !listKey.startsWith('list:system/')) {
-      const orphaned = await loadOrDefault('list:system/orphaned', load);
-      if ((orphaned.keys || []).includes(listKey)) {
-        return result;
+    if (page) {
+      const updated = { ...page, timestamp: entry.timestamp };
+      if (entry.url) updated.url = entry.url;
+      if (entry.title) updated.title = entry.title;
+
+      // visitDates
+      const d = new Date(entry.timestamp);
+      const yyyymmdd = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+      const visitDates = [...(updated.visitDates || [])];
+      if (!visitDates.includes(yyyymmdd)) visitDates.push(yyyymmdd);
+      updated.visitDates = visitDates;
+
+      // referrerUrl → parentIds
+      if (entry.referrerUrl) {
+        const referrerKey = PAGE_PREFIX + generateSlugFromUrl(entry.referrerUrl);
+        const parentIds = [...(updated.parentIds || [])];
+        if (!parentIds.includes(referrerKey)) {
+          parentIds.push(referrerKey);
+          if (parentIds.length > REFERRER_CAP) parentIds.shift();
+        }
+        updated.parentIds = parentIds;
       }
+
+      result[pageKey] = updated;
     }
 
-    const entity = await loadOrDefault(listKey, load,
-      entry.action === 'del_list' ? { includeDeleted: true } : undefined);
-    // Noop if already deleted
-    if (entry.action === 'del_list' && entity.deleted) return result;
-    result[listKey] = applyLogToPins(entity, entry);
-
-    // List entries with shallow: ids also update the shallow-page index
-    if (entry.action === 'list' && entry.ids?.some(id => id.startsWith(SHALLOW_PREFIX))) {
-      const spi = await loadOrDefault('list:system/shallow-page', load);
-      let updatedSpi = applyLogToShallowPage(spi, entry);
-
-      // Enrich newly-created SPI entries that have title=null from history
-      if (entry.op === 'add') {
-        const shallowUrls = entry.ids
-          .filter(id => id.startsWith(SHALLOW_PREFIX))
-          .map(id => id.slice(SHALLOW_PREFIX.length));
-        const needTitle = shallowUrls.filter(url => updatedSpi.index[url] && !updatedSpi.index[url].title);
-        if (needTitle.length > 0) {
-          const dateStr = new Date(entry.timestamp).toISOString().slice(0, 10);
-          const todayEntries = (await load('history:' + dateStr)) || [];
-          let sources = todayEntries;
-          // Also check yesterday (visit may have been logged the day before)
-          let remaining = needTitle.filter(url => !sources.find(e => e.url === url && e.title));
-          if (remaining.length > 0) {
-            const yest = new Date(entry.timestamp);
-            yest.setDate(yest.getDate() - 1);
-            const yestEntries = (await load('history:' + yest.toISOString().slice(0, 10))) || [];
-            sources = [...sources, ...yestEntries];
-          }
-          let changed = false;
-          const index = { ...updatedSpi.index };
-          for (const url of needTitle) {
-            const match = sources.find(e => e.url === url && e.title);
-            if (match) {
-              index[url] = { ...index[url], title: match.title };
-              changed = true;
+    // Parent-side: accumulate child ref on referrer page
+    if (entry.referrerUrl) {
+      const referrerSlug = generateSlugFromUrl(entry.referrerUrl);
+      const referrerKey = PAGE_PREFIX + referrerSlug;
+      if (referrerKey !== pageKey) {
+        const parent = result[referrerKey] !== undefined ? result[referrerKey] : await load(referrerKey);
+        if (parent) {
+          // Skip parent-side update for gateway roots (too many children)
+          const gwPins = (await loadOrDefault('list:auto/gateways', load)).pins || [];
+          if (!isGatewayOriginFromPins(parent.url || entry.referrerUrl, gwPins)) {
+            const childIds = [...(parent.childIds || [])];
+            const childRef = PAGE_PREFIX + slug;
+            if (!childIds.includes(childRef)) {
+              childIds.push(childRef);
+              if (childIds.length > REFERRER_CAP) childIds.shift();
             }
-          }
-          if (changed) updatedSpi = { ...updatedSpi, index };
-        }
-      }
-
-      result['list:system/shallow-page'] = updatedSpi;
-    }
-
-    // list_meta → sync root/parent for new lists
-    if (entry.action === 'list_meta' && !listKey.startsWith('list:system/')) {
-      const entity = result[listKey]; // already updated by applyLogToPins above
-
-      // NEW LIST: if entity has no parentList yet → add to root's childLists, set parentList
-      if (!entity.parentList) {
-        const root = result['list:system/root'] || await loadOrDefault('list:system/root', load);
-        if (!(root.childLists || []).includes(listKey)) {
-          result['list:system/root'] = { ...root, timestamp: entry.timestamp, childLists: [...(root.childLists || []), listKey] };
-        }
-        entity.parentList = 'list:system/root';
-        result[listKey] = entity;
-      }
-    }
-
-    // reparent_list → move list between parents (drag-and-drop)
-    if (entry.action === 'reparent_list' && !listKey.startsWith('list:system/') && !listKey.startsWith('list:auto/')) {
-      const entity = result[listKey];
-      const fromKey = 'list:' + entry.from;
-      const toKey = 'list:' + entry.to;
-      // Remove from source parent's childLists
-      const fromEntity = result[fromKey] || await loadOrDefault(fromKey, load);
-      fromEntity.childLists = (fromEntity.childLists || []).filter(k => k !== listKey);
-      result[fromKey] = { ...fromEntity, timestamp: entry.timestamp };
-      // Add to destination parent's childLists at index
-      const toEntity = (toKey === fromKey) ? result[fromKey] : (result[toKey] || await loadOrDefault(toKey, load));
-      const cl = [...(toEntity.childLists || [])].filter(k => k !== listKey);
-      cl.splice(entry.index, 0, listKey);
-      result[toKey] = { ...toEntity, timestamp: entry.timestamp, childLists: cl };
-      // Update child's parentList
-      entity.parentList = toKey;
-      result[listKey] = entity;
-    }
-
-    // del_list → remove from parent's childLists + soft-delete subtree descendants
-    if (entry.action === 'del_list' && !listKey.startsWith('list:system/') && !listKey.startsWith('list:auto/')) {
-      const deletedEntity = result[listKey]; // already set by applyLogToPins with full shape
-      // 1. Remove from parent's childLists (parentList is on entity)
-      const parentKey = deletedEntity.parentList || 'list:system/root';
-      const parent = result[parentKey] || await loadOrDefault(parentKey, load);
-      result[parentKey] = { ...parent, timestamp: entry.timestamp, childLists: (parent.childLists || []).filter(k => k !== listKey) };
-      // 2. Soft-delete all descendants (subtreeKeys provided by handler)
-      for (const childKey of (entry.subtreeKeys || [])) {
-        const child = result[childKey] || await loadOrDefault(childKey, load);
-        result[childKey] = { ...child, timestamp: entry.timestamp, deleted: true };
-        await orphan(childKey, entry.timestamp);
-      }
-    }
-
-    // list pin/unpin → update page parentIds with list:<id>
-    if (entry.action === 'list' && entry.ids && !listKey.startsWith('list:system/')) {
-      const pageIds = entry.ids.filter(id => id.startsWith(PAGE_PREFIX));
-      for (const pageKey of pageIds) {
-        const page = await load(pageKey);
-        if (!page) continue;
-        const parentIds = [...(page.parentIds || [])];
-        if (entry.op === 'add') {
-          if (!parentIds.includes(listKey)) parentIds.push(listKey);
-        } else if (entry.op === 'del') {
-          const idx = parentIds.indexOf(listKey);
-          if (idx >= 0) parentIds.splice(idx, 1);
-        }
-        result[pageKey] = { ...page, parentIds };
-      }
-
-      // note: pins — update note entity parentIds with list:<id>
-      const noteIds = entry.ids.filter(id => id.startsWith(NOTE_PREFIX));
-      for (const noteKey of noteIds) {
-        const note = await load(noteKey);
-        if (!note) continue;
-        const parentIds = [...(note.parentIds || [])];
-        if (entry.op === 'add') {
-          if (!parentIds.includes(listKey)) parentIds.push(listKey);
-        } else if (entry.op === 'del') {
-          const idx = parentIds.indexOf(listKey);
-          if (idx >= 0) parentIds.splice(idx, 1);
-        }
-        result[noteKey] = { ...note, parentIds };
-      }
-    }
-
-    // del_list → remove list:<id> from all pinned page parentIds + clean SPI + orphan
-    if (entry.action === 'del_list' && !listKey.startsWith('list:system/') && !listKey.startsWith('list:auto/')) {
-      const pins = entity.pins || [];
-      const shallowUrls = [];
-      for (const pin of pins) {
-        if (pin.id.startsWith(PAGE_PREFIX)) {
-          const page = await load(pin.id);
-          if (!page) continue;
-          const parentIds = (page.parentIds || []).filter(p => p !== listKey);
-          result[pin.id] = { ...page, parentIds };
-        } else if (pin.id.startsWith(SHALLOW_PREFIX)) {
-          shallowUrls.push(pin.id.slice(SHALLOW_PREFIX.length));
-        } else if (pin.id.startsWith(NOTE_PREFIX)) {
-          const note = await load(pin.id);
-          if (!note) continue;
-          const parentIds = (note.parentIds || []).filter(p => p !== listKey);
-          result[pin.id] = { ...note, parentIds };
-        }
-      }
-      // Remove list from SPI lists for shallow pins
-      if (shallowUrls.length > 0) {
-        const spi = result['list:system/shallow-page'] || await loadOrDefault('list:system/shallow-page', load);
-        const index = { ...spi.index };
-        for (const url of shallowUrls) {
-          if (index[url]) {
-            index[url] = { ...index[url], lists: (index[url].lists || []).filter(l => l !== listKey) };
+            result[referrerKey] = { ...parent, childIds, timestamp: Math.max(parent.timestamp || 0, entry.timestamp) };
           }
         }
-        result['list:system/shallow-page'] = { ...spi, timestamp: entry.timestamp, index };
       }
-      await orphan(listKey, entry.timestamp);
     }
 
     return result;
   }
 
-  // --- note: wire note as child of parent pages (content is on disk, not in log) ---
-  if (entry.action === 'note') {
-    const noteKey = `${NOTE_PREFIX}${entry.slug}`;
-    await linkChild(noteKey, entry.parentIds);
+  // --- leave_page ---
+  // Updates attention data on existing page entities only. Does NOT create entities.
+  if (entry.action === 'leave_page') {
+    const slug = generateSlugFromUrl(entry.url);
+    const pageKey = PAGE_PREFIX + slug;
+    const page = await load(pageKey);
+
+    if (page) {
+      const prevTimestamp = page.timestamp || 0;
+      const updated = { ...page, timestamp: entry.timestamp };
+
+      // Title: latest auto-detected from MutationObserver, folded into leave report
+      if (entry.title) updated.title = entry.title;
+
+      // Attention (guard with prevTimestamp for idempotency)
+      if (entry.timestamp > prevTimestamp) {
+        if (entry.scrollDepth !== undefined) {
+          updated.scrollDepth = Math.max(updated.scrollDepth || 0, entry.scrollDepth);
+        }
+        if (entry.timeOnPage !== undefined) {
+          updated.timeOnPage = (updated.timeOnPage || 0) + entry.timeOnPage;
+        }
+      }
+
+      result[pageKey] = updated;
+    }
+
     return result;
   }
 
-  // --- del_note: unlink from pages, remove list pins, set deleted, orphan ---
-  if (entry.action === 'del_note') {
-    const noteKey = `${NOTE_PREFIX}${entry.slug}`;
+  // --- rename_page ---
+  // User-initiated title rename. Creates entity if missing (explicit user action).
+  if (entry.action === 'rename_page') {
+    const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp);
+    const page = result[pageKey];
+    result[pageKey] = { ...page, user_title: entry.user_title, timestamp: entry.timestamp };
+    return result;
+  }
+
+  // --- rate_page ---
+  // Like/dislike. Creates entity if missing (explicit user action).
+  if (entry.action === 'rate_page') {
+    const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp);
+    const page = result[pageKey];
+    const prevTimestamp = page.timestamp || 0;
+    const updated = { ...page, timestamp: entry.timestamp };
+
+    if (entry.timestamp > prevTimestamp && entry.likes !== undefined) {
+      updated.likes = (updated.likes || 0) + entry.likes;
+    }
+
+    result[pageKey] = updated;
+    return result;
+  }
+
+  // --- create_snapshot ---
+  // Merged page+snapshot: captures snapshot and links to parent page.
+  // Creates entity if missing (explicit user action).
+  // entry.path is the stem: "snapshots/<slug>-<ts>"
+  if (entry.action === 'create_snapshot') {
+    const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp);
+    const page = result[pageKey];
+    const updated = { ...page, timestamp: entry.timestamp };
+
+    // Snapshot key derived from path: "snapshots/<slug>-<ts>" → "snapshot:<slug>-<ts>"
+    const snapKey = `${SNAPSHOT_PREFIX}${entry.path.slice('snapshots/'.length)}`;
+    const childIds = [...(updated.childIds || [])];
+    if (!childIds.includes(snapKey)) childIds.push(snapKey);
+    updated.childIds = childIds;
+
+    result[pageKey] = updated;
+    return result;
+  }
+
+  // --- create_note ---
+  // Creates note entity link to parent page. Creates page entity if missing.
+  // entry.path: "notes/<slug>.json"
+  if (entry.action === 'create_note') {
+    const slug = generateSlugFromUrl(entry.url);
+    const pageKey = PAGE_PREFIX + slug;
+    await ensurePageEntity(entry.url, entry.timestamp);
+
+    // Derive note slug from path: "notes/<slug>.json" → "<slug>"
+    const noteSlug = entry.path.slice('notes/'.length, -'.json'.length);
+    const noteKey = `${NOTE_PREFIX}${noteSlug}`;
+    await linkChild(noteKey, [pageKey]);
+    return result;
+  }
+
+  // --- delete_note ---
+  if (entry.action === 'delete_note') {
+    const noteSlug = entry.path.slice('notes/'.length, -'.json'.length);
+    const noteKey = `${NOTE_PREFIX}${noteSlug}`;
     // Load with includeDeleted; noop if already deleted
     const note = await loadOrDefault(noteKey, load, { includeDeleted: true });
     if (note.deleted) return result;
+
     // Unlink from parent pages
-    const pageParents = (entry.parentIds || []).filter(p => p.startsWith(PAGE_PREFIX));
+    const pageParents = (note.parentIds || []).filter(p => p.startsWith(PAGE_PREFIX));
     await unlinkChild(noteKey, pageParents);
+    // GC parent pages that became ineligible
+    for (const pk of pageParents) {
+      const p = result[pk];
+      if (p && !isPageEligible(p)) result[pk] = null;
+    }
     // Remove note pin from lists
-    const listParents = (entry.parentIds || []).filter(p => p.startsWith('list:') && !p.startsWith('list:system/'));
+    const listParents = (note.parentIds || []).filter(p => p.startsWith('list:') && !p.startsWith('list:system/'));
     for (const lk of listParents) {
       const list = await load(lk);
       if (!list) continue;
@@ -331,15 +347,18 @@ export async function effectOf(entry, load) {
     return result;
   }
 
-  // --- restore_note: re-link to pages, re-add list pins, clear deleted, unorphan ---
+  // --- restore_note ---
   if (entry.action === 'restore_note') {
-    const noteKey = `${NOTE_PREFIX}${entry.slug}`;
+    const noteSlug = entry.path.slice('notes/'.length, -'.json'.length);
+    const noteKey = `${NOTE_PREFIX}${noteSlug}`;
+    // Load with includeDeleted to preserve original entity fields
+    const note = await loadOrDefault(noteKey, load, { includeDeleted: true });
+
     // Re-link to parent pages
-    const pageParents = (entry.parentIds || []).filter(p => p.startsWith(PAGE_PREFIX));
+    const pageParents = (note.parentIds || []).filter(p => p.startsWith(PAGE_PREFIX));
     await linkChild(noteKey, pageParents);
     // Re-add note to lists
-    // TODO: preserve original pinnedAt — currently uses entry.timestamp
-    const listParents = (entry.parentIds || []).filter(p => p.startsWith('list:') && !p.startsWith('list:system/'));
+    const listParents = (note.parentIds || []).filter(p => p.startsWith('list:') && !p.startsWith('list:system/'));
     for (const lk of listParents) {
       const list = await load(lk);
       if (!list) continue;
@@ -349,65 +368,437 @@ export async function effectOf(entry, load) {
       }
       result[lk] = { ...list, pins };
     }
-    // Clear deleted flag — load with includeDeleted to preserve original entity fields
-    const note = await loadOrDefault(noteKey, load, { includeDeleted: true });
+    // Clear deleted flag
     result[noteKey] = { ...note, deleted: false, timestamp: entry.timestamp };
     await unorphan(noteKey, entry.timestamp);
     return result;
   }
 
-  // --- snap: wire snapshot as child of parent page (content is on disk, not in log) ---
-  if (entry.action === 'snap') {
-    const snapKey = `${SNAP_PREFIX}${entry.slug}`;
-    await linkChild(snapKey, entry.parentIds);
-    return result;
-  }
-
-  // --- del_snap: unlink snapshot from parents + add to orphaned list ---
-  if (entry.action === 'del_snap') {
-    const snapKey = `${SNAP_PREFIX}${entry.slug}`;
-    await unlinkChild(snapKey, entry.parentIds);
+  // --- delete_snapshot ---
+  // entry.path: "snapshots/<slug>-<ts>"
+  if (entry.action === 'delete_snapshot') {
+    const snapStem = entry.path.slice('snapshots/'.length);
+    const snapKey = `${SNAPSHOT_PREFIX}${snapStem}`;
+    const slug = generateSlugFromUrl(entry.url);
+    const pageKey = PAGE_PREFIX + slug;
+    await unlinkChild(snapKey, [pageKey]);
+    // GC parent page if it became ineligible
+    const snapPage = result[pageKey];
+    if (snapPage && !isPageEligible(snapPage)) result[pageKey] = null;
     await orphan(snapKey, entry.timestamp);
     return result;
   }
 
-  // --- restore_snap: re-link snapshot to parents + remove from orphaned list ---
-  if (entry.action === 'restore_snap') {
-    const snapKey = `${SNAP_PREFIX}${entry.slug}`;
-    await linkChild(snapKey, entry.parentIds);
+  // --- restore_snapshot ---
+  // entry.path: "snapshots/<slug>-<ts>"
+  if (entry.action === 'restore_snapshot') {
+    const snapStem = entry.path.slice('snapshots/'.length);
+    const snapKey = `${SNAPSHOT_PREFIX}${snapStem}`;
+    const slug = generateSlugFromUrl(entry.url);
+    const pageKey = PAGE_PREFIX + slug;
+    await linkChild(snapKey, [pageKey]);
     await unorphan(snapKey, entry.timestamp);
     return result;
   }
 
-  // --- restore_list: re-add to root, clear deleted flag, restore subtree + page parentIds ---
+  // --- pin_to_list ---
+  // Add items to a list. Items are URLs (for pages) or "notes/<slug>.json" paths (for notes).
+  if (entry.action === 'pin_to_list') {
+    const listKey = await resolveListKey(entry.parents, entry.name);
+    if (!listKey) return result;
+
+    // Guard: reject actions on orphaned (deleted) lists
+    if (!listKey.startsWith('list:system/')) {
+      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
+      if ((orphanedEntity.keys || []).includes(listKey)) return result;
+    }
+
+    const entity = await loadOrDefault(listKey, load);
+    const pins = [...(entity.pins || [])];
+
+    for (const item of (entry.items || [])) {
+      // Resolve item to pin ID — notes use path prefix, others are URLs
+      let pinId;
+      if (item.startsWith('notes/')) {
+        // Note path: "notes/<slug>.json" → "note:<slug>"
+        const noteSlug = item.slice('notes/'.length, -'.json'.length);
+        pinId = NOTE_PREFIX + noteSlug;
+      } else {
+        const slug = generateSlugFromUrl(item);
+        const pageKey = PAGE_PREFIX + slug;
+        await ensurePageEntity(item, entry.timestamp);
+        pinId = pageKey;
+      }
+
+      if (!pins.some(p => p.id === pinId)) {
+        pins.push({ id: pinId, pinnedAt: entry.timestamp });
+      }
+
+      // Update page/note parentIds with list key
+      if (pinId.startsWith(PAGE_PREFIX)) {
+        const page = result[pinId] || await load(pinId);
+        if (page) {
+          const parentIds = [...(page.parentIds || [])];
+          if (!parentIds.includes(listKey)) parentIds.push(listKey);
+          result[pinId] = { ...page, parentIds };
+        }
+      } else if (pinId.startsWith(NOTE_PREFIX)) {
+        const note = await load(pinId);
+        if (note) {
+          const parentIds = [...(note.parentIds || [])];
+          if (!parentIds.includes(listKey)) parentIds.push(listKey);
+          result[pinId] = { ...note, parentIds };
+        }
+      }
+    }
+
+    result[listKey] = { ...entity, pins, timestamp: entry.timestamp };
+    return result;
+  }
+
+  // --- unpin_from_list ---
+  // Remove items from a list. Items are URLs (for pages) or "notes/<slug>.json" paths (for notes).
+  if (entry.action === 'unpin_from_list') {
+    const listKey = await resolveListKey(entry.parents, entry.name);
+    if (!listKey) return result;
+
+    // Guard: reject actions on orphaned (deleted) lists
+    if (!listKey.startsWith('list:system/')) {
+      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
+      if ((orphanedEntity.keys || []).includes(listKey)) return result;
+    }
+
+    const entity = await loadOrDefault(listKey, load);
+    const removeIds = new Set();
+
+    for (const item of (entry.items || [])) {
+      let pinId;
+      if (item.startsWith('notes/')) {
+        const noteSlug = item.slice('notes/'.length, -'.json'.length);
+        pinId = NOTE_PREFIX + noteSlug;
+      } else {
+        pinId = PAGE_PREFIX + generateSlugFromUrl(item);
+      }
+      removeIds.add(pinId);
+    }
+
+    const pins = (entity.pins || []).filter(p => !removeIds.has(p.id));
+    result[listKey] = { ...entity, pins, timestamp: entry.timestamp };
+
+    // Update page/note parentIds: remove list key
+    for (const pinId of removeIds) {
+      if (pinId.startsWith(PAGE_PREFIX)) {
+        const page = await load(pinId);
+        if (page) {
+          const parentIds = (page.parentIds || []).filter(p => p !== listKey);
+          const updated = { ...page, parentIds };
+          result[pinId] = isPageEligible(updated) ? updated : null;
+        }
+      } else if (pinId.startsWith(NOTE_PREFIX)) {
+        const note = await load(pinId);
+        if (note) {
+          const parentIds = (note.parentIds || []).filter(p => p !== listKey);
+          result[pinId] = { ...note, parentIds };
+        }
+      }
+    }
+
+    return result;
+  }
+
+  // --- create_list ---
+  // Creates a new list entity. Generates internal ID, updates name-to-id, links to parent.
+  if (entry.action === 'create_list') {
+    const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
+    const paths = { ...nameToId.paths };
+
+    // Resolve parent from entry.parents array
+    const parents = entry.parents || [];
+    let parentKey;
+    if (parents.length === 0) {
+      parentKey = 'list:system/root';
+    } else {
+      const parentName = parents[parents.length - 1];
+      const parentParents = parents.slice(0, -1);
+      parentKey = await resolveListKey(parentParents, parentName);
+      if (!parentKey) parentKey = 'list:system/root';
+    }
+
+    // Use provided listId (migrated events) or generate from name+timestamp (new events)
+    const listId = entry.listId || (entry.name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').substring(0, 30) + '-' + Math.abs(hashString(entry.name + entry.timestamp)).toString(36));
+    const listKey = `list:${listId}`;
+
+    // Create list entity
+    const entity = defaultEntity(listKey);
+    entity.name = entry.name;
+    entity.parentList = parentKey;
+    entity.timestamp = entry.timestamp;
+    result[listKey] = entity;
+
+    // Add to parent's childLists
+    const parent = result[parentKey] || await loadOrDefault(parentKey, load);
+    const childLists = [...(parent.childLists || [])];
+    if (!childLists.includes(listKey)) childLists.push(listKey);
+    result[parentKey] = { ...parent, timestamp: entry.timestamp, childLists };
+
+    // Update name-to-id
+    const fullPath = parents.length === 0
+      ? `root/${entry.name}`
+      : `${parents.join('/')}/${entry.name}`;
+    paths[fullPath] = listId;
+    result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
+
+    return result;
+  }
+
+  // --- update_list ---
+  // Rename list and/or update savedSearches.
+  // entry.name identifies the current list; entry.newName is the rename target.
+  if (entry.action === 'update_list') {
+    const listKey = await resolveListKey(entry.parents, entry.name);
+    if (!listKey) return result;
+
+    // Guard: reject actions on orphaned (deleted) lists
+    if (!listKey.startsWith('list:system/')) {
+      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
+      if ((orphanedEntity.keys || []).includes(listKey)) return result;
+    }
+
+    const entity = await loadOrDefault(listKey, load);
+    const updated = { ...entity, timestamp: entry.timestamp };
+
+    if (entry.newName !== undefined) {
+      const oldName = entity.name;
+      updated.name = entry.newName;
+
+      // Update name-to-id: rename this path and all descendant paths
+      if (oldName !== entry.newName) {
+        const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
+        const paths = { ...nameToId.paths };
+        const oldPath = entry.parents.length === 0 ? `root/${entry.name}` : `${entry.parents.join('/')}/${entry.name}`;
+        const parentPath = oldPath.substring(0, oldPath.lastIndexOf('/'));
+        const newPath = `${parentPath}/${entry.newName}`;
+
+        // Rename: delete old path, add new path
+        const listId = paths[oldPath];
+        delete paths[oldPath];
+        paths[newPath] = listId;
+
+        // Rename all descendant paths
+        const oldPrefix = oldPath + '/';
+        for (const [p, id] of Object.entries(paths)) {
+          if (p.startsWith(oldPrefix)) {
+            const suffix = p.slice(oldPrefix.length);
+            delete paths[p];
+            paths[`${newPath}/${suffix}`] = id;
+          }
+        }
+
+        result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
+      }
+    }
+
+    if (entry.savedSearches !== undefined) {
+      updated.savedSearches = entry.savedSearches;
+    }
+
+    result[listKey] = updated;
+    return result;
+  }
+
+  // --- reparent_list ---
+  // Move list between parents. Uses full childNames for destination parent (last-write-wins).
+  if (entry.action === 'reparent_list') {
+    const listKey = await resolveListKey(entry.parents, entry.name);
+    if (!listKey) return result;
+
+    if (listKey.startsWith('list:system/') || listKey.startsWith('list:auto/')) return result;
+
+    const entity = await loadOrDefault(listKey, load);
+    const fromKey = entity.parentList || 'list:system/root';
+
+    // Resolve destination parent from toParents array
+    const toParents = entry.toParents || [];
+    let toKey;
+    if (toParents.length === 0) {
+      toKey = 'list:system/root';
+    } else {
+      const toName = toParents[toParents.length - 1];
+      const toParentParents = toParents.slice(0, -1);
+      toKey = await resolveListKey(toParentParents, toName);
+      if (!toKey) toKey = 'list:system/root';
+    }
+
+    // Remove from source parent's childLists
+    const fromEntity = result[fromKey] || await loadOrDefault(fromKey, load);
+    fromEntity.childLists = (fromEntity.childLists || []).filter(k => k !== listKey);
+    result[fromKey] = { ...fromEntity, timestamp: entry.timestamp };
+
+    // Update child's parentList
+    entity.parentList = toKey;
+    result[listKey] = { ...entity, timestamp: entry.timestamp };
+
+    // Update name-to-id FIRST (before childNames resolution, since moved list's path changes)
+    const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
+    const paths = { ...nameToId.paths };
+    const oldPath = entry.parents.length === 0 ? `root/${entry.name}` : `${entry.parents.join('/')}/${entry.name}`;
+    const toPath = toParents.length === 0 ? 'root' : toParents.join('/');
+    const newPath = `${toPath}/${entry.name}`;
+
+    if (oldPath !== newPath) {
+      const listId = paths[oldPath];
+      delete paths[oldPath];
+      paths[newPath] = listId;
+
+      // Move all descendant paths
+      const oldPrefix = oldPath + '/';
+      for (const [p, id] of Object.entries(paths)) {
+        if (p.startsWith(oldPrefix)) {
+          const suffix = p.slice(oldPrefix.length);
+          delete paths[p];
+          paths[`${newPath}/${suffix}`] = id;
+        }
+      }
+
+      result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
+    }
+
+    // Set destination parent's childLists from childNames (complete, last-write-wins)
+    const toEntity = (toKey === fromKey) ? result[fromKey] : (result[toKey] || await loadOrDefault(toKey, load));
+
+    if (entry.childNames) {
+      // Resolve child names to keys using the UPDATED name-to-id
+      const updatedNameToId = result['manifest:name-to-id'] || nameToId;
+      const childKeys = [];
+      for (const cname of entry.childNames) {
+        const childPath = `${toPath}/${cname}`;
+        const childId = updatedNameToId.paths?.[childPath];
+        if (childId) childKeys.push(`list:${childId}`);
+      }
+      result[toKey] = { ...toEntity, timestamp: entry.timestamp, childLists: childKeys };
+    } else {
+      // Fallback: just append to destination (for simple cases)
+      const cl = [...(toEntity.childLists || [])].filter(k => k !== listKey);
+      cl.push(listKey);
+      result[toKey] = { ...toEntity, timestamp: entry.timestamp, childLists: cl };
+    }
+
+    return result;
+  }
+
+  // --- delete_list ---
+  // Soft-delete a list. Cascading effects derived from entity state.
+  if (entry.action === 'delete_list') {
+    const listKey = await resolveListKey(entry.parents, entry.name);
+    if (!listKey) return result;
+
+    if (listKey.startsWith('list:system/') || listKey.startsWith('list:auto/')) return result;
+
+    const entity = await loadOrDefault(listKey, load, { includeDeleted: true });
+    // Noop if already deleted
+    if (entity.deleted) return result;
+
+    // Mark deleted
+    result[listKey] = { ...entity, timestamp: entry.timestamp, deleted: true };
+
+    // Remove from parent's childLists
+    const parentKey = entity.parentList || 'list:system/root';
+    const parent = result[parentKey] || await loadOrDefault(parentKey, load);
+    result[parentKey] = { ...parent, timestamp: entry.timestamp, childLists: (parent.childLists || []).filter(k => k !== listKey) };
+
+    // Soft-delete all descendant lists (BFS)
+    const queue = [...(entity.childLists || [])];
+    const visited = new Set();
+    while (queue.length > 0) {
+      const childKey = queue.shift();
+      if (visited.has(childKey)) continue;
+      visited.add(childKey);
+      const child = result[childKey] || await loadOrDefault(childKey, load);
+      result[childKey] = { ...child, timestamp: entry.timestamp, deleted: true };
+      await orphan(childKey, entry.timestamp);
+      if (child.childLists) queue.push(...child.childLists);
+    }
+
+    // Remove list key from all pinned page/note parentIds
+    const pins = entity.pins || [];
+    for (const pin of pins) {
+      if (pin.id.startsWith(PAGE_PREFIX)) {
+        const page = await load(pin.id);
+        if (!page) continue;
+        const parentIds = (page.parentIds || []).filter(p => p !== listKey);
+        const updated = { ...page, parentIds };
+        result[pin.id] = isPageEligible(updated) ? updated : null;
+      } else if (pin.id.startsWith(NOTE_PREFIX)) {
+        const note = await load(pin.id);
+        if (!note) continue;
+        const parentIds = (note.parentIds || []).filter(p => p !== listKey);
+        result[pin.id] = { ...note, parentIds };
+      }
+    }
+
+    // Remove from name-to-id (this list and all descendants)
+    const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
+    const paths = { ...nameToId.paths };
+    const listPath = entry.parents.length === 0 ? `root/${entry.name}` : `${entry.parents.join('/')}/${entry.name}`;
+    delete paths[listPath];
+    const pathPrefix = listPath + '/';
+    for (const p of Object.keys(paths)) {
+      if (p.startsWith(pathPrefix)) delete paths[p];
+    }
+    result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
+
+    await orphan(listKey, entry.timestamp);
+    return result;
+  }
+
+  // --- restore_list ---
+  // Restore a deleted list. Restores to root by default.
   if (entry.action === 'restore_list') {
-    const listKey = `list:${entry.id}`;
+    // Resolve by name-to-id first; if not found (deleted), try to find by searching entities
+    let listKey = await resolveListKey(entry.parents, entry.name);
+
+    // Deleted lists are removed from name-to-id, so resolve from orphaned entities
+    if (!listKey) {
+      // Scan orphaned keys for a list matching this name
+      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
+      for (const key of (orphanedEntity.keys || [])) {
+        if (!key.startsWith('list:') || key.startsWith('list:system/')) continue;
+        const entity = await load(key, { includeDeleted: true });
+        if (entity?.name === entry.name) {
+          listKey = key;
+          break;
+        }
+      }
+    }
+    if (!listKey) return result;
 
     // Load list entity with includeDeleted to preserve original fields
     const entity = await loadOrDefault(listKey, load, { includeDeleted: true });
-    // Clear deleted flag and update timestamp
     const restored = { ...entity, deleted: false, timestamp: entry.timestamp };
-    if (entry.name) restored.name = entry.name;
-    if (entry.pins) restored.pins = entry.pins;
-    result[listKey] = restored;
 
     // Re-add to root's childLists (restored lists always go to root)
     const root = result['list:system/root'] || await loadOrDefault('list:system/root', load);
     const rootCL = [...(root.childLists || [])];
     if (!rootCL.includes(listKey)) rootCL.push(listKey);
     result['list:system/root'] = { ...root, timestamp: entry.timestamp, childLists: rootCL };
-    // Update restored entity's parentList to root
     restored.parentList = 'list:system/root';
     result[listKey] = restored;
+
     // Restore all descendants
-    for (const childKey of (entry.subtreeKeys || [])) {
+    const queue = [...(entity.childLists || [])];
+    const visited = new Set();
+    while (queue.length > 0) {
+      const childKey = queue.shift();
+      if (visited.has(childKey)) continue;
+      visited.add(childKey);
       const child = result[childKey] || await loadOrDefault(childKey, load, { includeDeleted: true });
       result[childKey] = { ...child, deleted: false, timestamp: entry.timestamp };
       await unorphan(childKey, entry.timestamp);
+      if (child.childLists) queue.push(...child.childLists);
     }
 
-    // Restore page parentIds for checkpointed pins (use entry.pins — authoritative)
-    const pins = entry.pins || restored.pins || [];
+    // Restore page/note parentIds for pins
+    const pins = restored.pins || [];
     for (const pin of pins) {
       if (pin.id.startsWith(PAGE_PREFIX)) {
         const page = await load(pin.id);
@@ -415,19 +806,7 @@ export async function effectOf(entry, load) {
         const parentIds = [...(page.parentIds || [])];
         if (!parentIds.includes(listKey)) parentIds.push(listKey);
         result[pin.id] = { ...page, parentIds };
-      } else if (pin.id.startsWith(SHALLOW_PREFIX)) {
-        // Re-add list to SPI lists for shallow pins
-        const url = pin.id.slice(SHALLOW_PREFIX.length);
-        const spi = result['list:system/shallow-page'] || await loadOrDefault('list:system/shallow-page', load);
-        const index = { ...spi.index };
-        if (index[url]) {
-          const lists = [...(index[url].lists || [])];
-          if (!lists.includes(listKey)) lists.push(listKey);
-          index[url] = { ...index[url], lists };
-        }
-        result['list:system/shallow-page'] = { ...spi, timestamp: entry.timestamp, index };
       } else if (pin.id.startsWith(NOTE_PREFIX)) {
-        // Re-add list to note parentIds
         const note = await load(pin.id);
         if (!note) continue;
         const parentIds = [...(note.parentIds || [])];
@@ -436,111 +815,24 @@ export async function effectOf(entry, load) {
       }
     }
 
+    // Re-add to name-to-id
+    const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
+    const paths = { ...nameToId.paths };
+    const listName = restored.name || entry.name;
+    const listId = listKey.slice('list:'.length);
+    paths[`root/${listName}`] = listId;
+    // Also re-add descendants
+    for (const childKey of visited) {
+      const child = result[childKey];
+      if (child?.name) {
+        const childId = childKey.slice('list:'.length);
+        // Simplified: put descendants directly under restored list
+        paths[`root/${listName}/${child.name}`] = childId;
+      }
+    }
+    result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
+
     await unorphan(listKey, entry.timestamp);
-
-    return result;
-  }
-
-  // --- page ---
-  if (entry.action === 'page') {
-    // Skip parent-side childIds accumulation when parent is a gateway root
-    const gwPins = entry.referrerId
-      ? (await loadOrDefault('list:auto/gateways', load)).pins || []
-      : [];
-    // Apply to each affected page (entry's own page + referrer parent)
-    for (const pageKey of getAffectedKeys(entry)) {
-      const page = await load(pageKey);
-      if (!page) { result[pageKey] = null; continue; }
-      // Skip parent-side update for gateway roots (too many children)
-      if (pageKey === entry.referrerId && page.url && isGatewayOriginFromPins(page.url, gwPins)) continue;
-      result[pageKey] = applyLogToPage(page, entry);
-    }
-
-    // Update shallow-page index if entry carries referrer/title info
-    if (entry.referrerId || entry.title || entry.user_title) {
-      const spi = await loadOrDefault('list:system/shallow-page', load);
-      let updated = applyLogToShallowPage(spi, entry);
-      // Prune SPI entries for pages that exist in scope
-      if (updated.index) {
-        let pruned = false;
-        const index = { ...updated.index };
-        for (const url of Object.keys(index)) {
-          const pk = PAGE_PREFIX + generateSlugFromUrl(url);
-          if (result[pk] !== undefined && result[pk] !== null) {
-            delete index[url]; pruned = true;
-          }
-        }
-        if (pruned) updated = { ...updated, index };
-      }
-      result['list:system/shallow-page'] = updated;
-    }
-
-    // Resolve shallow:<url> refs in parentIds/childIds to page:<slug>
-    for (const [key, entity] of Object.entries(result)) {
-      if (!key.startsWith(PAGE_PREFIX) || !entity) continue;
-      let cur = entity;
-      for (const field of ['parentIds', 'childIds']) {
-        if (!cur[field]?.length) continue;
-        let changed = false;
-        const resolved = cur[field].map(ref => {
-          if (typeof ref !== 'string' || !ref.startsWith(SHALLOW_PREFIX)) return ref;
-          const refKey = PAGE_PREFIX + generateSlugFromUrl(ref.slice(SHALLOW_PREFIX.length));
-          if (result[refKey] !== undefined && result[refKey] !== null) { changed = true; return refKey; }
-          return ref;
-        });
-        if (changed) cur = { ...cur, [field]: resolved };
-      }
-      if (cur !== entity) result[key] = cur;
-    }
-    return result;
-  }
-
-  // --- page_checkpoint ---
-  if (entry.action === 'page_checkpoint') {
-    const slug = generateSlugFromUrl(entry.url);
-    const pageKey = `${PAGE_PREFIX}${slug}`;
-    const page = await loadPage(pageKey, load, true);
-    result[pageKey] = applyLogToPage(page, entry);
-
-    // Absorption: move SPI data into new page entity, upgrade list pins
-    const spi = await loadOrDefault('list:system/shallow-page', load);
-    const shallowEntry = spi.index?.[entry.url];
-    if (shallowEntry) {
-      // Absorb parent refs into page.parentIds
-      const parentRefs = shallowEntry.parentIds || [];
-      if (parentRefs.length > 0) {
-        const p = result[pageKey];
-        const parentIds = [...(p.parentIds || [])];
-        for (const ref of parentRefs) {
-          if (!parentIds.includes(ref)) parentIds.push(ref);
-        }
-        result[pageKey] = { ...p, parentIds };
-      }
-
-      // Remove absorbed URL from SPI
-      const updatedIdx = { ...spi, index: { ...spi.index } };
-      delete updatedIdx.index[entry.url];
-      result['list:system/shallow-page'] = updatedIdx;
-
-      // Upgrade shallow: pins → page: in affected lists
-      const affectedLists = shallowEntry.lists || [];
-      if (affectedLists.length > 0) {
-        const shallowId = `${SHALLOW_PREFIX}${entry.url}`;
-        for (const listKey of affectedLists) {
-          const listEntity = await loadOrDefault(listKey, load);
-          if (!listEntity.pins?.some(p => p.id === shallowId)) continue;
-          result[listKey] = {
-            ...listEntity,
-            pins: listEntity.pins.map(p =>
-              p.id === shallowId ? { ...p, id: pageKey } : p
-            ),
-          };
-        }
-      }
-    } else {
-      result['list:system/shallow-page'] = spi;
-    }
-
     return result;
   }
 
@@ -548,253 +840,27 @@ export async function effectOf(entry, load) {
 }
 
 // ---------------------------------------------------------------------------
-// Per-entity apply functions (used by effectOf internally, exported for tests)
+// Helper: simple string hash (same as generateSlug in utils.js)
+// ---------------------------------------------------------------------------
+
+function hashString(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return hash;
+}
+
+// ---------------------------------------------------------------------------
+// Per-entity apply functions (exported for tests)
 // ---------------------------------------------------------------------------
 
 /**
  * Apply a log entry to settings state.
- * Entry: { timestamp, action: 'set', key, value }
+ * Entry: { timestamp, action: 'update_setting', key, value }
  * Returns new settings object (or original if entry is irrelevant).
  */
 export function applyLogToSettings(settings, entry) {
-  if (entry.action !== 'set') return settings;
+  if (entry.action !== 'update_setting') return settings;
   return { ...settings, [entry.key]: entry.value, timestamp: entry.timestamp };
 }
-
-/**
- * Apply a log entry to a page entity.
- * Handles:
- *   - page_checkpoint: create/update page watermark
- *   - page: unified visit + attention + capture (url, title, referrerId, scrollDepth, timeOnPage, mdPath, htmlPath)
- *     - On parent page (referrerId match): accumulate shallow child ref in childIds[]
- * Returns new page object (or original if entry is irrelevant).
- */
-export function applyLogToPage(page, entry) {
-  // Derive slug from entry URL (slug field removed from log entries)
-  const entrySlug = entry.url ? generateSlugFromUrl(entry.url) : null;
-
-  // page_checkpoint: passthrough that creates/updates page watermark
-  if (entry.action === 'page_checkpoint') {
-    if (entrySlug !== page.slug && page.slug !== undefined) return page;
-    const updated = { ...page };
-    if (!updated.url && entry.url) updated.url = entry.url;
-    if (!updated.title && entry.title) updated.title = entry.title;
-    if (!updated.user_title && entry.user_title) updated.user_title = entry.user_title;
-    if (entry.parentIds?.length) {
-      const parentIds = [...(updated.parentIds || [])];
-      for (const pid of entry.parentIds) {
-        if (!parentIds.includes(pid)) parentIds.push(pid);
-      }
-      updated.parentIds = parentIds;
-    }
-    if (entry.visitDates?.length) {
-      const visitDates = [...(updated.visitDates || [])];
-      for (const d of entry.visitDates) {
-        if (!visitDates.includes(d)) visitDates.push(d);
-      }
-      updated.visitDates = visitDates;
-    }
-    updated.timestamp = Math.max(updated.timestamp || 0, entry.timestamp);
-    return updated;
-  }
-
-  // Unified page entry: visit + attention + capture
-  if (entry.action === 'page') {
-    // Parent-side: if this page's referrerId matches this page, accumulate shallow child ref
-    if (entry.referrerId && page.slug !== undefined) {
-      const referrerSlug = entry.referrerId.startsWith(PAGE_PREFIX)
-        ? entry.referrerId.slice(PAGE_PREFIX.length) : entry.referrerId;
-      if (referrerSlug === page.slug && entrySlug !== page.slug) {
-        const updated = { ...page };
-        const childIds = [...(updated.childIds || [])];
-        const shallowRef = SHALLOW_PREFIX + entry.url;
-        const pageRef = PAGE_PREFIX + entrySlug;
-        if (!childIds.some(c => c === shallowRef || c === pageRef)) {
-          childIds.push(shallowRef);
-          if (childIds.length > REFERRER_CAP) childIds.shift();
-        }
-        updated.childIds = childIds;
-        updated.timestamp = Math.max(updated.timestamp || 0, entry.timestamp);
-        return updated;
-      }
-    }
-
-    // Child-side slug check
-    const matchSlug = entrySlug || entry.slug;
-    if (matchSlug !== page.slug && page.slug !== undefined) return page;
-
-    const prevTimestamp = page.timestamp || 0; // save before mutation for attention idempotency
-    const updated = { ...page };
-
-    // Visit fields
-    if (entry.url) updated.url = entry.url;
-    if (entry.title) updated.title = entry.title;
-    if (entry.user_title) updated.user_title = entry.user_title;
-    updated.timestamp = entry.timestamp;
-
-    // visitDates (only when url present = visit entry)
-    if (entry.url) {
-      const d = new Date(entry.timestamp);
-      const yyyymmdd = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
-      if (!updated.visitDates) updated.visitDates = [];
-      else updated.visitDates = [...updated.visitDates];
-      if (!updated.visitDates.includes(yyyymmdd)) updated.visitDates.push(yyyymmdd);
-    }
-
-    // parentIds from referrerId (already in page:slug format)
-    if (entry.referrerId) {
-      const parentIds = [...(updated.parentIds || [])];
-      if (!parentIds.includes(entry.referrerId)) {
-        parentIds.push(entry.referrerId);
-        if (parentIds.length > REFERRER_CAP) parentIds.shift();
-      }
-      updated.parentIds = parentIds;
-    }
-
-    // Attention (guard with prevTimestamp for idempotency)
-    if ((entry.scrollDepth !== undefined || entry.timeOnPage !== undefined || entry.likes !== undefined)
-        && entry.timestamp > prevTimestamp) {
-      if (entry.scrollDepth !== undefined) {
-        updated.scrollDepth = Math.max(updated.scrollDepth || 0, entry.scrollDepth);
-      }
-      if (entry.timeOnPage !== undefined) {
-        updated.timeOnPage = (updated.timeOnPage || 0) + entry.timeOnPage;
-      }
-      if (entry.likes !== undefined) {
-        updated.likes = (updated.likes || 0) + entry.likes;
-      }
-    }
-
-    // Capture fields
-    if (entry.mdPath) updated.mdPath = entry.mdPath;
-    if (entry.htmlPath) updated.htmlPath = entry.htmlPath;
-
-    return updated;
-  }
-
-  return page;
-}
-
-/**
- * Apply a log entry to a list entity (self-describing file).
- * Entity: { timestamp, id, name, savedSearches, pins: [...] }
- * Handles:
- *   - list (id="{listId}", op=add/del/clear): granular pin operations (typed ids)
- *   - list_meta (id="{listId}"): list metadata (name, savedSearches)
- *   - del_list (id="{listId}"): mark entity as deleted
- * Returns new entity (or original if entry is irrelevant).
- */
-export function applyLogToPins(pinsEntity, entry) {
-  if (entry.action === 'list' && entry.id === pinsEntity.slug) {
-    const updated = { ...pinsEntity, timestamp: entry.timestamp };
-    let pins = [...(pinsEntity.pins || [])];
-
-    if (entry.op === 'clear') {
-      updated.pins = [];
-    } else if (entry.op === 'add' && entry.ids) {
-      for (const id of entry.ids) {
-        if (!pins.some(p => p.id === id)) {
-          pins.push({ id, pinnedAt: entry.timestamp });
-        }
-      }
-      updated.pins = pins;
-    } else if (entry.op === 'del' && entry.ids) {
-      pins = pins.filter(p => !entry.ids.includes(p.id));
-      updated.pins = pins;
-    }
-
-    return updated;
-  }
-  if (entry.action === 'list_meta' && entry.id === pinsEntity.slug) {
-    const updated = { ...pinsEntity, timestamp: entry.timestamp };
-    if (entry.name !== undefined) updated.name = entry.name;
-    if (entry.savedSearches !== undefined) updated.savedSearches = entry.savedSearches;
-    if (entry.parentList !== undefined) updated.parentList = entry.parentList;
-    if (entry.childLists !== undefined) updated.childLists = entry.childLists;
-    return updated;
-  }
-  if (entry.action === 'del_list' && entry.id === pinsEntity.slug) {
-    return { ...pinsEntity, timestamp: entry.timestamp, deleted: true };
-  }
-  return pinsEntity;
-}
-
-/**
- * Apply a log entry to the shallow page index (for non-checkpointed pages).
- * Index: { timestamp, index: { url: { parentIds: [...], lists: [...], title, user_title } } }
- * Processes:
- *   - page entries with referrerId: records parent in index[url].parentIds
- *   - page entries with title/user_title: updates index[url].title/user_title
- *   - list entries with shallow: ids: records list membership in index[url].lists
- * Returns new index (or original if entry is irrelevant).
- *
- * SPI completeness guarantee — a page MUST have an SPI entry if any of:
- *   (a) it has parentIds (recorded via referrerId on page entries)
- *   (b) it belongs to a list (recorded via shallow: ids on list entries)
- *   (c) it has a user_title (recorded via user_title on page entries)
- * Callers (e.g. searchPageContext) may rely on this: if a field governed by
- * (a)–(c) is absent from SPI, it is genuinely absent — no history search needed.
- * Title is also kept up-to-date: if a page entry carries a new title and the
- * page already has an SPI record, the title is overwritten.
- */
-export function applyLogToShallowPage(shallowPageIndex, entry) {
-  // Page entry: record parentIds and title info
-  if (entry.action === 'page' && entry.url) {
-    const hasReferrer = !!entry.referrerId;
-    const hasTitle = !!entry.title;
-    const hasUserTitle = !!entry.user_title;
-    if (!hasReferrer && !hasTitle && !hasUserTitle) return shallowPageIndex;
-
-    const updated = { ...shallowPageIndex };
-    const index = { ...updated.index };
-    const existing = index[entry.url] || { parentIds: [], lists: [], title: null, user_title: null };
-    const rec = { ...existing };
-
-    if (hasReferrer) {
-      const parentIds = [...rec.parentIds];
-      if (!parentIds.includes(entry.referrerId)) parentIds.push(entry.referrerId);
-      rec.parentIds = parentIds;
-    }
-    if (hasTitle) rec.title = entry.title;
-    if (hasUserTitle) rec.user_title = entry.user_title;
-
-    index[entry.url] = rec;
-    updated.index = index;
-    updated.timestamp = entry.timestamp;
-    return updated;
-  }
-
-  // List entry with shallow: ids: record list membership
-  if (entry.action === 'list' && entry.ids && entry.id) {
-    const shallowUrls = entry.ids
-      .filter(id => id.startsWith(SHALLOW_PREFIX))
-      .map(id => id.slice(SHALLOW_PREFIX.length));
-    if (shallowUrls.length === 0) return shallowPageIndex;
-
-    const listKey = `list:${entry.id}`;
-    const updated = { ...shallowPageIndex };
-    const index = { ...updated.index };
-
-    for (const url of shallowUrls) {
-      const existing = index[url] || { parentIds: [], lists: [], title: null, user_title: null };
-      const rec = { ...existing };
-
-      if (entry.op === 'add') {
-        const lists = [...rec.lists];
-        if (!lists.includes(listKey)) lists.push(listKey);
-        rec.lists = lists;
-      } else if (entry.op === 'del') {
-        rec.lists = rec.lists.filter(l => l !== listKey);
-      }
-
-      index[url] = rec;
-    }
-
-    updated.index = index;
-    updated.timestamp = entry.timestamp;
-    return updated;
-  }
-
-  return shallowPageIndex;
-}
-

@@ -241,8 +241,8 @@ async function initHistoryFiles() {
 
   // Merge today's history — session cache has disk + undrained entries via addLog
   const todayStr = new Date().toISOString().slice(0, 10);
-  const todayEntries = await readCacheable('history:' + todayStr) || [];
-  const interactionBuffer = todayEntries.filter(e => (e.action === 'page' || !e.action) && e.url);
+  const todayEntries = await readCacheable('log:' + todayStr) || [];
+  const interactionBuffer = todayEntries.filter(e => (e.action === 'visit_page' || e.action === 'leave_page' || !e.action) && e.url);
   for (const entry of interactionBuffer) {
     const existing = historyByUrl.get(entry.url);
     if (!existing || entry.timestamp > existing.timestamp) {
@@ -277,8 +277,9 @@ async function loadHistoryBatch() {
     // unchanged fields" optimisation in background.js means later entries
     // often lack a title when it hasn't changed since the previous write).
     for (const item of interactions) {
-      // Skip non-visit entries (set, highlight, list, etc.)
-      if ((item.action && item.action !== 'page') || !item.url) continue;
+      // Skip non-visit entries (settings, list ops, etc.)
+      if (item.action && item.action !== 'visit_page' && item.action !== 'leave_page') continue;
+      if (!item.url) continue;
       historyAllEntries.push(item);
       const existing = historyByUrl.get(item.url);
       if (!existing) {
@@ -321,27 +322,25 @@ function getActivePinListId() {
 }
 
 function pinIdToUrl(id) {
-  if (id.startsWith('shallow:')) return id.slice(8);
-  // page:<slug> — need to resolve via page entity. Return null if can't resolve here.
+  // All page pins are page:<slug> — need to resolve via page entity. Return null if can't resolve here.
   return null;
 }
 
 function slugFromPinId(id) {
   if (id.startsWith('page:')) return id.slice(5);
-  if (id.startsWith('shallow:')) return generateSlugFromUrl(id.slice(8));
   if (id.startsWith('note:')) return id.slice(5);
 }
 
 // Resolve an array of pins to display-ready objects with title/url populated.
 // Loads entity context, resolves each pin via resolvePageRef, falls back to
-// historyByUrl for shallow pins with null SPI title.
+// historyByUrl for pins with null entity title.
 // Returns { pinsResolved, pageSnap } — pageSnap is needed by enrichPinResult.
 async function resolvePinsForDisplay(pins) {
-  const { pageSnap, spi, noteSnap } = await loadPinContext(pins);
+  const { pageSnap, noteSnap } = await loadPinContext(pins);
   const pinsResolved = pins.map(p => {
-    const ref = resolvePageRef(p.id, pageSnap, spi, noteSnap);
-    let url = ref?.url || '';
-    let title = ref?.title || '';
+    const ref = resolvePageRef(p.id, pageSnap, noteSnap);
+    let url = ref?.url || null;
+    let title = ref?.title || null;
     if (!title && url) {
       const hist = historyByUrl.get(url);
       if (hist?.title) title = hist.title;
@@ -352,18 +351,11 @@ async function resolvePinsForDisplay(pins) {
 }
 
 // Resolve a typed page reference to entity-like data, or null.
-// page:<slug> → page entity from pageSnap. shallow:<url> → metadata from shallowPageIndex.
-// Unreferenced shallow pages return null.
-function resolvePageRef(refId, pageSnap, spi, noteSnap) {
+// page:<slug> → page entity from pageSnap. note:<slug> → note entity.
+function resolvePageRef(refId, pageSnap, noteSnap) {
   if (!refId) return null;
   if (refId.startsWith('page:')) {
     return pageSnap?.get(refId.slice(5)) || null;
-  }
-  if (refId.startsWith('shallow:')) {
-    const url = refId.slice(8);
-    const entry = spi?.index?.[url];
-    if (!entry) return null;
-    return { url, title: entry.title || null, user_title: entry.user_title || null, parentIds: entry.parentIds || [], lists: entry.lists || [] };
   }
   if (refId.startsWith('note:')) {
     const note = noteSnap?.get(refId.slice(5));
@@ -373,7 +365,7 @@ function resolvePageRef(refId, pageSnap, spi, noteSnap) {
   return null;
 }
 
-// Load page entities + shallowPageIndex for a set of pins.
+// Load page entities for a set of pins.
 // Session cache first, filesystem fallback for page: slugs not in session.
 async function loadPinContext(pins) {
   const pagePinSlugs = [];
@@ -382,12 +374,8 @@ async function loadPinContext(pins) {
     if (p.id?.startsWith('page:')) pagePinSlugs.push(p.id.slice(5));
     else if (p.id?.startsWith('note:')) notePinSlugs.push(p.id.slice(5));
   }
-  const sessionKeys = [...pagePinSlugs.map(s => 'page:' + s), ...notePinSlugs.map(s => 'note:' + s), 'list:system/shallow-page'];
+  const sessionKeys = [...pagePinSlugs.map(s => 'page:' + s), ...notePinSlugs.map(s => 'note:' + s)];
   const sessionBatch = sessionKeys.length > 0 ? await chrome.storage.session.get(sessionKeys) : {};
-  let spi = sessionBatch['list:system/shallow-page'];
-  if (!spi) {
-    spi = await readCacheable('list:system/shallow-page');
-  }
   const pageSnap = new Map();
   const missingSlugs = [];
   for (const slug of pagePinSlugs) {
@@ -414,14 +402,13 @@ async function loadPinContext(pins) {
       if (notes[i]) noteSnap.set(missingNoteSlugs[i], notes[i]);
     }
   }
-  return { pageSnap, spi, noteSnap };
+  return { pageSnap, noteSnap };
 }
 
 function isResultPinned(listId, url) {
   const pins = allListPins[listId] || [];
   const pageId = 'page:' + generateSlugFromUrl(url);
-  const shallowId = 'shallow:' + url;
-  return pins.some(p => p.id === pageId || p.id === shallowId || p.url === url);
+  return pins.some(p => p.id === pageId);
 }
 
 async function toggleResultPin(listId, url, title) {
@@ -464,7 +451,7 @@ async function showRecycleBin() {
   updateMainTitle('Recycle Bin');
   showRecycleBinLayout();
 
-  const orphaned = await readCacheable('list:system/orphaned');
+  const orphaned = await readCacheable('manifest:orphaned');
   const keys = orphaned?.keys || [];
   const itemsEl = document.getElementById('recycleBinItems');
   const emptyEl = document.getElementById('recycleBinEmpty');
@@ -485,12 +472,12 @@ async function showRecycleBin() {
 
     // Load entity to get display name
     let displayName = key;
-    if (key.startsWith('snap:')) {
-      // snap:<pageSlug>/<timestamp> — derive display name from key
-      const snapSlug = key.slice('snap:'.length);
-      const lastSlash = snapSlug.lastIndexOf('/');
-      const pageSlug = snapSlug.slice(0, lastSlash);
-      const ts = parseInt(snapSlug.slice(lastSlash + 1), 10);
+    if (key.startsWith('snapshot:')) {
+      // snapshot:<pageSlug>-<timestamp> — derive display name from key
+      const snapStem = key.slice('snapshot:'.length);
+      const lastDash = snapStem.lastIndexOf('-');
+      const pageSlug = snapStem.slice(0, lastDash);
+      const ts = parseInt(snapStem.slice(lastDash + 1), 10);
       displayName = `${pageSlug} — ${new Date(ts).toLocaleString()}`;
     } else {
       try {
@@ -513,8 +500,8 @@ async function showRecycleBin() {
       <button class="restore-btn">Restore</button>
     `;
     card.querySelector('.restore-btn').addEventListener('click', async () => {
-      if (key.startsWith('snap:')) {
-        const snapSlug = key.slice('snap:'.length);
+      if (key.startsWith('snapshot:')) {
+        const snapSlug = key.slice('snapshot:'.length);
         await sendAction({ action: 'restoreSnapshot', snapSlug });
       } else if (key.startsWith('note:')) {
         const slug = key.slice('note:'.length);
@@ -538,7 +525,7 @@ async function showRecycleBin() {
 }
 
 async function updateRecycleBinBadge() {
-  const orphaned = await readCacheable('list:system/orphaned');
+  const orphaned = await readCacheable('manifest:orphaned');
   const count = orphaned?.keys?.length || 0;
   const badge = document.getElementById('recycleBinCount');
   badge.textContent = count > 0 ? String(count) : '';
@@ -1062,6 +1049,7 @@ async function saveSearchState() {
 // Shared pin enrichment: merges cached page data, attention scores, and pin timestamps.
 // Uses historyByUrl fallback for attention when page entity lacks it (showList behavior).
 function enrichPinResult(r, pins, pageSnap) {
+  if (!r.url && !r.slug) return r;
   const slug = r.slug || generateSlugFromUrl(r.url);
   const cached = pageSnap.get(slug);
   const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
@@ -1304,7 +1292,6 @@ function processInteractionsForDisplay(interactions, { globalDedup = false } = {
 }
 
 // Batch-fetch page entities for all unique slugs in entries, enrich with entity titles.
-// Falls back to SPI for shallow pages (no checkpoint) still missing a title.
 async function enrichFromEntityStorage(entries) {
   const titleless = entries.filter(e => !e.title);
   if (titleless.length === 0) return;
@@ -1315,23 +1302,11 @@ async function enrichFromEntityStorage(entries) {
   for (let i = 0; i < slugs.length; i++) {
     if (loaded[i]) pages[slugs[i]] = loaded[i];
   }
-  const needSpi = []; // entries still missing title after checkpoint lookup
   for (const entry of titleless) {
     const page = pages[entry.slug];
     if (page) {
       if (page.title) entry.title = page.title;
       if (page.user_title) entry.user_title = page.user_title;
-    } else {
-      needSpi.push(entry);
-    }
-  }
-  // SPI fallback for shallow pages with no title
-  if (needSpi.length > 0) {
-    const spi = await readCacheable('list:system/shallow-page');
-    for (const entry of needSpi) {
-      const spiEntry = spi?.index?.[entry.url];
-      if (spiEntry?.title) entry.title = spiEntry.title;
-      if (spiEntry?.user_title) entry.user_title = spiEntry.user_title;
     }
   }
 }
@@ -1444,8 +1419,7 @@ async function loadExtraDetail(url) {
   for (const lst of lists) {
     const pins = allListPins[lst.slug] || [];
     const pageId = 'page:' + generateSlugFromUrl(url);
-    const shallowId = 'shallow:' + url;
-    if (pins.some(p => p.id === pageId || p.id === shallowId)) {
+    if (pins.some(p => p.id === pageId)) {
       belongedLists.push(listDisplayName(lst));
     }
   }
@@ -1537,8 +1511,8 @@ function bindSnapshotClickHandlers(container) {
 
 // opts: { pinned, deletable, attScore, maxAtt, attDetail, notes, timestamps, context, pinnedAt, relevance, noFocusButton }
 function resultRowHtml(title, url, opts = {}) {
-  const safeTitle = escapeHtml(title || 'Untitled');
-  const safeUrl = escapeHtml(url || '');
+  const safeTitle = escapeHtml(title || '<unknown>');
+  const safeUrl = escapeHtml(url || '<unknown>');
   const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, relevance, cssClass, noFocusButton = false } = opts;
   const extraCols = getExtraColumns(context);
 
@@ -1674,8 +1648,6 @@ function bindResultDelegation(container) {
     if (!row) return;
     if (e.target.closest('.result-pin') || e.target.closest('.result-expand') || e.target.closest('.result-focus')) return;
     const url = row.dataset.url;
-    // Proactive checkpoint: ensure a page entity exists before navigation
-    sendAction({ action: 'ensurePageCheckpoint', url, title: row.dataset.title }).catch(e => console.warn('[checkpoint]', e.message));
     chrome.tabs.create({ url });
   });
 
@@ -2127,7 +2099,7 @@ function createSidebarItem(node, depth) {
         const newUrls = [];
         for (const { url } of items) {
           const pinId = 'page:' + generateSlugFromUrl(url);
-          if (url && !pins.some(p => p.id === pinId || p.id === 'shallow:' + url)) {
+          if (url && !pins.some(p => p.id === pinId)) {
             pins.push({ id: pinId, pinnedAt: Date.now() });
             newUrls.push(url);
           }
@@ -2384,10 +2356,9 @@ function formatBytes(bytes) {
 
 // Session-cached keys live in chrome.storage.session; logBuffer lives in chrome.storage.local
 const SESSION_CACHE_KEYS = [
-  { key: 'settings', label: 'Settings' },
-  { key: 'lists', label: 'Lists' },
+  { key: 'manifest:settings', label: 'Settings' },
   { key: 'list:auto/gateways', label: 'Auto Gateways' },
-  { key: 'list:system/shallow-page', label: 'Shallow Page Index' },
+  { key: 'manifest:name-to-id', label: 'List Name Map' },
 ];
 const LOCAL_CACHE_KEYS = [
   { key: 'logBuffer', label: 'Log Buffer' },
@@ -2733,8 +2704,8 @@ chrome.runtime.onMessage.addListener((request) => {
     // New page visit — merge into historyByUrl and historyAllEntries
     clearTimeout(mutationRefreshTimer);
     mutationRefreshTimer = setTimeout(async () => {
-      const todayEntries = await readCacheable('history:' + new Date().toISOString().slice(0, 10)) || [];
-      const interactionBuffer = todayEntries.filter(e => (e.action === 'page' || !e.action) && e.url);
+      const todayEntries = await readCacheable('log:' + new Date().toISOString().slice(0, 10)) || [];
+      const interactionBuffer = todayEntries.filter(e => (e.action === 'visit_page' || e.action === 'leave_page' || !e.action) && e.url);
       let changed = false;
       for (const entry of interactionBuffer) {
         const existing = historyByUrl.get(entry.url);
@@ -3298,7 +3269,7 @@ async function openListFocusPanel(listId, listName) {
       const maxAtt = 0.1;
       const { pinsResolved } = await resolvePinsForDisplay(pins);
       html += pinsResolved.map(r => {
-        const title = r.user_title || r.title || 'Untitled';
+        const title = r.user_title || r.title || '<unknown>';
         return resultRowHtml(title, r.url, {
           deletable: false, attScore: 0, maxAtt, timestamps: [r.pinnedAt || Date.now()], context: 'global', noFocusButton: true
         });
@@ -3524,7 +3495,7 @@ async function initialize() {
         const newUrls = [];
         for (const item of data.items) {
           const pinId = 'page:' + generateSlugFromUrl(item.url);
-          if (!pins.some(p => p.id === pinId || p.id === 'shallow:' + item.url)) {
+          if (!pins.some(p => p.id === pinId)) {
             pins.push({ id: pinId, pinnedAt: Date.now() });
             newUrls.push(item.url);
           }

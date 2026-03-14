@@ -11,14 +11,15 @@ test.describe('Round-trip persistence', () => {
   test('pin via helper page visible in options list view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example', timestamp: now, parentIds: [], childIds: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example' },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example' },
       ]},
     ]);
 
@@ -45,26 +46,25 @@ test.describe('Round-trip persistence', () => {
 
   test('new list via helper page visible in options sidebar', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
     await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'saveListMeta', listId: 'newlist', name: 'Brand New' })
+      chrome.runtime.sendMessage({ action: 'saveListMeta', name: 'Brand New' })
     );
     await helper.close();
 
     const options = await openOptionsPage(extContext, extensionId);
-    const listItem = options.locator('.sidebar-item[data-list-id="newlist"]');
+    const listItem = options.locator('.sidebar-item .label', { hasText: 'Brand New' });
     await expect(listItem).toBeVisible({ timeout: 5000 });
-    await expect(listItem.locator('.label')).toHaveText('Brand New');
     await options.close();
   });
 
   test('note created via helper page visible in getPageInfo', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -98,9 +98,10 @@ test.describe('Accumulation correctness', () => {
     const slugs = urls.map(u => getSlugForUrl(u));
 
     const files = [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:bulk'] } },
       { path: 'lists/bulk.json', data: { slug: 'bulk', name: 'Bulk', timestamp: now, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Bulk': 'bulk' } } },
       ...slugs.map((slug, i) => ({
         path: `pages/${slug}.json`,
         data: { slug, url: urls[i], title: `Page ${i}`, timestamp: now, parentIds: [], childIds: [] },
@@ -136,7 +137,7 @@ test.describe('Accumulation correctness', () => {
     localServer.addPage('/bounce', { title: 'Bounce', body: '<p>Bounce</p>' });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], blacklist: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     const url = localServer.url('/tall-page');
@@ -161,12 +162,12 @@ test.describe('Accumulation correctness', () => {
 
     // Wait for scroll depth entry
     await helper.waitForFunction(({ u, dateKey }) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'history:' + dateKey })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dateKey })
         .then(r => r.value && r.value.some(e => e.url === u && e.scrollDepth > 50))
     , { u: url, dateKey: today }, { timeout: 5000 });
 
     const hist = await helper.evaluate(({ dateKey }) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'history:' + dateKey })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dateKey })
     , { dateKey: today });
     await helper.close();
     await page.close();
@@ -187,7 +188,7 @@ test.describe('Cross-entity interference', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:alpha', 'list:beta'] } },
       { path: 'lists/alpha.json', data: {
         slug: 'alpha', name: 'Alpha', timestamp: now,
@@ -199,6 +200,7 @@ test.describe('Cross-entity interference', () => {
         pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Alpha': 'alpha', 'root/Beta': 'beta' } } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Shared', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -231,7 +233,7 @@ test.describe('Cross-entity interference', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:doomed', 'list:safe'],
       }},
@@ -245,6 +247,7 @@ test.describe('Cross-entity interference', () => {
         pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
         parentList: 'list:system/root', childLists: [],
       }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Doomed': 'doomed', 'root/Safe': 'safe' } } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Shared Page', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -278,20 +281,38 @@ test.describe('Cross-entity interference', () => {
     localServer.addPage('/child-a', { title: 'Child A', body: '<p>A</p>' });
     localServer.addPage('/child-b', { title: 'Child B', body: '<p>B</p>' });
 
+    const parentUrl = localServer.url('/shared-parent');
+    const childAUrl = localServer.url('/child-a');
+    const childBUrl = localServer.url('/child-b');
+    const parentSlug = getSlugForUrl(parentUrl);
+    const childASlug = getSlugForUrl(childAUrl);
+    const childBSlug = getSlugForUrl(childBUrl);
+    const now = Date.now();
+
+    // Seed page entities so visit_page can enrich them with referrer relations
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [], blacklist: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+      { path: `pages/${parentSlug}.json`, data: {
+        slug: parentSlug, url: parentUrl, title: 'Shared Parent', timestamp: now, parentIds: [], childIds: [],
+      }},
+      { path: `pages/${childASlug}.json`, data: {
+        slug: childASlug, url: childAUrl, title: 'Child A', timestamp: now, parentIds: [], childIds: [],
+      }},
+      { path: `pages/${childBSlug}.json`, data: {
+        slug: childBSlug, url: childBUrl, title: 'Child B', timestamp: now, parentIds: [], childIds: [],
+      }},
     ]);
 
     // Navigate parent → child-a via link click
     const page = await extContext.newPage();
-    await page.goto(localServer.url('/shared-parent'));
+    await page.goto(parentUrl);
     await page.waitForTimeout(300);
     await page.click('a[href="/child-a"]');
     await page.waitForURL('**/child-a');
     await page.waitForTimeout(300);
 
     // Navigate back to parent, then to child-b
-    await page.goto(localServer.url('/shared-parent'));
+    await page.goto(parentUrl);
     await page.waitForTimeout(300);
     await page.click('a[href="/child-b"]');
     await page.waitForURL('**/child-b');
@@ -299,31 +320,23 @@ test.describe('Cross-entity interference', () => {
 
     const helper = await openHelperPage(extContext, extensionId);
 
-    // Wait for child-b to be recorded
+    // Wait for child-b visit with referrer to be processed
     await helper.waitForFunction((u) =>
-      chrome.runtime.sendMessage({ action: 'getPageInfo', url: u })
-        .then(r => r.success && r.slug)
-    , localServer.url('/child-b'), { timeout: 5000 });
-
-    // Checkpoint both children so getPageRelations can resolve parents
-    await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'ensurePageCheckpoint', url: u, title: 'Child A' })
-    , localServer.url('/child-a'));
-    await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'ensurePageCheckpoint', url: u, title: 'Child B' })
-    , localServer.url('/child-b'));
+      chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
+        .then(r => r.success && r.parents.referrers.length > 0)
+    , childBUrl, { timeout: 5000 });
 
     const relA = await helper.evaluate((u) =>
       chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
-    , localServer.url('/child-a'));
+    , childAUrl);
     const relB = await helper.evaluate((u) =>
       chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
-    , localServer.url('/child-b'));
+    , childBUrl);
     await helper.close();
     await page.close();
 
     // Both children should independently show the shared parent
-    expect(relA.parents.referrers).toContain(localServer.url('/shared-parent'));
-    expect(relB.parents.referrers).toContain(localServer.url('/shared-parent'));
+    expect(relA.parents.referrers).toContain(parentUrl);
+    expect(relB.parents.referrers).toContain(parentUrl);
   });
 });

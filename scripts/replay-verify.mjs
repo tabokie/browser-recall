@@ -14,7 +14,7 @@ import { effectOf, defaultEntity } from '../extension/replay.js';
 import { generateSlugFromUrl } from '../extension/utils.js';
 
 const DATA_DIR = join(process.env.HOME, 'portal-data');
-const HISTORY_DIR = join(DATA_DIR, 'history');
+const LOGS_DIR = join(DATA_DIR, 'data', 'logs');
 
 // Parse args
 let outputDir = '/tmp/portal-replay';
@@ -24,16 +24,16 @@ for (let i = 0; i < args.length; i++) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Load all history entries, sorted by timestamp
+// 1. Load all log entries, sorted by timestamp
 // ---------------------------------------------------------------------------
-console.log('Loading history...');
-const historyFiles = readdirSync(HISTORY_DIR)
+console.log('Loading logs...');
+const logFiles = readdirSync(LOGS_DIR)
   .filter(f => f.endsWith('.jsonl'))
   .sort();
 
 const allEntries = [];
-for (const file of historyFiles) {
-  const lines = readFileSync(join(HISTORY_DIR, file), 'utf-8').split('\n');
+for (const file of logFiles) {
+  const lines = readFileSync(join(LOGS_DIR, file), 'utf-8').split('\n');
   for (const line of lines) {
     if (!line.trim()) continue;
     try {
@@ -46,7 +46,7 @@ for (const file of historyFiles) {
 
 // Sort by timestamp (stable — preserves file order for same-ts entries)
 allEntries.sort((a, b) => a.timestamp - b.timestamp);
-console.log(`  ${allEntries.length} entries from ${historyFiles.length} files`);
+console.log(`  ${allEntries.length} entries from ${logFiles.length} files`);
 
 // ---------------------------------------------------------------------------
 // 2. Replay all entries through effectOf, accumulating state in a Map
@@ -60,13 +60,7 @@ for (let i = 0; i < allEntries.length; i++) {
   try {
     const result = await effectOf(entry, load);
     for (const [key, value] of Object.entries(result)) {
-      if (value === null) {
-        // effectOf returns null when entity doesn't exist yet (e.g., page without checkpoint)
-        // Don't overwrite existing entities with null
-        if (!store.has(key)) store.set(key, null);
-      } else {
-        store.set(key, value);
-      }
+      store.set(key, value);
     }
   } catch (e) {
     console.warn(`  ERROR replaying entry ${i} (ts=${entry.timestamp}, action=${entry.action}): ${e.message}`);
@@ -80,29 +74,38 @@ console.log(`  ${store.size} keys in replayed store`);
 // ---------------------------------------------------------------------------
 console.log(`Writing replayed state to ${outputDir}...`);
 mkdirSync(join(outputDir, 'pages'), { recursive: true });
-mkdirSync(join(outputDir, 'notes'), { recursive: true });
+mkdirSync(join(outputDir, 'data', 'notes'), { recursive: true });
 mkdirSync(join(outputDir, 'lists', 'system'), { recursive: true });
+mkdirSync(join(outputDir, 'lists', 'auto'), { recursive: true });
+mkdirSync(join(outputDir, 'manifest'), { recursive: true });
 
 for (const [key, value] of store) {
   if (value === null) continue;
   let path;
-  if (key === 'settings') {
-    path = join(outputDir, 'settings.json');
+  if (key === 'manifest:settings') {
+    path = join(outputDir, 'manifest', 'settings.json');
+  } else if (key === 'manifest:orphaned') {
+    path = join(outputDir, 'manifest', 'orphaned.json');
+  } else if (key === 'manifest:name-to-id') {
+    path = join(outputDir, 'manifest', 'list-name-to-id.json');
   } else if (key.startsWith('page:')) {
     const slug = key.slice('page:'.length);
     path = join(outputDir, 'pages', `${slug}.json`);
   } else if (key.startsWith('note:')) {
     const slug = key.slice('note:'.length);
-    path = join(outputDir, 'notes', `${slug}.json`);
-  } else if (key === 'list:system/recycle-bin') {
-    path = join(outputDir, 'lists', 'system', 'recycle-bin.json');
-  } else if (key === 'list:system/permanent-deletes') {
-    path = join(outputDir, 'lists', 'system', 'permanent-deletes.json');
-  } else if (key === 'list:system/shallow-page') {
-    path = join(outputDir, 'lists', 'system', 'shallow-page.json');
+    path = join(outputDir, 'data', 'notes', `${slug}.json`);
+  } else if (key.startsWith('list:system/')) {
+    const name = key.slice('list:system/'.length);
+    path = join(outputDir, 'lists', 'system', `${name}.json`);
+  } else if (key.startsWith('list:auto/')) {
+    const name = key.slice('list:auto/'.length);
+    path = join(outputDir, 'lists', 'auto', `${name}.json`);
   } else if (key.startsWith('list:')) {
     const slug = key.slice('list:'.length);
     path = join(outputDir, 'lists', `${slug}.json`);
+  } else if (key.startsWith('snapshot:')) {
+    // Snapshot keys are identity-only — no entity file on disk
+    continue;
   } else {
     console.warn(`  Unknown key prefix: ${key}`);
     continue;
@@ -161,15 +164,15 @@ if (existsSync(join(DATA_DIR, 'pages'))) {
 }
 
 // Notes
-if (existsSync(join(DATA_DIR, 'notes'))) {
-  for (const f of readdirSync(join(DATA_DIR, 'notes'))) {
+if (existsSync(join(DATA_DIR, 'data', 'notes'))) {
+  for (const f of readdirSync(join(DATA_DIR, 'data', 'notes'))) {
     if (!f.endsWith('.json')) continue;
     const slug = f.replace('.json', '');
-    entityPaths.set(`note:${slug}`, `notes/${f}`);
+    entityPaths.set(`note:${slug}`, `data/notes/${f}`);
   }
 }
 
-// Lists (non-system)
+// Lists (non-system, non-auto)
 if (existsSync(join(DATA_DIR, 'lists'))) {
   for (const f of readdirSync(join(DATA_DIR, 'lists'))) {
     if (!f.endsWith('.json')) continue;
@@ -179,13 +182,23 @@ if (existsSync(join(DATA_DIR, 'lists'))) {
 }
 
 // System lists
-entityPaths.set('list:system/recycle-bin', 'lists/system/recycle-bin.json');
-entityPaths.set('list:system/permanent-deletes', 'lists/system/permanent-deletes.json');
-entityPaths.set('list:system/shallow-page', 'lists/system/shallow-page.json');
+for (const name of ['root', 'explore']) {
+  entityPaths.set(`list:system/${name}`, `lists/system/${name}.json`);
+}
 
-// Settings
-entityPaths.set('settings', 'settings.json');
+// Auto lists
+if (existsSync(join(DATA_DIR, 'lists', 'auto'))) {
+  for (const f of readdirSync(join(DATA_DIR, 'lists', 'auto'))) {
+    if (!f.endsWith('.json')) continue;
+    const name = f.replace('.json', '');
+    entityPaths.set(`list:auto/${name}`, `lists/auto/${f}`);
+  }
+}
 
+// Manifest entities
+entityPaths.set('manifest:settings', 'manifest/settings.json');
+entityPaths.set('manifest:orphaned', 'manifest/orphaned.json');
+entityPaths.set('manifest:name-to-id', 'manifest/list-name-to-id.json');
 // Collect all keys (union of replayed + existing)
 const allKeys = new Set([...store.keys(), ...entityPaths.keys()]);
 
@@ -195,6 +208,9 @@ let replayOnlyCount = 0;
 let existingOnlyCount = 0;
 
 for (const key of [...allKeys].sort()) {
+  // Skip snapshot keys — no entity file
+  if (key.startsWith('snapshot:')) continue;
+
   const replayed = store.get(key) ?? null;
   const existingPath = entityPaths.get(key);
   const existing = existingPath ? loadExisting(existingPath) : null;

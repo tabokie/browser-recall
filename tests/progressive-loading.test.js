@@ -324,11 +324,11 @@ describe('Progressive loading', () => {
 
       case 'readCacheable':
         switch (msg.key) {
-          case 'settings': return { success: true, value: TEST_SETTINGS };
+          case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
           case 'list:system/root': return { success: true, value: TEST_ROOT };
           case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] } };
-          case 'list:system/shallow-page': return { success: true, value: { timestamp: 0, index: {} } };
-          case 'list:system/orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
+          case 'manifest:name-to-id': return { success: true, value: { timestamp: 0, paths: {} } };
+          case 'manifest:orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
           default: {
             // Return individual list entities by slug with pins
             for (const list of TEST_LISTS) {
@@ -348,7 +348,7 @@ describe('Progressive loading', () => {
   // Populate cache with all settings so loadSettingsValue hits fast path
   function populateCache() {
     sessionData = {
-      settings: TEST_SETTINGS,
+      'manifest:settings': TEST_SETTINGS,
       'list:system/root': { ...TEST_ROOT },
       'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
     };
@@ -456,7 +456,7 @@ describe('Progressive loading', () => {
     deferreds['readCacheable'] = createDeferred();
     deferreds['listInteractionFiles'] = createDeferred();
 
-    // Import triggers initialize() — it blocks at readCacheable('settings') cache miss
+    // Import triggers initialize() — it blocks at readCacheable('manifest:settings') cache miss
     // and at initHistoryFiles() (listInteractionFiles paused)
     const importDone = importOptions();
     await tick(50);
@@ -484,7 +484,7 @@ describe('Progressive loading', () => {
     // loadListTree() reads list:system/root, then readCacheable falls back to
     // the message handler for each child entity key.
     sessionData = {
-      settings: TEST_SETTINGS,
+      'manifest:settings': TEST_SETTINGS,
       'list:system/root': { ...TEST_ROOT },
       'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
       // individual list:<slug> keys intentionally missing from session
@@ -652,9 +652,9 @@ describe('Progressive loading', () => {
     const base = new Date('2026-02-15T14:00:00Z').getTime();
     const slug = TITLE_CHANGE_URL.replace(/[^a-z0-9]/gi, '-').substring(0, 40);
     const titleEntries = [
-      { id: `${base}-${slug}`, url: TITLE_CHANGE_URL, title: 'Untitled', timestamp: base, slug, action: 'page' },
-      { id: `${base + 60000}-${slug}`, url: TITLE_CHANGE_URL, title: 'Real Title', timestamp: base + 60000, slug, action: 'page' },
-      { id: `${base + 120000}-${slug}`, url: TITLE_CHANGE_URL, timestamp: base + 120000, slug, action: 'page' },
+      { id: `${base}-${slug}`, url: TITLE_CHANGE_URL, title: 'Untitled', timestamp: base, slug, action: 'visit_page' },
+      { id: `${base + 60000}-${slug}`, url: TITLE_CHANGE_URL, title: 'Real Title', timestamp: base + 60000, slug, action: 'visit_page' },
+      { id: `${base + 120000}-${slug}`, url: TITLE_CHANGE_URL, timestamp: base + 120000, slug, action: 'leave_page' },
     ];
 
     // Inject title-change entries into FILE1 data

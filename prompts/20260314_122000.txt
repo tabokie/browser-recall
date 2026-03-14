@@ -1,0 +1,86 @@
+- In last session, we added a flag to control video capture in snapshot. I wonder, if it is possible to store seperately the large files (including snapshot, image and other resources), reference them in HTML, and display them as item (with size) in page detail UI. User can choose to delete them.
+- 1 -> (a). 2 yes. 3 yes. 4 tell me more about the complexity.
+- When resources are stored inlined in HTML, can we view/edit them in e.g. Chrome console or via extension?
+- It is possible to have a "Compact" command when viewing snapshot. When clicking on "Compact", two button "Cancel" "Conform" and a slider appear where user selects the compaction strength, and users see immediately the end result (temporary HTMLin memory), if user is satisfied, he can click "Conform".
+- Size threshold.
+- Walk me through types of history logs we currently use
+- I want to reposition the logs to be fully events. That is, events are self descriptive, convey clear intention from the user, they do not depend on previous events or states.
+
+In practical terms, it means (1) types are converted to events, e.g. page -> visit_page and leave_page (2) intention relevant to that event is complete, e.g. reparent_list should contain full children list of parent, instead of an index. What do you think?
+- Show me plan first
+- Show me, I am not seeing it
+- 1. Is "mdPath, htmlPath" duplicated with "snapSlug"?
+2. Drop "checkpoint_page", the decision to create a checkpoint should be decided based on events alone.
+3. visit_page shouldn't have user_title
+4. Why does "delete_list" have to store subtrees? In fact, let's drop both subtrees and pins from delete_list and restore_list.
+5. Figure out how to remove id from logs. ID is a concept of internal implementation. Use only name and URL.
+- 1. one giant change. 2. Go. 3. Go.
+- continue
+- reload token
+- Do it here, no subagent
+- E2E tests didn't take this long before, add some timeout to prevent it to run this long again, and then figure out where the majority of time is spent, previously we have plenty of timer logs to diagnose, not sure if they are removed.
+- Go over test cases before and after all pending Git changes, figure out what cases got removed and why.
+- Do that, prefer to use E2E tests
+- Examine the code thoroughly, find out silent default, fallback, back compat code, they should be removed. Keen examples are "unknown" and "Untitled".
+- All of them is worth fixing
+- I think it is not just renaming, we have to figure out each case whether it is a "supported" case. For example, in some cases, it is better to simply bubble error to user instead of storing an incomplete data record. In some cases, we need to fetch essential information from somewhere else.
+- Elaborate on cases in popup.js, createNote, deleteNote/restoreNote, deleteSnapshot/restoreSnapshot. When exactly will the empty field occurs?
+- A few minor points: (1) When title is missing, let's persist it as that (field is null or simply absent from the object). (2) For page visit, we must handle slow loading well. That is to say, make sure title is persisted eventually after fully load (e.g. using rename_page { title } or using leave_page). (3) For createNote called from popup, what is stored in sender.tab.url? Is there other fields in sender.tab that we can use?
+- Go ahead
+- reload token
+- I see there are still patterns like `x || ''`, what is the reason to use empty string instead of null?
+- Fix 2, and use "<unknown>" for UI render
+- Keep the MutationObserver code, but delete messages like "report" that are discarded in background.js.
+- What is reportAttention used for? I thought we removed periodic reporting a few days ago.
+- Yes, and rename reportAttention to onLeavePage
+- Go over the processing logic for every single events before and after the pending Git changes. Enumerate their differences for me to review.
+- I have a few questions and direction:
+1. "Create page entity", does it mean populating page-info.json?
+2. For some of those logs, the field can be changed to non optional. In particular, for
+delete_note and restore_note, the url is always available from file entities.
+3. Reorganize directory structure. We anticipate other apps can directly read from "data/", and
+we do not store any concept tied to internal implementation there. It holds
+"/data/logs/<date>.jsonl", "/data/snapshots/<slug>-<timestamp>/*.html",
+"/data/notes/<slug>.json". And every references are either URL or relative path like
+"snapshots/..".
+3.1. Let's change every "slug" or "id" to "path", path points to a physical location. It is
+self descriptive and doesn't require knowledge of our internal implementation. That includes
+changing "snapTimestamp" to path="snapshots/<slug>-<timestamp>/".
+4. Change create_list to { parents = ["name-xx", "name-yy"], name = "xx" }. First level list
+has parents=[], hide concept of "root". Drop the id, ID is an internal concept.
+5. You get the general idea.
+- "data/" is purely readable, i.e. we surrender read permission to all potential apps outside our domain. And content inside it is generally immutable/append-only. (Let's make sure this is documented in ARCHITECTURE.md.) For internal data (e.g. system, entities) that contains internal concepts, we put them in a different folder. E.g. "<root>/data/", "<root>/lists/", "<root>/pages/", "<root>/manifest/"
+
+A. yes, reduce the nesting depth. Internally we don't rely on filesystem listDir to get snapshots anyway, we always keep a manifest of them in checkpoint file.
+B. Only pages and notes.
+C. page-info is internal, let's move all manifests with irregular shapes into folder "<root>/manifest/".
+- AB. orphaned.json, settings.json belong to manifest (they are storing different elements than a normal list). root.json, explore.json, gateways.json stay in lists/system.
+C. Highlight is a subset of note. They should be in data/ and stored in the same format as before (<noteSlug>.json).
+
+Rename "name-map.json" to "list-name-to-id.json".
+- pages store <slug>.json, no nested folder. The rest looks good.
+- Don't just update plan. Implement the gap. Clear context before proceed.
+- Proceed
+- I have two questions: (1) "data/snapshots/<slug>-<ts>/index.md" looks bloated, user still has to listDir to know the exact file. What do you propose? (2) The old unified key schema (history:.., note:.., page:..) no longer maps the file structure, how do you propose we change it?
+- Is it better to just use file path?
+- I see. Let's keep it typed ID. page:<slug>, note:<slug>, snapshot:<slug>-<ts>, list:<id>, log:<date>.
+
+Formulate a plan for all needed changes.
+- continue
+- You stashed changes before
+- E2E tests didn't take this long before, add some timeout to prevent it to run this long again, and then figure out where the majority of time is spent.
+- reload token
+- Is there any fallback or back compat code remaining? Clean them up if so
+- What else is missing? Review thoroughly
+- Double check migration, dryrun it, backup ~/portal-data, and apply the migration. Do no delete backup, I will manage the backup manually.
+- reload token
+- A lot of list pins (not all) show up as "<unknown>", for example, the one in "Cinema" list.
+- One more thing. A lot of the page checkpoints in "pages/" should not exist based on latest criteria.
+- That is a misunderstanding of relation between page-info and page files. Page files are only created when page-info is too large (than a size threshold). They should have no intersection.
+- Do it now. 5MB sound good. And make sure that when a page becomes no longer eligible for remembering (e.g. unpinned), we remove it from page-info or page files during replay.
+- Cleaup data now
+- This is happening again, a lot of pinned pages in lists now have "<unknown>" titles.
+- We should definitely fix stale parentIds. And I worry why they are stale in the first place, will the extension code correctly updates parentIds moving forward?
+- Yes, TDD
+- One more thing. I noticed for an initially untitled page, the refreshed title is not passed to background.js in `leave_page` event. Fix that
+- /finish

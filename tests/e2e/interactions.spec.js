@@ -8,7 +8,7 @@ test.describe('Interactions — likes, notes, attention', () => {
   test('seeded page with likes returns correct value via getPageInfo', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain',
         timestamp: now, likes: 3, scrollDepth: 80, timeOnPage: 45000,
@@ -40,7 +40,7 @@ test.describe('Interactions — likes, notes, attention', () => {
   test('createNote via message, then getPageInfo returns the note WITHOUT flush', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain',
         timestamp: now, parentIds: [], childIds: [],
@@ -77,9 +77,9 @@ test.describe('Interactions — likes, notes, attention', () => {
   test('seeded page with attention data displays in explore view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain',
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'leave_page', url: TEST_URL, title: 'Example Domain',
           timeOnPage: 120000, scrollDepth: 95 },
       ]},
     ]);
@@ -96,7 +96,7 @@ test.describe('Interactions — likes, notes, attention', () => {
   test('like delta accumulates via addLog replay', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain',
         timestamp: now - 3000, likes: 0, parentIds: [], childIds: [],
@@ -129,13 +129,13 @@ test.describe('Interactions — likes, notes, attention', () => {
   test('createNote adds note to parent page childIds', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
     ]);
 
@@ -164,13 +164,13 @@ test.describe('Interactions — likes, notes, attention', () => {
   test('createNote writes content to filesystem, log entry has no content', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'history/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
     ]);
 
@@ -201,15 +201,15 @@ test.describe('Interactions — likes, notes, attention', () => {
     // Load today's history and find the note entry — it should NOT have content
     const todayStr = new Date().toISOString().slice(0, 10);
     const history = await helper.evaluate((date) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: `history:${date}` })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: `log:${date}` })
     , todayStr);
 
-    const noteEntry = (history.value || []).find(e => e.action === 'note' && e.slug === noteSlug);
+    const noteEntry = (history.value || []).find(e => e.action === 'create_note' && e.path === `notes/${noteSlug}.json`);
     expect(noteEntry).toBeTruthy();
     expect(noteEntry.excerpt).toBeUndefined();
     expect(noteEntry.note).toBeUndefined();
     expect(noteEntry.cssPath).toBeUndefined();
-    expect(noteEntry.parentIds).toBeTruthy(); // relation is logged
+    expect(noteEntry.url).toBeTruthy(); // relation is logged
 
     await helper.close();
   });
@@ -218,12 +218,12 @@ test.describe('Interactions — likes, notes, attention', () => {
     const now = Date.now();
     const noteSlug = '260301-test-note-abc';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
-        parentIds: [], childIds: [`note:${noteSlug}`],
+        parentIds: [], childIds: [`note:${noteSlug}`], user_title: 'Kept',
       }},
-      { path: `notes/${noteSlug}.json`, data: {
+      { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Hello', note: 'World', cssPath: 'p',
         parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
       }},
@@ -237,7 +237,7 @@ test.describe('Interactions — likes, notes, attention', () => {
     , noteSlug);
     expect(delResult.success).toBe(true);
 
-    // Parent page should no longer have note in childIds
+    // Parent page should no longer have note in childIds (page survives due to user_title)
     const pageEntity = await helper.evaluate((key) =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key })
     , `page:${TEST_SLUG}`);
@@ -254,7 +254,7 @@ test.describe('Interactions — likes, notes, attention', () => {
 
     // Note should be in orphaned list
     const orphaned = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphaned.value).toBeTruthy();
     expect(orphaned.value.keys).toContain(`note:${noteSlug}`);
@@ -266,12 +266,12 @@ test.describe('Interactions — likes, notes, attention', () => {
     const now = Date.now();
     const noteSlug = '260301-update-test';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`],
       }},
-      { path: `notes/${noteSlug}.json`, data: {
+      { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Original', note: 'Old text', cssPath: 'p',
         parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
       }},
@@ -299,9 +299,9 @@ test.describe('Interactions — likes, notes, attention', () => {
     );
     const todayStr = new Date().toISOString().slice(0, 10);
     const history = await helper.evaluate((date) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: `history:${date}` })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: `log:${date}` })
     , todayStr);
-    const noteEntries = (history.value || []).filter(e => e.action === 'note' && e.slug === noteSlug);
+    const noteEntries = (history.value || []).filter(e => e.action === 'create_note' && e.path === `notes/${noteSlug}.json`);
     expect(noteEntries).toHaveLength(0); // no log entry for update
 
     await helper.close();

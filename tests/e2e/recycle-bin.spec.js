@@ -11,19 +11,19 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const noteSlug = '260304-restore-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Page with empty childIds (note was unlinked by del_note)
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
       // Note file still on disk (deletion doesn't remove files)
-      { path: `notes/${noteSlug}.json`, data: {
+      { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Orphaned note', note: 'Still here', cssPath: 'p',
         parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
       }},
       // Orphaned list tracks the deleted note
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`],
       }},
     ]);
@@ -45,7 +45,7 @@ test.describe('Recycle bin', () => {
 
     // Verify orphaned list no longer has the note key
     const orphanedResp = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
     expect(orphanedResp.value.keys).not.toContain(`note:${noteSlug}`);
@@ -58,7 +58,7 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const listId = 'restore-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: [],  // list was removed from root by del_list
       }},
@@ -77,7 +77,7 @@ test.describe('Recycle bin', () => {
         parentIds: [], childIds: [],
       }},
       // Orphaned list tracks the deleted list
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`list:${listId}`],
       }},
     ]);
@@ -106,7 +106,7 @@ test.describe('Recycle bin', () => {
 
     // Verify orphaned list no longer has the list key
     const orphanedResp = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
     expect(orphanedResp.value.keys).not.toContain(`list:${listId}`);
@@ -127,17 +127,17 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const noteSlug = '260310-restore-fields';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
       // Note on disk with original fields + deleted: true
-      { path: `notes/${noteSlug}.json`, data: {
+      { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'My excerpt', note: 'Important content', cssPath: 'div.main > p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: ['snap:some/123'], timestamp: now, deleted: true,
+        parentIds: [`page:${TEST_SLUG}`], childIds: ['snapshot:some-123'], timestamp: now, deleted: true,
       }},
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`],
       }},
     ]);
@@ -159,7 +159,7 @@ test.describe('Recycle bin', () => {
     expect(noteResp.value.excerpt).toBe('My excerpt');
     expect(noteResp.value.note).toBe('Important content');
     expect(noteResp.value.cssPath).toBe('div.main > p');
-    expect(noteResp.value.childIds).toContain('snap:some/123');
+    expect(noteResp.value.childIds).toContain('snapshot:some-123');
 
     await helper.close();
   });
@@ -169,7 +169,7 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const listId = 'restore-fields-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: [],
       }},
@@ -185,7 +185,7 @@ test.describe('Recycle bin', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`list:${listId}`],
       }},
     ]);
@@ -217,22 +217,22 @@ test.describe('Recycle bin', () => {
     const today = new Date(now).toISOString().slice(0, 10);
     const noteSlug = '260304-perm-del-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
       // Note file on disk
-      { path: `notes/${noteSlug}.json`, data: {
+      { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'To be destroyed', note: 'Gone forever', cssPath: 'p',
         parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
       }},
       // A pending log entry to ensure drain is needed
-      { path: `history/${today}.jsonl`, lines: [
-        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      { path: `data/logs/${today}.jsonl`, lines: [
+        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
       // Orphaned list tracks the note
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`],
       }},
     ]);
@@ -254,7 +254,7 @@ test.describe('Recycle bin', () => {
 
     // Verify orphaned list no longer has the key
     const orphanedResp = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
     expect(orphanedResp.value.keys).not.toContain(`note:${noteSlug}`);
@@ -267,13 +267,13 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const listId = 'perm-del-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Deleted list entity on disk
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Doomed List', timestamp: now,
         pins: [], savedSearches: [], deleted: true,
       }},
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`list:${listId}`],
       }},
     ]);
@@ -295,7 +295,7 @@ test.describe('Recycle bin', () => {
 
     // Verify orphaned list no longer has the key
     const orphanedResp = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
     expect(orphanedResp.value.keys).not.toContain(`list:${listId}`);
@@ -309,8 +309,8 @@ test.describe('Recycle bin', () => {
     const noteSlug = '260304-bulk-note';
     const listId = 'bulk-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
-      { path: `notes/${noteSlug}.json`, data: {
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Bulk delete', note: 'Gone', cssPath: 'p',
         parentIds: [], childIds: [], timestamp: now,
       }},
@@ -318,7 +318,7 @@ test.describe('Recycle bin', () => {
         slug: listId, name: 'Bulk List', timestamp: now,
         pins: [], savedSearches: [], deleted: true,
       }},
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`, `list:${listId}`],
       }},
     ]);
@@ -333,7 +333,7 @@ test.describe('Recycle bin', () => {
 
     // Verify orphaned list is empty
     const orphanedResp = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
     expect(orphanedResp.value.keys).toHaveLength(0);
@@ -358,8 +358,8 @@ test.describe('Recycle bin', () => {
     const noteSlug = '260304-ui-note';
     const listId = 'ui-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
-      { path: `notes/${noteSlug}.json`, data: {
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'UI test note', note: 'Visible', cssPath: 'p',
         parentIds: [], childIds: [], timestamp: now,
       }},
@@ -367,7 +367,7 @@ test.describe('Recycle bin', () => {
         slug: listId, name: 'UI List', timestamp: now,
         pins: [], savedSearches: [], deleted: true,
       }},
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`, `list:${listId}`],
       }},
     ]);
@@ -397,16 +397,16 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const noteSlug = '260304-restore-ui-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: `notes/${noteSlug}.json`, data: {
+      { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Restore me', note: 'Content', cssPath: 'p',
         parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
       }},
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`],
       }},
     ]);
@@ -440,8 +440,8 @@ test.describe('Recycle bin', () => {
     const noteSlug = '260304-empty-note';
     const listId = 'empty-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
-      { path: `notes/${noteSlug}.json`, data: {
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Empty me', note: 'Gone', cssPath: 'p',
         parentIds: [], childIds: [], timestamp: now,
       }},
@@ -449,7 +449,7 @@ test.describe('Recycle bin', () => {
         slug: listId, name: 'Empty List', timestamp: now,
         pins: [], savedSearches: [], deleted: true,
       }},
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`, `list:${listId}`],
       }},
     ]);
@@ -469,10 +469,86 @@ test.describe('Recycle bin', () => {
 
     // Verify orphaned list is empty
     const orphanedResp = await options.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.value.keys).toHaveLength(0);
 
     await options.close();
+  });
+
+  // Noop guard: deleting an already-deleted note does not duplicate orphaned key
+  test('deleteNote on already-deleted note is noop — no duplicate orphaned key', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const noteSlug = '260312-noop-del';
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      // Note already deleted (deleted: true on disk)
+      { path: `data/notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: 'Already gone', note: 'Gone', cssPath: 'p',
+        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now, deleted: true,
+      }},
+      { path: 'manifest/orphaned.json', data: {
+        timestamp: now, keys: [`note:${noteSlug}`],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Delete the already-deleted note again
+    await helper.evaluate((slug) =>
+      chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug: slug })
+    , noteSlug);
+
+    // Orphaned list should still have exactly 1 entry (not duplicated)
+    const orphanedResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
+    );
+    const noteKeys = orphanedResp.value.keys.filter(k => k === `note:${noteSlug}`);
+    expect(noteKeys).toHaveLength(1);
+
+    await helper.close();
+  });
+
+  // Dedup: restoring a note whose parent page already has it in childIds should not duplicate
+  test('restoreNote does not duplicate note in parent childIds', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const noteSlug = '260312-dedup-restore';
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      // Page that already has the note in childIds (simulates inconsistent state)
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [`note:${noteSlug}`],
+      }},
+      // Note deleted on disk
+      { path: `data/notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: 'Dedup test', note: 'Content', cssPath: 'p',
+        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now, deleted: true,
+      }},
+      { path: 'manifest/orphaned.json', data: {
+        timestamp: now, keys: [`note:${noteSlug}`],
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Restore the note — linkChild should not duplicate it in parent's childIds
+    const restoreResp = await helper.evaluate((slug) =>
+      chrome.runtime.sendMessage({ action: 'restoreNote', noteSlug: slug })
+    , noteSlug);
+    expect(restoreResp.success).toBe(true);
+
+    // Verify parent page has exactly 1 note ref (not 2)
+    const pageResp = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${TEST_SLUG}`);
+    const noteRefs = pageResp.value.childIds.filter(id => id === `note:${noteSlug}`);
+    expect(noteRefs).toHaveLength(1);
+
+    await helper.close();
   });
 });

@@ -4,7 +4,7 @@ import { resetAndSeed, openOptionsPage, openHelperPage, getSlugForUrl } from './
 test.describe('Settings persistence', () => {
   test('seeded settings values display in settings modal', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [], relatedPagesLimit: 25, historyFileBatch: 5,
       }},
     ]);
@@ -23,7 +23,7 @@ test.describe('Settings persistence', () => {
 
   test('changed setting persists after page reload', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: {
+      { path: 'manifest/settings.json', data: {
         trimRules: [], relatedPagesLimit: 50, historyFileBatch: 10,
       }},
     ]);
@@ -59,7 +59,7 @@ test.describe('Settings persistence', () => {
     const exSlug = getSlugForUrl('https://example.com/');
     const hnSlug = getSlugForUrl('https://news.ycombinator.com/');
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/auto.json', data: { slug: 'auto', name: 'Auto', auto: true, parentList: 'list:system/root', childLists: ['list:auto/gateways'], pins: [], savedSearches: [], timestamp: 1 } },
       { path: 'lists/auto/gateways.json', data: {
         slug: 'auto/gateways', name: 'Gateways', auto: true, parentList: 'list:auto', childLists: [],
@@ -88,12 +88,13 @@ test.describe('Settings persistence', () => {
   // Visits child pages, then root (triggers promotion), flushes, rehydrates,
   // and checks that the gateway pin persists.
   test('gateway promotion persists through drain flush + rehydrate', async ({ extContext, extensionId, setupDir, localServer }) => {
+    localServer.addPage('/', { title: 'Root', body: '<h1>Root</h1>' });
     localServer.addPage('/gw-child-1', { title: 'Child 1', body: '<p>Page 1</p>' });
     localServer.addPage('/gw-child-2', { title: 'Child 2', body: '<p>Page 2</p>' });
 
     // Seed empty auto/gateways list so promotion has somewhere to write
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/auto.json', data: { slug: 'auto', name: 'Auto', auto: true, parentList: 'list:system/root', childLists: ['list:auto/gateways'], pins: [], savedSearches: [], timestamp: 1 } },
       { path: 'lists/auto/gateways.json', data: { slug: 'auto/gateways', name: 'Gateways', auto: true, parentList: 'list:auto', childLists: [], pins: [], savedSearches: [], timestamp: 1 } },
       { path: 'lists/system/root.json', data: { timestamp: 1, childLists: ['list:auto'] } },

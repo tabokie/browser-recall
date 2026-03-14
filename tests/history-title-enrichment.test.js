@@ -4,7 +4,6 @@
  * Verifies:
  * - enrichFromEntityStorage fills missing titles from page checkpoints
  *   (when no log entry in the loaded batch has a title for that URL)
- * - enrichFromEntityStorage fills missing titles from SPI for shallow pages
  * - Explore view (no enabled blocks) calls enrichFromEntityStorage
  *
  * @vitest-environment jsdom
@@ -32,23 +31,23 @@ const CHECKPOINTED_URL = 'https://music.douban.com/';
 const CHECKPOINTED_SLUG = generateSlugFromUrl(CHECKPOINTED_URL);
 const CHECKPOINTED_TITLE = '豆瓣音乐';
 
-// Shallow page: never checkpointed, title only in SPI
-const SHALLOW_URL = 'https://shallow-example.com/page';
-const SHALLOW_SLUG = generateSlugFromUrl(SHALLOW_URL);
-const SHALLOW_TITLE = 'Shallow Page Title from SPI';
+// Second checkpointed page: title only in page entity, not in today's log entries
+const SECOND_URL = 'https://shallow-example.com/page';
+const SECOND_SLUG = generateSlugFromUrl(SECOND_URL);
+const SECOND_TITLE = 'Second Page Title from Entity';
 
 const base = new Date(`${FILE1_DATE}T12:00:00Z`).getTime();
 
 // Checkpointed page entries — NO title in any entry (simulates revisit on a new day)
 const CHECKPOINT_ENTRIES = [
-  { url: CHECKPOINTED_URL, timestamp: base, action: 'page', scrollDepth: 0, timeOnPage: 1078 },
-  { url: CHECKPOINTED_URL, timestamp: base + 60000, action: 'page', timeOnPage: 287 },
+  { url: CHECKPOINTED_URL, timestamp: base, action: 'visit_page', scrollDepth: 0, timeOnPage: 1078 },
+  { url: CHECKPOINTED_URL, timestamp: base + 60000, action: 'visit_page', timeOnPage: 287 },
 ];
 
-// Shallow page entries — NO title in any entry
-const SHALLOW_ENTRIES = [
-  { url: SHALLOW_URL, timestamp: base + 200000, action: 'page', scrollDepth: 0, timeOnPage: 500 },
-  { url: SHALLOW_URL, timestamp: base + 260000, action: 'page', timeOnPage: 100 },
+// Second page entries — NO title in any entry
+const SECOND_ENTRIES = [
+  { url: SECOND_URL, timestamp: base + 200000, action: 'visit_page', scrollDepth: 0, timeOnPage: 500 },
+  { url: SECOND_URL, timestamp: base + 260000, action: 'visit_page', timeOnPage: 100 },
 ];
 
 // Normal entries with titles (filler)
@@ -58,11 +57,11 @@ for (let i = 0; i < 5; i++) {
     url: `https://example.com/page${i}`,
     title: `Example Page ${i}`,
     timestamp: base + 300000 + i * 60000,
-    action: 'page',
+    action: 'visit_page',
   });
 }
 
-const ALL_ENTRIES = [...CHECKPOINT_ENTRIES, ...SHALLOW_ENTRIES, ...NORMAL_ENTRIES];
+const ALL_ENTRIES = [...CHECKPOINT_ENTRIES, ...SECOND_ENTRIES, ...NORMAL_ENTRIES];
 
 const FILES_NEWEST_FIRST = [`${FILE1_DATE}.jsonl`];
 const FILE_MAP = {
@@ -78,7 +77,7 @@ const TEST_SETTINGS = {
   titleTrimRules: [],
 };
 
-// Page checkpoint returned by readCacheable('page:*')
+// Page checkpoints returned by readCacheable('page:*')
 const PAGE_CHECKPOINTS = {
   [CHECKPOINTED_SLUG]: {
     slug: CHECKPOINTED_SLUG,
@@ -88,17 +87,13 @@ const PAGE_CHECKPOINTS = {
     parentIds: [],
     childIds: [],
   },
-};
-
-// Shallow Page Index
-const SPI_DATA = {
-  timestamp: base,
-  index: {
-    [SHALLOW_URL]: {
-      title: SHALLOW_TITLE,
-      parentIds: [],
-      lists: [],
-    },
+  [SECOND_SLUG]: {
+    slug: SECOND_SLUG,
+    url: SECOND_URL,
+    title: SECOND_TITLE,
+    timestamp: base - 86400000,
+    parentIds: [],
+    childIds: [],
   },
 };
 
@@ -227,10 +222,10 @@ describe('History title enrichment', () => {
 
       case 'readCacheable':
         switch (msg.key) {
-          case 'settings': return { success: true, value: TEST_SETTINGS };
+          case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
           case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] } };
-          case 'list:system/shallow-page': return { success: true, value: SPI_DATA };
-          case 'list:system/orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
+          case 'manifest:name-to-id': return { success: true, value: { timestamp: 0, paths: {} } };
+          case 'manifest:orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
           default: {
             if (msg.key.startsWith('page:')) {
               const slug = msg.key.slice('page:'.length);
@@ -270,9 +265,9 @@ describe('History title enrichment', () => {
 
   function populateCache() {
     sessionData = {
-      settings: TEST_SETTINGS,
+      'manifest:settings': TEST_SETTINGS,
       'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
-      'list:system/shallow-page': SPI_DATA,
+      'manifest:name-to-id': { timestamp: 0, paths: {} },
     };
     localData = { logBuffer: [] };
   }
@@ -332,17 +327,16 @@ describe('History title enrichment', () => {
     expect(title).toBe(CHECKPOINTED_TITLE);
   });
 
-  it('enriches shallow page title from SPI when log entries have no title', async () => {
-    // Scenario: a shallow page (never checkpointed) has no title in any
-    // log entry. The SPI has a title for it. enrichFromEntityStorage should
-    // fall back to SPI.
+  it('enriches second page title from page entity when log entries have no title', async () => {
+    // Scenario: a page was checkpointed on a prior day. Today's log entries
+    // have no title field. enrichFromEntityStorage should fill from page entity.
     populateCache();
 
     const importDone = importOptions();
     await importDone;
     await tick(200);
 
-    const title = findRowTitle(SHALLOW_URL);
-    expect(title).toBe(SHALLOW_TITLE);
+    const title = findRowTitle(SECOND_URL);
+    expect(title).toBe(SECOND_TITLE);
   });
 });

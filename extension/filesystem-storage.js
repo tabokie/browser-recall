@@ -244,7 +244,7 @@ class FileSystemStorage {
       const date = new Date(metadata.timestamp);
       const filename = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}.jsonl`;
 
-      const fileHandle = await this.resolveFile('history/' + filename, { create: true });
+      const fileHandle = await this.resolveFile('data/logs/' + filename, { create: true });
 
       const writable = await fileHandle.createWritable({ keepExistingData: true });
       const file = await fileHandle.getFile();
@@ -289,9 +289,9 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
-    const historyDir = await this.resolveDir('history');
+    const logsDir = await this.resolveDir('data/logs');
     const files = [];
-    for await (const entry of historyDir.values()) {
+    for await (const entry of logsDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl'))
         files.push(entry.name);
     }
@@ -321,7 +321,7 @@ class FileSystemStorage {
     const interactions = [];
     for (const name of filenames) {
       try {
-        const fh = await this.resolveFile('history/' + name);
+        const fh = await this.resolveFile('data/logs/' + name);
         const file = await fh.getFile();
         const text = await file.text();
         for (const line of text.split('\n')) {
@@ -341,8 +341,8 @@ class FileSystemStorage {
 
     const interactionsByUrl = new Map();
 
-    // Read all .jsonl files from history/
-    const historyDir = await this.resolveDir('history');
+    // Read all .jsonl files from data/logs/
+    const historyDir = await this.resolveDir('data/logs');
     for await (const entry of historyDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
         const file = await entry.getFile();
@@ -369,20 +369,6 @@ class FileSystemStorage {
     return interactions;
   }
 
-  // Load shallow page index from lists/system/shallow-page.json
-  async loadShallowPageIndex() {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to read directory');
-    }
-    try {
-      const fileHandle = await this.resolveFile('lists/system/shallow-page.json');
-      return this.readJson(fileHandle);
-    } catch (error) {
-      if (isNotFound(error)) return { timestamp: 0, index: {} };
-      throw error;
-    }
-  }
-
   // Load all notes from notes/ directory
   async loadAllNotes() {
     if (!(await this.verifyPermission())) {
@@ -392,7 +378,7 @@ class FileSystemStorage {
     const notesMap = {}; // pageSlug → [noteEntity, ...]
 
     try {
-      const notesDir = await this.resolveDir('notes');
+      const notesDir = await this.resolveDir('data/notes');
       for await (const entry of notesDir.values()) {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
           const file = await entry.getFile();
@@ -412,12 +398,12 @@ class FileSystemStorage {
     return notesMap;
   }
 
-  // Capture a versioned snapshot: pages/{slug}/{timestamp}.md and .html
+  // Capture a versioned snapshot: data/snapshots/<slug>-<timestamp>.md and .html (flat files)
   async captureSnapshot(slug, timestamp, markdown, html) {
-    const slugDir = await this.resolveDir('pages/' + slug);
+    const snapshotsDir = await this.resolveDir('data/snapshots');
 
     if (markdown) {
-      const mdHandle = await slugDir.getFileHandle(`${timestamp}.md`, { create: true });
+      const mdHandle = await snapshotsDir.getFileHandle(`${slug}-${timestamp}.md`, { create: true });
       const mdWritable = await mdHandle.createWritable();
       await mdWritable.write(markdown);
       await mdWritable.close();
@@ -427,14 +413,14 @@ class FileSystemStorage {
       // Embed slug identity so content.js can identify the page in blob: tabs
       const metaTag = `<meta name="x-portal-slug" content="${slug}">`;
       const taggedHtml = html.replace(/<head([^>]*)>/i, `<head$1>${metaTag}`);
-      const htmlHandle = await slugDir.getFileHandle(`${timestamp}.html`, { create: true });
+      const htmlHandle = await snapshotsDir.getFileHandle(`${slug}-${timestamp}.html`, { create: true });
       const htmlWritable = await htmlHandle.createWritable();
       await htmlWritable.write(taggedHtml === html ? metaTag + html : taggedHtml);
       await htmlWritable.close();
     }
   }
 
-  // List all snapshots for a slug
+  // List all snapshots for a slug (flat files in data/snapshots/)
   async listSnapshots(slug) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
@@ -443,14 +429,15 @@ class FileSystemStorage {
     const snapshots = [];
 
     try {
-      const pagesDir = await this.resolveDir('pages');
-      const slugDir = await pagesDir.getDirectoryHandle(slug);
+      const snapshotsDir = await this.resolveDir('data/snapshots');
       const tsSet = new Map();
+      const prefix = slug + '-';
 
-      for await (const entry of slugDir.values()) {
+      for await (const entry of snapshotsDir.values()) {
         if (entry.kind !== 'file') continue;
+        if (!entry.name.startsWith(prefix)) continue;
 
-        const match = entry.name.match(/^(\d+)\.(md|html)$/);
+        const match = entry.name.slice(prefix.length).match(/^(\d+)\.(md|html)$/);
         if (!match) continue;
 
         const ts = parseInt(match[1], 10);
@@ -475,11 +462,10 @@ class FileSystemStorage {
 
   // Get a blob URL for a snapshot file (html preferred, falls back to md)
   async getSnapshotBlobUrl(slug, timestamp) {
-    const pagesDir = await this.resolveDir('pages');
-    const slugDir = await pagesDir.getDirectoryHandle(slug);
+    const snapshotsDir = await this.resolveDir('data/snapshots');
     for (const ext of ['html', 'md']) {
       try {
-        const handle = await slugDir.getFileHandle(`${timestamp}.${ext}`);
+        const handle = await snapshotsDir.getFileHandle(`${slug}-${timestamp}.${ext}`);
         const file = await handle.getFile();
         return URL.createObjectURL(file);
       } catch (e) { if (!isNotFound(e)) throw e; }
@@ -493,10 +479,19 @@ class FileSystemStorage {
       throw new Error('No permission to delete');
     }
 
+    const snapshotsDir = await this.resolveDir('data/snapshots');
+    try { await this.softDelete(snapshotsDir, `${slug}-${timestamp}.md`); } catch (e) { if (!isNotFound(e)) throw e; }
+    try { await this.softDelete(snapshotsDir, `${slug}-${timestamp}.html`); } catch (e) { if (!isNotFound(e)) throw e; }
+  }
+
+  // Delete a page entity file from pages/{slug}.json
+  async deletePage(slug) {
     const pagesDir = await this.resolveDir('pages');
-    const slugDir = await pagesDir.getDirectoryHandle(slug);
-    try { await this.softDelete(slugDir, `${timestamp}.md`); } catch (e) { if (!isNotFound(e)) throw e; }
-    try { await this.softDelete(slugDir, `${timestamp}.html`); } catch (e) { if (!isNotFound(e)) throw e; }
+    try {
+      await this.softDelete(pagesDir, `${slug}.json`);
+    } catch (e) {
+      if (!isNotFound(e)) throw e;
+    }
   }
 
   // Load notes for a page slug from page entity's children + notes/ directory
@@ -541,7 +536,7 @@ class FileSystemStorage {
     const slugSet = new Set(slugs);
     const visitDays = new Map(); // slug → Set<YYYY-MM-DD>
 
-    const historyDir = await this.resolveDir('history');
+    const historyDir = await this.resolveDir('data/logs');
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
     const cutoffStr = cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
@@ -603,10 +598,10 @@ class FileSystemStorage {
     await this.writeJson(fileHandle, data);
   }
 
-  // Load note metadata from notes/{slug}.json
+  // Load note metadata from data/notes/{slug}.json
   async loadNote(slug) {
     try {
-      const fileHandle = await this.resolveFile(`notes/${slug}.json`);
+      const fileHandle = await this.resolveFile(`data/notes/${slug}.json`);
       return this.readJson(fileHandle);
     } catch (error) {
       if (isNotFound(error)) return null;
@@ -614,15 +609,15 @@ class FileSystemStorage {
     }
   }
 
-  // Save note metadata to notes/{slug}.json
+  // Save note metadata to data/notes/{slug}.json
   async saveNote(slug, data) {
-    const fileHandle = await this.resolveFile(`notes/${slug}.json`, { create: true });
+    const fileHandle = await this.resolveFile(`data/notes/${slug}.json`, { create: true });
     await this.writeJson(fileHandle, data);
   }
 
   // Delete note by moving to deleted/ directory
   async deleteNote(slug) {
-    const notesDir = await this.resolveDir('notes');
+    const notesDir = await this.resolveDir('data/notes');
     await this.softDelete(notesDir, `${slug}.json`);
   }
 
@@ -634,8 +629,8 @@ class FileSystemStorage {
 
     let match = null;
 
-    const historyDir = await this.resolveDir('history');
-    for await (const entry of historyDir.values()) {
+    const logsDir = await this.resolveDir('data/logs');
+    for await (const entry of logsDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
         const file = await entry.getFile();
         const text = await file.text();
@@ -873,14 +868,14 @@ class FileSystemStorage {
     }
   }
 
-  // Load settings.json — returns {} if missing or unreadable
+  // Load manifest/settings.json — returns {} if missing or unreadable
   async loadSettings() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
 
     try {
-      const fileHandle = await this.resolveFile('settings.json');
+      const fileHandle = await this.resolveFile('manifest/settings.json');
       return this.readJson(fileHandle);
     } catch (error) {
       if (isNotFound(error)) return {};
@@ -888,13 +883,13 @@ class FileSystemStorage {
     }
   }
 
-  // Save settings.json
+  // Save manifest/settings.json
   async saveSettings(data) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write directory');
     }
 
-    const fileHandle = await this.resolveFile('settings.json', { create: true });
+    const fileHandle = await this.resolveFile('manifest/settings.json', { create: true });
     await this.writeJson(fileHandle, data);
   }
 

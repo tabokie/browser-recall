@@ -21,12 +21,12 @@ test.describe('Snapshot slug meta tag', () => {
 
     // Seed: page entity with a note child, and the note entity with an excerpt
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url: originalUrl, title: 'Example Article', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`],
       }},
-      { path: `notes/${noteSlug}.json`, data: {
+      { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: highlightText, note: '', timestamp: now,
         parentIds: [`page:${slug}`],
       }},
@@ -58,7 +58,7 @@ test.describe('Snapshot slug meta tag', () => {
     const slug = getSlugForUrl(pageUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
     ]);
 
     // Navigate to the page so content script is available for capture

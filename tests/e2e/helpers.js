@@ -107,5 +107,5 @@ export function getSlugForUrl(url) {
     }
     const hashStr = Math.abs(hash).toString(36);
     return `${base}-${hashStr}`.substring(0, 80);
-  } catch { return 'untitled'; }
+  } catch { throw new Error(`getSlugForUrl: invalid URL: ${url}`); }
 }

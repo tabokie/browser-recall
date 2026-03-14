@@ -9,7 +9,7 @@ test.describe('Context menu highlight', () => {
   test('contextMenuHighlight creates note for page', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Article', timestamp: now,
         parentIds: [], childIds: [],
@@ -43,7 +43,7 @@ test.describe('Context menu highlight', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url: pageUrl, title: 'Ctx Test', timestamp: now,
         parentIds: [], childIds: [],
@@ -80,16 +80,16 @@ test.describe('Context menu highlight', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url: pageUrl, title: 'Multi', timestamp: now,
         parentIds: [], childIds: ['note:note-a', 'note:note-b'],
       }},
-      { path: 'notes/note-a.json', data: {
+      { path: 'data/notes/note-a.json', data: {
         slug: 'note-a', excerpt: 'first', note: 'my note', timestamp: now,
         parentIds: [`page:${slug}`],
       }},
-      { path: 'notes/note-b.json', data: {
+      { path: 'data/notes/note-b.json', data: {
         slug: 'note-b', excerpt: 'second', note: '', timestamp: now,
         parentIds: [`page:${slug}`],
       }},

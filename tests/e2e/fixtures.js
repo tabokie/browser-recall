@@ -93,7 +93,8 @@ export const test = base.extend({
         return;
       }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${page.title}</title></head><body>${page.body}</body></html>`);
+      const titleTag = page.title != null ? `<title>${page.title}</title>` : '';
+      res.end(`<!DOCTYPE html><html><head><meta charset="utf-8">${titleTag}</head><body>${page.body}</body></html>`);
     });
     await new Promise(r => server.listen(0, '127.0.0.1', r));
     const port = server.address().port;

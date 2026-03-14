@@ -4,7 +4,7 @@ import { resetAndSeed, getSlugForUrl, openOptionsPage, openHelperPage } from './
 const TEST_URL = 'https://example.com/';
 const TEST_SLUG = getSlugForUrl(TEST_URL);
 const SNAP_TS = 1700000000000;
-const SNAP_KEY = `snap:${TEST_SLUG}/${SNAP_TS}`;
+const SNAP_KEY = `snapshot:${TEST_SLUG}-${SNAP_TS}`;
 
 test.describe('Snapshot entities', () => {
 
@@ -12,14 +12,14 @@ test.describe('Snapshot entities', () => {
   test('listSnapshots returns snapshots from page entity childIds', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [SNAP_KEY],
       }},
       // Snapshot files on disk (for getSnapshotUrl)
-      { path: `pages/${TEST_SLUG}/${SNAP_TS}.md`, content: '# Example' },
-      { path: `pages/${TEST_SLUG}/${SNAP_TS}.html`, content: '<h1>Example</h1>' },
+      { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.md`, content: '# Example' },
+      { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.html`, content: '<h1>Example</h1>' },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -40,13 +40,13 @@ test.describe('Snapshot entities', () => {
   test('deleteSnapshot removes from listSnapshots and adds to orphaned', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
-        parentIds: [], childIds: [SNAP_KEY],
+        parentIds: [], childIds: [SNAP_KEY], user_title: 'Kept',
       }},
-      { path: `pages/${TEST_SLUG}/${SNAP_TS}.md`, content: '# Example' },
-      { path: `pages/${TEST_SLUG}/${SNAP_TS}.html`, content: '<h1>Example</h1>' },
+      { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.md`, content: '# Example' },
+      { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.html`, content: '<h1>Example</h1>' },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -57,7 +57,7 @@ test.describe('Snapshot entities', () => {
     , { slug: TEST_SLUG, ts: SNAP_TS });
     expect(delResp.success).toBe(true);
 
-    // Verify listSnapshots no longer returns it
+    // Verify listSnapshots no longer returns it (page survives due to user_title)
     const snapResp = await helper.evaluate((slug) =>
       chrome.runtime.sendMessage({ action: 'listSnapshots', slug })
     , TEST_SLUG);
@@ -66,7 +66,7 @@ test.describe('Snapshot entities', () => {
 
     // Verify orphaned list has the snap key
     const orphanedResp = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
     expect(orphanedResp.value.keys).toContain(SNAP_KEY);
@@ -78,16 +78,16 @@ test.describe('Snapshot entities', () => {
   test('restoreSnapshot re-adds to listSnapshots and clears orphaned', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Page with snapshot already removed from childIds
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: `pages/${TEST_SLUG}/${SNAP_TS}.md`, content: '# Example' },
-      { path: `pages/${TEST_SLUG}/${SNAP_TS}.html`, content: '<h1>Example</h1>' },
+      { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.md`, content: '# Example' },
+      { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.html`, content: '<h1>Example</h1>' },
       // Orphaned list tracks the deleted snapshot
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [SNAP_KEY],
       }},
     ]);
@@ -97,7 +97,7 @@ test.describe('Snapshot entities', () => {
     // Restore the snapshot
     const restoreResp = await helper.evaluate((snapSlug) =>
       chrome.runtime.sendMessage({ action: 'restoreSnapshot', snapSlug })
-    , `${TEST_SLUG}/${SNAP_TS}`);
+    , `${TEST_SLUG}-${SNAP_TS}`);
     expect(restoreResp.success).toBe(true);
 
     // Verify listSnapshots returns it again
@@ -110,7 +110,7 @@ test.describe('Snapshot entities', () => {
 
     // Verify orphaned list no longer has the snap key
     const orphanedResp = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
     expect(orphanedResp.value.keys).not.toContain(SNAP_KEY);
@@ -123,17 +123,17 @@ test.describe('Snapshot entities', () => {
     const now = Date.now();
     const today = new Date(now).toISOString().slice(0, 10);
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: `pages/${TEST_SLUG}/${SNAP_TS}.md`, content: '# Example' },
-      { path: `pages/${TEST_SLUG}/${SNAP_TS}.html`, content: '<h1>Example</h1>' },
-      { path: `history/${today}.jsonl`, lines: [
-        { timestamp: now, action: 'page', url: TEST_URL, title: 'Example Domain' },
+      { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.md`, content: '# Example' },
+      { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.html`, content: '<h1>Example</h1>' },
+      { path: `data/logs/${today}.jsonl`, lines: [
+        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
-      { path: 'lists/system/orphaned.json', data: {
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [SNAP_KEY],
       }},
     ]);
@@ -148,7 +148,7 @@ test.describe('Snapshot entities', () => {
 
     // Verify orphaned list no longer has the snap key
     const orphanedResp = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/orphaned' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
     expect(orphanedResp.value.keys).not.toContain(SNAP_KEY);
@@ -160,14 +160,14 @@ test.describe('Snapshot entities', () => {
   test('recycle bin shows snapshot with badge and restore works', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: `pages/${TEST_SLUG}/${SNAP_TS}.md`, content: '# Example' },
-      { path: `pages/${TEST_SLUG}/${SNAP_TS}.html`, content: '<h1>Example</h1>' },
-      { path: 'lists/system/orphaned.json', data: {
+      { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.md`, content: '# Example' },
+      { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.html`, content: '<h1>Example</h1>' },
+      { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [SNAP_KEY],
       }},
     ]);

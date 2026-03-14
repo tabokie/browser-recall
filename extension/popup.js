@@ -225,6 +225,7 @@ document.getElementById('pageNote').addEventListener('input', (e) => {
         const resp = await chrome.runtime.sendMessage({
           action: 'createNote',
           pageSlug: currentSlug,
+          url: tab.url,
           excerpt: null,
           note,
           cssPath: null
@@ -270,8 +271,7 @@ function isPagePinned(allPins, listId, url) {
   const pins = allPins[listId] || [];
   const slug = generateSlugFromUrl(url);
   const pageId = `page:${slug}`;
-  const shallowId = `shallow:${url}`;
-  return pins.some(p => p.id === pageId || p.id === shallowId || p.url === url);
+  return pins.some(p => p.id === pageId || p.url === url);
 }
 
 async function renderListChips() {
@@ -554,7 +554,7 @@ document.getElementById('triToggle').addEventListener('click', async (e) => {
     await chrome.runtime.sendMessage({
       action: 'reportPage',
       url: currentTab.url,
-      title: currentTab.title || 'Untitled',
+      title: currentTab.title || null,
       slug: generateSlugFromUrl(currentTab.url),
       isInitialLoad: true
     });
@@ -666,7 +666,7 @@ async function showDashboard(tab) {
   }
 
   currentUrl = tab.url;
-  currentTitle = tab.title || 'Untitled';
+  currentTitle = tab.title || '<unknown>';
   document.getElementById('pageTitle').textContent = currentTitle;
   document.getElementById('pageUrl').textContent = tab.url;
   currentSlug = generateSlugFromUrl(tab.url);
@@ -675,7 +675,7 @@ async function showDashboard(tab) {
   currentInteraction = {
     timestamp: Date.now(),
     url: tab.url,
-    title: tab.title || 'Untitled',
+    title: tab.title || null,
     intent: '',
     slug: currentSlug
   };
@@ -690,7 +690,7 @@ async function showDashboard(tab) {
       if (info.interaction) {
         currentInteraction = info.interaction;
         // Use user_title if set, otherwise auto-detected title
-        currentTitle = info.interaction.user_title || info.interaction.title || tab.title || 'Untitled';
+        currentTitle = info.interaction.user_title || info.interaction.title || tab.title || '<unknown>';
         document.getElementById('pageTitle').textContent = currentTitle;
       }
       renderSnapshots(info.snapshots);
@@ -720,7 +720,7 @@ async function showDashboard(tab) {
 
   // Re-check tab title after 1s — some sites set a generic title initially
   // Skip if user has set a custom title (user_title takes precedence)
-  const initialTitle = tab.title || 'Untitled';
+  const initialTitle = tab.title || '';
   const hasUserTitle = currentInteraction?.user_title;
   if (!hasUserTitle) {
     setTimeout(async () => {
@@ -728,7 +728,7 @@ async function showDashboard(tab) {
         const [freshTab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (!freshTab || freshTab.id !== tab.id) return;
 
-        const freshTitle = freshTab.title || 'Untitled';
+        const freshTitle = freshTab.title || '';
         if (freshTitle === initialTitle) return;
 
         // Only auto-update if the displayed title still matches the initial tab title
@@ -782,7 +782,7 @@ async function showDashboard(tab) {
   hasVisitHistory = !!(resp && resp.interaction);
 
   // Check blacklist only for pages with no visit history
-  const urlBlacklist = (await readCacheable('settings')).urlBlacklist;
+  const urlBlacklist = (await readCacheable('manifest:settings')).urlBlacklist;
   const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
   if (!hasVisitHistory && blacklist.some(prefix => tab.url.startsWith(prefix))) {
     document.getElementById('loading').style.display = 'none';
@@ -805,7 +805,7 @@ async function showDashboard(tab) {
         await chrome.runtime.sendMessage({
           action: 'reportPage',
           url: tab.url,
-          title: tab.title || 'Untitled',
+          title: tab.title || null,
           slug,
           isInitialLoad: true,
           bypassBlacklist: true,
