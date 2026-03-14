@@ -1,0 +1,11 @@
+- After last commit and data migration, there appear some data that was not presented before (list named "-m6wzwl", and pins in explore list), and the many lists have two files on disk (e.g. ai-core-ffnyqr.json and ai-core-gmhe9s.json). Figure out if they should appear, and remove ones that shouldn't
+- Do 1 and 2.
+
+For explore list, two of the pins don't have page checkpoints (AFAIK). Let's just remove the original pin logs as well as updating the list file.
+
+Additionally, explain why generated Id is different from before. And check if there are logs that has unrecognized type.
+- Compare list pins against my backup data at ~/portal-data-backup-20260313-173225/lists, make sure the new data has more than before
+- Add TODO item. Investigation unneeded, it was a flaw by design.
+- Add TODO item to TODO.md
+- /finish
+- /finish go straight to step 3
