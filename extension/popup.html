@@ -4,86 +4,211 @@
   <meta charset="UTF-8">
   <title>Portal</title>
   <style>
+    @font-face {
+      font-family: 'Instrument Serif';
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+      src: url(fonts/instrument-serif-regular.woff2) format('woff2');
+    }
+    @font-face {
+      font-family: 'Instrument Serif';
+      font-style: italic;
+      font-weight: 400;
+      font-display: swap;
+      src: url(fonts/instrument-serif-italic.woff2) format('woff2');
+    }
+    @font-face {
+      font-family: 'Nunito';
+      font-style: normal;
+      font-weight: 400 700;
+      font-display: swap;
+      src: url(fonts/nunito.woff2) format('woff2');
+    }
+
+    :root {
+      /* Warm palette */
+      --bg-base: #F8F0E6;
+      --bg-ambient: radial-gradient(ellipse at 20% 20%, rgba(255, 200, 140, 0.25) 0%, transparent 50%),
+                    radial-gradient(ellipse at 80% 60%, rgba(180, 160, 220, 0.12) 0%, transparent 50%),
+                    linear-gradient(160deg, #FFF6EE 0%, #F5E8D8 40%, #EDE4DA 100%);
+      --bg-surface: rgba(255, 255, 255, 0.45);
+      --bg-surface-solid: rgba(255, 255, 255, 0.75);
+      --bg-surface-hover: rgba(255, 248, 240, 0.7);
+      --bg-surface-active: rgba(255, 238, 218, 0.8);
+      --bg-sidebar: rgba(255, 252, 248, 0.55);
+
+      --border-glass: rgba(255, 255, 255, 0.55);
+      --border-glass-strong: rgba(255, 255, 255, 0.7);
+      --border-subtle: rgba(180, 160, 140, 0.15);
+      --border-hover: rgba(212, 128, 58, 0.35);
+
+      --text-primary: #352820;
+      --text-secondary: #5E4D3E;
+      --text-muted: #8E7D6D;
+
+      --accent-primary: #D07030;
+      --accent-primary-hover: #B86028;
+      --accent-primary-glow: rgba(208, 112, 48, 0.2);
+      --accent-primary-soft: rgba(208, 112, 48, 0.1);
+      --accent-blue: #5080B0;
+      --accent-blue-soft: rgba(80, 128, 176, 0.1);
+      --accent-green: #588858;
+      --accent-green-soft: rgba(88, 136, 88, 0.1);
+      --accent-red: #B85040;
+      --accent-red-soft: rgba(184, 80, 64, 0.1);
+
+      --shadow-float:
+        0 0.5px 0.5px rgba(53, 40, 32, 0.03),
+        0 1px 2px rgba(53, 40, 32, 0.04),
+        0 3px 6px rgba(53, 40, 32, 0.05),
+        0 8px 16px rgba(53, 40, 32, 0.04);
+      --shadow-float-hover:
+        0 0.5px 1px rgba(53, 40, 32, 0.04),
+        0 2px 4px rgba(53, 40, 32, 0.06),
+        0 6px 12px rgba(53, 40, 32, 0.06),
+        0 14px 28px rgba(53, 40, 32, 0.05);
+      --shadow-elevated:
+        0 1px 2px rgba(53, 40, 32, 0.04),
+        0 4px 8px rgba(53, 40, 32, 0.06),
+        0 12px 24px rgba(53, 40, 32, 0.06),
+        0 24px 48px rgba(53, 40, 32, 0.05);
+
+      --highlight-top: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+      --highlight-top-strong: inset 0 1.5px 0 rgba(255, 255, 255, 0.75);
+      --highlight-edge: inset 0 0 0 0.5px rgba(255, 255, 255, 0.3);
+
+      --radius-pill: 9999px;
+      --radius-xl: 14px;
+      --radius-lg: 10px;
+      --radius-md: 8px;
+      --radius-sm: 6px;
+
+      --font-display: 'Instrument Serif', Georgia, serif;
+      --font-body: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+      --ease-smooth: cubic-bezier(0.25, 0.1, 0.25, 1);
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       width: 400px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: var(--font-body);
       font-size: 13px;
-      color: #333;
+      color: var(--text-primary);
+      background: var(--bg-ambient);
+      background-attachment: fixed;
+      padding: 8px;
+    }
+
+    .popup-shell {
+      background: rgba(255, 255, 255, 0.5);
+      border: 1px solid var(--border-glass-strong);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow-elevated), var(--highlight-top-strong), var(--highlight-edge);
+      overflow: visible;
+      position: relative;
+    }
+
+    .popup-shell::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: linear-gradient(
+        170deg,
+        rgba(255, 255, 255, 0.35) 0%,
+        rgba(255, 255, 255, 0.08) 40%,
+        transparent 100%
+      );
+      pointer-events: none;
     }
 
     .header {
-      padding: 12px 16px;
-      border-bottom: 1px solid #e0e0e0;
-      background: #fafafa;
+      padding: 12px 16px 10px;
+      border-bottom: 1px solid rgba(180, 160, 140, 0.1);
+      background: var(--bg-sidebar);
+      position: relative;
     }
 
     .page-title {
+      font-family: var(--font-display);
       font-size: 15px;
-      font-weight: 600;
+      font-weight: 400;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       cursor: pointer;
+      margin-bottom: 2px;
     }
 
     .page-title:hover {
-      color: #1967d2;
+      color: var(--accent-primary);
     }
 
     .page-title-input {
-      font-size: 15px;
-      font-weight: 600;
+      font-family: var(--font-display);
+      font-size: 17px;
+      font-weight: 400;
       width: 100%;
-      border: 1px solid #4285f4;
-      border-radius: 3px;
-      padding: 1px 4px;
-      font-family: inherit;
+      border: 1px solid var(--accent-primary);
+      border-radius: var(--radius-sm);
+      padding: 1px 6px;
       outline: none;
+      background: rgba(255, 255, 255, 0.4);
     }
 
     .page-url {
       font-size: 11px;
-      color: #888;
+      color: var(--text-muted);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      margin-top: 2px;
     }
 
     .section {
-      border-bottom: 1px solid #e0e0e0;
-      padding: 10px 16px;
+      border-bottom: 1px solid rgba(180, 160, 140, 0.08);
+      padding: 9px 16px;
+      position: relative;
+    }
+
+    .section:last-child {
+      border-bottom: none;
     }
 
     .section-header {
       display: flex;
-      justify-content: space-between;
+      justify-content: flex-end;
       align-items: center;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
 
     .section-title {
-      font-size: 12px;
-      font-weight: 600;
+      font-size: 11px;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #666;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
     }
 
     .section-action {
       background: none;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      padding: 2px 8px;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      border-radius: var(--radius-pill);
+      padding: 3px 10px;
       cursor: pointer;
       font-size: 12px;
-      color: #555;
+      font-weight: 500;
+      color: var(--text-secondary);
+      box-shadow: var(--highlight-top);
+      transition: all 0.2s;
     }
 
     .section-action:hover {
-      background: #f0f0f0;
+      background: rgba(255, 248, 240, 0.8);
+      border-color: var(--border-hover);
+      color: var(--text-primary);
     }
 
     .snapshot-list {
@@ -101,7 +226,7 @@
 
     .snapshot-time {
       font-size: 12px;
-      color: #444;
+      color: var(--text-secondary);
     }
 
     .snapshot-badges {
@@ -111,39 +236,40 @@
     }
 
     .snapshot-row:hover {
-      background: #f5f5f5;
-      border-radius: 4px;
+      background: var(--bg-surface-hover);
+      border-radius: var(--radius-sm);
     }
 
     .badge {
       font-size: 10px;
-      padding: 1px 4px;
-      border-radius: 3px;
-      background: #e8f0fe;
-      color: #1967d2;
+      padding: 1px 6px;
+      border-radius: var(--radius-sm);
+      font-weight: 600;
       cursor: pointer;
       border: 1px solid transparent;
       transition: border-color 0.15s, background 0.15s;
     }
 
     .badge.html {
-      background: #fef7e0;
-      color: #b06000;
+      background: var(--accent-primary-soft);
+      color: var(--accent-primary);
+      border-color: rgba(208, 112, 48, 0.12);
     }
 
     .badge.html:hover {
-      border-color: #b06000;
-      background: #fdf0c8;
+      border-color: var(--accent-primary);
+      background: rgba(208, 112, 48, 0.15);
     }
 
     .badge.md {
-      background: #e8f0fe;
-      color: #1967d2;
+      background: var(--accent-blue-soft);
+      color: var(--accent-blue);
+      border-color: rgba(80, 128, 176, 0.12);
     }
 
     .badge.md:hover {
-      border-color: #1967d2;
-      background: #d2e3fc;
+      border-color: var(--accent-blue);
+      background: rgba(80, 128, 176, 0.15);
     }
 
     .delete-btn {
@@ -151,12 +277,12 @@
       border: none;
       cursor: pointer;
       font-size: 14px;
-      color: #999;
+      color: var(--text-muted);
       padding: 0 2px;
     }
 
     .delete-btn:hover {
-      color: #ea4335;
+      color: var(--accent-red);
     }
 
     .attention-grid {
@@ -167,11 +293,11 @@
 
     .attention-item {
       font-size: 12px;
-      color: #555;
+      color: var(--text-secondary);
     }
 
     .attention-item strong {
-      color: #333;
+      color: var(--text-primary);
     }
 
     .notes-scroll {
@@ -184,7 +310,7 @@
 
     .highlight-item {
       padding: 6px 0;
-      border-bottom: 1px solid #f0f0f0;
+      border-bottom: 1px solid rgba(180, 160, 140, 0.08);
       position: relative;
     }
 
@@ -201,7 +327,7 @@
     .highlight-text {
       flex: 1;
       font-size: 12px;
-      color: #333;
+      color: var(--text-primary);
       font-style: italic;
       margin-bottom: 4px;
       display: -webkit-box;
@@ -217,7 +343,7 @@
       background: none;
       border-radius: 50%;
       cursor: pointer;
-      color: #bbb;
+      color: var(--text-muted);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -228,61 +354,69 @@
     }
 
     .highlight-delete:hover {
-      background: #fce8e6;
-      color: #c5221f;
+      background: var(--accent-red-soft);
+      color: var(--accent-red);
     }
 
     .highlight-note {
       width: 100%;
       font-size: 11px;
       line-height: 1.4;
-      padding: 3px 6px;
-      border: 1px solid #ddd;
-      border-radius: 3px;
+      padding: 6px 10px;
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-body);
       resize: none;
       overflow: hidden;
-      font-family: inherit;
       box-sizing: border-box;
       min-height: 1.4em;
+      background: rgba(255, 255, 255, 0.4);
+      color: var(--text-primary);
+      box-shadow: var(--highlight-top);
     }
 
     .highlight-note:focus {
       outline: none;
-      border-color: #4285f4;
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px rgba(208, 112, 48, 0.08), var(--highlight-top);
     }
 
     .page-note {
       width: 100%;
-      font-size: 12px;
+      font-size: 13px;
       line-height: 1.4;
-      padding: 4px 6px;
-      border: 1px solid #ddd;
-      border-radius: 3px;
-      resize: none;
+      padding: 10px 13px;
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-body);
+      resize: vertical;
       overflow: hidden;
-      font-family: inherit;
       box-sizing: border-box;
-      min-height: 1.4em;
+      min-height: 48px;
+      background: rgba(255, 255, 255, 0.4);
+      color: var(--text-primary);
+      box-shadow: var(--highlight-top);
       margin-bottom: 8px;
     }
 
     .page-note:focus {
       outline: none;
-      border-color: #4285f4;
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px rgba(208, 112, 48, 0.08), 0 0 10px rgba(208, 112, 48, 0.04), var(--highlight-top);
     }
 
     .highlight-label {
       font-size: 11px;
-      font-weight: 600;
-      color: #888;
+      font-weight: 700;
+      color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.3px;
+      letter-spacing: 0.06em;
       margin-bottom: 4px;
     }
 
     .empty-state {
       font-size: 12px;
-      color: #999;
+      color: var(--text-muted);
       padding: 8px 0;
       text-align: center;
     }
@@ -298,24 +432,30 @@
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      padding: 3px 8px;
-      border: 1px solid #ddd;
-      border-radius: 12px;
-      font-size: 11px;
+      padding: 5px 13px;
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-weight: 500;
+      background: rgba(245, 237, 228, 0.5);
+      color: var(--text-secondary);
       cursor: pointer;
-      background: #fff;
-      color: #555;
-      transition: background 0.15s, border-color 0.15s;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      box-shadow: var(--highlight-top);
+      transition: all 0.2s;
     }
 
     .list-chip:hover {
-      border-color: #aaa;
+      background: rgba(255, 248, 240, 0.8);
+      border-color: var(--border-hover);
+      color: var(--text-primary);
     }
 
     .list-chip.selected {
-      background: #e8f0fe;
-      border-color: #1967d2;
-      color: #1967d2;
+      background: var(--accent-primary-soft);
+      color: var(--accent-primary);
+      border-color: rgba(208, 112, 48, 0.2);
+      font-weight: 600;
+      box-shadow: 0 1px 4px rgba(208, 112, 48, 0.1), var(--highlight-top);
     }
 
     .list-chip-check {
@@ -326,24 +466,24 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 22px;
-      height: 22px;
-      border: 1px dashed #ccc;
-      border-radius: 50%;
-      font-size: 13px;
-      line-height: 1;
-      color: #999;
+      padding: 5px 13px;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
       cursor: pointer;
-      background: #fff;
-      transition: border-color 0.15s, color 0.15s;
+      background: rgba(245, 237, 228, 0.5);
+      box-shadow: var(--highlight-top);
+      transition: all 0.2s;
       user-select: none;
       flex-shrink: 0;
     }
 
     .list-add-btn:hover {
-      border-style: solid;
-      border-color: #888;
-      color: #555;
+      background: rgba(255, 248, 240, 0.8);
+      border-color: var(--border-hover);
+      color: var(--text-primary);
     }
 
     .list-chips-wrap {
@@ -356,10 +496,10 @@
       left: 0;
       right: 0;
       margin-top: 4px;
-      background: #fff;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      background: var(--bg-surface-solid);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-elevated);
       z-index: 100;
       overflow: hidden;
     }
@@ -367,12 +507,22 @@
     .list-picker-input {
       width: 100%;
       font-size: 11px;
-      padding: 8px 10px;
+      padding: 8px 12px;
       border: none;
-      border-bottom: 1px solid #e0e0e0;
+      border-bottom: 1px solid rgba(180, 160, 140, 0.1);
       outline: none;
-      font-family: inherit;
+      font-family: var(--font-body);
       box-sizing: border-box;
+      background: transparent;
+      color: var(--text-primary);
+    }
+
+    .list-picker-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .list-picker-input:focus {
+      border-bottom-color: var(--accent-primary);
     }
 
     .list-picker-list {
@@ -386,17 +536,17 @@
       gap: 6px;
       padding: 6px 10px;
       font-size: 11px;
-      color: #333;
+      color: var(--text-primary);
       cursor: pointer;
       transition: background 0.1s;
     }
 
     .list-picker-row:hover {
-      background: #f5f5f5;
+      background: var(--bg-surface-hover);
     }
 
     .list-picker-row.selected {
-      color: #1967d2;
+      color: var(--accent-primary);
     }
 
     .list-picker-row-check {
@@ -412,31 +562,44 @@
       gap: 6px;
       padding: 6px 10px;
       font-size: 11px;
-      color: #888;
+      color: var(--text-muted);
       font-style: italic;
       cursor: pointer;
       transition: background 0.1s;
     }
 
     .list-picker-create:hover {
-      background: #f5f5f5;
-      color: #555;
+      background: var(--bg-surface-hover);
+      color: var(--text-secondary);
+    }
+
+    #dashboard {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .shortcut-bar {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      padding: 0 0 8px;
+    }
+
+    .shortcut-bar-item {
+      font-size: 10px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 4px;
     }
 
     .workspace-bar {
-      padding: 8px 16px;
-      border-bottom: 1px solid #e0e0e0;
-      background: #fafafa;
-    }
-
-    .workspace-bar.mode-workspace {
-      background: #e8f0fe;
-      border-bottom: 2px solid #1967d2;
-    }
-
-    .workspace-bar.mode-private {
-      background: #fef3e8;
-      border-bottom: 2px solid #e8710a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
     }
 
     .workspace-header {
@@ -446,67 +609,78 @@
     }
 
     .tri-toggle {
-      position: relative;
       display: flex;
-      align-items: center;
-      width: 280px;
-      height: 26px;
-      background: #e0e0e0;
-      border-radius: 13px;
-      cursor: pointer;
-      user-select: none;
-      overflow: hidden;
+      gap: 3px;
+      background: rgba(245, 237, 228, 0.6);
+      border-radius: var(--radius-pill);
+      padding: 3px;
+      width: fit-content;
+      border: 1px solid var(--border-glass);
+      box-shadow: var(--highlight-top), var(--highlight-edge);
     }
 
     .tri-toggle-knob {
-      position: absolute;
-      width: 90px;
-      height: 22px;
-      background: #fff;
-      border-radius: 11px;
-      top: 2px;
-      left: 95px;
-      transition: left 0.2s;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-      pointer-events: none;
-    }
-
-    .tri-toggle.mode-workspace .tri-toggle-knob {
-      left: 2px;
-    }
-
-    .tri-toggle.mode-private .tri-toggle-knob {
-      left: 188px;
+      display: none;
     }
 
     .tri-toggle-zone {
-      flex: 1;
-      height: 100%;
+      padding: 6px 16px;
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+      border: 1px solid transparent;
       display: flex;
       align-items: center;
-      position: relative;
-      z-index: 1;
-      cursor: pointer;
-      font-size: 10px;
-      font-weight: 600;
-      text-transform: uppercase;
-      color: #999;
-      transition: color 0.2s;
+      justify-content: center;
       white-space: nowrap;
     }
 
-    .tri-toggle-zone.left,
-    .tri-toggle-zone.center,
-    .tri-toggle-zone.right {
-      justify-content: center;
+    .tri-toggle-zone:hover {
+      color: var(--text-secondary);
     }
 
+    /* Default mode: center zone is active */
+    .tri-toggle-zone.center {
+      background: rgba(255, 255, 255, 0.8);
+      color: var(--text-primary);
+      font-weight: 600;
+      box-shadow: var(--shadow-float);
+      border-color: var(--border-glass);
+    }
+
+    /* Workspace mode: left zone is active, center reverts */
+    .tri-toggle.mode-workspace .tri-toggle-zone.center {
+      background: transparent;
+      color: var(--text-muted);
+      font-weight: 500;
+      box-shadow: none;
+      border-color: transparent;
+    }
     .tri-toggle.mode-workspace .tri-toggle-zone.left {
-      color: #1967d2;
+      background: rgba(255, 255, 255, 0.8);
+      color: var(--accent-primary);
+      font-weight: 600;
+      box-shadow: var(--shadow-float);
+      border-color: var(--border-glass);
     }
 
+    /* Private mode: right zone is active, center reverts */
+    .tri-toggle.mode-private .tri-toggle-zone.center {
+      background: transparent;
+      color: var(--text-muted);
+      font-weight: 500;
+      box-shadow: none;
+      border-color: transparent;
+    }
     .tri-toggle.mode-private .tri-toggle-zone.right {
-      color: #e8710a;
+      background: rgba(255, 255, 255, 0.8);
+      color: var(--accent-primary-hover);
+      font-weight: 600;
+      box-shadow: var(--shadow-float);
+      border-color: var(--border-glass);
     }
 
     .workspace-config {
@@ -515,7 +689,7 @@
 
     .workspace-list-label {
       font-size: 10px;
-      color: #888;
+      color: var(--text-muted);
       margin-bottom: 4px;
     }
 
@@ -530,24 +704,29 @@
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      padding: 2px 7px;
-      border: 1px solid #ddd;
-      border-radius: 10px;
+      padding: 3px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      border-radius: var(--radius-pill);
       font-size: 11px;
+      font-weight: 500;
       cursor: pointer;
-      background: #fff;
-      color: #555;
-      transition: background 0.15s, border-color 0.15s;
+      background: rgba(245, 237, 228, 0.5);
+      color: var(--text-secondary);
+      box-shadow: var(--highlight-top);
+      transition: all 0.2s;
     }
 
     .ws-list-chip:hover {
-      border-color: #aaa;
+      background: rgba(255, 248, 240, 0.8);
+      border-color: var(--border-hover);
+      color: var(--text-primary);
     }
 
     .ws-list-chip.selected {
-      background: #1967d2;
-      border-color: #1967d2;
+      background: var(--accent-primary);
+      border-color: var(--accent-primary);
       color: #fff;
+      box-shadow: 0 1px 4px rgba(208, 112, 48, 0.2);
     }
 
     .workspace-auto-snapshot {
@@ -555,7 +734,7 @@
       align-items: center;
       gap: 6px;
       font-size: 11px;
-      color: #555;
+      color: var(--text-secondary);
       cursor: pointer;
     }
 
@@ -565,76 +744,81 @@
 
     .workspace-empty {
       font-size: 11px;
-      color: #999;
+      color: var(--text-muted);
       font-style: italic;
     }
 
     .shortcut-hint {
       font-size: 10px;
-      color: #aaa;
+      color: var(--text-muted);
       margin-left: 4px;
     }
 
     .loading {
       text-align: center;
       padding: 32px;
-      color: #999;
+      color: var(--text-muted);
     }
 
     .blacklisted {
       text-align: center;
       padding: 32px 24px;
-      color: #666;
+      color: var(--text-secondary);
     }
 
     .blacklisted-icon {
       font-size: 32px;
       margin-bottom: 8px;
-      color: #c5221f;
+      color: var(--accent-red);
     }
 
     .blacklisted-title {
       font-size: 14px;
       font-weight: 600;
-      color: #c5221f;
+      color: var(--accent-red);
       margin-bottom: 4px;
     }
 
     .blacklisted-url {
       font-size: 11px;
-      color: #999;
+      color: var(--text-muted);
       word-break: break-all;
       margin-bottom: 12px;
     }
 
     .capture-once-btn {
       padding: 6px 16px;
-      border: 1px solid #1967d2;
-      border-radius: 4px;
-      background: #1967d2;
+      border: none;
+      border-radius: var(--radius-pill);
+      background: linear-gradient(145deg, #D88040, #B86028);
       color: #fff;
       font-size: 12px;
+      font-weight: 600;
       cursor: pointer;
       margin-bottom: 12px;
+      box-shadow:
+        0 1px 2px rgba(208, 112, 48, 0.25),
+        0 3px 8px rgba(208, 112, 48, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.25);
     }
 
     .capture-once-btn:hover {
-      background: #1558b0;
+      background: linear-gradient(145deg, #E08848, #C87030);
     }
 
     .capture-once-btn:disabled {
-      background: #aaa;
-      border-color: #aaa;
+      background: var(--text-muted);
+      border-color: var(--text-muted);
       cursor: default;
     }
 
     .blacklisted-hint {
       font-size: 11px;
-      color: #888;
+      color: var(--text-muted);
     }
 
     .blacklisted-hint a {
-      color: #1967d2;
+      color: var(--accent-primary);
       cursor: pointer;
       text-decoration: none;
     }
@@ -645,9 +829,9 @@
   </style>
 </head>
 <body>
-  <div id="loading" class="loading">Loading...</div>
+  <div id="loading" class="popup-shell loading">Loading...</div>
 
-  <div id="blacklisted" class="blacklisted" style="display: none;">
+  <div id="blacklisted" class="popup-shell blacklisted" style="display: none;">
     <div class="blacklisted-icon">&#x26D4;</div>
     <div class="blacklisted-title">Blacklisted</div>
     <div class="blacklisted-url" id="blacklistedUrl"></div>
@@ -661,7 +845,7 @@
         <div class="tri-toggle" id="triToggle">
           <div class="tri-toggle-knob"></div>
           <div class="tri-toggle-zone left" data-mode="workspace">Workspace</div>
-          <div class="tri-toggle-zone center" data-mode="default"><svg width="20" height="16" viewBox="0 0 20 16" fill="currentColor"><ellipse cx="13" cy="6" rx="2" ry="1.6"/><circle cx="11" cy="3.2" r="1"/><circle cx="12.5" cy="2.2" r="1"/><circle cx="14" cy="2.2" r="1"/><circle cx="15.5" cy="3.2" r="1"/><ellipse cx="7" cy="12.5" rx="2" ry="1.6"/><circle cx="5" cy="9.7" r="1"/><circle cx="6.5" cy="8.7" r="1"/><circle cx="8" cy="8.7" r="1"/><circle cx="9.5" cy="9.7" r="1"/></svg></div>
+          <div class="tri-toggle-zone center" data-mode="default">Default</div>
           <div class="tri-toggle-zone right" data-mode="private">Private</div>
         </div>
       </div>
@@ -675,29 +859,20 @@
       </div>
     </div>
 
-    <div id="dashboardContent">
+    <div class="popup-shell" id="dashboardContent">
       <div class="header">
         <div class="page-title" id="pageTitle">—</div>
         <div class="page-url" id="pageUrl">—</div>
       </div>
 
       <div class="section">
-        <div class="section-header">
-          <span class="section-title">Notes &amp; Highlights</span>
-          <span class="shortcut-hint">Alt+H</span>
-        </div>
         <div class="notes-scroll">
           <textarea class="page-note" id="pageNote" placeholder="Add a page note..."></textarea>
-          <div class="highlight-list" id="highlightList">
-            <div class="empty-state">No highlights</div>
-          </div>
+          <div class="highlight-list" id="highlightList"></div>
         </div>
       </div>
 
       <div class="section">
-        <div class="section-header">
-          <span class="section-title">Lists</span>
-        </div>
         <div class="list-chips-wrap">
           <div class="list-chips" id="listChips"></div>
         </div>
@@ -705,25 +880,15 @@
 
       <div class="section">
         <div class="section-header">
-          <span class="section-title">Snapshots</span>
-          <span>
-            <span class="shortcut-hint">Alt+S</span>
-            <button class="section-action" id="captureBtn">+ Capture</button>
-          </span>
+          <button class="section-action" id="captureBtn">+ Capture</button>
         </div>
-        <div class="snapshot-list" id="snapshotList">
-          <div class="empty-state">No snapshots yet</div>
-        </div>
+        <div class="snapshot-list" id="snapshotList"></div>
       </div>
+    </div>
 
-      <div class="section">
-        <div class="section-header">
-          <span class="section-title">Attention</span>
-        </div>
-        <div class="attention-grid" id="attentionGrid">
-          <div class="empty-state">No data</div>
-        </div>
-      </div>
+    <div class="shortcut-bar">
+      <div class="shortcut-bar-item"><span class="shortcut-hint">Alt+H</span> Highlight</div>
+      <div class="shortcut-bar-item"><span class="shortcut-hint">Alt+S</span> Snapshot</div>
     </div>
   </div>
 

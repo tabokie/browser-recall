@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Option A — Warm Material</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Nunito:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* Warm palette — inspired by Dayflow / Catppuccin Latte */
+    --bg-base: #FFF8F0;
+    --bg-surface: #FFFFFF;
+    --bg-surface-hover: #FFF3E6;
+    --bg-surface-active: #FFE8CC;
+    --bg-muted: #F5EDE4;
+    --bg-sidebar: #FAF4ED;
+
+    --border-default: #E6D5C3;
+    --border-light: #F0E4D6;
+
+    --text-primary: #4A3728;
+    --text-secondary: #7A6555;
+    --text-muted: #A89482;
+
+    --accent-primary: #D4803A;
+    --accent-primary-hover: #C06E2A;
+    --accent-primary-bg: #FFF0E0;
+    --accent-blue: #5B8CB8;
+    --accent-blue-bg: #EAF0F7;
+    --accent-green: #6A9E6A;
+    --accent-green-bg: #EDF5ED;
+    --accent-red: #C25B4A;
+    --accent-red-bg: #FAEAE7;
+
+    --shadow-sm: 0 1px 2px rgba(74, 55, 40, 0.06);
+    --shadow-md: 0 2px 8px rgba(74, 55, 40, 0.08);
+    --shadow-lg: 0 4px 16px rgba(74, 55, 40, 0.10);
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+
+    --font-display: 'Instrument Serif', Georgia, serif;
+    --font-body: 'Nunito', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-body);
+    background: var(--bg-base);
+    color: var(--text-primary);
+    line-height: 1.5;
+    padding: 40px;
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 28px;
+    margin-bottom: 6px;
+    color: var(--text-primary);
+  }
+
+  .subtitle {
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-bottom: 32px;
+  }
+
+  .demo-grid {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 24px;
+    max-width: 960px;
+  }
+
+  /* ---- Sidebar Demo ---- */
+  .sidebar {
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .sidebar-title {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 400;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sidebar-title .icon {
+    width: 20px;
+    height: 20px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    opacity: 0.7;
+  }
+
+  .sidebar-btn {
+    width: 100%;
+    padding: 8px 14px;
+    background: var(--accent-primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 16px;
+    transition: background 0.15s;
+  }
+  .sidebar-btn:hover { background: var(--accent-primary-hover); }
+
+  .sidebar-section {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin: 12px 0 6px;
+  }
+
+  .sidebar-item {
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.12s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sidebar-item:hover { background: var(--bg-surface-hover); }
+  .sidebar-item.active {
+    background: var(--accent-primary-bg);
+    color: var(--accent-primary);
+    font-weight: 600;
+  }
+  .sidebar-item .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ---- Main Content ---- */
+  .main {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .main-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 4px;
+  }
+
+  .main-header h2 {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 400;
+  }
+
+  .badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--accent-primary-bg);
+    color: var(--accent-primary);
+  }
+
+  /* Cards */
+  .card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.15s, border-color 0.15s;
+    cursor: pointer;
+  }
+  .card:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--accent-primary);
+  }
+
+  .card-title {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 4px;
+  }
+
+  .card-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .card-meta .tag {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+  .tag-note { background: var(--accent-blue-bg); color: var(--accent-blue); }
+  .tag-snap { background: var(--accent-green-bg); color: var(--accent-green); }
+  .tag-page { background: var(--accent-primary-bg); color: var(--accent-primary); }
+
+  /* Buttons row */
+  .btn-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .btn {
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.12s;
+  }
+  .btn-primary {
+    background: var(--accent-primary);
+    color: white;
+  }
+  .btn-primary:hover { background: var(--accent-primary-hover); }
+
+  .btn-secondary {
+    background: var(--bg-muted);
+    color: var(--text-primary);
+    border-color: var(--border-default);
+  }
+  .btn-secondary:hover { background: var(--bg-surface-hover); }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+  }
+  .btn-ghost:hover { background: var(--bg-muted); color: var(--text-primary); }
+
+  /* Input */
+  .input-group { margin-top: 8px; }
+
+  .input-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .input-group input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-body);
+    font-size: 13px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    transition: border-color 0.15s;
+  }
+  .input-group input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(212, 128, 58, 0.15);
+  }
+
+  /* Attention dots */
+  .attention-grid {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 6px;
+  }
+  .attention-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+  }
+  .attention-dot.low { opacity: 0.25; }
+  .attention-dot.med { opacity: 0.55; }
+  .attention-dot.high { opacity: 0.85; }
+  .attention-dot.max { opacity: 1; }
+
+  .attention-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: 4px;
+  }
+
+  /* Popup demo */
+  .popup-demo {
+    width: 360px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    margin-top: 24px;
+  }
+
+  .popup-header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .popup-header h3 {
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 400;
+    margin-bottom: 2px;
+  }
+
+  .popup-header .url {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .popup-section {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .popup-section:last-child { border-bottom: none; }
+
+  .popup-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+
+  .chip-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .chip {
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 500;
+    background: var(--bg-muted);
+    color: var(--text-secondary);
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.12s;
+  }
+  .chip:hover { background: var(--bg-surface-hover); border-color: var(--border-default); }
+  .chip.active {
+    background: var(--accent-primary-bg);
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+  }
+
+  textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-body);
+    font-size: 13px;
+    resize: vertical;
+    min-height: 48px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+  }
+  textarea:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+  }
+
+  .section-divider {
+    margin: 32px 0 24px;
+    border: none;
+    border-top: 1px solid var(--border-light);
+  }
+
+  .label-row {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    font-style: italic;
+    font-family: var(--font-display);
+  }
+</style>
+</head>
+<body>
+
+<h1>Option A — Warm Material</h1>
+<p class="subtitle">Same layout structure, warm color palette, serif + rounded sans typography. Minimal CSS changes.</p>
+
+<div class="demo-grid">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-title">
+      <div class="icon"></div>
+      Portal
+    </div>
+    <button class="sidebar-btn">Explore</button>
+    <div class="sidebar-section">Lists</div>
+    <div class="sidebar-item active">
+      <div class="dot" style="background: var(--accent-primary)"></div>
+      Research Papers
+    </div>
+    <div class="sidebar-item">
+      <div class="dot" style="background: var(--accent-blue)"></div>
+      Design Inspiration
+    </div>
+    <div class="sidebar-item">
+      <div class="dot" style="background: var(--accent-green)"></div>
+      Reading List
+    </div>
+    <div class="sidebar-item">
+      <div class="dot" style="background: var(--accent-red)"></div>
+      Bug Reports
+    </div>
+    <div class="sidebar-section">System</div>
+    <div class="sidebar-item">
+      <div class="dot" style="background: var(--text-muted)"></div>
+      Gateways
+    </div>
+  </div>
+
+  <!-- Main content -->
+  <div class="main">
+    <div class="main-header">
+      <h2>Research Papers</h2>
+      <span class="badge">12 items</span>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Attention Is All You Need</div>
+      <div class="card-meta">
+        <span class="tag tag-page">page</span>
+        <span>arxiv.org</span>
+        <span>3 days ago</span>
+      </div>
+      <div class="attention-grid">
+        <div class="attention-dot max"></div>
+        <div class="attention-dot high"></div>
+        <div class="attention-dot med"></div>
+        <div class="attention-dot low"></div>
+        <div class="attention-dot low"></div>
+        <span class="attention-label">High attention</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">BERT: Pre-training of Deep Bidirectional Transformers</div>
+      <div class="card-meta">
+        <span class="tag tag-note">note</span>
+        <span class="tag tag-snap">snapshot</span>
+        <span>arxiv.org</span>
+        <span>1 week ago</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Language Models are Few-Shot Learners</div>
+      <div class="card-meta">
+        <span class="tag tag-page">page</span>
+        <span>openai.com</span>
+        <span>2 weeks ago</span>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary">Add Page</button>
+      <button class="btn btn-secondary">Import</button>
+      <button class="btn btn-ghost">Settings</button>
+    </div>
+
+    <div class="input-group">
+      <label>Search</label>
+      <input type="text" placeholder="Search pages, notes, snapshots...">
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<p class="label-row">Popup preview (360px wide)</p>
+
+<div class="popup-demo">
+  <div class="popup-header">
+    <h3>Attention Is All You Need</h3>
+    <div class="url">arxiv.org/abs/1706.03762</div>
+  </div>
+  <div class="popup-section">
+    <div class="popup-section-title">Notes</div>
+    <textarea placeholder="Add a note about this page..."></textarea>
+  </div>
+  <div class="popup-section">
+    <div class="popup-section-title">Lists</div>
+    <div class="chip-row">
+      <span class="chip active">Research Papers</span>
+      <span class="chip">Reading List</span>
+      <span class="chip">+ Add</span>
+    </div>
+  </div>
+  <div class="popup-section">
+    <div class="popup-section-title">Snapshots</div>
+    <div class="card-meta">
+      <span class="tag tag-snap">HTML</span>
+      <span>Mar 12, 2026 · 14:32</span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

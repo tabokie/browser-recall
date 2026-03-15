@@ -60,6 +60,8 @@ let historyLoading = false;        // guard against concurrent loads
 let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'list', query: '...', id: '...' } or { type: 'explore', query: '...', filter: '...' }
 let allListPins = {}; // listId -> [{ url, title, pinnedAt }]
 let lastClickedRow = null; // for shift-click range select
+const cardDataByUrl = new Map(); // url → { attDetail, timestamps } for detail overlay
+const listNameById = new Map(); // listId → display name, populated by renderLists()
 let marqueeActive = false; // suppress click during marquee drag
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
 // pinnedFilterCtx removed — pinned section no longer has related pages
@@ -345,7 +347,7 @@ async function resolvePinsForDisplay(pins) {
       const hist = historyByUrl.get(url);
       if (hist?.title) title = hist.title;
     }
-    return { ...p, url, title, user_title: ref?.user_title || null, isNote: ref?.isNote || false };
+    return { ...p, url, title, user_title: ref?.user_title || null, isNote: ref?.isNote || false, childIds: ref?.childIds || [] };
   });
   return { pinsResolved, pageSnap };
 }
@@ -862,33 +864,31 @@ function showColumnPopover(anchorBtn, context) {
 }
 
 
-// Show chart frame + column headers immediately (bars and rows fill in after data loads)
+// Show chart frame immediately (rows fill in after data loads)
 function renderResultsSkeleton(opts = {}) {
-  const { showRelevance = false } = opts;
   const chartEl = document.getElementById('timeChart');
   chartEl.querySelector('.chart-bars').innerHTML = '';
   chartEl.classList.add('visible');
 
   const vs = getOrCreateGlobalScroller();
-  vs._headerHtml = columnHeaderHtml('global', { hasPin: false, showRelevance });
+  vs._headerHtml = '';
   vs.setData([], () => '');
 }
 
-// Show list chart frames + column headers immediately
+// Show list chart frames immediately
 function renderListSkeleton() {
-  // Pinned section: show column header
+  // Pinned section
   const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
   pinnedSection.style.display = '';
   const pinnedContainer = document.getElementById('pinnedResults');
-  pinnedContainer.innerHTML = columnHeaderHtml('pinned', { hasPin: true });
-  bindColumnHeaderClicks(pinnedContainer);
+  pinnedContainer.innerHTML = '';
 
-  // Explore section: show chart frame + column header
+  // Explore section: show chart frame
   const relatedChart = document.getElementById('relatedChart');
   relatedChart.querySelector('.chart-bars').innerHTML = '';
   relatedChart.classList.add('visible');
   const vs = getOrCreateRelatedScroller();
-  vs._headerHtml = columnHeaderHtml('related', { hasPin: true, showRelevance: false });
+  vs._headerHtml = '';
   vs.setData([], () => '');
 }
 
@@ -912,11 +912,6 @@ function resortActiveScroller(context) {
   const sortState = getSortState(context);
   const effectiveSort = sortState.column ? sortState : { column: 'lastVisit', direction: 'desc' };
   const sorted = applySortOrder([...vs._fullData], effectiveSort);
-
-  // Regenerate header with updated sort indicators
-  const showRelevance = vs._headerHtml.includes('col-rel');
-  const hasPin = context === 'related' || context === 'pinned';
-  vs._headerHtml = columnHeaderHtml(context, { hasPin, showRelevance });
 
   vs.updateData(sorted);
 }
@@ -1224,12 +1219,10 @@ function renderPinnedSection(allPinned, listId) {
     pinnedSection.style.display = 'none';
   } else {
     pinnedSection.style.display = '';
-    let html = columnHeaderHtml('pinned', { hasPin: true });
-    html += sortedPinned.map(r =>
-      resultRowHtml(r.user_title || r.title, r.url, { pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, notes: r.notes, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt })
+    let html = sortedPinned.map(r =>
+      resultRowHtml(r.user_title || r.title, r.url, { pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, notes: r.notes, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt, childIds: r.childIds })
     ).join('');
     pinnedContainer.innerHTML = html;
-    bindColumnHeaderClicks(pinnedContainer);
     bindResultDelegation(pinnedContainer);
     bindPinClicks(pinnedContainer, listId);
   }
@@ -1293,21 +1286,19 @@ function processInteractionsForDisplay(interactions, { globalDedup = false } = {
 
 // Batch-fetch page entities for all unique slugs in entries, enrich with entity titles.
 async function enrichFromEntityStorage(entries) {
-  const titleless = entries.filter(e => !e.title);
-  if (titleless.length === 0) return;
-  const slugs = [...new Set(titleless.map(r => r.slug).filter(Boolean))];
-  if (slugs.length === 0) return;
-  const loaded = await Promise.all(slugs.map(s => readCacheable('page:' + s)));
+  const allSlugs = [...new Set(entries.map(r => r.slug).filter(Boolean))];
+  if (allSlugs.length === 0) return;
+  const loaded = await Promise.all(allSlugs.map(s => readCacheable('page:' + s)));
   const pages = {};
-  for (let i = 0; i < slugs.length; i++) {
-    if (loaded[i]) pages[slugs[i]] = loaded[i];
+  for (let i = 0; i < allSlugs.length; i++) {
+    if (loaded[i]) pages[allSlugs[i]] = loaded[i];
   }
-  for (const entry of titleless) {
+  for (const entry of entries) {
     const page = pages[entry.slug];
-    if (page) {
-      if (page.title) entry.title = page.title;
-      if (page.user_title) entry.user_title = page.user_title;
-    }
+    if (!page) continue;
+    if (!entry.title && page.title) entry.title = page.title;
+    if (!entry.user_title && page.user_title) entry.user_title = page.user_title;
+    if (page.childIds) entry.childIds = page.childIds;
   }
 }
 
@@ -1349,15 +1340,14 @@ async function displayInteractionRows(interactions) {
   const maxAtt = Math.max(...sorted.map(e => e.attScore), 0.1);
 
   const vs = getOrCreateGlobalScroller();
-  vs._headerHtml = columnHeaderHtml('global', { hasPin: false });
+  vs._headerHtml = '';
   vs.setData(sorted, (e) =>
-    resultRowHtml(e.user_title || e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global' })
+    resultRowHtml(e.user_title || e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global', childIds: e.childIds })
   );
 }
 
 const PIN_SVG = '<svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>';
 const DELETE_SVG = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
-const FOCUS_SVG = '<svg viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>';
 
 
 // Group interactions by URL, return Map<url, interaction[]>
@@ -1508,57 +1498,64 @@ function bindSnapshotClickHandlers(container) {
   });
 }
 
-// opts: { pinned, deletable, attScore, maxAtt, attDetail, notes, timestamps, context, pinnedAt, relevance, noFocusButton }
+function attentionLevel(normalized) {
+  if (!normalized || normalized <= 0) return '';
+  if (normalized >= 0.75) return 'high';
+  if (normalized >= 0.4) return 'med';
+  return 'low';
+}
+
 function resultRowHtml(title, url, opts = {}) {
-  const safeTitle = escapeHtml(title || '<unknown>');
   const safeUrl = escapeHtml(url || '<unknown>');
-  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, relevance, cssClass, noFocusButton = false } = opts;
-  const extraCols = getExtraColumns(context);
+  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, cssClass, childIds = [] } = opts;
 
   const lastVisit = timestamps.length > 0 ? formatTime(Math.max(...timestamps)) : '';
   const normalized = maxAtt > 0 ? attScore / maxAtt : 0;
-  const dotColor = attentionColor(normalized);
 
-  const isPinned = pinned !== undefined ? pinned : isResultPinned(getActivePinListId(), url);
-  const pinBtn = `<button class="result-pin${isPinned ? ' pinned' : ''}" data-pin-url="${safeUrl}" data-pin-title="${safeTitle}" title="${isPinned ? 'Unpin' : 'Pin'}">${PIN_SVG}</button>`;
+  let site = '';
+  try {
+    const parsed = new URL(url);
+    site = parsed.protocol === 'file:' ? 'file' : parsed.hostname.replace(/^www\./, '');
+  } catch {}
 
-  const detailHtml = buildDetailHtml(url, attDetail, notes);
-
-  let relevanceCell = '';
-  if (relevance != null) {
-    const pct = Math.round(relevance * 100);
-    relevanceCell = `<div class="result-rel">${pct}%</div>`;
-  }
-
-  let extraTimeCells = '';
-  if (extraCols.includes('firstVisit')) {
-    const firstVisit = timestamps.length > 0 ? formatTime(Math.min(...timestamps)) : '';
-    extraTimeCells += `<div class="result-time">${escapeHtml(firstVisit)}</div>`;
-  }
-
-  let extraAfterAtt = '';
-  if (extraCols.includes('pinTime')) {
-    extraAfterAtt += `<div class="result-time">${pinnedAt ? escapeHtml(formatTime(pinnedAt)) : ''}</div>`;
-  }
+  const safeTitle = escapeHtml(title || site || url || '<unknown>');
 
   const dates = [...new Set(timestamps.map(ts => new Date(ts).toISOString().slice(0, 10)))].join(',');
 
+  const hasNotes = childIds.some(id => id.startsWith('note:'));
+  const hasSnaps = childIds.some(id => id.startsWith('snapshot:'));
+  const belongedListNames = [];
+  if (url) {
+    const pageId = 'page:' + generateSlugFromUrl(url);
+    for (const [listId, pins] of Object.entries(allListPins)) {
+      if (Array.isArray(pins) && pins.some(p => p.id === pageId)) {
+        const name = listNameById.get(listId);
+        if (name) belongedListNames.push(name);
+      }
+    }
+  }
+  const attLvl = attentionLevel(normalized);
+  if (url) cardDataByUrl.set(url, {
+    attDetail: attDetail ? { timeOnPage: attDetail.timeOnPage, scrollDepth: attDetail.scrollDepth, clicks: attDetail.clicks } : null,
+    timestamps,
+  });
+  const attCtrlHtml = `<div class="att-ctrl${attLvl ? ' ' + attLvl : ''}" data-url="${safeUrl}" data-title="${safeTitle}"><span class="att-ctrl-dot"></span><button class="att-ctrl-btn" title="View details">···</button></div>`;
+  const listTagsHtml = belongedListNames.map(n => `<span class="card-tag card-tag-list">${escapeHtml(n)}</span>`).join('');
+  const hasExtras = hasNotes || hasSnaps || listTagsHtml;
+  const extrasHtml = hasExtras ? `<div class="card-extras">${hasNotes ? '<span class="card-tag card-tag-note">note</span>' : ''}${hasSnaps ? '<span class="card-tag card-tag-snap">snapshot</span>' : ''}${listTagsHtml}</div>` : '';
+  const cardActionsHtml = deletable ? `<div class="card-actions"><button class="result-delete" data-delete-url="${safeUrl}" data-delete-title="${safeTitle}" title="Delete">${DELETE_SVG}</button></div>` : '';
+
   return `<div class="result-item${cssClass ? ' ' + cssClass : ''}">
     <div class="result-row" data-url="${safeUrl}" data-title="${safeTitle}" data-dates="${dates}" draggable="true">
-      <button class="result-expand" title="Show details">&#9654;</button>
-      <div class="result-title">${safeTitle}</div>
-      ${relevanceCell}
-      <div class="result-time">${escapeHtml(lastVisit)}</div>
-      ${extraTimeCells}
-      <div class="attention-dot-wrap" title="Attention: ${(normalized * 100).toFixed(0)}%">
-        <div class="attention-dot" style="background: ${dotColor}"></div>
+      <div class="card-row">
+        <div class="result-title">${safeTitle}</div>
+        <span class="result-site">${escapeHtml(site)}</span>
+        <span class="result-time">${escapeHtml(lastVisit)}</span>
+        ${attCtrlHtml}
       </div>
-      ${extraAfterAtt}
-      ${deletable ? `<button class="result-delete" data-delete-url="${safeUrl}" data-delete-title="${safeTitle}" title="Delete">${DELETE_SVG}</button>` : ''}
-      ${pinBtn}
-      ${noFocusButton ? '' : `<button class="result-focus" data-focus-url="${safeUrl}" data-focus-title="${safeTitle}" title="Focus">${FOCUS_SVG}</button>`}
+      ${cardActionsHtml}
     </div>
-    <div class="result-detail">${detailHtml}</div>
+    ${extrasHtml}
   </div>`;
 }
 
@@ -1566,110 +1563,110 @@ function bindResultDelegation(container) {
   if (container._resultDelegationBound) return;
   container._resultDelegationBound = true;
 
-  container.addEventListener('click', async (e) => {
-    const expandBtn = e.target.closest('.result-expand');
-    if (expandBtn) {
+  container.addEventListener('click', (e) => {
+    if (e.target.closest('.att-ctrl-btn')) {
       e.stopPropagation();
-      const row = expandBtn.closest('.result-row');
-      const item = row?.closest('.result-item');
-      const detail = item?.querySelector('.result-detail');
-      if (detail) {
-        const wasOpen = detail.classList.contains('open');
-        detail.classList.toggle('open');
-        expandBtn.classList.toggle('open');
-        if (!wasOpen && !detail.dataset.extraLoaded) {
-          detail.dataset.extraLoaded = '1';
-          const url = row.dataset.url;
-          const extra = await loadExtraDetail(url);
-          const extraHtml = renderExtraDetailHtml(extra);
-          if (extraHtml) {
-            const extraDiv = document.createElement('div');
-            extraDiv.className = 'detail-extra';
-            extraDiv.innerHTML = extraHtml;
-            detail.appendChild(extraDiv);
-            bindNoteDeleteButtons(extraDiv);
-            bindSnapshotClickHandlers(extraDiv);
-          }
-        }
-        // Notify virtual scroller of height change
-        if (container._virtualScroller) container._virtualScroller.onExpandToggle();
+      const ctrl = e.target.closest('.att-ctrl');
+      if (ctrl) {
+        const { attDetail = null, timestamps = [] } = cardDataByUrl.get(ctrl.dataset.url) || {};
+        openPageDetailCard(ctrl.dataset.url, ctrl.dataset.title, attDetail, timestamps);
       }
       return;
     }
-
-    const pinBtn = e.target.closest('.result-pin');
-    if (pinBtn) {
+    if (e.target.closest('.card-actions') || e.target.closest('.att-ctrl')) {
       e.stopPropagation();
-      return; // pin clicks handled by bindPinClicks
-    }
-
-    const focusBtn = e.target.closest('.result-focus');
-    if (focusBtn) {
-      e.stopPropagation();
-      openFocusPanel(focusBtn.dataset.focusUrl, focusBtn.dataset.focusTitle);
       return;
     }
 
-    const row = e.target.closest('.result-row');
+    const item = e.target.closest('.result-item');
+    if (!item || marqueeActive) return;
+    const row = item.querySelector('.result-row');
     if (!row) return;
-    if (marqueeActive) return;
 
     const allRows = [...container.querySelectorAll('.result-row')];
-
     if (e.shiftKey && lastClickedRow) {
       const anchorIdx = allRows.indexOf(lastClickedRow);
       const curIdx = allRows.indexOf(row);
       if (anchorIdx !== -1 && curIdx !== -1) {
-        const [start, end] = anchorIdx < curIdx ? [anchorIdx, curIdx] : [curIdx, anchorIdx];
-        if (!e.ctrlKey && !e.metaKey) {
-          allRows.forEach(r => r.classList.remove('selected'));
-        }
-        for (let i = start; i <= end; i++) {
-          allRows[i].classList.add('selected');
-        }
+        const [lo, hi] = anchorIdx < curIdx ? [anchorIdx, curIdx] : [curIdx, anchorIdx];
+        if (!e.ctrlKey && !e.metaKey) allRows.forEach(r => r.classList.remove('selected'));
+        for (let i = lo; i <= hi; i++) allRows[i].classList.add('selected');
       }
     } else if (e.ctrlKey || e.metaKey) {
       row.classList.toggle('selected');
       lastClickedRow = row;
     } else {
-      const wasSelected = row.classList.contains('selected');
       allRows.forEach(r => r.classList.remove('selected'));
-      if (!wasSelected) {
-        row.classList.add('selected');
-      }
+      row.classList.add('selected');
       lastClickedRow = row;
     }
-    syncChartHighlights();
   });
 
   container.addEventListener('dblclick', (e) => {
     const row = e.target.closest('.result-row');
     if (!row) return;
-    if (e.target.closest('.result-pin') || e.target.closest('.result-expand') || e.target.closest('.result-focus')) return;
-    const url = row.dataset.url;
-    chrome.tabs.create({ url });
+    if (e.target.closest('.result-pin') || e.target.closest('.card-actions') || e.target.closest('.att-ctrl')) return;
+    chrome.tabs.create({ url: row.dataset.url });
   });
 
   container.addEventListener('dragstart', (e) => {
     const row = e.target.closest('.result-row');
     if (!row) return;
-    let items;
-    const selectedRows = container.querySelectorAll('.result-row.selected');
-    if (row.classList.contains('selected') && selectedRows.length > 1) {
-      items = Array.from(selectedRows).map(r => ({ url: r.dataset.url, title: r.dataset.title }));
-      // Show count badge as drag image
-      const badge = document.createElement('div');
-      badge.textContent = `${items.length} pages`;
-      badge.style.cssText = 'position:absolute;top:-9999px;padding:4px 10px;background:#4a90d9;color:#fff;border-radius:4px;font-size:13px;white-space:nowrap;';
-      document.body.appendChild(badge);
-      e.dataTransfer.setDragImage(badge, 0, 0);
-      requestAnimationFrame(() => badge.remove());
-    } else {
-      items = [{ url: row.dataset.url, title: row.dataset.title }];
-    }
+    const items = [{ url: row.dataset.url, title: row.dataset.title }];
     e.dataTransfer.setData('text/plain', JSON.stringify({ items }));
     e.dataTransfer.effectAllowed = 'copy';
   });
+}
+
+function openPageDetailCard(url, title, attDetail = null, timestamps = []) {
+  closePageDetailCard();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'pageDetailOverlay';
+  overlay.className = 'page-detail-overlay';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closePageDetailCard(); });
+
+  const card = document.createElement('div');
+  card.className = 'page-detail-card';
+  card.innerHTML = `
+    <div class="page-detail-header">
+      <div class="page-detail-title">${escapeHtml(title || url)}</div>
+      <button class="page-detail-close" title="Close">×</button>
+    </div>
+    <div class="page-detail-body"><div class="page-detail-loading">Loading…</div></div>
+  `;
+  card.querySelector('.page-detail-close').addEventListener('click', closePageDetailCard);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  loadExtraDetail(url).then(extra => {
+    const body = card.querySelector('.page-detail-body');
+    let html = buildDetailHtml(url, attDetail, []);
+    if (timestamps.length > 0) {
+      const latest = Math.max(...timestamps);
+      const fmt = new Date(latest).toLocaleString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+        hour: 'numeric', minute: '2-digit', second: '2-digit',
+      });
+      html += `<div class="detail-visit-time">Last visited: <strong>${fmt}</strong></div>`;
+    }
+    const extraHtml = renderExtraDetailHtml(extra);
+    body.innerHTML = html + (extraHtml ? `<div class="detail-extra">${extraHtml}</div>` : '');
+    bindNoteDeleteButtons(body);
+    bindSnapshotClickHandlers(body);
+  });
+
+  const onEsc = (e) => { if (e.key === 'Escape') closePageDetailCard(); };
+  overlay._escHandler = onEsc;
+  document.addEventListener('keydown', onEsc);
+}
+
+function closePageDetailCard() {
+  const overlay = document.getElementById('pageDetailOverlay');
+  if (overlay) {
+    if (overlay._escHandler) document.removeEventListener('keydown', overlay._escHandler);
+    overlay.remove();
+  }
 }
 
 function bindPinClicks(container, listId) {
@@ -1890,6 +1887,13 @@ function isDescendant(ancestorSlug, targetSlug) {
 async function renderLists() {
   const tree = await loadListTree();
   lastRenderedTree = tree;
+  listNameById.clear();
+  (function walkTree(nodes) {
+    for (const n of nodes) {
+      listNameById.set(n.slug, n.name);
+      if (n.children?.length) walkTree(n.children);
+    }
+  })(tree);
   const listEl = document.getElementById('listsList');
   const empty = document.getElementById('listsEmpty');
 
@@ -3173,12 +3177,13 @@ async function runSearchFilterPipeline() {
   const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
 
   const vs = getOrCreateRelatedScroller();
-  vs._headerHtml = columnHeaderHtml('related', { hasPin: true, showRelevance: false });
+  vs._headerHtml = '';
   vs.updateData(sorted, (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
       pinned: isResultPinned(listId, r.url),
       attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'related',
+      childIds: r.childIds,
     })
   );
   bindPinClicks(relatedContainer, listId);
@@ -3270,7 +3275,7 @@ async function openListFocusPanel(listId, listName) {
       html += pinsResolved.map(r => {
         const title = r.user_title || r.title || '<unknown>';
         return resultRowHtml(title, r.url, {
-          deletable: false, attScore: 0, maxAtt, timestamps: [r.pinnedAt || Date.now()], context: 'global', noFocusButton: true
+          deletable: false, attScore: 0, maxAtt, timestamps: [r.pinnedAt || Date.now()], context: 'global', deletable: false, childIds: r.childIds
         });
       }).join('');
     }
@@ -3287,7 +3292,7 @@ async function openListFocusPanel(listId, listName) {
 
 function renderFocusWaterfall(content, url, title, parents, children, similar) {
   const maxAtt = 0.1;
-  const focusOpts = { deletable: false, maxAtt, context: 'global', noFocusButton: true };
+  const focusOpts = { deletable: false, maxAtt, context: 'global', deletable: false };
 
   function makeCard(cardUrl, cardTitle, opts = {}) {
     const hist = historyByUrl.get(cardUrl);
@@ -3372,7 +3377,7 @@ function bindFocusContentDelegation(content) {
     // Skip if click was on a button or handled by result delegation
     if (e.target.closest('.result-expand') || e.target.closest('.result-delete') ||
         e.target.closest('.result-pin') ||
-        e.target.closest('.result-focus') || e.target.closest('.attention-dot-wrap')) return;
+        e.target.closest('.result-focus') || e.target.closest('.card-actions')) return;
 
     const row = e.target.closest('.result-row');
     if (!row) return;
@@ -3398,12 +3403,14 @@ function initSidebarResize() {
     startX = e.clientX;
     startWidth = sidebar.offsetWidth;
     handle.classList.add('active');
+    document.body.style.userSelect = 'none';
     const onMove = (ev) => {
       sidebar.style.width = Math.max(180, Math.min(500, startWidth + ev.clientX - startX)) + 'px';
       sidebar.style.minWidth = sidebar.style.width;
     };
     const onUp = () => {
       handle.classList.remove('active');
+      document.body.style.userSelect = '';
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       chrome.storage.session.set({ sidebarWidth: sidebar.offsetWidth }).catch(() => {});
@@ -3461,18 +3468,6 @@ async function initialize() {
   updateExploreBadge();
   updateRecycleBinBadge();
   showExplore();
-
-  // Focus overlay: close on backdrop click or Escape
-  document.getElementById('focusOverlay').addEventListener('click', (e) => {
-    // Close when clicking the backdrop (not the content)
-    if (e.target === e.currentTarget) closeFocusPanel();
-  });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && document.getElementById('focusOverlay').classList.contains('visible')) {
-      e.stopPropagation();
-      closeFocusPanel();
-    }
-  });
 
   // Explore button: drag-to-explore
   const exploreBtn = document.getElementById('exploreBtn');

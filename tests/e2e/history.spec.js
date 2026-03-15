@@ -133,6 +133,27 @@ test.describe('History recording', () => {
   // The fix (readCacheable fallback to disk) is exercised implicitly by every test
   // via resetAndSeed → rehydrateForTest.
 
+  // When neither the log entry nor a page entity has a title, the card should
+  // fall back to the URL hostname rather than showing <unknown>.
+  test('title-less entry with no page entity falls back to hostname', async ({ extContext, extensionId, setupDir }) => {
+    const url = 'https://titterfun.com/';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      // Log entry has NO title field; no page entity seeded
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.waitForSelector('.result-row', { timeout: 5000 });
+    const title = await options.$eval('.result-title', el => el.textContent.trim());
+    expect(title).toBe('titterfun.com');
+    await options.close();
+  });
+
   // Bug 20260224: title trimming must apply consistently to all page reports.
   // Regression: first visit logged trimmed, subsequent visits logged untrimmed.
   // This test visits twice and verifies BOTH entries use the trimmed title.

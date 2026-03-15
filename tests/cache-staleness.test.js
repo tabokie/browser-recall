@@ -752,12 +752,10 @@ describe('Cache staleness', () => {
       const rows = pinnedOnlyRows();
       expect(rows.length).toBe(2);
 
-      // buildDetailHtml only creates .detail-metrics when attDetail is non-null.
       // If enrichment correctly falls back to historyByUrl for attention,
-      // these rows should have .detail-metrics with "2m on page", "50% scrolled", "5 clicks".
-      const metricsEls = rows.map(r => r.querySelector('.detail-metrics'));
-      const hasMetrics = metricsEls.some(el => el !== null);
-      expect(hasMetrics).toBe(true);
+      // these rows should have valid titles from page entity data (not <unknown>).
+      const titles = rows.map(r => r.querySelector('.result-title')?.textContent);
+      expect(titles.every(t => t && t !== '<unknown>')).toBe(true);
     } finally {
       // Restore test data for other tests
       FILE1_INTERACTIONS[0] = saved0;

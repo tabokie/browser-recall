@@ -1,0 +1,99 @@
+- I want to rework the UI to be more modern, somewhat in the direction of Apple's liquid glass (delicate, material, emotional), but still simplistic without the added rendering overhead. One example I can think of is https://github.com/JerryZLiu/Dayflow . I want to you do some research, prefereably point me to some other UI designs that roughly align with the direction, and present me with a few options to pursue. Ask clarifying questions if needed.
+- There is a bug. I added a new list earlier, now root.json contains only that list, all other lists are dropped. Find the bug, TDD, and restore data.
+- go
+- Tell me about the rendering overhead, say we are rendering 10K page cards in a search view.
+- Apply the change to demo.
+- In B & C, the hover floating effect is cool, but to render the shadow, the card itself shrinks slightly. This is annoying and breaks the concept of physical card for me. Could you fix it easily? If not let's consider dropping shadow
+- But that is not faithful to physics. A card's shadow should only enlarge if its distance to ground is larger. If a card's y position is unchanged, the shadow shouldn't change either. Could you make the y position transform not affect card size (in an easy way)?
+- The card still appears shrunken when hovered
+- In C, let remove the bouncing effect for all buttons, including the x transform of list button. If you think by removing the position change, the buttons become less responsive, you can use other visual element to enhance the feedback (size, border, color, etc).
+- The list button animation is hideous, not consistent with other elements. Let's make it less dramatic instead
+- What fonts did you used for C?
+- I want to see how the time chart appears in this aesthetics
+- Too wide, make it narrower like before
+- No, I don't mean to change style, I mean to reduce the width of the chart so that the view port doesn't extend beyond my screen
+- Still wider than my screen. I want you to add the internal scroll bar inside the time chart, and keep the chart's external width the same as a normal card, matching view port
+- Still wider, a vertical scrollbar
+- That's fixed. But in general it is not suitable for time chart to be a card. Time chart is not a static element, it reacts and controls the display. And I wanted it to be sticky when scrolled past (you should add more page cards to overflow the screen to demonstrate that).
+- Make page card selectable (e.g. to drag)
+- how about make the time chart a capsule, but a different type? It is semi-transparent, and has more rounded corner. Also, I want to display a search bar higher than the time chart (sticky as well)
+- The zone shouldn't have background, only the capsules are floating
+- Too transparent
+- Remove the transparency alltogether
+- Do you think it's a bit weird? The two capsules header situation. Is there an option to make them more integral?
+- Try three of them together in C.1, C.2, C.3
+- Remove all three. Let change C. Search and time chart are no longer sticky. Time chart goes back to blend in the background instead of a capsule.
+- Good, I like the general look. But the information density is much lower compared to our current UI. What do you propose?
+- Copy C to D, keep Nunito, apply other changes to D
+- Good, then remove Nunito
+- Revert that, system font is even bigger
+- Let's see the look when the padding and interval are even smaller
+- Revert that
+- Site and visit time can be placed at the same line as title. There is no need to display "page" tag. This way, for shallow pages, they occupy only one line of text.
+- Good. Let's apply this look to our extension!
+- go ahead
+- Emmm, you are only changing the cosmetics (e.g background font), but I want a complete redesign using the exact visual style from demo D.
+- In fact, the redesign may go deeper than UI and CSS. E.g. for page card UI, we no longer has a folded detail page, every information is displayed on card. Please study thoroughly to reproduce the style in D, work out a plan
+- 1. Remove the focus UI and button.
+2. I thought we agreed on the page card no longer has a drop down button? Make sure it is styled exactly the same way as Demo D, including padding, internal structure, gap.
+3. Popup UI is still not updated to match the example in Demo D.
+- I don't get it, walk me through your thought process earlier because you failed to execute my request: The page card is still not styled exactly the same as demo D, and the original "expand card naturally to show details" from the plan is not implemented either. Furthermore, the popup UI looks unchanged from before my prompts, they still have sharp corner and are far from the exact style shown in demo D ("Popup preview").
+- 1. Page card should still display tags (note, snapshot), and the page detail should not be a seperate container, it should be layouted in the same structure as other elements.
+2. Page card text padding and the gap between page cards are still not the same as demo D. In fact there is no gap at all between cards.
+3. Popup UI is still not updated. I expect to see it styled like the capsule in Demo D, and uses the three-way workspace toggle like in Demo D.
+- Why popup UI doesn't have rounded corner?
+- I see. For popup, let's make the tri toggle seperated from the page detail. Two capsules emphasize the concept better.
+- No, the tri toggle itself is a capsule, don't add another one to wrap around it. And add more breathing room between toggle and details. Reproduce the aesthetics of demo D.
+- Change the tri toggle to use "Default" like in Demo D
+- Make the detail capsule slightly smaller
+- Sometimes when I click on a page card in search UI, the card doesn't get selected, I have to click for the second time to select it
+- When I select a card, then select another card, the first card is deselected automatically. But then I select the first card again, it is not immediately selected
+- In fact, let's change the page card UI:
+
+Remove the select and show detail flow.
+
+Move the attention display to right most corner of the card. One single point with three different color strength (preserve the same color schema).
+
+When user hovers over the attention dot, it changes into a read-more button. Clicking the button will open a floating card that shows the page details. Background elements are dimmed.
+- Remove the pin button as well. Move the attention dot to the same line as title. And make sure button doesn't shadow the text.
+- Some of the page show <unknown> title now, e.g. https://titterfun.com/, figure out why
+- continue debug
+- E2E test?
+- Page card should be highlighted when I select them
+- What is the selecting area? I think it doesn't cover the full card.
+- Show the attention dot for page that has no attention data. The dot is mentally not just about attention, but about page info.
+- Show multi-line title in page details. Show attention data. Show visit time (down to seconds).
+- SOme page detail has error:
+
+Uncaught SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+    at JSON.parse (<anonymous>)
+    at HTMLDivElement.<anonymous> (options.js:1602:32)
+- In some case the domain name is too long and overflows the card.
+- Like in demo D, the tag should include not only "note", but "snapshot". Additionally, we show lists that contains the page. Lists use the same color but different from note and snapshot.
+- "snapshot" tag is not shown
+- Don't change the cursor to a cross when doing range select
+- For the sidebar, don't highlight the section line when resizing the sidebar
+- Not sure what you changed. But when I hover around the sidebar right edge, a vertical highlight section line is still displayed
+- Setting page. The scroll bar should be tucked inside the capsule, not sticking out
+- Can you hide the white gutter of the scrollbar?
+- Remove the section line between time chart and results
+- Add slightly more padding room around the page
+- No, I don't mean padding around "page card", I mean padding around the entire portal UI.
+- Revert the increase of page card gap. Then add more padding to side bar as well (left, top and bottom).
+- For popup menu, let's do these:
+1. Increase gap between tri toggle and detail cards.
+2. Remove attention section.
+3. Remove the section titles, the content is self explanatory.
+4. Move the key shortcuts hints to outside and under the capsule. This way the capsule has more breathing room.
+- Remove "no highligh" "no snapshots". Add more gap between tri toggle and capsule, I am not sensing any difference. And the shortcut hints should have plenty of padding top and bottom.
+- I'm still seeing "No snapshots yet". And the gap between tri-toggle and detail capsule is still unchanged.
+- Working now, except the padding is way too large (between tri-toggle and capsule, between capsule and hints)
+- A bit smaller
+- The bottom padding of hint should be larger than its top padding
+- The drop down menu to select more list is truncated by the capsule
+- When the portal UI is first loading, a tri toggle containing "Recent" flickers. What is that?
+- When exactly is the sort toggle shown?
+- But I never see it appear when results are searched
+- Remove the toggle
+- For local file ("file://.."), let's use "file" as its domain name in page card rendering.
+- /finish

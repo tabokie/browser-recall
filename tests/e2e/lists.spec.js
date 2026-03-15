@@ -1807,6 +1807,56 @@ test.describe('List operations', () => {
     expect(root.value.childLists[0]).toMatch(/^list:/);
   });
 
+  // Bug: ensureLoaded in offscreen drain skips list:system/* keys, so when
+  // create_list replays during drain, loadOrDefault returns a fresh default
+  // with childLists:[], dropping all pre-existing children from root.json.
+  test('new list creation preserves existing root childLists through drain', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:existing1', 'list:existing2'],
+      }},
+      { path: 'lists/existing1.json', data: {
+        slug: 'existing1', name: 'Existing One', timestamp: now, pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'lists/existing2.json', data: {
+        slug: 'existing2', name: 'Existing Two', timestamp: now, pins: [], savedSearches: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Existing One': 'existing1', 'root/Existing Two': 'existing2' } } },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Create a new list — this triggers create_list in the log
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'saveListMeta', name: 'New List' })
+    );
+
+    // Flush (drain replays log entries in offscreen, writes to disk)
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+    );
+
+    // Rehydrate (clears session cache, re-reads from disk)
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+    );
+
+    // root.json must retain BOTH existing lists plus the new one
+    const root = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
+    );
+    await helper.close();
+
+    expect(root.value).toBeTruthy();
+    expect(root.value.childLists).toContain('list:existing1');
+    expect(root.value.childLists).toContain('list:existing2');
+    expect(root.value.childLists.length).toBe(3); // existing1, existing2, new
+  });
+
   // Bug: reparenting a child list to root updates root.json childLists, but
   // the drain was missing the list:system/root case so it never persisted.
   test('reparentList to root persists root.json through drain + rehydrate', async ({ extContext, extensionId, setupDir }) => {

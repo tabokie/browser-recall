@@ -427,7 +427,7 @@ async function drainQueue() {
         let s = await fsStorage.loadSettings();
         if (!s.timestamp) s.timestamp = 0;
         roundCache.set(key, s);
-      } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
+      } else if (key.startsWith('list:') && !key.startsWith('list:index/')) {
         const listId = key.slice('list:'.length);
         roundCache.set(key, await fsStorage.loadListPinsEntity(listId));
       } else if (key === 'manifest:orphaned') {

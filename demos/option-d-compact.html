@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Option D — Compact</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Nunito:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* Warm palette with richer depth */
+    --bg-base: #F8F0E6;
+    --bg-ambient: radial-gradient(ellipse at 20% 20%, rgba(255, 200, 140, 0.25) 0%, transparent 50%),
+                  radial-gradient(ellipse at 80% 60%, rgba(180, 160, 220, 0.12) 0%, transparent 50%),
+                  linear-gradient(160deg, #FFF6EE 0%, #F5E8D8 40%, #EDE4DA 100%);
+    --bg-surface: rgba(255, 255, 255, 0.45);
+    --bg-surface-solid: rgba(255, 255, 255, 0.75);
+    --bg-surface-hover: rgba(255, 248, 240, 0.7);
+    --bg-surface-active: rgba(255, 238, 218, 0.8);
+    --bg-frosted: rgba(255, 255, 255, 0.35);
+    --bg-sidebar: rgba(255, 252, 248, 0.55);
+
+    --border-glass: rgba(255, 255, 255, 0.55);
+    --border-glass-strong: rgba(255, 255, 255, 0.7);
+    --border-subtle: rgba(180, 160, 140, 0.15);
+    --border-hover: rgba(212, 128, 58, 0.35);
+
+    --text-primary: #352820;
+    --text-secondary: #5E4D3E;
+    --text-muted: #8E7D6D;
+
+    --accent-primary: #D07030;
+    --accent-primary-hover: #B86028;
+    --accent-primary-glow: rgba(208, 112, 48, 0.2);
+    --accent-primary-soft: rgba(208, 112, 48, 0.1);
+    --accent-blue: #5080B0;
+    --accent-blue-soft: rgba(80, 128, 176, 0.1);
+    --accent-green: #588858;
+    --accent-green-soft: rgba(88, 136, 88, 0.1);
+    --accent-red: #B85040;
+    --accent-red-soft: rgba(184, 80, 64, 0.1);
+
+    /* Deep layered shadows */
+    --shadow-float:
+      0 0.5px 0.5px rgba(53, 40, 32, 0.03),
+      0 1px 2px rgba(53, 40, 32, 0.04),
+      0 3px 6px rgba(53, 40, 32, 0.05),
+      0 8px 16px rgba(53, 40, 32, 0.04);
+    --shadow-float-hover:
+      0 0.5px 1px rgba(53, 40, 32, 0.04),
+      0 2px 4px rgba(53, 40, 32, 0.06),
+      0 6px 12px rgba(53, 40, 32, 0.06),
+      0 14px 28px rgba(53, 40, 32, 0.05);
+    --shadow-elevated:
+      0 1px 2px rgba(53, 40, 32, 0.04),
+      0 4px 8px rgba(53, 40, 32, 0.06),
+      0 12px 24px rgba(53, 40, 32, 0.06),
+      0 24px 48px rgba(53, 40, 32, 0.05);
+
+    --highlight-top: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    --highlight-top-strong: inset 0 1.5px 0 rgba(255, 255, 255, 0.75);
+    --highlight-edge: inset 0 0 0 0.5px rgba(255, 255, 255, 0.3);
+
+    --radius-pill: 9999px;
+    --radius-xl: 14px;
+    --radius-lg: 10px;
+    --radius-md: 8px;
+    --radius-sm: 6px;
+
+    --font-display: 'Instrument Serif', Georgia, serif;
+    --font-body: 'Nunito', -apple-system, BlinkMacSystemFont, sans-serif;
+
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-spring-soft: cubic-bezier(0.22, 1.2, 0.36, 1);
+    --ease-smooth: cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-body);
+    background: var(--bg-ambient);
+    background-attachment: fixed;
+    color: var(--text-primary);
+    line-height: 1.5;
+    padding: 40px;
+    min-height: 100vh;
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: 28px;
+    margin-bottom: 6px;
+  }
+
+  .subtitle {
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-bottom: 32px;
+  }
+
+  .demo-grid {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 24px;
+    max-width: 960px;
+  }
+
+  /* ---- Sidebar (frosted) ---- */
+  .sidebar {
+    background: var(--bg-sidebar);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border-glass-strong);
+    box-shadow: var(--shadow-float), var(--highlight-top-strong), var(--highlight-edge);
+    border-radius: var(--radius-xl);
+    padding: 14px;
+  }
+
+  .sidebar-title {
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-weight: 400;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .sidebar-title .icon {
+    width: 22px;
+    height: 22px;
+    background: linear-gradient(145deg, #E89050, #D07030);
+    border-radius: 50%;
+    box-shadow:
+      0 1px 3px rgba(208, 112, 48, 0.35),
+      0 0 8px rgba(208, 112, 48, 0.15);
+  }
+
+  .sidebar-btn {
+    width: 100%;
+    padding: 10px 16px;
+    background: linear-gradient(145deg, #D88040, #C06828);
+    color: white;
+    border: none;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 12px;
+    box-shadow:
+      0 1px 2px rgba(208, 112, 48, 0.25),
+      0 3px 8px rgba(208, 112, 48, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    transition: background 0.15s var(--ease-smooth), box-shadow 0.2s var(--ease-smooth);
+  }
+  .sidebar-btn:hover {
+    background: linear-gradient(145deg, #E08848, #C87030);
+    box-shadow:
+      0 2px 4px rgba(208, 112, 48, 0.3),
+      0 6px 16px rgba(208, 112, 48, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+  .sidebar-btn:active {
+    background: linear-gradient(145deg, #C06828, #A85820);
+  }
+
+  .sidebar-section {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin: 10px 0 4px;
+  }
+
+  .sidebar-item {
+    padding: 6px 10px;
+    border-radius: var(--radius-pill);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.18s var(--ease-spring-soft);
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .sidebar-item:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+  .sidebar-item.active {
+    background: var(--accent-primary-soft);
+    color: var(--accent-primary);
+    font-weight: 600;
+    box-shadow:
+      inset 0 0 0 1px rgba(208, 112, 48, 0.12),
+      0 1px 3px rgba(208, 112, 48, 0.08);
+  }
+  .sidebar-item .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0.5px 2px rgba(0,0,0,0.2);
+  }
+
+  /* ---- Main Content ---- */
+  .main {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .main-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 4px;
+  }
+
+  .main-header h2 {
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 400;
+  }
+
+  .badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 12px;
+    border-radius: var(--radius-pill);
+    background: var(--accent-primary-soft);
+    color: var(--accent-primary);
+    border: 1px solid rgba(208, 112, 48, 0.12);
+  }
+
+  /* ---- Search ---- */
+  .sticky-search {
+    width: 100%;
+    padding: 7px 14px;
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-pill);
+    font-family: var(--font-body);
+    font-size: 13px;
+    background: #FFFFFF;
+    color: var(--text-primary);
+    box-shadow: var(--highlight-top), var(--highlight-edge),
+      0 1px 3px rgba(53, 40, 32, 0.06);
+    transition: border-color 0.15s, box-shadow 0.2s;
+  }
+  .sticky-search::placeholder {
+    color: var(--text-muted);
+  }
+  .sticky-search:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow:
+      0 0 0 3px rgba(208, 112, 48, 0.1),
+      0 0 12px rgba(208, 112, 48, 0.06),
+      var(--highlight-top);
+  }
+
+  /* ---- Time Chart (flat, blends with background) ---- */
+  .time-chart {
+    padding: 8px 0;
+    min-width: 0;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border-subtle);
+    position: relative;
+  }
+
+  .chart-bars {
+    display: flex;
+    justify-content: flex-end;
+    overflow-x: auto;
+    min-height: 44px;
+  }
+
+  .chart-bars::-webkit-scrollbar {
+    height: 4px;
+  }
+  .chart-bars::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .chart-bars::-webkit-scrollbar-thumb {
+    background: rgba(142, 125, 109, 0.2);
+    border-radius: var(--radius-pill);
+  }
+
+  .chart-content {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+  }
+
+  .chart-bars-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    height: 32px;
+  }
+
+  .chart-bar-group {
+    flex: 0 0 10px;
+    height: 100%;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .chart-bar {
+    width: 10px;
+    min-height: 2px;
+    background: rgba(142, 125, 109, 0.2);
+    border-radius: 3px 3px 0 0;
+    transition: background 0.15s;
+  }
+
+  .chart-bar-group.has-data .chart-bar {
+    cursor: pointer;
+  }
+
+  .chart-bar:hover {
+    background: rgba(142, 125, 109, 0.4);
+  }
+
+  .chart-bar.highlighted {
+    background: var(--accent-primary);
+    box-shadow: 0 0 4px var(--accent-primary-glow);
+  }
+
+  .chart-bar-group.active .chart-bar {
+    background: var(--accent-primary);
+    box-shadow: 0 0 6px var(--accent-primary-glow);
+  }
+
+  .chart-axis {
+    position: relative;
+    height: 14px;
+    margin-top: 2px;
+  }
+
+  .chart-month {
+    position: absolute;
+    top: 0;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+    line-height: 14px;
+  }
+
+  .chart-tooltip {
+    position: absolute;
+    background: var(--text-primary);
+    color: var(--bg-base);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+    white-space: nowrap;
+    display: none;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(53, 40, 32, 0.2);
+  }
+
+  /* Floating Glass Cards */
+  .card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-lg);
+    padding: 10px 14px;
+    box-shadow: var(--shadow-float), var(--highlight-top), var(--highlight-edge),
+      inset 0 16px 24px -12px rgba(255, 255, 255, 0.25);
+    transition:
+      box-shadow 0.25s var(--ease-smooth),
+      border-color 0.15s;
+    cursor: pointer;
+  }
+  .card:hover {
+    box-shadow: var(--shadow-float-hover), var(--highlight-top), var(--highlight-edge),
+      inset 0 16px 24px -12px rgba(255, 255, 255, 0.25);
+    border-color: var(--border-hover);
+  }
+  .card.selected {
+    background: var(--accent-primary-soft);
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-float), var(--highlight-top), var(--highlight-edge),
+      inset 0 16px 24px -12px rgba(255, 255, 255, 0.25),
+      0 0 0 2px var(--accent-primary-soft);
+  }
+
+  .card-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .card-title {
+    font-weight: 600;
+    font-size: 13px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-site {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .card-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .card-extras {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 3px;
+  }
+
+  .tag {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .tag-note {
+    background: var(--accent-blue-soft);
+    color: var(--accent-blue);
+    border-color: rgba(80, 128, 176, 0.12);
+  }
+  .tag-snap {
+    background: var(--accent-green-soft);
+    color: var(--accent-green);
+    border-color: rgba(88, 136, 88, 0.12);
+  }
+  .tag-page {
+    background: var(--accent-primary-soft);
+    color: var(--accent-primary);
+    border-color: rgba(208, 112, 48, 0.12);
+  }
+
+  /* Attention with glow */
+  .attention-grid {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    margin-top: 4px;
+    position: relative;
+  }
+  .attention-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+  }
+  .attention-dot.low { opacity: 0.2; }
+  .attention-dot.med { opacity: 0.45; }
+  .attention-dot.high { opacity: 0.75; box-shadow: 0 0 4px var(--accent-primary-glow); }
+  .attention-dot.max { opacity: 1; box-shadow: 0 0 6px var(--accent-primary-glow); }
+  .attention-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: 4px;
+  }
+
+  /* Pill Buttons with depth */
+  .btn-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .btn {
+    padding: 6px 14px;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition:
+      box-shadow 0.15s var(--ease-smooth),
+      background 0.15s,
+      border-color 0.15s;
+  }
+
+  .btn-primary {
+    background: linear-gradient(145deg, #D88040, #B86028);
+    color: white;
+    box-shadow:
+      0 1px 2px rgba(208, 112, 48, 0.25),
+      0 3px 8px rgba(208, 112, 48, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+  .btn-primary:hover {
+    background: linear-gradient(145deg, #E08848, #C87030);
+    box-shadow:
+      0 2px 4px rgba(208, 112, 48, 0.3),
+      0 6px 14px rgba(208, 112, 48, 0.25),
+      0 0 20px rgba(208, 112, 48, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+  .btn-primary:active {
+    background: linear-gradient(145deg, #C06828, #A85820);
+    box-shadow:
+      0 1px 2px rgba(208, 112, 48, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  }
+
+  .btn-secondary {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border-color: var(--border-glass);
+    box-shadow: var(--shadow-float), var(--highlight-top);
+  }
+  .btn-secondary:hover {
+    background: var(--bg-surface-solid);
+    border-color: var(--border-hover);
+  }
+  .btn-secondary:active {
+    background: var(--bg-surface-active);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+  }
+  .btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.4);
+    color: var(--text-primary);
+  }
+
+  /* Input with glass feel */
+  .input-group { margin-top: 8px; }
+  .input-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: 5px;
+  }
+
+  .input-group input {
+    width: 100%;
+    padding: 10px 16px;
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-pill);
+    font-family: var(--font-body);
+    font-size: 13px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    box-shadow: var(--highlight-top), var(--highlight-edge);
+    transition: border-color 0.15s, box-shadow 0.2s;
+  }
+  .input-group input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow:
+      0 0 0 3px rgba(208, 112, 48, 0.1),
+      0 0 12px rgba(208, 112, 48, 0.06),
+      var(--highlight-top);
+  }
+
+  /* ---- Toggle (glass pill) ---- */
+  .toggle-row {
+    display: flex;
+    gap: 3px;
+    background: rgba(245, 237, 228, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: var(--radius-pill);
+    padding: 3px;
+    width: fit-content;
+    margin-top: 8px;
+    border: 1px solid var(--border-glass);
+    box-shadow: var(--highlight-top), var(--highlight-edge);
+  }
+  .toggle-option {
+    padding: 6px 16px;
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.25s var(--ease-spring);
+    border: 1px solid transparent;
+  }
+  .toggle-option:hover { color: var(--text-secondary); }
+  .toggle-option.active {
+    background: rgba(255, 255, 255, 0.8);
+    color: var(--text-primary);
+    font-weight: 600;
+    box-shadow: var(--shadow-float);
+    border-color: var(--border-glass);
+  }
+
+  /* ---- Popup Demo (elevated glass) ---- */
+  .section-divider {
+    margin: 36px 0 24px;
+    border: none;
+    border-top: 1px solid rgba(180, 160, 140, 0.15);
+  }
+
+  .label-row {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    font-style: italic;
+    font-family: var(--font-display);
+  }
+
+  .popup-demo {
+    width: 360px;
+    background: rgba(255, 255, 255, 0.5);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-glass-strong);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-elevated), var(--highlight-top-strong), var(--highlight-edge);
+    overflow: hidden;
+    position: relative;
+  }
+  .popup-demo::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+      170deg,
+      rgba(255, 255, 255, 0.35) 0%,
+      rgba(255, 255, 255, 0.08) 40%,
+      transparent 100%
+    );
+    pointer-events: none;
+  }
+
+  .popup-header {
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid rgba(180, 160, 140, 0.1);
+    position: relative;
+  }
+
+  .popup-header h3 {
+    font-family: var(--font-display);
+    font-size: 17px;
+    font-weight: 400;
+    margin-bottom: 2px;
+  }
+
+  .popup-header .url {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .popup-section {
+    padding: 12px 18px;
+    border-bottom: 1px solid rgba(180, 160, 140, 0.08);
+    position: relative;
+  }
+  .popup-section:last-child { border-bottom: none; }
+
+  .popup-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin-bottom: 7px;
+  }
+
+  .chip-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .chip {
+    padding: 5px 13px;
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    font-weight: 500;
+    background: rgba(245, 237, 228, 0.5);
+    color: var(--text-secondary);
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: var(--highlight-top);
+    transition: all 0.2s var(--ease-spring);
+  }
+  .chip:hover {
+    background: rgba(255, 248, 240, 0.8);
+    border-color: var(--border-hover);
+    color: var(--text-primary);
+  }
+  .chip.active {
+    background: var(--accent-primary-soft);
+    color: var(--accent-primary);
+    border-color: rgba(208, 112, 48, 0.2);
+    font-weight: 600;
+    box-shadow: 0 1px 4px rgba(208, 112, 48, 0.1), var(--highlight-top);
+  }
+
+  textarea {
+    width: 100%;
+    padding: 10px 13px;
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-body);
+    font-size: 13px;
+    resize: vertical;
+    min-height: 48px;
+    background: rgba(255, 255, 255, 0.4);
+    color: var(--text-primary);
+    box-shadow: var(--highlight-top);
+  }
+  textarea:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(208, 112, 48, 0.08), 0 0 10px rgba(208, 112, 48, 0.04), var(--highlight-top);
+  }
+
+  /* ---- Shimmer loading demo ---- */
+  .shimmer-demo {
+    margin-top: 24px;
+  }
+  .shimmer-demo .label-row { margin-bottom: 8px; }
+
+  @keyframes shimmer {
+    0% { background-position: -200px 0; }
+    100% { background-position: calc(200px + 100%) 0; }
+  }
+
+  .shimmer-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-lg);
+    padding: 16px 18px;
+    box-shadow: var(--shadow-float), var(--highlight-top);
+    width: 360px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .shimmer-line {
+    height: 12px;
+    border-radius: var(--radius-pill);
+    background: linear-gradient(
+      90deg,
+      rgba(245, 237, 228, 0.5) 0%,
+      rgba(255, 248, 240, 0.8) 50%,
+      rgba(245, 237, 228, 0.5) 100%
+    );
+    background-size: 200px 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+  .shimmer-line.w-75 { width: 75%; }
+  .shimmer-line.w-50 { width: 50%; }
+  .shimmer-line.w-60 { width: 60%; }
+  .shimmer-line.h-8 { height: 8px; }
+</style>
+</head>
+<body>
+
+<h1>Option D — Compact</h1>
+<p class="subtitle">Same aesthetic as C, tightened for higher information density.</p>
+
+<div class="demo-grid">
+  <!-- Sidebar (frosted glass) -->
+  <div class="sidebar">
+    <div class="sidebar-title">
+      <div class="icon"></div>
+      Portal
+    </div>
+    <button class="sidebar-btn">Explore</button>
+    <div class="sidebar-section">Lists</div>
+    <div class="sidebar-item active">
+      <div class="dot" style="background: var(--accent-primary)"></div>
+      Research Papers
+    </div>
+    <div class="sidebar-item">
+      <div class="dot" style="background: var(--accent-blue)"></div>
+      Design Inspiration
+    </div>
+    <div class="sidebar-item">
+      <div class="dot" style="background: var(--accent-green)"></div>
+      Reading List
+    </div>
+    <div class="sidebar-item">
+      <div class="dot" style="background: var(--accent-red)"></div>
+      Bug Reports
+    </div>
+    <div class="sidebar-section">System</div>
+    <div class="sidebar-item">
+      <div class="dot" style="background: var(--text-muted)"></div>
+      Gateways
+    </div>
+  </div>
+
+  <!-- Main content -->
+  <div class="main">
+    <div class="main-header">
+      <h2>Research Papers</h2>
+      <span class="badge">12 items</span>
+    </div>
+
+    <input type="text" class="sticky-search" placeholder="Search pages, notes, snapshots...">
+
+    <div class="time-chart" id="timeChart">
+      <div class="chart-bars" id="chartBars">
+        <div class="chart-content">
+          <div class="chart-bars-row" id="chartBarsRow"></div>
+          <div class="chart-axis" id="chartAxis"></div>
+        </div>
+      </div>
+      <div class="chart-tooltip" id="chartTooltip"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">Attention Is All You Need</div>
+        <span class="card-site">arxiv.org</span>
+        <span class="card-time">3d ago</span>
+      </div>
+      <div class="card-extras">
+        <div class="attention-grid">
+          <div class="attention-dot max"></div>
+          <div class="attention-dot high"></div>
+          <div class="attention-dot med"></div>
+          <div class="attention-dot low"></div>
+          <div class="attention-dot low"></div>
+          <span class="attention-label">High attention</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">BERT: Pre-training of Deep Bidirectional Transformers</div>
+        <span class="card-site">arxiv.org</span>
+        <span class="card-time">1w ago</span>
+      </div>
+      <div class="card-extras">
+        <span class="tag tag-note">note</span>
+        <span class="tag tag-snap">snapshot</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">Language Models are Few-Shot Learners</div>
+        <span class="card-site">openai.com</span>
+        <span class="card-time">2w ago</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">Scaling Laws for Neural Language Models</div>
+        <span class="card-site">arxiv.org</span>
+        <span class="card-time">3w ago</span>
+      </div>
+      <div class="card-extras">
+        <span class="tag tag-note">note</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">Constitutional AI: Harmlessness from AI Feedback</div>
+        <span class="card-site">anthropic.com</span>
+        <span class="card-time">3w ago</span>
+      </div>
+      <div class="card-extras">
+        <span class="tag tag-snap">snapshot</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">Chain-of-Thought Prompting Elicits Reasoning</div>
+        <span class="card-site">arxiv.org</span>
+        <span class="card-time">1mo ago</span>
+      </div>
+      <div class="card-extras">
+        <div class="attention-grid">
+          <div class="attention-dot high"></div>
+          <div class="attention-dot med"></div>
+          <div class="attention-dot med"></div>
+          <div class="attention-dot low"></div>
+          <div class="attention-dot low"></div>
+          <span class="attention-label">Medium attention</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">Retrieval-Augmented Generation for Knowledge-Intensive NLP</div>
+        <span class="card-site">arxiv.org</span>
+        <span class="card-time">1mo ago</span>
+      </div>
+      <div class="card-extras">
+        <span class="tag tag-note">note</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">Training Language Models to Follow Instructions</div>
+        <span class="card-site">openai.com</span>
+        <span class="card-time">1mo ago</span>
+      </div>
+      <div class="card-extras">
+        <span class="tag tag-snap">snapshot</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">Chinchilla: Training Compute-Optimal Large Language Models</div>
+        <span class="card-site">deepmind.google</span>
+        <span class="card-time">2mo ago</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">PaLM: Scaling Language Modeling with Pathways</div>
+        <span class="card-site">arxiv.org</span>
+        <span class="card-time">2mo ago</span>
+      </div>
+      <div class="card-extras">
+        <span class="tag tag-note">note</span>
+        <div class="attention-grid">
+          <div class="attention-dot med"></div>
+          <div class="attention-dot low"></div>
+          <div class="attention-dot low"></div>
+          <div class="attention-dot low"></div>
+          <div class="attention-dot low"></div>
+          <span class="attention-label">Low attention</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">Sparks of Artificial General Intelligence</div>
+        <span class="card-site">microsoft.com</span>
+        <span class="card-time">2mo ago</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">LLaMA: Open and Efficient Foundation Language Models</div>
+        <span class="card-site">arxiv.org</span>
+        <span class="card-time">2mo ago</span>
+      </div>
+      <div class="card-extras">
+        <span class="tag tag-snap">snapshot</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-row">
+        <div class="card-title">Direct Preference Optimization</div>
+        <span class="card-site">arxiv.org</span>
+        <span class="card-time">3mo ago</span>
+      </div>
+      <div class="card-extras">
+        <span class="tag tag-note">note</span>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary">Add Page</button>
+      <button class="btn btn-secondary">Import</button>
+      <button class="btn btn-ghost">Settings</button>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-option active">Workspace</div>
+      <div class="toggle-option">Default</div>
+      <div class="toggle-option">Private</div>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<p class="label-row">Popup preview (360px wide, frosted glass)</p>
+
+<div class="popup-demo">
+  <div class="popup-header">
+    <h3>Attention Is All You Need</h3>
+    <div class="url">arxiv.org/abs/1706.03762</div>
+  </div>
+  <div class="popup-section">
+    <div class="popup-section-title">Notes</div>
+    <textarea placeholder="Add a note about this page..."></textarea>
+  </div>
+  <div class="popup-section">
+    <div class="popup-section-title">Lists</div>
+    <div class="chip-row">
+      <span class="chip active">Research Papers</span>
+      <span class="chip">Reading List</span>
+      <span class="chip">+ Add</span>
+    </div>
+  </div>
+  <div class="popup-section">
+    <div class="popup-section-title">Snapshots</div>
+    <div style="display: flex; align-items: center; gap: 8px; position: relative;">
+      <span class="tag tag-snap">HTML</span>
+      <span style="font-size: 12px; color: var(--text-secondary);">Mar 12, 2026 · 14:32</span>
+    </div>
+  </div>
+</div>
+
+<div class="shimmer-demo">
+  <hr class="section-divider">
+  <p class="label-row">Loading state (shimmer)</p>
+  <div class="shimmer-card">
+    <div class="shimmer-line w-75"></div>
+    <div class="shimmer-line w-50 h-8"></div>
+    <div class="shimmer-line w-60 h-8"></div>
+  </div>
+</div>
+
+<script>
+// Card selection
+(() => {
+  const cards = () => [...document.querySelectorAll('.main .card')];
+  let lastSelected = null;
+
+  document.querySelector('.main').addEventListener('click', (e) => {
+    const card = e.target.closest('.card');
+    if (!card) return;
+
+    const all = cards();
+    if (e.metaKey || e.ctrlKey) {
+      // Toggle single
+      card.classList.toggle('selected');
+      lastSelected = card;
+    } else if (e.shiftKey && lastSelected) {
+      // Range select
+      const from = all.indexOf(lastSelected);
+      const to = all.indexOf(card);
+      const [lo, hi] = from < to ? [from, to] : [to, from];
+      all.forEach((c, i) => c.classList.toggle('selected', i >= lo && i <= hi));
+    } else {
+      // Single select (clear others)
+      const wasSelected = card.classList.contains('selected');
+      all.forEach(c => c.classList.remove('selected'));
+      if (!wasSelected) card.classList.add('selected');
+      lastSelected = card;
+    }
+  });
+})();
+</script>
+
+<script>
+// Generate sample chart data (90 days, sparse visits)
+(() => {
+  const barsRow = document.getElementById('chartBarsRow');
+  const axis = document.getElementById('chartAxis');
+  const tooltip = document.getElementById('chartTooltip');
+  const chartEl = document.getElementById('timeChart');
+
+  const days = 45;
+  const end = new Date('2026-03-15');
+  const start = new Date(end);
+  start.setDate(start.getDate() - days + 1);
+  // Round start to 1st of month
+  const rangeStart = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+
+  const maxScore = 12;
+  const data = new Map();
+  // Generate sparse random visit data
+  for (let i = 0; i < 45; i++) {
+    const d = new Date(rangeStart);
+    d.setDate(d.getDate() + Math.floor(Math.random() * days));
+    const key = d.toISOString().slice(0, 10);
+    data.set(key, (data.get(key) || 0) + Math.ceil(Math.random() * 4));
+  }
+
+  let prevMonth = null;
+  const daySlotPx = 11;
+  let dayIndex = 0;
+
+  for (let d = new Date(rangeStart); d <= end; d.setDate(d.getDate() + 1)) {
+    const dateStr = d.toISOString().slice(0, 10);
+    const month = dateStr.slice(0, 7);
+
+    // Month label
+    if (month !== prevMonth) {
+      const label = document.createElement('span');
+      label.className = 'chart-month';
+      label.style.left = (dayIndex * daySlotPx) + 'px';
+      label.textContent = month;
+      axis.appendChild(label);
+      prevMonth = month;
+    }
+
+    // Bar group
+    const group = document.createElement('div');
+    group.className = 'chart-bar-group';
+    group.dataset.date = dateStr;
+
+    const score = data.get(dateStr);
+    if (score != null) {
+      group.classList.add('has-data');
+      group.dataset.score = score;
+      const bar = document.createElement('div');
+      bar.className = 'chart-bar';
+      const capped = Math.min(score, maxScore);
+      bar.style.height = Math.max(2, Math.round((capped / maxScore) * 32)) + 'px';
+      group.appendChild(bar);
+    }
+
+    barsRow.appendChild(group);
+    dayIndex++;
+  }
+
+  // Set content min-width
+  const content = barsRow.parentElement;
+  content.style.minWidth = (dayIndex * daySlotPx) + 'px';
+
+  // Scroll to end
+  const barsContainer = document.getElementById('chartBars');
+  barsContainer.scrollLeft = barsContainer.scrollWidth;
+
+  // Tooltip
+  barsContainer.addEventListener('mouseover', (e) => {
+    const group = e.target.closest('.chart-bar-group.has-data');
+    if (!group) { tooltip.style.display = 'none'; return; }
+    const count = Math.round(parseFloat(group.dataset.score));
+    const visits = count === 1 ? 'visit' : 'visits';
+    tooltip.textContent = group.dataset.date + ': ' + count + ' ' + visits;
+    tooltip.style.display = 'block';
+    const rect = group.getBoundingClientRect();
+    const chartRect = chartEl.getBoundingClientRect();
+    tooltip.style.left = (rect.left - chartRect.left + rect.width / 2 - tooltip.offsetWidth / 2) + 'px';
+    tooltip.style.top = (rect.top - chartRect.top - 22) + 'px';
+  });
+  barsContainer.addEventListener('mouseout', () => {
+    tooltip.style.display = 'none';
+  });
+
+  // Click to toggle active
+  barsContainer.addEventListener('click', (e) => {
+    const bar = e.target.closest('.chart-bar');
+    if (!bar) return;
+    bar.closest('.chart-bar-group').classList.toggle('active');
+  });
+})();
+</script>
+
+</body>
+</html>

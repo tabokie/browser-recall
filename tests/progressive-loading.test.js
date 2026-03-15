@@ -464,7 +464,7 @@ describe('Progressive loading', () => {
     // Frames should be rendered from static HTML
     expect(document.getElementById('exploreBtn')).not.toBeNull();
     expect(mainTitle()).toBe('Explore'); // static HTML default
-    expect(columnHeaders().length).toBeGreaterThan(0); // column headers in static HTML
+    // sort toggle removed — results use default sort (lastVisit desc)
 
     // No list items (readCacheable blocked → renderLists hasn't completed)
     expect(sidebarLists()).toEqual([]);

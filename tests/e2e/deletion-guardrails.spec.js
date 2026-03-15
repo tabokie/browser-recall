@@ -72,23 +72,17 @@ test.describe('Deletion guardrails', () => {
     // Open options page — the page should appear in explore
     const options = await openOptionsPage(extContext, extensionId);
 
-    // Click the expand button on the result row to show notes
-    const expandBtn = options.locator('.result-expand').first();
-    await expect(expandBtn).toBeVisible({ timeout: 5000 });
-    await expandBtn.click();
-
-    // Note should be visible in the detail panel
-    const noteEntry = options.locator(`.detail-note-entry[data-note-slug="${noteSlug}"]`);
-    await expect(noteEntry).toBeVisible({ timeout: 5000 });
+    // The page should have a "note" tag in card-extras (from childIds containing note:)
+    const noteTag = options.locator('.card-tag-note').first();
+    await expect(noteTag).toBeVisible({ timeout: 5000 });
 
     // Delete the note via background message (simulates deletion from another context)
     await options.evaluate((slug) =>
       chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug: slug })
     , noteSlug);
 
-    // The note should disappear from the detail panel without page reload.
-    // The mutation handler should trigger refreshCurrentView().
-    await expect(noteEntry).toBeHidden({ timeout: 5000 });
+    // The note tag should disappear after the mutation handler refreshes the view.
+    await expect(noteTag).toBeHidden({ timeout: 5000 });
 
     await options.close();
   });

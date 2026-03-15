@@ -232,19 +232,19 @@ function showGlobalNoteOverlay(existingNote, existingNoteSlug, pageSlug) {
     <style>
       .overlay {
         width: 280px;
-        background: white;
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #FFF8F0;
+        border: 1px solid rgba(180, 160, 140, 0.15);
+        border-radius: 10px;
+        box-shadow: 0 1px 2px rgba(53,40,32,0.04), 0 4px 12px rgba(53,40,32,0.08);
+        font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         padding: 8px;
       }
       textarea {
         width: 100%;
         min-height: 28px;
         height: 28px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
+        border: 1px solid rgba(180, 160, 140, 0.15);
+        border-radius: 6px;
         padding: 4px 8px;
         font-family: inherit;
         font-size: 12px;
@@ -253,7 +253,7 @@ function showGlobalNoteOverlay(existingNote, existingNoteSlug, pageSlug) {
         line-height: 18px;
         overflow: hidden;
       }
-      textarea:focus { outline: none; border-color: #4285f4; }
+      textarea:focus { outline: none; border-color: #D07030; }
     </style>
     <div class="overlay">
       <textarea placeholder="Add a page note... Esc to save."></textarea>
@@ -603,11 +603,11 @@ function showHighlightEditOverlay(mark, text, noteSlug, existingNote, pageSlug) 
         align-items: flex-start;
         gap: 8px;
         width: 280px;
-        background: white;
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #FFF8F0;
+        border: 1px solid rgba(180, 160, 140, 0.15);
+        border-radius: 10px;
+        box-shadow: 0 1px 2px rgba(53,40,32,0.04), 0 4px 12px rgba(53,40,32,0.08);
+        font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         padding: 8px;
       }
       .delete-btn {
@@ -618,16 +618,16 @@ function showHighlightEditOverlay(mark, text, noteSlug, existingNote, pageSlug) 
         align-items: center;
         justify-content: center;
         background: none;
-        border: 1px solid #ddd;
-        border-radius: 4px;
+        border: 1px solid rgba(180, 160, 140, 0.15);
+        border-radius: 6px;
         cursor: pointer;
-        color: #888;
+        color: #8E7D6D;
         padding: 0;
       }
       .delete-btn:hover {
-        background: #fce8e6;
-        border-color: #c5221f;
-        color: #c5221f;
+        background: rgba(184, 80, 64, 0.1);
+        border-color: #B85040;
+        color: #B85040;
       }
       .delete-btn svg {
         width: 16px;
@@ -638,8 +638,8 @@ function showHighlightEditOverlay(mark, text, noteSlug, existingNote, pageSlug) 
         width: 100%;
         min-height: 28px;
         height: 28px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
+        border: 1px solid rgba(180, 160, 140, 0.15);
+        border-radius: 6px;
         padding: 4px 8px;
         font-family: inherit;
         font-size: 12px;
@@ -648,7 +648,7 @@ function showHighlightEditOverlay(mark, text, noteSlug, existingNote, pageSlug) 
         line-height: 18px;
         overflow: hidden;
       }
-      textarea:focus { outline: none; border-color: #4285f4; }
+      textarea:focus { outline: none; border-color: #D07030; }
     </style>
     <div class="overlay">
       <button class="delete-btn" title="Delete note">
@@ -809,7 +809,7 @@ function showCaptureNotification() {
         z-index: 2147483647;
         background: rgba(0, 0, 0, 0.78);
         color: #fff;
-        font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font: 14px/1.4 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         padding: 10px 20px;
         border-radius: 8px;
         pointer-events: none;
@@ -843,7 +843,7 @@ function showLikeNotification(delta = 1) {
         z-index: 2147483647;
         background: rgba(0, 0, 0, 0.78);
         color: #fff;
-        font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font: 14px/1.4 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         padding: 10px 20px;
         border-radius: 8px;
         pointer-events: none;
@@ -877,7 +877,7 @@ function showErrorNotification(message) {
         z-index: 2147483647;
         background: rgba(180, 30, 30, 0.88);
         color: #fff;
-        font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font: 14px/1.4 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         padding: 10px 20px;
         border-radius: 8px;
         pointer-events: none;
@@ -915,20 +915,20 @@ function showHighlightsPanel(notes, pageSlug, { hint } = {}) {
   const shadow = host.attachShadow({ mode: 'open' });
   shadow.innerHTML = `
     <style>
-      .panel { width: 300px; max-height: 400px; overflow-y: auto; background: white; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.18); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; }
-      .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #eee; font-weight: 600; font-size: 12px; color: #444; cursor: move; user-select: none; }
-      .close-btn { background: none; border: none; cursor: pointer; color: #888; font-size: 16px; padding: 0 4px; line-height: 1; }
-      .close-btn:hover { color: #333; }
-      .highlight-item { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }
+      .panel { width: 300px; max-height: 400px; overflow-y: auto; background: #FFF8F0; border: 1px solid rgba(180, 160, 140, 0.15); border-radius: 10px; box-shadow: 0 1px 2px rgba(53,40,32,0.04), 0 4px 16px rgba(53,40,32,0.1); font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; }
+      .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid rgba(180, 160, 140, 0.15); font-weight: 600; font-size: 12px; color: #5E4D3E; cursor: move; user-select: none; }
+      .close-btn { background: none; border: none; cursor: pointer; color: #8E7D6D; font-size: 16px; padding: 0 4px; line-height: 1; }
+      .close-btn:hover { color: #352820; }
+      .highlight-item { padding: 8px 12px; border-bottom: 1px solid rgba(180, 160, 140, 0.1); }
       .highlight-item:last-child { border-bottom: none; }
-      .excerpt { font-size: 12px; color: #222; background: #fff8dc; padding: 4px 6px; border-radius: 3px; border-left: 3px solid #f0c040; margin-bottom: 4px; line-height: 1.4; word-break: break-word; }
+      .excerpt { font-size: 12px; color: #352820; background: #fff8dc; padding: 4px 6px; border-radius: 6px; border-left: 3px solid #f0c040; margin-bottom: 4px; line-height: 1.4; word-break: break-word; }
       .note-row { display: flex; align-items: flex-start; gap: 4px; }
-      textarea { flex: 1; min-height: 24px; height: 24px; border: 1px solid #e0e0e0; border-radius: 4px; padding: 3px 6px; font-family: inherit; font-size: 11px; resize: none; box-sizing: border-box; line-height: 16px; overflow: hidden; }
-      textarea:focus { outline: none; border-color: #4285f4; }
-      .delete-btn { flex-shrink: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: none; border: 1px solid transparent; border-radius: 3px; cursor: pointer; color: #aaa; padding: 0; }
-      .delete-btn:hover { background: #fce8e6; color: #c5221f; border-color: #c5221f; }
+      textarea { flex: 1; min-height: 24px; height: 24px; border: 1px solid rgba(180, 160, 140, 0.15); border-radius: 6px; padding: 3px 6px; font-family: inherit; font-size: 11px; resize: none; box-sizing: border-box; line-height: 16px; overflow: hidden; }
+      textarea:focus { outline: none; border-color: #D07030; }
+      .delete-btn { flex-shrink: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: none; border: 1px solid transparent; border-radius: 6px; cursor: pointer; color: #8E7D6D; padding: 0; }
+      .delete-btn:hover { background: rgba(184, 80, 64, 0.1); color: #B85040; border-color: #B85040; }
       .delete-btn svg { width: 14px; height: 14px; fill: currentColor; }
-      .hint { padding: 8px 12px; font-size: 11px; color: #888; line-height: 1.4; }
+      .hint { padding: 8px 12px; font-size: 11px; color: #8E7D6D; line-height: 1.4; }
     </style>
     <div class="panel">
       <div class="panel-header">

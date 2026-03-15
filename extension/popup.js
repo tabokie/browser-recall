@@ -62,7 +62,7 @@ function formatDuration(ms) {
 function renderSnapshots(snapshots) {
   const container = document.getElementById('snapshotList');
   if (!snapshots || snapshots.length === 0) {
-    container.innerHTML = '<div class="empty-state">No snapshots yet</div>';
+    container.innerHTML = '';
     return;
   }
 
@@ -716,7 +716,7 @@ async function showDashboard(tab) {
 
   document.getElementById('loading').style.display = 'none';
   document.getElementById('blacklisted').style.display = 'none';
-  document.getElementById('dashboard').style.display = 'block';
+  document.getElementById('dashboard').style.display = 'flex';
   document.getElementById('dashboardContent').style.display = 'block';
 
   // Auto-resize note textareas now that the dashboard is visible
@@ -779,7 +779,7 @@ async function showDashboard(tab) {
     detachedContent = content;
     content.remove();
     document.getElementById('loading').style.display = 'none';
-    document.getElementById('dashboard').style.display = 'block';
+    document.getElementById('dashboard').style.display = 'flex';
     return;
   }
 
