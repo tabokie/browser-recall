@@ -48,6 +48,133 @@ test.describe('Snapshot slug meta tag', () => {
     await page.close();
   });
 
+  // openSnapshot opens the snapshot-viewer.html extension page which renders the
+  // snapshot in an iframe and applies highlights from the original page's notes.
+  test('highlights applied on snapshot via openSnapshot viewer', async ({ extContext, extensionId, setupDir }) => {
+    const originalUrl = 'https://example.com/article';
+    const slug = getSlugForUrl(originalUrl);
+    const noteSlug = 'test-note-blob';
+    const highlightText = 'important sentence';
+    const now = Date.now();
+    const snapTs = now - 1000;
+
+    const snapshotHtml = `<html><head><meta name="x-portal-slug" content="${slug}"></head>` +
+      `<body><p>This is an ${highlightText} in the document.</p></body></html>`;
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: `pages/${slug}.json`, data: {
+        slug, url: originalUrl, title: 'Example Article', timestamp: now,
+        parentIds: [], childIds: [`note:${noteSlug}`, `snapshot:${slug}-${snapTs}`],
+      }},
+      { path: `data/notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: highlightText, note: '', timestamp: now,
+        parentIds: [`page:${slug}`],
+      }},
+      { path: `data/snapshots/${slug}-${snapTs}.html`, content: snapshotHtml },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Open snapshot via openSnapshot — background opens viewer page
+    const resp = await helper.evaluate(({ slug, timestamp }) =>
+      chrome.runtime.sendMessage({ action: 'openSnapshot', slug, timestamp })
+    , { slug, timestamp: snapTs });
+    expect(resp.success).toBe(true);
+
+    // Wait for the viewer page to open and iframe to be populated
+    const viewerPage = await extContext.waitForEvent('page');
+    await viewerPage.waitForLoadState('domcontentloaded');
+    await viewerPage.waitForFunction(() => {
+      const frame = document.getElementById('frame');
+      return frame && frame.srcdoc && frame.srcdoc.length > 0;
+    }, { timeout: 5000 });
+
+    // Viewer renders snapshot in an iframe; wait for highlights inside it
+    const frame = viewerPage.frameLocator('#frame');
+    await frame.locator('mark').waitFor({ timeout: 5000 });
+    const markText = await frame.locator('mark').textContent();
+    expect(markText).toBe(highlightText);
+
+    await viewerPage.close();
+    await helper.close();
+  });
+
+  // Popup resolves slug from snapshot-viewer.html URL params
+  test('getPageInfo returns notes when called with slug from viewer URL', async ({ extContext, extensionId, setupDir }) => {
+    const originalUrl = 'https://example.com/article';
+    const slug = getSlugForUrl(originalUrl);
+    const noteSlug = 'test-note-viewer';
+    const now = Date.now();
+    const snapTs = now - 1000;
+
+    const snapshotHtml = `<html><head></head><body><p>Content.</p></body></html>`;
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: `pages/${slug}.json`, data: {
+        slug, url: originalUrl, title: 'Example Article', timestamp: now,
+        parentIds: [], childIds: [`note:${noteSlug}`, `snapshot:${slug}-${snapTs}`],
+      }},
+      { path: `data/notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: 'some text', note: 'my note', timestamp: now,
+        parentIds: [`page:${slug}`],
+      }},
+      { path: `data/snapshots/${slug}-${snapTs}.html`, content: snapshotHtml },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Simulate what popup does: extract slug from viewer URL and query getPageInfo
+    const info = await helper.evaluate((slug) =>
+      chrome.runtime.sendMessage({ action: 'getPageInfo', slug })
+    , slug);
+
+    expect(info.success).toBe(true);
+    expect(info.notes.length).toBe(1);
+    expect(info.notes[0].slug).toBe(noteSlug);
+
+    await helper.close();
+  });
+
+  // captureSnapshot strips portal highlight marks from captured HTML
+  test('captureSnapshot strips highlight marks from HTML', async ({ extContext, extensionId, setupDir, localServer }) => {
+    localServer.addPage('/with-highlights', {
+      title: 'Highlighted Page',
+      body: '<p>Some <mark class="portal-highlight" style="background:#fff3b0" data-highlight-text="important">important</mark> text here.</p>',
+    });
+    const pageUrl = localServer.url('/with-highlights');
+    const slug = getSlugForUrl(pageUrl);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('load');
+
+    const helper = await openHelperPage(extContext, extensionId);
+    await page.bringToFront();
+    const captureResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' })
+    );
+    expect(captureResp.success).toBe(true);
+
+    // Fetch the captured HTML
+    const htmlResp = await helper.evaluate(({ slug, timestamp }) =>
+      chrome.runtime.sendMessage({ action: 'getSnapshotHtml', slug, timestamp })
+    , { slug, timestamp: captureResp.timestamp });
+    expect(htmlResp.success).toBe(true);
+
+    // Should not contain portal highlight marks, but text should be preserved
+    expect(htmlResp.html).not.toContain('portal-highlight');
+    expect(htmlResp.html).toContain('important');
+
+    await helper.close();
+    await page.close();
+  });
+
   // captureSnapshot embeds x-portal-slug meta tag in stored HTML
   test('captureSnapshot embeds x-portal-slug meta tag in HTML', async ({ extContext, extensionId, setupDir, localServer }) => {
     localServer.addPage('/capture-meta', {

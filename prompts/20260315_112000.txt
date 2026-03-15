@@ -1,0 +1,7 @@
+- Earlier in commit 7022e39b216ee20fbec2d56fb55058df8a60e00f, we embed HTML meta to snapshot captures, so that when user opens a capture, we can recognize the original page and apply the highlights onto the capture. This functionality is broken. On a snapshot, I cannot see my highlights in popup UI, and they are not applied to HTML.
+- So the HTML metadata is useless?
+- Yes
+- Good. One more thing. I want to strip away applied highlight markups when user are creating a capture, so that when the capture is opened, we don't apply the markup twice. Is it easy to accomplish?
+- /finish
+- continue
+- skip all

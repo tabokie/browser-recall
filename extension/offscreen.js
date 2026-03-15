@@ -102,6 +102,11 @@ async function handleRequest(request) {
         return url ? { success: true, url } : { success: false, error: 'Not found' };
       }
 
+      case 'getSnapshotHtml': {
+        const html = await fsStorage.getSnapshotHtml(request.slug, request.timestamp);
+        return html ? { success: true, html } : { success: false, error: 'Not found' };
+      }
+
       case 'deleteSnapshot': {
         await fsStorage.deleteSnapshot(request.slug, request.timestamp);
         return { success: true };

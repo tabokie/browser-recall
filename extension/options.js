@@ -1503,8 +1503,7 @@ function bindSnapshotClickHandlers(container) {
       const slug = item.closest('.detail-snapshots')?.dataset.slug;
       const ts = parseInt(item.dataset.ts, 10);
       if (!slug || !ts) return;
-      const resp = await chrome.runtime.sendMessage({ action: 'getSnapshotUrl', slug, timestamp: ts });
-      if (resp?.success) chrome.tabs.create({ url: resp.url });
+      await chrome.runtime.sendMessage({ action: 'openSnapshot', slug, timestamp: ts });
     });
   });
 }

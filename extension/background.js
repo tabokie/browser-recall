@@ -878,7 +878,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // ── Tab-dependent (background-only) ──
 
         case 'getPageInfo': {
-          const slug = generateSlugFromUrl(request.url);
+          const slug = request.slug || generateSlugFromUrl(request.url);
           const key = 'page:' + slug;
 
           // Entity storage: session cache → filesystem fallback
@@ -1123,6 +1123,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'getSnapshotUrl': {
           const resp = await requestOffscreen({ action: 'getSnapshotUrl', slug: request.slug, timestamp: request.timestamp });
           sendResponse(resp);
+          break;
+        }
+
+        case 'getSnapshotHtml': {
+          const resp = await requestOffscreen({ action: 'getSnapshotHtml', slug: request.slug, timestamp: request.timestamp });
+          sendResponse(resp);
+          break;
+        }
+
+        case 'openSnapshot': {
+          const viewerUrl = chrome.runtime.getURL(
+            `snapshot-viewer.html?slug=${encodeURIComponent(request.slug)}&ts=${request.timestamp}`
+          );
+          const tab = await chrome.tabs.create({ url: viewerUrl });
+          sendResponse({ success: true, tabId: tab.id });
           break;
         }
 

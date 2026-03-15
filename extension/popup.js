@@ -93,8 +93,7 @@ function renderSnapshots(snapshots) {
   container.querySelectorAll('.snapshot-row').forEach(row => {
     row.addEventListener('dblclick', async () => {
       const ts = parseInt(row.dataset.ts, 10);
-      const resp = await chrome.runtime.sendMessage({ action: 'getSnapshotUrl', slug: currentSlug, timestamp: ts });
-      if (resp?.success) chrome.tabs.create({ url: resp.url });
+      await chrome.runtime.sendMessage({ action: 'openSnapshot', slug: currentSlug, timestamp: ts });
     });
   });
 }
@@ -669,7 +668,15 @@ async function showDashboard(tab) {
   currentTitle = tab.title || '<unknown>';
   document.getElementById('pageTitle').textContent = currentTitle;
   document.getElementById('pageUrl').textContent = tab.url;
-  currentSlug = generateSlugFromUrl(tab.url);
+
+  // For snapshot viewer tabs, extract slug from URL params instead of deriving from URL
+  const viewerPrefix = chrome.runtime.getURL('snapshot-viewer.html');
+  if (tab.url.startsWith(viewerPrefix)) {
+    const viewerParams = new URL(tab.url).searchParams;
+    currentSlug = viewerParams.get('slug') || '';
+  } else {
+    currentSlug = generateSlugFromUrl(tab.url);
+  }
 
   // Build a fallback interaction from tab info
   currentInteraction = {
@@ -683,7 +690,7 @@ async function showDashboard(tab) {
   // Fetch page info from background (which queries offscreen)
   try {
     console.log(`[popup] Fetching page info for slug=${currentSlug}`);
-    const info = await chrome.runtime.sendMessage({ action: 'getPageInfo', url: tab.url });
+    const info = await chrome.runtime.sendMessage({ action: 'getPageInfo', slug: currentSlug });
     console.log('[popup] getPageInfo response:', info);
 
     if (info && info.success) {

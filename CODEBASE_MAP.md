@@ -66,7 +66,8 @@ Offscreen is port-only — responds via `chrome.runtime.connect({ name: 'bg-offs
 
 ### background.js handles ALL actions (line ~646):
 **Tab-dependent:** `getPageInfo` (entity storage: session cache → filesystem + buffer replay; null for shallow pages), `captureCurrentPageFromPopup`, `hydrateCache`, `reportPage`
-**Pure reads (relay to offscreen via port):** `loadInteractionByUrl`, `getDirectoryInfo`, `getSnapshotUrl`, `listInteractionFiles`, `loadInteractionBatch`
+**Pure reads (relay to offscreen via port):** `loadInteractionByUrl`, `getDirectoryInfo`, `getSnapshotUrl`, `getSnapshotHtml`, `listInteractionFiles`, `loadInteractionBatch`
+**Snapshot viewer:** `openSnapshot` opens `snapshot-viewer.html?slug=...&ts=...` extension page (content scripts don't run on blob: URLs)
 **Entity-based reads:** `listSnapshots` (reads page entity `childIds` filtered for `snap:` prefix — no offscreen I/O)
 **Composite reads (readCacheable-based):** `loadPageNotes` (reads page entity + each note via `readCacheable`)
 **Cacheable reads (via `readCacheable` — session→filesystem fallback):** `readCacheable` (generic: any key — settings, list entities, SPI, auto lists, notes, pages, history). `getPageInfo` reads notes from page.childIds via `readCacheable('note:*')` and snapshots from page.childIds filtered for `snap:` prefix.
@@ -114,7 +115,7 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **HTML capture**: Save Page WE engine — converts all resources (images, fonts, CSS) to data URIs → truly self-contained HTML; `savepage-bridge.js` injects `savepage/content-frame.js` (all frames) then `savepage/content.js` (main), content sends `savepageDone` with HTML, `captureSavePage` resolves Promise
 - **Markdown extraction**: `content.js` `extractMarkdown()` (10KB cap) — lightweight DOM-to-markdown conversion
 - **Background resource fetch**: `savepage-bridge.js` `loadSavepageResource()` (internal) — background fetches CORS resources for SPWE via `loadResource` message (10s timeout, 50MB size cap, video skipped by default via `captureSnapshotVideo` setting)
-- **Filesystem write**: `filesystem-storage.js` `captureSnapshot(slug, ts, md, html)` → `pages/{slug}/{ts}.md|.html`. Embeds `<meta name="x-portal-slug" content="{slug}">` in HTML for slug identity in blob: tabs.
+- **Filesystem write**: `filesystem-storage.js` `captureSnapshot(slug, ts, md, html)` → `data/snapshots/{slug}-{ts}.md|.html`. Embeds `<meta name="x-portal-slug" content="{slug}">` in HTML for slug identity.
 - **Two-phase capture log**: after offscreen writes files, background calls `addLog({ action: 'page', url, mdPath, htmlPath })` — large content never in log buffer
 - **PDF guard**: `captureAndLog` rejects `.pdf` URLs with `'Cannot capture PDF pages'` error
 - **Auto-snapshot**: workspace mode with `autoSnapshot` flag
@@ -126,7 +127,8 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **Global page note**: Alt+H with no selection → `showGlobalNoteOverlay()`
 - **Overlay UI**: Shadow DOM for style isolation; matches highlight by timestamp (primary), falls back to text
 - **Visual marks**: wraps text in `<mark class="portal-highlight">`; grouped marks share `data-highlight-timestamp`; delete unwraps all marks in group
-- **Reapply on load**: `getSlugForCurrentPage()` checks `<meta name="x-portal-slug">` first (snapshot blob: tabs), then falls back to URL parsing; reads notes via `loadPageNotes`; normalizes excerpt to array, highlights each chunk via `findTextRange()` cross-node search
+- **Reapply on load**: `getSlugForCurrentPage()` checks `<meta name="x-portal-slug">` first, then falls back to URL parsing; reads notes via `loadPageNotes`; normalizes excerpt to array, highlights each chunk via `findTextRange()` cross-node search
+- **Snapshot viewer highlights**: `snapshot-viewer.html` + `snapshot-viewer.js` renders snapshot in srcdoc iframe; loads notes via `loadPageNotes` and applies highlights to iframe's DOM. Popup extracts slug from viewer URL params for `getPageInfo`.
 - **Context menu highlight**: right-click "Highlight Selected" → background `handleContextMenuHighlight` (ensureCheckpointIfMissing + saveNote + addLog + sends `showHighlightsPanel` to content script); uses `chrome.tabs.query({active:true, lastFocusedWindow:true})` to get real URL (workaround for Chrome PDF viewer reporting internal extension URL)
 - **Highlights panel**: `showHighlightsPanel(notes, pageSlug, {hint})` in content.js — Shadow DOM overlay listing all excerpt notes with inline edit textareas, delete buttons, draggable header; auto-shown on PDF pages (1500ms delay + MutationObserver re-creation guard, `__portalPanelDismissed` flag suppresses re-creation after user closes)
 - **PDF page support**: content.js `.pdf` URL detection auto-shows highlights panel with hint; DOM-based highlight marks not possible (PDFium plugin), but context menu `info.selectionText` works; `captureAndLog` rejects `.pdf` URLs with error

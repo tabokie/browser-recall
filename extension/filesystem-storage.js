@@ -410,12 +410,14 @@ class FileSystemStorage {
     }
 
     if (html) {
-      // Embed slug identity so content.js can identify the page in blob: tabs
+      // Strip portal highlight marks — viewer reapplies from notes
+      const strippedHtml = html.replace(/<mark\b[^>]*class="[^"]*portal-highlight[^"]*"[^>]*>([\s\S]*?)<\/mark>/gi, '$1');
+      // Embed slug identity so viewer page can load the original page's notes
       const metaTag = `<meta name="x-portal-slug" content="${slug}">`;
-      const taggedHtml = html.replace(/<head([^>]*)>/i, `<head$1>${metaTag}`);
+      const taggedHtml = strippedHtml.replace(/<head([^>]*)>/i, `<head$1>${metaTag}`);
       const htmlHandle = await snapshotsDir.getFileHandle(`${slug}-${timestamp}.html`, { create: true });
       const htmlWritable = await htmlHandle.createWritable();
-      await htmlWritable.write(taggedHtml === html ? metaTag + html : taggedHtml);
+      await htmlWritable.write(taggedHtml === strippedHtml ? metaTag + strippedHtml : taggedHtml);
       await htmlWritable.close();
     }
   }
@@ -470,6 +472,17 @@ class FileSystemStorage {
         return URL.createObjectURL(file);
       } catch (e) { if (!isNotFound(e)) throw e; }
     }
+    return null;
+  }
+
+  // Read snapshot HTML content as text
+  async getSnapshotHtml(slug, timestamp) {
+    const snapshotsDir = await this.resolveDir('data/snapshots');
+    try {
+      const handle = await snapshotsDir.getFileHandle(`${slug}-${timestamp}.html`);
+      const file = await handle.getFile();
+      return await file.text();
+    } catch (e) { if (!isNotFound(e)) throw e; }
     return null;
   }
 
