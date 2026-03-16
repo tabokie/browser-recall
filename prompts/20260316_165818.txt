@@ -1,0 +1,29 @@
+- User can use keyboard to delete pinse from a list, cannot delete history (print a bubble notification to user)
+- Yes. Q1, yes. Q2, something like "cannot delete history". Q3, neutral, align with aesthetics from demo D.
+- When user drag-and-drop pages to another list, we copy the pages, without removing them from original list.
+- ctrl-c will put selected pages in a list, write it to clipboard in a readable format, ctrl-v in a list will add them as pins
+- go ahead
+- Wait, parsing "http" is flaky. Some URLs have different schemes (like ftp or file). We should structure the format easy to get URL
+- What happen when the title itself contains pointed brackets?
+- Not working, print a debug log when something is copied
+- No log is printed, is the key stroke listener not firing?
+- No logs
+- There are only two logs:
+
+Background script loading...
+background.js:39 Offscreen document created
+- I was right clicking on options page. And the logs are indeed from background.js
+- Yes, functional
+- There are logs:
+
+[kb] Meta ctrl: false meta: true active: BODY 
+[kb] c ctrl: false meta: true active: BODY
+- [copy] view: explore container: results selected: 0
+- Fixed. I forget your answer to "What happen when the title itself contains pointed brackets?"
+- Remove debug logs we added earlier
+- Clean all traces of URL with "https://gitlab.corp.metabit-trading.com/" prefix in my ~/portal-data. They are caused by blacklist bug earlier.
+- go
+- /finish fast
+- What do you mean "but can't run in this environment (no Chrome)"
+- go 2
+- n

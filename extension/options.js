@@ -47,6 +47,21 @@ function showErrorBubble(message) {
   _errorBubbleTimer = setTimeout(() => { bubble.style.opacity = '0'; }, 4000);
 }
 
+let _infoBubbleTimer = null;
+function showInfoBubble(message) {
+  let bubble = document.getElementById('infoBubble');
+  if (!bubble) {
+    bubble = document.createElement('div');
+    bubble.id = 'infoBubble';
+    bubble.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:var(--bg-surface-solid, rgba(255,255,255,0.75));color:var(--text-secondary, #5E4D3E);font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;border:1px solid var(--border-glass, rgba(255,255,255,0.55));backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 2px 8px rgba(0,0,0,0.08);opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
+    document.body.appendChild(bubble);
+  }
+  bubble.textContent = message;
+  bubble.style.opacity = '1';
+  clearTimeout(_infoBubbleTimer);
+  _infoBubbleTimer = setTimeout(() => { bubble.style.opacity = '0'; }, 3000);
+}
+
 
 // --- State ---
 let currentSortState = { column: null, direction: null };
@@ -1685,7 +1700,11 @@ function bindResultDelegation(container) {
   container.addEventListener('dragstart', (e) => {
     const row = e.target.closest('.result-row');
     if (!row) return;
-    const items = [{ url: row.dataset.url, title: row.dataset.title }];
+    // Include all selected rows if the dragged row is part of a selection
+    const selected = container.querySelectorAll('.result-row.selected');
+    const items = (selected.length > 0 && row.classList.contains('selected'))
+      ? [...selected].map(r => ({ url: r.dataset.url, title: r.dataset.title }))
+      : [{ url: row.dataset.url, title: row.dataset.title }];
     e.dataTransfer.setData('text/plain', JSON.stringify({ items }));
     e.dataTransfer.effectAllowed = 'copy';
   });
@@ -3452,3 +3471,81 @@ async function initialize() {
 }
 
 initialize().catch(err => showFatalError(err.message));
+// --- Keyboard delete for selected result rows ---
+document.addEventListener('keydown', async (e) => {
+  if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+  // Don't intercept when typing in an input/textarea
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+
+  // Determine which container has selected rows
+  const isListView = activeView.type === 'list';
+  const container = activeView.type === 'category'
+    ? document.getElementById('results')
+    : document.getElementById('relatedResults');
+  const selected = container?.querySelectorAll('.result-row.selected');
+  if (!selected || selected.length === 0) return;
+
+  e.preventDefault();
+
+  if (!isListView) {
+    showInfoBubble('Cannot delete history');
+    return;
+  }
+
+  // Unpin each selected row from the active list
+  const listId = activeView.id;
+  for (const row of selected) {
+    const url = row.dataset.url;
+    const title = row.dataset.title;
+    if (url) await toggleResultPin(listId, url, title);
+  }
+  refreshPins();
+});
+
+// --- Ctrl+C / Ctrl+V for page copy-paste ---
+document.addEventListener('keydown', async (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+
+  if (e.key === 'c') {
+    // Copy selected rows as readable text with angle-bracket URLs
+    const container = activeView.type === 'category'
+      ? document.getElementById('results')
+      : document.getElementById('relatedResults');
+    const selected = container?.querySelectorAll('.result-row.selected');
+    if (!selected || selected.length === 0) return;
+
+    e.preventDefault();
+    const lines = [...selected].map(r => {
+      const title = (r.dataset.title || '').replace(/[<>]/g, '');
+      const url = r.dataset.url || '';
+      return title ? `${title} <${url}>` : `<${url}>`;
+    });
+    await navigator.clipboard.writeText(lines.join('\n'));
+  }
+
+  if (e.key === 'v') {
+    if (activeView.type !== 'list') {
+      e.preventDefault();
+      showInfoBubble('Can only paste into a list');
+      return;
+    }
+
+    e.preventDefault();
+    let text;
+    try { text = await navigator.clipboard.readText(); } catch { return; }
+    // Extract URLs from angle-bracket format: <url>
+    const urls = [];
+    for (const m of text.matchAll(/<([^>]+)>/g)) {
+      const candidate = m[1].trim();
+      if (candidate.includes('://')) urls.push(candidate);
+    }
+    if (urls.length === 0) return;
+
+    const listId = activeView.id;
+    await chrome.runtime.sendMessage({ action: 'addListPins', listId, urls: urls });
+    refreshPins();
+  }
+});

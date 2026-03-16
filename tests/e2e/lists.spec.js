@@ -1893,4 +1893,237 @@ test.describe('List operations', () => {
 
     expect(pageEntity.value).toBeNull();
   });
+
+  test('Delete key unpins selected items in list view', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const url1 = 'https://example.com/kb-del-1';
+    const url2 = 'https://example.com/kb-del-2';
+    const slug1 = getSlugForUrl(url1);
+    const slug2 = getSlugForUrl(url2);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:kbdel'],
+      }},
+      { path: 'lists/kbdel.json', data: {
+        slug: 'kbdel', name: 'KB Del', timestamp: now,
+        pins: [
+          { id: `page:${slug1}`, pinnedAt: now },
+          { id: `page:${slug2}`, pinnedAt: now },
+        ],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: `pages/${slug1}.json`, data: {
+        slug: slug1, url: url1, title: 'KB Delete One', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: `pages/${slug2}.json`, data: {
+        slug: slug2, url: url2, title: 'KB Delete Two', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/KB Del': 'kbdel' } } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    const listItem = options.locator('.sidebar-item[data-list-id="kbdel"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    // Wait for both pins to render
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 2,
+      { timeout: 10000 }
+    );
+
+    // Click the first row to select it
+    const firstRow = options.locator('#relatedResults .result-row').first();
+    await firstRow.click();
+    await expect(firstRow).toHaveClass(/selected/);
+
+    // Press Delete key
+    await options.keyboard.press('Delete');
+
+    // Should unpin — only one row remaining
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length === 1,
+      { timeout: 10000 }
+    );
+    const remaining = await options.$$eval('#relatedResults .result-title', els =>
+      els.map(el => el.textContent.trim())
+    );
+    expect(remaining).toHaveLength(1);
+    await options.close();
+  });
+
+  test('Delete key on explore view shows info bubble', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: 'https://example.com/history-item', title: 'History Item' },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Wait for explore view results (explore renders into #relatedResults)
+    const firstRow = options.locator('#relatedResults .result-row').first();
+    await expect(firstRow).toBeVisible({ timeout: 10000 });
+
+    // Click to select
+    await firstRow.click();
+    await expect(firstRow).toHaveClass(/selected/);
+
+    // Press Delete key — should show info bubble, not delete
+    await options.keyboard.press('Delete');
+
+    const bubble = options.locator('#infoBubble');
+    await expect(bubble).toBeVisible({ timeout: 3000 });
+    const text = await bubble.textContent();
+    expect(text.toLowerCase()).toContain('cannot delete history');
+
+    await options.close();
+  });
+
+  test('Ctrl+C copies selected pages in readable format with angle-bracket URLs', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const url1 = 'https://example.com/copy-1';
+    const url2 = 'https://example.com/copy-2';
+    const slug1 = getSlugForUrl(url1);
+    const slug2 = getSlugForUrl(url2);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:cplist'],
+      }},
+      { path: 'lists/cplist.json', data: {
+        slug: 'cplist', name: 'Copy List', timestamp: now,
+        pins: [
+          { id: `page:${slug1}`, pinnedAt: now },
+          { id: `page:${slug2}`, pinnedAt: now },
+        ],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: `pages/${slug1}.json`, data: {
+        slug: slug1, url: url1, title: 'Copy One', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: `pages/${slug2}.json`, data: {
+        slug: slug2, url: url2, title: 'Copy Two', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Copy List': 'cplist' } } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    const listItem = options.locator('.sidebar-item[data-list-id="cplist"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 2,
+      { timeout: 10000 }
+    );
+
+    // Select all rows via Ctrl+click
+    const rows = options.locator('#relatedResults .result-row');
+    await rows.first().click();
+    await rows.nth(1).click({ modifiers: ['ControlOrMeta'] });
+
+    // Ctrl+C
+    await options.keyboard.press('ControlOrMeta+c');
+
+    // Read clipboard
+    const clipText = await options.evaluate(() => navigator.clipboard.readText());
+    expect(clipText).toContain('<https://example.com/copy-1>');
+    expect(clipText).toContain('<https://example.com/copy-2>');
+    // Should also contain titles
+    expect(clipText).toContain('Copy One');
+    expect(clipText).toContain('Copy Two');
+
+    await options.close();
+  });
+
+  test('Ctrl+V in list view pastes URLs as pins', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const pasteUrl = 'https://example.com/pasted-page';
+    const pasteSlug = getSlugForUrl(pasteUrl);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'lists/system/root.json', data: {
+        timestamp: now, childLists: ['list:pastelist'],
+      }},
+      { path: 'lists/pastelist.json', data: {
+        slug: 'pastelist', name: 'Paste List', timestamp: now, pins: [],
+        parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Paste List': 'pastelist' } } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    const listItem = options.locator('.sidebar-item[data-list-id="pastelist"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    // Write angle-bracket formatted text to clipboard
+    await options.evaluate((url) => {
+      navigator.clipboard.writeText(`Pasted Page <${url}>`);
+    }, pasteUrl);
+
+    // Ctrl+V
+    await options.keyboard.press('ControlOrMeta+v');
+
+    // Pin should appear
+    const pinnedRow = options.locator('#relatedResults .result-row');
+    await expect(pinnedRow).toBeVisible({ timeout: 10000 });
+
+    // Verify via backend that pin was added
+    const helper = await openHelperPage(extContext, extensionId);
+    const listEntity = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:pastelist' })
+    );
+    await helper.close();
+    expect(listEntity.value.pins.length).toBe(1);
+    expect(listEntity.value.pins[0].id).toBe(`page:${pasteSlug}`);
+
+    await options.close();
+  });
+
+  test('Ctrl+V outside list view shows info bubble', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: 'https://example.com/explore-item', title: 'Explore Item' },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+
+    // Wait for explore view (explore renders into #relatedResults)
+    const firstRow = options.locator('#relatedResults .result-row').first();
+    await expect(firstRow).toBeVisible({ timeout: 10000 });
+
+    // Write URL to clipboard and paste
+    await options.evaluate(() => {
+      navigator.clipboard.writeText('Some Page <https://example.com/nope>');
+    });
+    await options.keyboard.press('ControlOrMeta+v');
+
+    const bubble = options.locator('#infoBubble');
+    await expect(bubble).toBeVisible({ timeout: 3000 });
+    const text = await bubble.textContent();
+    expect(text.toLowerCase()).toContain('paste');
+
+    await options.close();
+  });
 });
