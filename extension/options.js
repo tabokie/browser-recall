@@ -11,6 +11,13 @@ import { entityTypeLabel } from './entity-types.js';
 
 const fsStorage = new FileSystemStorage();
 
+// ─── Utility ─────────────────────────────────────────────────────────
+
+function autoResizeTextarea(textarea) {
+  textarea.style.height = '0';
+  textarea.style.height = textarea.scrollHeight + 'px';
+}
+
 // ─── Error UI ────────────────────────────────────────────────────────
 
 function showFatalError(message) {
@@ -1444,6 +1451,12 @@ async function loadExtraDetail(url) {
 function renderExtraDetailHtml(extra) {
   let html = '';
 
+  // Page note textarea (global note = excerpt is null)
+  const globalNote = extra.notes.find(n => n.excerpt === null);
+  html += `<div class="detail-section"><span class="detail-section-label">Page Note:</span>
+    <textarea class="detail-page-note" data-note-slug="${escapeHtml(globalNote?.slug || '')}" data-page-slug="${escapeHtml(extra.slug)}" placeholder="Add a page note...">${escapeHtml(globalNote?.note || '')}</textarea>
+  </div>`;
+
   if (extra.likes > 0) {
     html += `<div class="detail-section"><span class="detail-section-label">Liked:</span> <strong>${extra.likes}</strong></div>`;
   }
@@ -1454,17 +1467,17 @@ function renderExtraDetailHtml(extra) {
     html += '</div>';
   }
 
-  if (extra.notes.length > 0) {
+  const highlightNotes = extra.notes.filter(n => n.excerpt !== null);
+  if (highlightNotes.length > 0) {
     html += `<div class="detail-section detail-notes-section" data-slug="${escapeHtml(extra.slug)}"><span class="detail-section-label">Notes:</span>`;
-    for (const n of extra.notes.slice(0, 20)) {
+    for (const n of highlightNotes.slice(0, 20)) {
       const rawQuote = Array.isArray(n.excerpt) ? n.excerpt.join(' ') : (n.excerpt || '');
       const noteText = n.note || '';
       const noteSlug = n.slug || '';
-      const isGlobal = n.excerpt === null;
-      const label = isGlobal ? 'Page note' : escapeHtml(rawQuote.substring(0, 100)) + (rawQuote.length > 100 ? '...' : '');
+      const label = escapeHtml(rawQuote.substring(0, 100)) + (rawQuote.length > 100 ? '...' : '');
       const noteHtml = noteText ? ` <span class="detail-note-text">${escapeHtml(noteText)}</span>` : '';
       html += `<div class="detail-note-entry" data-note-slug="${escapeHtml(noteSlug)}">
-        <span class="detail-note-content">${isGlobal ? '<em>Page note</em>' : `"${label}"`}${noteHtml}</span>
+        <span class="detail-note-content">"${label}"${noteHtml}</span>
         <button class="detail-note-delete" title="Delete">&times;</button>
       </div>`;
     }
@@ -1523,6 +1536,36 @@ function bindSnapshotClickHandlers(container) {
       if (!slug || !ts) return;
       await chrome.runtime.sendMessage({ action: 'openSnapshot', slug, timestamp: ts });
     });
+  });
+}
+
+function bindPageNoteHandler(container, url) {
+  const textarea = container.querySelector('.detail-page-note');
+  if (!textarea) return;
+
+  requestAnimationFrame(() => autoResizeTextarea(textarea));
+
+  let saveTimeout = null;
+  textarea.addEventListener('input', () => {
+    autoResizeTextarea(textarea);
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(async () => {
+      const note = textarea.value;
+      const noteSlug = textarea.dataset.noteSlug;
+      const pageSlug = textarea.dataset.pageSlug;
+      try {
+        if (noteSlug) {
+          await sendAction({ action: 'updateNote', noteSlug, note });
+        } else if (note) {
+          const resp = await sendAction({ action: 'createNote', pageSlug, url, excerpt: null, note, cssPath: null });
+          if (resp?.noteSlug) {
+            textarea.dataset.noteSlug = resp.noteSlug;
+          }
+        }
+      } catch (err) {
+        console.error('[options] Page note save error:', err);
+      }
+    }, 500);
   });
 }
 
@@ -1684,6 +1727,7 @@ function openPageDetailCard(url, title, attDetail = null, timestamps = []) {
     body.innerHTML = html + (extraHtml ? `<div class="detail-extra">${extraHtml}</div>` : '');
     bindNoteDeleteButtons(body);
     bindSnapshotClickHandlers(body);
+    bindPageNoteHandler(body, url);
   });
 
   const onEsc = (e) => { if (e.key === 'Escape') closePageDetailCard(); };
@@ -2560,11 +2604,7 @@ const DEFAULT_BLACKLIST = ['chrome://', 'edge://'];
 
 async function loadBlacklist() {
   const list = await loadSettingsValue('urlBlacklist', null);
-  if (list === null) {
-    await saveBlacklist(DEFAULT_BLACKLIST);
-    return [...DEFAULT_BLACKLIST];
-  }
-  return list;
+  return list ?? [...DEFAULT_BLACKLIST];
 }
 
 async function saveBlacklist(list) {

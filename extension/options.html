@@ -963,6 +963,28 @@
       color: var(--text-primary);
     }
 
+    .detail-page-note {
+      width: 100%;
+      font-size: 12px;
+      line-height: 1.5;
+      padding: 8px 10px;
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-body);
+      resize: vertical;
+      overflow: hidden;
+      box-sizing: border-box;
+      min-height: 40px;
+      background: rgba(255, 255, 255, 0.4);
+      color: var(--text-primary);
+      margin-top: 6px;
+    }
+    .detail-page-note:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px rgba(208, 112, 48, 0.08);
+    }
+
     .detail-snapshots {
       display: flex;
       flex-wrap: wrap;

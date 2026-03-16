@@ -1,0 +1,4 @@
+- Support writing page notes in portal's page details, like in popup
+- My customized URl blacklists are lost. Is it an issue from data migration in previous session? Or is it a code bug?
+- Yes, TDD with E2E test
+- /finish fast
