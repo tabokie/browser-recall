@@ -13,7 +13,7 @@ test.describe('Round-trip persistence', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: [] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], parentList: 'list:system/root', childLists: [] } },
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example', timestamp: now, parentIds: [], childIds: [],
@@ -37,7 +37,7 @@ test.describe('Round-trip persistence', () => {
     await expect(listItem).toBeVisible({ timeout: 5000 });
     await listItem.click();
     await waitForListView(options);
-    const pinnedRow = options.locator('#pinnedResults .result-row');
+    const pinnedRow = options.locator('#relatedResults .result-row');
     await expect(pinnedRow).toBeVisible({ timeout: 5000 });
     const title = await pinnedRow.locator('.result-title').textContent();
     expect(title).toContain('Example');
@@ -100,7 +100,7 @@ test.describe('Accumulation correctness', () => {
     const files = [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:bulk'] } },
-      { path: 'lists/bulk.json', data: { slug: 'bulk', name: 'Bulk', timestamp: now, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: [] } },
+      { path: 'lists/bulk.json', data: { slug: 'bulk', name: 'Bulk', timestamp: now, pins: [], parentList: 'list:system/root', childLists: [] } },
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Bulk': 'bulk' } } },
       ...slugs.map((slug, i) => ({
         path: `pages/${slug}.json`,
@@ -192,12 +192,12 @@ test.describe('Cross-entity interference', () => {
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:alpha', 'list:beta'] } },
       { path: 'lists/alpha.json', data: {
         slug: 'alpha', name: 'Alpha', timestamp: now,
-        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/beta.json', data: {
         slug: 'beta', name: 'Beta', timestamp: now,
-        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Alpha': 'alpha', 'root/Beta': 'beta' } } },
@@ -239,12 +239,12 @@ test.describe('Cross-entity interference', () => {
       }},
       { path: 'lists/doomed.json', data: {
         slug: 'doomed', name: 'Doomed', timestamp: now,
-        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/safe.json', data: {
         slug: 'safe', name: 'Safe', timestamp: now,
-        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Doomed': 'doomed', 'root/Safe': 'safe' } } },

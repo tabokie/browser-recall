@@ -15,7 +15,6 @@
     <listId>.json
     system/
       root.json                      #   Tree root (childLists)
-      explore.json                   #   Explore smart list
       gateways.json                  #   Gateway domain registry
 
   pages/                             # INTERNAL. Per-page entity files. GC'd when ineligible.

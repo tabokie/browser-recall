@@ -48,7 +48,7 @@ test.describe('User journeys', () => {
     // Click list and verify pin is visible
     await listItem.click();
     await waitForListView(options);
-    const pinnedRow = options.locator('#pinnedResults .result-row');
+    const pinnedRow = options.locator('#relatedResults .result-row');
     await expect(pinnedRow).toBeVisible({ timeout: 5000 });
     const title = await pinnedRow.locator('.result-title').textContent();
     expect(title).toContain('Journey Page');
@@ -145,7 +145,7 @@ test.describe('Empty and edge states', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: [] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], parentList: 'list:system/root', childLists: [] } },
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
       // No history, no page checkpoint — the URL has never been seen
     ]);
@@ -183,7 +183,7 @@ test.describe('Empty and edge states', () => {
         timestamp: now, childLists: ['list:empty'],
       }},
       { path: 'lists/empty.json', data: {
-        slug: 'empty', name: 'Empty List', timestamp: now, pins: [], savedSearches: [],
+        slug: 'empty', name: 'Empty List', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
     ]);
@@ -197,7 +197,7 @@ test.describe('Empty and edge states', () => {
     // Should show list layout without error (no pinned rows)
     const layout = options.locator('#listLayout');
     await expect(layout).toBeVisible();
-    const pinnedRows = await options.$$('#pinnedResults .result-row');
+    const pinnedRows = await options.$$('#relatedResults .result-row');
     expect(pinnedRows.length).toBe(0);
     await options.close();
   });
@@ -210,7 +210,7 @@ test.describe('Empty and edge states', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [], parentList: 'list:system/root', childLists: [] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], parentList: 'list:system/root', childLists: [] } },
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Complex URL Page', timestamp: now, parentIds: [], childIds: [],
@@ -278,7 +278,7 @@ test.describe('Unicode and special characters', () => {
         timestamp: now, childLists: ['list:unicode-list'],
       }},
       { path: 'lists/unicode-list.json', data: {
-        slug: 'unicode-list', name, timestamp: now, pins: [], savedSearches: [],
+        slug: 'unicode-list', name, timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
     ]);

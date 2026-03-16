@@ -27,6 +27,9 @@
     }
 
     :root {
+      /* Sidebar layout */
+      --sidebar-padding-x: 14px;
+
       /* Results layout */
       --results-padding: 18px;
       --results-gap: 8px;
@@ -125,7 +128,7 @@
     }
 
     .sidebar-header {
-      padding: 14px 14px 12px;
+      padding: 14px var(--sidebar-padding-x) 12px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -165,8 +168,8 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      width: calc(100% - 28px);
-      margin: 0 14px 12px;
+      width: calc(100% - var(--sidebar-padding-x) * 2);
+      margin: 0 var(--sidebar-padding-x) 12px;
       padding: 8px 12px;
       background: linear-gradient(145deg, #D88040, #C06828);
       color: #fff;
@@ -234,7 +237,7 @@
     .sidebar-separator {
       border: none;
       border-top: 1px solid var(--border-subtle);
-      margin: 4px 14px;
+      margin: 4px var(--sidebar-padding-x);
     }
 
     .sidebar-content {
@@ -253,7 +256,7 @@
     .sidebar-resize-handle { width: 4px; cursor: col-resize; background: transparent; flex-shrink: 0; z-index: 10; }
 
     .sidebar-section-label {
-      padding: 10px 14px 4px;
+      padding: 10px var(--sidebar-padding-x) 4px;
       font-size: 11px;
       font-weight: 700;
       color: var(--text-muted);
@@ -271,7 +274,8 @@
       color: var(--text-primary);
       font-size: 13px;
       border-radius: var(--radius-pill);
-      margin-right: 8px;
+      margin-left: calc(var(--sidebar-padding-x) - 10px);
+      margin-right: calc(var(--sidebar-padding-x) - 10px);
       user-select: none;
     }
 
@@ -411,28 +415,6 @@
     }
 
 
-    .pin-search-btn {
-      padding: 4px 12px;
-      background: none;
-      color: var(--text-secondary);
-      border: 1px solid var(--border-subtle);
-      border-radius: 16px;
-      cursor: pointer;
-      font-size: 12px;
-      display: none;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .pin-search-btn:hover {
-      background: var(--bg-surface-hover);
-    }
-
-    .pin-search-btn svg {
-      width: 14px;
-      height: 14px;
-      fill: currentColor;
-    }
 
     /* ── Time chart (flat, blends with background) ── */
     .time-chart {
@@ -702,6 +684,12 @@
       background: var(--accent-green-soft);
       color: var(--accent-green);
       border-color: rgba(88, 136, 88, 0.12);
+    }
+
+    .card-tag-liked {
+      background: var(--accent-red-soft);
+      color: var(--accent-red);
+      border-color: rgba(184, 80, 64, 0.12);
     }
 
     .card-tag-list {
@@ -1600,56 +1588,6 @@
       font-size: 13px;
     }
 
-    .list-section {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .section-header {
-      padding: 6px 24px;
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      background: var(--bg-surface-hover);
-      border-bottom: 1px solid var(--border-subtle);
-      cursor: pointer;
-      user-select: none;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .section-header:hover {
-      background: var(--bg-surface-active);
-    }
-
-    .section-chevron {
-      font-size: 8px;
-      display: inline-block;
-      transition: transform 0.15s;
-      transform: rotate(90deg);
-      color: var(--text-muted);
-    }
-
-    .section-header.collapsed .section-chevron {
-      transform: rotate(0deg);
-    }
-
-    .section-header.collapsed + .section-body {
-      display: none !important;
-    }
-
-    .list-section .section-body {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .list-qb {
-      border-top: none;
-    }
-
     .section-results-wrapper {
       position: relative;
       cursor: default;
@@ -1769,19 +1707,6 @@
         0 0 12px rgba(208, 112, 48, 0.06),
         var(--highlight-top);
     }
-
-    .search-save-btn {
-      padding: 4px 12px;
-      border: 1px solid var(--border-glass);
-      border-radius: var(--radius-pill);
-      background: var(--bg-surface);
-      font-size: 12px;
-      color: var(--text-secondary);
-      cursor: pointer;
-      flex-shrink: 0;
-      box-shadow: var(--highlight-top);
-    }
-    .search-save-btn:hover { background: var(--bg-surface-hover); color: var(--accent-primary); border-color: var(--border-hover); }
 
     .filter-toggle-btn {
       display: flex;
@@ -2333,9 +2258,6 @@
       <span class="main-title" id="mainTitle">Explore</span>
       <input class="main-title-input" id="mainTitleInput" type="text" style="display:none">
       <button class="confirm-title-btn" id="confirmTitleBtn" style="display:none">&#x2713;</button>
-      <button class="pin-search-btn" id="pinSearchBtn" title="Save as list">
-        Save
-      </button>
     </div>
 
     <div class="query-builder" id="queryBuilder" style="display:none">
@@ -2359,29 +2281,16 @@
       </div>
     </div>
 
-    <!-- List layout: merged pinned+related, then Explore section -->
+    <!-- List layout: single-section (explore results OR filtered pins) -->
     <div class="list-layout" id="listLayout">
-      <div class="list-section" data-section="pinned">
-        <div class="section-header" data-collapse="pinned"><span class="section-chevron">&#9654;</span> Pinned</div>
-        <div class="section-body">
-          <div class="section-results-wrapper" id="pinnedResultsWrapper">
-            <div class="results-container" id="pinnedResults"></div>
-          </div>
-        </div>
+      <div id="listQueryBuilder" style="display:none"></div>
+      <div class="time-chart" id="relatedChart">
+        <div class="chart-label">Results</div>
+        <div class="chart-bars" id="relatedChartBars"></div>
+        <div class="chart-tooltip" id="relatedChartTooltip"></div>
       </div>
-      <div class="list-section" data-section="explore">
-        <div class="section-header" data-collapse="explore"><span class="section-chevron">&#9654;</span> Explore</div>
-        <div class="section-body">
-          <div id="listQueryBuilder" style="display:none"></div>
-          <div class="time-chart" id="relatedChart">
-            <div class="chart-label">Explore results</div>
-            <div class="chart-bars" id="relatedChartBars"></div>
-            <div class="chart-tooltip" id="relatedChartTooltip"></div>
-          </div>
-          <div class="section-results-wrapper" id="relatedResultsWrapper">
-            <div class="results-container" id="relatedResults"></div>
-          </div>
-        </div>
+      <div class="section-results-wrapper" id="relatedResultsWrapper">
+        <div class="results-container" id="relatedResults"></div>
       </div>
     </div>
 

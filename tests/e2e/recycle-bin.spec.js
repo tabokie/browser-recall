@@ -68,7 +68,7 @@ test.describe('Recycle bin', () => {
         pins: [
           { id: `page:${TEST_SLUG}`, pinnedAt: now },
         ],
-        savedSearches: [], deleted: true,
+        deleted: true,
         parentList: 'list:system/root', childLists: [],
       }},
       // Page that lost the list from parentIds
@@ -164,7 +164,7 @@ test.describe('Recycle bin', () => {
     await helper.close();
   });
 
-  // 2c. restoreList preserves original entity fields (savedSearches, childLists, etc.)
+  // 2c. restoreList preserves original entity fields (childLists, etc.)
   test('restoreList preserves original entity fields after restore', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const listId = 'restore-fields-list';
@@ -177,7 +177,6 @@ test.describe('Recycle bin', () => {
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Rich List', timestamp: now,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
-        savedSearches: [{ query: 'test search', createdAt: now }],
         deleted: true,
         parentList: 'list:system/root', childLists: ['list:sub-child'],
       }},
@@ -204,8 +203,6 @@ test.describe('Recycle bin', () => {
     , `list:${listId}`);
     expect(listResp.success).toBe(true);
     expect(listResp.value.deleted).toBeFalsy();
-    expect(listResp.value.savedSearches).toHaveLength(1);
-    expect(listResp.value.savedSearches[0].query).toBe('test search');
     expect(listResp.value.childLists).toContain('list:sub-child');
 
     await helper.close();
@@ -271,7 +268,7 @@ test.describe('Recycle bin', () => {
       // Deleted list entity on disk
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Doomed List', timestamp: now,
-        pins: [], savedSearches: [], deleted: true,
+        pins: [], deleted: true,
       }},
       { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`list:${listId}`],
@@ -316,7 +313,7 @@ test.describe('Recycle bin', () => {
       }},
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Bulk List', timestamp: now,
-        pins: [], savedSearches: [], deleted: true,
+        pins: [], deleted: true,
       }},
       { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`, `list:${listId}`],
@@ -365,7 +362,7 @@ test.describe('Recycle bin', () => {
       }},
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'UI List', timestamp: now,
-        pins: [], savedSearches: [], deleted: true,
+        pins: [], deleted: true,
       }},
       { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`, `list:${listId}`],
@@ -447,7 +444,7 @@ test.describe('Recycle bin', () => {
       }},
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Empty List', timestamp: now,
-        pins: [], savedSearches: [], deleted: true,
+        pins: [], deleted: true,
       }},
       { path: 'manifest/orphaned.json', data: {
         timestamp: now, keys: [`note:${noteSlug}`, `list:${listId}`],

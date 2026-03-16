@@ -543,11 +543,6 @@ async function drainQueue() {
           const fh = await fsStorage.resolveFile('lists/system/root.json', { create: true });
           await fsStorage.writeJson(fh, entity);
         });
-      } else if (key === 'list:system/explore') {
-        await withLock('lists/system/explore.json', async () => {
-          const fh = await fsStorage.resolveFile('lists/system/explore.json', { create: true });
-          await fsStorage.writeJson(fh, entity);
-        });
       }
     }
 

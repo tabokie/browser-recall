@@ -1,0 +1,14 @@
+- In portal UI sidebar, the capsule button for lists left padding is smaller than right, and both are smaller than the padding for "Explore" button. They should align to "Explore" button's padding. Use shared variable to enforce this constraint.
+- Remove the pin section in Explore, and remove the explore section in Lists. Remove the "Save query" and "Save pins" functionality in Explore. I want each of them to focus on one thing. However, for list, I want a search bar for pins (exactly the same UI as Explore, with time chart), that search bar is used to search pins only.
+- For cards of list pins, do not show tags of the same list.
+- Add a card tag "liked" for non-zero like count.
+- Remove the "Search Save" button in explore, and the top padding before the search bar is slightly smaller in Explore than in List, figure out why.
+- Show likes in the page detail (both popup and portal)
+- Now, the data model needs to be update to match the UI as well. In specific:
+1. Remove savedSearches from list metadata.
+2. Remove explore.json entity. Note that if in the past, a list was created by saving "explore", we need to modify the history to appear as if a list was created and when pins added.
+3. Make sure list and explore share exactly the same search bar and time chart functionality (right now, I can't enter to create multiple queries). But the search queries are not saved in files or produce a log, they are UI states saved in session storage.
+- Double check the migration script. Make sure the logs that become empty after the migration will be removed. Make sure lists that were created from saving explore are preserved.
+- Dryrun
+- Go apply
+- /finish

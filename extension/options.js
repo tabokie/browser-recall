@@ -3,7 +3,7 @@
 import { FileSystemStorage } from './filesystem-storage.js';
 import init, { Interaction, SearchEngine, searchBatch } from './pkg/portal_extension.js';
 import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine, extractInteractionBuffer } from './search-helpers.js';
-import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, savedSearchesChanged, escapeHtml } from './utils.js';
+import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, escapeHtml } from './utils.js';
 import { attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
 import { initCharts, renderTimeChart, renderTimeChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './time-chart.js';
 import { VirtualScroller } from './virtual-scroller.js';
@@ -65,12 +65,11 @@ const listNameById = new Map(); // listId → display name, populated by renderL
 let marqueeActive = false; // suppress click during marquee drag
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
 // pinnedFilterCtx removed — pinned section no longer has related pages
-const EXPLORE_LIST_ID = 'system/explore';
 // Page data cached in chrome.storage.session (managed by background).
 // Keys: 'page:{slug}' for pages.
 
 // --- Search/filter state ---
-let savedSearches = [];           // string[] — persisted to entity
+let savedSearches = [];           // string[] — session-only, per-view UI state
 let currentSearchInput = '';      // unsaved draft (also participates in live search)
 let filterState = {
   firstSeen: { lo: null, hi: null },  // null = unbounded (days ago)
@@ -318,9 +317,8 @@ function resetHistory() {
 
 
 function getActivePinListId() {
-  if (activeView.type === 'explore') return EXPLORE_LIST_ID;
   if (activeView.type === 'list') return activeView.id;
-  return EXPLORE_LIST_ID; // default: pin to explore
+  return null;
 }
 
 function pinIdToUrl(id) {
@@ -442,7 +440,6 @@ function showRecycleBinLayout() {
   document.getElementById('listLayout').classList.remove('visible');
   document.getElementById('recycleBinLayout').classList.add('visible');
   document.getElementById('queryBuilder').style.display = 'none';
-  document.getElementById('pinSearchBtn').style.display = 'none';
 }
 
 // --- Recycle Bin ---
@@ -877,13 +874,6 @@ function renderResultsSkeleton(opts = {}) {
 
 // Show list chart frames immediately
 function renderListSkeleton() {
-  // Pinned section
-  const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
-  pinnedSection.style.display = '';
-  const pinnedContainer = document.getElementById('pinnedResults');
-  pinnedContainer.innerHTML = '';
-
-  // Explore section: show chart frame
   const relatedChart = document.getElementById('relatedChart');
   relatedChart.querySelector('.chart-bars').innerHTML = '';
   relatedChart.classList.add('visible');
@@ -896,7 +886,7 @@ function refreshCurrentView() {
   if (activeView.type === 'category') {
     showCategory(activeView.value);
   } else if (activeView.type === 'list') {
-    showList({ slug: activeView.id, savedSearches: activeView.savedSearches, name: activeView.name });
+    showList({ slug: activeView.id, name: activeView.name });
   } else if (activeView.type === 'explore') {
     showExplore();
   } else if (activeView.type === 'recycle-bin') {
@@ -945,7 +935,6 @@ async function showCategory(category) {
   updateSidebarActive();
   const categoryLabels = { all: 'History', today: 'Today', week: 'This Week', highlighted: 'Highlighted', explore: 'Explore' };
   updateMainTitle(categoryLabels[category] || category);
-  document.getElementById('pinSearchBtn').style.display = 'none';
   document.getElementById('queryBuilder').style.display = 'none';
 
   renderResultsSkeleton();
@@ -1025,17 +1014,21 @@ function matchKeyword(item, field, value) {
 // results. Consumers must not assume results are unique by URL/slug.
 
 
-async function saveSearchState() {
-  const isExplore = activeView.type === 'explore';
-  const isList = activeView.type === 'list';
-  if (!isExplore && !isList) return;
+// Save search queries to session storage (per-view, ephemeral)
+function saveSearchQueries() {
+  const viewKey = activeView.type === 'explore' ? 'explore'
+    : activeView.type === 'list' ? `list:${activeView.id}` : null;
+  if (!viewKey) return;
+  chrome.storage.session.set({ [`searchQueries:${viewKey}`]: savedSearches }).catch(() => {});
+}
 
-  if (!savedSearchesChanged(activeView.savedSearches, savedSearches)) return;
-
-  activeView.savedSearches = [...savedSearches];
-  const listId = isExplore ? EXPLORE_LIST_ID : activeView.id;
-  const name = activeView.name || null;
-  await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, savedSearches });
+// Load search queries from session storage for the current view
+async function loadSearchQueries() {
+  const viewKey = activeView.type === 'explore' ? 'explore'
+    : activeView.type === 'list' ? `list:${activeView.id}` : null;
+  if (!viewKey) return [];
+  const data = await chrome.storage.session.get(`searchQueries:${viewKey}`);
+  return data[`searchQueries:${viewKey}`] || [];
 }
 
 
@@ -1078,84 +1071,55 @@ async function showExplore() {
   const _t0 = performance.now();
   const _timer = (label) => console.debug(`[explore-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
 
-  activeView = { type: 'explore', savedSearches: [], name: null };
+  activeView = { type: 'explore', name: null };
   updateSidebarActive();
   updateMainTitle('Explore');
-  document.getElementById('pinSearchBtn').style.display = 'flex';
 
   showListLayout();
   renderListSkeleton();
 
   try {
-    const listId = EXPLORE_LIST_ID;
-    const listEntity = await readCacheable('list:' + listId);
-    allListPins[listId] = listEntity?.pins || [];
-    savedSearches = listEntity?.savedSearches || [];
-    activeView.savedSearches = [...savedSearches];
+    savedSearches = await loadSearchQueries();
     currentSearchInput = '';
-    const pins = getExplorePins();
-    _timer('load explore pins');
-
-    // Hide pinned section when no pins
-    const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
-    if (pins.length === 0) {
-      pinnedSection.style.display = 'none';
-    } else {
-      const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
-      const fullPinned = pinsResolved.map(r => enrichPinResult(r, pins, pageSnap));
-      renderPinnedSection(fullPinned, listId);
-      _timer('render pinned section');
-    }
 
     await renderListSearchFilters();
     _timer('renderListSearchFilters');
   } catch (error) {
     console.error('Explore load error:', error);
-    document.getElementById('pinnedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
+    document.getElementById('relatedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
   }
   document.body.dataset.ready = 'true';
 }
 
 // Incremental refresh after pin toggle — preserves scroll position and search state.
-// Works for both explore and list views by deriving listId from activeView.
 async function refreshPins() {
-  const isExplore = activeView.type === 'explore';
-  const listId = isExplore ? EXPLORE_LIST_ID : activeView.id;
-  if (!allListPins[listId]) {
-    const entity = await readCacheable('list:' + listId);
-    allListPins[listId] = entity?.pins || [];
+  if (activeView.type === 'explore') {
+    runSearchFilterPipeline();
+  } else if (activeView.type === 'list') {
+    const listId = activeView.id;
+    if (!allListPins[listId]) {
+      const entity = await readCacheable('list:' + listId);
+      allListPins[listId] = entity?.pins || [];
+    }
+    const pins = allListPins[listId];
+    if (pins.length === 0) {
+      document.getElementById('relatedResults').innerHTML = '<div class="no-results">No pinned pages</div>';
+      document.getElementById('relatedChart').classList.remove('visible');
+    } else {
+      const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
+      const enriched = pinsResolved.map(r => enrichPinResult(r, pins, pageSnap));
+      renderListPinView(enriched, listId);
+    }
   }
-  const pins = allListPins[listId];
-
-  // Re-render pinned section
-  const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
-  if (pins.length === 0) {
-    pinnedSection.style.display = 'none';
-  } else {
-    const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
-    const fullPinned = pinsResolved.map(r => enrichPinResult(r, pins, pageSnap));
-    renderPinnedSection(fullPinned, listId);
-  }
-
-  if (isExplore) updateExploreBadge();
-  runSearchFilterPipeline();
 }
 
 async function showList(list) {
-  // loadLists() returns { slug, name } only — load full entity for savedSearches
-  if (!list.savedSearches) {
-    try {
-      const entity = await readCacheable('list:' + list.slug);
-      if (entity?.savedSearches) list.savedSearches = entity.savedSearches;
-    } catch (err) { showErrorBubble(err.message); return; }
-  }
   const displayName = listDisplayName(list);
-  activeView = { type: 'list', id: list.slug, savedSearches: list.savedSearches || [], name: list.name || null };
-  savedSearches = activeView.savedSearches ? [...activeView.savedSearches] : [];
+  activeView = { type: 'list', id: list.slug, name: list.name || null };
+  savedSearches = await loadSearchQueries();
   currentSearchInput = '';
   updateSidebarActive();
   updateMainTitle(displayName);
-  document.getElementById('pinSearchBtn').style.display = 'none';
 
   // Enable double-click rename on title
   const titleEl = document.getElementById('mainTitle');
@@ -1186,46 +1150,101 @@ async function showList(list) {
     allListPins[listId] = listEntity?.pins || [];
     const pins = allListPins[listId];
 
-    // Hide pinned section when no pins
-    const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
     if (pins.length === 0) {
-      pinnedSection.style.display = 'none';
+      listPinsData = [];
+      listPinsListId = listId;
+      renderSearchPanel();
+      document.getElementById('relatedResults').innerHTML = '<div class="no-results">No pinned pages</div>';
+      document.getElementById('relatedChart').classList.remove('visible');
     } else {
       const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
-
-      // --- Pinned section: render directly from entity pins ---
-      renderPinnedSection(pinsResolved.map(r => enrichPinResult(r, pins, pageSnap)), listId);
+      const enriched = pinsResolved.map(r => enrichPinResult(r, pins, pageSnap));
+      renderListPinView(enriched, listId);
     }
-
-    // --- Search/filter panel ---
-    await renderListSearchFilters();
   } catch (error) {
     console.error('List load error:', error);
-    document.getElementById('pinnedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
+    document.getElementById('relatedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
   }
 }
 
 
-// Render pinned rows (no related pages, no time chart)
-function renderPinnedSection(allPinned, listId) {
-  const effectivePinnedSort = pinnedSortState.column ? pinnedSortState : { column: 'lastVisit', direction: 'desc' };
-  const sortedPinned = applySortOrder(allPinned, effectivePinnedSort);
-  const maxAtt = Math.max(...sortedPinned.map(r => r.attScore), 0.1);
+// Module-level storage for list pin data (used by search filtering)
+let listPinsData = [];
+let listPinsListId = null;
 
-  const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
-  const pinnedContainer = document.getElementById('pinnedResults');
+// Render all pins into #relatedResults with search filtering support
+function renderListPinView(allPins, listId) {
+  listPinsData = allPins;
+  listPinsListId = listId;
+  renderSearchPanel();
+  runListPinFilter();
+}
 
-  if (sortedPinned.length === 0) {
-    pinnedSection.style.display = 'none';
-  } else {
-    pinnedSection.style.display = '';
-    let html = sortedPinned.map(r =>
-      resultRowHtml(r.user_title || r.title, r.url, { pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail, notes: r.notes, timestamps: r.timestamps, context: 'pinned', pinnedAt: r.pinnedAt, childIds: r.childIds })
-    ).join('');
-    pinnedContainer.innerHTML = html;
-    bindResultDelegation(pinnedContainer);
-    bindPinClicks(pinnedContainer, listId);
+// Run the active view's search pipeline (debounced for explore, immediate for list)
+function runActiveSearchPipeline() {
+  if (activeView.type === 'explore') {
+    if (exploreDebounceTimer) clearTimeout(exploreDebounceTimer);
+    exploreDebounceTimer = setTimeout(() => runSearchFilterPipeline(), 300);
+  } else if (activeView.type === 'list') {
+    runListPinFilter();
   }
+}
+
+// Filter list pins by current queries + draft input
+function runListPinFilter() {
+  const allQueries = [...savedSearches];
+  if (currentSearchInput.trim()) allQueries.push(currentSearchInput.trim());
+
+  let filtered;
+  if (allQueries.length === 0 || allQueries.every(q => !q.trim())) {
+    filtered = listPinsData;
+  } else {
+    filtered = listPinsData.filter(r => {
+      return allQueries.some(query => {
+        const words = parseSearchWords(query);
+        return wordsMatchItem(words, r);
+      });
+    });
+  }
+  renderFilteredPins(filtered, listPinsListId, allQueries.join(' '));
+}
+
+// Render filtered pin results into the virtual scroller + time chart
+function renderFilteredPins(pins, listId, searchQuery) {
+  const relatedContainer = document.getElementById('relatedResults');
+
+  if (pins.length === 0) {
+    relatedContainer.innerHTML = searchQuery.trim()
+      ? '<div class="no-results">No matching pins</div>'
+      : '<div class="no-results">No pinned pages</div>';
+    document.getElementById('relatedChart').classList.remove('visible');
+    return;
+  }
+
+  const effectiveSort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
+  const sorted = applySortOrder([...pins], effectiveSort);
+  const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
+
+  const vs = getOrCreateRelatedScroller();
+  vs._headerHtml = '';
+  vs.updateData(sorted, (r) =>
+    resultRowHtml(r.user_title || r.title, r.url, {
+      pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
+      notes: r.notes, timestamps: r.timestamps, context: 'related',
+      pinnedAt: r.pinnedAt, childIds: r.childIds, excludeListId: listId, likes: r.likes,
+    })
+  );
+  bindPinClicks(relatedContainer, listId);
+
+  // Time chart for pins
+  const chartData = sorted.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || r.pinnedAt || Date.now(), attention: '' }));
+  renderTimeChartInto(
+    document.getElementById('relatedChart'),
+    document.getElementById('relatedChartBars'),
+    chartData,
+    'Pinned pages'
+  );
+  bindChartBarClick(document.getElementById('relatedChart'), relatedContainer);
 }
 
 // renderPinnedWithRelated removed — pinned section only shows pinned rows
@@ -1299,6 +1318,7 @@ async function enrichFromEntityStorage(entries) {
     if (!entry.title && page.title) entry.title = page.title;
     if (!entry.user_title && page.user_title) entry.user_title = page.user_title;
     if (page.childIds) entry.childIds = page.childIds;
+    if (page.likes) entry.likes = page.likes;
   }
 }
 
@@ -1342,7 +1362,7 @@ async function displayInteractionRows(interactions) {
   const vs = getOrCreateGlobalScroller();
   vs._headerHtml = '';
   vs.setData(sorted, (e) =>
-    resultRowHtml(e.user_title || e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global', childIds: e.childIds })
+    resultRowHtml(e.user_title || e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global', childIds: e.childIds, likes: e.likes })
   );
 }
 
@@ -1403,6 +1423,10 @@ async function loadExtraDetail(url) {
   const snapResp = await sendAction({ action: 'listSnapshots', slug });
   const snapshots = snapResp.snapshots || [];
 
+  // Load page entity for likes
+  const pageEntity = await readCacheable('page:' + slug);
+  const likes = pageEntity?.likes || 0;
+
   // Find belonged lists (reverse lookup)
   const lists = await loadLists();
   const belongedLists = [];
@@ -1414,11 +1438,15 @@ async function loadExtraDetail(url) {
     }
   }
 
-  return { notes, snapshots, belongedLists, slug };
+  return { notes, snapshots, belongedLists, slug, likes };
 }
 
 function renderExtraDetailHtml(extra) {
   let html = '';
+
+  if (extra.likes > 0) {
+    html += `<div class="detail-section"><span class="detail-section-label">Liked:</span> <strong>${extra.likes}</strong></div>`;
+  }
 
   if (extra.belongedLists.length > 0) {
     html += '<div class="detail-section"><span class="detail-section-label">Lists:</span> ';
@@ -1507,7 +1535,7 @@ function attentionLevel(normalized) {
 
 function resultRowHtml(title, url, opts = {}) {
   const safeUrl = escapeHtml(url || '<unknown>');
-  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, cssClass, childIds = [] } = opts;
+  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, cssClass, childIds = [], excludeListId, likes = 0 } = opts;
 
   const lastVisit = timestamps.length > 0 ? formatTime(Math.max(...timestamps)) : '';
   const normalized = maxAtt > 0 ? attScore / maxAtt : 0;
@@ -1528,6 +1556,7 @@ function resultRowHtml(title, url, opts = {}) {
   if (url) {
     const pageId = 'page:' + generateSlugFromUrl(url);
     for (const [listId, pins] of Object.entries(allListPins)) {
+      if (excludeListId && listId === excludeListId) continue;
       if (Array.isArray(pins) && pins.some(p => p.id === pageId)) {
         const name = listNameById.get(listId);
         if (name) belongedListNames.push(name);
@@ -1541,8 +1570,9 @@ function resultRowHtml(title, url, opts = {}) {
   });
   const attCtrlHtml = `<div class="att-ctrl${attLvl ? ' ' + attLvl : ''}" data-url="${safeUrl}" data-title="${safeTitle}"><span class="att-ctrl-dot"></span><button class="att-ctrl-btn" title="View details">···</button></div>`;
   const listTagsHtml = belongedListNames.map(n => `<span class="card-tag card-tag-list">${escapeHtml(n)}</span>`).join('');
-  const hasExtras = hasNotes || hasSnaps || listTagsHtml;
-  const extrasHtml = hasExtras ? `<div class="card-extras">${hasNotes ? '<span class="card-tag card-tag-note">note</span>' : ''}${hasSnaps ? '<span class="card-tag card-tag-snap">snapshot</span>' : ''}${listTagsHtml}</div>` : '';
+  const isLiked = likes > 0;
+  const hasExtras = hasNotes || hasSnaps || isLiked || listTagsHtml;
+  const extrasHtml = hasExtras ? `<div class="card-extras">${isLiked ? '<span class="card-tag card-tag-liked">liked</span>' : ''}${hasNotes ? '<span class="card-tag card-tag-note">note</span>' : ''}${hasSnaps ? '<span class="card-tag card-tag-snap">snapshot</span>' : ''}${listTagsHtml}</div>` : '';
   const cardActionsHtml = deletable ? `<div class="card-actions"><button class="result-delete" data-delete-url="${safeUrl}" data-delete-title="${safeTitle}" title="Delete">${DELETE_SVG}</button></div>` : '';
 
   return `<div class="result-item${cssClass ? ' ' + cssClass : ''}">
@@ -1748,10 +1778,8 @@ function enterTitleEditMode(prefill, onConfirm, onCancel) {
   const titleEl = document.getElementById('mainTitle');
   const inputEl = document.getElementById('mainTitleInput');
   const confirmBtn = document.getElementById('confirmTitleBtn');
-  const pinBtn = document.getElementById('pinSearchBtn');
 
   titleEl.style.display = 'none';
-  pinBtn.style.display = 'none';
   inputEl.value = prefill;
   inputEl.style.display = '';
   confirmBtn.style.display = 'flex';
@@ -2122,32 +2150,6 @@ function createSidebarItem(node, depth) {
   return item;
 }
 
-async function saveExploreAsList() {
-  if (activeView.type !== 'explore') return;
-  const pins = getExplorePins();
-
-  const newSavedSearches = [...savedSearches];
-
-  enterTitleEditMode('', async (name) => {
-    if (!name) return;
-    try {
-      const listId = generateSlugFromTitle(name);
-      const newList = { slug: listId, name, savedSearches: newSavedSearches };
-      await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name, savedSearches: newSavedSearches });
-      // Copy explore pins to the new list (if any)
-      if (pins.length > 0) {
-        await chrome.runtime.sendMessage({
-          action: 'copyListPins', fromListId: EXPLORE_LIST_ID, toListId: listId,
-        });
-      }
-      await renderLists();
-      showList(newList);
-    } catch (err) { showErrorBubble(err.message); }
-  }, () => {
-    updateMainTitle('Explore');
-    document.getElementById('pinSearchBtn').style.display = 'flex';
-  });
-}
 
 // --- Utility ---
 function formatTime(timestamp) {
@@ -2183,8 +2185,6 @@ document.getElementById('recycleBinBtn').addEventListener('click', () => {
   showRecycleBin();
 });
 
-// --- Event listeners: Pin search ---
-document.getElementById('pinSearchBtn').addEventListener('click', saveExploreAsList);
 
 // --- Marquee drag-select from results background ---
 function initMarqueeForElements(wrapper, container) {
@@ -2270,23 +2270,11 @@ initMarqueeForElements(
   document.getElementById('resultsWrapper'),
   document.getElementById('results')
 );
-// Init marquee for list sections
-initMarqueeForElements(
-  document.getElementById('pinnedResultsWrapper'),
-  document.getElementById('pinnedResults')
-);
+// Init marquee for list results
 initMarqueeForElements(
   document.getElementById('relatedResultsWrapper'),
   document.getElementById('relatedResults')
 );
-
-// --- Section collapse toggle ---
-document.querySelectorAll('.section-header[data-collapse]').forEach(header => {
-  header.addEventListener('click', () => {
-    header.classList.toggle('collapsed');
-  
-  });
-});
 
 // --- Settings modal ---
 document.getElementById('settingsBtn').addEventListener('click', () => {
@@ -2736,8 +2724,7 @@ chrome.runtime.onMessage.addListener((request) => {
     }, 500);
   } else if (type === 'pins') {
     // List pins changed — invalidate caches and re-render active list.
-    const activeListId = activeView.type === 'explore' ? EXPLORE_LIST_ID
-      : (activeView.type === 'list' ? activeView.id : null);
+    const activeListId = activeView.type === 'list' ? activeView.id : null;
     if (request.listId) {
       delete allListPins[request.listId];
       if (request.listId === activeListId) refreshCurrentView();
@@ -2797,60 +2784,47 @@ document.addEventListener('visibilitychange', async () => {
   // destroy scroll position, block enable/disable state, and expanded details.
 });
 
-// --- Explore Pins ---
-
-function getExplorePins() {
-  return allListPins[EXPLORE_LIST_ID] || [];
-}
-
-function updateExploreBadge() {
-  const badge = document.getElementById('exploreBadge');
-  if (!badge) return;
-  const pins = getExplorePins();
-  if (pins.length > 0) {
-    badge.textContent = pins.length;
-    badge.classList.add('visible');
-  } else {
-    badge.textContent = '';
-    badge.classList.remove('visible');
-  }
-}
-
-// --- Explore Blocks ---
+// --- Explore Search ---
 
 
 function renderSearchPanel() {
   const container = document.getElementById('listQueryBuilder');
   container.style.display = 'block';
+  const isExplore = activeView.type === 'explore';
+  const placeholder = isExplore ? 'Search...' : 'Filter pins...';
 
   const removeSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
   const filterSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
 
   let html = '<div class="search-filters-panel" id="searchFiltersPanel">';
-  html += '<div class="search-rows" id="searchRows">';
-  for (let i = 0; i < savedSearches.length; i++) {
-    html += `<div class="search-row" data-index="${i}">`;
-    html += `<input type="text" class="search-row-input" value="${escapeHtml(savedSearches[i])}" data-index="${i}">`;
-    html += `<button class="search-row-remove" data-index="${i}" title="Remove">${removeSvg}</button>`;
-    html += `</div>`;
+  if (savedSearches.length > 0) {
+    html += '<div class="search-rows" id="searchRows">';
+    for (let i = 0; i < savedSearches.length; i++) {
+      html += `<div class="search-row" data-index="${i}">`;
+      html += `<input type="text" class="search-row-input" value="${escapeHtml(savedSearches[i])}" data-index="${i}">`;
+      html += `<button class="search-row-remove" data-index="${i}" title="Remove">${removeSvg}</button>`;
+      html += `</div>`;
+    }
+    html += '</div>';
+  }
+  html += '<div class="search-draft">';
+  html += `<input type="text" class="search-draft-input" id="searchDraftInput" placeholder="${placeholder}" value="${escapeHtml(currentSearchInput)}">`;
+  if (isExplore) {
+    html += `<button class="filter-toggle-btn${filterVisible ? ' active' : ''}${!isDefaultFilterState(filterState) ? ' has-filters' : ''}" id="filterToggleBtn" title="Filters">${filterSvg}</button>`;
   }
   html += '</div>';
-  html += '<div class="search-draft">';
-  html += `<input type="text" class="search-draft-input" id="searchDraftInput" placeholder="Search..." value="${escapeHtml(currentSearchInput)}">`;
-  html += '<button class="search-save-btn" id="searchSaveBtn" title="Save search">Save</button>';
-  html += `<button class="filter-toggle-btn${filterVisible ? ' active' : ''}${!isDefaultFilterState(filterState) ? ' has-filters' : ''}" id="filterToggleBtn" title="Filters">${filterSvg}</button>`;
-  html += '</div>';
 
-  // Filter panel
-  html += `<div class="filter-panel" id="filterPanel" style="display:${filterVisible ? 'block' : 'none'}">`;
-  html += renderFilterPanelHtml();
-  html += '</div>';
+  if (isExplore) {
+    html += `<div class="filter-panel" id="filterPanel" style="display:${filterVisible ? 'block' : 'none'}">`;
+    html += renderFilterPanelHtml();
+    html += '</div>';
+  }
 
   html += '</div>';
 
   container.innerHTML = html;
   bindSearchEvents(container);
-  if (filterVisible) bindFilterEvents(container);
+  if (isExplore && filterVisible) bindFilterEvents(container);
 }
 
 function renderFilterPanelHtml() {
@@ -2967,10 +2941,10 @@ function bindSearchEvents(container) {
     input.addEventListener('input', () => {
       const idx = parseInt(input.dataset.index);
       savedSearches[idx] = input.value;
-      debouncedRunSearchPipeline();
+      runActiveSearchPipeline();
     });
     input.addEventListener('change', () => {
-      saveSearchState();
+      saveSearchQueries();
     });
   });
 
@@ -2980,8 +2954,8 @@ function bindSearchEvents(container) {
       const idx = parseInt(btn.dataset.index);
       savedSearches.splice(idx, 1);
       renderSearchPanel();
-      saveSearchState();
-      debouncedRunSearchPipeline();
+      saveSearchQueries();
+      runActiveSearchPipeline();
     });
   });
 
@@ -2990,33 +2964,17 @@ function bindSearchEvents(container) {
   if (draftInput) {
     draftInput.addEventListener('input', () => {
       currentSearchInput = draftInput.value;
-      debouncedRunSearchPipeline();
+      runActiveSearchPipeline();
     });
     draftInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && draftInput.value.trim()) {
         savedSearches.push(draftInput.value.trim());
         currentSearchInput = '';
         renderSearchPanel();
-        saveSearchState();
-        runSearchFilterPipeline();
+        saveSearchQueries();
+        runActiveSearchPipeline();
         // Focus the new draft input
-        container.querySelector('#searchDraftInput')?.focus();
-      }
-    });
-  }
-
-  // Save button
-  const saveBtn = container.querySelector('#searchSaveBtn');
-  if (saveBtn) {
-    saveBtn.addEventListener('click', () => {
-      const draftInput = container.querySelector('#searchDraftInput');
-      if (draftInput && draftInput.value.trim()) {
-        savedSearches.push(draftInput.value.trim());
-        currentSearchInput = '';
-        renderSearchPanel();
-        saveSearchState();
-        runSearchFilterPipeline();
-        container.querySelector('#searchDraftInput')?.focus();
+        document.querySelector('#searchDraftInput')?.focus();
       }
     });
   }
@@ -3070,7 +3028,7 @@ function bindFilterEvents(container) {
         hi: hi < cfg.max ? hi : null,
       };
       saveFilterState();
-      debouncedRunSearchPipeline();
+      runActiveSearchPipeline();
     });
   });
 
@@ -3083,7 +3041,7 @@ function bindFilterEvents(container) {
       // Update filter-toggle-btn indicator
       const btn = container.querySelector('#filterToggleBtn');
       if (btn) btn.classList.toggle('has-filters', !isDefaultFilterState(filterState));
-      debouncedRunSearchPipeline();
+      runActiveSearchPipeline();
     });
   });
 
@@ -3102,27 +3060,16 @@ function bindFilterEvents(container) {
       saveFilterState();
       const toggleBtn = container.querySelector('#filterToggleBtn');
       if (toggleBtn) toggleBtn.classList.toggle('has-filters', !isDefaultFilterState(filterState));
-      debouncedRunSearchPipeline();
+      runActiveSearchPipeline();
     });
   });
 }
 
-function debouncedRunSearchPipeline() {
-  if (exploreDebounceTimer) clearTimeout(exploreDebounceTimer);
-  exploreDebounceTimer = setTimeout(() => runSearchFilterPipeline(), 300);
-}
 
 async function runSearchFilterPipeline() {
-  if (activeView.type !== 'explore' && activeView.type !== 'list') return;
+  if (activeView.type !== 'explore') return;
 
-  let pinnedSlugs, listId;
-  if (activeView.type === 'explore') {
-    listId = EXPLORE_LIST_ID;
-    pinnedSlugs = new Set(getExplorePins().map(p => slugFromPinId(p.id)));
-  } else {
-    listId = activeView.id;
-    pinnedSlugs = new Set((allListPins[listId] || []).map(p => slugFromPinId(p.id)));
-  }
+  const pinnedSlugs = new Set();
 
   // Collect all queries: saved searches + current draft
   const allQueries = [...savedSearches];
@@ -3180,13 +3127,11 @@ async function runSearchFilterPipeline() {
   vs._headerHtml = '';
   vs.updateData(sorted, (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
-      pinned: isResultPinned(listId, r.url),
       attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'related',
-      childIds: r.childIds,
+      childIds: r.childIds, likes: r.likes,
     })
   );
-  bindPinClicks(relatedContainer, listId);
 
   // Demand-load more history when scrolling (for all-history mode)
   if (showAllHistory) {
@@ -3459,49 +3404,11 @@ async function initialize() {
   renderTrimRules();
   _timer('renderSidebar (fire-and-forget)');
 
-  // Load metadata in parallel (history is demand-loaded in showCategory, pins loaded per-list)
-  await Promise.all([
-    initHistoryFiles(),
-    readCacheable('list:' + EXPLORE_LIST_ID).then(entity => { allListPins[EXPLORE_LIST_ID] = entity?.pins || []; }),
-  ]);
+  // Load metadata (history is demand-loaded in showCategory, pins loaded per-list)
+  await initHistoryFiles();
   _timer('parallel metadata load');
-  updateExploreBadge();
   updateRecycleBinBadge();
   showExplore();
-
-  // Explore button: drag-to-explore
-  const exploreBtn = document.getElementById('exploreBtn');
-  exploreBtn.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    exploreBtn.classList.add('drag-over');
-  });
-  exploreBtn.addEventListener('dragleave', () => {
-    exploreBtn.classList.remove('drag-over');
-  });
-  exploreBtn.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    exploreBtn.classList.remove('drag-over');
-    try {
-      const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-      if (data.items) {
-        if (!allListPins[EXPLORE_LIST_ID]) allListPins[EXPLORE_LIST_ID] = [];
-        const pins = allListPins[EXPLORE_LIST_ID];
-        const newUrls = [];
-        for (const item of data.items) {
-          const pinId = 'page:' + generateSlugFromUrl(item.url);
-          if (!pins.some(p => p.id === pinId)) {
-            pins.push({ id: pinId, pinnedAt: Date.now() });
-            newUrls.push(item.url);
-          }
-        }
-        if (newUrls.length > 0) {
-          await chrome.runtime.sendMessage({ action: 'addListPins', listId: EXPLORE_LIST_ID, urls: newUrls });
-          updateExploreBadge();
-          if (activeView.type === 'explore') showExplore();
-        }
-      }
-    } catch {}
-  });
 }
 
 initialize().catch(err => showFatalError(err.message));

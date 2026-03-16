@@ -30,10 +30,10 @@ function makeLoad(store) {
 function listStore(extra = {}) {
   return {
     'manifest:name-to-id': { timestamp: 0, paths: { 'root/Test': 'test-id' } },
-    'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [], parentList: 'list:system/root', childLists: [], savedSearches: [] },
+    'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [], parentList: 'list:system/root', childLists: [] },
     'list:system/root': { timestamp: 0, childLists: ['list:test-id'] },
     'manifest:orphaned': { timestamp: 0, keys: [] },
-    'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [], parentList: null, childLists: [], savedSearches: [] },
+    'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [], parentList: null, childLists: [] },
     ...extra,
   };
 }
@@ -213,7 +213,7 @@ describe('effectOf: visit_page', () => {
     const store = {
       [`page:${childSlug}`]: { slug: childSlug, timestamp: 0, parentIds: [], childIds: [] },
       [`page:${parentSlug}`]: { slug: parentSlug, url: 'https://parent.com', timestamp: 50, parentIds: [], childIds: [] },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [], parentList: null, childLists: [], savedSearches: [] },
+      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [], parentList: null, childLists: [] },
     };
     const result = await effectOf(
       { timestamp: 100, action: 'visit_page', url: 'https://child.com', title: 'C', referrerUrl: 'https://parent.com' },
@@ -229,7 +229,7 @@ describe('effectOf: visit_page', () => {
     const store = {
       [`page:${childSlug}`]: { slug: childSlug, url: 'https://github.com/user/repo', timestamp: 0, parentIds: [], childIds: [] },
       [`page:${parentSlug}`]: { slug: parentSlug, url: 'https://github.com/', timestamp: 50, parentIds: [], childIds: [] },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [{ id: `page:${parentSlug}`, pinnedAt: 10 }], parentList: null, childLists: [], savedSearches: [] },
+      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [{ id: `page:${parentSlug}`, pinnedAt: 10 }], parentList: null, childLists: [] },
     };
     const result = await effectOf(
       { timestamp: 100, action: 'visit_page', url: 'https://github.com/user/repo', title: 'Repo', referrerUrl: 'https://github.com/' },
@@ -533,7 +533,7 @@ describe('effectOf: pin_to_list', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = listStore({
       [`page:${slug}`]: { slug, timestamp: 50, url: 'https://a.com', parentIds: ['list:test-id'], childIds: [] },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [], savedSearches: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'pin_to_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
@@ -548,7 +548,7 @@ describe('effectOf: unpin_from_list', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = listStore({
       [`page:${slug}`]: { slug, timestamp: 50, url: 'https://a.com', parentIds: ['list:test-id'], childIds: [] },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [], savedSearches: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'unpin_from_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
@@ -630,14 +630,6 @@ describe('effectOf: update_list', () => {
     expect(result['manifest:name-to-id'].paths['root/Test']).toBeUndefined();
   });
 
-  it('updates savedSearches without rename', async () => {
-    const store = listStore();
-    const result = await effectOf(
-      { timestamp: 100, action: 'update_list', parents: ['root'], name: 'Test', savedSearches: [{ query: 'foo' }] },
-      makeLoad(store),
-    );
-    expect(result['list:test-id'].savedSearches).toEqual([{ query: 'foo' }]);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -659,7 +651,7 @@ describe('effectOf: delete_list', () => {
 
   it('noop if already deleted', async () => {
     const store = listStore({
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', deleted: true, pins: [], parentList: 'list:system/root', childLists: [], savedSearches: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', deleted: true, pins: [], parentList: 'list:system/root', childLists: [] },
     });
     const load = async (key, opts) => {
       const e = store[key] ?? null;
@@ -676,8 +668,8 @@ describe('effectOf: delete_list', () => {
   it('cascades to child lists', async () => {
     const store = listStore({
       'manifest:name-to-id': { timestamp: 0, paths: { 'root/Test': 'test-id', 'root/Test/Child': 'child-id' } },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [], parentList: 'list:system/root', childLists: ['list:child-id'], savedSearches: [] },
-      'list:child-id': { timestamp: 0, slug: 'child-id', name: 'Child', pins: [], parentList: 'list:test-id', childLists: [], savedSearches: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [], parentList: 'list:system/root', childLists: ['list:child-id'] },
+      'list:child-id': { timestamp: 0, slug: 'child-id', name: 'Child', pins: [], parentList: 'list:test-id', childLists: [] },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'delete_list', parents: ['root'], name: 'Test' },
@@ -693,7 +685,7 @@ describe('effectOf: restore_list', () => {
   it('restores to root, re-adds to name-map, unorphans', async () => {
     const store = {
       'manifest:name-to-id': { timestamp: 0, paths: {} },
-      'list:test-id': { slug: 'test-id', name: 'Test', deleted: true, timestamp: 50, pins: [], parentList: 'list:system/root', childLists: [], savedSearches: [] },
+      'list:test-id': { slug: 'test-id', name: 'Test', deleted: true, timestamp: 50, pins: [], parentList: 'list:system/root', childLists: [] },
       'list:system/root': { timestamp: 0, childLists: [] },
       'manifest:orphaned': { timestamp: 50, keys: ['list:test-id'] },
     };
@@ -730,7 +722,7 @@ describe('effectOf: visit_page — REFERRER_CAP', () => {
         slug: childSlug, url: 'https://example.com/child', title: 'Child',
         timestamp: 50, parentIds: existingParentIds, childIds: [],
       },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [], parentList: null, childLists: [], savedSearches: [] },
+      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [], parentList: null, childLists: [] },
       'manifest:orphaned': { timestamp: 0, keys: [] },
     };
     const newParentUrl = 'https://example.com/new-parent-51';
@@ -764,7 +756,7 @@ describe('effectOf: visit_page — REFERRER_CAP', () => {
         slug: parentSlug, url: 'https://example.com/parent', title: 'Parent',
         timestamp: 50, parentIds: [], childIds: existingChildIds,
       },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [], parentList: null, childLists: [], savedSearches: [] },
+      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [], parentList: null, childLists: [] },
       'manifest:orphaned': { timestamp: 0, keys: [] },
     };
     const newChildUrl = 'https://example.com/new-child-51';
@@ -795,8 +787,8 @@ describe('effectOf: reparent_list', () => {
   it('moves list between parents and updates name-map', async () => {
     const store = {
       'manifest:name-to-id': { timestamp: 0, paths: { 'root/A': 'a-id', 'root/B': 'b-id' } },
-      'list:a-id': { timestamp: 0, slug: 'a-id', name: 'A', pins: [], parentList: 'list:system/root', childLists: [], savedSearches: [] },
-      'list:b-id': { timestamp: 0, slug: 'b-id', name: 'B', pins: [], parentList: 'list:system/root', childLists: [], savedSearches: [] },
+      'list:a-id': { timestamp: 0, slug: 'a-id', name: 'A', pins: [], parentList: 'list:system/root', childLists: [] },
+      'list:b-id': { timestamp: 0, slug: 'b-id', name: 'B', pins: [], parentList: 'list:system/root', childLists: [] },
       'list:system/root': { timestamp: 0, childLists: ['list:a-id', 'list:b-id'] },
       'manifest:orphaned': { timestamp: 0, keys: [] },
     };
@@ -859,7 +851,7 @@ describe('effectOf: page GC on unpin_from_list', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = listStore({
       [`page:${slug}`]: { slug, timestamp: 50, url: 'https://a.com', parentIds: ['list:test-id'], childIds: [] },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [], savedSearches: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'unpin_from_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
@@ -872,7 +864,7 @@ describe('effectOf: page GC on unpin_from_list', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = listStore({
       [`page:${slug}`]: { slug, timestamp: 50, url: 'https://a.com', parentIds: ['list:test-id'], childIds: ['note:n1'] },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [], savedSearches: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'unpin_from_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
@@ -886,7 +878,7 @@ describe('effectOf: page GC on unpin_from_list', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = listStore({
       [`page:${slug}`]: { slug, timestamp: 50, url: 'https://a.com', parentIds: ['list:test-id'], childIds: [], user_title: 'Custom' },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [], savedSearches: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'unpin_from_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },

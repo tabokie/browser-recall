@@ -75,7 +75,7 @@ export async function openOptionsPage(extContext, extensionId) {
 }
 
 // Wait for the list view to finish rendering after a sidebar click.
-// showList() renders #listLayout visible and populates pinned/explore sections.
+// showList() renders #listLayout visible and populates #relatedResults.
 export async function waitForListView(page) {
   await page.waitForFunction(
     () => {

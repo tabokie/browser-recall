@@ -105,7 +105,7 @@ test.describe('Scale — larger data sets', () => {
       }
       files.push({
         path: `lists/${listSlug}.json`,
-        data: { slug: listSlug, name: `List ${l}`, timestamp: now, pins, savedSearches: [], parentList: 'list:system/root', childLists: [] },
+        data: { slug: listSlug, name: `List ${l}`, timestamp: now, pins, parentList: 'list:system/root', childLists: [] },
       });
     }
 
@@ -138,10 +138,10 @@ test.describe('Scale — larger data sets', () => {
     await options.locator('.sidebar-item[data-list-id="list-2"]').click();
     await waitForListView(options);
     await options.waitForFunction(
-      () => document.querySelectorAll('#pinnedResults .result-row').length === 3,
+      () => document.querySelectorAll('#relatedResults .result-row').length === 3,
       { timeout: 10000 }
     );
-    const pinnedTitles = await options.$$eval('#pinnedResults .result-title', els =>
+    const pinnedTitles = await options.$$eval('#relatedResults .result-title', els =>
       els.map(el => el.textContent.trim())
     );
     expect(pinnedTitles.length).toBe(3);
@@ -162,7 +162,7 @@ test.describe('Scale — larger data sets', () => {
       }},
       { path: 'lists/research.json', data: {
         slug: 'research', name: 'Research', timestamp: now,
-        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Research': 'research' } } },

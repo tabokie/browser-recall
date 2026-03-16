@@ -1371,36 +1371,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'copyListPins': {
-          try {
-            const source = await readCacheable('list:' + request.fromListId);
-            const pn = await getListParentsAndName(request.toListId);
-            // Resolve pin IDs back to items for the event format
-            const items = [];
-            for (const pin of (source?.pins || [])) {
-              if (pin.id.startsWith('page:')) {
-                const page = await readCacheable(pin.id);
-                if (page?.url) items.push(page.url);
-              } else if (pin.id.startsWith('note:')) {
-                const noteSlug = pin.id.slice('note:'.length);
-                items.push(`notes/${noteSlug}.json`);
-              }
-            }
-            if (pn && items.length > 0) {
-              await addLog({
-                timestamp: Date.now(),
-                action: 'pin_to_list',
-                parents: pn.parents, name: pn.name,
-                items
-              });
-            }
-            sendResponse({ success: true });
-            notifyMutation('pins', { listId: request.toListId });
-          } catch (error) {
-            sendResponse({ success: false, error: error.message });
-          }
-          break;
-        }
 
         case 'saveListMeta': {
           const cached = request.listId ? await readCacheable('list:' + request.listId) : null;
@@ -1434,10 +1404,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             let hasChange = false;
             if (request.name !== undefined && cached.name !== request.name) {
               entry.newName = request.name;
-              hasChange = true;
-            }
-            if (request.savedSearches !== undefined && JSON.stringify(cached.savedSearches) !== JSON.stringify(request.savedSearches)) {
-              entry.savedSearches = request.savedSearches;
               hasChange = true;
             }
             if (hasChange) {

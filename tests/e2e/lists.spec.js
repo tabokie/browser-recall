@@ -15,7 +15,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now, pins: [], savedSearches: [],
+        slug: 'reading', name: 'Reading List', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
@@ -39,7 +39,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
-        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -58,7 +58,7 @@ test.describe('List operations', () => {
     await listItem.click();
     await waitForListView(options);
 
-    const pinnedRow = options.locator('#pinnedResults .result-row');
+    const pinnedRow = options.locator('#relatedResults .result-row');
     await expect(pinnedRow).toBeVisible({ timeout: 5000 });
     const title = await pinnedRow.locator('.result-title').textContent();
     expect(title).toContain('Example Domain');
@@ -78,7 +78,6 @@ test.describe('List operations', () => {
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: day2,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: day1 }],
-        savedSearches: [{ field: 'url', id: 1, predicateType: 'keyword', type: 'predicate', value: 'example' }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -101,7 +100,7 @@ test.describe('List operations', () => {
     await waitForListView(options);
 
     // Wait for pinned row to appear, then verify exactly one
-    const pinnedRows = options.locator('#pinnedResults .result-row');
+    const pinnedRows = options.locator('#relatedResults .result-row');
     await expect(pinnedRows.first()).toBeVisible({ timeout: 5000 });
     await expect(pinnedRows).toHaveCount(1);
     await options.close();
@@ -117,7 +116,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now, pins: [], savedSearches: [],
+        slug: 'reading', name: 'Reading List', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -144,7 +143,7 @@ test.describe('List operations', () => {
     expect(pinResult.pinned).toBe(true);
     await helper.close();
 
-    const pinnedRow = options.locator('#pinnedResults .result-row');
+    const pinnedRow = options.locator('#relatedResults .result-row');
     await expect(pinnedRow).toBeVisible({ timeout: 10000 });
     const title = await pinnedRow.locator('.result-title').textContent();
     expect(title).toContain('Example Domain');
@@ -162,7 +161,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
-        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -179,7 +178,7 @@ test.describe('List operations', () => {
     const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
     await expect(listItem).toBeVisible({ timeout: 5000 });
     await listItem.click();
-    const pinnedRow = options.locator('#pinnedResults .result-row');
+    const pinnedRow = options.locator('#relatedResults .result-row');
     await expect(pinnedRow).toBeVisible({ timeout: 5000 });
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -216,28 +215,36 @@ test.describe('List operations', () => {
     await options.close();
   });
 
-  // savedSearches: list with saved search keywords shows filtered explore results
-  test('list with savedSearches shows filtered explore results', async ({ extContext, extensionId, setupDir }) => {
+  // List view: search input filters pinned pages
+  test('list pin search filters pins by title', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
-    const matchUrl = 'https://example.com/match-page';
-    const noMatchUrl = 'https://other.com/no-match';
+    const url1 = 'https://example.com/alpha';
+    const url2 = 'https://example.com/beta';
+    const slug1 = getSlugForUrl(url1);
+    const slug2 = getSlugForUrl(url2);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: {
-        trimRules: [],
-      }},
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:filtered'],
       }},
       { path: 'lists/filtered.json', data: {
         slug: 'filtered', name: 'Filtered', timestamp: now,
-        pins: [], savedSearches: ['Match Page'],
+        pins: [
+          { id: `page:${slug1}`, pinnedAt: now },
+          { id: `page:${slug2}`, pinnedAt: now },
+        ],
+        
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
-        { timestamp: now - 1000, action: 'visit_page', url: noMatchUrl, title: 'No Match' },
-        { timestamp: now, action: 'visit_page', url: matchUrl, title: 'Match Page' },
-      ]},
+      { path: `pages/${slug1}.json`, data: {
+        slug: slug1, url: url1, title: 'Alpha Page', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: `pages/${slug2}.json`, data: {
+        slug: slug2, url: url2, title: 'Beta Page', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Filtered': 'filtered' } } },
     ]);
 
@@ -247,16 +254,30 @@ test.describe('List operations', () => {
     await listItem.click();
     await waitForListView(options);
 
-    // The explore section should show only the matching result
+    // Both pins should show initially
     await options.waitForFunction(
-      () => document.querySelectorAll('#relatedResults .result-row').length >= 1,
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 2,
+      { timeout: 10000 }
+    );
+
+    // Type "Alpha" in the filter input
+    const draftInput = options.locator('#searchDraftInput');
+    await expect(draftInput).toBeVisible({ timeout: 5000 });
+    await draftInput.fill('Alpha');
+
+    // Only Alpha should remain
+    await options.waitForFunction(
+      () => {
+        const rows = document.querySelectorAll('#relatedResults .result-row');
+        return rows.length === 1;
+      },
       { timeout: 10000 }
     );
     const titles = await options.$$eval('#relatedResults .result-title', els =>
       els.map(el => el.textContent.trim())
     );
-    expect(titles).toContain('Match Page');
-    expect(titles).not.toContain('No Match');
+    expect(titles).toContain('Alpha Page');
+    expect(titles).not.toContain('Beta Page');
 
     await options.close();
   });
@@ -278,7 +299,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/research.json', data: {
         slug: 'research', name: 'Research', timestamp: now,
-        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${slug}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug}.json`, data: {
@@ -305,7 +326,7 @@ test.describe('List operations', () => {
     await listItem.click();
     await waitForListView(options);
 
-    const pinnedRows = await options.$$('#pinnedResults .result-row');
+    const pinnedRows = await options.$$('#relatedResults .result-row');
     expect(pinnedRows.length).toBe(0);
     await options.close();
   });
@@ -324,7 +345,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
+        slug: 'reading', name: 'Reading', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug}.json`, data: {
@@ -402,7 +423,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
+        slug: 'reading', name: 'Reading', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `data/logs/${today}.jsonl`, lines: [
@@ -444,7 +465,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
+        slug: 'reading', name: 'Reading', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
@@ -475,55 +496,6 @@ test.describe('List operations', () => {
     expect(page2.value.url).toBe(url2);
   });
 
-  // copyListPins copies page pins from source to target list.
-  // Verifies that the target list receives the pins.
-  test('copyListPins copies page pins to target list', async ({ extContext, extensionId, setupDir }) => {
-    const now = Date.now();
-    const url = 'https://example.com/copy-pin-page';
-    const slug = getSlugForUrl(url);
-    const today = new Date(now).toISOString().slice(0, 10);
-
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: {
-        trimRules: [],
-      }},
-      { path: 'lists/system/root.json', data: {
-        timestamp: now, childLists: ['list:source', 'list:target'],
-      }},
-      { path: 'lists/source.json', data: {
-        slug: 'source', name: 'Source', timestamp: now,
-        pins: [{ id: `page:${slug}`, pinnedAt: now }], savedSearches: [],
-        parentList: 'list:system/root', childLists: [],
-      }},
-      { path: 'lists/target.json', data: {
-        slug: 'target', name: 'Target', timestamp: now, pins: [], savedSearches: [],
-        parentList: 'list:system/root', childLists: [],
-      }},
-      { path: `pages/${slug}.json`, data: {
-        slug, url, title: 'Copy Pin Page', timestamp: now, parentIds: [], childIds: [],
-      }},
-      { path: `data/logs/${today}.jsonl`, lines: [
-        { timestamp: now, action: 'visit_page', url, title: 'Copy Pin Page' },
-      ]},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Source': 'source', 'root/Target': 'target' } } },
-    ]);
-
-    const helper = await openHelperPage(extContext, extensionId);
-    const result = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'copyListPins', fromListId: 'source', toListId: 'target' })
-    );
-    expect(result.success).toBe(true);
-
-    // Target list should now have the pin
-    const targetResult = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:target' })
-    );
-    await helper.close();
-
-    const targetPins = targetResult.value?.pins || [];
-    expect(targetPins.length).toBe(1);
-    expect(targetPins[0].id).toBe(`page:${slug}`);
-  });
 
   // Workspace auto-pin (background.js:1140-1156) also creates shallow SPI entries,
   // but requires content script navigation + workspace.listIds configuration.
@@ -540,7 +512,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
+        slug: 'reading', name: 'Reading', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
@@ -572,11 +544,11 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:keep', 'list:remove'],
       }},
       { path: 'lists/keep.json', data: {
-        slug: 'keep', name: 'Keep', timestamp: now, pins: [], savedSearches: [],
+        slug: 'keep', name: 'Keep', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/remove.json', data: {
-        slug: 'remove', name: 'Remove', timestamp: now, pins: [], savedSearches: [],
+        slug: 'remove', name: 'Remove', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Keep': 'keep', 'root/Remove': 'remove' } } },
@@ -608,7 +580,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:doomed'],
       }},
       { path: 'lists/doomed.json', data: {
-        slug: 'doomed', name: 'Doomed', timestamp: now, pins: [], savedSearches: [],
+        slug: 'doomed', name: 'Doomed', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Doomed': 'doomed' } } },
@@ -629,22 +601,18 @@ test.describe('List operations', () => {
     await helper.close();
   });
 
-  // Bug: clicking the pin button on a search result in the list view appends a
-  // 'del' log instead of 'add', and the pinned section shows "Untitled" without URL.
-  // Scenario: page is not checkpointed (no page entity file) — only exists in history.
-  // UI constructs page:<slug> optimistically, but background resolves to shallow:<url>.
-  test('pin a non-checkpointed searched page via UI pin button appends add log and shows correct title', async ({ extContext, extensionId, setupDir }) => {
+  // Pin a non-checkpointed page (only in history, no page entity file)
+  // via toggleListPin API — verifies pin log and pinned page display.
+  test('pin a non-checkpointed page via API shows correct title in list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const pageUrl = 'https://example.com/shallow-only';
-    const pageSlug = getSlugForUrl(pageUrl);
 
-    // Seed: NO page entity file — page exists only in history (shallow)
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
-        pins: [], savedSearches: [],
+        pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
@@ -654,30 +622,20 @@ test.describe('List operations', () => {
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
-
-    // Navigate to the list
     const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
     await expect(listItem).toBeVisible({ timeout: 5000 });
     await listItem.click();
     await waitForListView(options);
 
-    // Wait for the page to appear in related results (all-history mode, no saved searches)
-    await options.waitForFunction(
-      () => document.querySelectorAll('#relatedResults .result-row').length >= 1,
-      { timeout: 10000 }
-    );
-
-    // Click the pin button on the search result
-    const pinBtn = options.locator('#relatedResults .result-row .result-pin').first();
-    await expect(pinBtn).toBeVisible();
-    await pinBtn.click();
-
-    // Wait for the pinned section to show the page
-    const pinnedRow = options.locator('#pinnedResults .result-row').first();
-    await expect(pinnedRow).toBeVisible({ timeout: 10000 });
-
-    // Verify the log entry has op: 'add' (not 'del')
+    // Pin via API
     const helper = await openHelperPage(extContext, extensionId);
+    const pinResult = await helper.evaluate((url) =>
+      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'reading', url })
+    , pageUrl);
+    expect(pinResult.success).toBe(true);
+    expect(pinResult.pinned).toBe(true);
+
+    // Verify log entry
     const dateKey = new Date().toISOString().slice(0, 10);
     const history = await helper.evaluate((dk) =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dk })
@@ -689,31 +647,26 @@ test.describe('List operations', () => {
     );
     expect(listLogEntries.length).toBeGreaterThanOrEqual(1);
 
-    // Verify pinned page has URL in data attribute (not empty)
+    // Verify pinned page appears in list view
+    const pinnedRow = options.locator('#relatedResults .result-row');
+    await expect(pinnedRow).toBeVisible({ timeout: 10000 });
     const pinnedUrl = await pinnedRow.getAttribute('data-url');
     expect(pinnedUrl).toContain('example.com/shallow-only');
-
-    // Verify pinned page shows correct title (not "Untitled")
-    const pinnedTitle = await pinnedRow.locator('.result-title').textContent();
-    expect(pinnedTitle).toContain('Shallow Page');
 
     await options.close();
   });
 
-  // Bug: after pinning a non-checkpointed page from search results, clicking
-  // the pin button on the now-"Untitled" pinned row sends a second toggleListPin
-  // that produces a 'del' log because background sees the pin already exists.
-  test('pin non-checkpointed page from search — re-clicking Untitled pin does not produce del log', async ({ extContext, extensionId, setupDir }) => {
+  // Pin a non-checkpointed page via API — verify exactly one pin_to_list log, no unpin
+  test('pin non-checkpointed page via API produces exactly one pin_to_list log', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const pageUrl = 'https://example.com/shallow-reclick';
-    const pageSlug = getSlugForUrl(pageUrl);
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
-        pins: [], savedSearches: [],
+        pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
@@ -722,31 +675,16 @@ test.describe('List operations', () => {
       ]},
     ]);
 
-    const options = await openOptionsPage(extContext, extensionId);
-
-    // Navigate to the list
-    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
-    await expect(listItem).toBeVisible({ timeout: 5000 });
-    await listItem.click();
-    await waitForListView(options);
-
-    // Wait for the page to appear in related results
-    await options.waitForFunction(
-      () => document.querySelectorAll('#relatedResults .result-row').length >= 1,
-      { timeout: 10000 }
-    );
-
-    // Click the pin button on the search result
-    const pinBtn = options.locator('#relatedResults .result-row .result-pin').first();
-    await expect(pinBtn).toBeVisible();
-    await pinBtn.click();
-
-    // Wait for the pinned section to show (even if "Untitled")
-    const pinnedRow = options.locator('#pinnedResults .result-row').first();
-    await expect(pinnedRow).toBeVisible({ timeout: 10000 });
-
-    // Verify the entity has exactly one pin with op: 'add'
     const helper = await openHelperPage(extContext, extensionId);
+
+    // Pin via API
+    const pinResult = await helper.evaluate((url) =>
+      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'reading', url })
+    , pageUrl);
+    expect(pinResult.success).toBe(true);
+    expect(pinResult.pinned).toBe(true);
+
+    // Verify exactly 1 pin_to_list, no unpin
     const listEntity = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
     );
@@ -759,12 +697,9 @@ test.describe('List operations', () => {
     await helper.close();
 
     const pinLogs = (history.value || []).filter(e => e.action === 'pin_to_list' && e.name === 'Reading List');
-    // Should have exactly 1 pin_to_list log entry, no unpin
     expect(pinLogs.length).toBe(1);
     const unpinLogs = (history.value || []).filter(e => e.action === 'unpin_from_list' && e.name === 'Reading List');
     expect(unpinLogs.length).toBe(0);
-
-    await options.close();
   });
 
   // Bug 20260226: unpin should emit a single 'del' op, not 'clear' then 'add'.
@@ -788,7 +723,7 @@ test.describe('List operations', () => {
         pins: [
           { id: `page:${slug1}`, pinnedAt: now },
           { id: `page:${slug2}`, pinnedAt: now },
-        ], savedSearches: [],
+        ],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${slug1}.json`, data: {
@@ -832,7 +767,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
+        slug: 'reading', name: 'Reading', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -870,7 +805,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now,
-        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -914,7 +849,7 @@ test.describe('List operations', () => {
         pins: [
           { id: `page:${TEST_SLUG}`, pinnedAt: now },
           { id: `page:${slug2}`, pinnedAt: now },
-        ], savedSearches: [],
+        ],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -949,29 +884,18 @@ test.describe('List operations', () => {
     expect(page2.value.parentIds).toEqual([]);
   });
 
-  test('list restores savedSearches from entity', async ({ extContext, extensionId, setupDir }) => {
+  test('list with no pins shows empty state', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: {
-        trimRules: [],
-      }},
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
-        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
-        savedSearches: ['example', 'domain'],
+        pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
-      { path: `pages/${TEST_SLUG}.json`, data: {
-        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
-        parentIds: [], childIds: [],
-      }},
-
-      { path: `data/logs/2026-03-06.jsonl`, data: [
-        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
-      ]},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
     ]);
 
@@ -981,34 +905,32 @@ test.describe('List operations', () => {
     await listItem.click();
     await waitForListView(options);
 
-    // Saved search rows should be rendered
-    await expect(options.locator('.search-row')).toHaveCount(2, { timeout: 5000 });
-    const searchInputs = options.locator('.search-row input');
-    await expect(searchInputs.nth(0)).toHaveValue('example');
-    await expect(searchInputs.nth(1)).toHaveValue('domain');
+    // Should show empty state message
+    await expect(options.locator('#relatedResults .no-results')).toBeVisible({ timeout: 5000 });
+    const text = await options.locator('#relatedResults .no-results').textContent();
+    expect(text).toContain('No pinned pages');
 
     await options.close();
   });
 
-  test('filter panel toggles visibility', async ({ extContext, extensionId, setupDir }) => {
+  test('explore filter panel toggles visibility', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now,
-        pins: [], savedSearches: [],
-        parentList: 'list:system/root', childLists: [],
-      }},
-
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: [] } },
+      { path: 'data/logs/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: 'https://example.com/', title: 'Example' },
+      ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
-    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
-    await expect(listItem).toBeVisible({ timeout: 5000 });
-    await listItem.click();
-    await waitForListView(options);
+
+    // Default view is Explore
+    await options.waitForFunction(
+      () => document.getElementById('mainTitle')?.textContent?.trim() === 'Explore',
+      { timeout: 5000 }
+    );
 
     // Filter panel should be hidden initially
     const filterPanel = options.locator('#filterPanel');
@@ -1029,31 +951,22 @@ test.describe('List operations', () => {
     await options.close();
   });
 
-  test('empty search shows all history', async ({ extContext, extensionId, setupDir }) => {
+  test('explore empty search shows all history', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now,
-        pins: [], savedSearches: [],
-        parentList: 'list:system/root', childLists: [],
-      }},
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: [] } },
       { path: 'data/logs/2026-03-01.jsonl', lines: [
         { timestamp: now - 2000, action: 'visit_page', url: 'https://a.com/', title: 'Page A' },
         { timestamp: now - 1000, action: 'visit_page', url: 'https://b.com/', title: 'Page B' },
         { timestamp: now, action: 'visit_page', url: 'https://c.com/', title: 'Page C' },
       ]},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
-    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
-    await expect(listItem).toBeVisible({ timeout: 5000 });
-    await listItem.click();
-    await waitForListView(options);
 
-    // No savedSearches → all history should be shown
+    // Default view is Explore — all history should be shown
     await options.waitForFunction(
       () => document.querySelectorAll('#relatedResults .result-row').length >= 3,
       { timeout: 10000 }
@@ -1068,28 +981,24 @@ test.describe('List operations', () => {
     await options.close();
   });
 
-  test('adding search via UI persists across reload', async ({ extContext, extensionId, setupDir }) => {
+  test('explore adding search via UI persists across reload', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now,
-        pins: [], savedSearches: [],
-        parentList: 'list:system/root', childLists: [],
-      }},
-
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: [] } },
       { path: 'data/logs/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: 'https://example.com/', title: 'Example' },
       ]},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
-    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
-    await expect(listItem).toBeVisible({ timeout: 5000 });
-    await listItem.click();
-    await waitForListView(options);
+
+    // Default view is Explore
+    await options.waitForFunction(
+      () => document.getElementById('mainTitle')?.textContent?.trim() === 'Explore',
+      { timeout: 5000 }
+    );
 
     // Type a search and press Enter to save
     const draftInput = options.locator('#searchDraftInput');
@@ -1101,15 +1010,13 @@ test.describe('List operations', () => {
     await expect(options.locator('.search-row')).toHaveCount(1, { timeout: 5000 });
     await expect(options.locator('.search-row input').first()).toHaveValue('example');
 
-    // Reload — navigate away and back
-    const exploreBtn = options.locator('#exploreBtn');
-    await exploreBtn.click();
+    // Navigate away and back to Explore
+    const listItem = options.locator('#exploreBtn');
+    await listItem.click();
     await options.waitForFunction(
       () => document.getElementById('mainTitle')?.textContent?.trim() === 'Explore',
       { timeout: 5000 }
     );
-    await listItem.click();
-    await waitForListView(options);
 
     // Saved search should persist
     await expect(options.locator('.search-row')).toHaveCount(1, { timeout: 5000 });
@@ -1118,7 +1025,7 @@ test.describe('List operations', () => {
     await options.close();
   });
 
-  test('last-seen range filter narrows results', async ({ extContext, extensionId, setupDir }) => {
+  test('explore last-seen range filter narrows results', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const DAY = 86400000;
     const recentUrl = 'https://recent.com/';
@@ -1126,28 +1033,19 @@ test.describe('List operations', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now,
-        pins: [], savedSearches: [],
-        parentList: 'list:system/root', childLists: [],
-      }},
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: [] } },
       { path: 'data/logs/2026-03-08.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: recentUrl, title: 'Recent Page' },
       ]},
       { path: 'data/logs/2026-02-06.jsonl', lines: [
         { timestamp: now - 30 * DAY, action: 'visit_page', url: oldUrl, title: 'Old Page' },
       ]},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
-    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
-    await expect(listItem).toBeVisible({ timeout: 5000 });
-    await listItem.click();
-    await waitForListView(options);
 
-    // Both pages should appear initially
+    // Default view is Explore — both pages should appear initially
     await options.waitForFunction(
       () => document.querySelectorAll('#relatedResults .result-row').length >= 2,
       { timeout: 10000 }
@@ -1195,7 +1093,7 @@ test.describe('List operations', () => {
     await options.close();
   });
 
-  test('has-highlights checkbox filter narrows results', async ({ extContext, extensionId, setupDir }) => {
+  test('explore has-highlights checkbox filter narrows results', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const highlightUrl = 'https://highlighted.com/';
     const plainUrl = 'https://plain.com/';
@@ -1203,12 +1101,7 @@ test.describe('List operations', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now,
-        pins: [], savedSearches: [],
-        parentList: 'list:system/root', childLists: [],
-      }},
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: [] } },
       { path: `pages/${highlightSlug}.json`, data: {
         slug: highlightSlug, url: highlightUrl, title: 'Highlighted Page', timestamp: now,
         parentIds: [], childIds: [],
@@ -1218,16 +1111,12 @@ test.describe('List operations', () => {
         { timestamp: now - 1000, action: 'visit_page', url: plainUrl, title: 'Plain Page' },
         { timestamp: now, action: 'visit_page', url: highlightUrl, title: 'Highlighted Page' },
       ]},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
-    const listItem = options.locator('.sidebar-item[data-list-id="reading"]');
-    await expect(listItem).toBeVisible({ timeout: 5000 });
-    await listItem.click();
-    await waitForListView(options);
 
-    // Both pages should appear initially
+    // Default view is Explore — both pages should appear initially
     await options.waitForFunction(
       () => document.querySelectorAll('#relatedResults .result-row').length >= 2,
       { timeout: 10000 }
@@ -1292,12 +1181,12 @@ test.describe('List operations', () => {
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:rust', 'list:golang'] } },
       { path: 'lists/rust.json', data: {
         slug: 'rust', name: 'Rust', timestamp: now,
-        pins: [{ id: `page:${rustSlug}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${rustSlug}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/golang.json', data: {
         slug: 'golang', name: 'Go', timestamp: now,
-        pins: [{ id: `page:${goSlug}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${goSlug}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${rustSlug}.json`, data: {
@@ -1376,11 +1265,11 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:parent'],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent List', timestamp: now, pins: [], savedSearches: [],
+        slug: 'parent', name: 'Parent List', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: ['list:child'],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child List', timestamp: now, pins: [], savedSearches: [],
+        slug: 'child', name: 'Child List', timestamp: now, pins: [],
         parentList: 'list:parent', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Parent List': 'parent', 'root/Parent List/Child List': 'child' } } },
@@ -1407,11 +1296,11 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:parent'],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent', timestamp: now, pins: [], savedSearches: [],
+        slug: 'parent', name: 'Parent', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: ['list:child'],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
+        slug: 'child', name: 'Child', timestamp: now, pins: [],
         parentList: 'list:parent', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Parent': 'parent', 'root/Parent/Child': 'child' } } },
@@ -1440,15 +1329,15 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:a', 'list:b'],
       }},
       { path: 'lists/a.json', data: {
-        slug: 'a', name: 'List A', timestamp: now, pins: [], savedSearches: [],
+        slug: 'a', name: 'List A', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: ['list:child'],
       }},
       { path: 'lists/b.json', data: {
-        slug: 'b', name: 'List B', timestamp: now, pins: [], savedSearches: [],
+        slug: 'b', name: 'List B', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
+        slug: 'child', name: 'Child', timestamp: now, pins: [],
         parentList: 'list:a', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/List A': 'a', 'root/List B': 'b', 'root/List A/Child': 'child' } } },
@@ -1487,11 +1376,11 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:parent'],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent', timestamp: now, pins: [], savedSearches: [],
+        slug: 'parent', name: 'Parent', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: ['list:child'],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
+        slug: 'child', name: 'Child', timestamp: now, pins: [],
         parentList: 'list:parent', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Parent': 'parent', 'root/Parent/Child': 'child' } } },
@@ -1525,11 +1414,11 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:parent'],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent', timestamp: now, pins: [], savedSearches: [],
+        slug: 'parent', name: 'Parent', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: ['list:child'],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
+        slug: 'child', name: 'Child', timestamp: now, pins: [],
         parentList: 'list:parent', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Parent': 'parent', 'root/Parent/Child': 'child' } } },
@@ -1575,7 +1464,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now,
-        pins: [], savedSearches: [],
+        pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `data/notes/${NOTE_SLUG}.json`, data: {
@@ -1623,7 +1512,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now,
-        pins: [{ id: `note:${NOTE_SLUG}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `note:${NOTE_SLUG}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `data/notes/${NOTE_SLUG}.json`, data: {
@@ -1672,7 +1561,7 @@ test.describe('List operations', () => {
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now,
         pins: [{ id: `note:${NOTE_SLUG}`, pinnedAt: now }, { id: `page:${TEST_SLUG}`, pinnedAt: now }],
-        savedSearches: [],
+        
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `data/notes/${NOTE_SLUG}.json`, data: {
@@ -1722,7 +1611,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now,
-        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `data/notes/${NOTE_SLUG}.json`, data: {
@@ -1818,11 +1707,11 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:existing1', 'list:existing2'],
       }},
       { path: 'lists/existing1.json', data: {
-        slug: 'existing1', name: 'Existing One', timestamp: now, pins: [], savedSearches: [],
+        slug: 'existing1', name: 'Existing One', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/existing2.json', data: {
-        slug: 'existing2', name: 'Existing Two', timestamp: now, pins: [], savedSearches: [],
+        slug: 'existing2', name: 'Existing Two', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Existing One': 'existing1', 'root/Existing Two': 'existing2' } } },
@@ -1867,11 +1756,11 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:parent'],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent', timestamp: now, pins: [], savedSearches: [],
+        slug: 'parent', name: 'Parent', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: ['list:child'],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [], savedSearches: [],
+        slug: 'child', name: 'Child', timestamp: now, pins: [],
         parentList: 'list:parent', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Parent': 'parent', 'root/Parent/Child': 'child' } } },
@@ -1904,42 +1793,6 @@ test.describe('List operations', () => {
     expect(parent.value.childLists).not.toContain('list:child');
   });
 
-  // Bug: explore list entity (list:system/explore) must not appear in sidebar tree.
-  // The explore entity is a system entity — it should never leak into root's childLists.
-  test('explore pins do not leak into root childLists or sidebar', async ({ extContext, extensionId, setupDir }) => {
-    const now = Date.now();
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [], savedSearches: [],
-        parentList: 'list:system/root', childLists: [],
-      }},
-      { path: 'lists/system/explore.json', data: {
-        slug: 'system/explore', name: '', timestamp: now, pins: [
-          { id: `page:${TEST_SLUG}`, pinnedAt: now },
-        ], savedSearches: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
-    ]);
-
-    const helper = await openHelperPage(extContext, extensionId);
-
-    // Verify root's childLists does NOT contain explore
-    const root = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
-    );
-    expect(root.value.childLists).not.toContain('list:explore');
-    expect(root.value.childLists).not.toContain('list:system/explore');
-
-    // Verify explore entity is loadable as a system entity
-    const explore = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/explore' })
-    );
-    await helper.close();
-    expect(explore.value).toBeTruthy();
-    expect(explore.value.pins.length).toBe(1);
-  });
 
   // Bug: offscreen drain's load closure doesn't filter deleted entities,
   // so pin_to_list incorrectly updates parentIds on deleted notes during drain.
@@ -1953,7 +1806,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/pintest.json', data: {
         slug: 'pintest', name: 'PinTest', timestamp: now,
-        pins: [], savedSearches: [],
+        pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: {
@@ -2007,7 +1860,7 @@ test.describe('List operations', () => {
       }},
       { path: 'lists/gctest.json', data: {
         slug: 'gctest', name: 'GCTest', timestamp: now,
-        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }], savedSearches: [],
+        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {

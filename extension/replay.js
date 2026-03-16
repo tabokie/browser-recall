@@ -59,7 +59,7 @@ export function defaultEntity(key) {
   if (key === 'manifest:name-to-id') return { timestamp: 0, paths: {} };
   if (key.startsWith('list:')) {
     const slug = key.slice('list:'.length);
-    return { timestamp: 0, slug, name: '', savedSearches: [], pins: [], parentList: null, childLists: [] };
+    return { timestamp: 0, slug, name: '', pins: [], parentList: null, childLists: [] };
   }
   return null;
 }
@@ -552,7 +552,7 @@ export async function effectOf(entry, load) {
   }
 
   // --- update_list ---
-  // Rename list and/or update savedSearches.
+  // Rename list.
   // entry.name identifies the current list; entry.newName is the rename target.
   if (entry.action === 'update_list') {
     const listKey = await resolveListKey(entry.parents, entry.name);
@@ -596,10 +596,6 @@ export async function effectOf(entry, load) {
 
         result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
       }
-    }
-
-    if (entry.savedSearches !== undefined) {
-      updated.savedSearches = entry.savedSearches;
     }
 
     result[listKey] = updated;

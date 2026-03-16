@@ -80,11 +80,6 @@ const TEST_LIST_PINS = {
     pinFromUrl('https://example.com/today0', NOW - DAY),
     pinFromUrl('https://example.com/today1', NOW - DAY),
   ],
-  // Explore pins — used by T12
-  'system/explore': [
-    pinFromUrl('https://explore.example.com/a', NOW - DAY),
-    pinFromUrl('https://explore.example.com/b', NOW - DAY),
-  ],
 };
 
 const TEST_LISTS = [TEST_LIST, TEST_LIST_NOQUERY];
@@ -322,7 +317,7 @@ describe('Cache staleness', () => {
         switch (msg.key) {
           case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
           case 'list:system/root': return { success: true, value: testRootData || TEST_ROOT };
-          case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] } };
+          case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], parentList: 'list:auto', childLists: [] } };
           case 'manifest:name-to-id': return { success: true, value: testNameMapData || { timestamp: 0, paths: {} } };
           case 'manifest:orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
           default: {
@@ -336,7 +331,7 @@ describe('Cache staleness', () => {
               const listId = msg.key.slice('list:'.length);
               const list = TEST_LISTS.find(l => l.slug === listId);
               if (list) {
-                return { success: true, value: { ...list, pins: testListPins[listId] || [], savedSearches: list.savedSearches || [] } };
+                return { success: true, value: { ...list, pins: testListPins[listId] || [] } };
               }
               // Check dynamically-added lists in sessionData
               if (sessionData[msg.key]) {
@@ -361,14 +356,12 @@ describe('Cache staleness', () => {
     sessionData = {
       'manifest:settings': TEST_SETTINGS,
       'list:system/root': { ...TEST_ROOT },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
+      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], parentList: 'list:auto', childLists: [] },
     };
     // Individual list entity keys (include pins for session cache hits)
     for (const list of TEST_LISTS) {
-      sessionData['list:' + list.slug] = { ...list, pins: testListPins[list.slug] || [], savedSearches: list.savedSearches || [] };
+      sessionData['list:' + list.slug] = { ...list, pins: testListPins[list.slug] || [] };
     }
-    // Explore list entity (system list used by Explore view)
-    sessionData['list:system/explore'] = { slug: 'system/explore', name: 'Explore', pins: testListPins['system/explore'] || [], savedSearches: [] };
     // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
     for (const [slug, url] of SLUG_TO_URL) {
       sessionData['page:' + slug] = { slug, url, watermark: 0 };
@@ -408,7 +401,7 @@ describe('Cache staleness', () => {
   }
 
   function pinnedOnlyRows() {
-    return [...document.querySelectorAll('#pinnedResults .result-item:not(.related-result)')];
+    return [...document.querySelectorAll('#relatedResults .result-item')];
   }
 
   // ---------------------------------------------------------------------------
@@ -575,7 +568,7 @@ describe('Cache staleness', () => {
     testListPins['col-buf'] = [
       pinFromUrl('https://buffered.com/page1', NOW),
     ];
-    sessionData['list:col-buf'] = { slug: 'col-buf', query: '', name: 'Buffered', pins: testListPins['col-buf'], savedSearches: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:col-buf'] = { slug: 'col-buf', query: '', name: 'Buffered', pins: testListPins['col-buf'], parentList: 'list:system/root', childLists: [] };
     sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-buf'] };
 
     await importOptions();
@@ -660,7 +653,7 @@ describe('Cache staleness', () => {
     // col-noq has query '' and pins on example.com (same domain as history)
     // Give it a query so it goes through pipelinedSearch path
     // Override session cache with modified list (include pins)
-    sessionData['list:col-noq'] = { slug: 'col-noq', query: 'example', name: 'Example List', pins: testListPins['col-noq'] || [], savedSearches: [] };
+    sessionData['list:col-noq'] = { slug: 'col-noq', query: 'example', name: 'Example List', pins: testListPins['col-noq'] || [] };
 
     mockSearchBatchFn.mockImplementation(async () => {
       throw new Error('RuntimeError: memory access out of bounds');
@@ -702,7 +695,7 @@ describe('Cache staleness', () => {
     testListPins['col-today'] = [
       pinFromUrl('https://example.com/today0', NOW - DAY),
     ];
-    sessionData['list:col-today'] = { slug: 'col-today', query: 'today', name: 'Today Search', pins: testListPins['col-today'], savedSearches: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:col-today'] = { slug: 'col-today', query: 'today', name: 'Today Search', pins: testListPins['col-today'], parentList: 'list:system/root', childLists: [] };
     sessionData['list:system/root'] = { timestamp: 0, childLists: ['list:col-today'] };
 
     await importOptions();
@@ -766,27 +759,24 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T12: visibilitychange on Explore reloads explore pins
   // ---------------------------------------------------------------------------
-  it('T12: visibilitychange on Explore view reloads explore pins', async () => {
+  it('T12: visibilitychange on Explore view preserves explore state', async () => {
     populateCache();
 
     await importOptions();
     await tick(100);
 
-    // Default view is Explore — verify pinned section is visible with 2 explore pins
+    // Default view is Explore — verify it shows
     expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
-    const pinnedSection = document.querySelector('.list-section[data-section="pinned"]');
-    expect(pinnedSection.style.display).not.toBe('none');
-    expect(pinnedOnlyRows().length).toBe(2);
+    expect(document.getElementById('listLayout').classList.contains('visible')).toBe(true);
 
     // Dispatch visibilitychange (simulates switching to another tab and back)
     Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: true, configurable: true });
     document.dispatchEvent(new Event('visibilitychange'));
     await tick(500);
 
-    // After visibilitychange, Explore should still show its pinned section with 2 rows
+    // After visibilitychange, Explore should still be the active view
     expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
-    expect(pinnedSection.style.display, 'pinned section should be visible').not.toBe('none');
-    expect(pinnedOnlyRows().length).toBe(2);
+    expect(document.getElementById('listLayout').classList.contains('visible')).toBe(true);
   });
 
   // ---------------------------------------------------------------------------
@@ -897,28 +887,26 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T16: pin mutation notification does not revert in-memory pin changes
   // ---------------------------------------------------------------------------
-  it('T16: explore pin toggle survives mutation notification from background', async () => {
+  it('T16: explore view survives mutation notification from background', async () => {
     populateCache();
 
     await importOptions();
     await tick(100);
 
-    // Default view is Explore with 2 pins
+    // Default view is Explore
     expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
-    expect(pinnedOnlyRows().length).toBe(2);
+    expect(document.getElementById('listLayout').classList.contains('visible')).toBe(true);
 
-    // Simulate background mutation notification for pins
-    // This is what happens after toggleListPin/addListPins resolves:
-    // background sends notifyMutation('pins', { listId: 'system/explore' })
+    // Simulate background mutation notification for pins on a list
     const listeners = chrome.runtime.onMessage.addListener.mock.calls.map(c => c[0]);
     for (const listener of listeners) {
-      listener({ action: 'mutation', type: 'pins', listId: 'system/explore' });
+      listener({ action: 'mutation', type: 'pins', listId: 'some-list' });
     }
     await tick(500);
 
-    // The mutation notification should NOT cause the pins to disappear or flicker.
-    // The in-memory allListPins should be preserved for the active explore view.
-    expect(pinnedOnlyRows().length, 'pinned rows should be preserved after mutation notification').toBe(2);
+    // The mutation notification should NOT cause the explore view to break
+    expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
+    expect(document.getElementById('listLayout').classList.contains('visible')).toBe(true);
   });
 
   // ---------------------------------------------------------------------------
@@ -968,7 +956,7 @@ describe('Cache staleness', () => {
     testPageData[PIN_SLUG] = { slug: PIN_SLUG, url: PIN_URL, title: PIN_TITLE, watermark: 1 };
 
     // Add the list to lists and list:system/root (include pins for session cache hit)
-    sessionData['list:' + TEST_LIST_WITH_PIN.slug] = { ...TEST_LIST_WITH_PIN, pins: testListPins['col-pinned'] || [], savedSearches: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:' + TEST_LIST_WITH_PIN.slug] = { ...TEST_LIST_WITH_PIN, pins: testListPins['col-pinned'] || [], parentList: 'list:system/root', childLists: [] };
     sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-pinned'] };
 
     await importOptions();
@@ -1007,7 +995,7 @@ describe('Cache staleness', () => {
     testPageData[PAGE_SLUG] = { slug: PAGE_SLUG, url: PAGE_URL, title: PAGE_TITLE, watermark: 1 };
 
     // Do NOT put 'page:<slug>' in sessionData — simulating empty session cache
-    sessionData['list:' + TEST_LIST_UNCACHED.slug] = { ...TEST_LIST_UNCACHED, pins: testListPins['col-uncached'] || [], savedSearches: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:' + TEST_LIST_UNCACHED.slug] = { ...TEST_LIST_UNCACHED, pins: testListPins['col-uncached'] || [], parentList: 'list:system/root', childLists: [] };
     sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-uncached'] };
 
     await importOptions();
@@ -1043,7 +1031,7 @@ describe('Cache staleness', () => {
     testPageData[FALLBACK_SLUG] = { slug: FALLBACK_SLUG, url: FALLBACK_URL, title: FALLBACK_TITLE, watermark: 1 };
 
     // Do NOT put page entity in sessionData — simulating pre-hydration state
-    sessionData['list:' + TEST_LIST_FALLBACK.slug] = { ...TEST_LIST_FALLBACK, pins: testListPins['col-fallback'], savedSearches: [], parentList: 'list:system/root', childLists: [] };
+    sessionData['list:' + TEST_LIST_FALLBACK.slug] = { ...TEST_LIST_FALLBACK, pins: testListPins['col-fallback'], parentList: 'list:system/root', childLists: [] };
     sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-fallback'] };
 
     await importOptions();

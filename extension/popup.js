@@ -120,6 +120,17 @@ function renderAttention(interaction) {
     : '<div class="empty-state">No data</div>';
 }
 
+function renderLikes(interaction) {
+  const el = document.getElementById('pageLikes');
+  const likes = interaction?.likes || 0;
+  if (likes > 0) {
+    el.textContent = `Liked (${likes})`;
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
 // Render notes section
 function renderNotes(notes) {
   const container = document.getElementById('highlightList');
@@ -702,6 +713,7 @@ async function showDashboard(tab) {
       }
       renderSnapshots(info.snapshots);
       renderAttention(info.interaction);
+      renderLikes(info.interaction);
       renderNotes(info.notes);
       console.log(`[popup] Loaded ${info.notes?.length || 0} notes, ${info.snapshots?.length || 0} snapshots`);
     } else {

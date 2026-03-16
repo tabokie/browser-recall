@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { generateSlugFromUrl, savedSearchesChanged, isGatewayOriginFromPins } from '../extension/utils.js';
+import { generateSlugFromUrl, isGatewayOriginFromPins } from '../extension/utils.js';
 
 describe('generateSlugFromUrl', () => {
   it('produces a slug from a simple URL', () => {
@@ -45,27 +45,6 @@ describe('generateSlugFromUrl', () => {
 // collectQbTrees
 // ---------------------------------------------------------------------------
 
-describe('savedSearchesChanged', () => {
-  it('returns false for identical arrays', () => {
-    expect(savedSearchesChanged(['rust', 'go'], ['rust', 'go'])).toBe(false);
-  });
-
-  it('returns false for both empty', () => {
-    expect(savedSearchesChanged([], [])).toBe(false);
-  });
-
-  it('returns true when a search is added', () => {
-    expect(savedSearchesChanged(['rust'], ['rust', 'go'])).toBe(true);
-  });
-
-  it('returns true when a search is removed', () => {
-    expect(savedSearchesChanged(['rust', 'go'], ['rust'])).toBe(true);
-  });
-
-  it('returns true when search content differs', () => {
-    expect(savedSearchesChanged(['rust'], ['wasm'])).toBe(true);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // isGatewayOriginFromPins

@@ -102,13 +102,13 @@ describe('readCacheable / readFs', () => {
         return { success: true, entity: { timestamp: 42, paths: { 'my-list': 'My List' } } };
       case 'loadListEntity':
         if (msg.listId === 'my-custom-list') {
-          return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', savedSearches: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] } };
+          return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] } };
         }
         if (msg.listId === 'system/root') {
           return { success: true, entity: { timestamp: 0, childLists: ['list:b', 'list:a'] } };
         }
         if (msg.listId === 'auto/gateways') {
-          return { success: true, entity: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [{ id: 'page:docs-rs-abc', pinnedAt: 1 }], savedSearches: [], parentList: 'list:auto', childLists: [] } };
+          return { success: true, entity: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [{ id: 'page:docs-rs-abc', pinnedAt: 1 }], parentList: 'list:auto', childLists: [] } };
         }
         return { success: true, entity: null };
       default:
@@ -179,9 +179,9 @@ describe('readCacheable / readFs', () => {
 
   // ── Session hit ──────────────────────────────────────────────────────
   it('returns cached value from session without offscreen call', async () => {
-    await session.set({ 'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [{ id: 'page:example-abc', pinnedAt: 1 }], savedSearches: [], parentList: 'list:auto', childLists: [] } });
+    await session.set({ 'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [{ id: 'page:example-abc', pinnedAt: 1 }], parentList: 'list:auto', childLists: [] } });
     const result = await readCacheable('list:auto/gateways');
-    expect(result).toEqual({ timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [{ id: 'page:example-abc', pinnedAt: 1 }], savedSearches: [], parentList: 'list:auto', childLists: [] });
+    expect(result).toEqual({ timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [{ id: 'page:example-abc', pinnedAt: 1 }], parentList: 'list:auto', childLists: [] });
     expect(offscreenCalls).toEqual([]); // No offscreen call
   });
 
@@ -216,9 +216,9 @@ describe('readCacheable / readFs', () => {
 
   it('falls back to filesystem for gateways and caches result', async () => {
     const result = await readCacheable('list:auto/gateways');
-    expect(result).toEqual({ timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [{ id: 'page:docs-rs-abc', pinnedAt: 1 }], savedSearches: [], parentList: 'list:auto', childLists: [] });
+    expect(result).toEqual({ timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [{ id: 'page:docs-rs-abc', pinnedAt: 1 }], parentList: 'list:auto', childLists: [] });
     expect(offscreenCalls.some(c => c.action === 'loadListEntity')).toBe(true);
-    expect(session._store['list:auto/gateways']).toEqual({ timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [{ id: 'page:docs-rs-abc', pinnedAt: 1 }], savedSearches: [], parentList: 'list:auto', childLists: [] });
+    expect(session._store['list:auto/gateways']).toEqual({ timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [{ id: 'page:docs-rs-abc', pinnedAt: 1 }], parentList: 'list:auto', childLists: [] });
   });
 
   // ── Settings batch-load ──────────────────────────────────────────────
@@ -300,10 +300,10 @@ describe('readCacheable / readFs', () => {
   // ── #4: User list keys fall back to filesystem ─────────────────────
   it('falls back to filesystem for user list keys on session miss', async () => {
     const result = await readCacheable('list:my-custom-list');
-    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', savedSearches: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
+    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
     expect(offscreenCalls.some(c => c.action === 'loadListEntity' && c.listId === 'my-custom-list')).toBe(true);
     // Should be cached after first load
-    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', savedSearches: [], pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
+    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
   });
 
   it('returns null for user list key that does not exist on disk', async () => {
@@ -372,22 +372,10 @@ describe('background.js addListPins accepts urls', () => {
   });
 });
 
-describe('options.js pin operations send urls or use copyListPins', () => {
+describe('options.js pin operations send urls', () => {
   const optionsSource = readFileSync(resolve(extDir, 'options.js'), 'utf-8');
 
-  it('list drag-drop sends urls to addListPins', () => {
-    expect(optionsSource).toMatch(/action:\s*'addListPins'.*urls:\s*newUrls/);
-  });
-
-  it('saveExploreAsList uses copyListPins instead of sending local pin IDs', () => {
-    const fnBody = optionsSource.match(/async function saveExploreAsList[\s\S]*?\n\}/);
-    expect(fnBody).not.toBeNull();
-    expect(fnBody[0]).toMatch(/action:\s*'copyListPins'/);
-    expect(fnBody[0]).not.toMatch(/action:\s*'addListPins'/);
-  });
-
   it('no addListPins call sends ids', () => {
-    // All addListPins calls should use urls, never ids
     const calls = optionsSource.match(/action:\s*'addListPins'[^}]*/g) || [];
     for (const call of calls) {
       expect(call).toMatch(/urls:/);

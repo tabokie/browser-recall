@@ -60,14 +60,14 @@ test.describe('Settings persistence', () => {
     const hnSlug = getSlugForUrl('https://news.ycombinator.com/');
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/auto.json', data: { slug: 'auto', name: 'Auto', auto: true, parentList: 'list:system/root', childLists: ['list:auto/gateways'], pins: [], savedSearches: [], timestamp: 1 } },
+      { path: 'lists/auto.json', data: { slug: 'auto', name: 'Auto', auto: true, parentList: 'list:system/root', childLists: ['list:auto/gateways'], pins: [], timestamp: 1 } },
       { path: 'lists/auto/gateways.json', data: {
         slug: 'auto/gateways', name: 'Gateways', auto: true, parentList: 'list:auto', childLists: [],
         pins: [
           { id: `page:${exSlug}`, pinnedAt: Date.now() },
           { id: `page:${hnSlug}`, pinnedAt: Date.now() },
         ],
-        savedSearches: [], timestamp: Date.now(),
+        timestamp: Date.now(),
       }},
       { path: 'lists/system/root.json', data: { timestamp: 1, childLists: ['list:auto'] } },
     ]);
@@ -95,8 +95,8 @@ test.describe('Settings persistence', () => {
     // Seed empty auto/gateways list so promotion has somewhere to write
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/auto.json', data: { slug: 'auto', name: 'Auto', auto: true, parentList: 'list:system/root', childLists: ['list:auto/gateways'], pins: [], savedSearches: [], timestamp: 1 } },
-      { path: 'lists/auto/gateways.json', data: { slug: 'auto/gateways', name: 'Gateways', auto: true, parentList: 'list:auto', childLists: [], pins: [], savedSearches: [], timestamp: 1 } },
+      { path: 'lists/auto.json', data: { slug: 'auto', name: 'Auto', auto: true, parentList: 'list:system/root', childLists: ['list:auto/gateways'], pins: [], timestamp: 1 } },
+      { path: 'lists/auto/gateways.json', data: { slug: 'auto/gateways', name: 'Gateways', auto: true, parentList: 'list:auto', childLists: [], pins: [], timestamp: 1 } },
       { path: 'lists/system/root.json', data: { timestamp: 1, childLists: ['list:auto'] } },
     ]);
 

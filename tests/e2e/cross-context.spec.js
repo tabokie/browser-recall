@@ -13,7 +13,7 @@ test.describe('Cross-context consistency', () => {
         timestamp: now, childLists: ['list:research'],
       }},
       { path: 'lists/research.json', data: {
-        slug: 'research', name: 'Research', timestamp: now, pins: [], savedSearches: [],
+        slug: 'research', name: 'Research', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Research': 'research' } } },
@@ -32,7 +32,7 @@ test.describe('Cross-context consistency', () => {
     await listItem.click();
     await waitForListView(optionsA);
 
-    let pinnedRows = await optionsA.$$('#pinnedResults .result-row');
+    let pinnedRows = await optionsA.$$('#relatedResults .result-row');
     expect(pinnedRows.length).toBe(0);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -41,7 +41,7 @@ test.describe('Cross-context consistency', () => {
     , TEST_URL);
     await helper.close();
 
-    const pinnedRow = optionsA.locator('#pinnedResults .result-row');
+    const pinnedRow = optionsA.locator('#relatedResults .result-row');
     await expect(pinnedRow).toBeVisible({ timeout: 10000 });
     const title = await pinnedRow.locator('.result-title').textContent();
     expect(title).toContain('Example Domain');

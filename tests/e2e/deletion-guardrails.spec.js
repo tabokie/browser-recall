@@ -96,7 +96,7 @@ test.describe('Deletion guardrails', () => {
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:to-delete'] } },
       { path: 'lists/to-delete.json', data: {
-        slug: 'to-delete', name: 'To Delete', timestamp: now, pins: [], savedSearches: [],
+        slug: 'to-delete', name: 'To Delete', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/To Delete': 'to-delete' } } },
@@ -129,7 +129,7 @@ test.describe('Deletion guardrails', () => {
       // Disk checkpoint already has deleted: true (written by previous drain)
       { path: 'lists/rehydrate-del.json', data: {
         slug: 'rehydrate-del', name: 'Rehydrate Del', timestamp: now,
-        pins: [], savedSearches: [], deleted: true,
+        pins: [], deleted: true,
       }},
       // Orphaned list tracks it
       { path: 'manifest/orphaned.json', data: {
@@ -162,7 +162,7 @@ test.describe('Deletion guardrails', () => {
         timestamp: now, childLists: ['list:doomed'],
       }},
       { path: 'lists/doomed.json', data: {
-        slug: 'doomed', name: 'Doomed', timestamp: now, pins: [], savedSearches: [],
+        slug: 'doomed', name: 'Doomed', timestamp: now, pins: [],
         parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Doomed': 'doomed' } } },

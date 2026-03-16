@@ -82,12 +82,6 @@ export function generateSlugFromTitle(title) {
   return generateSlug(title, hashInput);
 }
 
-// Compare two savedSearches arrays for equality (deep comparison).
-// Returns true if they differ and a save is needed.
-export function savedSearchesChanged(a, b) {
-  return JSON.stringify(a) !== JSON.stringify(b);
-}
-
 // Check if a URL's origin root is pinned in an auto-gateways pin list.
 // pins: [{ id: 'page:<slug>', pinnedAt }]
 export function isGatewayOriginFromPins(url, pins) {

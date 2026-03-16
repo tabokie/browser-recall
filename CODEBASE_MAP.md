@@ -35,7 +35,7 @@
 | `extension/search-helpers.js` | ~70 | `extractInteractionBuffer`, `mergeBufferIntoInteractions`, `getBufferContentMap`, `buildInteractionsForEngine` — pure helpers for flat log entries |
 | `src/lib.rs` | ~336 | WASM: `Interaction` struct, `InteractionData` (JSONL deser), `SearchResult`, `SearchEngine` with 5 ranking algorithms, `searchBatch` async fn (File System Access API bindings, reads JSONL + content directly, parallel search) |
 | `Cargo.toml` | 23 | Rust deps: wasm-bindgen, wasm-bindgen-futures, serde, js-sys, web-sys (console only) |
-| `tests/utils.test.js` | ~280 | Vitest: slug generation, collectQbTrees, savedSearchesChanged, isGatewayOriginFromPins, readCacheable behavioral tests (session hit/miss, sendMessage fallback), loadSettingsValue defaultValue delegation |
+| `tests/utils.test.js` | ~280 | Vitest: slug generation, collectQbTrees, isGatewayOriginFromPins, readCacheable behavioral tests (session hit/miss, sendMessage fallback), loadSettingsValue defaultValue delegation |
 | `tests/replay.test.js` | ~1471 | Vitest: tests for replay.js — effectOf scope (which keys affected per action), effectOf apply (entity mutations per action), effectOf integration (drain simulations, round-cache, referrer wiring, absorption), per-entity appliers (settings, page parentIds/childIds/visitDates/capture/page_checkpoint/attention with typed refs, note parentIds wiring only, del_note unlinking + orphaned, pins with `{id, pinnedAt}` format and `entry.ids` + page parentIds updates, del_list with page parentIds/SPI cleanup + orphaned, shallowPage index tracking parents/lists/title); idempotency + sequence replay; entity storage title resolution (last-write-wins, buffer replay, user_title); page_checkpoint absorption with list pin upgrade (shallow:→page:) |
 | `tests/log-buffer.test.js` | ~160 | Vitest: 10 tests for background.js log buffer — appendLog, appendVisit, watermark pruning, SW restart recovery, mixed entry types |
 | `tests/search-helpers.test.js` | 144 | Vitest: merge + engine-builder tests (flat log entry format) |
@@ -148,33 +148,33 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **Buffer merge**: `search-helpers.js` `mergeBufferIntoInteractions()` — dedup by URL, sort by timestamp; `getBufferContentMap()` extracts buffer content separately
 
 ### Lists (Pinned Searches) — formerly "Collections" / "Topics"
-- **Storage**: Self-describing files `lists/{id}.json` — each file contains `{slug, timestamp, name, savedSearches: [...], pins: [{id, pinnedAt}, ...], parentList, childLists}`. Pin `id` is typed ref (`page:<slug>` or `shallow:<url>`). Tree structure rooted at `list:system/root` (entity with `childLists` array). Each list has `parentList` (parent key) and `childLists` (ordered child keys). Session cache hydrated from files by background.
+- **Storage**: Self-describing files `lists/{id}.json` — each file contains `{slug, timestamp, name, pins: [{id, pinnedAt}, ...], parentList, childLists}`. Pin `id` is typed ref (`page:<slug>` or `shallow:<url>`). Tree structure rooted at `list:system/root` (entity with `childLists` array). Each list has `parentList` (parent key) and `childLists` (ordered child keys). Session cache hydrated from files by background.
 - **Display name**: `listDisplayName(list)` → `name || query`; `name` always present in self-describing files
 - **Create/update**: `options.js` sends `saveListMeta` message to background (which updates session cache + appends `list_meta` log entry); new lists auto-added to root's `childLists` by `effectOf`
 - **Delete**: `options.js` sends `deleteList` message to background (which collects subtree keys, removes from parent's `childLists` + appends `del_list` log entry with `subtreeKeys`; entire subtree soft-deleted)
 - **Reparent**: `options.js` sends `reparentList` message (which emits `list_meta` with `reparent: { from, to, index }`; `effectOf` updates both parent `childLists` + child `parentList`)
 - **ID format**: `crypto.randomUUID()` for new lists (existing ones migrated from timestamp-based IDs)
 - **Sidebar**: `options.js` `renderLists()` — recursive tree renderer with fold/unfold toggle, three-zone drag-drop (top 25% reorder above, middle 50% nest as child, bottom 25% reorder below), resizable sidebar width
-- **Pin search**: `options.js` `pinCurrentSearch()` — enters naming mode (editable title input), then creates list
-- **Title editing**: `options.js` `enterTitleEditMode()` — inline edit with confirm/cancel; used for pin naming and double-click rename
-- **List view**: `options.js` `showList()` — pinned section (no chart, no related), Explore section with interactive query builder; double-click title to rename
+- **Title editing**: `options.js` `enterTitleEditMode()` — inline edit with confirm/cancel; used for double-click rename
+- **List view**: `options.js` `showList()` — pins-only view with search input to filter pins; renders all pins into `#relatedResults` via virtual scroller, time chart from pin data; double-click title to rename
 - **Related pages scoring**: `related-scoring.js` `findRelatedPages(seeds, candidates, poolLimit)` — pool-based: processes seeds iteratively, fills shared pool up to configurable limit (default 50, settings `relatedPagesLimit`); weights: hostname 0.30, title 0.30, temporal 0.25, intent 0.15; imported by options.js (used by explore auto-blocks)
-- **List explore**: `options.js` `renderListSearchFilters()` — renders search panel with saved searches, runs search/filter pipeline
-- **Search context-aware**: `debouncedRunQuery()` detects explore/list views and calls `runSearchFilterPipeline()`
+- **List pin filter**: `options.js` `renderListPinView()` — stores enriched pins in `listPinsData`, renders simplified search input, filters with `wordsMatchItem()`, renders via `renderFilteredPins()` into virtual scroller + time chart
+- **List explore (explore only)**: `options.js` `renderListSearchFilters()` — renders search panel with saved searches, runs search/filter pipeline (explore view only)
 - **Popup list chips**: `popup.js` `renderListChips()` — shows top 5 most-recently-active lists as chips, `+` button opens search/create picker dropdown (`openListPicker()`)
 - **Popup list picker**: `popup.js` `openListPicker()` — dropdown with search input, filtered rows with checkmarks, create option for new names; `toggleListPin()`, `createListAndPin()` helpers
 
 ### Explore View — Searches + Filters
 - **Explore button**: sidebar top, opens explore view (landing page — replaces History)
 - **Landing page**: list layout with search panel; no queries = shows all history with demand-loading
-- **Search model**: `savedSearches: string[]` persisted to entity, `currentSearchInput` for live draft; OR across queries, AND within each query (quoted exact match supported)
-- **Pipeline**: `runSearchFilterPipeline()` — collects saved + draft queries, OR-matches across history, `processInteractionsForDisplay()` → `enrichFromEntityStorage()` → render results + time chart
-- **Rendering**: `renderSearchPanel()` — saved search rows with edit/remove, draft input with save button
-- **Events**: `bindSearchEvents()` — inline edit, remove, draft input (Enter to save), debounced pipeline
-- **Persistence**: `saveSearchState()` — sends `savedSearches` via `saveListMeta` when changed
-- **State**: `savedSearches` (string[]), `currentSearchInput` (draft), `exploreDebounceTimer`
-- **Entry**: `options.js` `showExplore()` — loads explore pins, savedSearches from entity, renders search panel, runs pipeline
-- **List explore**: `renderListSearchFilters()` — shared by both explore and list views
+- **Search model**: `savedSearches: string[]` session-only UI state (per-view in `chrome.storage.session` keyed `searchQueries:<viewKey>`), `currentSearchInput` for live draft; OR across queries, AND within each query (quoted exact match supported)
+- **Pipeline**: `runSearchFilterPipeline()` — collects saved + draft queries, OR-matches across history, `processInteractionsForDisplay()` → `enrichFromEntityStorage()` → render results + time chart (explore only)
+- **Pin filter**: `runListPinFilter()` — filters list pins by `wordsMatchItem()` with same OR/AND semantics, renders via virtual scroller + time chart (list view only)
+- **Rendering**: `renderSearchPanel()` — saved search rows with edit/remove, draft input; shared between explore and list views
+- **Events**: `bindSearchEvents()` — inline edit, remove, draft input (Enter to add query row), debounced pipeline
+- **Persistence**: `saveSearchQueries()` / `loadSearchQueries()` — stores queries in `chrome.storage.session` per view key
+- **State**: `savedSearches` (string[], session-only), `currentSearchInput` (draft), `exploreDebounceTimer`
+- **Entry**: `options.js` `showExplore()` — loads search queries from session, renders search panel, runs pipeline
+- **Explore only**: `renderListSearchFilters()` — renders search panel + runs `runSearchFilterPipeline()`
 
 ### Workspace / Private Mode
 - **State**: `settings.json` key `workspace` `{mode: 'default'|'workspace'|'private', listIds, autoSnapshot}`; cached in session as part of `settings` object
@@ -194,9 +194,9 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 
 ### Options Page Views
 - **Category filters**: `options.js` `filterByCategory()` — today, week, highlighted
-- **Explore view**: `options.js` `showExplore()` — landing page; always shows list layout with block-based query UI and add-block button; if pins exist: pinned section + auto-blocks (children/parents/similar); when no blocks enabled: shows entire history with demand-loading; explore badge shows pin count
-- **List view**: `options.js` `showList()` — lazy-loads pins per-list (cached in `allListPins`), renders from cached pin fields + session page cache via `enrichPinResult()` (shared with explore); pinned section (no chart/related), column header sort
-- **Pin refresh**: `options.js` `refreshPins()` — lightweight incremental re-render after pin toggle; derives listId from `activeView`, re-resolves + enriches pins, updates pinned section and search pipeline without full view reload
+- **Explore view**: `options.js` `showExplore()` — search/discovery only; shows list layout with search panel + filters + time chart; no pins displayed; shows entire history with demand-loading when no queries
+- **List view**: `options.js` `showList()` — pins-only view; loads pins per-list (cached in `allListPins`), resolves + enriches via `enrichPinResult()`, renders into `#relatedResults` via virtual scroller; simplified search input filters pins with `wordsMatchItem()`; time chart from pin data
+- **Pin refresh**: `options.js` `refreshPins()` — lightweight incremental re-render after pin toggle; for explore: runs search pipeline; for list: re-resolves pins and re-renders via `renderListPinView()`
 - **Virtual scrolling**: `virtual-scroller.js` `VirtualScroller` class — viewport-only rendering (~50-80 DOM nodes at any time); `appendData(newItems)` for demand-loading (items pre-sorted before append), `onLoadMore` callback triggers near end of data; imported by options.js, instances for global results and list explore
 - **Event delegation**: `bindResultDelegation(container)` — single container-level click/dblclick/dragstart handler, replaces per-row listeners; dragstart collects all `.selected` rows for multi-drag
 - **Multi-drag drop**: list sidebar `drop` handler processes `{ items: [...] }` array, bulk-adds pins with single `saveAllListPins()` call
@@ -242,7 +242,7 @@ Lists                 ← section label
 - **Content**: `pages/{slug}/{timestamp}.md|.html` (versioned snapshots)
 - **Legacy**: `pages/{slug}.md` flat files coexist via fallback reads
 - **Notes**: `notes/{slug}.json` — per-note entity `{ slug, timestamp, excerpt, note, cssPath, parentIds, childIds }`; `loadPageNotes(pageSlug)` returns all notes whose parent is the given page
-- **List files**: `lists/{listId}.json` — self-describing entity `{ id, timestamp, name, savedSearches: [...], pins: [{id, pinnedAt}, ...] }`; pin `id` is typed ref (`page:<slug>` or `shallow:<url>`); `loadListPinsById(id)` returns just pins, `loadListPinsEntity(id)` returns full entity; `saveListPinsById(id, pins, timestamp)` preserves metadata (read-merge-write); `saveListMeta(id, meta, timestamp)` preserves pins; `loadAllListMetadata()` scans all files; `deleteListFile(id)` removes file
+- **List files**: `lists/{listId}.json` — self-describing entity `{ id, timestamp, name, pins: [{id, pinnedAt}, ...] }`; pin `id` is typed ref (`page:<slug>` or `shallow:<url>`); `loadListPinsById(id)` returns just pins, `loadListPinsEntity(id)` returns full entity; `saveListPinsById(id, pins, timestamp)` preserves metadata (read-merge-write); `saveListMeta(id, meta, timestamp)` preserves pins; `loadAllListMetadata()` scans all files; `deleteListFile(id)` removes file
 - **Note deletion**: `deleteNote(slug)` — softDelete to `deleted/`
 - **Orphaned list**: `lists/system/orphaned.json` — `{ timestamp, keys: [...] }` — tracks deleted entity keys
 - **Settings**: `settings.json` — derived checkpoint with `timestamp` watermark
@@ -279,13 +279,11 @@ Lists                 ← section label
 - **Multi-day visits**: background detects multi-day visits (from cached page `visitDates` or logBuffer) and emits `page_checkpoint` before the visit
 - **Focus panel / getPageRelations**: parents from `page.parentIds` (typed refs — `page:<slug>` resolved via `readCacheable`, `shallow:<url>` URL extracted directly), fallback to `shallowPageIndex.index[url]`; children from `page.childIds` (same resolution pattern)
 
-### Explore as System List
-- **List ID**: `EXPLORE_LIST_ID = 'system/explore'` — Explore is a system list entity keyed as `list:system/explore`
-- **Storage**: `lists/system/explore.json` — same `[{id, pinnedAt}]` format as any list; uses `addListPins`/`readCacheable('list:system/explore')`
-- **Unified pin button**: one `.result-pin` button on all result rows; pins to active list (`getActivePinListId()` — Explore when in explore/other views, list ID when in list view)
-- **Badge**: `updateExploreBadge()` reads `allListPins[EXPLORE_LIST_ID]`
-- **Drag-to-explore**: drop result rows on Explore button to pin via `toggleResultPin(EXPLORE_LIST_ID, ...)`
-- **Distinction**: Explore shows all history when no blocks enabled; lists show empty state instead
+### Explore View (Pure UI — No Backing Entity)
+- **No entity**: Explore is a UI-only view with no `explore.json` or `list:system/explore` entity. No pins, no save.
+- **Search**: multi-query search panel (same component as list view), queries stored in `chrome.storage.session` keyed `searchQueries:explore`
+- **Pin button**: only visible in list views (`getActivePinListId()` returns `null` for explore)
+- **Distinction**: Explore shows all history when no search queries active; lists show only pins
 
 ### Focus Panel (Centered Overlay)
 - **DOM**: `options.html` — `#focusOverlay` with `#focusContent` (no visible frame)
@@ -331,7 +329,7 @@ Visit entries contain url/title/slug/referrerId (typed ref, always `page:<slug>`
 
 ### List (in lists/{listId}.json — self-describing entity)
 ```json
-{ "id": "uuid", "timestamp": 0, "name": "Rust Lang", "savedSearches": [], "pins": [{ "id": "page:slug", "pinnedAt": 1234 }, { "id": "shallow:https://...", "pinnedAt": 1234 }] }
+{ "id": "uuid", "timestamp": 0, "name": "Rust Lang", "pins": [{ "id": "page:slug", "pinnedAt": 1234 }, { "id": "shallow:https://...", "pinnedAt": 1234 }] }
 ```
 Pin `id` is a typed reference: `page:<slug>` for checkpointed pages, `shallow:<url>` for non-checkpointed pages.
 
@@ -367,7 +365,7 @@ Only checkpointed for pages with: rich data (notes/snapshots/reports), multi-day
 {"timestamp":1234,"action":"list","id":"uuid","op":"del","ids":["page:slug"]}
 {"timestamp":1234,"action":"list","id":"uuid","op":"clear","ids":[]}
 // List metadata
-{"timestamp":1234,"action":"list_meta","id":"uuid","name":"...","savedSearches":[]}
+{"timestamp":1234,"action":"list_meta","id":"uuid","name":"..."}
 // List delete
 {"timestamp":1234,"action":"del_list","id":"uuid"}
 ```

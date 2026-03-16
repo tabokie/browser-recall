@@ -705,7 +705,7 @@ class FileSystemStorage {
   }
 
   // Load the full self-describing entity for a single list.
-  // Returns { timestamp, id, name, savedSearches, pins: [...] }
+  // Returns { timestamp, id, name, pins: [...] }
   async loadListPinsEntity(listId) {
     const path = this.#resolveListPath(listId);
     try {
@@ -725,13 +725,6 @@ class FileSystemStorage {
     }
 
     const allPins = {};
-
-    // Load explore.json from lists/system/
-    try {
-      const fh = await this.resolveFile('lists/system/explore.json');
-      const data = await this.readJson(fh);
-      allPins['system/explore'] = data.pins;
-    } catch (error) { if (!isNotFound(error)) throw error; }
 
     // Load user lists from lists/ — filename is the list slug
     try {
@@ -772,7 +765,7 @@ class FileSystemStorage {
     await this.#readMergeWriteList(path, { timestamp, pins });
   }
 
-  // Save list metadata (name, savedSearches) without touching pins.
+  // Save list metadata (name) without touching pins.
   // Read-merge-write to preserve existing pins.
   // If name changes, the file is renamed (old deleted, new created).
   async saveListMeta(listId, meta, timestamp = 0) {
@@ -797,7 +790,7 @@ class FileSystemStorage {
   }
 
   // Load metadata for all lists from lists/ files.
-  // Returns [{ slug, name, savedSearches, pins }] — skips explore, system/, and index/ files.
+  // Returns [{ slug, name, pins }] — skips explore, system/, and index/ files.
   // Also scans lists/auto/ for auto-list entities.
   // Filenames are always the list slug.
   async loadAllListMetadata() {
@@ -809,7 +802,6 @@ class FileSystemStorage {
       const listEntry = {
         slug,
         name: data.name || slug,
-        savedSearches: data.savedSearches || [],
         pins: data.pins || [],
         parentList: data.parentList || null,
         childLists: data.childLists || [],

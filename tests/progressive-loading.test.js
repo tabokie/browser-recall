@@ -326,14 +326,14 @@ describe('Progressive loading', () => {
         switch (msg.key) {
           case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
           case 'list:system/root': return { success: true, value: TEST_ROOT };
-          case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] } };
+          case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], parentList: 'list:auto', childLists: [] } };
           case 'manifest:name-to-id': return { success: true, value: { timestamp: 0, paths: {} } };
           case 'manifest:orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
           default: {
             // Return individual list entities by slug with pins
             for (const list of TEST_LISTS) {
               if (msg.key === 'list:' + list.slug) {
-                return { success: true, value: { ...list, pins: TEST_LIST_PINS[list.slug] || [], savedSearches: list.savedSearches || [] } };
+                return { success: true, value: { ...list, pins: TEST_LIST_PINS[list.slug] || [] } };
               }
             }
             return { success: true, value: undefined };
@@ -350,11 +350,11 @@ describe('Progressive loading', () => {
     sessionData = {
       'manifest:settings': TEST_SETTINGS,
       'list:system/root': { ...TEST_ROOT },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
+      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], parentList: 'list:auto', childLists: [] },
     };
     // Individual list entity keys (include pins for session cache hits)
     for (const list of TEST_LISTS) {
-      sessionData['list:' + list.slug] = { ...list, pins: TEST_LIST_PINS[list.slug] || [], savedSearches: list.savedSearches || [] };
+      sessionData['list:' + list.slug] = { ...list, pins: TEST_LIST_PINS[list.slug] || [] };
     }
     // Add page entities for all known pin URLs (simulates real cache where checkpointed pages have .url)
     for (const [slug, url] of SLUG_TO_URL) {
@@ -432,12 +432,12 @@ describe('Progressive loading', () => {
   }
 
   function pinnedOnlyRows() {
-    // Pinned rows only (exclude related-result items also rendered inside #pinnedResults)
-    return [...document.querySelectorAll('#pinnedResults .result-item:not(.related-result)')];
+    // Pins now render in #relatedResults (unified single-section layout)
+    return [...document.querySelectorAll('#relatedResults .result-item')];
   }
 
   function pinnedResultRows() {
-    return [...document.querySelectorAll('#pinnedResults .result-item')];
+    return [...document.querySelectorAll('#relatedResults .result-item')];
   }
 
   function relatedResultsContent() {
@@ -486,7 +486,7 @@ describe('Progressive loading', () => {
     sessionData = {
       'manifest:settings': TEST_SETTINGS,
       'list:system/root': { ...TEST_ROOT },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], savedSearches: [], parentList: 'list:auto', childLists: [] },
+      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], parentList: 'list:auto', childLists: [] },
       // individual list:<slug> keys intentionally missing from session
     };
     localData = { logBuffer: [] };

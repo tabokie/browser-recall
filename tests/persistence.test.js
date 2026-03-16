@@ -235,8 +235,8 @@ describe('Persistence round-trip', () => {
 
     // List metadata in self-describing files
     const listMeta = [
-      { slug: 'c1', name: 'AI', savedSearches: [], pins: [], parentList: null, childLists: [] },
-      { slug: 'c2', name: 'Rust Lang', savedSearches: [], pins: [], parentList: null, childLists: [] },
+      { slug: 'c1', name: 'AI', pins: [], parentList: null, childLists: [] },
+      { slug: 'c2', name: 'Rust Lang', pins: [], parentList: null, childLists: [] },
     ];
 
     it('data survives chrome.storage.local.clear() + hydrateCache', async () => {
@@ -298,7 +298,7 @@ describe('Persistence round-trip', () => {
 
   it('list files are separate from settings', async () => {
     // Save list with metadata + pins
-    await fs.saveListMeta('c1', { slug: 'c1', name: 'Test', savedSearches: [] });
+    await fs.saveListMeta('c1', { slug: 'c1', name: 'Test' });
     await fs.saveListPinsById('c1', [pinFromUrl('https://a.com', 100)]);
 
     // Save settings
@@ -311,7 +311,7 @@ describe('Persistence round-trip', () => {
 
     expect(loadedPins).toEqual([pinFromUrl('https://a.com', 100)]);
     expect(loadedSettings.trimRules).toEqual(['rule1']);
-    expect(meta).toEqual([{ slug: 'c1', name: 'Test', savedSearches: [], pins: [pinFromUrl('https://a.com', 100)], parentList: null, childLists: [] }]);
+    expect(meta).toEqual([{ slug: 'c1', name: 'Test', pins: [pinFromUrl('https://a.com', 100)], parentList: null, childLists: [] }]);
   });
 
   // ---- Per-list pin isolation (regression: lazy pins + bulk save deleted other files) ----
@@ -381,7 +381,7 @@ describe('Persistence round-trip', () => {
     });
 
     it('loadListPinsEntity returns entity with slug for existing list', async () => {
-      await fs.saveListMeta('c1', { slug: 'c1', name: 'Test', savedSearches: [] });
+      await fs.saveListMeta('c1', { slug: 'c1', name: 'Test' });
       await fs.saveListPinsById('c1', [pinFromUrl('https://a.com', 100)]);
       const entity = await fs.loadListPinsEntity('c1');
       expect(entity).not.toBeNull();
