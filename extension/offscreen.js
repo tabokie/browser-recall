@@ -347,6 +347,25 @@ async function handleRequest(request) {
         return { success: true };
       }
 
+      // ─── Embedding / Sandbox Handlers ────────────────────────────────
+
+      case 'generateEmbedding': {
+        const { generateEmbedding } = await import('./semantic-engine.js');
+        const embedding = await generateEmbedding(request.text);
+        return { success: true, embedding: Array.from(embedding) };
+      }
+
+      case 'generateEmbeddingBatch': {
+        const { generateEmbeddingBatch } = await import('./semantic-engine.js');
+        const embeddings = await generateEmbeddingBatch(request.texts);
+        return { success: true, embeddings: embeddings.map(e => Array.from(e)) };
+      }
+
+      case 'executeSandboxFn': {
+        const score = await executeSandbox(request.fnSource, request.pageData);
+        return { success: true, score };
+      }
+
       default:
         return { success: false, error: `Unknown action: ${request.action}` };
     }
@@ -589,3 +608,56 @@ async function initialize() {
 }
 
 const initDone = initialize();
+
+// ─── Smart Rule Sandbox Bridge ───────────────────────────────────────
+
+let sandboxFrame = null;
+let sandboxReady = null;
+const sandboxCallbacks = new Map();
+let sandboxIdCounter = 0;
+
+function ensureSandboxFrame() {
+  if (sandboxReady) return sandboxReady;
+  sandboxReady = new Promise((resolve) => {
+    sandboxFrame = document.createElement('iframe');
+    sandboxFrame.src = 'smart-rule-sandbox.html';
+    sandboxFrame.style.display = 'none';
+    sandboxFrame.onload = () => resolve();
+    document.body.appendChild(sandboxFrame);
+  });
+
+  window.addEventListener('message', (event) => {
+    if (!event.data || !event.data.id) return;
+    const cb = sandboxCallbacks.get(event.data.id);
+    if (!cb) return;
+    sandboxCallbacks.delete(event.data.id);
+    if (event.data.error) {
+      cb.reject(new Error(event.data.error));
+    } else {
+      cb.resolve(event.data.score);
+    }
+  });
+
+  return sandboxReady;
+}
+
+async function executeSandbox(fnSource, pageData) {
+  await ensureSandboxFrame();
+  const id = ++sandboxIdCounter;
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      sandboxCallbacks.delete(id);
+      reject(new Error('Sandbox execution timed out (5s)'));
+    }, 5000);
+
+    sandboxCallbacks.set(id, {
+      resolve: (score) => { clearTimeout(timeout); resolve(score); },
+      reject: (err) => { clearTimeout(timeout); reject(err); },
+    });
+
+    sandboxFrame.contentWindow.postMessage(
+      { id, action: 'execute', fnSource, pageData },
+      '*'
+    );
+  });
+}

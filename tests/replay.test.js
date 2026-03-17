@@ -334,6 +334,15 @@ describe('effectOf: rate_page', () => {
     expect(result[`page:${slug}`].likes).toBe(2);
   });
 
+  it('applies title from entry when creating new entity', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const result = await effectOf(
+      { timestamp: 100, action: 'rate_page', url: 'https://a.com', likes: 1, title: 'Page A' },
+      nullLoad,
+    );
+    expect(result[`page:${slug}`].title).toBe('Page A');
+  });
+
   it('idempotency: skips likes when timestamp <= prevTimestamp', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const result = await effectOf(
@@ -360,6 +369,15 @@ describe('effectOf: create_snapshot', () => {
     expect(page.childIds).toContain(`snapshot:${slug}-1000`);
   });
 
+  it('applies title from entry when creating new entity', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const result = await effectOf(
+      { timestamp: 1000, action: 'create_snapshot', url: 'https://a.com', path: `snapshots/${slug}-1000`, title: 'Snap Title' },
+      nullLoad,
+    );
+    expect(result[`page:${slug}`].title).toBe('Snap Title');
+  });
+
   it('appends to existing childIds', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const result = await effectOf(
@@ -384,6 +402,15 @@ describe('effectOf: create_note', () => {
     );
     expect(result[`page:${slug}`]).toBeTruthy();
     expect(result[`page:${slug}`].childIds).toContain('note:n1');
+  });
+
+  it('applies title from entry when creating new entity', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const result = await effectOf(
+      { timestamp: 100, action: 'create_note', url: 'https://a.com', path: 'notes/n1.json', title: 'Note Page' },
+      nullLoad,
+    );
+    expect(result[`page:${slug}`].title).toBe('Note Page');
   });
 
   it('links note on existing page', async () => {
@@ -458,6 +485,132 @@ describe('effectOf: restore_note', () => {
 });
 
 // ---------------------------------------------------------------------------
+// effectOf: replace_note
+// ---------------------------------------------------------------------------
+
+describe('effectOf: replace_note', () => {
+  it('unlinks old note, links new note on parent page', async () => {
+    const store = {
+      'note:n1': { slug: 'n1', timestamp: 50, excerpt: 'old text', parentIds: ['page:p1'], childIds: [] },
+      'page:p1': { slug: 'p1', timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
+      'manifest:orphaned': { timestamp: 0, keys: [] },
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' },
+      makeLoad(store),
+    );
+    // Old note unlinked from page
+    expect(result['page:p1'].childIds).not.toContain('note:n1');
+    // New note linked to page
+    expect(result['page:p1'].childIds).toContain('note:n2');
+  });
+
+  it('marks old note as deleted with reason "replaced"', async () => {
+    const store = {
+      'note:n1': { slug: 'n1', timestamp: 50, parentIds: ['page:p1'], childIds: [] },
+      'page:p1': { slug: 'p1', timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
+      'manifest:orphaned': { timestamp: 0, keys: [] },
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' },
+      makeLoad(store),
+    );
+    expect(result['note:n1'].deleted).toBe(true);
+    expect(result['note:n1'].deletionReason).toBe('replaced');
+    expect(result['note:n1'].replacedBy).toBe('note:n2');
+  });
+
+  it('orphans old note', async () => {
+    const store = {
+      'note:n1': { slug: 'n1', timestamp: 50, parentIds: ['page:p1'], childIds: [] },
+      'page:p1': { slug: 'p1', timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
+      'manifest:orphaned': { timestamp: 0, keys: [] },
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' },
+      makeLoad(store),
+    );
+    expect(result['manifest:orphaned'].keys).toContain('note:n1');
+  });
+
+  it('transfers list pins from old note to new note', async () => {
+    const store = {
+      'note:n1': { slug: 'n1', timestamp: 50, parentIds: ['page:p1', 'list:test-id'], childIds: [] },
+      'page:p1': { slug: 'p1', timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: 'note:n1', pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
+      'manifest:orphaned': { timestamp: 0, keys: [] },
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' },
+      makeLoad(store),
+    );
+    // Old note pin replaced with new note pin
+    const pins = result['list:test-id'].pins;
+    expect(pins.some(p => p.id === 'note:n2')).toBe(true);
+    expect(pins.some(p => p.id === 'note:n1')).toBe(false);
+  });
+
+  it('sets new note parentIds from old note', async () => {
+    const store = {
+      'note:n1': { slug: 'n1', timestamp: 50, parentIds: ['page:p1', 'list:test-id'], childIds: [] },
+      'page:p1': { slug: 'p1', timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: 'note:n1', pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
+      'manifest:orphaned': { timestamp: 0, keys: [] },
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' },
+      makeLoad(store),
+    );
+    // New note inherits parentIds
+    expect(result['note:n2'].parentIds).toContain('page:p1');
+    expect(result['note:n2'].parentIds).toContain('list:test-id');
+  });
+
+  it('noop if old note is already deleted', async () => {
+    const store = {
+      'note:n1': { slug: 'n1', timestamp: 50, deleted: true, parentIds: ['page:p1'], childIds: [] },
+      'manifest:orphaned': { timestamp: 0, keys: ['note:n1'] },
+    };
+    const load = async (key, opts) => {
+      const e = store[key] ?? null;
+      if (!opts?.includeDeleted && e?.deleted) return null;
+      return e;
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' },
+      load,
+    );
+    expect(Object.keys(result)).toHaveLength(0);
+  });
+
+  it('is idempotent (safe to replay twice)', async () => {
+    const store = {
+      'note:n1': { slug: 'n1', timestamp: 50, parentIds: ['page:p1'], childIds: [] },
+      'page:p1': { slug: 'p1', timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
+      'manifest:orphaned': { timestamp: 0, keys: [] },
+    };
+    const entry = { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' };
+    const result1 = await effectOf(entry, makeLoad(store));
+
+    // Apply result1 to store, then replay
+    const store2 = { ...store };
+    for (const [k, v] of Object.entries(result1)) {
+      if (v === null) delete store2[k];
+      else store2[k] = v;
+    }
+    const load2 = async (key, opts) => {
+      const e = store2[key] ?? null;
+      if (!opts?.includeDeleted && e?.deleted) return null;
+      return e;
+    };
+    const result2 = await effectOf(entry, load2);
+
+    // Second replay should be a noop (old note already deleted)
+    expect(Object.keys(result2)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // effectOf: delete_snapshot / restore_snapshot
 // ---------------------------------------------------------------------------
 
@@ -527,6 +680,30 @@ describe('effectOf: pin_to_list', () => {
       makeLoad(store),
     );
     expect(result['list:test-id']).toBeUndefined();
+  });
+
+  it('applies title from entry.titles to newly-created page entity', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const store = listStore();
+    const result = await effectOf(
+      { timestamp: 100, action: 'pin_to_list', parents: ['root'], name: 'Test',
+        items: ['https://a.com'], titles: { 'https://a.com': 'Page A Title' } },
+      makeLoad(store),
+    );
+    expect(result[`page:${slug}`].title).toBe('Page A Title');
+  });
+
+  it('does not overwrite existing title with entry.titles', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const store = listStore({
+      [`page:${slug}`]: { slug, timestamp: 50, url: 'https://a.com', title: 'Existing Title', parentIds: [], childIds: [] },
+    });
+    const result = await effectOf(
+      { timestamp: 100, action: 'pin_to_list', parents: ['root'], name: 'Test',
+        items: ['https://a.com'], titles: { 'https://a.com': 'New Title' } },
+      makeLoad(store),
+    );
+    expect(result[`page:${slug}`].title).toBe('Existing Title');
   });
 
   it('deduplicates pins', async () => {
@@ -952,5 +1129,194 @@ describe('effectOf: page GC on delete_snapshot', () => {
     );
     expect(result[`page:${slug}`]).not.toBeNull();
     expect(result[`page:${slug}`].childIds).not.toContain(`snapshot:${slug}-1000`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// defaultEntity: list includes rules
+// ---------------------------------------------------------------------------
+
+describe('defaultEntity: list rules field', () => {
+  it('includes rules array in list default entity', () => {
+    const entity = defaultEntity('list:my-list');
+    expect(entity.rules).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// effectOf: add_rule / remove_rule / update_rule
+// ---------------------------------------------------------------------------
+
+describe('effectOf: add_rule', () => {
+  it('adds a rule to a list', async () => {
+    const store = listStore();
+    const result = await effectOf(
+      {
+        timestamp: 100,
+        action: 'add_rule',
+        parents: ['root'],
+        name: 'Test',
+        rule: { type: 'keyword', config: { pattern: 'test', fields: ['title'] } },
+      },
+      makeLoad(store),
+    );
+    expect(result['list:test-id']).toBeTruthy();
+    expect(result['list:test-id'].rules).toHaveLength(1);
+    expect(result['list:test-id'].rules[0].type).toBe('keyword');
+    expect(result['list:test-id'].rules[0].config.pattern).toBe('test');
+    expect(result['list:test-id'].rules[0].id).toMatch(/^rule-k-/);
+    expect(result['list:test-id'].timestamp).toBe(100);
+  });
+
+  it('is idempotent — replaying same entry does not duplicate', async () => {
+    const ruleId = 'rule-k-abc-1234';
+    const store = listStore({
+      'list:test-id': {
+        timestamp: 50, slug: 'test-id', name: 'Test', pins: [],
+        rules: [{ id: ruleId, type: 'keyword', config: { pattern: 'test' }, createdAt: 50 }],
+        parentList: 'list:system/root', childLists: [],
+      },
+    });
+    const result = await effectOf(
+      {
+        timestamp: 100,
+        action: 'add_rule',
+        parents: ['root'],
+        name: 'Test',
+        rule: { type: 'keyword', config: { pattern: 'test' }, id: ruleId },
+      },
+      makeLoad(store),
+    );
+    expect(result['list:test-id'].rules).toHaveLength(1);
+  });
+
+  it('skips orphaned lists', async () => {
+    const store = listStore({ 'manifest:orphaned': { timestamp: 0, keys: ['list:test-id'] } });
+    const result = await effectOf(
+      {
+        timestamp: 100,
+        action: 'add_rule',
+        parents: ['root'],
+        name: 'Test',
+        rule: { type: 'keyword', config: { pattern: 'test' } },
+      },
+      makeLoad(store),
+    );
+    expect(result['list:test-id']).toBeUndefined();
+  });
+
+  it('returns empty result for unknown list', async () => {
+    const store = listStore();
+    const result = await effectOf(
+      {
+        timestamp: 100,
+        action: 'add_rule',
+        parents: ['root'],
+        name: 'NonExistent',
+        rule: { type: 'keyword', config: { pattern: 'test' } },
+      },
+      makeLoad(store),
+    );
+    expect(Object.keys(result)).toHaveLength(0);
+  });
+});
+
+describe('effectOf: remove_rule', () => {
+  it('removes a rule from a list', async () => {
+    const store = listStore({
+      'list:test-id': {
+        timestamp: 50, slug: 'test-id', name: 'Test', pins: [],
+        rules: [{ id: 'rule-k-abc-1234', type: 'keyword', config: { pattern: 'test' }, createdAt: 50 }],
+        parentList: 'list:system/root', childLists: [],
+      },
+    });
+    const result = await effectOf(
+      { timestamp: 100, action: 'remove_rule', parents: ['root'], name: 'Test', ruleId: 'rule-k-abc-1234' },
+      makeLoad(store),
+    );
+    expect(result['list:test-id'].rules).toHaveLength(0);
+    expect(result['list:test-id'].timestamp).toBe(100);
+  });
+
+  it('is idempotent — removing non-existent rule is no-op', async () => {
+    const store = listStore();
+    const result = await effectOf(
+      { timestamp: 100, action: 'remove_rule', parents: ['root'], name: 'Test', ruleId: 'rule-k-nonexistent' },
+      makeLoad(store),
+    );
+    expect(result['list:test-id'].rules).toHaveLength(0);
+  });
+
+  it('skips orphaned lists', async () => {
+    const store = listStore({ 'manifest:orphaned': { timestamp: 0, keys: ['list:test-id'] } });
+    const result = await effectOf(
+      { timestamp: 100, action: 'remove_rule', parents: ['root'], name: 'Test', ruleId: 'rule-k-abc-1234' },
+      makeLoad(store),
+    );
+    expect(result['list:test-id']).toBeUndefined();
+  });
+});
+
+describe('effectOf: update_rule', () => {
+  it('merges config for matching rule', async () => {
+    const store = listStore({
+      'list:test-id': {
+        timestamp: 50, slug: 'test-id', name: 'Test', pins: [],
+        rules: [{
+          id: 'rule-k-abc-1234', type: 'keyword',
+          config: { pattern: 'old', fields: ['title'] },
+          createdAt: 50,
+        }],
+        parentList: 'list:system/root', childLists: [],
+      },
+    });
+    const result = await effectOf(
+      {
+        timestamp: 100,
+        action: 'update_rule',
+        parents: ['root'],
+        name: 'Test',
+        ruleId: 'rule-k-abc-1234',
+        config: { pattern: 'new' },
+      },
+      makeLoad(store),
+    );
+    const rule = result['list:test-id'].rules[0];
+    expect(rule.config.pattern).toBe('new');
+    expect(rule.config.fields).toEqual(['title']); // preserved
+    expect(rule.createdAt).toBe(50); // preserved
+    expect(result['list:test-id'].timestamp).toBe(100);
+  });
+
+  it('is idempotent — updating non-existent rule leaves list unchanged', async () => {
+    const store = listStore();
+    const result = await effectOf(
+      {
+        timestamp: 100,
+        action: 'update_rule',
+        parents: ['root'],
+        name: 'Test',
+        ruleId: 'rule-k-nonexistent',
+        config: { pattern: 'test' },
+      },
+      makeLoad(store),
+    );
+    expect(result['list:test-id'].rules).toHaveLength(0);
+  });
+
+  it('skips orphaned lists', async () => {
+    const store = listStore({ 'manifest:orphaned': { timestamp: 0, keys: ['list:test-id'] } });
+    const result = await effectOf(
+      {
+        timestamp: 100,
+        action: 'update_rule',
+        parents: ['root'],
+        name: 'Test',
+        ruleId: 'rule-k-abc-1234',
+        config: { pattern: 'test' },
+      },
+      makeLoad(store),
+    );
+    expect(result['list:test-id']).toBeUndefined();
   });
 });

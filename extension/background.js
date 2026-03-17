@@ -2,6 +2,7 @@
 // Central authority for reads and mutations. Offscreen is a pure filesystem I/O worker.
 import { generateSlugFromUrl, generateNoteSlug, dateKeyFromTimestamp, isGatewayOriginFromPins } from './utils.js';
 import { effectOf } from './replay.js';
+import { validateRuleConfig, validateSmartRuleFn, matchRules, matchKeywordRule, cosineSimilarity, buildPageDataFromEntry } from './rule-engine.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark, cacheClear } from './entity-cache.js';
 
@@ -239,10 +240,11 @@ async function addLog(entry) {
 }
 
 // Build a visit_page log entry. Title omitted when absent (slow-loading pages).
-function buildVisitPageEntry(url, title, referrerUrl) {
+function buildVisitPageEntry(url, title, referrerUrl, bodyPreview) {
   const entry = { timestamp: Date.now(), action: 'visit_page', url };
   if (title) entry.title = title;
   if (referrerUrl) entry.referrerUrl = referrerUrl;
+  if (bodyPreview) entry.bodyPreview = bodyPreview;
   return entry;
 }
 
@@ -737,10 +739,12 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
     markdown, html: html || ''
   });
   // Single create_snapshot event — entity creation + child linking handled by effectOf
-  await addLog({
+  const snapEntry = {
     timestamp, action: 'create_snapshot', url,
     path: `snapshots/${slug}-${timestamp}`
-  });
+  };
+  if (title) snapEntry.title = title;
+  await addLog(snapEntry);
   notifyMutation('snapshot', { slug });
 }
 
@@ -767,12 +771,14 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
   });
 
   // create_note — effectOf ensures page entity exists
-  await addLog({
+  const noteEntry = {
     timestamp,
     action: 'create_note',
     url,
     path: `notes/${noteSlug}.json`
-  });
+  };
+  if (title) noteEntry.title = title;
+  await addLog(noteEntry);
 
   notifyMutation('note', { pageSlug: slug, noteSlug });
 
@@ -856,7 +862,9 @@ chrome.commands.onCommand.addListener(async (command) => {
   } else if (command === 'like-page' || command === 'dislike-page') {
     const delta = command === 'like-page' ? 1 : -1;
     try {
-      await addLog({ timestamp: Date.now(), action: 'rate_page', url: tab.url, likes: delta });
+      const rateEntry = { timestamp: Date.now(), action: 'rate_page', url: tab.url, likes: delta };
+      if (tab.title) rateEntry.title = tab.title;
+      await addLog(rateEntry);
       notifyMutation('interaction', { url: tab.url });
       chrome.tabs.sendMessage(tab.id, { action: 'showLikeNotification', delta }).catch(() => {});
     } catch (error) {
@@ -985,7 +993,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               }
 
               const title = request.title ? await trimTitle(request.title, url) : '';
-              const entry = buildVisitPageEntry(url, title, referrerUrl);
+              const entry = buildVisitPageEntry(url, title, referrerUrl, request.bodyPreview);
               await addLog(entry);
 
               // First-visit extras: gateway + workspace
@@ -1004,12 +1012,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     if (!already) {
                       const pn = await getListParentsAndName(listSlug);
                       if (pn) {
-                        await addLog({
+                        const pinEntry = {
                           timestamp: Date.now(),
                           action: 'pin_to_list',
                           parents: pn.parents, name: pn.name,
                           items: [url]
-                        });
+                        };
+                        if (title) pinEntry.titles = { [url]: title };
+                        await addLog(pinEntry);
                         console.log(`Workspace: auto-pinned ${url} to ${pn.name}`);
                       }
                     }
@@ -1268,12 +1278,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           });
 
           // 2. Log create_note — effectOf ensures page entity exists
-          await addLog({
+          const cnNoteEntry = {
             timestamp,
             action: 'create_note',
             url: pageUrl,
             path: `notes/${noteSlug}.json`
-          });
+          };
+          const cnTitle = cnPageEntity?.title || sender?.tab?.title;
+          if (cnTitle) cnNoteEntry.title = cnTitle;
+          await addLog(cnNoteEntry);
 
           const notes = await requestOffscreen({ action: 'loadPageNotes', slug: pageSlug });
           sendResponse({ success: true, notes: notes.notes || [], noteSlug });
@@ -1304,15 +1317,51 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'updateNote': {
-          const noteSlug = request.noteSlug;
-          // Load current note, merge update, save directly to filesystem (no log entry)
-          const currentNote = await requestOffscreen({ action: 'loadNote', noteSlug: noteSlug });
-          const noteData = currentNote.note || {};
-          noteData.note = request.note;
-          noteData.timestamp = Date.now();
-          await requestOffscreen({ action: 'saveNote', slug: noteSlug, data: noteData });
-          sendResponse({ success: true });
-          notifyMutation('note', { noteSlug });
+          const oldNoteSlug = request.noteSlug;
+          const unTimestamp = Date.now();
+
+          // Load current note to get content and parentIds
+          const unCurrentNote = await requestOffscreen({ action: 'loadNote', noteSlug: oldNoteSlug });
+          const oldNoteData = unCurrentNote.note || {};
+
+          // Generate new slug for the replacement note
+          const newNoteSlug = generateNoteSlug(unTimestamp, oldNoteData.excerpt || '');
+
+          // Build new note data, copying immutable fields from old
+          const newNoteData = {
+            slug: newNoteSlug,
+            excerpt: oldNoteData.excerpt || null,
+            note: request.note,
+            cssPath: oldNoteData.cssPath || null,
+            parentIds: oldNoteData.parentIds || [],
+            childIds: oldNoteData.childIds || [],
+            timestamp: unTimestamp,
+          };
+
+          // Save new note file to filesystem
+          await requestOffscreen({ action: 'saveNote', slug: newNoteSlug, data: newNoteData });
+
+          // Get page URL for log entry (from old note's parentIds)
+          const oldNoteEntity = await readCacheable('note:' + oldNoteSlug, true);
+          const unPageParent = (oldNoteEntity?.parentIds || oldNoteData.parentIds || []).find(p => p.startsWith('page:'));
+          let unPageUrl = null;
+          if (unPageParent) {
+            const unPageEntity = await readCacheable(unPageParent);
+            unPageUrl = unPageEntity?.url;
+          }
+
+          // Log replace_note event
+          const replaceEntry = {
+            timestamp: unTimestamp,
+            action: 'replace_note',
+            path: `notes/${newNoteSlug}.json`,
+            oldPath: `notes/${oldNoteSlug}.json`,
+          };
+          if (unPageUrl) replaceEntry.url = unPageUrl;
+          await addLog(replaceEntry);
+
+          sendResponse({ success: true, noteSlug: newNoteSlug });
+          notifyMutation('note', { noteSlug: newNoteSlug, oldNoteSlug });
           break;
         }
 
@@ -1342,12 +1391,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
             const isPinned = pins.some(p => p.id === pinKey);
 
-            await addLog({
+            const pinLogEntry = {
               timestamp: Date.now(),
               action: isPinned ? 'unpin_from_list' : 'pin_to_list',
               parents: pn.parents, name: pn.name,
               items: [pinItem]
-            });
+            };
+            // Attach title for new page pins so ensurePageEntity gets it
+            if (!isPinned && !requestId?.startsWith('note:')) {
+              const pageEntity = await readCacheable(pinKey);
+              if (pageEntity?.title) pinLogEntry.titles = { [pinItem]: pageEntity.title };
+            }
+            await addLog(pinLogEntry);
             sendResponse({ success: true, pinned: !isPinned });
             notifyMutation('pins', { listId });
           } catch (error) {
@@ -1359,12 +1414,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'addListPins': {
           const pn = await getListParentsAndName(request.listId);
           if (pn && request.urls.length > 0) {
-            await addLog({
+            // Collect titles: from caller (request.titles) or page entities
+            const titles = { ...(request.titles || {}) };
+            for (const u of request.urls) {
+              if (!titles[u]) {
+                const slug = generateSlugFromUrl(u);
+                const pe = await readCacheable('page:' + slug);
+                if (pe?.title) titles[u] = pe.title;
+              }
+            }
+            const pinEntry = {
               timestamp: Date.now(),
               action: 'pin_to_list',
               parents: pn.parents, name: pn.name,
               items: request.urls
-            });
+            };
+            if (Object.keys(titles).length > 0) pinEntry.titles = titles;
+            await addLog(pinEntry);
           }
           sendResponse({ success: true });
           notifyMutation('pins', { listId: request.listId });
@@ -1672,6 +1738,224 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'seedTestData': {
           const resp = await requestOffscreen({ action: 'seedTestData', files: request.files });
           sendResponse(resp);
+          break;
+        }
+
+        // ─── Rule Handlers ───────────────────────────────────────────
+
+        case 'addRule': {
+          const { listId, rule } = request;
+          const listInfo = await getListParentsAndName(listId);
+          if (!listInfo) { sendResponse({ success: false, error: 'List not found' }); break; }
+
+          // Generate embedding BEFORE validation (validateRuleConfig requires embedding)
+          if (rule.type === 'semantic' && !rule.config.embedding) {
+            if (!rule.config.description) {
+              sendResponse({ success: false, error: 'Description is required' }); break;
+            }
+            const resp = await requestOffscreen({ action: 'generateEmbedding', text: rule.config.description });
+            if (!resp?.success) {
+              sendResponse({ success: false, error: resp?.error || 'Embedding generation failed' }); break;
+            }
+            rule.config.embedding = resp.embedding;
+          }
+
+          // Validate
+          const validation = validateRuleConfig(rule);
+          if (!validation.valid) {
+            sendResponse({ success: false, error: validation.errors.join('; ') });
+            break;
+          }
+
+          // For smart rules: validate function source
+          if (rule.type === 'smart') {
+            const fnValidation = validateSmartRuleFn(rule.config.fnSource);
+            if (!fnValidation.valid) {
+              sendResponse({ success: false, error: fnValidation.errors.join('; ') });
+              break;
+            }
+          }
+
+          await addLog({
+            timestamp: Date.now(),
+            action: 'add_rule',
+            parents: listInfo.parents,
+            name: listInfo.name,
+            rule: { type: rule.type, config: rule.config },
+          });
+          sendResponse({ success: true });
+          notifyMutation('rules', { listId });
+          break;
+        }
+
+        case 'removeRule': {
+          const { listId, ruleId } = request;
+          const listInfo = await getListParentsAndName(listId);
+          if (!listInfo) { sendResponse({ success: false, error: 'List not found' }); break; }
+
+          await addLog({
+            timestamp: Date.now(),
+            action: 'remove_rule',
+            parents: listInfo.parents,
+            name: listInfo.name,
+            ruleId,
+          });
+          sendResponse({ success: true });
+          notifyMutation('rules', { listId });
+          break;
+        }
+
+        case 'updateRule': {
+          const { listId, ruleId, config } = request;
+          const listInfo = await getListParentsAndName(listId);
+          if (!listInfo) { sendResponse({ success: false, error: 'List not found' }); break; }
+
+          await addLog({
+            timestamp: Date.now(),
+            action: 'update_rule',
+            parents: listInfo.parents,
+            name: listInfo.name,
+            ruleId,
+            config,
+          });
+          sendResponse({ success: true });
+          notifyMutation('rules', { listId });
+          break;
+        }
+
+        case 'runRuleBatch': {
+          const { listIds: batchListIds, entries } = request;
+          const results = [];
+
+          for (const listId of batchListIds) {
+            const listEntity = await readCacheable(`list:${listId}`);
+            if (!listEntity?.rules?.length) continue;
+
+            // Build embedder/sandbox closures that route to offscreen
+            const embedder = async (text) => {
+              const resp = await requestOffscreen({ action: 'generateEmbedding', text });
+              if (!resp?.success) throw new Error('Embedding failed');
+              return new Float32Array(resp.embedding);
+            };
+            const sandbox = async (fnSource, pageData) => {
+              const resp = await requestOffscreen({ action: 'executeSandboxFn', fnSource, pageData });
+              if (!resp?.success) throw new Error('Sandbox execution failed');
+              return resp.score;
+            };
+
+            for (const entry of entries) {
+              const pageData = buildPageDataFromEntry(entry);
+              const matches = await matchRules(listEntity.rules, pageData, { embedder, sandbox });
+              if (matches.length > 0) {
+                // Auto-pin: use the same parents/name path as the list
+                const listInfo = await getListParentsAndName(listId);
+                if (listInfo) {
+                  // Check if already pinned
+                  const slug = generateSlugFromUrl(entry.url);
+                  const alreadyPinned = (listEntity.pins || []).some(p => p.id === `page:${slug}`);
+                  if (!alreadyPinned) {
+                    const sfPinEntry = {
+                      timestamp: Date.now(),
+                      action: 'pin_to_list',
+                      parents: listInfo.parents,
+                      name: listInfo.name,
+                      items: [entry.url],
+                    };
+                    if (entry.title) sfPinEntry.titles = { [entry.url]: entry.title };
+                    await addLog(sfPinEntry);
+                    results.push({ listId, url: entry.url, matches });
+                  }
+                }
+              }
+            }
+          }
+
+          sendResponse({ success: true, results });
+          break;
+        }
+
+        case 'previewRule': {
+          const { rule, entries } = request;
+          // Generate temporary embedding for semantic rules (before validation,
+          // since validateRuleConfig requires embedding to be present)
+          if (rule.type === 'semantic' && !rule.config.embedding) {
+            if (!rule.config.description) {
+              sendResponse({ success: false, error: 'Description is required' });
+              break;
+            }
+            const resp = await requestOffscreen({ action: 'generateEmbedding', text: rule.config.description });
+            if (!resp?.success) {
+              sendResponse({ success: false, error: resp?.error || 'Embedding generation failed' }); break;
+            }
+            rule.config.embedding = new Float32Array(resp.embedding);
+          }
+          // Validate
+          const validation = validateRuleConfig(rule);
+          if (!validation.valid) {
+            sendResponse({ success: false, error: validation.errors.join('; ') });
+            break;
+          }
+          if (rule.type === 'smart') {
+            const fnValidation = validateSmartRuleFn(rule.config.fnSource);
+            if (!fnValidation.valid) {
+              sendResponse({ success: false, error: fnValidation.errors.join('; ') });
+              break;
+            }
+          }
+          // Uses the same matchRules path as runRuleBatch,
+          // with allScores to return raw scores for non-matches too.
+          // For semantic rules, page embeddings are cached in session storage
+          // (keyed by URL) so changing the query only recomputes the query embedding.
+          const tempRule = { id: 'preview', type: rule.type, config: rule.config };
+
+          // Load embedding cache (semantic only, URL → Array<number>)
+          let embeddingCache = {};
+          let newCache = {};
+          if (rule.type === 'semantic') {
+            const stored = await chrome.storage.session.get('previewEmbeddingCache');
+            embeddingCache = stored.previewEmbeddingCache || {};
+          }
+
+          const sandbox = async (fnSource, pageData) => {
+            const resp = await requestOffscreen({ action: 'executeSandboxFn', fnSource, pageData });
+            if (!resp?.success) throw new Error(resp?.error || 'Sandbox execution failed');
+            return resp.score;
+          };
+          const results = [];
+          let execError = null;
+          for (const entry of entries) {
+            const title = entry.title || '';
+            const pageData = buildPageDataFromEntry({ ...entry, title });
+            // Per-entry caching embedder: checks cache first, generates + caches on miss
+            const url = entry.url;
+            const cachingEmbedder = async (text) => {
+              if (embeddingCache[url]) {
+                const cached = new Float32Array(embeddingCache[url]);
+                newCache[url] = embeddingCache[url];
+                return cached;
+              }
+              const resp = await requestOffscreen({ action: 'generateEmbedding', text });
+              if (!resp?.success) throw new Error(resp?.error || 'Embedding failed');
+              newCache[url] = resp.embedding; // Array<number>, serializable
+              return new Float32Array(resp.embedding);
+            };
+            try {
+              const scored = await matchRules([tempRule], pageData, { embedder: cachingEmbedder, sandbox, allScores: true });
+              const { score = 0, match = false } = scored[0] || {};
+              results.push({ url: entry.url, title, score, match });
+            } catch (err) {
+              execError = err.message; break;
+            }
+          }
+          // Persist new cache (only current candidates — bounded size)
+          if (rule.type === 'semantic' && Object.keys(newCache).length > 0) {
+            await chrome.storage.session.set({ previewEmbeddingCache: newCache });
+          }
+          if (execError) {
+            sendResponse({ success: false, error: execError });
+          } else {
+            sendResponse({ success: true, results });
+          }
           break;
         }
 

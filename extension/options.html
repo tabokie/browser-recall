@@ -1644,7 +1644,7 @@
 
     /* ── Search / Filter panel ── */
     .search-filters-panel {
-      padding: 8px 24px 12px;
+      padding: 10px 24px 12px;
       display: flex;
       flex-direction: column;
       gap: 6px;
@@ -1653,35 +1653,38 @@
     .search-rows {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 5px;
     }
 
     .search-row {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
     }
 
     .search-row-input {
       flex: 1;
-      padding: 7px 14px;
+      padding: 8px 16px;
       border: 1px solid var(--border-glass);
       border-radius: var(--radius-pill);
       font-family: var(--font-body);
       font-size: 13px;
-      background: #FFFFFF;
+      background: rgba(255, 255, 255, 0.55);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       color: var(--text-primary);
       box-shadow: var(--highlight-top), var(--highlight-edge),
-        0 1px 3px rgba(53, 40, 32, 0.06);
+        0 1px 3px rgba(53, 40, 32, 0.05);
       outline: none;
-      transition: border-color 0.15s, box-shadow 0.2s;
+      transition: border-color 0.2s var(--ease-smooth), box-shadow 0.25s var(--ease-smooth), background 0.2s;
     }
     .search-row-input::placeholder { color: var(--text-muted); }
     .search-row-input:focus {
+      background: rgba(255, 255, 255, 0.7);
       border-color: var(--accent-primary);
       box-shadow:
-        0 0 0 3px rgba(208, 112, 48, 0.1),
-        0 0 12px rgba(208, 112, 48, 0.06),
+        0 0 0 3px rgba(208, 112, 48, 0.08),
+        0 0 12px rgba(208, 112, 48, 0.05),
         var(--highlight-top);
     }
 
@@ -1689,44 +1692,48 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 24px;
-      height: 24px;
+      width: 26px;
+      height: 26px;
       border: none;
       background: none;
       cursor: pointer;
       color: var(--text-muted);
-      border-radius: 4px;
+      border-radius: var(--radius-pill);
       flex-shrink: 0;
+      transition: background 0.15s, color 0.15s;
     }
-    .search-row-remove svg { width: 14px; height: 14px; }
+    .search-row-remove svg { width: 13px; height: 13px; }
     .search-row-remove:hover { background: var(--accent-red-soft); color: var(--accent-red); }
 
     .search-draft {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
     }
 
     .search-draft-input {
       flex: 1;
-      padding: 7px 14px;
+      padding: 8px 16px;
       border: 1px solid var(--border-glass);
       border-radius: var(--radius-pill);
       font-family: var(--font-body);
       font-size: 13px;
-      background: #FFFFFF;
+      background: rgba(255, 255, 255, 0.55);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       color: var(--text-primary);
       box-shadow: var(--highlight-top), var(--highlight-edge),
-        0 1px 3px rgba(53, 40, 32, 0.06);
+        0 1px 3px rgba(53, 40, 32, 0.05);
       outline: none;
-      transition: border-color 0.15s, box-shadow 0.2s;
+      transition: border-color 0.2s var(--ease-smooth), box-shadow 0.25s var(--ease-smooth), background 0.2s;
     }
     .search-draft-input::placeholder { color: var(--text-muted); }
     .search-draft-input:focus {
+      background: rgba(255, 255, 255, 0.7);
       border-color: var(--accent-primary);
       box-shadow:
-        0 0 0 3px rgba(208, 112, 48, 0.1),
-        0 0 12px rgba(208, 112, 48, 0.06),
+        0 0 0 3px rgba(208, 112, 48, 0.08),
+        0 0 12px rgba(208, 112, 48, 0.05),
         var(--highlight-top);
     }
 
@@ -1734,50 +1741,78 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 30px;
-      height: 30px;
+      width: 34px;
+      height: 34px;
       border: 1px solid var(--border-glass);
       border-radius: var(--radius-pill);
-      background: var(--bg-surface);
+      background: rgba(255, 255, 255, 0.45);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       cursor: pointer;
       flex-shrink: 0;
       color: var(--text-muted);
       padding: 0;
-      box-shadow: var(--highlight-top);
+      box-shadow: var(--highlight-top), var(--highlight-edge);
+      transition: all 0.2s var(--ease-smooth);
     }
-    .filter-toggle-btn svg { width: 14px; height: 14px; }
-    .filter-toggle-btn:hover { background: var(--bg-surface-hover); color: var(--text-secondary); }
-    .filter-toggle-btn.active { background: var(--accent-primary-soft); color: var(--accent-primary); border-color: var(--accent-primary); }
-    .filter-toggle-btn.has-filters { color: var(--accent-primary); border-color: var(--accent-primary); }
+    .filter-toggle-btn svg { width: 15px; height: 15px; }
+    .filter-toggle-btn:hover {
+      background: var(--bg-surface-hover);
+      color: var(--text-secondary);
+      border-color: var(--border-hover);
+    }
+    .filter-toggle-btn.active {
+      background: var(--accent-primary-soft);
+      color: var(--accent-primary);
+      border-color: rgba(208, 112, 48, 0.3);
+      box-shadow: var(--highlight-top), 0 0 8px rgba(208, 112, 48, 0.08);
+    }
+    .filter-toggle-btn.has-filters {
+      color: var(--accent-primary);
+      border-color: rgba(208, 112, 48, 0.25);
+    }
 
     .filter-panel {
-      margin-top: 8px;
-      padding: 8px 0 4px;
-      border-top: 1px solid var(--border-subtle);
+      margin-top: 10px;
+      padding: 16px 18px 12px;
+      background: rgba(255, 252, 248, 0.5);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--highlight-top), var(--highlight-edge),
+        0 1px 4px rgba(53, 40, 32, 0.04);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
     }
 
     .filter-section {
-      margin-bottom: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
     }
 
     .filter-section-label {
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 700;
       text-transform: uppercase;
       color: var(--text-muted);
-      letter-spacing: 0.5px;
-      margin-bottom: 6px;
+      letter-spacing: 0.8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid rgba(180, 160, 140, 0.1);
     }
 
     .filter-range {
-      margin-bottom: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
     }
 
     .filter-range-label {
       font-size: 11px;
       color: var(--text-secondary);
-      display: block;
-      margin-bottom: 2px;
+      font-weight: 500;
     }
 
     .filter-checkboxes {
@@ -1791,39 +1826,98 @@
       color: var(--text-primary);
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       cursor: pointer;
+      padding: 5px 8px;
+      border-radius: var(--radius-sm);
+      transition: background 0.15s;
     }
-    .filter-checkbox input { margin: 0; cursor: pointer; }
+    .filter-checkbox:hover {
+      background: rgba(255, 248, 240, 0.5);
+    }
+    .filter-checkbox input {
+      margin: 0;
+      cursor: pointer;
+      width: 15px;
+      height: 15px;
+      accent-color: var(--accent-primary);
+      border-radius: 3px;
+    }
 
     .filter-bubbles {
       display: flex;
       flex-wrap: wrap;
-      gap: 4px;
+      gap: 7px;
     }
 
     .filter-bubble {
-      padding: 4px 12px;
-      border: 1px solid rgba(255, 255, 255, 0.4);
+      padding: 5px 14px;
+      border: 1px solid rgba(255, 255, 255, 0.5);
       border-radius: var(--radius-pill);
-      background: rgba(245, 237, 228, 0.5);
+      background: rgba(255, 255, 255, 0.4);
       color: var(--text-secondary);
       font-size: 12px;
       font-weight: 500;
       cursor: pointer;
       white-space: nowrap;
-      box-shadow: var(--highlight-top);
-      transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+      box-shadow: var(--highlight-top), var(--highlight-edge),
+        0 1px 2px rgba(53, 40, 32, 0.04);
+      transition: all 0.2s var(--ease-smooth);
     }
-    .filter-bubble:hover { background: rgba(255, 248, 240, 0.8); border-color: var(--border-hover); color: var(--text-primary); }
+    .filter-bubble:hover {
+      background: rgba(255, 248, 240, 0.7);
+      border-color: var(--border-hover);
+      color: var(--text-primary);
+      box-shadow: var(--highlight-top), var(--highlight-edge),
+        0 2px 6px rgba(53, 40, 32, 0.06);
+    }
     .filter-bubble.active {
-      background: var(--accent-primary-soft);
+      background: rgba(208, 112, 48, 0.12);
       color: var(--accent-primary);
-      border-color: rgba(208, 112, 48, 0.2);
+      border-color: rgba(208, 112, 48, 0.25);
       font-weight: 600;
-      box-shadow: 0 1px 4px rgba(208, 112, 48, 0.1), var(--highlight-top);
+      box-shadow: var(--highlight-top),
+        0 1px 4px rgba(208, 112, 48, 0.1),
+        inset 0 0 0 0.5px rgba(208, 112, 48, 0.08);
     }
-    .filter-bubble.active:hover { background: var(--accent-primary-soft); }
+    .filter-bubble.active:hover {
+      background: rgba(208, 112, 48, 0.16);
+    }
+
+    /* Sort toggle (tri-toggle style) */
+    .sort-toggle {
+      display: flex;
+      gap: 2px;
+      background: rgba(245, 237, 228, 0.6);
+      border-radius: var(--radius-pill);
+      padding: 3px;
+      border: 1px solid var(--border-glass);
+      box-shadow: var(--highlight-top), var(--highlight-edge);
+      width: fit-content;
+    }
+    .sort-toggle-option {
+      padding: 5px 12px;
+      border-radius: var(--radius-pill);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+      border: 1px solid transparent;
+      white-space: nowrap;
+      background: none;
+      font-family: var(--font-body);
+    }
+    .sort-toggle-option:hover {
+      color: var(--text-secondary);
+    }
+    .sort-toggle-option.active {
+      background: rgba(255, 255, 255, 0.8);
+      color: var(--text-primary);
+      font-weight: 600;
+      box-shadow: var(--shadow-float);
+      border-color: var(--border-glass);
+    }
 
     /* ── Query builder ── */
     .query-builder {
@@ -1960,7 +2054,7 @@
     .qb-dual-range {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       min-width: 240px;
       flex: 1;
       max-width: 360px;
@@ -1968,22 +2062,24 @@
     .qb-dual-range-track {
       position: relative;
       flex: 1;
-      height: 4px;
-      background: var(--border-subtle);
-      border-radius: 2px;
+      height: 5px;
+      background: rgba(180, 160, 140, 0.15);
+      border-radius: 3px;
+      box-shadow: inset 0 0.5px 1px rgba(53, 40, 32, 0.08);
     }
     .qb-dual-range-fill {
       position: absolute;
       height: 100%;
-      background: var(--accent-primary);
-      border-radius: 2px;
+      background: linear-gradient(90deg, rgba(208, 112, 48, 0.7), var(--accent-primary));
+      border-radius: 3px;
+      box-shadow: 0 0 4px rgba(208, 112, 48, 0.15);
     }
     .qb-dual-range input[type="range"] {
       position: absolute;
-      top: -6px;
+      top: -7px;
       left: 0;
       width: 100%;
-      height: 16px;
+      height: 18px;
       -webkit-appearance: none;
       appearance: none;
       background: transparent;
@@ -1992,21 +2088,30 @@
     }
     .qb-dual-range input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      width: 12px;
-      height: 12px;
-      background: var(--accent-primary);
+      width: 14px;
+      height: 14px;
+      background: #fff;
       border-radius: 50%;
       cursor: pointer;
       pointer-events: auto;
-      border: 2px solid #fff;
-      box-shadow: 0 1px 2px rgba(53, 40, 32, 0.2);
+      border: 2.5px solid var(--accent-primary);
+      box-shadow: 0 1px 3px rgba(53, 40, 32, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.5);
+      transition: box-shadow 0.15s, transform 0.15s;
+    }
+    .qb-dual-range input[type="range"]::-webkit-slider-thumb:hover {
+      box-shadow: 0 1px 4px rgba(53, 40, 32, 0.2), 0 0 0 3px rgba(208, 112, 48, 0.1);
+      transform: scale(1.1);
     }
     .qb-dual-range-label {
       font-size: 10px;
+      font-weight: 600;
       color: var(--text-secondary);
       white-space: nowrap;
-      min-width: 28px;
+      min-width: 30px;
       text-align: center;
+      background: rgba(255, 255, 255, 0.4);
+      padding: 2px 5px;
+      border-radius: var(--radius-sm);
     }
 
     .qb-remove-btn {
@@ -2240,6 +2345,270 @@
     .col-popover label:hover {
       background: var(--bg-surface-hover);
     }
+
+    /* ── Rules section ── */
+    .rules-section {
+      margin-bottom: 12px;
+      background: var(--bg-surface);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--highlight-top), var(--highlight-edge),
+        0 1px 4px rgba(53, 40, 32, 0.04);
+      padding: 10px 14px;
+    }
+    .rules-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .rules-toggle-icon {
+      font-size: 10px;
+      color: var(--text-muted);
+      transition: transform 0.2s var(--ease-smooth);
+      display: inline-block;
+    }
+    .rules-toggle-icon.expanded {
+      transform: rotate(90deg);
+    }
+    .rules-count {
+      font-size: 10px;
+      font-weight: 700;
+      background: var(--accent-primary-soft);
+      color: var(--accent-primary);
+      padding: 1px 7px;
+      border-radius: var(--radius-pill);
+    }
+    .rules-body {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .rules-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .rule-entry {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      background: var(--bg-surface-hover);
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: var(--font-body);
+      color: var(--text-primary);
+    }
+    .rule-type-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: var(--radius-sm);
+      font-weight: 600;
+      border: 1px solid transparent;
+      flex-shrink: 0;
+    }
+    .rule-type-keyword {
+      background: var(--accent-primary-soft);
+      color: var(--accent-primary);
+      border-color: rgba(208, 112, 48, 0.15);
+    }
+    .rule-type-semantic {
+      background: var(--accent-blue-soft);
+      color: var(--accent-blue);
+      border-color: rgba(80, 128, 176, 0.12);
+    }
+    .rule-type-smart {
+      background: var(--accent-green-soft);
+      color: var(--accent-green);
+      border-color: rgba(88, 136, 88, 0.12);
+    }
+    .rule-desc {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .rule-remove {
+      width: 22px;
+      height: 22px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 16px;
+      cursor: pointer;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s, color 0.15s;
+    }
+    .rule-remove:hover {
+      background: var(--accent-red-soft);
+      color: var(--accent-red);
+    }
+    .rules-add-btn {
+      font-size: 12px;
+      padding: 4px 12px;
+    }
+    .rules-add-form {
+      background: var(--bg-surface);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .rules-form-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .rules-form-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      width: 70px;
+      flex-shrink: 0;
+    }
+    .rules-field-checks {
+      display: flex;
+      gap: 14px;
+      font-size: 12px;
+      color: var(--text-primary);
+    }
+    .rules-field-checks label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+    }
+    .rules-field-checks input {
+      accent-color: var(--accent-primary);
+    }
+    .rules-fn-textarea {
+      flex: 1;
+      padding: 8px 10px;
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .rules-fn-textarea:focus {
+      border-color: var(--accent-primary);
+    }
+    .rules-threshold-val {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: 'Monaco', 'Menlo', monospace;
+      width: 36px;
+      text-align: right;
+    }
+    .rules-form-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .rules-form-error {
+      font-size: 12px;
+      color: var(--accent-red);
+      padding: 4px 0;
+    }
+    .rules-run-btn {
+      font-size: 11px;
+      padding: 3px 10px;
+    }
+    /* Tri-toggle for rules type selector */
+    .rules-tri-toggle {
+      display: flex;
+      gap: 2px;
+      background: rgba(255, 255, 255, 0.3);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-pill);
+      padding: 2px;
+    }
+    .rules-tri-toggle-zone {
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-radius: var(--radius-pill);
+      transition: all 0.2s var(--ease-smooth);
+      user-select: none;
+    }
+    .rules-tri-toggle-zone.active {
+      background: rgba(255, 255, 255, 0.75);
+      color: var(--text-primary);
+      box-shadow: 0 1px 3px rgba(53, 40, 32, 0.08);
+    }
+    .rules-preview {
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 8px;
+    }
+    .rules-preview-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .rules-preview-count {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .rules-preview-list {
+      max-height: 200px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .rules-preview-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+      font-size: 12px;
+      color: var(--text-primary);
+      background: var(--bg-surface-hover);
+      border-radius: 4px;
+    }
+    .rules-preview-title {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .rules-preview-score {
+      font-size: 11px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      flex-shrink: 0;
+    }
+    .rules-preview-score-match {
+      color: #4ade80;
+    }
+    .rules-preview-score-miss {
+      color: #f87171;
+    }
+    .rules-preview-empty {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 4px 0;
+    }
   </style>
 </head>
 <body>
@@ -2305,6 +2674,88 @@
 
     <!-- List layout: single-section (explore results OR filtered pins) -->
     <div class="list-layout" id="listLayout">
+      <div class="rules-section" id="rulesSection" style="display:none">
+        <div class="rules-header" id="rulesHeader">
+          <span class="rules-toggle-icon" id="rulesToggleIcon">&#x25B6;</span>
+          <span class="filter-section-label" style="border:none;margin:0;padding:0">RULES</span>
+          <span class="rules-count" id="rulesCount" style="display:none"></span>
+          <span style="flex:1"></span>
+          <button class="btn btn-secondary rules-run-btn" id="rulesRunBtn" style="display:none;padding:3px 10px;font-size:11px">Run</button>
+        </div>
+        <div class="rules-body" id="rulesBody" style="display:none">
+          <div class="rules-list" id="rulesList"></div>
+          <div id="rulesAddRow">
+            <button class="btn btn-secondary rules-add-btn" id="rulesAddBtn">+ Add Rule</button>
+          </div>
+          <div class="rules-add-form" id="rulesAddForm" style="display:none">
+            <div class="rules-form-row">
+              <label class="rules-form-label">Type</label>
+              <div class="rules-tri-toggle" id="ruleTypeToggle">
+                <div class="rules-tri-toggle-zone active" data-type="keyword">Keyword</div>
+                <div class="rules-tri-toggle-zone" data-type="semantic">Semantic</div>
+                <div class="rules-tri-toggle-zone" data-type="smart">Smart</div>
+              </div>
+            </div>
+            <div id="rulesFormKeyword">
+              <div class="rules-form-row">
+                <label class="rules-form-label">Pattern</label>
+                <input type="text" id="rulePatternInput" class="blacklist-input" placeholder="github  or  /regex/" style="flex:1">
+              </div>
+              <div class="rules-form-row">
+                <label class="rules-form-label">Match in</label>
+                <div class="rules-field-checks">
+                  <label><input type="checkbox" id="ruleFieldTitle" checked> Title</label>
+                  <label><input type="checkbox" id="ruleFieldUrl" checked> URL</label>
+                </div>
+              </div>
+              <div class="rules-form-row">
+                <label><input type="checkbox" id="ruleCaseSensitive"> Case sensitive</label>
+              </div>
+            </div>
+            <div id="rulesFormSemantic" style="display:none">
+              <div class="rules-form-row">
+                <label class="rules-form-label">Description</label>
+                <input type="text" id="ruleSemanticInput" class="blacklist-input" placeholder="articles about machine learning" style="flex:1">
+              </div>
+              <div class="rules-form-row">
+                <label class="rules-form-label">Threshold</label>
+                <input type="range" id="ruleSemanticThreshold" min="0" max="100" value="50" style="flex:1">
+                <span id="ruleSemanticThresholdVal" class="rules-threshold-val">0.50</span>
+              </div>
+            </div>
+            <div id="rulesFormSmart" style="display:none">
+              <div class="rules-form-row">
+                <label class="rules-form-label">Description</label>
+                <input type="text" id="ruleSmartDescInput" class="blacklist-input" placeholder="pages with long titles" style="flex:1">
+              </div>
+              <div class="rules-form-row" style="align-items:flex-start">
+                <label class="rules-form-label" style="margin-top:8px">Function</label>
+                <textarea id="ruleSmartFnInput" class="rules-fn-textarea" rows="3" placeholder="return page.title.length > 50 ? 1 : 0;"></textarea>
+              </div>
+            </div>
+            <div class="rules-form-actions">
+              <button class="btn btn-secondary" id="rulesCancelBtn">Cancel</button>
+              <button class="btn btn-secondary" id="rulesPreviewBtn">Preview</button>
+              <button class="btn btn-primary" id="rulesSaveBtn">Add</button>
+            </div>
+            <div class="rules-form-error" id="rulesFormError" style="display:none"></div>
+            <div class="rules-preview" id="rulesPreview" style="display:none">
+              <div class="rules-preview-header">
+                <span class="filter-section-label" style="border:none;margin:0;padding:0">RECENT VISITS</span>
+                <span class="rules-preview-count" id="rulesPreviewCount"></span>
+              </div>
+              <div class="rules-preview-list" id="rulesPreviewList"></div>
+            </div>
+            <div class="rules-preview" id="rulesPinsPreview" style="display:none">
+              <div class="rules-preview-header">
+                <span class="filter-section-label" style="border:none;margin:0;padding:0">PINNED PAGES</span>
+                <span class="rules-preview-count" id="rulesPinsPreviewCount"></span>
+              </div>
+              <div class="rules-preview-list" id="rulesPinsPreviewList"></div>
+            </div>
+          </div>
+        </div>
+      </div>
       <div id="listQueryBuilder" style="display:none"></div>
       <div class="time-chart" id="relatedChart">
         <div class="chart-label">Results</div>

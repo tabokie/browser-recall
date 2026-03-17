@@ -3,7 +3,7 @@
 import { FileSystemStorage } from './filesystem-storage.js';
 import init, { Interaction, SearchEngine, searchBatch } from './pkg/portal_extension.js';
 import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine, extractInteractionBuffer } from './search-helpers.js';
-import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, escapeHtml } from './utils.js';
+import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, escapeHtml, BODY_WORD_LIMIT } from './utils.js';
 import { attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
 import { initCharts, renderTimeChart, renderTimeChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './time-chart.js';
 import { VirtualScroller } from './virtual-scroller.js';
@@ -184,6 +184,26 @@ function getRangeConfig(field) {
 }
 
 // --- WASM ---
+/**
+ * Fetch a URL and extract body text (first BODY_WORD_LIMIT words).
+ * Returns '' on timeout, network error, or non-HTML content.
+ */
+async function fetchPageBody(url) {
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!resp.ok || !(resp.headers.get('content-type') || '').includes('text/html')) return '';
+    const html = await resp.text();
+    return html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&[a-z#0-9]+;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(/\s+/).slice(0, BODY_WORD_LIMIT).join(' ');
+  } catch { return ''; }
+}
+
 async function initWasm() {
   if (!wasmInitialized) {
     try {
@@ -448,6 +468,10 @@ function showListLayout() {
   document.getElementById('listLayout').classList.add('visible');
   document.getElementById('recycleBinLayout').classList.remove('visible');
   document.getElementById('queryBuilder').style.display = 'none';
+  // Reset rules section to collapsed
+  document.getElementById('rulesBody').style.display = 'none';
+  document.getElementById('rulesToggleIcon').classList.remove('expanded');
+  resetRulesForm();
 }
 
 function showNormalLayout() {
@@ -726,6 +750,10 @@ function applySortOrder(items, sortState) {
       case 'pinTime':
         av = a.pinnedAt || 0;
         bv = b.pinnedAt || 0;
+        return dir * (av - bv);
+      case 'totalVisits':
+        av = a.visitCount || (a.timestamps ? a.timestamps.length : 0);
+        bv = b.visitCount || (b.timestamps ? b.timestamps.length : 0);
         return dir * (av - bv);
       case 'relevance':
         av = a.relevance || 0;
@@ -1167,10 +1195,15 @@ async function showList(list) {
   try {
     const listId = list.slug;
 
+    await loadFilterState();
+
     // Always fetch pins from entity storage
     const listEntity = await readCacheable('list:' + listId);
     allListPins[listId] = listEntity?.pins || [];
     const pins = allListPins[listId];
+
+    // Render rules section
+    renderRulesSection(listId, listEntity?.rules || []);
 
     if (pins.length === 0) {
       listPinsData = [];
@@ -1189,6 +1222,412 @@ async function showList(list) {
   }
 }
 
+
+// ─── Rules section ──────────────────────────────────────────────────
+
+function ruleDescription(rule) {
+  const c = rule.config || {};
+  if (rule.type === 'keyword') {
+    const fields = c.fields || ['title', 'url'];
+    return `${c.pattern || ''} (${fields.join(', ')})`;
+  } else if (rule.type === 'semantic') {
+    const t = c.threshold != null ? c.threshold : 0.5;
+    return `${c.description || '(no description)'} (≥${t.toFixed(2)})`;
+  } else if (rule.type === 'smart') {
+    return c.description || '(custom function)';
+  }
+  return rule.type || 'unknown';
+}
+
+function renderRulesSection(listId, rules) {
+  const section = document.getElementById('rulesSection');
+  const countBadge = document.getElementById('rulesCount');
+  const runBtn = document.getElementById('rulesRunBtn');
+
+  // Only show for non-system lists
+  if (listId.startsWith('system/')) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+
+  if (rules.length > 0) {
+    countBadge.textContent = rules.length;
+    countBadge.style.display = '';
+    runBtn.style.display = '';
+  } else {
+    countBadge.style.display = 'none';
+    runBtn.style.display = 'none';
+  }
+
+  renderRulesList(listId, rules);
+}
+
+function renderRulesList(listId, rules) {
+  const container = document.getElementById('rulesList');
+  if (rules.length === 0) {
+    container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:2px 0">No rules</div>';
+    return;
+  }
+  container.innerHTML = rules.map(rule =>
+    `<div class="rule-entry" data-rule-id="${escapeHtml(rule.id)}">
+      <span class="rule-type-badge rule-type-${escapeHtml(rule.type)}">${escapeHtml(rule.type)}</span>
+      <span class="rule-desc">${escapeHtml(ruleDescription(rule))}</span>
+      <button class="rule-remove" title="Remove rule">&times;</button>
+    </div>`
+  ).join('');
+
+  container.querySelectorAll('.rule-remove').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const entry = btn.closest('.rule-entry');
+      const ruleId = entry.dataset.ruleId;
+      try {
+        await sendAction({ action: 'removeRule', listId, ruleId });
+      } catch (err) {
+        showErrorBubble('Failed to remove rule: ' + err.message);
+      }
+    });
+  });
+}
+
+async function refreshRulesForActiveList() {
+  if (activeView.type !== 'list') return;
+  const listId = activeView.id;
+  const listEntity = await readCacheable('list:' + listId);
+  renderRulesSection(listId, listEntity?.rules || []);
+}
+
+function resetRulesForm() {
+  document.getElementById('rulesAddForm').style.display = 'none';
+  document.getElementById('rulesAddRow').style.display = '';
+  document.getElementById('rulesFormError').style.display = 'none';
+  document.getElementById('rulePatternInput').value = '';
+  document.getElementById('ruleFieldTitle').checked = true;
+  document.getElementById('ruleFieldUrl').checked = true;
+  document.getElementById('ruleCaseSensitive').checked = false;
+  document.getElementById('ruleSemanticInput').value = '';
+  document.getElementById('ruleSemanticThreshold').value = 50;
+  document.getElementById('ruleSemanticThresholdVal').textContent = '0.50';
+  document.getElementById('ruleSmartDescInput').value = '';
+  document.getElementById('ruleSmartFnInput').value = '';
+  // Reset type toggle to keyword
+  document.querySelectorAll('#ruleTypeToggle .rules-tri-toggle-zone').forEach(z => z.classList.remove('active'));
+  document.querySelector('#ruleTypeToggle [data-type="keyword"]').classList.add('active');
+  document.getElementById('rulesFormKeyword').style.display = '';
+  document.getElementById('rulesFormSemantic').style.display = 'none';
+  document.getElementById('rulesFormSmart').style.display = 'none';
+  document.getElementById('rulesPreview').style.display = 'none';
+  document.getElementById('rulesPinsPreview').style.display = 'none';
+  previewResults = [];
+  previewPinsResults = [];
+}
+
+/** Build a rule object from the current form state. Returns { rule } or { error }. */
+function buildRuleFromForm() {
+  const activeType = document.querySelector('#ruleTypeToggle .rules-tri-toggle-zone.active')?.dataset.type || 'keyword';
+  if (activeType === 'keyword') {
+    const pattern = document.getElementById('rulePatternInput').value.trim();
+    if (!pattern) return { error: 'Pattern is required' };
+    const fields = [];
+    if (document.getElementById('ruleFieldTitle').checked) fields.push('title');
+    if (document.getElementById('ruleFieldUrl').checked) fields.push('url');
+    if (fields.length === 0) return { error: 'Select at least one field' };
+    return { rule: { type: 'keyword', config: { pattern, fields, caseSensitive: document.getElementById('ruleCaseSensitive').checked } } };
+  } else if (activeType === 'semantic') {
+    const description = document.getElementById('ruleSemanticInput').value.trim();
+    if (!description) return { error: 'Description is required' };
+    const threshold = parseInt(document.getElementById('ruleSemanticThreshold').value, 10) / 100;
+    return { rule: { type: 'semantic', config: { description, threshold } } };
+  } else if (activeType === 'smart') {
+    const description = document.getElementById('ruleSmartDescInput').value.trim();
+    const fnSource = document.getElementById('ruleSmartFnInput').value.trim();
+    if (!fnSource) return { error: 'Function body is required' };
+    return { rule: { type: 'smart', config: { description: description || '(custom)', fnSource } } };
+  }
+  return { error: 'Unknown rule type' };
+}
+
+// Shared preview results for threshold re-rendering
+let previewResults = [];
+let previewPinsResults = [];
+
+function getPreviewThreshold() {
+  const activeType = document.querySelector('#ruleTypeToggle .rules-tri-toggle-zone.active')?.dataset.type;
+  return activeType === 'semantic'
+    ? parseInt(document.getElementById('ruleSemanticThreshold').value, 10) / 100
+    : 0.5;
+}
+
+function renderPreviewSection(results, listEl, countEl) {
+  const threshold = getPreviewThreshold();
+  const sorted = [...results].sort((a, b) => b.score - a.score);
+  const matchCount = sorted.filter(r => r.score >= threshold).length;
+  countEl.textContent = `${matchCount} matches (${sorted.length} checked)`;
+  listEl.innerHTML = sorted.map(r => {
+    const isMatch = r.score >= threshold;
+    const scoreClass = isMatch ? 'rules-preview-score-match' : 'rules-preview-score-miss';
+    return `<div class="rules-preview-item">
+      <span class="rules-preview-title">${escapeHtml(r.title || r.url)}</span>
+      <span class="rules-preview-score ${scoreClass}">${r.score.toFixed(2)}</span>
+    </div>`;
+  }).join('');
+}
+
+function rerenderPreviewWithThreshold() {
+  if (previewResults.length > 0) {
+    renderPreviewSection(previewResults,
+      document.getElementById('rulesPreviewList'),
+      document.getElementById('rulesPreviewCount'));
+  }
+  if (previewPinsResults.length > 0) {
+    renderPreviewSection(previewPinsResults,
+      document.getElementById('rulesPinsPreviewList'),
+      document.getElementById('rulesPinsPreviewCount'));
+  }
+}
+
+function initRulesPanel() {
+  // Header toggle expand/collapse
+  document.getElementById('rulesHeader').addEventListener('click', (e) => {
+    // Don't toggle when clicking the run button
+    if (e.target.closest('#rulesRunBtn')) return;
+    const body = document.getElementById('rulesBody');
+    const icon = document.getElementById('rulesToggleIcon');
+    const isExpanded = body.style.display !== 'none';
+    body.style.display = isExpanded ? 'none' : '';
+    icon.classList.toggle('expanded', !isExpanded);
+  });
+
+  // Type toggle
+  document.getElementById('ruleTypeToggle').addEventListener('click', (e) => {
+    const zone = e.target.closest('.rules-tri-toggle-zone');
+    if (!zone) return;
+    document.querySelectorAll('#ruleTypeToggle .rules-tri-toggle-zone').forEach(z => z.classList.remove('active'));
+    zone.classList.add('active');
+    const type = zone.dataset.type;
+    document.getElementById('rulesFormKeyword').style.display = type === 'keyword' ? '' : 'none';
+    document.getElementById('rulesFormSemantic').style.display = type === 'semantic' ? '' : 'none';
+    document.getElementById('rulesFormSmart').style.display = type === 'smart' ? '' : 'none';
+  });
+
+  // Threshold slider — update label + re-render preview with new threshold
+  document.getElementById('ruleSemanticThreshold').addEventListener('input', (e) => {
+    document.getElementById('ruleSemanticThresholdVal').textContent = (e.target.value / 100).toFixed(2);
+    rerenderPreviewWithThreshold();
+  });
+
+  // Add button → show form
+  document.getElementById('rulesAddBtn').addEventListener('click', () => {
+    resetRulesForm();
+    document.getElementById('rulesAddForm').style.display = '';
+    document.getElementById('rulesAddRow').style.display = 'none';
+  });
+
+  // Cancel button
+  document.getElementById('rulesCancelBtn').addEventListener('click', () => {
+    resetRulesForm();
+  });
+
+  // Save button
+  document.getElementById('rulesSaveBtn').addEventListener('click', async () => {
+    const errorEl = document.getElementById('rulesFormError');
+    errorEl.style.display = 'none';
+    const listId = activeView.id;
+    if (!listId || activeView.type !== 'list') return;
+
+    const built = buildRuleFromForm();
+    if (built.error) {
+      errorEl.textContent = built.error;
+      errorEl.style.display = '';
+      return;
+    }
+    const rule = built.rule;
+
+    try {
+      await sendAction({ action: 'addRule', listId, rule });
+      resetRulesForm();
+    } catch (err) {
+      errorEl.textContent = err.message;
+      errorEl.style.display = '';
+    }
+  });
+
+  // Preview button — progressive batched checking
+  document.getElementById('rulesPreviewBtn').addEventListener('click', async () => {
+    const MAX_CHECKED = 100;
+    const MAX_MATCHES = 20;
+    const BATCH_SIZE = 20;
+
+    const errorEl = document.getElementById('rulesFormError');
+    const previewEl = document.getElementById('rulesPreview');
+    const previewListEl = document.getElementById('rulesPreviewList');
+    const previewCountEl = document.getElementById('rulesPreviewCount');
+    const pinsPreviewEl = document.getElementById('rulesPinsPreview');
+    const pinsPreviewListEl = document.getElementById('rulesPinsPreviewList');
+    errorEl.style.display = 'none';
+    previewEl.style.display = 'none';
+    previewListEl.innerHTML = '';
+    pinsPreviewEl.style.display = 'none';
+    pinsPreviewListEl.innerHTML = '';
+
+    const built = buildRuleFromForm();
+    if (built.error) {
+      errorEl.textContent = built.error;
+      errorEl.style.display = '';
+      return;
+    }
+
+    const previewBtn = document.getElementById('rulesPreviewBtn');
+    previewBtn.disabled = true;
+    previewBtn.textContent = 'Running…';
+    previewEl.style.display = '';
+
+    previewResults = [];
+    previewPinsResults = [];
+    let matchCount = 0;
+    let checked = 0;
+    const seenUrls = new Set();
+
+    function renderResults() {
+      rerenderPreviewWithThreshold();
+    }
+
+    try {
+      // Collect visits from recent days, going backward
+      const today = new Date();
+      for (let dayOffset = 0; dayOffset < 30; dayOffset++) {
+        if (checked >= MAX_CHECKED || matchCount >= MAX_MATCHES) break;
+        const d = new Date(today);
+        d.setDate(d.getDate() - dayOffset);
+        const dateKey = d.toISOString().slice(0, 10);
+        const dayEntries = await readCacheable('log:' + dateKey) || [];
+        const visits = dayEntries
+          .filter(e => e.action === 'visit_page' && e.url && e.title && !seenUrls.has(e.url))
+          .reverse(); // most recent first within the day
+        // Deduplicate
+        const uniqueVisits = [];
+        for (const v of visits) {
+          if (!seenUrls.has(v.url)) {
+            seenUrls.add(v.url);
+            uniqueVisits.push(v);
+          }
+        }
+        if (uniqueVisits.length === 0) continue;
+
+        // Send in batches
+        for (let i = 0; i < uniqueVisits.length; i += BATCH_SIZE) {
+          if (checked >= MAX_CHECKED || matchCount >= MAX_MATCHES) break;
+          const remaining = Math.min(BATCH_SIZE, MAX_CHECKED - checked);
+          const batch = uniqueVisits.slice(i, i + remaining);
+          // Ensure each entry has bodyPreview — fetch on-the-fly if missing
+          const bodies = await Promise.all(batch.map(e =>
+            e.bodyPreview ? Promise.resolve(e.bodyPreview) : fetchPageBody(e.url)
+          ));
+          // Only include entries where body was successfully obtained
+          const entries = [];
+          for (let j = 0; j < batch.length; j++) {
+            if (!bodies[j]) continue; // skip pages where fetch failed
+            entries.push({
+              timestamp: batch[j].timestamp, action: batch[j].action, url: batch[j].url,
+              title: batch[j].title || '', bodyPreview: bodies[j],
+            });
+          }
+          if (entries.length === 0) continue;
+          const resp = await sendAction({ action: 'previewRule', rule: built.rule, entries });
+          for (const r of resp.results || []) {
+            previewResults.push(r);
+            checked++;
+            if (r.match) matchCount++;
+          }
+          renderResults();
+        }
+      }
+      // Final render for history section
+      if (checked === 0) {
+        previewCountEl.textContent = '';
+        previewListEl.innerHTML = '<div class="rules-preview-empty">No visits found to match against</div>';
+      } else {
+        renderResults();
+      }
+
+      // ── Pass 2: Pinned pages in this list ──
+      const listId = activeView.id;
+      if (listId && activeView.type === 'list') {
+        const listEntity = await readCacheable('list:' + listId);
+        const pins = listEntity?.pins || [];
+        if (pins.length > 0) {
+          pinsPreviewEl.style.display = '';
+          const pinEntries = [];
+          for (const pin of pins) {
+            const pageKey = pin.id; // 'page:<slug>'
+            const page = await readCacheable(pageKey);
+            if (!page?.url) continue;
+            const title = page.user_title || page.title || '';
+            if (!title) continue;
+            const body = await fetchPageBody(page.url);
+            if (!body) continue;
+            pinEntries.push({ url: page.url, title, bodyPreview: body });
+          }
+          if (pinEntries.length > 0) {
+            const resp = await sendAction({ action: 'previewRule', rule: built.rule, entries: pinEntries });
+            previewPinsResults = resp.results || [];
+            rerenderPreviewWithThreshold();
+          } else {
+            document.getElementById('rulesPinsPreviewCount').textContent = '';
+            pinsPreviewListEl.innerHTML = '<div class="rules-preview-empty">No pinned pages with fetchable content</div>';
+          }
+        }
+      }
+    } catch (err) {
+      previewEl.style.display = 'none';
+      pinsPreviewEl.style.display = 'none';
+      errorEl.textContent = err.message;
+      errorEl.style.display = '';
+    } finally {
+      previewBtn.disabled = false;
+      previewBtn.textContent = 'Preview';
+    }
+  });
+
+  // Run button
+  document.getElementById('rulesRunBtn').addEventListener('click', async () => {
+    if (activeView.type !== 'list') return;
+    const listId = activeView.id;
+    const runBtn = document.getElementById('rulesRunBtn');
+    runBtn.disabled = true;
+    runBtn.textContent = 'Running…';
+    try {
+      const todayKey = new Date().toISOString().slice(0, 10);
+      const todayEntries = await readCacheable('log:' + todayKey) || [];
+      const visits = todayEntries.filter(e => e.action === 'visit_page' && e.url);
+      if (visits.length === 0) {
+        showInfoBubble('No visits today to match');
+        return;
+      }
+      // Fetch bodyPreview on-the-fly for entries missing it
+      const bodies = await Promise.all(visits.map(e =>
+        e.bodyPreview ? Promise.resolve(e.bodyPreview) : fetchPageBody(e.url)
+      ));
+      const entries = [];
+      for (let j = 0; j < visits.length; j++) {
+        entries.push({
+          timestamp: visits[j].timestamp, action: visits[j].action, url: visits[j].url,
+          title: visits[j].title || '', bodyPreview: bodies[j] || '',
+        });
+      }
+      const resp = await sendAction({ action: 'runRuleBatch', listIds: [listId], entries });
+      const results = resp.results || [];
+      const matched = results.reduce((n, r) => n + (r.matches?.length || 0), 0);
+      showInfoBubble(matched > 0 ? `Matched ${matched} page${matched !== 1 ? 's' : ''}` : 'No matches');
+    } catch (err) {
+      showErrorBubble('Run rules failed: ' + err.message);
+    } finally {
+      runBtn.disabled = false;
+      runBtn.textContent = 'Run';
+    }
+  });
+}
 
 // Module-level storage for list pin data (used by search filtering)
 let listPinsData = [];
@@ -1212,8 +1651,8 @@ function runActiveSearchPipeline() {
   }
 }
 
-// Filter list pins by current queries + draft input
-function runListPinFilter() {
+// Filter list pins by current queries + draft input, then apply filters
+async function runListPinFilter() {
   const allQueries = [...savedSearches];
   if (currentSearchInput.trim()) allQueries.push(currentSearchInput.trim());
 
@@ -1228,6 +1667,13 @@ function runListPinFilter() {
       });
     });
   }
+
+  // Apply structured filters (same as explore)
+  if (!isDefaultFilterState(filterState)) {
+    await enrichForFilters(filtered);
+  }
+  filtered = await applyFilters(filtered);
+
   renderFilteredPins(filtered, listPinsListId, allQueries.join(' '));
 }
 
@@ -1249,6 +1695,7 @@ function renderFilteredPins(pins, listId, searchQuery) {
 
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = '';
+  vs.onLoadMore = null; // Clear stale explore demand-loader
   vs.updateData(sorted, (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
       pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
@@ -1570,7 +2017,10 @@ function bindPageNoteHandler(container, url) {
       const pageSlug = textarea.dataset.pageSlug;
       try {
         if (noteSlug) {
-          await sendAction({ action: 'updateNote', noteSlug, note });
+          const unResp = await sendAction({ action: 'updateNote', noteSlug, note });
+          if (unResp?.noteSlug && unResp.noteSlug !== noteSlug) {
+            textarea.dataset.noteSlug = unResp.noteSlug;
+          }
         } else if (note) {
           const resp = await sendAction({ action: 'createNote', pageSlug, url, excerpt: null, note, cssPath: null });
           if (resp?.noteSlug) {
@@ -2191,15 +2641,19 @@ function createSidebarItem(node, depth) {
         if (!allListPins[lst.slug]) allListPins[lst.slug] = [];
         const pins = allListPins[lst.slug];
         const newUrls = [];
-        for (const { url } of items) {
+        const titles = {};
+        for (const { url, title } of items) {
           const pinId = 'page:' + generateSlugFromUrl(url);
           if (url && !pins.some(p => p.id === pinId)) {
             pins.push({ id: pinId, pinnedAt: Date.now() });
             newUrls.push(url);
+            if (title) titles[url] = title;
           }
         }
         if (newUrls.length > 0) {
-          await chrome.runtime.sendMessage({ action: 'addListPins', listId: lst.slug, urls: newUrls });
+          const msg = { action: 'addListPins', listId: lst.slug, urls: newUrls };
+          if (Object.keys(titles).length > 0) msg.titles = titles;
+          await chrome.runtime.sendMessage(msg);
           if (activeView.type === 'list' && activeView.id === lst.slug) {
             showList(lst);
           }
@@ -2799,6 +3253,11 @@ chrome.runtime.onMessage.addListener((request) => {
     // Note created/deleted — invalidate cached notes and refresh view
   
     refreshCurrentView();
+  } else if (type === 'rules') {
+    // Rules changed — refresh rules panel if viewing the affected list
+    if (activeView.type === 'list' && request.listId === activeView.id) {
+      refreshRulesForActiveList();
+    }
   } else if (type === 'orphaned') {
     // Orphaned list changed — refresh recycle bin if active, update badge
     updateRecycleBinBadge();
@@ -2868,26 +3327,41 @@ function renderSearchPanel() {
   }
   html += '<div class="search-draft">';
   html += `<input type="text" class="search-draft-input" id="searchDraftInput" placeholder="${placeholder}" value="${escapeHtml(currentSearchInput)}">`;
-  if (isExplore) {
-    html += `<button class="filter-toggle-btn${filterVisible ? ' active' : ''}${!isDefaultFilterState(filterState) ? ' has-filters' : ''}" id="filterToggleBtn" title="Filters">${filterSvg}</button>`;
-  }
+  html += `<button class="filter-toggle-btn${filterVisible ? ' active' : ''}${!isDefaultFilterState(filterState) ? ' has-filters' : ''}" id="filterToggleBtn" title="Filters">${filterSvg}</button>`;
   html += '</div>';
 
-  if (isExplore) {
-    html += `<div class="filter-panel" id="filterPanel" style="display:${filterVisible ? 'block' : 'none'}">`;
-    html += renderFilterPanelHtml();
-    html += '</div>';
-  }
+  html += `<div class="filter-panel" id="filterPanel" style="display:${filterVisible ? 'flex' : 'none'}">`;
+  html += renderFilterPanelHtml();
+  html += '</div>';
 
   html += '</div>';
 
   container.innerHTML = html;
   bindSearchEvents(container);
-  if (isExplore && filterVisible) bindFilterEvents(container);
+  if (filterVisible) bindFilterEvents(container);
 }
 
 function renderFilterPanelHtml() {
   let html = '';
+  const isListView = activeView.type === 'list';
+
+  // Sort toggle (list view only)
+  if (isListView) {
+    const sortOptions = [
+      { key: 'lastVisit', label: 'Last visit' },
+      { key: 'firstVisit', label: 'First visit' },
+      { key: 'pinTime', label: 'Pin time' },
+      { key: 'title', label: 'Title' },
+      { key: 'totalVisits', label: 'Visits' },
+    ];
+    const currentSort = relatedSortState.column || 'lastVisit';
+    html += '<div class="filter-section"><div class="filter-section-label">Sort by</div>';
+    html += '<div class="sort-toggle">';
+    for (const opt of sortOptions) {
+      html += `<button class="sort-toggle-option${currentSort === opt.key ? ' active' : ''}" data-sort="${opt.key}">${escapeHtml(opt.label)}</button>`;
+    }
+    html += '</div></div>';
+  }
 
   // List membership bubbles
   const lists = collectFilterLists();
@@ -3045,7 +3519,7 @@ function bindSearchEvents(container) {
       filterVisible = !filterVisible;
       const panel = container.querySelector('#filterPanel');
       if (panel) {
-        panel.style.display = filterVisible ? 'block' : 'none';
+        panel.style.display = filterVisible ? 'flex' : 'none';
         filterBtn.classList.toggle('active', filterVisible);
         if (filterVisible) bindFilterEvents(container);
       }
@@ -3054,6 +3528,24 @@ function bindSearchEvents(container) {
 }
 
 function bindFilterEvents(container) {
+  // Sort toggle (list view)
+  container.querySelectorAll('.sort-toggle-option').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sortKey = btn.dataset.sort;
+      // Toggle direction if clicking the already-active sort
+      if (relatedSortState.column === sortKey) {
+        relatedSortState.direction = relatedSortState.direction === 'desc' ? 'asc' : 'desc';
+      } else {
+        relatedSortState.column = sortKey;
+        relatedSortState.direction = sortKey === 'title' ? 'asc' : 'desc';
+      }
+      // Update active class
+      container.querySelectorAll('.sort-toggle-option').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      runActiveSearchPipeline();
+    });
+  });
+
   // Dual-range sliders
   container.querySelectorAll('.filter-range-lo, .filter-range-hi').forEach(input => {
     input.addEventListener('input', () => {
@@ -3461,6 +3953,7 @@ async function initialize() {
   renderLists().catch(err => showFatalError(err.message));
   renderBlacklist();
   renderTrimRules();
+  initRulesPanel();
   _timer('renderSidebar (fire-and-forget)');
 
   // Load metadata (history is demand-loaded in showCategory, pins loaded per-list)

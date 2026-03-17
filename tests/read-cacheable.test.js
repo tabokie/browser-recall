@@ -345,7 +345,7 @@ describe('background.js toggleListPin resolves pin ID', () => {
     // Extract a larger chunk since case block has nested break statements
     const startIdx = bgSource.indexOf("case 'toggleListPin'");
     expect(startIdx).toBeGreaterThan(-1);
-    const handler = bgSource.substring(startIdx, startIdx + 1500);
+    const handler = bgSource.substring(startIdx, startIdx + 2000);
     // Should use getListParentsAndName to resolve list name and addLog to write pin action
     expect(handler).toMatch(/getListParentsAndName/);
     expect(handler).toMatch(/addLog/);

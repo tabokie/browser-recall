@@ -2,6 +2,7 @@
 // Imported by both background.js (cache-miss replay) and offscreen.js (checkpoint).
 // Each function is idempotent — safe to replay the same entry twice.
 import { generateSlugFromUrl, isGatewayOriginFromPins } from './utils.js';
+import { generateRuleId } from './rule-engine.js';
 
 const REFERRER_CAP = 50;
 
@@ -59,7 +60,7 @@ export function defaultEntity(key) {
   if (key === 'manifest:name-to-id') return { timestamp: 0, paths: {} };
   if (key.startsWith('list:')) {
     const slug = key.slice('list:'.length);
-    return { timestamp: 0, slug, name: '', pins: [], parentList: null, childLists: [] };
+    return { timestamp: 0, slug, name: '', pins: [], rules: [], parentList: null, childLists: [] };
   }
   return null;
 }
@@ -153,12 +154,13 @@ export async function effectOf(entry, load) {
    * Used by explicit user actions (pin, rate, snapshot, note, rename) that
    * require an entity to exist.
    */
-  async function ensurePageEntity(url, ts) {
+  async function ensurePageEntity(url, ts, title) {
     const slug = generateSlugFromUrl(url);
     const pageKey = PAGE_PREFIX + slug;
     let page = result[pageKey] !== undefined ? result[pageKey] : await load(pageKey);
     if (!page) {
       page = { ...defaultEntity(pageKey), url };
+      if (title) page.title = title;
     }
     result[pageKey] = page;
     return { pageKey, page };
@@ -271,7 +273,7 @@ export async function effectOf(entry, load) {
   // --- rate_page ---
   // Like/dislike. Creates entity if missing (explicit user action).
   if (entry.action === 'rate_page') {
-    const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp);
+    const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp, entry.title);
     const page = result[pageKey];
     const prevTimestamp = page.timestamp || 0;
     const updated = { ...page, timestamp: entry.timestamp };
@@ -289,7 +291,7 @@ export async function effectOf(entry, load) {
   // Creates entity if missing (explicit user action).
   // entry.path is the stem: "snapshots/<slug>-<ts>"
   if (entry.action === 'create_snapshot') {
-    const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp);
+    const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp, entry.title);
     const page = result[pageKey];
     const updated = { ...page, timestamp: entry.timestamp };
 
@@ -309,7 +311,7 @@ export async function effectOf(entry, load) {
   if (entry.action === 'create_note') {
     const slug = generateSlugFromUrl(entry.url);
     const pageKey = PAGE_PREFIX + slug;
-    await ensurePageEntity(entry.url, entry.timestamp);
+    await ensurePageEntity(entry.url, entry.timestamp, entry.title);
 
     // Derive note slug from path: "notes/<slug>.json" → "<slug>"
     const noteSlug = entry.path.slice('notes/'.length, -'.json'.length);
@@ -401,6 +403,59 @@ export async function effectOf(entry, load) {
     return result;
   }
 
+  // --- replace_note ---
+  // Immutable note edit: creates new note entity, orphans old one.
+  // entry.path: "notes/<new-slug>.json", entry.oldPath: "notes/<old-slug>.json"
+  if (entry.action === 'replace_note') {
+    const oldNoteSlug = entry.oldPath.slice('notes/'.length, -'.json'.length);
+    const oldNoteKey = `${NOTE_PREFIX}${oldNoteSlug}`;
+    const newNoteSlug = entry.path.slice('notes/'.length, -'.json'.length);
+    const newNoteKey = `${NOTE_PREFIX}${newNoteSlug}`;
+
+    // Load old note; noop if already deleted
+    const oldNote = await loadOrDefault(oldNoteKey, load, { includeDeleted: true });
+    if (oldNote.deleted) return result;
+
+    // Unlink old note from parent pages (derived from entity, same pattern as delete_note)
+    const pageParents = (oldNote.parentIds || []).filter(p => p.startsWith(PAGE_PREFIX));
+    await unlinkChild(oldNoteKey, pageParents);
+
+    // Link new note to same parent pages
+    await linkChild(newNoteKey, pageParents);
+
+    // Transfer list pins: replace old note with new note in each list
+    const listParents = (oldNote.parentIds || []).filter(p => p.startsWith('list:') && !p.startsWith('list:system/'));
+    for (const lk of listParents) {
+      const list = result[lk] !== undefined ? result[lk] : await load(lk);
+      if (!list) continue;
+      const pins = (list.pins || []).map(p =>
+        p.id === oldNoteKey ? { ...p, id: newNoteKey } : p
+      );
+      result[lk] = { ...list, pins };
+    }
+
+    // Set up new note's parentIds (inheriting from old)
+    const newNote = result[newNoteKey] !== undefined ? result[newNoteKey] : await load(newNoteKey);
+    const newParentIds = [...(oldNote.parentIds || [])];
+    if (newNote) {
+      result[newNoteKey] = { ...newNote, parentIds: newParentIds };
+    } else {
+      result[newNoteKey] = { ...defaultEntity(newNoteKey), parentIds: newParentIds };
+    }
+
+    // Mark old note as replaced + orphan
+    result[oldNoteKey] = {
+      ...oldNote,
+      deleted: true,
+      deletionReason: 'replaced',
+      replacedBy: newNoteKey,
+      timestamp: entry.timestamp,
+    };
+    await orphan(oldNoteKey, entry.timestamp);
+
+    return result;
+  }
+
   // --- pin_to_list ---
   // Add items to a list. Items are URLs (for pages) or "notes/<slug>.json" paths (for notes).
   if (entry.action === 'pin_to_list') {
@@ -426,7 +481,7 @@ export async function effectOf(entry, load) {
       } else {
         const slug = generateSlugFromUrl(item);
         const pageKey = PAGE_PREFIX + slug;
-        await ensurePageEntity(item, entry.timestamp);
+        await ensurePageEntity(item, entry.timestamp, entry.titles?.[item]);
         pinId = pageKey;
       }
 
@@ -503,6 +558,72 @@ export async function effectOf(entry, load) {
       }
     }
 
+    return result;
+  }
+
+  // --- add_rule ---
+  // Add a matching rule to a list.
+  if (entry.action === 'add_rule') {
+    const listKey = await resolveListKey(entry.parents, entry.name);
+    if (!listKey) return result;
+
+    if (!listKey.startsWith('list:system/')) {
+      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
+      if ((orphanedEntity.keys || []).includes(listKey)) return result;
+    }
+
+    const entity = await loadOrDefault(listKey, load);
+    const rules = [...(entity.rules || [])];
+    const ruleId = entry.rule.id || generateRuleId(entry.rule.type, entry.timestamp);
+
+    // Idempotent: skip if rule with same ID already exists
+    if (!rules.some(r => r.id === ruleId)) {
+      rules.push({
+        id: ruleId,
+        type: entry.rule.type,
+        config: entry.rule.config,
+        createdAt: entry.timestamp,
+      });
+    }
+
+    result[listKey] = { ...entity, rules, timestamp: entry.timestamp };
+    return result;
+  }
+
+  // --- remove_rule ---
+  // Remove a matching rule from a list by ID.
+  if (entry.action === 'remove_rule') {
+    const listKey = await resolveListKey(entry.parents, entry.name);
+    if (!listKey) return result;
+
+    if (!listKey.startsWith('list:system/')) {
+      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
+      if ((orphanedEntity.keys || []).includes(listKey)) return result;
+    }
+
+    const entity = await loadOrDefault(listKey, load);
+    const rules = (entity.rules || []).filter(r => r.id !== entry.ruleId);
+    result[listKey] = { ...entity, rules, timestamp: entry.timestamp };
+    return result;
+  }
+
+  // --- update_rule ---
+  // Update config of an existing rule by ID (merges config fields).
+  if (entry.action === 'update_rule') {
+    const listKey = await resolveListKey(entry.parents, entry.name);
+    if (!listKey) return result;
+
+    if (!listKey.startsWith('list:system/')) {
+      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
+      if ((orphanedEntity.keys || []).includes(listKey)) return result;
+    }
+
+    const entity = await loadOrDefault(listKey, load);
+    const rules = (entity.rules || []).map(r => {
+      if (r.id !== entry.ruleId) return r;
+      return { ...r, config: { ...r.config, ...entry.config } };
+    });
+    result[listKey] = { ...entity, rules, timestamp: entry.timestamp };
     return result;
   }
 

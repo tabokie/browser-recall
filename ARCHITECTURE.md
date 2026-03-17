@@ -164,6 +164,9 @@ Used internally in: `page.parentIds`, `page.childIds`, `note.parentIds`, list pi
 | **popup.js** | Current-page dashboard UI | `chrome.runtime.sendMessage`, `chrome.tabs.query` |
 | **options.js** | Full UI: search, explore, lists, settings | `chrome.runtime.sendMessage`, `chrome.storage.session` (transient UI state) |
 | **replay.js** | Pure event replay functions (no chrome APIs) | None |
+| **rule-engine.js** | Pure rule matching (keyword/semantic/smart), validation, ID generation | None |
+| **semantic-engine.js** | MiniLM-L6-v2 embeddings via HuggingFace transformers (offscreen only) | CDN import |
+| **smart-rule-sandbox.js** | Sandboxed JS execution for smart rules (manifest sandbox page) | `new Function` (via unsafe-eval CSP) |
 | **utils.js** | Shared utilities, `readCacheable`, `sendAction` | `chrome.runtime.sendMessage`, `chrome.storage.session` (cache read) |
 | **entity-cache.js** | Session cache with LRU eviction | `chrome.storage.session` |
 | **filesystem-storage.js** | File System Access API wrapper | File System Access, IndexedDB |
@@ -206,6 +209,57 @@ Two invariants ensure `readCacheable('page:*')` / `readCacheable('note:*')` / et
 
 These bypass the background→offscreen pipeline. The tradeoff is acceptable because (a) the WASM search is read-only and operates on immutable JSONL history files, (b) directory picker is a one-time setup action, (c) diagnostics are developer-facing.
 
+## Rules (Materialized Search Rules)
+
+### Design
+
+Lists can have **rules** that automatically pin matching pages. Rules are event-sourced via `add_rule`, `remove_rule`, `update_rule` log actions. Three rule types:
+
+| Type | Matching | Implementation |
+|------|----------|---------------|
+| **keyword** | Substring or `/regex/` match on title/url | Pure function in `rule-engine.js` |
+| **semantic** | Cosine similarity of MiniLM-L6-v2 embeddings | Offscreen: `semantic-engine.js` (lazy model load, ~22.8MB cached via CDN) |
+| **smart** | User-written JS function `(page) => score` | Offscreen → sandbox iframe (`smart-rule-sandbox.html`, manifest `sandbox` key for `unsafe-eval` CSP) |
+
+### Data Model
+
+List entity gains `rules: []` array. Each rule: `{ id, type, config, createdAt }`. Rule IDs: `rule-<type[0]>-<base36_ts>-<4char_hash>`.
+
+### Page Body Text (`bodyPreview`)
+
+content.js captures the first 200 words of `document.body.innerText` at visit time and sends it as `bodyPreview` in the `reportPage` message. background.js stores it in the `visit_page` JSONL entry. This enriches rule matching with page content beyond title/URL. The word limit is defined as `BODY_WORD_LIMIT` in `utils.js` (canonical) and duplicated in `content.js` (non-module, can't import).
+
+For keyword rules, `matchKeywordRule` automatically checks `body` when present in `pageData`. For semantic rules, `matchRules` embeds `title + body` (falls back to `title + url` when body unavailable). For smart rules, `page.body` is accessible to user functions.
+
+### Execution Flow
+
+**Batch matching** (`runRuleBatch` handler in background.js):
+1. Collect lists with non-empty `rules[]`
+2. For each list × entry: build `pageData` (incl. `body` from `bodyPreview`) → call `matchRules()` with offscreen-routed embedder/sandbox closures
+3. Auto-pin matching pages via `addLog({ action: 'pin_to_list' })`
+
+**Preview** (`previewRule` handler in background.js):
+- Dry-run matching without side effects. Uses `matchRules` with `allScores: true` to return raw scores for all entries (not just above-threshold matches).
+- For semantic rules, page embeddings are cached in `chrome.storage.session` under `previewEmbeddingCache` (URL → Array). Each preview rebuilds the cache from current candidates (bounded size). Changing the query only recomputes the query embedding; cached page embeddings are reused.
+
+**Semantic embedding**: background → offscreen port `generateEmbedding` → `semantic-engine.js` (lazy singleton pipeline). Embedding stored in rule config at creation time. Library vendored locally (`extension/vendor/transformers.min.js` + `ort-wasm-simd-threaded.jsep.mjs`); WASM binary fetched from CDN at runtime. `semantic-engine.js` sets `wasmPaths = './'` for local `.mjs` import and pre-fetches the `.wasm` via `fetch()` (not blocked by CSP) into `wasmBinary`.
+
+**Smart sandbox**: background → offscreen port `executeSandboxFn` → sandbox iframe `postMessage` → `new Function('page', fnSource)(pageData)` → result clamped 0-1. 5s timeout.
+
+### Security
+
+Smart rule functions are validated by `validateSmartRuleFn()` before storage: word-boundary regex scan for 16 banned globals (fetch, chrome, window, document, navigator, globalThis, eval, Function, setTimeout, setInterval, WebSocket, Worker, localStorage, sessionStorage, indexedDB, importScripts). Max 10KB source. Execution is sandboxed in a manifest-declared sandbox page (separate origin, no extension API access).
+
+### UI (Options Page)
+
+Rules section is a collapsible glass panel inside `#listLayout`, between the header and `#listQueryBuilder`. Hidden for system lists (`system/*`). Shows rule count badge and Run button when rules exist.
+
+- **Rendering**: `renderRulesSection(listId, rules)` shows/hides section + count badge; `renderRulesList()` renders entries with type badges (keyword=orange, semantic=blue, smart=green) + remove buttons following `blacklist-entry` pattern.
+- **Inline add form**: type tri-toggle switches between keyword (pattern + field checkboxes), semantic (description + threshold slider), smart (description + function textarea). Saves via `sendAction('addRule', ...)` with `{ type, config: {...} }` shape.
+- **Preview button**: two-pass check — (1) recent visits from history (progressive batched, up to 100 checked / 20 matches), (2) all pinned pages in the current list. Entries missing `bodyPreview` are fetched on-the-fly via `fetchPageBody()` in options.js. Shows all results with green (match) / red (miss) score coloring. Threshold slider re-renders scores client-side without re-running matching.
+- **Run button**: reads today's `visit_page` history, fetches `bodyPreview` on-the-fly for entries missing it, calls `runRuleBatch`, shows match count.
+- **Mutation handler**: `type === 'rules'` mutation refreshes rules panel for the affected list via `refreshRulesForActiveList()`.
+
 ## Deletion
 
 ### Design: Unlink + Orphan (No Physical File Moves)
@@ -233,6 +287,16 @@ This design exists because of the event-sourced architecture. The JSONL history 
 4. Adds `list:<id>` to `manifest/orphaned.json`
 5. Removes list and descendants from `manifest/list-name-to-id.json`
 6. File `lists/<id>.json` stays on disk
+
+**`replace_note` (replay.js):**
+1. Unlinks old `note:<old-slug>` from each parent page's `childIds`
+2. Links new `note:<new-slug>` to the same parent pages' `childIds`
+3. Transfers list pins: replaces old note ID with new note ID in each list's `pins` array
+4. Sets new note's `parentIds` from old note (inherits page + list parents)
+5. Marks old note: `{ deleted: true, deletionReason: 'replaced', replacedBy: 'note:<new-slug>' }`
+6. Adds old `note:<old-slug>` to `manifest/orphaned.json`
+
+Notes are immutable — editing creates a new entity via `replace_note` rather than mutating in place. This preserves the full change history of a page's notes in the JSONL log.
 
 All handlers use `effectOf` in replay.js — all side-effects are computed in a single replay pass, not as separate log entries.
 

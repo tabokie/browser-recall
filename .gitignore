@@ -17,6 +17,7 @@ yarn-error.log*
 /dist/
 /build/
 /test-results/
+extension/vendor/
 
 # IDE
 .vscode/

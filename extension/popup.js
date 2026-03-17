@@ -198,13 +198,17 @@ function renderNotes(notes) {
 
       clearTimeout(saveTimeout);
       saveTimeout = setTimeout(async () => {
-        console.log(`[popup] Saving note for slug=${noteSlug}`);
+        const currentSlugForSave = textarea.dataset.noteSlug;
+        console.log(`[popup] Saving note for slug=${currentSlugForSave}`);
         try {
-          await chrome.runtime.sendMessage({
+          const resp = await chrome.runtime.sendMessage({
             action: 'updateNote',
-            noteSlug,
+            noteSlug: currentSlugForSave,
             note: textarea.value
           });
+          if (resp?.noteSlug && resp.noteSlug !== currentSlugForSave) {
+            textarea.dataset.noteSlug = resp.noteSlug;
+          }
         } catch (error) {
           console.error('[popup] Note save error:', error);
         }
@@ -224,12 +228,15 @@ document.getElementById('pageNote').addEventListener('input', (e) => {
     const noteSlug = document.getElementById('pageNote').dataset.noteSlug;
     try {
       if (noteSlug) {
-        // Update existing global note
-        await chrome.runtime.sendMessage({
+        // Update existing global note (creates new immutable note entity)
+        const resp = await chrome.runtime.sendMessage({
           action: 'updateNote',
           noteSlug,
           note
         });
+        if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
+          document.getElementById('pageNote').dataset.noteSlug = resp.noteSlug;
+        }
       } else if (note) {
         // Create new global note
         const resp = await chrome.runtime.sendMessage({

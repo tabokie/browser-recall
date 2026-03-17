@@ -803,6 +803,7 @@ class FileSystemStorage {
         slug,
         name: data.name || slug,
         pins: data.pins || [],
+        rules: data.rules || [],
         parentList: data.parentList || null,
         childLists: data.childLists || [],
       };

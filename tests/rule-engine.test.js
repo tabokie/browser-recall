@@ -1,0 +1,580 @@
+/**
+ * Rule engine module unit tests.
+ *
+ * Tests pure functions for rule validation, matching, and ID generation.
+ */
+import { describe, it, expect, vi } from 'vitest';
+import {
+  RULE_TYPES,
+  generateRuleId,
+  validateRuleConfig,
+  validateSmartRuleFn,
+  matchKeywordRule,
+  cosineSimilarity,
+  matchRules,
+  buildPageDataFromEntry,
+} from '../extension/rule-engine.js';
+
+// ---------------------------------------------------------------------------
+// generateRuleId
+// ---------------------------------------------------------------------------
+
+describe('generateRuleId', () => {
+  it('produces correct format: rule-<type[0]>-<base36_ts>-<4char>', () => {
+    const id = generateRuleId('keyword', 1710000000000);
+    expect(id).toMatch(/^rule-k-[a-z0-9]+-[a-z0-9]{4}$/);
+  });
+
+  it('uses first char of type', () => {
+    expect(generateRuleId('keyword', 1000)).toMatch(/^rule-k-/);
+    expect(generateRuleId('semantic', 1000)).toMatch(/^rule-s-/);
+    expect(generateRuleId('smart', 1000)).toMatch(/^rule-s-/);
+  });
+
+  it('encodes timestamp in base36', () => {
+    const ts = 1710000000000;
+    const id = generateRuleId('keyword', ts);
+    const parts = id.split('-');
+    expect(parts[2]).toBe(ts.toString(36));
+  });
+
+  it('generates unique IDs for same timestamp', () => {
+    const a = generateRuleId('keyword', 1000);
+    const b = generateRuleId('keyword', 1000);
+    expect(a).not.toBe(b);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateRuleConfig
+// ---------------------------------------------------------------------------
+
+describe('validateRuleConfig', () => {
+  describe('keyword rules', () => {
+    it('accepts valid keyword config', () => {
+      const result = validateRuleConfig({
+        type: 'keyword',
+        config: { pattern: 'test', fields: ['title'] },
+      });
+      expect(result.valid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('rejects missing pattern', () => {
+      const result = validateRuleConfig({
+        type: 'keyword',
+        config: { fields: ['title'] },
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('pattern'))).toBe(true);
+    });
+
+    it('rejects empty pattern', () => {
+      const result = validateRuleConfig({
+        type: 'keyword',
+        config: { pattern: '', fields: ['title'] },
+      });
+      expect(result.valid).toBe(false);
+    });
+
+    it('rejects invalid fields', () => {
+      const result = validateRuleConfig({
+        type: 'keyword',
+        config: { pattern: 'test', fields: ['body'] },
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('fields'))).toBe(true);
+    });
+
+    it('defaults fields to title+url when not specified', () => {
+      const result = validateRuleConfig({
+        type: 'keyword',
+        config: { pattern: 'test' },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('accepts regex pattern delimited by slashes', () => {
+      const result = validateRuleConfig({
+        type: 'keyword',
+        config: { pattern: '/test\\d+/', fields: ['title'] },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('rejects invalid regex pattern', () => {
+      const result = validateRuleConfig({
+        type: 'keyword',
+        config: { pattern: '/[invalid(/', fields: ['title'] },
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('regex'))).toBe(true);
+    });
+  });
+
+  describe('semantic rules', () => {
+    it('accepts valid semantic config', () => {
+      const result = validateRuleConfig({
+        type: 'semantic',
+        config: {
+          description: 'articles about machine learning',
+          embedding: new Float32Array(384),
+          threshold: 0.5,
+        },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('rejects missing description', () => {
+      const result = validateRuleConfig({
+        type: 'semantic',
+        config: {
+          embedding: new Float32Array(384),
+          threshold: 0.5,
+        },
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('description'))).toBe(true);
+    });
+
+    it('rejects missing embedding', () => {
+      const result = validateRuleConfig({
+        type: 'semantic',
+        config: {
+          description: 'test',
+          threshold: 0.5,
+        },
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('embedding'))).toBe(true);
+    });
+
+    it('rejects wrong embedding dimension', () => {
+      const result = validateRuleConfig({
+        type: 'semantic',
+        config: {
+          description: 'test',
+          embedding: new Float32Array(128),
+          threshold: 0.5,
+        },
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('384'))).toBe(true);
+    });
+
+    it('rejects threshold out of range', () => {
+      const result = validateRuleConfig({
+        type: 'semantic',
+        config: {
+          description: 'test',
+          embedding: new Float32Array(384),
+          threshold: 1.5,
+        },
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('threshold'))).toBe(true);
+    });
+
+    it('defaults threshold to 0.5 when not specified', () => {
+      const result = validateRuleConfig({
+        type: 'semantic',
+        config: {
+          description: 'test',
+          embedding: new Float32Array(384),
+        },
+      });
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe('smart rules', () => {
+    it('accepts valid smart config', () => {
+      const result = validateRuleConfig({
+        type: 'smart',
+        config: {
+          description: 'pages with long titles',
+          fnSource: 'return page.title.length > 50 ? 1 : 0;',
+        },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('rejects missing fnSource', () => {
+      const result = validateRuleConfig({
+        type: 'smart',
+        config: { description: 'test' },
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('fnSource'))).toBe(true);
+    });
+
+    it('rejects missing description', () => {
+      const result = validateRuleConfig({
+        type: 'smart',
+        config: { fnSource: 'return 1;' },
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.includes('description'))).toBe(true);
+    });
+  });
+
+  it('rejects unknown rule type', () => {
+    const result = validateRuleConfig({ type: 'unknown', config: {} });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('type'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateSmartRuleFn
+// ---------------------------------------------------------------------------
+
+describe('validateSmartRuleFn', () => {
+  it('accepts clean function source', () => {
+    const result = validateSmartRuleFn('return page.title.length > 50 ? 1 : 0;');
+    expect(result.valid).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('rejects fetch usage', () => {
+    const result = validateSmartRuleFn('return fetch("http://evil.com").then(() => 1);');
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('fetch'))).toBe(true);
+  });
+
+  it('rejects chrome API usage', () => {
+    const result = validateSmartRuleFn('chrome.storage.local.get("key"); return 1;');
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('chrome'))).toBe(true);
+  });
+
+  it('rejects window usage', () => {
+    const result = validateSmartRuleFn('window.location.href; return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects document usage', () => {
+    const result = validateSmartRuleFn('document.cookie; return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects eval usage', () => {
+    const result = validateSmartRuleFn('eval("alert(1)"); return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects Function constructor', () => {
+    const result = validateSmartRuleFn('new Function("return 1")(); return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects globalThis', () => {
+    const result = validateSmartRuleFn('globalThis.fetch("x"); return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects setTimeout', () => {
+    const result = validateSmartRuleFn('setTimeout(() => {}, 0); return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects setInterval', () => {
+    const result = validateSmartRuleFn('setInterval(() => {}, 1000); return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects WebSocket', () => {
+    const result = validateSmartRuleFn('new WebSocket("ws://evil.com"); return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects Worker', () => {
+    const result = validateSmartRuleFn('new Worker("evil.js"); return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects localStorage', () => {
+    const result = validateSmartRuleFn('localStorage.getItem("x"); return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects sessionStorage', () => {
+    const result = validateSmartRuleFn('sessionStorage.getItem("x"); return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects indexedDB', () => {
+    const result = validateSmartRuleFn('indexedDB.open("x"); return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects importScripts', () => {
+    const result = validateSmartRuleFn('importScripts("evil.js"); return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects navigator', () => {
+    const result = validateSmartRuleFn('navigator.sendBeacon("/log", "data"); return 1;');
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects source >10KB', () => {
+    const bigSource = 'return 1;' + ' '.repeat(11000);
+    const result = validateSmartRuleFn(bigSource);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('10KB') || e.includes('10240'))).toBe(true);
+  });
+
+  it('allows page property access', () => {
+    const result = validateSmartRuleFn(
+      'if (page.url.includes("github.com")) return 1; return 0;'
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('does not false-positive on substrings', () => {
+    // "fetchResults" contains "fetch" as substring — should NOT trigger
+    const result = validateSmartRuleFn(
+      'const fetchResults = page.title.length; return fetchResults > 10 ? 1 : 0;'
+    );
+    expect(result.valid).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// matchKeywordRule
+// ---------------------------------------------------------------------------
+
+describe('matchKeywordRule', () => {
+  it('matches substring in title', () => {
+    const rule = { config: { pattern: 'hello', fields: ['title'] } };
+    expect(matchKeywordRule(rule, { title: 'say hello world', url: 'https://x.com' })).toBe(1);
+  });
+
+  it('matches substring in url', () => {
+    const rule = { config: { pattern: 'github', fields: ['url'] } };
+    expect(matchKeywordRule(rule, { title: 'Repo', url: 'https://github.com/foo' })).toBe(1);
+  });
+
+  it('returns 0 on no match', () => {
+    const rule = { config: { pattern: 'xyz', fields: ['title'] } };
+    expect(matchKeywordRule(rule, { title: 'hello world', url: 'https://x.com' })).toBe(0);
+  });
+
+  it('matches case-insensitively by default', () => {
+    const rule = { config: { pattern: 'HELLO', fields: ['title'] } };
+    expect(matchKeywordRule(rule, { title: 'hello world', url: '' })).toBe(1);
+  });
+
+  it('respects caseSensitive flag', () => {
+    const rule = { config: { pattern: 'HELLO', fields: ['title'], caseSensitive: true } };
+    expect(matchKeywordRule(rule, { title: 'hello world', url: '' })).toBe(0);
+    expect(matchKeywordRule(rule, { title: 'HELLO world', url: '' })).toBe(1);
+  });
+
+  it('checks both title and url when fields has both', () => {
+    const rule = { config: { pattern: 'match', fields: ['title', 'url'] } };
+    expect(matchKeywordRule(rule, { title: 'no', url: 'https://match.com' })).toBe(1);
+    expect(matchKeywordRule(rule, { title: 'match here', url: 'https://x.com' })).toBe(1);
+  });
+
+  it('defaults fields to title+url when not specified', () => {
+    const rule = { config: { pattern: 'found' } };
+    expect(matchKeywordRule(rule, { title: 'not here', url: 'https://found.com' })).toBe(1);
+  });
+
+  it('handles regex pattern', () => {
+    const rule = { config: { pattern: '/test\\d+/', fields: ['title'] } };
+    expect(matchKeywordRule(rule, { title: 'test123 page', url: '' })).toBe(1);
+    expect(matchKeywordRule(rule, { title: 'test page', url: '' })).toBe(0);
+  });
+
+  it('handles regex with case-insensitive flag', () => {
+    const rule = { config: { pattern: '/TEST/', fields: ['title'] } };
+    // Regex without caseSensitive should still be case-insensitive by default
+    expect(matchKeywordRule(rule, { title: 'test page', url: '' })).toBe(1);
+  });
+
+  it('returns 0 for invalid regex gracefully', () => {
+    const rule = { config: { pattern: '/[invalid(/', fields: ['title'] } };
+    expect(matchKeywordRule(rule, { title: 'test', url: '' })).toBe(0);
+  });
+
+  it('handles missing pageData fields', () => {
+    const rule = { config: { pattern: 'test', fields: ['title'] } };
+    expect(matchKeywordRule(rule, { url: 'https://x.com' })).toBe(0);
+    expect(matchKeywordRule(rule, {})).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cosineSimilarity
+// ---------------------------------------------------------------------------
+
+describe('cosineSimilarity', () => {
+  it('returns 1 for identical vectors', () => {
+    const a = new Float32Array([1, 2, 3]);
+    expect(cosineSimilarity(a, a)).toBeCloseTo(1.0);
+  });
+
+  it('returns 0 for orthogonal vectors', () => {
+    const a = new Float32Array([1, 0, 0]);
+    const b = new Float32Array([0, 1, 0]);
+    expect(cosineSimilarity(a, b)).toBeCloseTo(0.0);
+  });
+
+  it('returns -1 for opposite vectors', () => {
+    const a = new Float32Array([1, 0, 0]);
+    const b = new Float32Array([-1, 0, 0]);
+    expect(cosineSimilarity(a, b)).toBeCloseTo(-1.0);
+  });
+
+  it('returns 0 for zero-magnitude vector', () => {
+    const a = new Float32Array([0, 0, 0]);
+    const b = new Float32Array([1, 2, 3]);
+    expect(cosineSimilarity(a, b)).toBe(0);
+  });
+
+  it('computes known similarity', () => {
+    const a = new Float32Array([1, 0]);
+    const b = new Float32Array([1, 1]);
+    // cos(45°) ≈ 0.7071
+    expect(cosineSimilarity(a, b)).toBeCloseTo(Math.SQRT1_2, 4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// matchRules
+// ---------------------------------------------------------------------------
+
+describe('matchRules', () => {
+  it('matches keyword rules without embedder/sandbox', async () => {
+    const rules = [
+      { id: 'r1', type: 'keyword', config: { pattern: 'github', fields: ['url'], threshold: 0.5 } },
+    ];
+    const pageData = { title: 'My Repo', url: 'https://github.com/foo' };
+    const results = await matchRules(rules, pageData, {});
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({ ruleId: 'r1', score: 1, match: true });
+  });
+
+  it('filters below threshold', async () => {
+    const rules = [
+      { id: 'r1', type: 'keyword', config: { pattern: 'notfound', fields: ['title'], threshold: 0.5 } },
+    ];
+    const results = await matchRules(rules, { title: 'hello', url: '' }, {});
+    expect(results).toHaveLength(0);
+  });
+
+  it('matches semantic rules with mock embedder', async () => {
+    const ruleEmbedding = new Float32Array([1, 0, 0]);
+    const pageEmbedding = new Float32Array([0.9, 0.1, 0]);
+    const embedder = vi.fn().mockResolvedValue(pageEmbedding);
+
+    const rules = [
+      {
+        id: 'r1',
+        type: 'semantic',
+        config: { embedding: ruleEmbedding, threshold: 0.5 },
+      },
+    ];
+    const pageData = { title: 'ML article', url: 'https://x.com' };
+    const results = await matchRules(rules, pageData, { embedder });
+    expect(results).toHaveLength(1);
+    expect(results[0].ruleId).toBe('r1');
+    expect(results[0].score).toBeGreaterThan(0.5);
+    expect(embedder).toHaveBeenCalledWith('ML article https://x.com');
+  });
+
+  it('reuses page embedding across multiple semantic rules', async () => {
+    const embedder = vi.fn().mockResolvedValue(new Float32Array([1, 0, 0]));
+    const rules = [
+      { id: 'r1', type: 'semantic', config: { embedding: new Float32Array([1, 0, 0]), threshold: 0.5 } },
+      { id: 'r2', type: 'semantic', config: { embedding: new Float32Array([0, 1, 0]), threshold: 0.5 } },
+    ];
+    await matchRules(rules, { title: 'test', url: 'https://x.com' }, { embedder });
+    expect(embedder).toHaveBeenCalledTimes(1);
+  });
+
+  it('matches smart rules with mock sandbox', async () => {
+    const sandbox = vi.fn().mockResolvedValue(0.8);
+    const rules = [
+      { id: 'r1', type: 'smart', config: { fnSource: 'return 0.8;', threshold: 0.5 } },
+    ];
+    const pageData = { title: 'test', url: 'https://x.com' };
+    const results = await matchRules(rules, pageData, { sandbox });
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({ ruleId: 'r1', score: 0.8, match: true });
+    expect(sandbox).toHaveBeenCalledWith('return 0.8;', pageData);
+  });
+
+  it('handles mixed rule types', async () => {
+    const embedder = vi.fn().mockResolvedValue(new Float32Array([1, 0, 0]));
+    const sandbox = vi.fn().mockResolvedValue(0.9);
+    const rules = [
+      { id: 'r1', type: 'keyword', config: { pattern: 'test', fields: ['title'], threshold: 0.5 } },
+      { id: 'r2', type: 'semantic', config: { embedding: new Float32Array([1, 0, 0]), threshold: 0.5 } },
+      { id: 'r3', type: 'smart', config: { fnSource: 'return 0.9;', threshold: 0.5 } },
+    ];
+    const results = await matchRules(rules, { title: 'test', url: 'https://x.com' }, { embedder, sandbox });
+    expect(results).toHaveLength(3);
+  });
+
+  it('skips semantic rules when no embedder provided', async () => {
+    const rules = [
+      { id: 'r1', type: 'semantic', config: { embedding: new Float32Array([1, 0, 0]), threshold: 0.5 } },
+    ];
+    const results = await matchRules(rules, { title: 'test', url: '' }, {});
+    expect(results).toHaveLength(0);
+  });
+
+  it('skips smart rules when no sandbox provided', async () => {
+    const rules = [
+      { id: 'r1', type: 'smart', config: { fnSource: 'return 1;', threshold: 0.5 } },
+    ];
+    const results = await matchRules(rules, { title: 'test', url: '' }, {});
+    expect(results).toHaveLength(0);
+  });
+
+  it('uses default threshold of 0.5 for keyword when not specified', async () => {
+    const rules = [
+      { id: 'r1', type: 'keyword', config: { pattern: 'test', fields: ['title'] } },
+    ];
+    // keyword match returns 1, default threshold 0.5 → passes
+    const results = await matchRules(rules, { title: 'test page', url: '' }, {});
+    expect(results).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildPageDataFromEntry
+// ---------------------------------------------------------------------------
+
+describe('buildPageDataFromEntry', () => {
+  it('extracts title and url from visit_page entry', () => {
+    const entry = { timestamp: 100, action: 'visit_page', url: 'https://x.com', title: 'X' };
+    expect(buildPageDataFromEntry(entry)).toEqual({ title: 'X', url: 'https://x.com' });
+  });
+
+  it('handles missing title', () => {
+    const entry = { timestamp: 100, action: 'visit_page', url: 'https://x.com' };
+    expect(buildPageDataFromEntry(entry)).toEqual({ title: '', url: 'https://x.com' });
+  });
+
+  it('handles missing url', () => {
+    const entry = { timestamp: 100, action: 'visit_page', title: 'X' };
+    expect(buildPageDataFromEntry(entry)).toEqual({ title: 'X', url: '' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RULE_TYPES
+// ---------------------------------------------------------------------------
+
+describe('RULE_TYPES', () => {
+  it('has expected values', () => {
+    expect(RULE_TYPES.KEYWORD).toBe('keyword');
+    expect(RULE_TYPES.SEMANTIC).toBe('semantic');
+    expect(RULE_TYPES.SMART).toBe('smart');
+  });
+});

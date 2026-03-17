@@ -1,5 +1,8 @@
 // Shared utility functions
 
+/** Max words of page body text captured for rule matching. Duplicated in content.js (non-module). */
+export const BODY_WORD_LIMIT = 200;
+
 // Unified cache read: session cache → background readCacheable fallback.
 // Keys use entity key format: 'manifest:settings', 'manifest:orphaned', 'list:reading', etc.
 export async function readCacheable(key, includeDeleted = false) {

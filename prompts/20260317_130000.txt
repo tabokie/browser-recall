@@ -1,0 +1,85 @@
+- Search bars in lists is still different from explore. They don't have the filter option.
+- Let's work on a complete different direction to perform materialized search. I want each list to have a set of rules. There are different types of rules, "Keyword", "Semantic", "AI", "AI Compiled" (AI generates a static JS function that does the filtering). When user is browsing the web, we automatically run the web text (title, url, content text) against rules from all lists, and pin the page to matching lists.
+
+To pursue this further, I need information on how much overhead is there from performing semantic matching, and from LLM-assisted categorization (e.g. using Haiku model). And the practical usability of the "AI Compiled" mode.
+- Research more on embedding models for semantic search. Is there smaller model? And can LLM (like Haiku) generate embeddings?
+- Good. Let's go with MiniLM-L6-v2 for semantic search.
+I want more information on AI compiled, especially the paper Eureka (NVIDIA 2023). Is there different ways to generate function other than prompting? And do you think there's better name than "AI compiled" for this mode?
+- Let's work on search filters. First of all, I want to improve its style. Go for the aesthetics of demo D. Polish and refine the elements and layout.
+- Implement the core modules of semantic and smart searches, in their own files, because another agent is editing UI right now. With planning
+- Go ahead
+- I think the actual elements are still very crammed together, especially compared to the width.
+
+And in list's filter page, I want to add a sort toggle to select between (first visit, last visit, pin time, title, total visits), it is styled like the tri-toggle in popup UI.
+- In panel.
+- continue
+- I noticed some page has no title (e.g. https://news.ycombinator.com/item?id=47143754), figure out why, is it a data corruption or runtime bug
+- For logs that create a previously not existing checkpoint, we must give it enough information and insert into the log, then append the log and let effectOf write those information. For operating in content.js, we should get the title information right away. And for operating in portal UI (e.g. drag page to pin), we should also have the title information previously retrieved from history reads.
+- Are you sure moving forward, page checkpoints will have a title? What are the remaining cases for it to miss one?
+- Is the semantic and smart rule unit tested?
+- Yes, and you can download model to test
+- Did you fixed the data yet
+- I noticed a weird phenomenon. Sometimes when I view a list, and scrolled a bit, pages from history 10 days ago suddenly start to show up after the pins.
+- So are you bundling the transformer in extension now?
+- We should download it dynamically, and only if a semantic rule is added.
+- Now let's work on UI. Follow the aesthetics of Demo D.
+- Let's explore how to implement data synchronization between multiple devices. My preliminary thoughts are to use git repo (e.g. GitHub) to host history log of the past e.g. 5 days. Each device have its own device id, and upload to the same or different git repo. For any one device, it periodically pulls logs from other devices, and upload its own logs. Locally, it will try to replay logs from different devices, and it will keep track of the replay progress of each device. The logs from different devices maybe replayed interleaved, therefore we need to figure out if the current event logs are consistent against reordering.
+- Timestamp guard issue can be solved by storing timestamps of all devices in checkpoints (entity.timestamp is current device, entity.remotes['id'] is remove device).
+
+But the list reference issue is indeed very tricky. My idea is, we disallow concurrent modification of list structure. If a list rename or reparent is sent from remote, we take a global lock and fail any attempt by user to modify the lists in UI. Will it work?
+- It shouldn't replay by timestamp, timestamp from different devices can't be directly compared and ordered. When we receive list mutation from remote, we replay those logs *after* the local logs, even if they have smaller timestamps. Will this work?
+- I don't think fixed-order replay is possible? A particular remote may be slow in uploading its log, and we can't tolerate the delay caused by one slow peer.
+
+Even if I allow listId, will it solve reparent issue?
+- Elaborate on why it is necessary to split reparent, instead of only removing the "childLists", i.e. reparent { listId, toParentId }.
+- Good. And the positioning can be preserved with best effort by adding a "index" hint.
+- Fix test issues
+- Go over our discussion thoroughly, ask more clarifying questions for uncertainty to implement this. Then let's work out a detailed plan, and write the plan to sync-plan.md.
+- Did you researched how to do actual Git ops in extension? Are we cloning the mailboxes locally on file system? Or are we using in-memory Git ops to fetch data in memory first?
+- Figure out how to load model now. BTW, huggingface/transformers should be in devDependencies?
+- Elaborate the indexDB part. Is it a browser native way to do Git? Does it handle memory management? Can we copy the data to disk still?
+- Do you think this whole plan is a good idea? Or is the complexity getting out of hand a little?
+- That sounds okay. I still care about storage retention. Because if the backend is Git, it is unrealistic to keep full data in repo. We must still employ some mechanism to free up old data in Git but not removing them locally. Is it possible with Git ops?
+- "ort-wasm-simd-threaded.jsep.wasm" is huge. Can we runtime download it as well?
+- That sounds good. But I'm not sure about scripts though, does it require user to manually set up?
+- Go
+- Walk me through what E2E tests you added
+- Did you test the semantics search or smart compilation in unit tests?
+- But I haven't configure a LLM backend yet, what model does the smart compiler use?
+- Add a preview button, when clicked, show a list that would be retrieved by the filter, or error if e.g. function has wrong syntax. The preview is not responsive, when query changed, user should re-click to render the preview.
+- Help me understand the immutability of notes. We allow editing a pre-existing note in UI, is this event translated into logs that delete and recreate note entity?
+- I would prefer we enforce immutability by creating new note entity. This way we can retrieve the full change logs of a page in theory. The old entity can be moved to orphaned list for physical removal, but should distinguish the reason (deleted, replaced, etc). You can implement this change directly
+- Did you update the stale memory about "history:<date>"?
+- Error: Semantic rule requires an embedding vector
+- Error: Embedding generation failed
+- E2E tests?
+- Error: no available backend found. ERR: [wasm] TypeError: Failed to fetch dynamically imported module: https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/ort-wasm-simd-threaded.jsep.mjs
+- continue
+- no available backend found. ERR: [wasm] TypeError: Failed to fetch dynamically imported module: https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/ort-wasm-simd-threaded.jsep.mjs
+- But that makes the extension package huge isn't it? And it incurs a unnecessary overhead for user that don't want to use semantic search
+- Could you explain why WASM is able to fetch?
+- Actually, there is an error:
+no available backend found. ERR: [wasm] TypeError: Failed to fetch dynamically imported module: chrome-extension://hcndiohpnnmmojlkjbldbnhglaolfhgn/vendor/vendor/ort-wasm-simd-threaded.jsep.mjs
+- Why preview says 2 / 28 pages. Does it mean 28 pages are matched but 2 are shown, or does it mean 28 pages are checked and 2 are match?
+- yes
+- Make it dynamic, update while check is progressing. And don't stop unless we checked 100 pages or found 20 matches.
+- Also, show the unmatches pages along side matches.
+- Use green / red to color the score to denote whether it's a match or not
+- It seems weird, for my preview over "AI agent", only the first two checks return positive, all subsequent checks score 0.0 including a page titled "Nvidia Launches Vera CPU, Purpose-Built for Agentic AI | Hacker News". Seems like a bug
+- I don't think it's a problem with checkpoints. Most of the pages that score 0.0 are not checkpointed shallow pages. We should be able to find the title in history. In fact, I assume you were running the checks over recent history with enough information including URL and title.
+- Fetch the text of page using the URL, I want to see if accuracy improves with more context. Limit the text to the first N words. You decide on the N.
+- When we do automatic matching against active rules, also use the same implementation (preferrably the same code)
+- For automatic matching, we shouldn't need to fetch again in background, we should send the task (along with the needed first N text) to background
+- Why caller needs fetching? I thought content.js have access to the text already as user visits a page
+- When user changes the threshold, update the preview stats and score coloring as well
+- We should cache the embeddings for previewed pages (a map from url to embeddings, stored in session storage using one key). When user changes the query, we first get the candidates from history, then create a new map filled partially with cached embeddings, compute the missing scores, then update the cache map. This way, the preview can be computed fast, and cache is alawys up to date with fixed size.
+- Changing the threshold didn't affect the preview render
+- Do not include a page in the preview check if its information is incomplete (e.g. text not fetched)
+- It reports "No visits found to match against"
+- But I want bodyPreview. For preview, we should fetch it and only run check for a page when it is successfully fetched
+- Add comments to explain BODY_WORD_LIMIT is shared between content.js and options.js, or better yet just share the same variable.
+- For preview, add another pass that run checks over all pins in that list, show in another section
+- continue
+- /finish
+- Fix 1 2 3
+- go

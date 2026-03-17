@@ -93,7 +93,7 @@ test.describe('Page note textarea in detail card', () => {
     await options.close();
   });
 
-  test('updates existing page note when editing textarea', async ({ extContext, extensionId, setupDir }) => {
+  test('updates existing page note when editing textarea (immutable: creates new note)', async ({ extContext, extensionId, setupDir }) => {
     const slug = getSlugForUrl(PAGE_URL);
     const noteSlug = '260301-update-global';
     const now = Date.now();
@@ -126,16 +126,17 @@ test.describe('Page note textarea in detail card', () => {
 
     // Clear and type new text
     await textarea.fill('Updated text');
+    await textarea.dispatchEvent('input');
 
-    // Wait for debounce (500ms) + async save to disk
-    await options.waitForTimeout(1000);
+    // Wait for debounce (500ms) + replace_note processing.
+    // The textarea's data-note-slug should change to the new note slug.
+    await options.waitForFunction((oldSlug) => {
+      const ta = document.querySelector('.detail-page-note');
+      return ta && ta.dataset.noteSlug && ta.dataset.noteSlug !== oldSlug;
+    }, noteSlug, { timeout: 5000 });
 
-    // updateNote writes to disk but doesn't update session cache.
-    // Rehydrate to rebuild session cache from disk, then verify.
+    // Verify via backend: loadPageNotes should return the new note with updated text
     const helper = await openHelperPage(extContext, extensionId);
-    await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
-    );
     const notesResp = await helper.evaluate((s) =>
       chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: s })
     , slug);
@@ -143,6 +144,12 @@ test.describe('Page note textarea in detail card', () => {
     const globalNote = notesResp.notes.find(n => n.excerpt === null);
     expect(globalNote).toBeTruthy();
     expect(globalNote.note).toBe('Updated text');
+
+    // Old note should be orphaned
+    const orphaned = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
+    );
+    expect(orphaned.value.keys).toContain(`note:${noteSlug}`);
 
     await helper.close();
     await options.close();

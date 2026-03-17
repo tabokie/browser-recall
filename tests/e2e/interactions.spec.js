@@ -262,14 +262,14 @@ test.describe('Interactions — likes, notes, attention', () => {
     await helper.close();
   });
 
-  test('updateNote writes directly to disk without log entry', async ({ extContext, extensionId, setupDir }) => {
+  test('updateNote creates new note entity and orphans old one (immutable edit)', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const noteSlug = '260301-update-test';
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
-        parentIds: [], childIds: [`note:${noteSlug}`],
+        parentIds: [], childIds: [`note:${noteSlug}`], user_title: 'Kept',
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Original', note: 'Old text', cssPath: 'p',
@@ -284,25 +284,156 @@ test.describe('Interactions — likes, notes, attention', () => {
       chrome.runtime.sendMessage({ action: 'updateNote', noteSlug: slug, note: 'New text' })
     , { slug: noteSlug });
     expect(updateResult.success).toBe(true);
+    expect(updateResult.noteSlug).toBeTruthy();
+    expect(updateResult.noteSlug).not.toBe(noteSlug); // new slug generated
 
-    // Note should have updated text on disk
-    const noteOnDisk = await helper.evaluate((slug) =>
+    const newNoteSlug = updateResult.noteSlug;
+
+    // New note should exist with updated text
+    const newNote = await helper.evaluate((slug) =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: `note:${slug}` })
-    , noteSlug);
-    expect(noteOnDisk.value).toBeTruthy();
-    expect(noteOnDisk.value.note).toBe('New text');
-    expect(noteOnDisk.value.excerpt).toBe('Original'); // unchanged
+    , newNoteSlug);
+    expect(newNote.value).toBeTruthy();
+    expect(newNote.value.note).toBe('New text');
+    expect(newNote.value.excerpt).toBe('Original'); // inherited from old
 
-    // Flush and check no 'note' log entry was created for the update
-    await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+    // Old note should be deleted with reason
+    const oldNote = await helper.evaluate((slug) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: `note:${slug}`, includeDeleted: true })
+    , noteSlug);
+    expect(oldNote.value).toBeTruthy();
+    expect(oldNote.value.deleted).toBe(true);
+    expect(oldNote.value.deletionReason).toBe('replaced');
+    expect(oldNote.value.replacedBy).toBe(`note:${newNoteSlug}`);
+
+    // Old note should be in orphaned list
+    const orphaned = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
+    expect(orphaned.value.keys).toContain(`note:${noteSlug}`);
+
+    // Parent page's childIds should have new note, not old
+    const page = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${TEST_SLUG}`);
+    expect(page.value.childIds).toContain(`note:${newNoteSlug}`);
+    expect(page.value.childIds).not.toContain(`note:${noteSlug}`);
+
+    // replace_note log entry should exist
     const todayStr = new Date().toISOString().slice(0, 10);
     const history = await helper.evaluate((date) =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: `log:${date}` })
     , todayStr);
-    const noteEntries = (history.value || []).filter(e => e.action === 'create_note' && e.path === `notes/${noteSlug}.json`);
-    expect(noteEntries).toHaveLength(0); // no log entry for update
+    const replaceEntries = (history.value || []).filter(e => e.action === 'replace_note');
+    expect(replaceEntries).toHaveLength(1);
+    expect(replaceEntries[0].oldPath).toBe(`notes/${noteSlug}.json`);
+    expect(replaceEntries[0].path).toBe(`notes/${newNoteSlug}.json`);
+
+    await helper.close();
+  });
+
+  test('updateNote transfers list pins from old note to new note', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const noteSlug = '260301-pinned-note';
+    const listId = 'test-list-abc';
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/TestList': listId } } },
+      { path: 'list-name-to-id.json', data: { timestamp: now, paths: { 'root/TestList': listId } } },
+      { path: `lists/${listId}.json`, data: {
+        slug: listId, name: 'TestList', timestamp: now,
+        pins: [{ id: `note:${noteSlug}`, pinnedAt: now }],
+        rules: [], parentList: 'list:system/root', childLists: [],
+      }},
+      { path: 'lists/system/root.json', data: { timestamp: now, childLists: [`list:${listId}`] } },
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [`note:${noteSlug}`], user_title: 'Kept',
+      }},
+      { path: `data/notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: 'Pinned highlight', note: 'Note text', cssPath: 'p',
+        parentIds: [`page:${TEST_SLUG}`, `list:${listId}`], childIds: [], timestamp: now,
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    const updateResult = await helper.evaluate(({ slug }) =>
+      chrome.runtime.sendMessage({ action: 'updateNote', noteSlug: slug, note: 'Updated text' })
+    , { slug: noteSlug });
+    expect(updateResult.success).toBe(true);
+    const newNoteSlug = updateResult.noteSlug;
+
+    // List should now pin the new note, not the old one
+    const list = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `list:${listId}`);
+    expect(list.value).toBeTruthy();
+    const pinIds = list.value.pins.map(p => p.id);
+    expect(pinIds).toContain(`note:${newNoteSlug}`);
+    expect(pinIds).not.toContain(`note:${noteSlug}`);
+
+    // New note should inherit list in parentIds
+    const newNote = await helper.evaluate((slug) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: `note:${slug}` })
+    , newNoteSlug);
+    expect(newNote.value.parentIds).toContain(`list:${listId}`);
+    expect(newNote.value.parentIds).toContain(`page:${TEST_SLUG}`);
+
+    await helper.close();
+  });
+
+  test('updateNote survives drain→rehydrate round-trip', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const noteSlug = '260301-roundtrip-note';
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [`note:${noteSlug}`], user_title: 'Kept',
+      }},
+      { path: `data/notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: 'Roundtrip', note: 'Before edit', cssPath: 'p',
+        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Update the note
+    const updateResult = await helper.evaluate(({ slug }) =>
+      chrome.runtime.sendMessage({ action: 'updateNote', noteSlug: slug, note: 'After edit' })
+    , { slug: noteSlug });
+    const newNoteSlug = updateResult.noteSlug;
+
+    // Flush to disk, then rehydrate from scratch
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+    );
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+    );
+
+    // After rehydrate, new note should still be linked to page
+    const page = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${TEST_SLUG}`);
+    expect(page.value.childIds).toContain(`note:${newNoteSlug}`);
+    expect(page.value.childIds).not.toContain(`note:${noteSlug}`);
+
+    // New note content should survive round-trip
+    const newNote = await helper.evaluate((slug) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: `note:${slug}` })
+    , newNoteSlug);
+    expect(newNote.value).toBeTruthy();
+    expect(newNote.value.note).toBe('After edit');
+    expect(newNote.value.excerpt).toBe('Roundtrip');
+
+    // Old note should be orphaned after rehydrate
+    const orphaned = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
+    );
+    expect(orphaned.value.keys).toContain(`note:${noteSlug}`);
 
     await helper.close();
   });

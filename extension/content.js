@@ -280,11 +280,13 @@ function showGlobalNoteOverlay(existingNote, existingNoteSlug, pageSlug) {
     const note = textarea.value;
     if (note !== (existingNote || '')) {
       if (existingNoteSlug) {
-        // Update existing note
+        // Update existing note (creates new immutable note entity)
         chrome.runtime.sendMessage({
           action: 'updateNote',
           noteSlug: existingNoteSlug,
           note
+        }).then(resp => {
+          if (resp?.noteSlug) existingNoteSlug = resp.noteSlug;
         }).catch(() => {});
       } else {
         // Create new global note (excerpt: null)
@@ -758,6 +760,14 @@ const initialDelta = {
   slug: getSlugForCurrentPage(),
   isInitialLoad: true,
 };
+// Capture first N words of page text for rule matching (keyword/semantic).
+// Must match BODY_WORD_LIMIT in utils.js (can't import — content scripts are non-module).
+const BODY_WORD_LIMIT = 200;
+const bodyText = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+const bodyWords = bodyText.split(' ');
+if (bodyWords.length > 0 && bodyWords[0] !== '') {
+  initialDelta.bodyPreview = bodyWords.slice(0, BODY_WORD_LIMIT).join(' ');
+}
 const ref = document.referrer;
 if (ref) initialDelta.referrer = ref;
 report(initialDelta);
@@ -963,11 +973,13 @@ function showHighlightsPanel(notes, pageSlug, { hint } = {}) {
   });
 
   shadow.querySelectorAll('.highlight-item').forEach(item => {
-    const noteSlug = item.dataset.noteSlug;
+    let noteSlug = item.dataset.noteSlug;
     const ta = item.querySelector('textarea');
     const origValue = ta.value;
     ta.addEventListener('blur', () => {
-      if (ta.value !== origValue) chrome.runtime.sendMessage({ action: 'updateNote', noteSlug, note: ta.value }).catch(() => {});
+      if (ta.value !== origValue) chrome.runtime.sendMessage({ action: 'updateNote', noteSlug, note: ta.value })
+        .then(resp => { if (resp?.noteSlug) { noteSlug = resp.noteSlug; item.dataset.noteSlug = resp.noteSlug; } })
+        .catch(() => {});
     });
     ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') ta.blur(); });
     item.querySelector('.delete-btn').addEventListener('click', () => {
