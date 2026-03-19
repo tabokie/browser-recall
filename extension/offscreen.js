@@ -278,7 +278,7 @@ async function handleRequest(request) {
         return { success: true };
       }
 
-      // Direct JSON save — for derived data (gateways, referrer-index, pages)
+      // Direct JSON save — for derived data (referrer-index, pages, etc.)
       case 'saveJson': {
         await withLock(request.path, async () => {
           const fh = await fsStorage.resolveFile(request.path, { create: true });
@@ -347,19 +347,7 @@ async function handleRequest(request) {
         return { success: true };
       }
 
-      // ─── Embedding / Sandbox Handlers ────────────────────────────────
-
-      case 'generateEmbedding': {
-        const { generateEmbedding } = await import('./semantic-engine.js');
-        const embedding = await generateEmbedding(request.text);
-        return { success: true, embedding: Array.from(embedding) };
-      }
-
-      case 'generateEmbeddingBatch': {
-        const { generateEmbeddingBatch } = await import('./semantic-engine.js');
-        const embeddings = await generateEmbeddingBatch(request.texts);
-        return { success: true, embeddings: embeddings.map(e => Array.from(e)) };
-      }
+      // ─── Sandbox Handlers ─────────────────────────────────────────────
 
       case 'executeSandboxFn': {
         const score = await executeSandbox(request.fnSource, request.pageData);

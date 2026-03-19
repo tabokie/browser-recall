@@ -211,9 +211,6 @@ describe('History title enrichment', () => {
       case 'loadContentBatch':
         return { success: true, contentMap: {} };
 
-      case 'processGatewaysIncremental':
-        return { success: true, domains: {}, newWatermark: 0 };
-
       case 'loadAllHighlights':
         return { success: true, highlightsMap: {} };
 
@@ -223,7 +220,6 @@ describe('History title enrichment', () => {
       case 'readCacheable':
         switch (msg.key) {
           case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
-          case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], parentList: 'list:auto', childLists: [] } };
           case 'manifest:name-to-id': return { success: true, value: { timestamp: 0, paths: {} } };
           case 'manifest:orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
           default: {
@@ -266,7 +262,6 @@ describe('History title enrichment', () => {
   function populateCache() {
     sessionData = {
       'manifest:settings': TEST_SETTINGS,
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], parentList: 'list:auto', childLists: [] },
       'manifest:name-to-id': { timestamp: 0, paths: {} },
     };
     localData = { logBuffer: [] };

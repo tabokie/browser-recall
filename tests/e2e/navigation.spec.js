@@ -396,55 +396,6 @@ test.describe('Navigation and referrer tracking', () => {
     await page.close();
   });
 
-  // Gateway promotion: visit child pages, then visit root → promoted.
-  // Visiting root again should not create a duplicate pin.
-  test('gateway promotion triggers on root visit when history has same-origin pages', async ({ extContext, extensionId, setupDir, localServer }) => {
-    localServer.addPage('/gw-a', { title: 'GW Child A', body: '<p>a</p>' });
-    localServer.addPage('/gw-b', { title: 'GW Child B', body: '<p>b</p>' });
-
-    // Seed the auto/gateways list entity (empty pins) so it exists for promotion
-    await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
-      { path: 'lists/auto.json', data: { slug: 'auto', name: 'Auto', auto: true, parentList: 'list:system/root', childLists: ['list:auto/gateways'], pins: [], timestamp: 1 } },
-      { path: 'lists/auto/gateways.json', data: { slug: 'auto/gateways', name: 'Gateways', auto: true, parentList: 'list:auto', childLists: [], pins: [], timestamp: 1 } },
-      { path: 'lists/system/root.json', data: { timestamp: 1, childLists: ['list:auto'] } },
-    ]);
-
-    const page = await extContext.newPage();
-
-    // Visit child pages first (builds history for this origin)
-    await page.goto(localServer.url('/gw-a'));
-    await page.waitForSelector('p');
-    await page.goto(localServer.url('/gw-b'));
-    await page.waitForSelector('p');
-
-    // Visit root page → triggers gateway promotion (history has same-origin visits)
-    await page.goto(localServer.url('/'));
-    await page.waitForSelector('h1');
-
-    const helper = await openHelperPage(extContext, extensionId);
-
-    // Wait for promotion: pin should appear in auto/gateways
-    await helper.waitForFunction(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:auto/gateways' })
-        .then(r => r.value?.pins && r.value.pins.length > 0)
-    , null, { timeout: 5000 });
-
-    // Visit root again — should NOT create a duplicate pin
-    await page.goto(localServer.url('/'));
-    await page.waitForSelector('h1');
-    await page.waitForTimeout(500);
-
-    const gw = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:auto/gateways' })
-    );
-    await helper.close();
-    await page.close();
-
-    // Exactly 1 pin for this origin
-    expect(gw.value.pins.length).toBe(1);
-  });
-
   // page entity title enrichment: pin_to_list on a URL with prior history
   // should create a page entity with the title from that history.
   test('page entity title enriched from history when created by pin action', async ({ extContext, extensionId, setupDir }) => {

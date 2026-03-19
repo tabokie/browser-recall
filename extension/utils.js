@@ -85,19 +85,6 @@ export function generateSlugFromTitle(title) {
   return generateSlug(title, hashInput);
 }
 
-// Check if a URL's origin root is pinned in an auto-gateways pin list.
-// pins: [{ id: 'page:<slug>', pinnedAt }]
-export function isGatewayOriginFromPins(url, pins) {
-  try {
-    const origin = new URL(url).origin;
-    const rootUrl = origin + '/';
-    const rootSlug = generateSlugFromUrl(rootUrl);
-    return pins.some(p => p.id === `page:${rootSlug}`);
-  } catch {
-    return false;
-  }
-}
-
 // Format timestamp to YYYY-MM-DD date key
 export function dateKeyFromTimestamp(ts) {
   const d = new Date(ts);

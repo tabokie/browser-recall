@@ -468,10 +468,8 @@ function showListLayout() {
   document.getElementById('listLayout').classList.add('visible');
   document.getElementById('recycleBinLayout').classList.remove('visible');
   document.getElementById('queryBuilder').style.display = 'none';
-  // Reset rules section to collapsed
-  document.getElementById('rulesBody').style.display = 'none';
-  document.getElementById('rulesToggleIcon').classList.remove('expanded');
-  resetRulesForm();
+  document.getElementById('rulesSection').style.display = 'none';
+  cancelRuleEdit();
 }
 
 function showNormalLayout() {
@@ -1230,9 +1228,6 @@ function ruleDescription(rule) {
   if (rule.type === 'keyword') {
     const fields = c.fields || ['title', 'url'];
     return `${c.pattern || ''} (${fields.join(', ')})`;
-  } else if (rule.type === 'semantic') {
-    const t = c.threshold != null ? c.threshold : 0.5;
-    return `${c.description || '(no description)'} (≥${t.toFixed(2)})`;
   } else if (rule.type === 'smart') {
     return c.description || '(custom function)';
   }
@@ -1269,13 +1264,25 @@ function renderRulesList(listId, rules) {
     container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:2px 0">No rules</div>';
     return;
   }
+  const typeLabel = (t) => t === 'smart' ? 'function' : t;
   container.innerHTML = rules.map(rule =>
     `<div class="rule-entry" data-rule-id="${escapeHtml(rule.id)}">
-      <span class="rule-type-badge rule-type-${escapeHtml(rule.type)}">${escapeHtml(rule.type)}</span>
+      <span class="rule-type-badge rule-type-${escapeHtml(rule.type)}">${escapeHtml(typeLabel(rule.type))}</span>
       <span class="rule-desc">${escapeHtml(ruleDescription(rule))}</span>
-      <button class="rule-remove" title="Remove rule">&times;</button>
+      <button class="rule-action-btn rule-edit" title="Edit">&#x270E;</button>
+      <button class="rule-action-btn rule-remove" title="Remove">&times;</button>
     </div>`
   ).join('');
+
+  container.querySelectorAll('.rule-edit').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const entry = btn.closest('.rule-entry');
+      const ruleId = entry.dataset.ruleId;
+      const rule = rules.find(r => r.id === ruleId);
+      if (rule) startRuleEdit(listId, ruleId, rule);
+    });
+  });
 
   container.querySelectorAll('.rule-remove').forEach(btn => {
     btn.addEventListener('click', async (e) => {
@@ -1298,83 +1305,25 @@ async function refreshRulesForActiveList() {
   renderRulesSection(listId, listEntity?.rules || []);
 }
 
-function resetRulesForm() {
-  document.getElementById('rulesAddForm').style.display = 'none';
-  document.getElementById('rulesAddRow').style.display = '';
-  document.getElementById('rulesFormError').style.display = 'none';
-  document.getElementById('rulePatternInput').value = '';
-  document.getElementById('ruleFieldTitle').checked = true;
-  document.getElementById('ruleFieldUrl').checked = true;
-  document.getElementById('ruleCaseSensitive').checked = false;
-  document.getElementById('ruleSemanticInput').value = '';
-  document.getElementById('ruleSemanticThreshold').value = 50;
-  document.getElementById('ruleSemanticThresholdVal').textContent = '0.50';
-  document.getElementById('ruleSmartDescInput').value = '';
-  document.getElementById('ruleSmartFnInput').value = '';
-  // Reset type toggle to keyword
-  document.querySelectorAll('#ruleTypeToggle .rules-tri-toggle-zone').forEach(z => z.classList.remove('active'));
-  document.querySelector('#ruleTypeToggle [data-type="keyword"]').classList.add('active');
-  document.getElementById('rulesFormKeyword').style.display = '';
-  document.getElementById('rulesFormSemantic').style.display = 'none';
-  document.getElementById('rulesFormSmart').style.display = 'none';
-  document.getElementById('rulesPreview').style.display = 'none';
-  document.getElementById('rulesPinsPreview').style.display = 'none';
-  previewResults = [];
-  previewPinsResults = [];
-}
-
-/** Build a rule object from the current form state. Returns { rule } or { error }. */
-function buildRuleFromForm() {
-  const activeType = document.querySelector('#ruleTypeToggle .rules-tri-toggle-zone.active')?.dataset.type || 'keyword';
-  if (activeType === 'keyword') {
-    const pattern = document.getElementById('rulePatternInput').value.trim();
-    if (!pattern) return { error: 'Pattern is required' };
-    const fields = [];
-    if (document.getElementById('ruleFieldTitle').checked) fields.push('title');
-    if (document.getElementById('ruleFieldUrl').checked) fields.push('url');
-    if (fields.length === 0) return { error: 'Select at least one field' };
-    return { rule: { type: 'keyword', config: { pattern, fields, caseSensitive: document.getElementById('ruleCaseSensitive').checked } } };
-  } else if (activeType === 'semantic') {
-    const description = document.getElementById('ruleSemanticInput').value.trim();
-    if (!description) return { error: 'Description is required' };
-    const threshold = parseInt(document.getElementById('ruleSemanticThreshold').value, 10) / 100;
-    return { rule: { type: 'semantic', config: { description, threshold } } };
-  } else if (activeType === 'smart') {
-    const description = document.getElementById('ruleSmartDescInput').value.trim();
-    const fnSource = document.getElementById('ruleSmartFnInput').value.trim();
-    if (!fnSource) return { error: 'Function body is required' };
-    return { rule: { type: 'smart', config: { description: description || '(custom)', fnSource } } };
-  }
-  return { error: 'Unknown rule type' };
-}
-
-// Shared preview results for threshold re-rendering
+// ─── Inline rule editing state ───
 let previewResults = [];
 let previewPinsResults = [];
 
-function getPreviewThreshold() {
-  const activeType = document.querySelector('#ruleTypeToggle .rules-tri-toggle-zone.active')?.dataset.type;
-  return activeType === 'semantic'
-    ? parseInt(document.getElementById('ruleSemanticThreshold').value, 10) / 100
-    : 0.5;
-}
-
 function renderPreviewSection(results, listEl, countEl) {
-  const threshold = getPreviewThreshold();
-  const sorted = [...results].sort((a, b) => b.score - a.score);
-  const matchCount = sorted.filter(r => r.score >= threshold).length;
-  countEl.textContent = `${matchCount} matches (${sorted.length} checked)`;
-  listEl.innerHTML = sorted.map(r => {
-    const isMatch = r.score >= threshold;
-    const scoreClass = isMatch ? 'rules-preview-score-match' : 'rules-preview-score-miss';
-    return `<div class="rules-preview-item">
+  const matches = results.filter(r => r.score >= 0.5);
+  countEl.textContent = `${matches.length} matches (${results.length} checked)`;
+  if (matches.length === 0) {
+    listEl.innerHTML = '<div class="rules-preview-empty">No matches</div>';
+    return;
+  }
+  listEl.innerHTML = matches.map(r =>
+    `<div class="rules-preview-item">
       <span class="rules-preview-title">${escapeHtml(r.title || r.url)}</span>
-      <span class="rules-preview-score ${scoreClass}">${r.score.toFixed(2)}</span>
-    </div>`;
-  }).join('');
+    </div>`
+  ).join('');
 }
 
-function rerenderPreviewWithThreshold() {
+function rerenderPreview() {
   if (previewResults.length > 0) {
     renderPreviewSection(previewResults,
       document.getElementById('rulesPreviewList'),
@@ -1387,207 +1336,261 @@ function rerenderPreviewWithThreshold() {
   }
 }
 
-function initRulesPanel() {
-  // Header toggle expand/collapse
-  document.getElementById('rulesHeader').addEventListener('click', (e) => {
-    // Don't toggle when clicking the run button
-    if (e.target.closest('#rulesRunBtn')) return;
-    const body = document.getElementById('rulesBody');
-    const icon = document.getElementById('rulesToggleIcon');
-    const isExpanded = body.style.display !== 'none';
-    body.style.display = isExpanded ? 'none' : '';
-    icon.classList.toggle('expanded', !isExpanded);
-  });
+/** Build rule object from the currently active edit row. Returns { rule } or { error }. */
+function buildRuleFromEditRow() {
+  const editRow = document.querySelector('.rule-entry.rule-editing');
+  if (!editRow) return { error: 'No edit row' };
+  const activeType = editRow.querySelector('.rule-type-option.active')?.dataset.type || 'keyword';
+  const inputVal = editRow.querySelector('.rule-edit-input').value.trim();
+  if (activeType === 'keyword') {
+    if (!inputVal) return { error: 'Pattern is required' };
+    return { rule: { type: 'keyword', config: { pattern: inputVal, fields: ['title', 'url'] } } };
+  } else if (activeType === 'smart') {
+    const fnSource = editRow.querySelector('.rule-smart-fn-input')?.value.trim() || '';
+    if (!fnSource) return { error: 'Function body is required' };
+    return { rule: { type: 'smart', config: { description: inputVal || '(custom)', fnSource } } };
+  }
+  return { error: 'Unknown rule type' };
+}
 
+function cancelRuleEdit() {
+  previewResults = [];
+  previewPinsResults = [];
+  document.getElementById('rulesPreview').style.display = 'none';
+  document.getElementById('rulesPinsPreview').style.display = 'none';
+  document.getElementById('rulesFormError').style.display = 'none';
+  refreshRulesForActiveList();
+}
+
+function buildEditRowHTML(type, config) {
+  const isKeyword = (type || 'keyword') === 'keyword';
+  const inputValue = isKeyword ? (config?.pattern || '') : (config?.description || '');
+  const inputPlaceholder = isKeyword ? 'keyword or /regex/' : 'description';
+  const fnSource = config?.fnSource || '';
+  return `<div class="rule-entry rule-editing">
+    <div class="rule-edit-main">
+      <div class="rule-type-toggle">
+        <span class="rule-type-option ${isKeyword ? 'active' : ''}" data-type="keyword">Keyword</span>
+        <span class="rule-type-option ${!isKeyword ? 'active' : ''}" data-type="smart">Function</span>
+      </div>
+      <input class="rule-edit-input" type="text" value="${escapeHtml(inputValue)}" placeholder="${inputPlaceholder}">
+      <button class="rule-preview-btn">Preview</button>
+      <button class="rule-cancel-btn" title="Cancel">&times;</button>
+      <button class="rule-save-btn" title="Save (Enter)">OK</button>
+    </div>
+    <textarea class="rule-smart-fn-input" rows="3" placeholder="// page = { title, url, body }\nreturn page.title.length > 50 ? 1 : 0;" style="${isKeyword ? 'display:none' : ''}">${escapeHtml(fnSource)}</textarea>
+  </div>`;
+}
+
+function attachEditRowHandlers(editRow, listId, existingRuleId) {
   // Type toggle
-  document.getElementById('ruleTypeToggle').addEventListener('click', (e) => {
-    const zone = e.target.closest('.rules-tri-toggle-zone');
-    if (!zone) return;
-    document.querySelectorAll('#ruleTypeToggle .rules-tri-toggle-zone').forEach(z => z.classList.remove('active'));
-    zone.classList.add('active');
-    const type = zone.dataset.type;
-    document.getElementById('rulesFormKeyword').style.display = type === 'keyword' ? '' : 'none';
-    document.getElementById('rulesFormSemantic').style.display = type === 'semantic' ? '' : 'none';
-    document.getElementById('rulesFormSmart').style.display = type === 'smart' ? '' : 'none';
+  editRow.querySelectorAll('.rule-type-option').forEach(opt => {
+    opt.addEventListener('click', () => {
+      editRow.querySelectorAll('.rule-type-option').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+      const type = opt.dataset.type;
+      const input = editRow.querySelector('.rule-edit-input');
+      input.placeholder = type === 'keyword' ? 'keyword or /regex/' : 'description';
+      editRow.querySelector('.rule-smart-fn-input').style.display = type === 'smart' ? '' : 'none';
+    });
   });
 
-  // Threshold slider — update label + re-render preview with new threshold
-  document.getElementById('ruleSemanticThreshold').addEventListener('input', (e) => {
-    document.getElementById('ruleSemanticThresholdVal').textContent = (e.target.value / 100).toFixed(2);
-    rerenderPreviewWithThreshold();
-  });
-
-  // Add button → show form
-  document.getElementById('rulesAddBtn').addEventListener('click', () => {
-    resetRulesForm();
-    document.getElementById('rulesAddForm').style.display = '';
-    document.getElementById('rulesAddRow').style.display = 'none';
-  });
-
-  // Cancel button
-  document.getElementById('rulesCancelBtn').addEventListener('click', () => {
-    resetRulesForm();
-  });
-
-  // Save button
-  document.getElementById('rulesSaveBtn').addEventListener('click', async () => {
+  // Save handler (shared by button click and Enter key)
+  async function saveCurrentRule() {
     const errorEl = document.getElementById('rulesFormError');
     errorEl.style.display = 'none';
-    const listId = activeView.id;
-    if (!listId || activeView.type !== 'list') return;
-
-    const built = buildRuleFromForm();
+    const built = buildRuleFromEditRow();
     if (built.error) {
       errorEl.textContent = built.error;
       errorEl.style.display = '';
       return;
     }
-    const rule = built.rule;
-
     try {
-      await sendAction({ action: 'addRule', listId, rule });
-      resetRulesForm();
+      if (existingRuleId) {
+        await sendAction({ action: 'removeRule', listId, ruleId: existingRuleId });
+      }
+      await sendAction({ action: 'addRule', listId, rule: built.rule });
+      cancelRuleEdit();
     } catch (err) {
       errorEl.textContent = err.message;
       errorEl.style.display = '';
     }
+  }
+
+  editRow.querySelector('.rule-save-btn').addEventListener('click', saveCurrentRule);
+
+  // Cancel
+  editRow.querySelector('.rule-cancel-btn').addEventListener('click', () => cancelRuleEdit());
+
+  // Preview
+  editRow.querySelector('.rule-preview-btn').addEventListener('click', () => runPreview());
+
+  // Enter key saves
+  editRow.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      saveCurrentRule();
+    }
   });
 
-  // Preview button — progressive batched checking
-  document.getElementById('rulesPreviewBtn').addEventListener('click', async () => {
-    const MAX_CHECKED = 100;
-    const MAX_MATCHES = 20;
-    const BATCH_SIZE = 20;
+  // Focus input
+  editRow.querySelector('.rule-edit-input').focus();
+}
 
-    const errorEl = document.getElementById('rulesFormError');
-    const previewEl = document.getElementById('rulesPreview');
-    const previewListEl = document.getElementById('rulesPreviewList');
-    const previewCountEl = document.getElementById('rulesPreviewCount');
-    const pinsPreviewEl = document.getElementById('rulesPinsPreview');
-    const pinsPreviewListEl = document.getElementById('rulesPinsPreviewList');
-    errorEl.style.display = 'none';
-    previewEl.style.display = 'none';
-    previewListEl.innerHTML = '';
-    pinsPreviewEl.style.display = 'none';
-    pinsPreviewListEl.innerHTML = '';
+function startRuleEdit(listId, ruleId, rule) {
+  // Close any existing edit row (synchronous — no async refresh)
+  const existing = document.querySelector('.rule-entry.rule-editing');
+  if (existing) existing.remove();
+  previewResults = [];
+  previewPinsResults = [];
+  document.getElementById('rulesPreview').style.display = 'none';
+  document.getElementById('rulesPinsPreview').style.display = 'none';
+  document.getElementById('rulesFormError').style.display = 'none';
 
-    const built = buildRuleFromForm();
-    if (built.error) {
-      errorEl.textContent = built.error;
-      errorEl.style.display = '';
-      return;
+  const container = document.getElementById('rulesList');
+  if (ruleId) {
+    // Replace existing display row with edit row
+    const displayRow = container.querySelector(`.rule-entry[data-rule-id="${ruleId}"]`);
+    if (displayRow) {
+      displayRow.insertAdjacentHTML('afterend', buildEditRowHTML(rule.type, rule.config));
+      displayRow.remove();
     }
+  } else {
+    // Append new edit row
+    container.insertAdjacentHTML('beforeend', buildEditRowHTML('keyword', {}));
+  }
+  const editRow = container.querySelector('.rule-entry.rule-editing');
+  attachEditRowHandlers(editRow, listId, ruleId);
+}
 
-    const previewBtn = document.getElementById('rulesPreviewBtn');
-    previewBtn.disabled = true;
-    previewBtn.textContent = 'Running…';
-    previewEl.style.display = '';
+async function runPreview() {
+  const MAX_CHECKED = 100;
+  const MAX_MATCHES = 20;
+  const BATCH_SIZE = 20;
 
-    previewResults = [];
-    previewPinsResults = [];
-    let matchCount = 0;
-    let checked = 0;
-    const seenUrls = new Set();
+  const errorEl = document.getElementById('rulesFormError');
+  const previewEl = document.getElementById('rulesPreview');
+  const previewListEl = document.getElementById('rulesPreviewList');
+  const previewCountEl = document.getElementById('rulesPreviewCount');
+  const pinsPreviewEl = document.getElementById('rulesPinsPreview');
+  const pinsPreviewListEl = document.getElementById('rulesPinsPreviewList');
+  errorEl.style.display = 'none';
+  previewEl.style.display = 'none';
+  previewListEl.innerHTML = '';
+  pinsPreviewEl.style.display = 'none';
+  pinsPreviewListEl.innerHTML = '';
 
-    function renderResults() {
-      rerenderPreviewWithThreshold();
-    }
+  const built = buildRuleFromEditRow();
+  if (built.error) {
+    errorEl.textContent = built.error;
+    errorEl.style.display = '';
+    return;
+  }
 
-    try {
-      // Collect visits from recent days, going backward
-      const today = new Date();
-      for (let dayOffset = 0; dayOffset < 30; dayOffset++) {
+  const previewBtn = document.querySelector('.rule-preview-btn');
+  if (previewBtn) { previewBtn.disabled = true; previewBtn.textContent = 'Running…'; }
+  previewEl.style.display = '';
+
+  previewResults = [];
+  previewPinsResults = [];
+  let matchCount = 0;
+  let checked = 0;
+  const seenUrls = new Set();
+
+  try {
+    const today = new Date();
+    for (let dayOffset = 0; dayOffset < 30; dayOffset++) {
+      if (checked >= MAX_CHECKED || matchCount >= MAX_MATCHES) break;
+      const d = new Date(today);
+      d.setDate(d.getDate() - dayOffset);
+      const dateKey = d.toISOString().slice(0, 10);
+      const dayEntries = await readCacheable('log:' + dateKey) || [];
+      const visits = dayEntries
+        .filter(e => e.action === 'visit_page' && e.url && e.title && !seenUrls.has(e.url))
+        .reverse();
+      const uniqueVisits = [];
+      for (const v of visits) {
+        if (!seenUrls.has(v.url)) {
+          seenUrls.add(v.url);
+          uniqueVisits.push(v);
+        }
+      }
+      if (uniqueVisits.length === 0) continue;
+
+      for (let i = 0; i < uniqueVisits.length; i += BATCH_SIZE) {
         if (checked >= MAX_CHECKED || matchCount >= MAX_MATCHES) break;
-        const d = new Date(today);
-        d.setDate(d.getDate() - dayOffset);
-        const dateKey = d.toISOString().slice(0, 10);
-        const dayEntries = await readCacheable('log:' + dateKey) || [];
-        const visits = dayEntries
-          .filter(e => e.action === 'visit_page' && e.url && e.title && !seenUrls.has(e.url))
-          .reverse(); // most recent first within the day
-        // Deduplicate
-        const uniqueVisits = [];
-        for (const v of visits) {
-          if (!seenUrls.has(v.url)) {
-            seenUrls.add(v.url);
-            uniqueVisits.push(v);
-          }
+        const remaining = Math.min(BATCH_SIZE, MAX_CHECKED - checked);
+        const batch = uniqueVisits.slice(i, i + remaining);
+        const bodies = await Promise.all(batch.map(e =>
+          e.bodyPreview ? Promise.resolve(e.bodyPreview) : fetchPageBody(e.url)
+        ));
+        const entries = [];
+        for (let j = 0; j < batch.length; j++) {
+          if (!bodies[j]) continue;
+          entries.push({
+            timestamp: batch[j].timestamp, action: batch[j].action, url: batch[j].url,
+            title: batch[j].title || '', bodyPreview: bodies[j],
+          });
         }
-        if (uniqueVisits.length === 0) continue;
-
-        // Send in batches
-        for (let i = 0; i < uniqueVisits.length; i += BATCH_SIZE) {
-          if (checked >= MAX_CHECKED || matchCount >= MAX_MATCHES) break;
-          const remaining = Math.min(BATCH_SIZE, MAX_CHECKED - checked);
-          const batch = uniqueVisits.slice(i, i + remaining);
-          // Ensure each entry has bodyPreview — fetch on-the-fly if missing
-          const bodies = await Promise.all(batch.map(e =>
-            e.bodyPreview ? Promise.resolve(e.bodyPreview) : fetchPageBody(e.url)
-          ));
-          // Only include entries where body was successfully obtained
-          const entries = [];
-          for (let j = 0; j < batch.length; j++) {
-            if (!bodies[j]) continue; // skip pages where fetch failed
-            entries.push({
-              timestamp: batch[j].timestamp, action: batch[j].action, url: batch[j].url,
-              title: batch[j].title || '', bodyPreview: bodies[j],
-            });
-          }
-          if (entries.length === 0) continue;
-          const resp = await sendAction({ action: 'previewRule', rule: built.rule, entries });
-          for (const r of resp.results || []) {
-            previewResults.push(r);
-            checked++;
-            if (r.match) matchCount++;
-          }
-          renderResults();
+        if (entries.length === 0) continue;
+        const resp = await sendAction({ action: 'previewRule', rule: built.rule, entries });
+        for (const r of resp.results || []) {
+          previewResults.push(r);
+          checked++;
+          if (r.match) matchCount++;
         }
+        rerenderPreview();
       }
-      // Final render for history section
-      if (checked === 0) {
-        previewCountEl.textContent = '';
-        previewListEl.innerHTML = '<div class="rules-preview-empty">No visits found to match against</div>';
-      } else {
-        renderResults();
-      }
-
-      // ── Pass 2: Pinned pages in this list ──
-      const listId = activeView.id;
-      if (listId && activeView.type === 'list') {
-        const listEntity = await readCacheable('list:' + listId);
-        const pins = listEntity?.pins || [];
-        if (pins.length > 0) {
-          pinsPreviewEl.style.display = '';
-          const pinEntries = [];
-          for (const pin of pins) {
-            const pageKey = pin.id; // 'page:<slug>'
-            const page = await readCacheable(pageKey);
-            if (!page?.url) continue;
-            const title = page.user_title || page.title || '';
-            if (!title) continue;
-            const body = await fetchPageBody(page.url);
-            if (!body) continue;
-            pinEntries.push({ url: page.url, title, bodyPreview: body });
-          }
-          if (pinEntries.length > 0) {
-            const resp = await sendAction({ action: 'previewRule', rule: built.rule, entries: pinEntries });
-            previewPinsResults = resp.results || [];
-            rerenderPreviewWithThreshold();
-          } else {
-            document.getElementById('rulesPinsPreviewCount').textContent = '';
-            pinsPreviewListEl.innerHTML = '<div class="rules-preview-empty">No pinned pages with fetchable content</div>';
-          }
-        }
-      }
-    } catch (err) {
-      previewEl.style.display = 'none';
-      pinsPreviewEl.style.display = 'none';
-      errorEl.textContent = err.message;
-      errorEl.style.display = '';
-    } finally {
-      previewBtn.disabled = false;
-      previewBtn.textContent = 'Preview';
     }
+    if (checked === 0) {
+      previewCountEl.textContent = '';
+      previewListEl.innerHTML = '<div class="rules-preview-empty">No visits found to match against</div>';
+    } else {
+      rerenderPreview();
+    }
+
+    // ── Pass 2: Pinned pages ──
+    const listId = activeView.id;
+    if (listId && activeView.type === 'list') {
+      const listEntity = await readCacheable('list:' + listId);
+      const pins = listEntity?.pins || [];
+      if (pins.length > 0) {
+        pinsPreviewEl.style.display = '';
+        const pinEntries = [];
+        for (const pin of pins) {
+          const page = await readCacheable(pin.id);
+          if (!page?.url) continue;
+          const title = page.user_title || page.title || '';
+          if (!title) continue;
+          const body = await fetchPageBody(page.url);
+          if (!body) continue;
+          pinEntries.push({ url: page.url, title, bodyPreview: body });
+        }
+        if (pinEntries.length > 0) {
+          const resp = await sendAction({ action: 'previewRule', rule: built.rule, entries: pinEntries });
+          previewPinsResults = resp.results || [];
+          rerenderPreview();
+        } else {
+          document.getElementById('rulesPinsPreviewCount').textContent = '';
+          pinsPreviewListEl.innerHTML = '<div class="rules-preview-empty">No pinned pages with fetchable content</div>';
+        }
+      }
+    }
+  } catch (err) {
+    previewEl.style.display = '';
+    previewListEl.innerHTML = `<div class="rules-preview-error">${escapeHtml(err.message)}</div>`;
+    previewCountEl.textContent = '';
+    pinsPreviewEl.style.display = 'none';
+  } finally {
+    if (previewBtn) { previewBtn.disabled = false; previewBtn.textContent = 'Preview'; }
+  }
+}
+
+function initRulesPanel() {
+  // Add button → inline edit row
+  document.getElementById('rulesAddBtn').addEventListener('click', () => {
+    if (activeView.type !== 'list') return;
+    startRuleEdit(activeView.id, null, null);
   });
 
   // Run button
@@ -1605,7 +1608,6 @@ function initRulesPanel() {
         showInfoBubble('No visits today to match');
         return;
       }
-      // Fetch bodyPreview on-the-fly for entries missing it
       const bodies = await Promise.all(visits.map(e =>
         e.bodyPreview ? Promise.resolve(e.bodyPreview) : fetchPageBody(e.url)
       ));
@@ -2369,7 +2371,6 @@ async function buildTreeLevel(keys) {
     const slug = entity.slug || key.slice(5);
     const children = entity.childLists?.length ? await buildTreeLevel(entity.childLists) : [];
     const node = { slug, name: entity.name || slug, children, parentList: entity.parentList || 'list:system/root' };
-    if (entity.auto) node.auto = true;
     nodes.push(node);
   }
   return nodes;
@@ -2487,12 +2488,6 @@ function createSidebarItem(node, depth) {
     <button class="remove-list" title="Remove list">&times;</button>
   `;
 
-  // Hide remove button for auto lists
-  if (node.auto) {
-    const removeBtn = item.querySelector('.remove-list');
-    if (removeBtn) removeBtn.style.display = 'none';
-  }
-
   // Fold/unfold toggle
   if (hasChildren) {
     item.querySelector('.fold-toggle').addEventListener('click', (e) => {
@@ -2510,20 +2505,18 @@ function createSidebarItem(node, depth) {
     });
   }
 
-  if (!node.auto) {
-    item.draggable = true;
-    item.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('application/x-list-reorder', lst.slug);
-      e.dataTransfer.effectAllowed = 'move';
-      item.classList.add('dragging');
+  item.draggable = true;
+  item.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('application/x-list-reorder', lst.slug);
+    e.dataTransfer.effectAllowed = 'move';
+    item.classList.add('dragging');
+  });
+  item.addEventListener('dragend', () => {
+    item.classList.remove('dragging');
+    document.querySelectorAll('.reorder-above, .reorder-below, .nest-target').forEach(el => {
+      el.classList.remove('reorder-above', 'reorder-below', 'nest-target');
     });
-    item.addEventListener('dragend', () => {
-      item.classList.remove('dragging');
-      document.querySelectorAll('.reorder-above, .reorder-below, .nest-target').forEach(el => {
-        el.classList.remove('reorder-above', 'reorder-below', 'nest-target');
-      });
-    });
-  }
+  });
 
   item.addEventListener('click', (e) => {
     if (e.target.closest('.remove-list') || e.target.closest('.fold-toggle')) return;
@@ -2865,7 +2858,6 @@ function formatBytes(bytes) {
 // Session-cached keys live in chrome.storage.session; logBuffer lives in chrome.storage.local
 const SESSION_CACHE_KEYS = [
   { key: 'manifest:settings', label: 'Settings' },
-  { key: 'list:auto/gateways', label: 'Auto Gateways' },
   { key: 'manifest:name-to-id', label: 'List Name Map' },
 ];
 const LOCAL_CACHE_KEYS = [

@@ -2346,86 +2346,94 @@
       background: var(--bg-surface-hover);
     }
 
-    /* ── Rules section ── */
+    /* ── Rules section (lightweight, search-bar-like) ── */
     .rules-section {
-      margin-bottom: 12px;
-      background: var(--bg-surface);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid var(--border-glass);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--highlight-top), var(--highlight-edge),
-        0 1px 4px rgba(53, 40, 32, 0.04);
-      padding: 10px 14px;
+      margin-bottom: 8px;
+      padding: 0 24px;
     }
     .rules-header {
       display: flex;
       align-items: center;
-      gap: 8px;
-      cursor: pointer;
+      gap: 6px;
       user-select: none;
+      margin-bottom: 6px;
     }
-    .rules-toggle-icon {
-      font-size: 10px;
-      color: var(--text-muted);
-      transition: transform 0.2s var(--ease-smooth);
-      display: inline-block;
-    }
-    .rules-toggle-icon.expanded {
-      transform: rotate(90deg);
-    }
+    .rules-header .filter-section-label { font-size: 10px; }
     .rules-count {
-      font-size: 10px;
-      font-weight: 700;
+      font-size: 9px;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.45);
+      padding: 0 5px;
+      border-radius: var(--radius-pill);
+      line-height: 16px;
+    }
+    .rules-header-add {
+      width: 18px;
+      height: 18px;
+      border: 1px dashed rgba(0, 0, 0, 0.12);
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 13px;
+      cursor: pointer;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.2s var(--ease-smooth);
+    }
+    .rules-header-add:hover {
       background: var(--accent-primary-soft);
       color: var(--accent-primary);
-      padding: 1px 7px;
-      border-radius: var(--radius-pill);
+      border-color: var(--accent-primary);
     }
     .rules-body {
-      margin-top: 10px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 5px;
     }
     .rules-list {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 5px;
     }
+    /* Display row — pill-shaped glass bar */
     .rule-entry {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 6px 10px;
-      background: var(--bg-surface-hover);
-      border-radius: 4px;
-      font-size: 13px;
+      padding: 5px 14px;
+      background: rgba(255, 255, 255, 0.4);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-pill);
+      font-size: 12px;
       font-family: var(--font-body);
-      color: var(--text-primary);
+      color: var(--text-secondary);
+      box-shadow: var(--highlight-top), 0 1px 2px rgba(53, 40, 32, 0.03);
+      transition: background 0.2s var(--ease-smooth), box-shadow 0.2s;
+    }
+    .rule-entry:hover {
+      background: rgba(255, 255, 255, 0.55);
     }
     .rule-type-badge {
-      font-size: 10px;
+      font-size: 9px;
       padding: 1px 6px;
-      border-radius: var(--radius-sm);
+      border-radius: var(--radius-pill);
       font-weight: 600;
-      border: 1px solid transparent;
+      letter-spacing: 0.02em;
       flex-shrink: 0;
+      text-transform: lowercase;
     }
     .rule-type-keyword {
-      background: var(--accent-primary-soft);
+      background: rgba(208, 112, 48, 0.08);
       color: var(--accent-primary);
-      border-color: rgba(208, 112, 48, 0.15);
-    }
-    .rule-type-semantic {
-      background: var(--accent-blue-soft);
-      color: var(--accent-blue);
-      border-color: rgba(80, 128, 176, 0.12);
     }
     .rule-type-smart {
-      background: var(--accent-green-soft);
+      background: rgba(88, 136, 88, 0.08);
       color: var(--accent-green);
-      border-color: rgba(88, 136, 88, 0.12);
     }
     .rule-desc {
       flex: 1;
@@ -2433,144 +2441,171 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .rule-remove {
-      width: 22px;
-      height: 22px;
+    .rule-action-btn {
+      width: 20px;
+      height: 20px;
       border: none;
       background: transparent;
       color: var(--text-muted);
-      font-size: 16px;
+      font-size: 13px;
       cursor: pointer;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      transition: background 0.15s, color 0.15s;
+      opacity: 0;
+      transition: all 0.15s;
     }
-    .rule-remove:hover {
-      background: var(--accent-red-soft);
-      color: var(--accent-red);
-    }
-    .rules-add-btn {
-      font-size: 12px;
-      padding: 4px 12px;
-    }
-    .rules-add-form {
-      background: var(--bg-surface);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+    .rule-entry:hover .rule-action-btn { opacity: 1; }
+    .rule-edit:hover { background: rgba(255, 255, 255, 0.5); color: var(--text-primary); }
+    .rule-remove:hover { background: var(--accent-red-soft); color: var(--accent-red); }
+    /* Inline edit row — search-bar style */
+    .rule-entry.rule-editing {
+      background: rgba(255, 255, 255, 0.55);
       border: 1px solid var(--border-glass);
-      border-radius: var(--radius-md);
-      padding: 12px;
-      display: flex;
+      border-radius: var(--radius-lg);
       flex-direction: column;
-      gap: 10px;
+      gap: 6px;
+      padding: 6px 10px;
+      box-shadow: var(--highlight-top), var(--highlight-edge),
+        0 1px 3px rgba(53, 40, 32, 0.05);
     }
-    .rules-form-row {
+    .rule-entry.rule-editing:hover { background: rgba(255, 255, 255, 0.55); }
+    .rule-entry.rule-editing .rule-action-btn { opacity: 1; }
+    .rule-edit-main {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 6px;
+      width: 100%;
     }
-    .rules-form-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-secondary);
-      width: 70px;
+    .rule-type-toggle {
+      display: flex;
+      background: rgba(255, 255, 255, 0.3);
+      border: 1px solid rgba(0, 0, 0, 0.06);
+      border-radius: var(--radius-pill);
+      padding: 1px;
       flex-shrink: 0;
     }
-    .rules-field-checks {
-      display: flex;
-      gap: 14px;
-      font-size: 12px;
-      color: var(--text-primary);
-    }
-    .rules-field-checks label {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      cursor: pointer;
-    }
-    .rules-field-checks input {
-      accent-color: var(--accent-primary);
-    }
-    .rules-fn-textarea {
-      flex: 1;
-      padding: 8px 10px;
-      border: 1px solid var(--border-glass);
-      border-radius: var(--radius-sm);
-      font-size: 12px;
-      font-family: 'Monaco', 'Menlo', monospace;
-      background: var(--bg-surface);
-      color: var(--text-primary);
-      resize: vertical;
-      outline: none;
-      transition: border-color 0.15s;
-    }
-    .rules-fn-textarea:focus {
-      border-color: var(--accent-primary);
-    }
-    .rules-threshold-val {
-      font-size: 12px;
-      color: var(--text-muted);
-      font-family: 'Monaco', 'Menlo', monospace;
-      width: 36px;
-      text-align: right;
-    }
-    .rules-form-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-    }
-    .rules-form-error {
-      font-size: 12px;
-      color: var(--accent-red);
-      padding: 4px 0;
-    }
-    .rules-run-btn {
-      font-size: 11px;
-      padding: 3px 10px;
-    }
-    /* Tri-toggle for rules type selector */
-    .rules-tri-toggle {
-      display: flex;
-      gap: 2px;
-      background: rgba(255, 255, 255, 0.3);
-      border: 1px solid var(--border-glass);
-      border-radius: var(--radius-pill);
-      padding: 2px;
-    }
-    .rules-tri-toggle-zone {
-      padding: 4px 12px;
-      font-size: 12px;
+    .rule-type-option {
+      padding: 2px 8px;
+      font-size: 10px;
       font-weight: 500;
       color: var(--text-muted);
       cursor: pointer;
       border-radius: var(--radius-pill);
-      transition: all 0.2s var(--ease-smooth);
+      transition: all 0.15s var(--ease-smooth);
       user-select: none;
     }
-    .rules-tri-toggle-zone.active {
-      background: rgba(255, 255, 255, 0.75);
+    .rule-type-option.active {
+      background: rgba(255, 255, 255, 0.8);
       color: var(--text-primary);
-      box-shadow: 0 1px 3px rgba(53, 40, 32, 0.08);
+      box-shadow: 0 1px 2px rgba(53, 40, 32, 0.06);
+    }
+    .rule-edit-input {
+      flex: 1;
+      min-width: 0;
+      padding: 4px 10px;
+      border: 1px solid rgba(0, 0, 0, 0.06);
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-family: var(--font-body);
+      background: rgba(255, 255, 255, 0.5);
+      color: var(--text-primary);
+      outline: none;
+      transition: border-color 0.2s var(--ease-smooth), box-shadow 0.2s;
+    }
+    .rule-edit-input:focus {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 2px rgba(208, 112, 48, 0.08);
+    }
+    .rule-preview-btn {
+      padding: 3px 10px;
+      font-size: 10px;
+      font-weight: 500;
+      border: 1px solid rgba(0, 0, 0, 0.06);
+      border-radius: var(--radius-pill);
+      background: rgba(255, 255, 255, 0.4);
+      color: var(--text-secondary);
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.15s var(--ease-smooth);
+    }
+    .rule-preview-btn:hover { background: rgba(255, 255, 255, 0.7); color: var(--text-primary); }
+    .rule-preview-btn:disabled { opacity: 0.4; cursor: default; }
+    .rule-cancel-btn {
+      width: 22px;
+      height: 22px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 15px;
+      cursor: pointer;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.15s var(--ease-smooth);
+    }
+    .rule-cancel-btn:hover { background: var(--accent-red-soft); color: var(--accent-red); }
+    .rule-save-btn {
+      padding: 3px 10px;
+      border: none;
+      background: var(--accent-primary);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: var(--radius-pill);
+      flex-shrink: 0;
+      transition: all 0.15s var(--ease-smooth);
+      letter-spacing: 0.01em;
+    }
+    .rule-save-btn:hover { background: var(--accent-primary-hover, #c06020); box-shadow: 0 1px 4px rgba(208, 112, 48, 0.2); }
+    .rule-smart-fn-input {
+      width: 100%;
+      padding: 5px 10px;
+      border: 1px solid rgba(0, 0, 0, 0.06);
+      border-radius: var(--radius-md);
+      font-size: 11px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      background: rgba(255, 255, 255, 0.4);
+      color: var(--text-primary);
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s var(--ease-smooth);
+      box-sizing: border-box;
+    }
+    .rule-smart-fn-input:focus {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 2px rgba(208, 112, 48, 0.08);
+    }
+    .rules-form-error {
+      font-size: 11px;
+      color: var(--accent-red);
+      padding: 2px 14px;
+    }
+    .rules-run-btn {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
     }
     .rules-preview {
-      border-top: 1px solid var(--border-subtle);
-      padding-top: 8px;
+      padding-top: 4px;
     }
     .rules-preview-header {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 6px;
+      gap: 6px;
+      margin-bottom: 4px;
     }
     .rules-preview-count {
-      font-size: 11px;
+      font-size: 10px;
       color: var(--text-muted);
     }
     .rules-preview-list {
-      max-height: 200px;
+      max-height: 160px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
@@ -2580,10 +2615,10 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 4px 8px;
-      font-size: 12px;
-      color: var(--text-primary);
-      background: var(--bg-surface-hover);
+      padding: 3px 12px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      background: rgba(255, 255, 255, 0.3);
       border-radius: 4px;
     }
     .rules-preview-title {
@@ -2592,22 +2627,18 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .rules-preview-score {
-      font-size: 11px;
-      font-family: 'Monaco', 'Menlo', monospace;
-      flex-shrink: 0;
-    }
-    .rules-preview-score-match {
-      color: #4ade80;
-    }
-    .rules-preview-score-miss {
-      color: #f87171;
-    }
     .rules-preview-empty {
-      font-size: 12px;
+      font-size: 11px;
       color: var(--text-muted);
       font-style: italic;
-      padding: 4px 0;
+      padding: 2px 12px;
+    }
+    .rules-preview-error {
+      font-size: 11px;
+      color: var(--accent-red);
+      padding: 3px 12px;
+      background: rgba(248, 113, 113, 0.06);
+      border-radius: 4px;
     }
   </style>
 </head>
@@ -2676,83 +2707,28 @@
     <div class="list-layout" id="listLayout">
       <div class="rules-section" id="rulesSection" style="display:none">
         <div class="rules-header" id="rulesHeader">
-          <span class="rules-toggle-icon" id="rulesToggleIcon">&#x25B6;</span>
           <span class="filter-section-label" style="border:none;margin:0;padding:0">RULES</span>
           <span class="rules-count" id="rulesCount" style="display:none"></span>
+          <button class="rules-header-add" id="rulesAddBtn" title="Add rule">+</button>
           <span style="flex:1"></span>
           <button class="btn btn-secondary rules-run-btn" id="rulesRunBtn" style="display:none;padding:3px 10px;font-size:11px">Run</button>
         </div>
-        <div class="rules-body" id="rulesBody" style="display:none">
+        <div class="rules-body" id="rulesBody">
           <div class="rules-list" id="rulesList"></div>
-          <div id="rulesAddRow">
-            <button class="btn btn-secondary rules-add-btn" id="rulesAddBtn">+ Add Rule</button>
+          <div class="rules-form-error" id="rulesFormError" style="display:none"></div>
+          <div class="rules-preview" id="rulesPreview" style="display:none">
+            <div class="rules-preview-header">
+              <span class="filter-section-label" style="border:none;margin:0;padding:0">RECENT VISITS</span>
+              <span class="rules-preview-count" id="rulesPreviewCount"></span>
+            </div>
+            <div class="rules-preview-list" id="rulesPreviewList"></div>
           </div>
-          <div class="rules-add-form" id="rulesAddForm" style="display:none">
-            <div class="rules-form-row">
-              <label class="rules-form-label">Type</label>
-              <div class="rules-tri-toggle" id="ruleTypeToggle">
-                <div class="rules-tri-toggle-zone active" data-type="keyword">Keyword</div>
-                <div class="rules-tri-toggle-zone" data-type="semantic">Semantic</div>
-                <div class="rules-tri-toggle-zone" data-type="smart">Smart</div>
-              </div>
+          <div class="rules-preview" id="rulesPinsPreview" style="display:none">
+            <div class="rules-preview-header">
+              <span class="filter-section-label" style="border:none;margin:0;padding:0">PINNED PAGES</span>
+              <span class="rules-preview-count" id="rulesPinsPreviewCount"></span>
             </div>
-            <div id="rulesFormKeyword">
-              <div class="rules-form-row">
-                <label class="rules-form-label">Pattern</label>
-                <input type="text" id="rulePatternInput" class="blacklist-input" placeholder="github  or  /regex/" style="flex:1">
-              </div>
-              <div class="rules-form-row">
-                <label class="rules-form-label">Match in</label>
-                <div class="rules-field-checks">
-                  <label><input type="checkbox" id="ruleFieldTitle" checked> Title</label>
-                  <label><input type="checkbox" id="ruleFieldUrl" checked> URL</label>
-                </div>
-              </div>
-              <div class="rules-form-row">
-                <label><input type="checkbox" id="ruleCaseSensitive"> Case sensitive</label>
-              </div>
-            </div>
-            <div id="rulesFormSemantic" style="display:none">
-              <div class="rules-form-row">
-                <label class="rules-form-label">Description</label>
-                <input type="text" id="ruleSemanticInput" class="blacklist-input" placeholder="articles about machine learning" style="flex:1">
-              </div>
-              <div class="rules-form-row">
-                <label class="rules-form-label">Threshold</label>
-                <input type="range" id="ruleSemanticThreshold" min="0" max="100" value="50" style="flex:1">
-                <span id="ruleSemanticThresholdVal" class="rules-threshold-val">0.50</span>
-              </div>
-            </div>
-            <div id="rulesFormSmart" style="display:none">
-              <div class="rules-form-row">
-                <label class="rules-form-label">Description</label>
-                <input type="text" id="ruleSmartDescInput" class="blacklist-input" placeholder="pages with long titles" style="flex:1">
-              </div>
-              <div class="rules-form-row" style="align-items:flex-start">
-                <label class="rules-form-label" style="margin-top:8px">Function</label>
-                <textarea id="ruleSmartFnInput" class="rules-fn-textarea" rows="3" placeholder="return page.title.length > 50 ? 1 : 0;"></textarea>
-              </div>
-            </div>
-            <div class="rules-form-actions">
-              <button class="btn btn-secondary" id="rulesCancelBtn">Cancel</button>
-              <button class="btn btn-secondary" id="rulesPreviewBtn">Preview</button>
-              <button class="btn btn-primary" id="rulesSaveBtn">Add</button>
-            </div>
-            <div class="rules-form-error" id="rulesFormError" style="display:none"></div>
-            <div class="rules-preview" id="rulesPreview" style="display:none">
-              <div class="rules-preview-header">
-                <span class="filter-section-label" style="border:none;margin:0;padding:0">RECENT VISITS</span>
-                <span class="rules-preview-count" id="rulesPreviewCount"></span>
-              </div>
-              <div class="rules-preview-list" id="rulesPreviewList"></div>
-            </div>
-            <div class="rules-preview" id="rulesPinsPreview" style="display:none">
-              <div class="rules-preview-header">
-                <span class="filter-section-label" style="border:none;margin:0;padding:0">PINNED PAGES</span>
-                <span class="rules-preview-count" id="rulesPinsPreviewCount"></span>
-              </div>
-              <div class="rules-preview-list" id="rulesPinsPreviewList"></div>
-            </div>
+            <div class="rules-preview-list" id="rulesPinsPreviewList"></div>
           </div>
         </div>
       </div>

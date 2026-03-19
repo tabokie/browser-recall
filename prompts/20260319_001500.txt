@@ -1,0 +1,40 @@
+- Let's improve rules engine. First, remove semantic rule entirely.
+- Yes, don't forget to remove dependencies
+- For the preview, let's only show matches, and do not show scores (since they are just 1 and 0). For the smart rule, let's rename to "Function", and show error if the function fails to run during preview
+- I want the rules to be more simplistic, looking like this:
+
+Rules (+)
+[Keyword] (keywords..     ) <edit button>
+[Function] (description...) <edit button>
+
+When user click + to add new rule, or click edit to change existing rule, the specific rule changes to editable, but still inlined with other rules:
+
+..other rules...
+((Keyword) Function) (keywords input bar..) <preview button> <check mark buttont>
+..other rules...
+- continue E2E test
+- Do not store bodyPreview in logs. It is passed in message between content.js and background.js, and processed for rule matching, but not persisted to logs
+- continue
+- Make sure that field is striped from data in ~/portal-data as well
+- Remove the drop down of Rules. Rules are always displayed
+- The Rule card is a bit clunky and heavy. Could we make it lighter like the standalone search bar, but with distinction from the filter search bar. Doing so while reproducing the aesthetics of Demo D.
+- Rule section is not cleared when switch from list UI to explore UI. E2E cover this
+- Add a cross button to remove the pending rule: <preview> <x> <okay>. Okay is highlighted and key "Enter" saves the rule
+- Show the JS struct definition of `page` as comments in the function hint text
+- What is the implementation for checking Gateways right now? Explain to me
+- Remove the concept of "Auto" list, remove all traces of them in ~/portal-data. Instead, when user open the extension for the first time, there are some default lists with predefined rules. Gateways is one of them. You should use the Function to implement the gateway detection (e.g. pathname is / or /xx/ or /xx where xx contains index).
+
+By the way, I find the name "Gateways" a bit difficult to understand, do you have other suggestions?
+- Q1 yes, Q2 yes (but be careful with log migration, the end state of the checkpoint should be consistent with log replay result), Q3 no that I can think of, open to suggestions though.
+
+One thing, what is isGatewayOriginFromPins used for? Can we remove it? Because Hubs should not be different from any other user created lists.
+- Re run the function over history, make sure the Hubs pins (and the logs to add them) are exactly the same as what would be matched by the function
+- Actually, I don't like your function. The regex makes it hard to understand. Let me see the version using simple if else, and decide which to use
+- We check substring for the last path only. E.g. ../wiki and ../explore/. And the expensive substring is put after all other checks are run. No substring match over title.
+- Actuall, moving forward, we will need better fuzz keyword search anyway. What are the lightweight options out there for fuzz search?
+- What is the overhead for uFuzzy over all history URL, titles, and snapshot markdowns? You can use ~/portal-data to estimate
+- For options with index, where is the index stored?
+- Put the research of fuzz search into ./research-fuzz.md. Then resume to prior task. Let's remove "search" and check again
+- Go
+- Apply the migration, make sure there is no fallback or back compat code left in the codebase
+- /finish

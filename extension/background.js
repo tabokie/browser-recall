@@ -1,8 +1,8 @@
 // Background service worker for Portal extension
 // Central authority for reads and mutations. Offscreen is a pure filesystem I/O worker.
-import { generateSlugFromUrl, generateNoteSlug, dateKeyFromTimestamp, isGatewayOriginFromPins } from './utils.js';
+import { generateSlugFromUrl, generateNoteSlug, dateKeyFromTimestamp } from './utils.js';
 import { effectOf } from './replay.js';
-import { validateRuleConfig, validateSmartRuleFn, matchRules, matchKeywordRule, cosineSimilarity, buildPageDataFromEntry } from './rule-engine.js';
+import { validateRuleConfig, validateSmartRuleFn, matchRules, matchKeywordRule, buildPageDataFromEntry } from './rule-engine.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark, cacheClear } from './entity-cache.js';
 
@@ -240,11 +240,10 @@ async function addLog(entry) {
 }
 
 // Build a visit_page log entry. Title omitted when absent (slow-loading pages).
-function buildVisitPageEntry(url, title, referrerUrl, bodyPreview) {
+function buildVisitPageEntry(url, title, referrerUrl) {
   const entry = { timestamp: Date.now(), action: 'visit_page', url };
   if (title) entry.title = title;
   if (referrerUrl) entry.referrerUrl = referrerUrl;
-  if (bodyPreview) entry.bodyPreview = bodyPreview;
   return entry;
 }
 
@@ -393,6 +392,34 @@ async function hydrateCache() {
       await cacheSet('manifest:name-to-id', nmResp.entity);
     }
   } catch (e) { console.warn('Name-map load failed:', e.message); }
+
+  // Phase 1.1: First-run default list creation
+  // If no user lists exist (only system lists), create a "Hubs" list with a function rule.
+  try {
+    const metaRespCheck = await requestOffscreen({ action: 'loadAllListMetadata' });
+    const userLists = (metaRespCheck?.lists || []).filter(l => !l.slug.startsWith('system/'));
+    if (userLists.length === 0) {
+      await addLog({
+        timestamp: Date.now(),
+        action: 'create_list',
+        parents: [],
+        name: 'Hubs',
+      });
+      await addLog({
+        timestamp: Date.now(),
+        action: 'add_rule',
+        parents: [],
+        name: 'Hubs',
+        rule: {
+          type: 'smart',
+          config: {
+            description: 'Hub and landing pages',
+            fnSource: "const p = new URL(page.url).pathname.toLowerCase(); if (p === '/' || p === '') return 1; if (p.includes('index')) return 1; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return 1; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover']; if (hub.some(k => last.includes(k))) return 1; return 0;",
+          },
+        },
+      });
+    }
+  } catch (e) { console.warn('First-run default list creation failed:', e.message); }
 
   // Phase 1.5: History cache — per-date keys history:YYYY-MM-DD
   try {
@@ -581,48 +608,6 @@ async function trimTitle(rawTitle, url) {
   return title.trim();
 }
 
-// ─── Gateway Domain Registry ──────────────────────────────────────────
-// Promotes an origin to the gateways list when we visit a root-like page
-// and recent history already contains visits from the same origin.
-
-async function updateGatewayRegistry(url) {
-  try {
-    const parsed = new URL(url);
-    const origin = parsed.origin;
-    const isSearchQuery = parsed.searchParams.has('q') || parsed.searchParams.has('query') || parsed.searchParams.has('search');
-    const isRoot = parsed.pathname === '/' || parsed.pathname === '' || parsed.pathname === '/index.html' || parsed.pathname === '/index.htm';
-
-    // Only trigger on root-like pages
-    if (!isRoot && !isSearchQuery) return;
-
-    // Check if origin is already a gateway
-    const gwEntity = await readCacheable('list:auto/gateways');
-    const rootUrl = origin + '/';
-    if (gwEntity && isGatewayOriginFromPins(rootUrl, gwEntity.pins || [])) return;
-
-    // Check recent history for other visits from this origin
-    const today = new Date().toISOString().slice(0, 10);
-    const todayHistory = await readCacheable('log:' + today) || [];
-    const hasOriginVisits = todayHistory.some(e => {
-      try { return e.url && new URL(e.url).origin === origin && e.url !== url; }
-      catch { return false; }
-    });
-    if (!hasOriginVisits) return;
-
-    // Promote: pin root URL to auto/gateways list
-    await addLog({
-      timestamp: Date.now(),
-      action: 'pin_to_list',
-      parents: [], name: 'auto/gateways',
-      items: [rootUrl]
-    });
-    console.log(`Gateway: promoted ${origin}`);
-  } catch (e) {
-    console.warn('Gateway registry update failed:', e.message);
-  }
-}
-
-
 // ─── Supplementary referrer detection ─────────────────────────────────
 // Sites that suppress document.referrer via Referrer-Policy or rel="noreferrer"
 // leave an empty string in content script. webNavigation sees the real navigation.
@@ -705,8 +690,8 @@ initSavepageBridge();
 // Resolve a list internal ID to its name path using the name-map.
 
 async function getListParentsAndName(listId) {
-  // System/auto lists: name IS the ID
-  if (listId.startsWith('system/') || listId.startsWith('auto/')) {
+  // System lists: name IS the ID
+  if (listId.startsWith('system/')) {
     return { parents: [], name: listId };
   }
   const nameToId = await readCacheable('manifest:name-to-id');
@@ -993,12 +978,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               }
 
               const title = request.title ? await trimTitle(request.title, url) : '';
-              const entry = buildVisitPageEntry(url, title, referrerUrl, request.bodyPreview);
+              const entry = buildVisitPageEntry(url, title, referrerUrl);
               await addLog(entry);
 
-              // First-visit extras: gateway + workspace
+              // First-visit extras: workspace
               const slug = request.slug || generateSlugFromUrl(url);
-              updateGatewayRegistry(url);
 
               const wsListIds = rpWorkspace?.listIds || [];
               if (rpWorkspace && rpWorkspace.mode === 'workspace' && wsListIds.length > 0) {
@@ -1482,10 +1466,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'deleteList': {
-          if (request.listId.startsWith('auto/')) {
-            sendResponse({ success: false, error: 'Cannot delete auto lists' });
-            break;
-          }
           const pnDel = await getListParentsAndName(request.listId);
           if (!pnDel) {
             sendResponse({ success: false, error: 'List not found in name-to-id' });
@@ -1748,18 +1728,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const listInfo = await getListParentsAndName(listId);
           if (!listInfo) { sendResponse({ success: false, error: 'List not found' }); break; }
 
-          // Generate embedding BEFORE validation (validateRuleConfig requires embedding)
-          if (rule.type === 'semantic' && !rule.config.embedding) {
-            if (!rule.config.description) {
-              sendResponse({ success: false, error: 'Description is required' }); break;
-            }
-            const resp = await requestOffscreen({ action: 'generateEmbedding', text: rule.config.description });
-            if (!resp?.success) {
-              sendResponse({ success: false, error: resp?.error || 'Embedding generation failed' }); break;
-            }
-            rule.config.embedding = resp.embedding;
-          }
-
           // Validate
           const validation = validateRuleConfig(rule);
           if (!validation.valid) {
@@ -1831,12 +1799,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const listEntity = await readCacheable(`list:${listId}`);
             if (!listEntity?.rules?.length) continue;
 
-            // Build embedder/sandbox closures that route to offscreen
-            const embedder = async (text) => {
-              const resp = await requestOffscreen({ action: 'generateEmbedding', text });
-              if (!resp?.success) throw new Error('Embedding failed');
-              return new Float32Array(resp.embedding);
-            };
+            // Build sandbox closure that routes to offscreen
             const sandbox = async (fnSource, pageData) => {
               const resp = await requestOffscreen({ action: 'executeSandboxFn', fnSource, pageData });
               if (!resp?.success) throw new Error('Sandbox execution failed');
@@ -1845,7 +1808,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             for (const entry of entries) {
               const pageData = buildPageDataFromEntry(entry);
-              const matches = await matchRules(listEntity.rules, pageData, { embedder, sandbox });
+              const matches = await matchRules(listEntity.rules, pageData, { sandbox });
               if (matches.length > 0) {
                 // Auto-pin: use the same parents/name path as the list
                 const listInfo = await getListParentsAndName(listId);
@@ -1876,19 +1839,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'previewRule': {
           const { rule, entries } = request;
-          // Generate temporary embedding for semantic rules (before validation,
-          // since validateRuleConfig requires embedding to be present)
-          if (rule.type === 'semantic' && !rule.config.embedding) {
-            if (!rule.config.description) {
-              sendResponse({ success: false, error: 'Description is required' });
-              break;
-            }
-            const resp = await requestOffscreen({ action: 'generateEmbedding', text: rule.config.description });
-            if (!resp?.success) {
-              sendResponse({ success: false, error: resp?.error || 'Embedding generation failed' }); break;
-            }
-            rule.config.embedding = new Float32Array(resp.embedding);
-          }
           // Validate
           const validation = validateRuleConfig(rule);
           if (!validation.valid) {
@@ -1902,19 +1852,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               break;
             }
           }
-          // Uses the same matchRules path as runRuleBatch,
-          // with allScores to return raw scores for non-matches too.
-          // For semantic rules, page embeddings are cached in session storage
-          // (keyed by URL) so changing the query only recomputes the query embedding.
           const tempRule = { id: 'preview', type: rule.type, config: rule.config };
-
-          // Load embedding cache (semantic only, URL → Array<number>)
-          let embeddingCache = {};
-          let newCache = {};
-          if (rule.type === 'semantic') {
-            const stored = await chrome.storage.session.get('previewEmbeddingCache');
-            embeddingCache = stored.previewEmbeddingCache || {};
-          }
 
           const sandbox = async (fnSource, pageData) => {
             const resp = await requestOffscreen({ action: 'executeSandboxFn', fnSource, pageData });
@@ -1926,30 +1864,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           for (const entry of entries) {
             const title = entry.title || '';
             const pageData = buildPageDataFromEntry({ ...entry, title });
-            // Per-entry caching embedder: checks cache first, generates + caches on miss
-            const url = entry.url;
-            const cachingEmbedder = async (text) => {
-              if (embeddingCache[url]) {
-                const cached = new Float32Array(embeddingCache[url]);
-                newCache[url] = embeddingCache[url];
-                return cached;
-              }
-              const resp = await requestOffscreen({ action: 'generateEmbedding', text });
-              if (!resp?.success) throw new Error(resp?.error || 'Embedding failed');
-              newCache[url] = resp.embedding; // Array<number>, serializable
-              return new Float32Array(resp.embedding);
-            };
             try {
-              const scored = await matchRules([tempRule], pageData, { embedder: cachingEmbedder, sandbox, allScores: true });
+              const scored = await matchRules([tempRule], pageData, { sandbox, allScores: true });
               const { score = 0, match = false } = scored[0] || {};
               results.push({ url: entry.url, title, score, match });
             } catch (err) {
               execError = err.message; break;
             }
-          }
-          // Persist new cache (only current candidates — bounded size)
-          if (rule.type === 'semantic' && Object.keys(newCache).length > 0) {
-            await chrome.storage.session.set({ previewEmbeddingCache: newCache });
           }
           if (execError) {
             sendResponse({ success: false, error: execError });

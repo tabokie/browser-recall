@@ -152,9 +152,6 @@ async function hydrateCache(fsStorage, chromeStorage) {
 
   if (Object.keys(cacheUpdate).length > 0) await chromeStorage.set(cacheUpdate);
 
-  // Load gateway origins from entity file
-  const gwData = await fsStorage.loadListPinsEntity('auto/gateways');
-  if (gwData) await chromeStorage.set({ 'list:auto/gateways': gwData });
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +248,7 @@ describe('Persistence round-trip', () => {
 
       // Snapshot the cache
       const cacheBefore = { ...(await chromeStorage.get(null)) };
-      delete cacheBefore['list:auto/gateways']; // auto lists tested separately
+      // Snapshot for comparison
 
       // 3. Simulate reload: nuke chrome.storage.local
       await chromeStorage.clear();
@@ -261,7 +258,6 @@ describe('Persistence round-trip', () => {
       await hydrateCache(fs, chromeStorage);
 
       const cacheAfter = { ...(await chromeStorage.get(null)) };
-      delete cacheAfter['list:auto/gateways'];
 
       expect(cacheAfter).toEqual(cacheBefore);
     });

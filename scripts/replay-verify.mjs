@@ -97,9 +97,6 @@ for (const [key, value] of store) {
   } else if (key.startsWith('list:system/')) {
     const name = key.slice('list:system/'.length);
     path = join(outputDir, 'lists', 'system', `${name}.json`);
-  } else if (key.startsWith('list:auto/')) {
-    const name = key.slice('list:auto/'.length);
-    path = join(outputDir, 'lists', 'auto', `${name}.json`);
   } else if (key.startsWith('list:')) {
     const slug = key.slice('list:'.length);
     path = join(outputDir, 'lists', `${slug}.json`);
@@ -182,17 +179,8 @@ if (existsSync(join(DATA_DIR, 'lists'))) {
 }
 
 // System lists
-for (const name of ['root', 'explore']) {
+for (const name of ['root']) {
   entityPaths.set(`list:system/${name}`, `lists/system/${name}.json`);
-}
-
-// Auto lists
-if (existsSync(join(DATA_DIR, 'lists', 'auto'))) {
-  for (const f of readdirSync(join(DATA_DIR, 'lists', 'auto'))) {
-    if (!f.endsWith('.json')) continue;
-    const name = f.replace('.json', '');
-    entityPaths.set(`list:auto/${name}`, `lists/auto/${f}`);
-  }
 }
 
 // Manifest entities

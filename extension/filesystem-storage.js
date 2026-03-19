@@ -739,18 +739,6 @@ class FileSystemStorage {
           allPins[id] = data.pins;
         }
       }
-      // Scan lists/auto/ subdirectory
-      try {
-        const autoDir = await listsDir.getDirectoryHandle('auto');
-        for await (const entry of autoDir.values()) {
-          if (entry.kind === 'file' && entry.name.endsWith('.json')) {
-            const id = 'auto/' + entry.name.replace('.json', '');
-            const file = await entry.getFile();
-            const data = JSON.parse(await file.text());
-            allPins[id] = data.pins;
-          }
-        }
-      } catch (error) { if (!isNotFound(error)) throw error; }
     } catch (error) { if (!isNotFound(error)) throw error; }
     return allPins;
   }
@@ -790,8 +778,7 @@ class FileSystemStorage {
   }
 
   // Load metadata for all lists from lists/ files.
-  // Returns [{ slug, name, pins }] — skips explore, system/, and index/ files.
-  // Also scans lists/auto/ for auto-list entities.
+  // Returns [{ slug, name, pins }] — skips system/ and index/ files.
   // Filenames are always the list slug.
   async loadAllListMetadata() {
     if (!(await this.verifyPermission())) {
@@ -807,7 +794,6 @@ class FileSystemStorage {
         parentList: data.parentList || null,
         childLists: data.childLists || [],
       };
-      if (data.auto) listEntry.auto = true;
       if (data.deleted) listEntry.deleted = true;
       if (data.timestamp) listEntry.timestamp = data.timestamp;
       return listEntry;
@@ -824,18 +810,6 @@ class FileSystemStorage {
           result.push(parseListEntry(slug, data));
         }
       }
-      // Scan lists/auto/ subdirectory for auto-list entities
-      try {
-        const autoDir = await listsDir.getDirectoryHandle('auto');
-        for await (const entry of autoDir.values()) {
-          if (entry.kind === 'file' && entry.name.endsWith('.json')) {
-            const slug = 'auto/' + entry.name.replace('.json', '');
-            const file = await entry.getFile();
-            const data = JSON.parse(await file.text());
-            result.push(parseListEntry(slug, data));
-          }
-        }
-      } catch (error) { if (!isNotFound(error)) throw error; }
     } catch (error) { if (!isNotFound(error)) throw error; }
     return result;
   }

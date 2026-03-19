@@ -10,7 +10,6 @@ import {
   validateRuleConfig,
   validateSmartRuleFn,
   matchKeywordRule,
-  cosineSimilarity,
   matchRules,
   buildPageDataFromEntry,
 } from '../extension/rule-engine.js';
@@ -27,7 +26,6 @@ describe('generateRuleId', () => {
 
   it('uses first char of type', () => {
     expect(generateRuleId('keyword', 1000)).toMatch(/^rule-k-/);
-    expect(generateRuleId('semantic', 1000)).toMatch(/^rule-s-/);
     expect(generateRuleId('smart', 1000)).toMatch(/^rule-s-/);
   });
 
@@ -109,81 +107,6 @@ describe('validateRuleConfig', () => {
       });
       expect(result.valid).toBe(false);
       expect(result.errors.some(e => e.includes('regex'))).toBe(true);
-    });
-  });
-
-  describe('semantic rules', () => {
-    it('accepts valid semantic config', () => {
-      const result = validateRuleConfig({
-        type: 'semantic',
-        config: {
-          description: 'articles about machine learning',
-          embedding: new Float32Array(384),
-          threshold: 0.5,
-        },
-      });
-      expect(result.valid).toBe(true);
-    });
-
-    it('rejects missing description', () => {
-      const result = validateRuleConfig({
-        type: 'semantic',
-        config: {
-          embedding: new Float32Array(384),
-          threshold: 0.5,
-        },
-      });
-      expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('description'))).toBe(true);
-    });
-
-    it('rejects missing embedding', () => {
-      const result = validateRuleConfig({
-        type: 'semantic',
-        config: {
-          description: 'test',
-          threshold: 0.5,
-        },
-      });
-      expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('embedding'))).toBe(true);
-    });
-
-    it('rejects wrong embedding dimension', () => {
-      const result = validateRuleConfig({
-        type: 'semantic',
-        config: {
-          description: 'test',
-          embedding: new Float32Array(128),
-          threshold: 0.5,
-        },
-      });
-      expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('384'))).toBe(true);
-    });
-
-    it('rejects threshold out of range', () => {
-      const result = validateRuleConfig({
-        type: 'semantic',
-        config: {
-          description: 'test',
-          embedding: new Float32Array(384),
-          threshold: 1.5,
-        },
-      });
-      expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('threshold'))).toBe(true);
-    });
-
-    it('defaults threshold to 0.5 when not specified', () => {
-      const result = validateRuleConfig({
-        type: 'semantic',
-        config: {
-          description: 'test',
-          embedding: new Float32Array(384),
-        },
-      });
-      expect(result.valid).toBe(true);
     });
   });
 
@@ -408,42 +331,6 @@ describe('matchKeywordRule', () => {
 });
 
 // ---------------------------------------------------------------------------
-// cosineSimilarity
-// ---------------------------------------------------------------------------
-
-describe('cosineSimilarity', () => {
-  it('returns 1 for identical vectors', () => {
-    const a = new Float32Array([1, 2, 3]);
-    expect(cosineSimilarity(a, a)).toBeCloseTo(1.0);
-  });
-
-  it('returns 0 for orthogonal vectors', () => {
-    const a = new Float32Array([1, 0, 0]);
-    const b = new Float32Array([0, 1, 0]);
-    expect(cosineSimilarity(a, b)).toBeCloseTo(0.0);
-  });
-
-  it('returns -1 for opposite vectors', () => {
-    const a = new Float32Array([1, 0, 0]);
-    const b = new Float32Array([-1, 0, 0]);
-    expect(cosineSimilarity(a, b)).toBeCloseTo(-1.0);
-  });
-
-  it('returns 0 for zero-magnitude vector', () => {
-    const a = new Float32Array([0, 0, 0]);
-    const b = new Float32Array([1, 2, 3]);
-    expect(cosineSimilarity(a, b)).toBe(0);
-  });
-
-  it('computes known similarity', () => {
-    const a = new Float32Array([1, 0]);
-    const b = new Float32Array([1, 1]);
-    // cos(45°) ≈ 0.7071
-    expect(cosineSimilarity(a, b)).toBeCloseTo(Math.SQRT1_2, 4);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // matchRules
 // ---------------------------------------------------------------------------
 
@@ -466,36 +353,6 @@ describe('matchRules', () => {
     expect(results).toHaveLength(0);
   });
 
-  it('matches semantic rules with mock embedder', async () => {
-    const ruleEmbedding = new Float32Array([1, 0, 0]);
-    const pageEmbedding = new Float32Array([0.9, 0.1, 0]);
-    const embedder = vi.fn().mockResolvedValue(pageEmbedding);
-
-    const rules = [
-      {
-        id: 'r1',
-        type: 'semantic',
-        config: { embedding: ruleEmbedding, threshold: 0.5 },
-      },
-    ];
-    const pageData = { title: 'ML article', url: 'https://x.com' };
-    const results = await matchRules(rules, pageData, { embedder });
-    expect(results).toHaveLength(1);
-    expect(results[0].ruleId).toBe('r1');
-    expect(results[0].score).toBeGreaterThan(0.5);
-    expect(embedder).toHaveBeenCalledWith('ML article https://x.com');
-  });
-
-  it('reuses page embedding across multiple semantic rules', async () => {
-    const embedder = vi.fn().mockResolvedValue(new Float32Array([1, 0, 0]));
-    const rules = [
-      { id: 'r1', type: 'semantic', config: { embedding: new Float32Array([1, 0, 0]), threshold: 0.5 } },
-      { id: 'r2', type: 'semantic', config: { embedding: new Float32Array([0, 1, 0]), threshold: 0.5 } },
-    ];
-    await matchRules(rules, { title: 'test', url: 'https://x.com' }, { embedder });
-    expect(embedder).toHaveBeenCalledTimes(1);
-  });
-
   it('matches smart rules with mock sandbox', async () => {
     const sandbox = vi.fn().mockResolvedValue(0.8);
     const rules = [
@@ -509,23 +366,13 @@ describe('matchRules', () => {
   });
 
   it('handles mixed rule types', async () => {
-    const embedder = vi.fn().mockResolvedValue(new Float32Array([1, 0, 0]));
     const sandbox = vi.fn().mockResolvedValue(0.9);
     const rules = [
       { id: 'r1', type: 'keyword', config: { pattern: 'test', fields: ['title'], threshold: 0.5 } },
-      { id: 'r2', type: 'semantic', config: { embedding: new Float32Array([1, 0, 0]), threshold: 0.5 } },
-      { id: 'r3', type: 'smart', config: { fnSource: 'return 0.9;', threshold: 0.5 } },
+      { id: 'r2', type: 'smart', config: { fnSource: 'return 0.9;', threshold: 0.5 } },
     ];
-    const results = await matchRules(rules, { title: 'test', url: 'https://x.com' }, { embedder, sandbox });
-    expect(results).toHaveLength(3);
-  });
-
-  it('skips semantic rules when no embedder provided', async () => {
-    const rules = [
-      { id: 'r1', type: 'semantic', config: { embedding: new Float32Array([1, 0, 0]), threshold: 0.5 } },
-    ];
-    const results = await matchRules(rules, { title: 'test', url: '' }, {});
-    expect(results).toHaveLength(0);
+    const results = await matchRules(rules, { title: 'test', url: 'https://x.com' }, { sandbox });
+    expect(results).toHaveLength(2);
   });
 
   it('skips smart rules when no sandbox provided', async () => {
@@ -574,7 +421,6 @@ describe('buildPageDataFromEntry', () => {
 describe('RULE_TYPES', () => {
   it('has expected values', () => {
     expect(RULE_TYPES.KEYWORD).toBe('keyword');
-    expect(RULE_TYPES.SEMANTIC).toBe('semantic');
     expect(RULE_TYPES.SMART).toBe('smart');
   });
 });

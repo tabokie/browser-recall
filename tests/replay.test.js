@@ -33,7 +33,6 @@ function listStore(extra = {}) {
     'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [], parentList: 'list:system/root', childLists: [] },
     'list:system/root': { timestamp: 0, childLists: ['list:test-id'] },
     'manifest:orphaned': { timestamp: 0, keys: [] },
-    'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [], parentList: null, childLists: [] },
     ...extra,
   };
 }
@@ -213,8 +212,7 @@ describe('effectOf: visit_page', () => {
     const store = {
       [`page:${childSlug}`]: { slug: childSlug, timestamp: 0, parentIds: [], childIds: [] },
       [`page:${parentSlug}`]: { slug: parentSlug, url: 'https://parent.com', timestamp: 50, parentIds: [], childIds: [] },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [], parentList: null, childLists: [] },
-    };
+      };
     const result = await effectOf(
       { timestamp: 100, action: 'visit_page', url: 'https://child.com', title: 'C', referrerUrl: 'https://parent.com' },
       makeLoad(store),
@@ -223,20 +221,19 @@ describe('effectOf: visit_page', () => {
     expect(result[`page:${parentSlug}`].childIds).toContain(`page:${childSlug}`);
   });
 
-  it('skips parent childIds for gateway roots', async () => {
+  it('accumulates childIds on referrer page', async () => {
     const childSlug = generateSlugFromUrl('https://github.com/user/repo');
     const parentSlug = generateSlugFromUrl('https://github.com/');
     const store = {
       [`page:${childSlug}`]: { slug: childSlug, url: 'https://github.com/user/repo', timestamp: 0, parentIds: [], childIds: [] },
       [`page:${parentSlug}`]: { slug: parentSlug, url: 'https://github.com/', timestamp: 50, parentIds: [], childIds: [] },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [{ id: `page:${parentSlug}`, pinnedAt: 10 }], parentList: null, childLists: [] },
     };
     const result = await effectOf(
       { timestamp: 100, action: 'visit_page', url: 'https://github.com/user/repo', title: 'Repo', referrerUrl: 'https://github.com/' },
       makeLoad(store),
     );
     expect(result[`page:${childSlug}`].parentIds).toContain(`page:${parentSlug}`);
-    expect(result[`page:${parentSlug}`]).toBeUndefined(); // gateway: no child accumulation
+    expect(result[`page:${parentSlug}`].childIds).toContain(`page:${childSlug}`);
   });
 });
 
@@ -664,15 +661,6 @@ describe('effectOf: pin_to_list', () => {
     expect(result[`page:${slug}`].parentIds).toContain('list:test-id');
   });
 
-  it('resolves auto list by name directly', async () => {
-    const store = listStore();
-    const result = await effectOf(
-      { timestamp: 100, action: 'pin_to_list', parents: [], name: 'auto/gateways', items: ['https://a.com'] },
-      makeLoad(store),
-    );
-    expect(result['list:auto/gateways'].pins).toHaveLength(1);
-  });
-
   it('skips orphaned lists', async () => {
     const store = listStore({ 'manifest:orphaned': { timestamp: 0, keys: ['list:test-id'] } });
     const result = await effectOf(
@@ -899,8 +887,7 @@ describe('effectOf: visit_page — REFERRER_CAP', () => {
         slug: childSlug, url: 'https://example.com/child', title: 'Child',
         timestamp: 50, parentIds: existingParentIds, childIds: [],
       },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [], parentList: null, childLists: [] },
-      'manifest:orphaned': { timestamp: 0, keys: [] },
+        'manifest:orphaned': { timestamp: 0, keys: [] },
     };
     const newParentUrl = 'https://example.com/new-parent-51';
     const newParentSlug = generateSlugFromUrl(newParentUrl);
@@ -933,8 +920,7 @@ describe('effectOf: visit_page — REFERRER_CAP', () => {
         slug: parentSlug, url: 'https://example.com/parent', title: 'Parent',
         timestamp: 50, parentIds: [], childIds: existingChildIds,
       },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', pins: [], parentList: null, childLists: [] },
-      'manifest:orphaned': { timestamp: 0, keys: [] },
+        'manifest:orphaned': { timestamp: 0, keys: [] },
     };
     const newChildUrl = 'https://example.com/new-child-51';
     const newChildSlug = generateSlugFromUrl(newChildUrl);

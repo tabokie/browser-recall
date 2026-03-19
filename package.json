@@ -5,8 +5,7 @@
   "description": "Chrome extension for tracking and searching interaction history",
   "scripts": {
     "build:wasm": "wasm-pack build --target web --out-dir extension/pkg",
-    "vendor": "mkdir -p extension/vendor && cp node_modules/@huggingface/transformers/dist/transformers.min.js node_modules/@huggingface/transformers/dist/ort-wasm-simd-threaded.jsep.mjs extension/vendor/",
-    "build": "npm run build:wasm && npm run vendor",
+    "build": "npm run build:wasm",
     "watch": "wasm-pack build --target web --out-dir extension/pkg --dev",
     "dev": "npm run watch",
     "test": "vitest run",
@@ -22,9 +21,11 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "@huggingface/transformers": "^3.8.1",
+    "@leeoniya/ufuzzy": "^1.0.19",
     "@playwright/test": "^1.58.2",
+    "flexsearch": "^0.8.212",
     "jsdom": "^28.0.0",
+    "minisearch": "^7.2.0",
     "vitest": "^3.0.0"
   }
 }

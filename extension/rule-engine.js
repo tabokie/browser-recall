@@ -3,7 +3,6 @@
 
 export const RULE_TYPES = {
   KEYWORD: 'keyword',
-  SEMANTIC: 'semantic',
   SMART: 'smart',
 };
 
@@ -56,20 +55,6 @@ export function validateRuleConfig({ type, config }) {
       if (invalid.length) {
         errors.push(`Invalid fields: ${invalid.join(', ')}. Allowed: ${VALID_KEYWORD_FIELDS.join(', ')}`);
       }
-    }
-  }
-
-  if (type === RULE_TYPES.SEMANTIC) {
-    if (!config.description) {
-      errors.push('Semantic rule requires a description');
-    }
-    if (!config.embedding) {
-      errors.push('Semantic rule requires an embedding vector');
-    } else if (config.embedding.length !== 384) {
-      errors.push(`Embedding must be 384-dimensional, got ${config.embedding.length}`);
-    }
-    if (config.threshold !== undefined && (config.threshold < 0 || config.threshold > 1)) {
-      errors.push('Semantic rule threshold must be between 0 and 1');
     }
   }
 
@@ -151,54 +136,23 @@ export function matchKeywordRule(rule, pageData) {
 }
 
 /**
- * Compute cosine similarity between two Float32Arrays.
- * Returns 0 on zero-magnitude vectors.
- */
-export function cosineSimilarity(a, b) {
-  let dot = 0;
-  let magA = 0;
-  let magB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    magA += a[i] * a[i];
-    magB += b[i] * b[i];
-  }
-  const denom = Math.sqrt(magA) * Math.sqrt(magB);
-  if (denom === 0) return 0;
-  return dot / denom;
-}
-
-/**
  * Match multiple rules against page data.
  *
  * @param {Array} rules - Array of rule objects { id, type, config }
  * @param {Object} pageData - { title, url, body? }
- * @param {Object} options - { embedder?, sandbox?, allScores? }
- *   embedder: async (text) => Float32Array  — generates embedding for page text
+ * @param {Object} options - { sandbox?, allScores? }
  *   sandbox: async (fnSource, pageData) => number — executes sandboxed function
  *   allScores: if true, return scores for ALL rules (not just above threshold)
  * @returns {Promise<Array<{ruleId, score, match}>>} — matched rules (or all if allScores)
  */
-export async function matchRules(rules, pageData, { embedder, sandbox, allScores } = {}) {
+export async function matchRules(rules, pageData, { sandbox, allScores } = {}) {
   const results = [];
-  let pageEmbedding = null;
 
   for (const rule of rules) {
     const threshold = rule.config.threshold ?? 0.5;
 
     if (rule.type === RULE_TYPES.KEYWORD) {
       const score = matchKeywordRule(rule, pageData);
-      if (allScores || score >= threshold) {
-        results.push({ ruleId: rule.id, score, match: score >= threshold });
-      }
-    } else if (rule.type === RULE_TYPES.SEMANTIC) {
-      if (!embedder) continue;
-      if (!pageEmbedding) {
-        // Use body text for richer context when available, fall back to URL
-        const text = [pageData.title, pageData.body || pageData.url].filter(Boolean).join(' ');
-        pageEmbedding = await embedder(text);
-      }
-      const score = cosineSimilarity(pageEmbedding, rule.config.embedding);
       if (allScores || score >= threshold) {
         results.push({ ruleId: rule.id, score, match: score >= threshold });
       }

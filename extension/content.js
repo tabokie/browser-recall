@@ -760,7 +760,7 @@ const initialDelta = {
   slug: getSlugForCurrentPage(),
   isInitialLoad: true,
 };
-// Capture first N words of page text for rule matching (keyword/semantic).
+// Capture first N words of page text for rule matching.
 // Must match BODY_WORD_LIMIT in utils.js (can't import — content scripts are non-module).
 const BODY_WORD_LIMIT = 200;
 const bodyText = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();

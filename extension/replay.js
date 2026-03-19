@@ -1,7 +1,7 @@
 // replay.js — pure functions for applying log entries to entity state.
 // Imported by both background.js (cache-miss replay) and offscreen.js (checkpoint).
 // Each function is idempotent — safe to replay the same entry twice.
-import { generateSlugFromUrl, isGatewayOriginFromPins } from './utils.js';
+import { generateSlugFromUrl } from './utils.js';
 import { generateRuleId } from './rule-engine.js';
 
 const REFERRER_CAP = 50;
@@ -133,13 +133,13 @@ export async function effectOf(entry, load) {
 
   /**
    * Resolve a list from parents array + name to its internal list key via manifest:name-to-id.
-   * System/auto lists use their name directly as the ID.
+   * System lists use their name directly as the ID.
    * Returns null if user list not found in name-to-id.
    */
   async function resolveListKey(parents, name) {
     if (!name) return null;
-    // System and auto lists: name IS the ID
-    if (name.startsWith('system/') || name.startsWith('auto/')) {
+    // System lists: name IS the ID
+    if (name.startsWith('system/')) {
       return `list:${name}`;
     }
     // User lists: resolve via manifest:name-to-id
@@ -213,17 +213,13 @@ export async function effectOf(entry, load) {
       if (referrerKey !== pageKey) {
         const parent = result[referrerKey] !== undefined ? result[referrerKey] : await load(referrerKey);
         if (parent) {
-          // Skip parent-side update for gateway roots (too many children)
-          const gwPins = (await loadOrDefault('list:auto/gateways', load)).pins || [];
-          if (!isGatewayOriginFromPins(parent.url || entry.referrerUrl, gwPins)) {
-            const childIds = [...(parent.childIds || [])];
-            const childRef = PAGE_PREFIX + slug;
-            if (!childIds.includes(childRef)) {
-              childIds.push(childRef);
-              if (childIds.length > REFERRER_CAP) childIds.shift();
-            }
-            result[referrerKey] = { ...parent, childIds, timestamp: Math.max(parent.timestamp || 0, entry.timestamp) };
+          const childIds = [...(parent.childIds || [])];
+          const childRef = PAGE_PREFIX + slug;
+          if (!childIds.includes(childRef)) {
+            childIds.push(childRef);
+            if (childIds.length > REFERRER_CAP) childIds.shift();
           }
+          result[referrerKey] = { ...parent, childIds, timestamp: Math.max(parent.timestamp || 0, entry.timestamp) };
         }
       }
     }
@@ -729,7 +725,7 @@ export async function effectOf(entry, load) {
     const listKey = await resolveListKey(entry.parents, entry.name);
     if (!listKey) return result;
 
-    if (listKey.startsWith('list:system/') || listKey.startsWith('list:auto/')) return result;
+    if (listKey.startsWith('list:system/')) return result;
 
     const entity = await loadOrDefault(listKey, load);
     const fromKey = entity.parentList || 'list:system/root';
@@ -809,7 +805,7 @@ export async function effectOf(entry, load) {
     const listKey = await resolveListKey(entry.parents, entry.name);
     if (!listKey) return result;
 
-    if (listKey.startsWith('list:system/') || listKey.startsWith('list:auto/')) return result;
+    if (listKey.startsWith('list:system/')) return result;
 
     const entity = await loadOrDefault(listKey, load, { includeDeleted: true });
     // Noop if already deleted

@@ -285,9 +285,6 @@ describe('Cache staleness', () => {
       case 'loadContentBatch':
         return { success: true, contentMap: {} };
 
-      case 'processGatewaysIncremental':
-        return { success: true, domains: {}, newWatermark: 0 };
-
       case 'loadAllHighlights':
         return { success: true, highlightsMap: {} };
 
@@ -317,7 +314,6 @@ describe('Cache staleness', () => {
         switch (msg.key) {
           case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
           case 'list:system/root': return { success: true, value: testRootData || TEST_ROOT };
-          case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], parentList: 'list:auto', childLists: [] } };
           case 'manifest:name-to-id': return { success: true, value: testNameMapData || { timestamp: 0, paths: {} } };
           case 'manifest:orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
           default: {
@@ -356,7 +352,6 @@ describe('Cache staleness', () => {
     sessionData = {
       'manifest:settings': TEST_SETTINGS,
       'list:system/root': { ...TEST_ROOT },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], parentList: 'list:auto', childLists: [] },
     };
     // Individual list entity keys (include pins for session cache hits)
     for (const list of TEST_LISTS) {
@@ -549,7 +544,7 @@ describe('Cache staleness', () => {
     expect(loadBatchCalls).toBeGreaterThan(0);
   });
 
-  // T4 removed — gateway cache no longer exists in options.js (auto-list entity)
+  // T4 removed
 
   // ---------------------------------------------------------------------------
   // T5: logBuffer entries → history loads correctly

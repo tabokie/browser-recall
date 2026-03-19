@@ -313,9 +313,6 @@ describe('Progressive loading', () => {
         // Return empty content — search still works via title matching
         return { success: true, contentMap: {} };
 
-      case 'processGatewaysIncremental':
-        return { success: true, domains: {}, newWatermark: 0 };
-
       case 'loadAllHighlights':
         return { success: true, highlightsMap: {} };
 
@@ -326,7 +323,6 @@ describe('Progressive loading', () => {
         switch (msg.key) {
           case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
           case 'list:system/root': return { success: true, value: TEST_ROOT };
-          case 'list:auto/gateways': return { success: true, value: { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], parentList: 'list:auto', childLists: [] } };
           case 'manifest:name-to-id': return { success: true, value: { timestamp: 0, paths: {} } };
           case 'manifest:orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
           default: {
@@ -350,7 +346,6 @@ describe('Progressive loading', () => {
     sessionData = {
       'manifest:settings': TEST_SETTINGS,
       'list:system/root': { ...TEST_ROOT },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], parentList: 'list:auto', childLists: [] },
     };
     // Individual list entity keys (include pins for session cache hits)
     for (const list of TEST_LISTS) {
@@ -486,7 +481,6 @@ describe('Progressive loading', () => {
     sessionData = {
       'manifest:settings': TEST_SETTINGS,
       'list:system/root': { ...TEST_ROOT },
-      'list:auto/gateways': { timestamp: 0, slug: 'auto/gateways', name: 'Gateways', auto: true, pins: [], parentList: 'list:auto', childLists: [] },
       // individual list:<slug> keys intentionally missing from session
     };
     localData = { logBuffer: [] };

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { generateSlugFromUrl, isGatewayOriginFromPins } from '../extension/utils.js';
+import { generateSlugFromUrl } from '../extension/utils.js';
 
 describe('generateSlugFromUrl', () => {
   it('produces a slug from a simple URL', () => {
@@ -47,47 +47,6 @@ describe('generateSlugFromUrl', () => {
 
 
 // ---------------------------------------------------------------------------
-// isGatewayOriginFromPins
-// ---------------------------------------------------------------------------
-
-describe('isGatewayOriginFromPins', () => {
-  const ghSlug = generateSlugFromUrl('https://github.com/');
-  const docsSlug = generateSlugFromUrl('https://docs.rs/');
-  const pins = [
-    { id: `page:${ghSlug}`, pinnedAt: 100 },
-    { id: `page:${docsSlug}`, pinnedAt: 200 },
-  ];
-
-  it('matches root URL of a checkpointed gateway (page: pin)', () => {
-    expect(isGatewayOriginFromPins('https://github.com/', pins)).toBe(true);
-  });
-
-  it('matches root URL of another gateway (page: pin)', () => {
-    expect(isGatewayOriginFromPins('https://docs.rs/', pins)).toBe(true);
-  });
-
-  it('matches child page whose origin root is pinned', () => {
-    expect(isGatewayOriginFromPins('https://github.com/user/repo', pins)).toBe(true);
-  });
-
-  it('rejects URL from a non-gateway domain', () => {
-    expect(isGatewayOriginFromPins('https://example.com/', pins)).toBe(false);
-  });
-
-  it('matches child page of gateway', () => {
-    expect(isGatewayOriginFromPins('https://docs.rs/tokio/latest', pins)).toBe(true);
-  });
-
-  it('returns false for invalid URL', () => {
-    expect(isGatewayOriginFromPins('not-a-url', pins)).toBe(false);
-  });
-
-  it('returns false when pins is empty', () => {
-    expect(isGatewayOriginFromPins('https://github.com/', [])).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // readCacheable / loadSettingsValue (behavioral tests with mocked chrome APIs)
 // ---------------------------------------------------------------------------
 
@@ -132,8 +91,8 @@ describe('readCacheable', () => {
   it('sends readCacheable action on session miss and returns resp.value', async () => {
     sendMessageMock.mockResolvedValue({ success: true, value: { timestamp: 0, pins: [] } });
     const { readCacheable } = await import('../extension/utils.js');
-    const result = await readCacheable('list:auto/gateways');
-    expect(sendMessageMock).toHaveBeenCalledWith({ action: 'readCacheable', key: 'list:auto/gateways', includeDeleted: false });
+    const result = await readCacheable('list:some-list');
+    expect(sendMessageMock).toHaveBeenCalledWith({ action: 'readCacheable', key: 'list:some-list', includeDeleted: false });
     expect(result).toEqual({ timestamp: 0, pins: [] });
   });
 
