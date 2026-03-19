@@ -315,7 +315,7 @@ describe('Cache staleness', () => {
           case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
           case 'list:system/root': return { success: true, value: testRootData || TEST_ROOT };
           case 'manifest:name-to-id': return { success: true, value: testNameMapData || { timestamp: 0, paths: {} } };
-          case 'manifest:orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
+          case 'manifest:orphaned': return { success: true, value: { timestamp: 0, entries: [] } };
           default: {
             // Resolve page entity keys from testPageData (filesystem fallback)
             if (msg.key && msg.key.startsWith('page:')) {

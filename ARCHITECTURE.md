@@ -22,7 +22,7 @@
   manifest/                          # INTERNAL. Irregular-shape manifests.
     list-name-to-id.json             #   list [parents, name] → internal ID
     settings.json                    #   User settings
-    orphaned.json                    #   Tracks deleted entity keys (recycle bin)
+    orphaned.json                    #   Tracks deleted entities as entries [{ key, url? }] (recycle bin)
 ```
 
 **`data/` is public**: We surrender read permission to all potential apps outside our domain. Content inside it is generally immutable/append-only. Internal data (entities, system lists, manifests) that contain internal concepts live in separate folders (`lists/`, `pages/`, `manifest/`).
@@ -133,7 +133,7 @@ Internal entity references use typed keys with a prefix indicating the entity ki
 | `snap:<slug>-<ts>` | Snapshot (no entity file — exists in page `childIds` and `manifest/orphaned.json`) | `data/snapshots/<slug>-<ts>/` |
 | `list:<id>` | List entity | `lists/<id>.json` |
 
-Used internally in: `page.parentIds`, `page.childIds`, `note.parentIds`, list pin `id` fields.
+Used internally in: `page.parentIds`, `page.childIds`, list pin `id` fields. Notes use `url` (raw page URL) instead of typed references.
 
 **Events never use typed references.** Events reference pages by URL, notes/snapshots by relative path (`notes/...`, `snapshots/...`), and lists by `parents` array + `name`. `effectOf` translates between event fields and internal typed references.
 
@@ -283,12 +283,12 @@ This design exists because of the event-sourced architecture. The JSONL history 
 6. File `lists/<id>.json` stays on disk
 
 **`replace_note` (replay.js):**
-1. Unlinks old `note:<old-slug>` from each parent page's `childIds`
-2. Links new `note:<new-slug>` to the same parent pages' `childIds`
-3. Transfers list pins: replaces old note ID with new note ID in each list's `pins` array
-4. Sets new note's `parentIds` from old note (inherits page + list parents)
+1. Derives parent page from old note's `url` field, unlinks old `note:<old-slug>` from page's `childIds`
+2. Links new `note:<new-slug>` to the same page's `childIds`
+3. Transfers list pins: finds lists via `findListsWithPin`, replaces old note ID with new note ID in each list's `pins` array
+4. Copies `url` from old note to new note
 5. Marks old note: `{ deleted: true, deletionReason: 'replaced', replacedBy: 'note:<new-slug>' }`
-6. Adds old `note:<old-slug>` to `manifest/orphaned.json`
+6. Adds old `note:<old-slug>` to `manifest/orphaned.json` entries (with parent URL)
 
 Notes are immutable — editing creates a new entity via `replace_note` rather than mutating in place. This preserves the full change history of a page's notes in the JSONL log.
 
@@ -296,7 +296,7 @@ All handlers use `effectOf` in replay.js — all side-effects are computed in a 
 
 ### The Orphaned Manifest
 
-`manifest/orphaned.json` holds an array of entity keys (`note:<slug>`, `snap:<slug>-<ts>`, `list:<id>`) for deleted items. This serves as a "recycle bin" manifest: the keys are unlinked from the entity graph but the underlying files are intact and could be restored.
+`manifest/orphaned.json` holds an array of entry objects `[{ key, url? }]` for deleted items. Each entry has a `key` (entity key like `note:<slug>`, `snapshot:<slug>-<ts>`, `list:<id>`) and an optional `url` (parent page URL for notes/snapshots). This serves as a "recycle bin" manifest: the keys are unlinked from the entity graph but the underlying files are intact and could be restored. The `url` field enables reliable restore without having to traverse entity relationships.
 
 ### File Persistence and Its Consequences
 

@@ -26,7 +26,6 @@ const subdirMappings = [
   ['data/notes', 'data/notes'],
   ['lists', 'lists'],
   ['lists/system', 'lists/system'],
-  ['lists/auto', 'lists/auto'],
 ];
 
 for (const [replaySub, dataSub] of subdirMappings) {

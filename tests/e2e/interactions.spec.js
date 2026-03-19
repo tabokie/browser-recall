@@ -225,7 +225,7 @@ test.describe('Interactions — likes, notes, attention', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Hello', note: 'World', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
       }},
     ]);
 
@@ -257,7 +257,7 @@ test.describe('Interactions — likes, notes, attention', () => {
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphaned.value).toBeTruthy();
-    expect(orphaned.value.keys).toContain(`note:${noteSlug}`);
+    expect(orphaned.value.entries.map(e => e.key)).toContain(`note:${noteSlug}`);
 
     await helper.close();
   });
@@ -273,7 +273,7 @@ test.describe('Interactions — likes, notes, attention', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Original', note: 'Old text', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
       }},
     ]);
 
@@ -310,7 +310,7 @@ test.describe('Interactions — likes, notes, attention', () => {
     const orphaned = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
-    expect(orphaned.value.keys).toContain(`note:${noteSlug}`);
+    expect(orphaned.value.entries.map(e => e.key)).toContain(`note:${noteSlug}`);
 
     // Parent page's childIds should have new note, not old
     const page = await helper.evaluate((key) =>
@@ -352,7 +352,7 @@ test.describe('Interactions — likes, notes, attention', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Pinned highlight', note: 'Note text', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`, `list:${listId}`], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
       }},
     ]);
 
@@ -373,12 +373,11 @@ test.describe('Interactions — likes, notes, attention', () => {
     expect(pinIds).toContain(`note:${newNoteSlug}`);
     expect(pinIds).not.toContain(`note:${noteSlug}`);
 
-    // New note should inherit list in parentIds
+    // New note should inherit url from old note
     const newNote = await helper.evaluate((slug) =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: `note:${slug}` })
     , newNoteSlug);
-    expect(newNote.value.parentIds).toContain(`list:${listId}`);
-    expect(newNote.value.parentIds).toContain(`page:${TEST_SLUG}`);
+    expect(newNote.value.url).toBe(TEST_URL);
 
     await helper.close();
   });
@@ -394,7 +393,7 @@ test.describe('Interactions — likes, notes, attention', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Roundtrip', note: 'Before edit', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
       }},
     ]);
 
@@ -433,7 +432,7 @@ test.describe('Interactions — likes, notes, attention', () => {
     const orphaned = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
-    expect(orphaned.value.keys).toContain(`note:${noteSlug}`);
+    expect(orphaned.value.entries.map(e => e.key)).toContain(`note:${noteSlug}`);
 
     await helper.close();
   });

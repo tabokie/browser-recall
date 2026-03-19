@@ -217,8 +217,8 @@ Lists                 ← section label
 ```
 
 ### Deletion System
-- **Orphaned list**: `lists/system/orphaned.json` — `{ timestamp, keys: [] }` — tracks deleted entity keys (`note:<slug>`, `list:<id>`)
-- **Note deletion**: `del_note` log action unlinks note from parent page `childIds` and adds `note:<slug>` to `list:system/orphaned`; offscreen `deleteNote` soft-deletes the note file to `deleted/`
+- **Orphaned list**: `manifest/orphaned.json` — `{ timestamp, entries: [{ key, url? }] }` — tracks deleted entity keys with optional parent URL for notes/snapshots
+- **Note deletion**: `delete_note` log action unlinks note from parent page `childIds` (derived from `note.url`) and adds `{ key: 'note:<slug>', url }` to orphaned entries; offscreen `deleteNote` soft-deletes the note file to `deleted/`
 - **List deletion**: `del_list` log action removes `list:<id>` from page `parentIds` for checkpointed pins, removes list from SPI `lists` for shallow pins, adds `list:<id>` to `list:system/orphaned`; offscreen drain skips flush for deleted list entities (file stays on disk)
 - **Selection**: click, shift-click range, ctrl-click toggle
 - **Marquee select**: drag from results background (gutter is now full-width behind floating result items)
@@ -238,10 +238,10 @@ Lists                 ← section label
 - **Metadata**: JSONL files `YYYY-MM-DD.jsonl` — one JSON line per interaction
 - **Content**: `pages/{slug}/{timestamp}.md|.html` (versioned snapshots)
 - **Legacy**: `pages/{slug}.md` flat files coexist via fallback reads
-- **Notes**: `notes/{slug}.json` — per-note entity `{ slug, timestamp, excerpt, note, cssPath, parentIds, childIds }`; `loadPageNotes(pageSlug)` returns all notes whose parent is the given page
+- **Notes**: `notes/{slug}.json` — per-note entity `{ slug, timestamp, excerpt, note, cssPath, url }`; `loadPageNotes(pageSlug)` returns all notes whose parent is the given page
 - **List files**: `lists/{listId}.json` — self-describing entity `{ id, timestamp, name, pins: [{id, pinnedAt}, ...] }`; pin `id` is typed ref (`page:<slug>` or `shallow:<url>`); `loadListPinsById(id)` returns just pins, `loadListPinsEntity(id)` returns full entity; `saveListPinsById(id, pins, timestamp)` preserves metadata (read-merge-write); `saveListMeta(id, meta, timestamp)` preserves pins; `loadAllListMetadata()` scans all files; `deleteListFile(id)` removes file
 - **Note deletion**: `deleteNote(slug)` — softDelete to `deleted/`
-- **Orphaned list**: `lists/system/orphaned.json` — `{ timestamp, keys: [...] }` — tracks deleted entity keys
+- **Orphaned list**: `manifest/orphaned.json` — `{ timestamp, entries: [{ key, url? }] }` — tracks deleted entity keys with optional parent URL
 - **Settings**: `settings.json` — derived checkpoint with `timestamp` watermark
 - **Pages**: `pages/{slug}.json` — per-page metadata (attention, notes, `timestamp` watermark); `loadPage(slug)`, `savePage(slug, data)`, `loadPageBatch(slugs)` (batch load in offscreen); session `page:{slug}` cache managed by background via entity-cache.js; UI reads via `readCacheable('page:<slug>')`
 - **History logs**: `history/YYYY-MM-DD.jsonl` — event-sourced log files (source of truth); all visits and mutations appended here by offscreen drain
@@ -319,10 +319,10 @@ Visit entries contain url/title/slug/referrerId (typed ref, always `page:<slug>`
 
 ### Note (in notes/{slug}.json — first-class entity)
 ```json
-{ "slug": "note-slug", "timestamp": 1234, "excerpt": "selected text", "note": "user annotation", "cssPath": "body > ...", "parentIds": ["page:parent-slug"], "childIds": [] }
-{ "slug": "note-slug", "timestamp": 1234, "excerpt": ["chunk1", "chunk2"], "note": "", "cssPath": "body > ...", "parentIds": ["page:parent-slug"], "childIds": [] }
+{ "slug": "note-slug", "timestamp": 1234, "excerpt": "selected text", "note": "user annotation", "cssPath": "body > ...", "url": "https://parent-page-url" }
+{ "slug": "note-slug", "timestamp": 1234, "excerpt": ["chunk1", "chunk2"], "note": "", "cssPath": "body > ...", "url": "https://parent-page-url" }
 ```
-`excerpt` is `string` (same-block selection), `string[]` (cross-block chunks), or `null` (global page note). `note` is the user annotation text.
+`excerpt` is `string` (same-block selection), `string[]` (cross-block chunks), or `null` (global page note). `note` is the user annotation text. `url` is the parent page URL (replaces old `parentIds`/`childIds`).
 
 ### List (in lists/{listId}.json — self-describing entity)
 ```json

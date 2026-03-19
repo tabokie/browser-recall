@@ -28,7 +28,7 @@ test.describe('Snapshot slug meta tag', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: highlightText, note: '', timestamp: now,
-        parentIds: [`page:${slug}`],
+        url: originalUrl,
       }},
     ]);
 
@@ -69,7 +69,7 @@ test.describe('Snapshot slug meta tag', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: highlightText, note: '', timestamp: now,
-        parentIds: [`page:${slug}`],
+        url: originalUrl,
       }},
       { path: `data/snapshots/${slug}-${snapTs}.html`, content: snapshotHtml },
     ]);
@@ -118,7 +118,7 @@ test.describe('Snapshot slug meta tag', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'some text', note: 'my note', timestamp: now,
-        parentIds: [`page:${slug}`],
+        url: originalUrl,
       }},
       { path: `data/snapshots/${slug}-${snapTs}.html`, content: snapshotHtml },
     ]);

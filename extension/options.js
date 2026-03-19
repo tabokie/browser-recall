@@ -495,13 +495,13 @@ async function showRecycleBin() {
   showRecycleBinLayout();
 
   const orphaned = await readCacheable('manifest:orphaned');
-  const keys = orphaned?.keys || [];
+  const entries = orphaned?.entries || [];
   const itemsEl = document.getElementById('recycleBinItems');
   const emptyEl = document.getElementById('recycleBinEmpty');
   const headerEl = document.querySelector('.recycle-bin-header');
   itemsEl.innerHTML = '';
 
-  if (keys.length === 0) {
+  if (entries.length === 0) {
     emptyEl.style.display = '';
     headerEl.style.display = 'none';
     return;
@@ -509,7 +509,7 @@ async function showRecycleBin() {
   emptyEl.style.display = 'none';
   headerEl.style.display = '';
 
-  for (const key of keys) {
+  for (const { key } of entries) {
     const typeLabel = entityTypeLabel(key);
     const typeCls = 'type-' + typeLabel.toLowerCase();
 
@@ -569,7 +569,7 @@ async function showRecycleBin() {
 
 async function updateRecycleBinBadge() {
   const orphaned = await readCacheable('manifest:orphaned');
-  const count = orphaned?.keys?.length || 0;
+  const count = orphaned?.entries?.length || 0;
   const badge = document.getElementById('recycleBinCount');
   badge.textContent = count > 0 ? String(count) : '';
 }

@@ -221,7 +221,7 @@ describe('History title enrichment', () => {
         switch (msg.key) {
           case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
           case 'manifest:name-to-id': return { success: true, value: { timestamp: 0, paths: {} } };
-          case 'manifest:orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
+          case 'manifest:orphaned': return { success: true, value: { timestamp: 0, entries: [] } };
           default: {
             if (msg.key.startsWith('page:')) {
               const slug = msg.key.slice('page:'.length);

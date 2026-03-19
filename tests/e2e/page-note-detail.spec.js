@@ -18,7 +18,7 @@ test.describe('Page note textarea in detail card', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: null, note: 'Existing page note', cssPath: null,
-        parentIds: [`page:${slug}`], childIds: [], timestamp: now,
+        url: PAGE_URL, timestamp: now,
       }},
       { path: 'data/logs/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'leave_page', url: PAGE_URL, title: PAGE_TITLE, timeOnPage: 5, scrollDepth: 50 },
@@ -106,7 +106,7 @@ test.describe('Page note textarea in detail card', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: null, note: 'Old text', cssPath: null,
-        parentIds: [`page:${slug}`], childIds: [], timestamp: now,
+        url: PAGE_URL, timestamp: now,
       }},
       { path: 'data/logs/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'leave_page', url: PAGE_URL, title: PAGE_TITLE, timeOnPage: 5, scrollDepth: 50 },
@@ -149,7 +149,7 @@ test.describe('Page note textarea in detail card', () => {
     const orphaned = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
-    expect(orphaned.value.keys).toContain(`note:${noteSlug}`);
+    expect(orphaned.value.entries.map(e => e.key)).toContain(`note:${noteSlug}`);
 
     await helper.close();
     await options.close();
@@ -169,11 +169,11 @@ test.describe('Page note textarea in detail card', () => {
       }},
       { path: `data/notes/${globalNoteSlug}.json`, data: {
         slug: globalNoteSlug, excerpt: null, note: 'Global note text', cssPath: null,
-        parentIds: [`page:${slug}`], childIds: [], timestamp: now,
+        url: PAGE_URL, timestamp: now,
       }},
       { path: `data/notes/${highlightNoteSlug}.json`, data: {
         slug: highlightNoteSlug, excerpt: 'Selected text', note: 'Highlight annotation', cssPath: 'p',
-        parentIds: [`page:${slug}`], childIds: [], timestamp: now,
+        url: PAGE_URL, timestamp: now,
       }},
       { path: 'data/logs/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'leave_page', url: PAGE_URL, title: PAGE_TITLE, timeOnPage: 5, scrollDepth: 50 },

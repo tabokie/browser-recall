@@ -87,11 +87,11 @@ test.describe('Context menu highlight', () => {
       }},
       { path: 'data/notes/note-a.json', data: {
         slug: 'note-a', excerpt: 'first', note: 'my note', timestamp: now,
-        parentIds: [`page:${slug}`],
+        url: pageUrl,
       }},
       { path: 'data/notes/note-b.json', data: {
         slug: 'note-b', excerpt: 'second', note: '', timestamp: now,
-        parentIds: [`page:${slug}`],
+        url: pageUrl,
       }},
     ]);
 

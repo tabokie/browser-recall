@@ -52,10 +52,10 @@ export function defaultEntity(key) {
   }
   if (key.startsWith(NOTE_PREFIX)) {
     const slug = key.slice(NOTE_PREFIX.length);
-    return { slug, timestamp: 0, excerpt: null, note: null, cssPath: null, parentIds: [], childIds: [] };
+    return { slug, timestamp: 0, excerpt: null, note: null, cssPath: null, url: null };
   }
   if (key === 'manifest:settings') return { timestamp: 0 };
-  if (key === 'manifest:orphaned') return { timestamp: 0, keys: [] };
+  if (key === 'manifest:orphaned') return { timestamp: 0, entries: [] };
   if (key === 'list:system/root') return { timestamp: 0, childLists: [] };
   if (key === 'manifest:name-to-id') return { timestamp: 0, paths: {} };
   if (key.startsWith('list:')) {
@@ -118,17 +118,21 @@ export async function effectOf(entry, load) {
     }
   }
 
-  async function orphan(childKey, ts) {
+  async function orphan(childKey, ts, parentUrl) {
     const orphaned = result['manifest:orphaned'] || await loadOrDefault('manifest:orphaned', load);
-    const keys = [...(orphaned.keys || [])];
-    if (!keys.includes(childKey)) keys.push(childKey);
-    result['manifest:orphaned'] = { ...orphaned, timestamp: ts, keys };
+    const entries = [...(orphaned.entries || [])];
+    if (!entries.some(e => e.key === childKey)) {
+      const entry = { key: childKey };
+      if (parentUrl) entry.url = parentUrl;
+      entries.push(entry);
+    }
+    result['manifest:orphaned'] = { ...orphaned, timestamp: ts, entries };
   }
 
   async function unorphan(childKey, ts) {
     const orphaned = result['manifest:orphaned'] || await loadOrDefault('manifest:orphaned', load);
-    const keys = (orphaned.keys || []).filter(k => k !== childKey);
-    result['manifest:orphaned'] = { ...orphaned, timestamp: ts, keys };
+    const entries = (orphaned.entries || []).filter(e => e.key !== childKey);
+    result['manifest:orphaned'] = { ...orphaned, timestamp: ts, entries };
   }
 
   /**
@@ -164,6 +168,20 @@ export async function effectOf(entry, load) {
     }
     result[pageKey] = page;
     return { pageKey, page };
+  }
+
+  /**
+   * Find all lists that have pinId in their pins array.
+   */
+  async function findListsWithPin(pinId) {
+    const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
+    const lists = [];
+    for (const id of Object.values(nameToId.paths || {})) {
+      const lk = `list:${id}`;
+      const list = result[lk] !== undefined ? result[lk] : await load(lk);
+      if (list && (list.pins || []).some(p => p.id === pinId)) lists.push(lk);
+    }
+    return lists;
   }
 
   // --- update_setting ---
@@ -312,7 +330,11 @@ export async function effectOf(entry, load) {
     // Derive note slug from path: "notes/<slug>.json" → "<slug>"
     const noteSlug = entry.path.slice('notes/'.length, -'.json'.length);
     const noteKey = `${NOTE_PREFIX}${noteSlug}`;
+    // Link note as child of page (page.childIds)
     await linkChild(noteKey, [pageKey]);
+    // Set url on note entity
+    const note = result[noteKey] !== undefined ? result[noteKey] : await load(noteKey);
+    if (note) result[noteKey] = { ...note, url: entry.url };
     return result;
   }
 
@@ -324,24 +346,25 @@ export async function effectOf(entry, load) {
     const note = await loadOrDefault(noteKey, load, { includeDeleted: true });
     if (note.deleted) return result;
 
-    // Unlink from parent pages
-    const pageParents = (note.parentIds || []).filter(p => p.startsWith(PAGE_PREFIX));
-    await unlinkChild(noteKey, pageParents);
-    // GC parent pages that became ineligible
-    for (const pk of pageParents) {
-      const p = result[pk];
-      if (p && !isPageEligible(p)) result[pk] = null;
+    // Derive page key from note.url
+    const noteUrl = note.url || entry.url;
+    if (noteUrl) {
+      const pageKey = PAGE_PREFIX + generateSlugFromUrl(noteUrl);
+      await unlinkChild(noteKey, [pageKey]);
+      // GC parent page if it became ineligible
+      const p = result[pageKey];
+      if (p && !isPageEligible(p)) result[pageKey] = null;
     }
-    // Remove note pin from lists
-    const listParents = (note.parentIds || []).filter(p => p.startsWith('list:') && !p.startsWith('list:system/'));
-    for (const lk of listParents) {
-      const list = await load(lk);
+    // Remove note pin from lists (find via pins scan)
+    const listKeys = await findListsWithPin(noteKey);
+    for (const lk of listKeys) {
+      const list = result[lk] !== undefined ? result[lk] : await load(lk);
       if (!list) continue;
       result[lk] = { ...list, pins: (list.pins || []).filter(p => p.id !== noteKey) };
     }
-    // Mark deleted (note entity retains parentIds for restore)
+    // Mark deleted
     result[noteKey] = { ...note, deleted: true, timestamp: entry.timestamp };
-    await orphan(noteKey, entry.timestamp);
+    await orphan(noteKey, entry.timestamp, noteUrl);
     return result;
   }
 
@@ -352,19 +375,14 @@ export async function effectOf(entry, load) {
     // Load with includeDeleted to preserve original entity fields
     const note = await loadOrDefault(noteKey, load, { includeDeleted: true });
 
-    // Re-link to parent pages
-    const pageParents = (note.parentIds || []).filter(p => p.startsWith(PAGE_PREFIX));
-    await linkChild(noteKey, pageParents);
-    // Re-add note to lists
-    const listParents = (note.parentIds || []).filter(p => p.startsWith('list:') && !p.startsWith('list:system/'));
-    for (const lk of listParents) {
-      const list = await load(lk);
-      if (!list) continue;
-      const pins = [...(list.pins || [])];
-      if (!pins.some(p => p.id === noteKey)) {
-        pins.push({ id: noteKey, pinnedAt: entry.timestamp });
-      }
-      result[lk] = { ...list, pins };
+    // Get parent URL from orphaned entries or note.url
+    const orphaned = result['manifest:orphaned'] || await loadOrDefault('manifest:orphaned', load);
+    const orphanEntry = (orphaned.entries || []).find(e => e.key === noteKey);
+    const noteUrl = orphanEntry?.url || note.url || entry.url;
+    // Re-link to parent page
+    if (noteUrl) {
+      const pageKey = PAGE_PREFIX + generateSlugFromUrl(noteUrl);
+      await linkChild(noteKey, [pageKey]);
     }
     // Clear deleted flag
     result[noteKey] = { ...note, deleted: false, timestamp: entry.timestamp };
@@ -383,7 +401,7 @@ export async function effectOf(entry, load) {
     // GC parent page if it became ineligible
     const snapPage = result[pageKey];
     if (snapPage && !isPageEligible(snapPage)) result[pageKey] = null;
-    await orphan(snapKey, entry.timestamp);
+    await orphan(snapKey, entry.timestamp, entry.url);
     return result;
   }
 
@@ -412,16 +430,17 @@ export async function effectOf(entry, load) {
     const oldNote = await loadOrDefault(oldNoteKey, load, { includeDeleted: true });
     if (oldNote.deleted) return result;
 
-    // Unlink old note from parent pages (derived from entity, same pattern as delete_note)
-    const pageParents = (oldNote.parentIds || []).filter(p => p.startsWith(PAGE_PREFIX));
-    await unlinkChild(oldNoteKey, pageParents);
-
-    // Link new note to same parent pages
-    await linkChild(newNoteKey, pageParents);
+    // Derive page key from old note's url
+    const noteUrl = oldNote.url || entry.url;
+    if (noteUrl) {
+      const pageKey = PAGE_PREFIX + generateSlugFromUrl(noteUrl);
+      await unlinkChild(oldNoteKey, [pageKey]);
+      await linkChild(newNoteKey, [pageKey]);
+    }
 
     // Transfer list pins: replace old note with new note in each list
-    const listParents = (oldNote.parentIds || []).filter(p => p.startsWith('list:') && !p.startsWith('list:system/'));
-    for (const lk of listParents) {
+    const listKeys = await findListsWithPin(oldNoteKey);
+    for (const lk of listKeys) {
       const list = result[lk] !== undefined ? result[lk] : await load(lk);
       if (!list) continue;
       const pins = (list.pins || []).map(p =>
@@ -430,13 +449,12 @@ export async function effectOf(entry, load) {
       result[lk] = { ...list, pins };
     }
 
-    // Set up new note's parentIds (inheriting from old)
+    // Set up new note with url from old note
     const newNote = result[newNoteKey] !== undefined ? result[newNoteKey] : await load(newNoteKey);
-    const newParentIds = [...(oldNote.parentIds || [])];
     if (newNote) {
-      result[newNoteKey] = { ...newNote, parentIds: newParentIds };
+      result[newNoteKey] = { ...newNote, url: noteUrl };
     } else {
-      result[newNoteKey] = { ...defaultEntity(newNoteKey), parentIds: newParentIds };
+      result[newNoteKey] = { ...defaultEntity(newNoteKey), url: noteUrl };
     }
 
     // Mark old note as replaced + orphan
@@ -447,7 +465,7 @@ export async function effectOf(entry, load) {
       replacedBy: newNoteKey,
       timestamp: entry.timestamp,
     };
-    await orphan(oldNoteKey, entry.timestamp);
+    await orphan(oldNoteKey, entry.timestamp, noteUrl);
 
     return result;
   }
@@ -461,7 +479,7 @@ export async function effectOf(entry, load) {
     // Guard: reject actions on orphaned (deleted) lists
     if (!listKey.startsWith('list:system/')) {
       const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      if ((orphanedEntity.keys || []).includes(listKey)) return result;
+      if ((orphanedEntity.entries || []).some(e => e.key === listKey)) return result;
     }
 
     const entity = await loadOrDefault(listKey, load);
@@ -485,20 +503,13 @@ export async function effectOf(entry, load) {
         pins.push({ id: pinId, pinnedAt: entry.timestamp });
       }
 
-      // Update page/note parentIds with list key
+      // Update page parentIds with list key (notes don't track parentIds)
       if (pinId.startsWith(PAGE_PREFIX)) {
         const page = result[pinId] || await load(pinId);
         if (page) {
           const parentIds = [...(page.parentIds || [])];
           if (!parentIds.includes(listKey)) parentIds.push(listKey);
           result[pinId] = { ...page, parentIds };
-        }
-      } else if (pinId.startsWith(NOTE_PREFIX)) {
-        const note = await load(pinId);
-        if (note) {
-          const parentIds = [...(note.parentIds || [])];
-          if (!parentIds.includes(listKey)) parentIds.push(listKey);
-          result[pinId] = { ...note, parentIds };
         }
       }
     }
@@ -516,7 +527,7 @@ export async function effectOf(entry, load) {
     // Guard: reject actions on orphaned (deleted) lists
     if (!listKey.startsWith('list:system/')) {
       const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      if ((orphanedEntity.keys || []).includes(listKey)) return result;
+      if ((orphanedEntity.entries || []).some(e => e.key === listKey)) return result;
     }
 
     const entity = await loadOrDefault(listKey, load);
@@ -536,7 +547,7 @@ export async function effectOf(entry, load) {
     const pins = (entity.pins || []).filter(p => !removeIds.has(p.id));
     result[listKey] = { ...entity, pins, timestamp: entry.timestamp };
 
-    // Update page/note parentIds: remove list key
+    // Update page parentIds: remove list key (notes don't track parentIds)
     for (const pinId of removeIds) {
       if (pinId.startsWith(PAGE_PREFIX)) {
         const page = await load(pinId);
@@ -544,12 +555,6 @@ export async function effectOf(entry, load) {
           const parentIds = (page.parentIds || []).filter(p => p !== listKey);
           const updated = { ...page, parentIds };
           result[pinId] = isPageEligible(updated) ? updated : null;
-        }
-      } else if (pinId.startsWith(NOTE_PREFIX)) {
-        const note = await load(pinId);
-        if (note) {
-          const parentIds = (note.parentIds || []).filter(p => p !== listKey);
-          result[pinId] = { ...note, parentIds };
         }
       }
     }
@@ -565,7 +570,7 @@ export async function effectOf(entry, load) {
 
     if (!listKey.startsWith('list:system/')) {
       const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      if ((orphanedEntity.keys || []).includes(listKey)) return result;
+      if ((orphanedEntity.entries || []).some(e => e.key === listKey)) return result;
     }
 
     const entity = await loadOrDefault(listKey, load);
@@ -594,7 +599,7 @@ export async function effectOf(entry, load) {
 
     if (!listKey.startsWith('list:system/')) {
       const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      if ((orphanedEntity.keys || []).includes(listKey)) return result;
+      if ((orphanedEntity.entries || []).some(e => e.key === listKey)) return result;
     }
 
     const entity = await loadOrDefault(listKey, load);
@@ -611,7 +616,7 @@ export async function effectOf(entry, load) {
 
     if (!listKey.startsWith('list:system/')) {
       const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      if ((orphanedEntity.keys || []).includes(listKey)) return result;
+      if ((orphanedEntity.entries || []).some(e => e.key === listKey)) return result;
     }
 
     const entity = await loadOrDefault(listKey, load);
@@ -678,7 +683,7 @@ export async function effectOf(entry, load) {
     // Guard: reject actions on orphaned (deleted) lists
     if (!listKey.startsWith('list:system/')) {
       const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      if ((orphanedEntity.keys || []).includes(listKey)) return result;
+      if ((orphanedEntity.entries || []).some(e => e.key === listKey)) return result;
     }
 
     const entity = await loadOrDefault(listKey, load);
@@ -832,7 +837,7 @@ export async function effectOf(entry, load) {
       if (child.childLists) queue.push(...child.childLists);
     }
 
-    // Remove list key from all pinned page/note parentIds
+    // Remove list key from all pinned page parentIds (notes don't track parentIds)
     const pins = entity.pins || [];
     for (const pin of pins) {
       if (pin.id.startsWith(PAGE_PREFIX)) {
@@ -841,11 +846,6 @@ export async function effectOf(entry, load) {
         const parentIds = (page.parentIds || []).filter(p => p !== listKey);
         const updated = { ...page, parentIds };
         result[pin.id] = isPageEligible(updated) ? updated : null;
-      } else if (pin.id.startsWith(NOTE_PREFIX)) {
-        const note = await load(pin.id);
-        if (!note) continue;
-        const parentIds = (note.parentIds || []).filter(p => p !== listKey);
-        result[pin.id] = { ...note, parentIds };
       }
     }
 
@@ -872,9 +872,10 @@ export async function effectOf(entry, load) {
 
     // Deleted lists are removed from name-to-id, so resolve from orphaned entities
     if (!listKey) {
-      // Scan orphaned keys for a list matching this name
+      // Scan orphaned entries for a list matching this name
       const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      for (const key of (orphanedEntity.keys || [])) {
+      for (const oe of (orphanedEntity.entries || [])) {
+        const key = oe.key;
         if (!key.startsWith('list:') || key.startsWith('list:system/')) continue;
         const entity = await load(key, { includeDeleted: true });
         if (entity?.name === entry.name) {
@@ -910,7 +911,7 @@ export async function effectOf(entry, load) {
       if (child.childLists) queue.push(...child.childLists);
     }
 
-    // Restore page/note parentIds for pins
+    // Restore page parentIds for pins (notes don't track parentIds)
     const pins = restored.pins || [];
     for (const pin of pins) {
       if (pin.id.startsWith(PAGE_PREFIX)) {
@@ -919,12 +920,6 @@ export async function effectOf(entry, load) {
         const parentIds = [...(page.parentIds || [])];
         if (!parentIds.includes(listKey)) parentIds.push(listKey);
         result[pin.id] = { ...page, parentIds };
-      } else if (pin.id.startsWith(NOTE_PREFIX)) {
-        const note = await load(pin.id);
-        if (!note) continue;
-        const parentIds = [...(note.parentIds || [])];
-        if (!parentIds.includes(listKey)) parentIds.push(listKey);
-        result[pin.id] = { ...note, parentIds };
       }
     }
 

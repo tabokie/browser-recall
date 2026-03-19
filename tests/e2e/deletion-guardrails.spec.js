@@ -26,7 +26,7 @@ test.describe('Deletion guardrails', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'To be deleted', note: 'Gone', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
       }},
     ]);
 
@@ -62,7 +62,7 @@ test.describe('Deletion guardrails', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Visible note', note: 'Annotation', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
       }},
       { path: `data/logs/${today}.jsonl`, lines: [
         { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
@@ -133,7 +133,7 @@ test.describe('Deletion guardrails', () => {
       }},
       // Orphaned list tracks it
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: ['list:rehydrate-del'],
+        timestamp: now, entries: [{ key: 'list:rehydrate-del' }],
       }},
     ]);
 

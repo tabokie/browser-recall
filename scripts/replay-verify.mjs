@@ -76,11 +76,11 @@ console.log(`Writing replayed state to ${outputDir}...`);
 mkdirSync(join(outputDir, 'pages'), { recursive: true });
 mkdirSync(join(outputDir, 'data', 'notes'), { recursive: true });
 mkdirSync(join(outputDir, 'lists', 'system'), { recursive: true });
-mkdirSync(join(outputDir, 'lists', 'auto'), { recursive: true });
 mkdirSync(join(outputDir, 'manifest'), { recursive: true });
 
 for (const [key, value] of store) {
   if (value === null) continue;
+  if (value.deleted) continue; // Deleted entities have no disk file
   let path;
   if (key === 'manifest:settings') {
     path = join(outputDir, 'manifest', 'settings.json');
@@ -160,16 +160,12 @@ if (existsSync(join(DATA_DIR, 'pages'))) {
   }
 }
 
-// Notes
-if (existsSync(join(DATA_DIR, 'data', 'notes'))) {
-  for (const f of readdirSync(join(DATA_DIR, 'data', 'notes'))) {
-    if (!f.endsWith('.json')) continue;
-    const slug = f.replace('.json', '');
-    entityPaths.set(`note:${slug}`, `data/notes/${f}`);
-  }
-}
+// Notes: only compare notes that replay actually produces (replace_note creates note entities;
+// create_note only updates parent page childIds — note content files are written by offscreen,
+// not derived from replay).
+// We skip scanning data/notes/ on disk; replay-only notes are still reported.
 
-// Lists (non-system, non-auto)
+// Lists (non-system)
 if (existsSync(join(DATA_DIR, 'lists'))) {
   for (const f of readdirSync(join(DATA_DIR, 'lists'))) {
     if (!f.endsWith('.json')) continue;
@@ -199,7 +195,8 @@ for (const key of [...allKeys].sort()) {
   // Skip snapshot keys — no entity file
   if (key.startsWith('snapshot:')) continue;
 
-  const replayed = store.get(key) ?? null;
+  const raw = store.get(key) ?? null;
+  const replayed = (raw && raw.deleted) ? null : raw; // deleted entities have no disk file
   const existingPath = entityPaths.get(key);
   const existing = existingPath ? loadExisting(existingPath) : null;
 

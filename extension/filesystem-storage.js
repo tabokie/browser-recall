@@ -383,13 +383,11 @@ class FileSystemStorage {
         if (entry.kind === 'file' && entry.name.endsWith('.json')) {
           const file = await entry.getFile();
           const note = JSON.parse(await file.text());
-          // Group by parent page slug
-          for (const parentKey of (note.parentIds || [])) {
-            if (parentKey.startsWith('page:')) {
-              const pageSlug = parentKey.slice(5);
-              if (!notesMap[pageSlug]) notesMap[pageSlug] = [];
-              notesMap[pageSlug].push(note);
-            }
+          // Group by parent page slug derived from note.url
+          if (note.url) {
+            const pageSlug = generateSlugFromUrl(note.url);
+            if (!notesMap[pageSlug]) notesMap[pageSlug] = [];
+            notesMap[pageSlug].push(note);
           }
         }
       }

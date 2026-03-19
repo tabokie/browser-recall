@@ -402,9 +402,10 @@ test.describe('List operations', () => {
     });
     await helper.close();
 
-    // create_list generates an ID from name+timestamp, so check that exactly one child was added
-    expect(root.childLists.length).toBe(1);
-    expect(root.childLists[0]).toMatch(/^list:/);  // valid list key
+    // create_list generates an ID from name+timestamp; Hubs default list also present
+    const nonHubs = root.childLists.filter(k => !k.includes('hub'));
+    expect(nonHubs.length).toBe(1);
+    expect(nonHubs[0]).toMatch(/^list:/);  // valid list key
   });
 
   // Pin a never-visited URL via toggleListPin — creates page entity with title
@@ -596,7 +597,7 @@ test.describe('List operations', () => {
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphaned.value).toBeTruthy();
-    expect(orphaned.value.keys).toContain('list:doomed');
+    expect(orphaned.value.entries.map(e => e.key)).toContain('list:doomed');
 
     await helper.close();
   });
@@ -1395,8 +1396,8 @@ test.describe('List operations', () => {
     const orphaned = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
-    expect(orphaned.value.keys).toContain('list:parent');
-    expect(orphaned.value.keys).toContain('list:child');
+    expect(orphaned.value.entries.map(e => e.key)).toContain('list:parent');
+    expect(orphaned.value.entries.map(e => e.key)).toContain('list:child');
 
     // Root should not contain parent
     const root = await helper.evaluate(() =>
@@ -1440,8 +1441,8 @@ test.describe('List operations', () => {
     const orphaned = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
-    expect(orphaned.value.keys).not.toContain('list:parent');
-    expect(orphaned.value.keys).not.toContain('list:child');
+    expect(orphaned.value.entries.map(e => e.key)).not.toContain('list:parent');
+    expect(orphaned.value.entries.map(e => e.key)).not.toContain('list:child');
 
     // Root should contain parent again
     const root = await helper.evaluate(() =>
@@ -1455,7 +1456,7 @@ test.describe('List operations', () => {
 
   const NOTE_SLUG = 'test-note-abc';
 
-  test('pin note via toggleListPin adds note to list and list to note parentIds', async ({ extContext, extensionId, setupDir }) => {
+  test('pin note via toggleListPin adds note to list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] }},
@@ -1469,7 +1470,7 @@ test.describe('List operations', () => {
       }},
       { path: `data/notes/${NOTE_SLUG}.json`, data: {
         slug: NOTE_SLUG, excerpt: 'Test note', note: 'Content', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -1493,17 +1494,10 @@ test.describe('List operations', () => {
     );
     expect(list.value.pins.some(p => p.id === `note:${NOTE_SLUG}`)).toBe(true);
 
-    // Note should have list:reading in parentIds
-    const note = await helper.evaluate((key) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key })
-    , `note:${NOTE_SLUG}`);
     await helper.close();
-
-    expect(note.value).toBeTruthy();
-    expect(note.value.parentIds).toContain('list:reading');
   });
 
-  test('unpin note via toggleListPin removes note from list and list from note parentIds', async ({ extContext, extensionId, setupDir }) => {
+  test('unpin note via toggleListPin removes note from list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] }},
@@ -1517,7 +1511,7 @@ test.describe('List operations', () => {
       }},
       { path: `data/notes/${NOTE_SLUG}.json`, data: {
         slug: NOTE_SLUG, excerpt: 'Test note', note: 'Content', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`, 'list:reading'], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -1541,14 +1535,7 @@ test.describe('List operations', () => {
     );
     expect(list.value.pins.some(p => p.id === `note:${NOTE_SLUG}`)).toBe(false);
 
-    // Note should not have list:reading in parentIds
-    const note = await helper.evaluate((key) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key })
-    , `note:${NOTE_SLUG}`);
     await helper.close();
-
-    expect(note.value).toBeTruthy();
-    expect(note.value.parentIds).not.toContain('list:reading');
   });
 
   test('deleteNote removes note pin from list', async ({ extContext, extensionId, setupDir }) => {
@@ -1566,7 +1553,7 @@ test.describe('List operations', () => {
       }},
       { path: `data/notes/${NOTE_SLUG}.json`, data: {
         slug: NOTE_SLUG, excerpt: 'Doomed note', note: 'Content', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`, 'list:reading'], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -1599,7 +1586,7 @@ test.describe('List operations', () => {
     expect(note.value.deleted).toBe(true);
   });
 
-  test('restoreNote re-adds note pin to list', async ({ extContext, extensionId, setupDir }) => {
+  test('restoreNote re-links note to parent page and un-orphans', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] }},
@@ -1607,7 +1594,7 @@ test.describe('List operations', () => {
         timestamp: now, childLists: ['list:reading'],
       }},
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`note:${NOTE_SLUG}`],
+        timestamp: now, entries: [{ key: `note:${NOTE_SLUG}`, url: TEST_URL }],
       }},
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading', timestamp: now,
@@ -1616,7 +1603,7 @@ test.describe('List operations', () => {
       }},
       { path: `data/notes/${NOTE_SLUG}.json`, data: {
         slug: NOTE_SLUG, excerpt: 'Restore me', note: 'Content', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`, 'list:reading'], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
         deleted: true,
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -1633,13 +1620,11 @@ test.describe('List operations', () => {
       chrome.runtime.sendMessage({ action: 'restoreNote', noteSlug })
     , NOTE_SLUG);
 
-    // List should have note pin re-added
-    const list = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
-    );
-    expect(list.value.pins.some(p => p.id === `note:${NOTE_SLUG}`)).toBe(true);
-    // Original page pin preserved
-    expect(list.value.pins.some(p => p.id === `page:${TEST_SLUG}`)).toBe(true);
+    // Page should have note re-linked in childIds
+    const page = await helper.evaluate((key) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key })
+    , `page:${TEST_SLUG}`);
+    expect(page.value.childIds).toContain(`note:${NOTE_SLUG}`);
 
     // Note should no longer be deleted
     const note = await helper.evaluate((key) =>
@@ -1654,7 +1639,7 @@ test.describe('List operations', () => {
 
     expect(note.value).toBeTruthy();
     expect(note.value.deleted).toBe(false);
-    expect(orphaned.value.keys).not.toContain(`note:${NOTE_SLUG}`);
+    expect(orphaned.value.entries.map(e => e.key)).not.toContain(`note:${NOTE_SLUG}`);
   });
 
   // Bug: root.json not persisted to disk after saveListMeta adds a new list.
@@ -1691,9 +1676,10 @@ test.describe('List operations', () => {
     await helper.close();
 
     expect(root.value).toBeTruthy();
-    // create_list generates an ID from name+timestamp, so check that one child was added
-    expect(root.value.childLists.length).toBe(1);
-    expect(root.value.childLists[0]).toMatch(/^list:/);
+    // create_list generates an ID from name+timestamp; Hubs default list also present
+    const nonHubs = root.value.childLists.filter(k => !k.includes('hub'));
+    expect(nonHubs.length).toBe(1);
+    expect(nonHubs[0]).toMatch(/^list:/);
   });
 
   // Bug: ensureLoaded in offscreen drain skips list:system/* keys, so when
@@ -1814,13 +1800,13 @@ test.describe('List operations', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Deleted', note: 'Gone', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now, deleted: true,
+        url: TEST_URL, timestamp: now, deleted: true,
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example', timestamp: now,
         parentIds: [], childIds: [], user_title: 'Kept',
       }},
-      { path: 'manifest/orphaned.json', data: { timestamp: now, keys: [`note:${noteSlug}`] } },
+      { path: 'manifest/orphaned.json', data: { timestamp: now, entries: [{ key: `note:${noteSlug}` }] } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1838,9 +1824,7 @@ test.describe('List operations', () => {
       chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
     );
 
-    // Deleted note should NOT have list:pintest in parentIds after drain round-trip.
-    // Bug: offscreen load doesn't filter deleted entities, so effectOf incorrectly
-    // updates parentIds on the deleted note during drain.
+    // Deleted note should still be marked deleted after drain round-trip.
     const note = await helper.evaluate(({ key }) =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key, includeDeleted: true })
     , { key: `note:${noteSlug}` });
@@ -1848,7 +1832,6 @@ test.describe('List operations', () => {
 
     expect(note.value).toBeTruthy();
     expect(note.value.deleted).toBe(true);
-    expect(note.value.parentIds).not.toContain('list:pintest');
   });
 
   test('page GC persists through drain: unpin removes ineligible page from disk', async ({ extContext, extensionId, setupDir }) => {

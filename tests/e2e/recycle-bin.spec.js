@@ -20,11 +20,11 @@ test.describe('Recycle bin', () => {
       // Note file still on disk (deletion doesn't remove files)
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Orphaned note', note: 'Still here', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
       }},
       // Orphaned list tracks the deleted note
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`note:${noteSlug}`],
+        timestamp: now, entries: [{ key: `note:${noteSlug}` }],
       }},
     ]);
 
@@ -48,7 +48,7 @@ test.describe('Recycle bin', () => {
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
-    expect(orphanedResp.value.keys).not.toContain(`note:${noteSlug}`);
+    expect(orphanedResp.value.entries.map(e => e.key)).not.toContain(`note:${noteSlug}`);
 
     await helper.close();
   });
@@ -78,7 +78,7 @@ test.describe('Recycle bin', () => {
       }},
       // Orphaned list tracks the deleted list
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`list:${listId}`],
+        timestamp: now, entries: [{ key: `list:${listId}` }],
       }},
     ]);
 
@@ -109,7 +109,7 @@ test.describe('Recycle bin', () => {
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
-    expect(orphanedResp.value.keys).not.toContain(`list:${listId}`);
+    expect(orphanedResp.value.entries.map(e => e.key)).not.toContain(`list:${listId}`);
 
     // Verify the list entity itself is accessible and no longer deleted
     const listResp = await helper.evaluate((key) =>
@@ -135,10 +135,10 @@ test.describe('Recycle bin', () => {
       // Note on disk with original fields + deleted: true
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'My excerpt', note: 'Important content', cssPath: 'div.main > p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: ['snapshot:some-123'], timestamp: now, deleted: true,
+        url: TEST_URL, timestamp: now, deleted: true,
       }},
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`note:${noteSlug}`],
+        timestamp: now, entries: [{ key: `note:${noteSlug}` }],
       }},
     ]);
 
@@ -159,7 +159,6 @@ test.describe('Recycle bin', () => {
     expect(noteResp.value.excerpt).toBe('My excerpt');
     expect(noteResp.value.note).toBe('Important content');
     expect(noteResp.value.cssPath).toBe('div.main > p');
-    expect(noteResp.value.childIds).toContain('snapshot:some-123');
 
     await helper.close();
   });
@@ -185,7 +184,7 @@ test.describe('Recycle bin', () => {
         parentIds: [], childIds: [],
       }},
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`list:${listId}`],
+        timestamp: now, entries: [{ key: `list:${listId}` }],
       }},
     ]);
 
@@ -222,7 +221,7 @@ test.describe('Recycle bin', () => {
       // Note file on disk
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'To be destroyed', note: 'Gone forever', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
       }},
       // A pending log entry to ensure drain is needed
       { path: `data/logs/${today}.jsonl`, lines: [
@@ -230,7 +229,7 @@ test.describe('Recycle bin', () => {
       ]},
       // Orphaned list tracks the note
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`note:${noteSlug}`],
+        timestamp: now, entries: [{ key: `note:${noteSlug}` }],
       }},
     ]);
 
@@ -254,7 +253,7 @@ test.describe('Recycle bin', () => {
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
-    expect(orphanedResp.value.keys).not.toContain(`note:${noteSlug}`);
+    expect(orphanedResp.value.entries.map(e => e.key)).not.toContain(`note:${noteSlug}`);
 
     await helper.close();
   });
@@ -271,7 +270,7 @@ test.describe('Recycle bin', () => {
         pins: [], deleted: true,
       }},
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`list:${listId}`],
+        timestamp: now, entries: [{ key: `list:${listId}` }],
       }},
     ]);
 
@@ -295,7 +294,7 @@ test.describe('Recycle bin', () => {
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
-    expect(orphanedResp.value.keys).not.toContain(`list:${listId}`);
+    expect(orphanedResp.value.entries.map(e => e.key)).not.toContain(`list:${listId}`);
 
     await helper.close();
   });
@@ -309,14 +308,14 @@ test.describe('Recycle bin', () => {
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Bulk delete', note: 'Gone', cssPath: 'p',
-        parentIds: [], childIds: [], timestamp: now,
+        url: '', timestamp: now,
       }},
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Bulk List', timestamp: now,
         pins: [], deleted: true,
       }},
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`note:${noteSlug}`, `list:${listId}`],
+        timestamp: now, entries: [{ key: `note:${noteSlug}` }, { key: `list:${listId}` }],
       }},
     ]);
 
@@ -333,7 +332,7 @@ test.describe('Recycle bin', () => {
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
-    expect(orphanedResp.value.keys).toHaveLength(0);
+    expect(orphanedResp.value.entries).toHaveLength(0);
 
     // Verify files are gone
     const noteResp = await helper.evaluate((key) =>
@@ -358,14 +357,14 @@ test.describe('Recycle bin', () => {
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'UI test note', note: 'Visible', cssPath: 'p',
-        parentIds: [], childIds: [], timestamp: now,
+        url: '', timestamp: now,
       }},
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'UI List', timestamp: now,
         pins: [], deleted: true,
       }},
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`note:${noteSlug}`, `list:${listId}`],
+        timestamp: now, entries: [{ key: `note:${noteSlug}` }, { key: `list:${listId}` }],
       }},
     ]);
 
@@ -401,10 +400,10 @@ test.describe('Recycle bin', () => {
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Restore me', note: 'Content', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now,
+        url: TEST_URL, timestamp: now,
       }},
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`note:${noteSlug}`],
+        timestamp: now, entries: [{ key: `note:${noteSlug}` }],
       }},
     ]);
 
@@ -440,14 +439,14 @@ test.describe('Recycle bin', () => {
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Empty me', note: 'Gone', cssPath: 'p',
-        parentIds: [], childIds: [], timestamp: now,
+        url: '', timestamp: now,
       }},
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Empty List', timestamp: now,
         pins: [], deleted: true,
       }},
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`note:${noteSlug}`, `list:${listId}`],
+        timestamp: now, entries: [{ key: `note:${noteSlug}` }, { key: `list:${listId}` }],
       }},
     ]);
 
@@ -468,7 +467,7 @@ test.describe('Recycle bin', () => {
     const orphanedResp = await options.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
-    expect(orphanedResp.value.keys).toHaveLength(0);
+    expect(orphanedResp.value.entries).toHaveLength(0);
 
     await options.close();
   });
@@ -486,10 +485,10 @@ test.describe('Recycle bin', () => {
       // Note already deleted (deleted: true on disk)
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Already gone', note: 'Gone', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now, deleted: true,
+        url: TEST_URL, timestamp: now, deleted: true,
       }},
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`note:${noteSlug}`],
+        timestamp: now, entries: [{ key: `note:${noteSlug}` }],
       }},
     ]);
 
@@ -504,7 +503,7 @@ test.describe('Recycle bin', () => {
     const orphanedResp = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
-    const noteKeys = orphanedResp.value.keys.filter(k => k === `note:${noteSlug}`);
+    const noteKeys = orphanedResp.value.entries.map(e => e.key).filter(k => k === `note:${noteSlug}`);
     expect(noteKeys).toHaveLength(1);
 
     await helper.close();
@@ -524,10 +523,10 @@ test.describe('Recycle bin', () => {
       // Note deleted on disk
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Dedup test', note: 'Content', cssPath: 'p',
-        parentIds: [`page:${TEST_SLUG}`], childIds: [], timestamp: now, deleted: true,
+        url: TEST_URL, timestamp: now, deleted: true,
       }},
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [`note:${noteSlug}`],
+        timestamp: now, entries: [{ key: `note:${noteSlug}` }],
       }},
     ]);
 

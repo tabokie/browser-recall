@@ -324,7 +324,7 @@ describe('Progressive loading', () => {
           case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
           case 'list:system/root': return { success: true, value: TEST_ROOT };
           case 'manifest:name-to-id': return { success: true, value: { timestamp: 0, paths: {} } };
-          case 'manifest:orphaned': return { success: true, value: { timestamp: 0, keys: [] } };
+          case 'manifest:orphaned': return { success: true, value: { timestamp: 0, entries: [] } };
           default: {
             // Return individual list entities by slug with pins
             for (const list of TEST_LISTS) {

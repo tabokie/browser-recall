@@ -1,0 +1,33 @@
+- Earlier you said:
+
+  1. list:gateways-3km4de mismatch — replay produces old "Gateways" (from history before
+  migration), disk has "Hubs" (from migration). Expected — migration wrote data that doesn't
+  exist in the log history yet (the pin_to_list entry was appended but the list rename and rule
+   aren't log entries).
+  2. rules: [] vs undefined — replay produces rules: [] (from defaultEntity), disk files don't
+  have rules field. This is a pre-existing difference from the rules feature, not our change.
+  3. list:auto/gateways in existing page parentIds — these pages have stale parentIds
+  referencing list:auto/gateways on disk. Replay no longer produces this since the
+  auto/gateways entries were removed from logs. The disk files need overwrite-disk.mjs to sync,
+   but that's expected post-migration.
+  4. Existing-only notes/pages — notes with disk files but no matching log entries (orphaned
+  notes, etc.). Pre-existing.
+
+Let's make sure the replay matches existing data
+- You are allowed to remove the unwanted logs from history
+- continue
+- "pre-existing, not from our changes" claim responsibility, I want the data fixed thoroughly, I don't care who introduced the diffs.
+
+To be more specific, I want to logs to appear as if they are created using the latest version of the code. Remove the logs what wouldn't be created using the latest implementation. And make sure replay results matches data exactly. Remember this is the policy for data migration moving forward.
+- Remove explore.json, this concept should
+- Proceed the task.
+
+After its done, remove explore.json, this concept should've been purged from the system.
+
+Then remove the "childIds" and "parentIds" from the note file. Note file is a public data, it should use public name only. Change it to use url to refer to the page it belongs to.
+- How do we restore a snapshot capture in the current implementation?
+- I still don't understand where restore_snapshot gets the url?
+- You still didn't answer my question. How does background.js get the url for a capture or a note? Answer it and wait for my followup before doing the planning
+- Good. Let's do this instead: keep the parentIds in orphan.json. Don't use stem to deduce it. And remove the parentIds/childIds field from note file.
+- /finish
+- continue

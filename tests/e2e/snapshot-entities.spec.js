@@ -69,7 +69,7 @@ test.describe('Snapshot entities', () => {
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
-    expect(orphanedResp.value.keys).toContain(SNAP_KEY);
+    expect(orphanedResp.value.entries.map(e => e.key)).toContain(SNAP_KEY);
 
     await helper.close();
   });
@@ -88,7 +88,7 @@ test.describe('Snapshot entities', () => {
       { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.html`, content: '<h1>Example</h1>' },
       // Orphaned list tracks the deleted snapshot
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [SNAP_KEY],
+        timestamp: now, entries: [{ key: SNAP_KEY }],
       }},
     ]);
 
@@ -113,7 +113,7 @@ test.describe('Snapshot entities', () => {
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
-    expect(orphanedResp.value.keys).not.toContain(SNAP_KEY);
+    expect(orphanedResp.value.entries.map(e => e.key)).not.toContain(SNAP_KEY);
 
     await helper.close();
   });
@@ -134,7 +134,7 @@ test.describe('Snapshot entities', () => {
         { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [SNAP_KEY],
+        timestamp: now, entries: [{ key: SNAP_KEY }],
       }},
     ]);
 
@@ -151,7 +151,7 @@ test.describe('Snapshot entities', () => {
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
     );
     expect(orphanedResp.success).toBe(true);
-    expect(orphanedResp.value.keys).not.toContain(SNAP_KEY);
+    expect(orphanedResp.value.entries.map(e => e.key)).not.toContain(SNAP_KEY);
 
     await helper.close();
   });
@@ -168,7 +168,7 @@ test.describe('Snapshot entities', () => {
       { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.md`, content: '# Example' },
       { path: `data/snapshots/${TEST_SLUG}-${SNAP_TS}.html`, content: '<h1>Example</h1>' },
       { path: 'manifest/orphaned.json', data: {
-        timestamp: now, keys: [SNAP_KEY],
+        timestamp: now, entries: [{ key: SNAP_KEY }],
       }},
     ]);
 

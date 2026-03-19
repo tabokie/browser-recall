@@ -393,33 +393,9 @@ async function hydrateCache() {
     }
   } catch (e) { console.warn('Name-map load failed:', e.message); }
 
-  // Phase 1.1: First-run default list creation
-  // If no user lists exist (only system lists), create a "Hubs" list with a function rule.
-  try {
-    const metaRespCheck = await requestOffscreen({ action: 'loadAllListMetadata' });
-    const userLists = (metaRespCheck?.lists || []).filter(l => !l.slug.startsWith('system/'));
-    if (userLists.length === 0) {
-      await addLog({
-        timestamp: Date.now(),
-        action: 'create_list',
-        parents: [],
-        name: 'Hubs',
-      });
-      await addLog({
-        timestamp: Date.now(),
-        action: 'add_rule',
-        parents: [],
-        name: 'Hubs',
-        rule: {
-          type: 'smart',
-          config: {
-            description: 'Hub and landing pages',
-            fnSource: "const p = new URL(page.url).pathname.toLowerCase(); if (p === '/' || p === '') return 1; if (p.includes('index')) return 1; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return 1; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover']; if (hub.some(k => last.includes(k))) return 1; return 0;",
-          },
-        },
-      });
-    }
-  } catch (e) { console.warn('First-run default list creation failed:', e.message); }
+  // Phase 1.1 (default list creation) runs AFTER hydrateCache returns —
+  // it uses addLog() which calls readCacheable → await hydrationDone,
+  // so it can't run inside hydrateCache itself (circular wait).
 
   // Phase 1.5: History cache — per-date keys history:YYYY-MM-DD
   try {
@@ -588,6 +564,36 @@ async function hydrateCache() {
   console.log('Cache hydrated');
 }
 
+// First-run default list creation — must run AFTER hydrateCache completes
+// because addLog → sessionLoad → readCacheable → await hydrationDone.
+async function ensureDefaultLists() {
+  try {
+    const metaRespCheck = await requestOffscreen({ action: 'loadAllListMetadata' });
+    const userLists = (metaRespCheck?.lists || []).filter(l => !l.slug.startsWith('system/'));
+    if (userLists.length === 0) {
+      await addLog({
+        timestamp: Date.now(),
+        action: 'create_list',
+        parents: [],
+        name: 'Hubs',
+      });
+      await addLog({
+        timestamp: Date.now(),
+        action: 'add_rule',
+        parents: [],
+        name: 'Hubs',
+        rule: {
+          type: 'smart',
+          config: {
+            description: 'Hub and landing pages',
+            fnSource: "const p = new URL(page.url).pathname.toLowerCase(); if (p === '/' || p === '') return 1; if (p.includes('index')) return 1; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return 1; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover']; if (hub.some(k => last.includes(k))) return 1; return 0;",
+          },
+        },
+      });
+    }
+  } catch (e) { console.warn('First-run default list creation failed:', e.message); }
+}
+
 // ─── Title Trimming ───────────────────────────────────────────────────
 
 async function trimTitle(rawTitle, url) {
@@ -664,6 +670,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     console.log('Filesystem configured:', response.info.name);
     hydrationDone = hydrateCache();
     await hydrationDone;
+    await ensureDefaultLists();
   }
 });
 
@@ -677,6 +684,7 @@ chrome.runtime.onStartup.addListener(async () => {
     if (response && response.info) {
       hydrationDone = hydrateCache();
       await hydrationDone;
+      await ensureDefaultLists();
     }
   } catch (error) {
     console.warn('Startup hydration failed:', error.message);
@@ -1255,8 +1263,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               excerpt: request.excerpt,
               note: request.note || '',
               cssPath: request.cssPath || null,
-              parentIds: [`page:${pageSlug}`],
-              childIds: [],
+              url: pageUrl,
               timestamp
             }
           });
@@ -1282,17 +1289,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const noteSlug = request.noteSlug;
 
           // Load note to get parent page URL
-          const noteResp = await requestOffscreen({ action: 'loadNote', noteSlug });
-          const noteData = noteResp.note;
-          const pageParent = (noteData?.parentIds || []).find(p => p.startsWith('page:'));
-          let pageUrl = null;
-          if (pageParent) {
-            const pageEntity = await readCacheable(pageParent);
-            pageUrl = pageEntity?.url;
-          }
+          const noteEntity = await readCacheable('note:' + noteSlug, true);
+          const dnPageUrl = noteEntity?.url || null;
 
           const dnEntry = { timestamp: Date.now(), action: 'delete_note', path: `notes/${noteSlug}.json` };
-          if (pageUrl) dnEntry.url = pageUrl;
+          if (dnPageUrl) dnEntry.url = dnPageUrl;
           await addLog(dnEntry);
 
           sendResponse({ success: true });
@@ -1304,7 +1305,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const oldNoteSlug = request.noteSlug;
           const unTimestamp = Date.now();
 
-          // Load current note to get content and parentIds
+          // Load current note to get content and url
           const unCurrentNote = await requestOffscreen({ action: 'loadNote', noteSlug: oldNoteSlug });
           const oldNoteData = unCurrentNote.note || {};
 
@@ -1312,27 +1313,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const newNoteSlug = generateNoteSlug(unTimestamp, oldNoteData.excerpt || '');
 
           // Build new note data, copying immutable fields from old
+          const oldNoteEntity = await readCacheable('note:' + oldNoteSlug, true);
+          const unNoteUrl = oldNoteEntity?.url || oldNoteData.url || null;
           const newNoteData = {
             slug: newNoteSlug,
             excerpt: oldNoteData.excerpt || null,
             note: request.note,
             cssPath: oldNoteData.cssPath || null,
-            parentIds: oldNoteData.parentIds || [],
-            childIds: oldNoteData.childIds || [],
+            url: unNoteUrl,
             timestamp: unTimestamp,
           };
 
           // Save new note file to filesystem
           await requestOffscreen({ action: 'saveNote', slug: newNoteSlug, data: newNoteData });
-
-          // Get page URL for log entry (from old note's parentIds)
-          const oldNoteEntity = await readCacheable('note:' + oldNoteSlug, true);
-          const unPageParent = (oldNoteEntity?.parentIds || oldNoteData.parentIds || []).find(p => p.startsWith('page:'));
-          let unPageUrl = null;
-          if (unPageParent) {
-            const unPageEntity = await readCacheable(unPageParent);
-            unPageUrl = unPageEntity?.url;
-          }
 
           // Log replace_note event
           const replaceEntry = {
@@ -1341,7 +1334,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             path: `notes/${newNoteSlug}.json`,
             oldPath: `notes/${oldNoteSlug}.json`,
           };
-          if (unPageUrl) replaceEntry.url = unPageUrl;
+          if (unNoteUrl) replaceEntry.url = unNoteUrl;
           await addLog(replaceEntry);
 
           sendResponse({ success: true, noteSlug: newNoteSlug });
@@ -1519,15 +1512,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'restoreNote': {
           const noteSlug = request.noteSlug;
-          const noteData = await readCacheable('note:' + noteSlug, true);
-          const pageParent = (noteData?.parentIds || []).find(p => p.startsWith('page:'));
-          let pageUrl = null;
-          if (pageParent) {
-            const pageEntity = await readCacheable(pageParent);
-            pageUrl = pageEntity?.url || null;
-          }
+          // Get parent URL from orphaned entries or note entity
+          const orphanedForRestore = await readCacheable('manifest:orphaned');
+          const noteOrphanEntry = (orphanedForRestore?.entries || []).find(e => e.key === 'note:' + noteSlug);
+          const rnNoteData = await readCacheable('note:' + noteSlug, true);
+          const rnPageUrl = noteOrphanEntry?.url || rnNoteData?.url || null;
           const rnEntry = { timestamp: Date.now(), action: 'restore_note', path: `notes/${noteSlug}.json` };
-          if (pageUrl) rnEntry.url = pageUrl;
+          if (rnPageUrl) rnEntry.url = rnPageUrl;
           await addLog(rnEntry);
           sendResponse({ success: true });
           notifyMutation('orphaned');
@@ -1537,18 +1528,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'restoreSnapshot': {
           const snapStem = request.snapSlug; // e.g. 'page-slug-1234567890'
-          // Parse: everything before the last dash is pageSlug, after is timestamp
-          const lastDash = snapStem.lastIndexOf('-');
-          const pageSlug = snapStem.slice(0, lastDash);
-          const page = await readCacheable('page:' + pageSlug);
-          if (!page?.url) {
-            sendResponse({ success: false, error: 'Page entity not found for snapshot' });
+          // Get parent URL from orphaned entries or page entity
+          const rsOrphaned = await readCacheable('manifest:orphaned');
+          const snapOrphanEntry = (rsOrphaned?.entries || []).find(e => e.key === 'snapshot:' + snapStem);
+          let rsPageUrl = snapOrphanEntry?.url || null;
+          if (!rsPageUrl) {
+            // Fallback: parse snapshot stem to derive page slug
+            const lastDash = snapStem.lastIndexOf('-');
+            const pageSlug = snapStem.slice(0, lastDash);
+            const page = await readCacheable('page:' + pageSlug);
+            rsPageUrl = page?.url || null;
+          }
+          if (!rsPageUrl) {
+            sendResponse({ success: false, error: 'Cannot determine page URL for snapshot' });
             break;
           }
           await addLog({
             timestamp: Date.now(),
             action: 'restore_snapshot',
-            url: page.url,
+            url: rsPageUrl,
             path: `snapshots/${snapStem}`,
           });
           sendResponse({ success: true });
@@ -1595,11 +1593,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             await requestOffscreen({ action: 'deleteSnapshot', slug: pageSlug, timestamp });
           }
           // 3. Update orphaned list: remove the key
-          const orphaned = await readCacheable('manifest:orphaned') || { timestamp: 0, keys: [] };
+          const orphaned = await readCacheable('manifest:orphaned') || { timestamp: 0, entries: [] };
           const updatedOrphaned = {
             ...orphaned,
             timestamp: Date.now(),
-            keys: orphaned.keys.filter(k => k !== key),
+            entries: (orphaned.entries || []).filter(e => e.key !== key),
           };
           await requestOffscreen({ action: 'saveJson', path: 'manifest/orphaned.json', data: updatedOrphaned });
           await cacheSet('manifest:orphaned', updatedOrphaned);
@@ -1617,9 +1615,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           await requestOffscreen({ action: 'flushLogBuffer', entries: logBuffer });
           await new Promise(r => setTimeout(r, 100));
           // 2. Load orphaned list
-          const orphaned = await readCacheable('manifest:orphaned') || { timestamp: 0, keys: [] };
+          const orphaned = await readCacheable('manifest:orphaned') || { timestamp: 0, entries: [] };
           // 3. Delete each file
-          for (const key of orphaned.keys) {
+          for (const { key } of (orphaned.entries || [])) {
             if (key.startsWith('note:')) {
               const slug = key.slice('note:'.length);
               await requestOffscreen({ action: 'deleteNote', noteSlug: slug });
@@ -1636,7 +1634,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             await cacheRemove(key);
           }
           // 4. Save empty orphaned list
-          const emptyOrphaned = { timestamp: Date.now(), keys: [] };
+          const emptyOrphaned = { timestamp: Date.now(), entries: [] };
           await requestOffscreen({ action: 'saveJson', path: 'manifest/orphaned.json', data: emptyOrphaned });
           await cacheSet('manifest:orphaned', emptyOrphaned);
           sendResponse({ success: true });
@@ -1678,6 +1676,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             // Re-hydrate from the fresh OPFS directory
             hydrationDone = hydrateCache();
             await hydrationDone;
+            await ensureDefaultLists();
           }
           sendResponse(resp);
           break;
@@ -1697,6 +1696,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // 5. Re-hydrate from (now empty) filesystem
           hydrationDone = hydrateCache();
           await hydrationDone;
+          await ensureDefaultLists();
           sendResponse({ success: true });
           break;
         }
@@ -1711,6 +1711,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
           hydrationDone = hydrateCache();
           await hydrationDone;
+          await ensureDefaultLists();
           sendResponse({ success: true });
           break;
         }
