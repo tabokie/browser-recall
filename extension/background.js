@@ -757,9 +757,7 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
       excerpt: selectionText,
       note: '',
       cssPath: null,
-      parentIds: [`page:${slug}`],
-      childIds: [],
-      timestamp
+      url,
     }
   });
 
@@ -1264,7 +1262,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               note: request.note || '',
               cssPath: request.cssPath || null,
               url: pageUrl,
-              timestamp
             }
           });
 
@@ -1309,6 +1306,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const unCurrentNote = await requestOffscreen({ action: 'loadNote', noteSlug: oldNoteSlug });
           const oldNoteData = unCurrentNote.note || {};
 
+          // Skip if note text is unchanged
+          if (request.note === (oldNoteData.note ?? '')) {
+            sendResponse({ success: true, noteSlug: oldNoteSlug });
+            break;
+          }
+
           // Generate new slug for the replacement note
           const newNoteSlug = generateNoteSlug(unTimestamp, oldNoteData.excerpt || '');
 
@@ -1321,7 +1324,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             note: request.note,
             cssPath: oldNoteData.cssPath || null,
             url: unNoteUrl,
-            timestamp: unTimestamp,
           };
 
           // Save new note file to filesystem
@@ -1701,11 +1703,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
+        case 'setLogBufferForTest': {
+          // Inject entries into logBuffer for testing hydration replay paths.
+          logBuffer = request.entries || [];
+          await chrome.storage.local.set({ logBuffer });
+          sendResponse({ success: true });
+          break;
+        }
+
         case 'rehydrateForTest': {
           // Clear caches and re-hydrate without wiping the directory.
           // Used after seedTestData to pick up seeded files.
-          logBuffer = [];
-          await chrome.storage.local.set({ logBuffer });
+          // Pass keepLogBuffer:true to preserve injected logBuffer entries for replay.
+          if (!request.keepLogBuffer) {
+            logBuffer = [];
+            await chrome.storage.local.set({ logBuffer });
+          }
           await cacheClear();
           recentUrls = new Map();
           if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }

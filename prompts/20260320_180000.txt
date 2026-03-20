@@ -1,0 +1,38 @@
+- I added highlight and note on a page, the file are correct. But in page detail or popup UI, I cannot see the note. And on the page, the highlight are not marked. The page in question is https://www.zhihu.com/question/1925509412862292877/answer/2011042209626083366
+- go
+- Fix it by E2E TDD, fix data too.
+After doing that, run a full check to make sure note file is truly immutable. Remove the timestamp field in note file, migrate data too.
+- no, run inline, I input wrong before
+- Figure out why urlBlacklist is dropped from earlier data migration. Is it because there is no log to update it or because replay is wrong? The blacklist URL I have before is "https://gitlab.corp.metabit-trading.com/"
+- Insert a log to set urlblacklist in the beginning of data. And clean visits with that prefix
+- To double check, there is logs for titleTrimRules right?
+- highlight <mark> is not stripped during snapshot capture, and snapshot blob-url is not recognized as the original page. There is a snapshot with markups named zhihu-question-192550941286229-6pacw5-1773907788495
+- Purge https://gitlab.corp.metabit-trading.com/ prefix one more time. I visited some new pages just now before reloading the extension. After that, fix issue 2
+- Run the replay verification script, check data is consistent with log replay
+- > new note file wasn't on disk
+
+It should be though. The note was created yesterday
+- I reloaded the extension, but urlblacklist is not refreshed on the settings page
+- yes
+- I added a note for a highlight, the log looks correct, but the UI doesn't show my note after I reload the page and click on highlight
+- It is case a. Fix it
+- E2E test TDD
+- For the double save, in background.js do we do content comparision before converting to logs?
+- When viewing the capture HTML, the highlights are marked, but I cannot click on highlights to read notes, or edit the notes, or apply additional highlights
+- Yes. Reuse the same code as much as possible
+- continue
+- Fix the test infra issue properly. It is causing excessive re-run and waste a lot of time. If the issue cannot be fixed, figure out a reliable way to contain it (e.g. set up a test prehook to kill chrome).
+- > When one worker's Chrome dies or a previous run leaves zombies, the next worker hits "Failed to open a new tab".
+Help me understand this better. Do you mean test failure causes zombie Chrome, and zombie Chrome causes subsequent infra failures?
+- yes
+- go
+- What is the average time spent running full test suite? Based on your previous runs
+- leave_page can be triggered multiple time for a page, do we reset timeOnPage or do we send accumlative value?
+- Yes, I want to make it count delta only. E2E TDD. And this fix needs data fix too.
+- When user switch back and forth between a page, it seems the pattern is one visit_page followed by multiple leave_page. Why is it not paired?
+- I prefer 2
+- run migration
+- Modify the code to cap timeOnPage under 1h. And remove the excessively long logs in portal-data.
+- What do you mean by "only the 2 pre-existing orphaned notes remain"
+- Remove them
+- /finish

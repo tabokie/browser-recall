@@ -14,7 +14,7 @@ chrome.storage.session.get(['workspace'], (result) => {
 function initContentScript() {
 let currentInteractionId = null;
 let maxScrollDepth = 0;
-let startTime = Date.now();
+let lastActiveTime = Date.now(); // reset on visibility→visible; null after leave report
 
 // Track scroll depth
 window.addEventListener('scroll', () => {
@@ -682,13 +682,18 @@ function showHighlightEditOverlay(mark, text, noteSlug, existingNote, pageSlug) 
 
   textarea.addEventListener('input', () => { autoResize(); });
 
+  let saved = false;
   function saveAndClose() {
+    if (saved) return;
+    saved = true;
     const note = textarea.value;
     if (note !== existingNote && noteSlug) {
       chrome.runtime.sendMessage({
         action: 'updateNote',
         noteSlug,
         note
+      }).then(resp => {
+        if (resp?.noteSlug) mark.dataset.noteSlug = resp.noteSlug;
       }).catch(() => {});
     }
     host.remove();
@@ -745,10 +750,13 @@ function report(delta) {
 let latestTitle = document.title;
 
 function onLeavePage() {
+  if (lastActiveTime === null) return; // already reported, skip no-op
+  const timeOnPage = Math.min(Date.now() - lastActiveTime, 3600000); // cap at 1h
+  lastActiveTime = null; // prevent double-counting on subsequent fires
   report({
     title: latestTitle,
     scrollDepth: Math.round(maxScrollDepth),
-    timeOnPage: Date.now() - startTime,
+    timeOnPage,
     isLeaving: true,
   });
 }
@@ -794,15 +802,21 @@ if (titleEl) {
   headObs.observe(document.head, { childList: true });
 }
 
-// Page leave: visibility hidden / freeze
+// Page leave/return: track foreground time only
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     onLeavePage();
+  } else {
+    lastActiveTime = Date.now(); // reset foreground timer on return
   }
 });
 
 document.addEventListener('freeze', () => {
   onLeavePage();
+});
+
+document.addEventListener('resume', () => {
+  lastActiveTime = Date.now(); // reset foreground timer after unfreeze
 });
 
 // ─── Capture notification bubble ──────────────────────────────────────

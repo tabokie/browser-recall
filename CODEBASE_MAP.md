@@ -104,7 +104,7 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 ## Feature → Code Map
 
 ### Page Visit Tracking (Event-Sourced)
-- **Entry**: `content.js` — unified `report(delta)` sends `reportPage` to background; initial load (title, slug, referrer, `isInitialLoad`), periodic attention (title, scrollDepth, timeOnPage every 5s), title-only on mutation, `isLeaving` on visibility hidden / freeze / beforeunload
+- **Entry**: `content.js` — unified `report(delta)` sends `reportPage` to background; initial load (title, slug, referrer, `isInitialLoad`), periodic attention (title, scrollDepth, timeOnPage every 5s), title-only on mutation, `isLeaving` on visibility hidden / freeze / beforeunload. `timeOnPage` reports **foreground-only deltas** (not cumulative): `lastActiveTime` resets on `visibilitychange→visible` and `resume`; nulled after each leave report to prevent double-counting. Capped at 1h per delta.
 - **Background handler**: `background.js` `reportPage` → `processPageReport(delta)` trims title, diffs all fields against cached entity, logs only changes; `isInitialLoad` triggers referrer tracking + checkpoints + workspace auto-pin/snapshot; `isLeaving` triggers `drainNow()`
 - **Blacklist check**: skips URLs matching `urlBlacklist` prefixes (unless already in DB)
 - **Title trimming**: applies `titleTrimRules` (remove_after_pipe, remove_brackets, remove_parens)

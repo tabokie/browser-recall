@@ -27,7 +27,7 @@ test.describe('Snapshot slug meta tag', () => {
         parentIds: [], childIds: [`note:${noteSlug}`],
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
-        slug: noteSlug, excerpt: highlightText, note: '', timestamp: now,
+        slug: noteSlug, excerpt: highlightText, note: '',
         url: originalUrl,
       }},
     ]);
@@ -68,7 +68,7 @@ test.describe('Snapshot slug meta tag', () => {
         parentIds: [], childIds: [`note:${noteSlug}`, `snapshot:${slug}-${snapTs}`],
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
-        slug: noteSlug, excerpt: highlightText, note: '', timestamp: now,
+        slug: noteSlug, excerpt: highlightText, note: '',
         url: originalUrl,
       }},
       { path: `data/snapshots/${slug}-${snapTs}.html`, content: snapshotHtml },
@@ -117,7 +117,7 @@ test.describe('Snapshot slug meta tag', () => {
         parentIds: [], childIds: [`note:${noteSlug}`, `snapshot:${slug}-${snapTs}`],
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
-        slug: noteSlug, excerpt: 'some text', note: 'my note', timestamp: now,
+        slug: noteSlug, excerpt: 'some text', note: 'my note',
         url: originalUrl,
       }},
       { path: `data/snapshots/${slug}-${snapTs}.html`, content: snapshotHtml },

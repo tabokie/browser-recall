@@ -717,6 +717,11 @@ async function showDashboard(tab) {
         // Use user_title if set, otherwise auto-detected title
         currentTitle = info.interaction.user_title || info.interaction.title || tab.title || '<unknown>';
         document.getElementById('pageTitle').textContent = currentTitle;
+        // For snapshot viewer tabs, show the original page URL
+        if (info.interaction.url) {
+          currentUrl = info.interaction.url;
+          document.getElementById('pageUrl').textContent = info.interaction.url;
+        }
       }
       renderSnapshots(info.snapshots);
       renderAttention(info.interaction);
@@ -783,7 +788,8 @@ async function showDashboard(tab) {
 (async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-  if (!tab || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+  const isSnapshotViewer = tab?.url?.startsWith(chrome.runtime.getURL('snapshot-viewer.html'));
+  if (!tab || !tab.url || tab.url.startsWith('chrome://') || (tab.url.startsWith('chrome-extension://') && !isSnapshotViewer)) {
     document.getElementById('loading').textContent = 'Not available for this page';
     return;
   }

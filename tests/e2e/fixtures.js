@@ -14,22 +14,62 @@ function timer(label) {
 
 export const test = base.extend({
   extContext: [async ({}, use) => {
-    let done = timer('browser launch');
     const extPath = path.join(__dirname, '../../extension');
-    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-test-'));
-    const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: false,
-      args: [
-        '--headless=new',
-        `--disable-extensions-except=${extPath}`,
-        `--load-extension=${extPath}`,
-      ],
-    });
-    done();
+    const userDataDirs = [];
+
+    async function launchAndVerify() {
+      const done = timer('browser launch');
+      const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-test-'));
+      userDataDirs.push(userDataDir);
+      const ctx = await chromium.launchPersistentContext(userDataDir, {
+        headless: false,
+        args: [
+          '--headless=new',
+          `--disable-extensions-except=${extPath}`,
+          `--load-extension=${extPath}`,
+        ],
+      });
+      done();
+      // Health check: load an extension page to verify browser + extension
+      // are fully alive. A lightweight newPage() probe is insufficient —
+      // Chrome can crash moments later when the extension service worker
+      // and renderer interact.
+      try {
+        let [sw] = ctx.serviceWorkers();
+        if (!sw) sw = await ctx.waitForEvent('serviceworker', { timeout: 5000 });
+        const extId = sw.url().split('/')[2];
+        const probe = await ctx.newPage();
+        await probe.goto(`chrome-extension://${extId}/test-helper.html`, { timeout: 5000 });
+        await probe.waitForFunction(
+          () => typeof chrome !== 'undefined' && chrome.runtime,
+          { timeout: 5000 }
+        );
+        await probe.close();
+      } catch (e) {
+        await ctx.close().catch(() => {});
+        throw e;
+      }
+      return ctx;
+    }
+
+    let context;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        context = await launchAndVerify();
+        break;
+      } catch (e) {
+        console.warn(`[extContext] browser launch attempt ${attempt + 1} failed: ${e.message}`);
+        if (attempt >= 2) throw e;
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+
     await use(context);
-    done = timer('browser teardown');
+    const done = timer('browser teardown');
     await context.close();
-    fs.rmSync(userDataDir, { recursive: true, force: true });
+    for (const dir of userDataDirs) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
     done();
   }, { scope: 'worker' }],
 
@@ -62,17 +102,7 @@ export const test = base.extend({
     }
 
     let done = timer('setupDir: setTestDirectory');
-    let result;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        result = await trySetTestDirectory();
-        break;
-      } catch (e) {
-        const isContextGone = e.message.includes('closed') || e.message.includes('destroyed') || e.message.includes('context');
-        if (attempt > 0 || !isContextGone) throw e;
-        console.warn('[setupDir] page context destroyed on attempt 1, retrying...');
-      }
-    }
+    const result = await trySetTestDirectory();
     if (!result?.success) {
       throw new Error(`setTestDirectory failed: ${JSON.stringify(result)}`);
     }

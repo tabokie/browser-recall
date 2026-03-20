@@ -52,7 +52,7 @@ export function defaultEntity(key) {
   }
   if (key.startsWith(NOTE_PREFIX)) {
     const slug = key.slice(NOTE_PREFIX.length);
-    return { slug, timestamp: 0, excerpt: null, note: null, cssPath: null, url: null };
+    return { slug, excerpt: null, note: null, cssPath: null, url: null };
   }
   if (key === 'manifest:settings') return { timestamp: 0 };
   if (key === 'manifest:orphaned') return { timestamp: 0, entries: [] };
@@ -363,7 +363,7 @@ export async function effectOf(entry, load) {
       result[lk] = { ...list, pins: (list.pins || []).filter(p => p.id !== noteKey) };
     }
     // Mark deleted
-    result[noteKey] = { ...note, deleted: true, timestamp: entry.timestamp };
+    result[noteKey] = { ...note, deleted: true };
     await orphan(noteKey, entry.timestamp, noteUrl);
     return result;
   }
@@ -385,7 +385,7 @@ export async function effectOf(entry, load) {
       await linkChild(noteKey, [pageKey]);
     }
     // Clear deleted flag
-    result[noteKey] = { ...note, deleted: false, timestamp: entry.timestamp };
+    result[noteKey] = { ...note, deleted: false };
     await unorphan(noteKey, entry.timestamp);
     return result;
   }
@@ -449,12 +449,21 @@ export async function effectOf(entry, load) {
       result[lk] = { ...list, pins };
     }
 
-    // Set up new note with url from old note
+    // Set up new note with url from old note.
+    // If the new note file can't be loaded (transient save error, missing file),
+    // inherit content fields from the old note — these are primary user data
+    // (excerpt, cssPath, note text) that would be lost if we fell back to defaultEntity.
     const newNote = result[newNoteKey] !== undefined ? result[newNoteKey] : await load(newNoteKey);
     if (newNote) {
       result[newNoteKey] = { ...newNote, url: noteUrl };
     } else {
-      result[newNoteKey] = { ...defaultEntity(newNoteKey), url: noteUrl };
+      result[newNoteKey] = {
+        ...defaultEntity(newNoteKey),
+        excerpt: oldNote.excerpt,
+        cssPath: oldNote.cssPath,
+        note: oldNote.note,
+        url: noteUrl,
+      };
     }
 
     // Mark old note as replaced + orphan
@@ -463,7 +472,6 @@ export async function effectOf(entry, load) {
       deleted: true,
       deletionReason: 'replaced',
       replacedBy: newNoteKey,
-      timestamp: entry.timestamp,
     };
     await orphan(oldNoteKey, entry.timestamp, noteUrl);
 

@@ -280,6 +280,23 @@ describe('effectOf: leave_page', () => {
     );
     expect(result[`page:${slug}`].title).toBe('New Title');
   });
+
+  it('accumulates delta timeOnPage across multiple leave events', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const pageKey = `page:${slug}`;
+    // First leave: 2000ms foreground delta
+    const r1 = await effectOf(
+      { timestamp: 200, action: 'leave_page', url: 'https://a.com', timeOnPage: 2000 },
+      makeLoad({ [pageKey]: { slug, timestamp: 100, parentIds: [], childIds: [] } }),
+    );
+    expect(r1[pageKey].timeOnPage).toBe(2000);
+    // Second leave: 500ms foreground delta (after tab switch back)
+    const r2 = await effectOf(
+      { timestamp: 300, action: 'leave_page', url: 'https://a.com', timeOnPage: 500 },
+      makeLoad({ [pageKey]: { ...r1[pageKey] } }),
+    );
+    expect(r2[pageKey].timeOnPage).toBe(2500);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -430,7 +447,7 @@ describe('effectOf: delete_note', () => {
     const pageSlug = generateSlugFromUrl('https://a.com');
     const pageKey = `page:${pageSlug}`;
     const store = {
-      'note:n1': { slug: 'n1', timestamp: 50, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', url: 'https://a.com' },
       [pageKey]: { slug: pageSlug, timestamp: 50, parentIds: [], childIds: ['note:n1', 'note:n2'], user_title: 'Kept' },
       'manifest:orphaned': { timestamp: 0, entries: [] },
     };
@@ -445,7 +462,7 @@ describe('effectOf: delete_note', () => {
 
   it('noop if already deleted', async () => {
     const store = {
-      'note:n1': { slug: 'n1', timestamp: 50, deleted: true, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', deleted: true, url: 'https://a.com' },
       'manifest:orphaned': { timestamp: 0, entries: [{ key: 'note:n1', url: 'https://a.com' }] },
     };
     const load = async (key, opts) => {
@@ -466,7 +483,7 @@ describe('effectOf: restore_note', () => {
     const pageSlug = generateSlugFromUrl('https://a.com');
     const pageKey = `page:${pageSlug}`;
     const store = {
-      'note:n1': { slug: 'n1', timestamp: 50, deleted: true, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', deleted: true, url: 'https://a.com' },
       [pageKey]: { slug: pageSlug, timestamp: 50, parentIds: [], childIds: [] },
       'manifest:orphaned': { timestamp: 50, entries: [{ key: 'note:n1', url: 'https://a.com' }] },
     };
@@ -495,7 +512,7 @@ describe('effectOf: replace_note', () => {
 
   it('unlinks old note, links new note on parent page', async () => {
     const store = {
-      'note:n1': { slug: 'n1', timestamp: 50, excerpt: 'old text', url: 'https://a.com' },
+      'note:n1': { slug: 'n1', excerpt: 'old text', url: 'https://a.com' },
       [rpPageKey]: { slug: rpPageSlug, timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
       'manifest:orphaned': { timestamp: 0, entries: [] },
     };
@@ -511,7 +528,7 @@ describe('effectOf: replace_note', () => {
 
   it('marks old note as deleted with reason "replaced"', async () => {
     const store = {
-      'note:n1': { slug: 'n1', timestamp: 50, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', url: 'https://a.com' },
       [rpPageKey]: { slug: rpPageSlug, timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
       'manifest:orphaned': { timestamp: 0, entries: [] },
     };
@@ -526,7 +543,7 @@ describe('effectOf: replace_note', () => {
 
   it('orphans old note', async () => {
     const store = {
-      'note:n1': { slug: 'n1', timestamp: 50, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', url: 'https://a.com' },
       [rpPageKey]: { slug: rpPageSlug, timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
       'manifest:orphaned': { timestamp: 0, entries: [] },
     };
@@ -539,7 +556,7 @@ describe('effectOf: replace_note', () => {
 
   it('transfers list pins from old note to new note', async () => {
     const store = {
-      'note:n1': { slug: 'n1', timestamp: 50, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', url: 'https://a.com' },
       [rpPageKey]: { slug: rpPageSlug, timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
       'manifest:name-to-id': { timestamp: 0, paths: { 'root/Test': 'test-id' } },
       'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: 'note:n1', pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
@@ -557,7 +574,7 @@ describe('effectOf: replace_note', () => {
 
   it('copies url from old note to new note', async () => {
     const store = {
-      'note:n1': { slug: 'n1', timestamp: 50, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', url: 'https://a.com' },
       [rpPageKey]: { slug: rpPageSlug, timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
       'manifest:name-to-id': { timestamp: 0, paths: { 'root/Test': 'test-id' } },
       'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: 'note:n1', pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
@@ -573,7 +590,7 @@ describe('effectOf: replace_note', () => {
 
   it('noop if old note is already deleted', async () => {
     const store = {
-      'note:n1': { slug: 'n1', timestamp: 50, deleted: true, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', deleted: true, url: 'https://a.com' },
       'manifest:orphaned': { timestamp: 0, entries: [{ key: 'note:n1', url: 'https://a.com' }] },
     };
     const load = async (key, opts) => {
@@ -590,7 +607,7 @@ describe('effectOf: replace_note', () => {
 
   it('is idempotent (safe to replay twice)', async () => {
     const store = {
-      'note:n1': { slug: 'n1', timestamp: 50, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', url: 'https://a.com' },
       [rpPageKey]: { slug: rpPageSlug, timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
       'manifest:orphaned': { timestamp: 0, entries: [] },
     };
@@ -1070,7 +1087,7 @@ describe('effectOf: page GC on delete_note', () => {
 
   it('GCs parent page when note was last eligible criterion', async () => {
     const store = {
-      'note:n1': { slug: 'n1', timestamp: 50, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', url: 'https://a.com' },
       [gcPageKey]: { slug: gcPageSlug, timestamp: 50, parentIds: [], childIds: ['note:n1'] },
       'manifest:orphaned': { timestamp: 0, entries: [] },
     };
@@ -1083,7 +1100,7 @@ describe('effectOf: page GC on delete_note', () => {
 
   it('keeps parent page when it has other eligible criteria', async () => {
     const store = {
-      'note:n1': { slug: 'n1', timestamp: 50, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', url: 'https://a.com' },
       [gcPageKey]: { slug: gcPageSlug, timestamp: 50, parentIds: [], childIds: ['note:n1'], user_title: 'Kept' },
       'manifest:orphaned': { timestamp: 0, entries: [] },
     };

@@ -53,7 +53,17 @@ console.log(`  ${allEntries.length} entries from ${logFiles.length} files`);
 // ---------------------------------------------------------------------------
 console.log('Replaying...');
 const store = new Map();
-const load = async (key) => store.get(key) ?? null;
+function loadFromDisk(key) {
+  if (key.startsWith('note:')) {
+    const slug = key.slice('note:'.length);
+    const p = join(DATA_DIR, 'data', 'notes', `${slug}.json`);
+    if (existsSync(p)) {
+      try { return JSON.parse(readFileSync(p, 'utf-8')); } catch { return null; }
+    }
+  }
+  return null;
+}
+const load = async (key) => store.get(key) ?? loadFromDisk(key) ?? null;
 
 for (let i = 0; i < allEntries.length; i++) {
   const entry = allEntries[i];
@@ -160,10 +170,14 @@ if (existsSync(join(DATA_DIR, 'pages'))) {
   }
 }
 
-// Notes: only compare notes that replay actually produces (replace_note creates note entities;
-// create_note only updates parent page childIds — note content files are written by offscreen,
-// not derived from replay).
-// We skip scanning data/notes/ on disk; replay-only notes are still reported.
+// Notes
+if (existsSync(join(DATA_DIR, 'data', 'notes'))) {
+  for (const f of readdirSync(join(DATA_DIR, 'data', 'notes'))) {
+    if (!f.endsWith('.json')) continue;
+    const slug = f.replace('.json', '');
+    entityPaths.set(`note:${slug}`, `data/notes/${f}`);
+  }
+}
 
 // Lists (non-system)
 if (existsSync(join(DATA_DIR, 'lists'))) {

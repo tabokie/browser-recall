@@ -527,7 +527,11 @@ async function drainQueue() {
         await withLock('pages/' + slug + '.json', () => fsStorage.savePage(slug, entity));
       } else if (key.startsWith('note:')) {
         const slug = key.slice(5);
-        await withLock('data/notes/' + slug + '.json', () => fsStorage.saveNote(slug, entity));
+        // Strip entity-only fields — note files are immutable primary data.
+        // Mutable state (deleted, replacedBy, etc.) lives in session cache only.
+        const { slug: s, excerpt, note, cssPath, url } = entity;
+        const fileData = { slug: s, excerpt, note, cssPath, url };
+        await withLock('data/notes/' + slug + '.json', () => fsStorage.saveNote(slug, fileData));
       } else if (key === 'manifest:settings') {
         await withLock('manifest/settings.json', () => fsStorage.saveSettings(entity));
       } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
