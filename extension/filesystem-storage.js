@@ -789,8 +789,6 @@ class FileSystemStorage {
         name: data.name || slug,
         pins: data.pins || [],
         rules: data.rules || [],
-        parentList: data.parentList || null,
-        childLists: data.childLists || [],
       };
       if (data.deleted) listEntry.deleted = true;
       if (data.timestamp) listEntry.timestamp = data.timestamp;

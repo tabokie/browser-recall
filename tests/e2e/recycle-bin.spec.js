@@ -53,14 +53,14 @@ test.describe('Recycle bin', () => {
     await helper.close();
   });
 
-  // 2. restoreList re-adds to root childLists and restores page parentIds
-  test('restoreList re-adds to root childLists and restores page parentIds', async ({ extContext, extensionId, setupDir }) => {
+  // 2. restoreList re-adds to tree manifest and restores page parentIds
+  test('restoreList re-adds to tree manifest and restores page parentIds', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const listId = 'restore-list';
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: {
-        timestamp: now, childLists: [],  // list was removed from root by del_list
+      { path: 'manifest/list-order.json', data: {
+        timestamp: now, tree: [],  // list was removed from root by del_list
       }},
       // Deleted list entity still on disk with deleted: true
       { path: `lists/${listId}.json`, data: {
@@ -69,7 +69,6 @@ test.describe('Recycle bin', () => {
           { id: `page:${TEST_SLUG}`, pinnedAt: now },
         ],
         deleted: true,
-        parentList: 'list:system/root', childLists: [],
       }},
       // Page that lost the list from parentIds
       { path: `pages/${TEST_SLUG}.json`, data: {
@@ -90,12 +89,12 @@ test.describe('Recycle bin', () => {
     , listId);
     expect(restoreResp.success).toBe(true);
 
-    // Verify root's childLists has the entry back
+    // Verify tree manifest has the entry back
     const rootResp = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:list-order' })
     );
     expect(rootResp.success).toBe(true);
-    expect(rootResp.value.childLists).toContain(`list:${listId}`);
+    expect(rootResp.value.tree.map(n => n.id)).toContain(`list:${listId}`);
 
     // Verify page parentIds has the list back
     const pageResp = await helper.evaluate((key) =>
@@ -163,21 +162,20 @@ test.describe('Recycle bin', () => {
     await helper.close();
   });
 
-  // 2c. restoreList preserves original entity fields (childLists, etc.)
+  // 2c. restoreList preserves original entity fields
   test('restoreList preserves original entity fields after restore', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const listId = 'restore-fields-list';
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: {
-        timestamp: now, childLists: [],
+      { path: 'manifest/list-order.json', data: {
+        timestamp: now, tree: [],
       }},
       // Deleted list with rich fields on disk
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Rich List', timestamp: now,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
         deleted: true,
-        parentList: 'list:system/root', childLists: ['list:sub-child'],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -202,7 +200,8 @@ test.describe('Recycle bin', () => {
     , `list:${listId}`);
     expect(listResp.success).toBe(true);
     expect(listResp.value.deleted).toBeFalsy();
-    expect(listResp.value.childLists).toContain('list:sub-child');
+    expect(listResp.value.pins).toHaveLength(1);
+    expect(listResp.value.pins[0].id).toBe(`page:${TEST_SLUG}`);
 
     await helper.close();
   });

@@ -12,9 +12,9 @@ test.describe('Round-trip persistence', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], parentList: 'list:system/root', childLists: [] } },
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -99,9 +99,9 @@ test.describe('Accumulation correctness', () => {
 
     const files = [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:bulk'] } },
-      { path: 'lists/bulk.json', data: { slug: 'bulk', name: 'Bulk', timestamp: now, pins: [], parentList: 'list:system/root', childLists: [] } },
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Bulk': 'bulk' } } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:bulk' }] } },
+      { path: 'lists/bulk.json', data: { slug: 'bulk', name: 'Bulk', timestamp: now, pins: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Bulk': 'bulk' } } },
       ...slugs.map((slug, i) => ({
         path: `pages/${slug}.json`,
         data: { slug, url: urls[i], title: `Page ${i}`, timestamp: now, parentIds: [], childIds: [] },
@@ -189,18 +189,16 @@ test.describe('Cross-entity interference', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:alpha', 'list:beta'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:alpha' }, { id: 'list:beta' }] } },
       { path: 'lists/alpha.json', data: {
         slug: 'alpha', name: 'Alpha', timestamp: now,
         pins: [{ id: `page:${slug}`, pinnedAt: now }],
-        parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/beta.json', data: {
         slug: 'beta', name: 'Beta', timestamp: now,
         pins: [{ id: `page:${slug}`, pinnedAt: now }],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Alpha': 'alpha', 'root/Beta': 'beta' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Alpha': 'alpha', 'Beta': 'beta' } } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Shared', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -234,20 +232,18 @@ test.describe('Cross-entity interference', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: {
-        timestamp: now, childLists: ['list:doomed', 'list:safe'],
+      { path: 'manifest/list-order.json', data: {
+        timestamp: now, tree: [{ id: 'list:doomed' }, { id: 'list:safe' }],
       }},
       { path: 'lists/doomed.json', data: {
         slug: 'doomed', name: 'Doomed', timestamp: now,
         pins: [{ id: `page:${slug}`, pinnedAt: now }],
-        parentList: 'list:system/root', childLists: [],
       }},
       { path: 'lists/safe.json', data: {
         slug: 'safe', name: 'Safe', timestamp: now,
         pins: [{ id: `page:${slug}`, pinnedAt: now }],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Doomed': 'doomed', 'root/Safe': 'safe' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Doomed': 'doomed', 'Safe': 'safe' } } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Shared Page', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -264,13 +260,13 @@ test.describe('Cross-entity interference', () => {
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:safe' })
     );
     const root = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:list-order' })
     );
     await helper.close();
 
     expect((safeResult.value?.pins || []).length).toBe(1);
-    expect(root.value.childLists).toContain('list:safe');
-    expect(root.value.childLists).not.toContain('list:doomed');
+    expect(root.value.tree.map(n => n.id)).toContain('list:safe');
+    expect(root.value.tree.map(n => n.id)).not.toContain('list:doomed');
   });
 
   test('two child pages sharing a parent via navigation — each shows parent independently', async ({ extContext, extensionId, setupDir, localServer }) => {

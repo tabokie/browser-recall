@@ -343,9 +343,9 @@ test.describe('Interactions — likes, notes, attention', () => {
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'TestList', timestamp: now,
         pins: [{ id: `note:${noteSlug}`, pinnedAt: now }],
-        rules: [], parentList: 'list:system/root', childLists: [],
+        rules: [],
       }},
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: [`list:${listId}`] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: `list:${listId}` }] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`], user_title: 'Kept',

@@ -406,9 +406,9 @@ test.describe('Navigation and referrer tracking', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], parentList: 'list:system/root', childLists: [] } },
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
       // Page visited with title in history, but no page entity yet
       { path: `data/logs/${today}.jsonl`, lines: [
         { timestamp: now, action: 'visit_page', url, title: 'Enriched Title' },

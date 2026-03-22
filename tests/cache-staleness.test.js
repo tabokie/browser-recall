@@ -65,9 +65,9 @@ const FILE1_INTERACTIONS = makeFileInteractions(FILE1_DATE, 0, 20, 'Today');
 const FILE2_INTERACTIONS = makeFileInteractions(FILE2_DATE, 20, 20, 'Yesterday');
 const FILE3_INTERACTIONS = makeFileInteractions(FILE3_DATE, 40, 20, 'OldDay');
 
-const TEST_LIST = { slug: 'col-rust', query: 'rust', name: 'Rust Lang', parentList: 'list:system/root', childLists: [] };
+const TEST_LIST = { slug: 'col-rust', query: 'rust', name: 'Rust Lang' };
 // List with no query — only pinned pages, pins on same domain as history
-const TEST_LIST_NOQUERY = { slug: 'col-noq', query: '', name: 'No Query List', parentList: 'list:system/root', childLists: [] };
+const TEST_LIST_NOQUERY = { slug: 'col-noq', query: '', name: 'No Query List' };
 
 const TEST_LIST_PINS = {
   'col-rust': [
@@ -100,9 +100,9 @@ const TEST_SETTINGS = {
   titleTrimRules: [],
 };
 
-const TEST_ROOT = {
+const TEST_LIST_ORDER = {
   timestamp: 0,
-  childLists: ['list:col-rust', 'list:col-noq'],
+  tree: [{ id: 'list:col-rust' }, { id: 'list:col-noq' }],
 };
 
 const FILES_NEWEST_FIRST = [
@@ -206,7 +206,7 @@ describe('Cache staleness', () => {
   let testListPins;
   /** Mutable name-map data — tests can override for name-map responses */
   let testNameMapData;
-  /** Mutable root data — tests can override to change list:system/root responses */
+  /** Mutable root data — tests can override to change manifest:list-order responses */
   let testRootData;
   /** Mutable page entity data — tests can override to change readCacheable('page:*') responses.
    *  When removing a background.js handler (e.g. loadPageBatch), callers switch to
@@ -313,7 +313,7 @@ describe('Cache staleness', () => {
         // Simulate background readCacheable: dispatch to known handlers
         switch (msg.key) {
           case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
-          case 'list:system/root': return { success: true, value: testRootData || TEST_ROOT };
+          case 'manifest:list-order': return { success: true, value: testRootData || TEST_LIST_ORDER };
           case 'manifest:name-to-id': return { success: true, value: testNameMapData || { timestamp: 0, paths: {} } };
           case 'manifest:orphaned': return { success: true, value: { timestamp: 0, entries: [] } };
           default: {
@@ -351,7 +351,7 @@ describe('Cache staleness', () => {
     // Session-cached keys (settings as single object, individual list keys, entity keys for system lists)
     sessionData = {
       'manifest:settings': TEST_SETTINGS,
-      'list:system/root': { ...TEST_ROOT },
+      'manifest:list-order': { ...TEST_LIST_ORDER },
     };
     // Individual list entity keys (include pins for session cache hits)
     for (const list of TEST_LISTS) {
@@ -563,8 +563,8 @@ describe('Cache staleness', () => {
     testListPins['col-buf'] = [
       pinFromUrl('https://buffered.com/page1', NOW),
     ];
-    sessionData['list:col-buf'] = { slug: 'col-buf', query: '', name: 'Buffered', pins: testListPins['col-buf'], parentList: 'list:system/root', childLists: [] };
-    sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-buf'] };
+    sessionData['list:col-buf'] = { slug: 'col-buf', query: '', name: 'Buffered', pins: testListPins['col-buf'] };
+    sessionData['manifest:list-order'] = { timestamp: 0, tree: [...TEST_LIST_ORDER.tree, { id: 'list:col-buf' }] };
 
     await importOptions();
     await tick(100);
@@ -690,8 +690,8 @@ describe('Cache staleness', () => {
     testListPins['col-today'] = [
       pinFromUrl('https://example.com/today0', NOW - DAY),
     ];
-    sessionData['list:col-today'] = { slug: 'col-today', query: 'today', name: 'Today Search', pins: testListPins['col-today'], parentList: 'list:system/root', childLists: [] };
-    sessionData['list:system/root'] = { timestamp: 0, childLists: ['list:col-today'] };
+    sessionData['list:col-today'] = { slug: 'col-today', query: 'today', name: 'Today Search', pins: testListPins['col-today'] };
+    sessionData['manifest:list-order'] = { timestamp: 0, tree: [{ id: 'list:col-today' }] };
 
     await importOptions();
     await tick(100);
@@ -915,7 +915,7 @@ describe('Cache staleness', () => {
     // Background would handle these actions after hydration
     actionOverrides['readCacheable'] = (msg) => {
       if (msg.key === 'manifest:settings') return { success: true, value: TEST_SETTINGS };
-      if (msg.key === 'list:system/root') return { success: true, value: TEST_ROOT };
+      if (msg.key === 'manifest:list-order') return { success: true, value: TEST_LIST_ORDER };
       // Return individual list entities by slug
       for (const list of TEST_LISTS) {
         if (msg.key === 'list:' + list.slug) return { success: true, value: list };
@@ -950,9 +950,9 @@ describe('Cache staleness', () => {
     // Put page entity in testPageData (filesystem fallback for readCacheable)
     testPageData[PIN_SLUG] = { slug: PIN_SLUG, url: PIN_URL, title: PIN_TITLE, watermark: 1 };
 
-    // Add the list to lists and list:system/root (include pins for session cache hit)
-    sessionData['list:' + TEST_LIST_WITH_PIN.slug] = { ...TEST_LIST_WITH_PIN, pins: testListPins['col-pinned'] || [], parentList: 'list:system/root', childLists: [] };
-    sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-pinned'] };
+    // Add the list to lists and manifest:list-order (include pins for session cache hit)
+    sessionData['list:' + TEST_LIST_WITH_PIN.slug] = { ...TEST_LIST_WITH_PIN, pins: testListPins['col-pinned'] || [] };
+    sessionData['manifest:list-order'] = { timestamp: 0, tree: [...TEST_LIST_ORDER.tree, { id: 'list:col-pinned' }] };
 
     await importOptions();
     await tick(200);
@@ -990,8 +990,8 @@ describe('Cache staleness', () => {
     testPageData[PAGE_SLUG] = { slug: PAGE_SLUG, url: PAGE_URL, title: PAGE_TITLE, watermark: 1 };
 
     // Do NOT put 'page:<slug>' in sessionData — simulating empty session cache
-    sessionData['list:' + TEST_LIST_UNCACHED.slug] = { ...TEST_LIST_UNCACHED, pins: testListPins['col-uncached'] || [], parentList: 'list:system/root', childLists: [] };
-    sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-uncached'] };
+    sessionData['list:' + TEST_LIST_UNCACHED.slug] = { ...TEST_LIST_UNCACHED, pins: testListPins['col-uncached'] || [] };
+    sessionData['manifest:list-order'] = { timestamp: 0, tree: [...TEST_LIST_ORDER.tree, { id: 'list:col-uncached' }] };
 
     await importOptions();
     await tick(200);
@@ -1026,8 +1026,8 @@ describe('Cache staleness', () => {
     testPageData[FALLBACK_SLUG] = { slug: FALLBACK_SLUG, url: FALLBACK_URL, title: FALLBACK_TITLE, watermark: 1 };
 
     // Do NOT put page entity in sessionData — simulating pre-hydration state
-    sessionData['list:' + TEST_LIST_FALLBACK.slug] = { ...TEST_LIST_FALLBACK, pins: testListPins['col-fallback'], parentList: 'list:system/root', childLists: [] };
-    sessionData['list:system/root'] = { timestamp: 0, childLists: [...TEST_ROOT.childLists, 'list:col-fallback'] };
+    sessionData['list:' + TEST_LIST_FALLBACK.slug] = { ...TEST_LIST_FALLBACK, pins: testListPins['col-fallback'] };
+    sessionData['manifest:list-order'] = { timestamp: 0, tree: [...TEST_LIST_ORDER.tree, { id: 'list:col-fallback' }] };
 
     await importOptions();
     await tick(200);

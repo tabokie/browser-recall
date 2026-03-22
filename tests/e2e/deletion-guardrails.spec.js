@@ -94,12 +94,11 @@ test.describe('Deletion guardrails', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:to-delete'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:to-delete' }] } },
       { path: 'lists/to-delete.json', data: {
         slug: 'to-delete', name: 'To Delete', timestamp: now, pins: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/To Delete': 'to-delete' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'To Delete': 'to-delete' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -151,21 +150,20 @@ test.describe('Deletion guardrails', () => {
 
   // Fix 3: replay guard on orphaned list resurrection.
   // After del_list, a subsequent toggleListPin should NOT resurrect the list
-  // entity or re-add it to root's childLists via effectOf replay.
+  // entity or re-add it to the tree manifest via effectOf replay.
   test('pinning to a deleted list does not resurrect it', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const pageUrl = 'https://example.com/pinme';
     const pageSlug = getSlugForUrl(pageUrl);
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: {
-        timestamp: now, childLists: ['list:doomed'],
+      { path: 'manifest/list-order.json', data: {
+        timestamp: now, tree: [{ id: 'list:doomed' }],
       }},
       { path: 'lists/doomed.json', data: {
         slug: 'doomed', name: 'Doomed', timestamp: now, pins: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Doomed': 'doomed' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Doomed': 'doomed' } } },
       { path: `pages/${pageSlug}.json`, data: {
         slug: pageSlug, url: pageUrl, title: 'Pin Target', timestamp: now,
         parentIds: [], childIds: [],
@@ -179,11 +177,11 @@ test.describe('Deletion guardrails', () => {
       chrome.runtime.sendMessage({ action: 'deleteList', listId: 'doomed' })
     );
 
-    // Verify list is deleted from root's childLists
+    // Verify list is removed from tree manifest
     let root = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:list-order' })
     );
-    expect(root.value.childLists).not.toContain('list:doomed');
+    expect(root.value.tree.map(n => n.id)).not.toContain('list:doomed');
 
     // Now try to pin a page to the deleted list
     await helper.evaluate((url) =>
@@ -202,11 +200,11 @@ test.describe('Deletion guardrails', () => {
     const shallowId = `shallow:${pageUrl}`;
     expect(pins.some(p => p.id === pageId || p.id === shallowId)).toBe(false);
 
-    // root's childLists should still not contain the deleted list
+    // tree manifest should still not contain the deleted list
     root = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:list-order' })
     );
-    expect(root.value.childLists).not.toContain('list:doomed');
+    expect(root.value.tree.map(n => n.id)).not.toContain('list:doomed');
 
     await helper.close();
   });

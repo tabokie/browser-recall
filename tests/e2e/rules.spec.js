@@ -9,12 +9,11 @@ test.describe('Rule operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [], rules: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -43,13 +42,12 @@ test.describe('Rule operations', () => {
     const ruleId = 'rule-k-test-1234';
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [],
         rules: [{ id: ruleId, type: 'keyword', config: { pattern: 'test' }, createdAt: now }],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -70,12 +68,11 @@ test.describe('Rule operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [], rules: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -112,13 +109,12 @@ test.describe('Rule operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [],
         rules: [{ id: 'rule-k-test-0001', type: 'keyword', config: { pattern: 'github', fields: ['url'], threshold: 0.5 }, createdAt: now }],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -151,12 +147,11 @@ test.describe('Rule operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [], rules: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -182,12 +177,11 @@ test.describe('Rule operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [], rules: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -220,7 +214,7 @@ test.describe('Rule operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [],
         rules: [{
@@ -232,9 +226,8 @@ test.describe('Rule operations', () => {
           },
           createdAt: now,
         }],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -267,7 +260,7 @@ test.describe('Rule operations', () => {
     const hubsFnSource = "const p = new URL(page.url).pathname.toLowerCase(); if (p === '/' || p === '') return 1; if (p.includes('index')) return 1; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return 1; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover']; if (hub.some(k => last.includes(k))) return 1; return 0;";
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:hubs'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:hubs' }] } },
       { path: 'lists/hubs.json', data: {
         slug: 'hubs', name: 'Hubs', timestamp: now, pins: [],
         rules: [{
@@ -275,9 +268,8 @@ test.describe('Rule operations', () => {
           config: { description: 'Hub and landing pages', fnSource: hubsFnSource },
           createdAt: now,
         }],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Hubs': 'hubs' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Hubs': 'hubs' } } },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -319,13 +311,12 @@ test.describe('Rules UI', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [],
         rules: [{ id: 'rule-k-test-0001', type: 'keyword', config: { pattern: 'github', fields: ['url'] }, createdAt: now }],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -352,12 +343,11 @@ test.describe('Rules UI', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [], rules: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -397,12 +387,11 @@ test.describe('Rules UI', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [], rules: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -432,12 +421,11 @@ test.describe('Rules UI', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [], rules: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -468,13 +456,12 @@ test.describe('Rules UI', () => {
     const ruleId = 'rule-k-test-0001';
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [],
         rules: [{ id: ruleId, type: 'keyword', config: { pattern: 'test' }, createdAt: now }],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -507,13 +494,12 @@ test.describe('Rules UI', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [],
         rules: [{ id: 'rule-k-test-0001', type: 'keyword', config: { pattern: 'test' }, createdAt: now }],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -534,10 +520,9 @@ test.describe('Rules UI', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:system/archive'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:system/archive' }] } },
       { path: 'lists/system/archive.json', data: {
         slug: 'system/archive', name: 'Archive', timestamp: now, pins: [], rules: [],
-        parentList: 'list:system/root', childLists: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
     ]);
@@ -559,12 +544,11 @@ test.describe('Rules UI', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [], rules: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -597,12 +581,11 @@ test.describe('Rules UI', () => {
     const todayKey = new Date().toISOString().slice(0, 10);
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [], rules: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
       { path: `data/logs/${todayKey}.jsonl`, lines: [
         { timestamp: now - 3000, action: 'visit_page', url: localServer.url('/foo'), title: 'Foo Repo' },
         { timestamp: now - 2000, action: 'visit_page', url: localServer.url('/example'), title: 'Example' },
@@ -638,12 +621,11 @@ test.describe('Rules UI', () => {
     const todayKey = new Date().toISOString().slice(0, 10);
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now, pins: [], rules: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
       { path: `data/logs/${todayKey}.jsonl`, lines: [
         { timestamp: now - 1000, action: 'visit_page', url: localServer.url('/example'), title: 'Example' },
       ]},
@@ -683,7 +665,7 @@ test.describe('Rules UI', () => {
     const todayKey = new Date().toISOString().slice(0, 10);
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', timestamp: now,
         pins: [
@@ -691,9 +673,8 @@ test.describe('Rules UI', () => {
           { id: `page:${slug2}`, pinnedAt: now - 1000 },
         ],
         rules: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
       { path: `pages/${slug1}.json`, data: {
         slug: slug1, url: url1, title: 'Pinned GitHub Page',
         timestamp: now, parentIds: ['list:reading'], childIds: [],

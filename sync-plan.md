@@ -4,7 +4,7 @@
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Sync scope | Everything (logs, notes, snapshots) | Full data availability across devices |
+| Sync scope | Logs and notes only | Snapshots excluded — too expensive. User can manually copy `data/snapshots/`. |
 | Passive events | Sync all (visit_page, leave_page) | Cross-device page enrichment |
 | Transport | GitHub REST API from extension | No scripts, no external tools. User pastes repo URL + token in settings. |
 | Git topology | Shared repo, per-device branches | One repo to configure. Each device force-pushes its own branch. No conflicts. |
@@ -12,12 +12,15 @@
 | Storage retention | Force-push single commit with rolling window | Old data pruned from git but preserved on local disk. Repo size stays bounded. |
 | List ID clash | Accept duplicates | Two devices creating same-name list get two lists. User merges manually. |
 | Entry identity | deviceId:timestamp | Sufficient for dedup within a device |
-| Delete/restore conflict | Restore wins | Losing a deletion is cheap; losing a restore may lose user intent |
+| Delete/restore conflict | LWW by timestamp | Later action wins. Simpler than voting; user's most recent intent prevails. |
+| Note edit conflict | Both survive as siblings | Two edits of same note → both new notes linked to page. User deletes unwanted one. |
+| List tree structure | Nested JSON blob in `manifest/list-order.json`, LWW | Hierarchy restored without commutativity cost. Whole-tree LWW + reconcile. No per-node structural events. |
+| Pin to deleted list | Still updates entity | Preserves data for potential restore. `pin_to_list` loads with `includeDeleted`. |
 | Peer config | Manual setup | User enters repo URL + token in extension settings |
 | Replay order | Local logs first, then remote logs per peer | No cross-device timestamp comparison |
-| Reparent format | `{ listId, toParentId, index }` — no `childNames` | Commutative (set-add with index hint) |
 | List reference in events | Add `listId` field (resolved at emit time) | Survives renames. `parents`+`name` kept for readability. |
 | Note immutability | **DONE.** Notes are immutable — edits create new entity via `replace_note` | No file conflicts on sync. Full change history preserved in logs. |
+| No backward compat | Migrate data, don't add fallback code | Extension is in development. Migrate `~/portal-data` to new formats directly. |
 
 ## 2. Architecture
 
@@ -32,7 +35,7 @@ data/logs/2026-03-16-e5f6g7h8.jsonl    ← device B's events (after sync)
 
 The extension writes only to its own device's log file. Remote devices' log files appear after sync (pulled from git). On replay, the extension processes all log files for a given date — own device first, then remotes.
 
-Notes and snapshots are already unique by slug. No naming conflicts across devices.
+Notes are already unique by slug. No naming conflicts across devices. Snapshots are excluded from sync (too large); user can manually copy `data/snapshots/` between devices.
 
 ### 2.2 Git repo: per-device branches
 
@@ -44,7 +47,6 @@ repo (e.g. github.com/user/portal-sync)
     data/logs/2026-03-15-a1b2c3d4.jsonl
     data/logs/2026-03-16-a1b2c3d4.jsonl
     data/notes/highlight-abc.json
-    data/snapshots/page-123/index.html
   branch: e5f6g7h8              ← device B pushes here
     data/logs/2026-03-15-e5f6g7h8.jsonl
     data/logs/2026-03-16-e5f6g7h8.jsonl
@@ -71,7 +73,7 @@ Local ~/portal-data/data/                   Git branch a1b2c3d4:
 
 Since each push is a force-push with a single orphan commit, the repo never accumulates history. Git's server-side GC prunes unreachable objects from previous pushes. Repo size ≈ current sync window size.
 
-Notes and snapshots: push all (they're the actual data). Only logs have a rolling window. If snapshots become too large, add a size cap or skip large snapshots from sync (deferred optimization).
+Notes: push all (they're the actual data). Only logs have a rolling window. Snapshots are excluded from sync entirely.
 
 A device offline for longer than the retention window misses old peer logs. Those logs still exist on the originating device's local disk — manual catch-up (file copy) is the fallback.
 
@@ -124,8 +126,8 @@ Affected actions and their call sites in `background.js`:
 | `create_list` | 1418 | `listId` (pre-generated, see 3.3) |
 | `update_list` | 1432 | `listId` |
 | `delete_list` | 1458 | `listId` |
-| `reparent_list` | 1491 | `listId`, `toParentId` |
 | `restore_list` | 1547 | `listId` |
+| `update_list_tree` | (new) | (see §3.4) |
 | `add_rule` | 1737 | `listId` |
 | `remove_rule` | 1754 | `listId` |
 | `update_rule` | 1771 | `listId` |
@@ -136,36 +138,33 @@ At each call site, the list ID is already available (e.g., `request.listId` or f
 
 Currently, `effectOf` generates the list ID from `hash(name + timestamp)`. For sync, the ID must be in the event so remote devices use the same ID. Change: generate the ID in the handler, pass as `entry.listId`, and have `effectOf` use it (it already does: `entry.listId || hash(...)`).
 
-### 3.4 `reparent_list`: new format
+### 3.4 `update_list_tree`: tree structure event
 
-Old:
+List hierarchy and ordering are stored as a single nested JSON blob in `manifest/list-order.json`, synced via a dedicated event. The entire tree is written on every structural change (reorder, reparent, nest/unnest):
+
 ```json
 {
-  "action": "reparent_list",
-  "parents": ["root"], "name": "MyList",
-  "toParents": ["root", "Projects"],
-  "childNames": ["MyList", "OtherChild", "AnotherChild"]
+  "action": "update_list_tree",
+  "timestamp": 1710600000,
+  "tree": [
+    { "id": "list:a-id", "children": [
+      { "id": "list:b-id" },
+      { "id": "list:c-id" }
+    ]},
+    { "id": "list:d-id" }
+  ]
 }
 ```
 
-New:
-```json
-{
-  "action": "reparent_list",
-  "parents": ["root"], "name": "MyList",
-  "listId": "mylist-abc123",
-  "toParents": ["root", "Projects"],
-  "toParentId": "system/root",
-  "index": 0
-}
-```
+Emitted whenever the user changes tree structure in the UI (reorder, reparent, nest, unnest). Also emitted on `create_list` (appends new node) and `delete_list` (removes node).
 
-- `childNames` removed — no complete replacement
-- `index` is a best-effort insertion hint (clamped to array bounds)
-- `listId` and `toParentId` for reliable resolution
-- `parents`, `name`, `toParents` kept for name-to-id path maintenance
+This replaces both `reparent_list` and flat ordering. All hierarchy complexity (cascade, orphan relocation, cycles) is eliminated: the tree is an opaque blob resolved by LWW + reconcile. No per-node structural events needed.
 
-### 3.5 Device-specific log file naming
+### 3.5 `reparent_list`: removed
+
+Replaced by `update_list_tree`. No `reparent_list` action exists. Existing `reparent_list` events in JSONL history should be stripped by the migration script. List entities no longer have `parentList` or `childLists` fields — tree structure lives in `manifest/list-order.json` only.
+
+### 3.6 Device-specific log file naming
 
 Change `addLog()` → offscreen drain path to write to `data/logs/YYYY-MM-DD-<deviceId>.jsonl` instead of `data/logs/YYYY-MM-DD.jsonl`.
 
@@ -195,39 +194,57 @@ Entities that use timestamp guards for additive fields gain a `remotes` map:
 
 Only page entities need `remotes` (they have additive fields: `likes`, `timeOnPage`, `scrollDepth`). Other entities use set-based operations that are already idempotent.
 
-### 4.2 Delete/restore tracking: `deleteVotes` map
+### 4.2 Delete/restore tracking: `deletedTs` LWW
 
-Entities that support delete/restore gain a `deleteVotes` map for restore-wins conflict resolution:
+Entities that support delete/restore gain a `deletedTs` field for LWW conflict resolution:
 
 ```json
 {
   "slug": "highlight-abc",
   "deleted": false,
-  "deleteVotes": {
-    "device-A-id": { "action": "delete", "ts": 1710600000 },
-    "device-B-id": { "action": "restore", "ts": 1710601000 }
-  }
+  "deletedTs": 1710601000
 }
 ```
 
-**Resolution rule**: Entity is deleted iff ALL devices that have voted have voted `delete`. If ANY device's latest vote is `restore`, the entity is alive. Within a single device, later timestamp overwrites earlier vote.
+**Resolution rule**: `deletedTs` records the timestamp of the last applied delete or restore. Incoming events compare their timestamp against `deletedTs` — newer wins, older is skipped.
 
 ```js
-function isDeleted(entity) {
-  const votes = entity.deleteVotes;
-  if (!votes || Object.keys(votes).length === 0) return false;
-  return Object.values(votes).every(v => v.action === 'delete');
+// delete handler:
+if (entity.deletedTs && entity.deletedTs >= entry.timestamp) return; // skip stale
+entity.deleted = true;
+entity.deletedTs = entry.timestamp;
+
+// restore handler:
+if (entity.deletedTs && entity.deletedTs >= entry.timestamp) return; // skip stale
+entity.deleted = false;
+entity.deletedTs = entry.timestamp;
+```
+
+This is commutative: the entity always converges to the state of the event with the highest timestamp, regardless of replay order.
+
+Affected entities: notes, lists. (Snapshots excluded from sync.)
+
+### 4.3 List tree: `manifest/list-order.json`
+
+```json
+{
+  "timestamp": 1710600000,
+  "tree": [
+    { "id": "list:a-id", "children": [
+      { "id": "list:b-id" },
+      { "id": "list:c-id" }
+    ]},
+    { "id": "list:d-id" }
+  ]
 }
 ```
 
-This is commutative:
-- A deletes, B restores → A.vote=delete, B.vote=restore → not all delete → alive
-- B restores, A deletes → same votes → same result
-- A deletes, A restores → A.vote=restore (later ts wins within same device) → alive
+- `timestamp`: when the tree was last changed (used for LWW on conflicts)
+- `tree`: nested array representing list hierarchy and display order
 
-Affected entities: notes, snapshots, lists.
+**Reconcile after LWW**: After applying the winning tree, walk the tree and (1) append any list IDs that exist but aren't in the tree as top-level nodes (new lists from other device), and (2) remove any nodes for deleted lists. This is the same reconciliation as the flat case, just applied to a tree structure.
 
-### 4.3 Sync cursor tracking
+### 4.4 Sync cursor tracking
 
 New manifest file: `manifest/sync-cursors.json`:
 
@@ -288,114 +305,115 @@ Same pattern for `leave_page` (`timeOnPage`, `scrollDepth`).
 
 Events without `deviceId` (legacy): use `entity.timestamp` as before (backward compat).
 
-### 5.3 `reparent_list`: incremental with index hint
+### 5.3 `pin_to_list` / `unpin_from_list`: operate on deleted lists
+
+`pin_to_list` and `unpin_from_list` load the list entity with `includeDeleted: true` and update pins regardless of the list's deleted state. This ensures that if the list is later restored, all pins are intact.
 
 ```js
-if (entry.action === 'reparent_list') {
-  const listKey = entry.listId ? `list:${entry.listId}` : await resolveListKey(...);
-  if (!listKey) return result;
+// pin_to_list — always applies, even to deleted lists
+const list = await loadOrDefault(listKey, load, { includeDeleted: true });
+// ... add pin to list.pins ...
+result[listKey] = { ...list, pins: updatedPins };
+```
 
-  const entity = await loadOrDefault(listKey, load);
-  const fromKey = entity.parentList || 'list:system/root';
+### 5.4 `delete_list` / `restore_list`: simple LWW
 
-  // Resolve destination
-  const toKey = entry.toParentId
-    ? (entry.toParentId === 'system/root' ? 'list:system/root' : `list:${entry.toParentId}`)
-    : /* legacy toParents resolution */;
+With flat lists (no hierarchy), `delete_list` is a single-entity operation — no cascade, no `fromParent` preconditions.
 
-  // Remove from old parent (set-remove, idempotent)
-  const fromEntity = result[fromKey] || await loadOrDefault(fromKey, load);
-  result[fromKey] = {
-    ...fromEntity,
-    timestamp: Math.max(fromEntity.timestamp || 0, entry.timestamp),
-    childLists: (fromEntity.childLists || []).filter(k => k !== listKey),
-  };
+```js
+// delete_list:
+if (entry.action === 'delete_list') {
+  const list = await loadOrDefault(listKey, load, { includeDeleted: true });
+  if (list.deletedTs && list.deletedTs >= entry.timestamp) return result; // skip stale
+  result[listKey] = { ...list, deleted: true, deletedTs: entry.timestamp };
+  // ... unlink pins from pages, add to orphaned manifest ...
+  return result;
+}
 
-  // Add to new parent (set-add with index hint, idempotent)
-  const toEntity = (toKey === fromKey)
-    ? result[fromKey]
-    : (result[toKey] || await loadOrDefault(toKey, load));
-  let childLists = [...(toEntity.childLists || [])].filter(k => k !== listKey);
-  const idx = (entry.index != null)
-    ? Math.min(entry.index, childLists.length)
-    : childLists.length;
-  childLists.splice(idx, 0, listKey);
-  result[toKey] = {
-    ...toEntity,
-    timestamp: Math.max(toEntity.timestamp || 0, entry.timestamp),
-    childLists,
-  };
-
-  // Update entity's parentList
-  result[listKey] = {
-    ...entity,
-    parentList: toKey,
-    timestamp: Math.max(entity.timestamp || 0, entry.timestamp),
-  };
-
-  // Update name-to-id paths (derived from parents/name/toParents — kept in event)
-  // ... existing path rename logic using parents+name fields ...
-
+// restore_list:
+if (entry.action === 'restore_list') {
+  const list = await loadOrDefault(listKey, load, { includeDeleted: true });
+  if (list.deletedTs && list.deletedTs >= entry.timestamp) return result; // skip stale
+  result[listKey] = { ...list, deleted: false, deletedTs: entry.timestamp };
+  // ... re-link pins to pages, remove from orphaned manifest ...
   return result;
 }
 ```
 
-Key properties:
-- `filter(k => k !== listKey)` before splice ensures idempotency
-- Two concurrent reparents to the same parent: both append, both present
-- Index is best-effort: clamped if concurrent inserts shift positions
-
-### 5.4 `delete_*` / `restore_*`: deleteVotes
+### 5.5 `update_list_tree`: LWW on whole tree + reconcile
 
 ```js
-// delete_note example:
+if (entry.action === 'update_list_tree') {
+  const treeEntity = await loadOrDefault('manifest/list-order', load);
+  if (treeEntity.timestamp && treeEntity.timestamp >= entry.timestamp) return result;
+
+  // Start with the winning tree
+  let tree = deepClone(entry.tree);
+
+  // Reconcile: collect all IDs in the tree
+  const idsInTree = collectIds(tree);
+
+  // Append lists that exist but aren't in the tree (remote-created)
+  const allLists = /* scan all list entities */;
+  for (const listKey of allLists) {
+    if (!idsInTree.has(listKey) && !isDeleted(listKey)) {
+      tree.push({ id: listKey });
+    }
+  }
+
+  // Remove deleted lists from tree
+  tree = filterTree(tree, node => !isDeleted(node.id));
+
+  result['manifest/list-order'] = { timestamp: entry.timestamp, tree };
+  return result;
+}
+```
+
+The tree is an opaque blob — LWW picks the winner, reconcile handles create/delete drift. Reordering, reparenting, and nesting are all just "tree changed." Same commutativity cost as a flat array.
+
+### 5.6 `replace_note`: both survive
+
+When two devices edit the same note, both new notes survive as siblings on the page:
+
+```
+Device A: replace_note(X → Y)
+Device B: replace_note(X → Z)
+```
+
+The existing `effectOf` for `replace_note` already handles this naturally:
+1. Each event orphans old note X (second orphan is a no-op — already orphaned)
+2. Each event creates and links its new note (Y, Z) to the page's `childIds`
+3. Each event transfers list pins from X to the new note
+
+Result: Y and Z are both linked to the page. The user sees both and deletes the unwanted one.
+
+**Pin transfer race**: The first-replayed event transfers pins from X to (say) Y. The second event's pin transfer finds X has no pins (already moved to Y) — so Z gets no pins. This is acceptable: the "winning" note inherits the pins, the other is a clean sibling.
+
+### 5.7 `delete_note` / `restore_note`: LWW with `deletedTs`
+
+```js
+// delete_note:
 if (entry.action === 'delete_note') {
   const note = await loadOrDefault(noteKey, load, { includeDeleted: true });
-
-  // Update deleteVotes
-  const deleteVotes = { ...(note.deleteVotes || {}) };
-  const deviceId = entry.deviceId || '_local';
-  const existingVote = deleteVotes[deviceId];
-  if (!existingVote || entry.timestamp > existingVote.ts) {
-    deleteVotes[deviceId] = { action: 'delete', ts: entry.timestamp };
-  }
-
-  // Derive deleted state
-  const allDelete = Object.keys(deleteVotes).length > 0 &&
-    Object.values(deleteVotes).every(v => v.action === 'delete');
-
-  if (!allDelete) return result;  // restore-wins: skip delete effects
-
-  // All votes agree on delete — apply effects
+  if (note.deletedTs && note.deletedTs >= entry.timestamp) return result; // skip stale
+  result[noteKey] = { ...note, deleted: true, deletedTs: entry.timestamp };
   // ... existing unlink/orphan logic ...
-  result[noteKey] = { ...note, deleted: true, deleteVotes, timestamp: entry.timestamp };
-  await orphan(noteKey, entry.timestamp);
   return result;
 }
 
-// restore_note example:
+// restore_note:
 if (entry.action === 'restore_note') {
   const note = await loadOrDefault(noteKey, load, { includeDeleted: true });
-
-  // Update deleteVotes
-  const deleteVotes = { ...(note.deleteVotes || {}) };
-  const deviceId = entry.deviceId || '_local';
-  const existingVote = deleteVotes[deviceId];
-  if (!existingVote || entry.timestamp > existingVote.ts) {
-    deleteVotes[deviceId] = { action: 'restore', ts: entry.timestamp };
-  }
-
-  // Restore always applies (restore-wins)
-  // ... existing restore logic ...
-  result[noteKey] = { ...note, deleted: false, deleteVotes, timestamp: entry.timestamp };
-  await unorphan(noteKey, entry.timestamp);
+  if (note.deletedTs && note.deletedTs >= entry.timestamp) return result; // skip stale
+  result[noteKey] = { ...note, deleted: false, deletedTs: entry.timestamp };
+  // ... existing restore/re-link logic ...
   return result;
 }
 ```
 
-Same pattern for `delete_snapshot`/`restore_snapshot` and `delete_list`/`restore_list`.
+**`delete_note` vs `replace_note`**: The replacement always survives. `replace_note` creates a new note entity (Y) and orphans old note (X). A concurrent `delete_note(X)` also orphans X — no conflict. Y exists regardless.
 
-### 5.5 `entity.timestamp` semantics
+### 5.8 `entity.timestamp` semantics
 
 All `effectOf` branches that set `timestamp` use `Math.max`:
 
@@ -409,7 +427,7 @@ result[pageKey] = { ...page, timestamp: Math.max(page.timestamp || 0, entry.time
 
 Ensures `entity.timestamp` is the latest modification across all devices, regardless of replay order. Used for display, sorting, and LRU eviction watermark.
 
-### 5.6 Commutativity summary
+### 5.9 Commutativity summary
 
 | Operation | Mechanism | Commutative? |
 |-----------|-----------|:---:|
@@ -418,13 +436,18 @@ Ensures `entity.timestamp` is the latest modification across all devices, regard
 | `leave_page` (timeOnPage, scrollDepth) | Per-device timestamp guard | Yes |
 | `rate_page` (likes) | Per-device timestamp guard | Yes |
 | `rename_page` (user_title) | Last-write-wins (`Math.max` timestamp) | Yes |
-| `pin_to_list` / `unpin_from_list` | Set-add/remove with idempotency guard | Yes |
-| `create_note` / `create_snapshot` | Set-add link | Yes |
-| `delete_*` / `restore_*` | deleteVotes with restore-wins | Yes |
-| `create_list` | ID in event, set-add to parent | Yes |
+| `pin_to_list` / `unpin_from_list` | Set-add/remove with `includeDeleted` | Yes |
+| `create_note` | Set-add link (unique slug) | Yes |
+| `replace_note` | Both survive as siblings | Yes |
+| `delete_note` / `restore_note` | LWW via `deletedTs` | Yes |
+| `delete_note` vs `replace_note` | Edit wins (independent ops) | Yes |
+| `create_list` | ID in event, idempotent | Yes |
 | `update_list` (rename) | `listId` for resolution, last-write-wins on name | Yes |
-| `reparent_list` | `listId` + incremental + index hint | Yes |
+| `delete_list` / `restore_list` | LWW via `deletedTs` | Yes |
+| `pin_to_list` vs `delete_list` | Pin applies to deleted entity; survives restore | Yes |
+| `update_list_tree` | LWW on whole tree blob + reconcile | Yes |
 | `add_rule` / `remove_rule` | ID-based set-add/remove | Yes |
+| `update_rule` | Last-write-wins per rule ID | Yes |
 | `update_setting` | Last-write-wins per key | Yes |
 
 ## 6. Sync Protocol
@@ -443,7 +466,6 @@ Triggered by `chrome.alarms` (configurable interval, default 5 min) or manual bu
 1. Collect local files to push:
    - `data/logs/YYYY-MM-DD-<myDeviceId>.jsonl` — only within retention window (default 7 days)
    - `data/notes/*.json` — all
-   - `data/snapshots/*/` — all (or size-capped, deferred optimization)
 2. Compare against last-pushed state (hash manifest stored locally in `manifest/sync-push-state.json`)
 3. For new/changed files, call GitHub API:
    - Create blobs for each file
@@ -462,7 +484,7 @@ Triggered after push, or on its own schedule.
 2. For each peer branch (not own):
    a. `GET /repos/.../git/trees/{sha}?recursive=1` — get file listing
    b. Compare against sync cursor (`manifest/sync-cursors.json[peerId]`)
-   c. Download new log files, notes, snapshots via blob API
+   c. Download new log files and notes via blob API
    d. Write to local `data/` directory (log files keep their device-specific names)
    e. Replay new log entries via `replayRemoteEntries()` (see 6.4)
    f. Update sync cursor
@@ -513,7 +535,8 @@ Per the project's data migration policy: migrate `~/portal-data` on disk first, 
 Script: `scripts/migrate-sync-schema.mjs`
 
 - `pages/*.json`: add `remotes: {}`
-- `lists/*.json`, `data/notes/*.json`: add `deleteVotes: {}`
+- `lists/*.json`: add `deletedTs: 0`; remove `parentList`, `childLists` fields
+- `data/notes/*.json`: add `deletedTs: 0`
 - Create `manifest/sync-cursors.json`: `{ timestamp: 0, cursors: {} }`
 
 ### 7.2 Log file migration
@@ -526,17 +549,12 @@ Requires device ID generation before migration. The script generates one and wri
 
 Existing JSONL entries don't have `deviceId` or `listId`. No migration needed — `effectOf` treats missing `deviceId` as local and falls back to `parents`+`name` when `listId` is absent.
 
-### 7.4 Reparent format migration
+### 7.4 Hierarchy removal migration
 
-Existing `reparent_list` entries have `childNames`. The updated `effectOf` handles both formats:
-
-```js
-if (entry.childNames) {
-  // Legacy: complete replacement (existing logic)
-} else {
-  // New: incremental with index hint
-}
-```
+- Strip `reparent_list` entries from JSONL history (action no longer exists)
+- Remove `parentList` and `childLists` fields from all list entity files
+- Remove `list:system/root` entity (no longer needed as tree root)
+- Generate `manifest/list-order.json` with nested tree from existing `list:system/root` hierarchy
 
 ## 8. Implementation Phases
 
@@ -544,18 +562,24 @@ if (entry.childNames) {
 
 Make `effectOf` order-independent. Prerequisite for sync, also improves single-device replay correctness.
 
-1. Add `deviceId` to all entries in `addLog()` (background.js)
-2. Add `listId` to all list-referencing entries at call sites (background.js)
-3. Pre-generate `listId` for `create_list` (background.js handler)
-4. Change `reparent_list` event format + handler (background.js + replay.js)
-   - Keep backward compat for old `childNames` format
-5. Per-device timestamp guards for `rate_page`, `leave_page` (replay.js)
-6. `deleteVotes` + restore-wins for delete/restore branches (replay.js)
-7. `resolveListKey` prefers `entry.listId` (replay.js)
-8. `Math.max` for all `entity.timestamp` assignments (replay.js)
-9. Device-specific log file naming (`YYYY-MM-DD-<deviceId>.jsonl`)
-10. Entity schema migration script
-11. Tests: replay same entries in different orders, assert identical final state
+1. Data migration script (`scripts/migrate-sync-schema.mjs`):
+   - Remove list hierarchy: strip `reparent_list` events, remove `parentList`/`childLists` from entities, remove `list:system/root`
+   - Generate `manifest/list-order.json` with nested tree from existing `list:system/root` hierarchy
+   - Add entity fields: `remotes` (pages), `deletedTs` (lists, notes)
+   - Rename log files: `YYYY-MM-DD.jsonl` → `YYYY-MM-DD-<deviceId>.jsonl`
+2. Add `deviceId` to all entries in `addLog()` (background.js)
+3. Add `listId` to all list-referencing entries at call sites (background.js)
+4. Pre-generate `listId` for `create_list` (background.js handler)
+5. Remove `reparent_list` action entirely (background.js + replay.js)
+6. List tree structure: `update_list_tree` event + `manifest/list-order.json` LWW + reconcile (background.js + replay.js)
+7. LWW via `deletedTs` for all delete/restore branches (replay.js)
+8. `pin_to_list` / `unpin_from_list` load with `includeDeleted: true` (replay.js)
+9. `replace_note` both-survive: no code change needed (existing effectOf naturally handles it)
+10. Per-device timestamp guards for `rate_page`, `leave_page` (replay.js)
+11. `resolveListKey` prefers `entry.listId` (replay.js)
+12. `Math.max` for all `entity.timestamp` assignments (replay.js)
+13. Device-specific log file naming (`YYYY-MM-DD-<deviceId>.jsonl`)
+14. Tests: replay same entries in different orders, assert identical final state (see §11)
 
 ### Phase 1: Sync transport
 
@@ -582,10 +606,131 @@ Make `effectOf` order-independent. Prerequisite for sync, also improves single-d
 4. Error handling: network failures, auth errors, rate limits
 5. Conflict visibility: notification when restore-wins overrides a local delete
 
-## 9. Open Questions (deferred)
+## 9. Implementation Notes
 
-1. **Snapshot size**: Large snapshots may make pushes slow. Options: skip snapshots over N MB, compress before push, or use GitHub LFS.
-2. **GitLab/Gitea support**: Add `SyncTransport` adapters when needed. API surface is small.
-3. **Token security**: `chrome.storage.local` for tokens. Acceptable for v1; could use OS keychain via native messaging later.
-4. **Offline gap**: Device offline > retention window misses peer logs. Accept as limitation; manual file copy is fallback.
-5. **History view**: Should remote visits appear in the Explore timeline? Deferred — start with entity-only enrichment.
+These are correctness issues that must be addressed during implementation, not commutativity problems.
+
+**9.1 GC_TOMBSTONE must not block remote events.** `sessionLoad` (via `readCacheable`) must treat `GC_TOMBSTONE` (`{ __gc: true }`) as a cache miss, not a valid entity. Otherwise, remote events referencing a locally-GC'd page will spread `{ __gc: true, ...newFields }` into session cache — silent data corruption. Fix: add a `__gc` check in `readCacheable` or `sessionLoad` that returns `undefined` for tombstones.
+
+**9.2 All list-modifying operations must use `includeDeleted: true`.** Not just `pin_to_list` / `unpin_from_list` — also `add_rule`, `remove_rule`, `update_rule`, and `update_list`. These operations should update the entity even when deleted, so that data is preserved for potential restore. This is a uniform rule: if the entity supports delete/restore, all mutations load with `includeDeleted`.
+
+**9.3 `create_list` and `delete_list` must update the tree manifest.** `effectOf` for `create_list` should append the new list to `manifest/list-order.json` as a top-level node if not already present. `effectOf` for `delete_list` should remove the list from the tree. Without this, remote-created lists won't appear in the UI until the next `update_list_tree` event, and remote-deleted lists will linger in the tree.
+
+## 10. Open Questions (deferred)
+
+1. **GitLab/Gitea support**: Add `SyncTransport` adapters when needed. API surface is small.
+2. **Token security**: `chrome.storage.local` for tokens. Acceptable for v1; could use OS keychain via native messaging later.
+3. **Offline gap**: Device offline > retention window misses peer logs. Accept as limitation; manual file copy is fallback.
+4. **History view**: Should remote visits appear in the Explore timeline? Deferred — start with entity-only enrichment.
+5. **Cross-user sharing**: Separate feature from sync. Publish list checkpoint files to a public GitHub Pages repo. Subscribers fetch static JSON over HTTPS. No log replay needed — checkpoint files are the state. Design details deferred.
+
+## 11. Commutativity Edge Cases (Test Scenarios)
+
+Each test replays the same set of events in two different orders and asserts identical final state. Grouped by conflict type.
+
+### 11.1 Note edit conflicts
+
+**T1: Two devices edit the same note.**
+Events: `replace_note(X → Y, ts=10)`, `replace_note(X → Z, ts=20)`.
+Expected: X orphaned. Y and Z both linked to page as siblings. Pins transferred to Y only (first-replayed gets pins).
+Verify both orders produce: page.childIds contains both `note:Y` and `note:Z`. X is orphaned.
+
+**T2: One device edits, other deletes the same note.**
+Events: `replace_note(X → Y, ts=10)`, `delete_note(X, ts=20)`.
+Expected: X orphaned (by both ops independently). Y exists and is linked to page. Delete of X is effectively a no-op on a note that's already orphaned by the replace.
+Verify: Y is alive and linked. X is orphaned.
+
+**T3: One device edits, other deletes — edit is newer.**
+Events: `delete_note(X, ts=10)`, `replace_note(X → Y, ts=20)`.
+Expected: Same as T2. The replace creates Y regardless of X's delete state.
+
+### 11.2 Note delete/restore conflicts
+
+**T4: Delete and restore of same note, restore is newer.**
+Events: `delete_note(X, ts=10)`, `restore_note(X, ts=20)`.
+Expected: X is alive (deletedTs=20, deleted=false).
+
+**T5: Delete and restore of same note, delete is newer.**
+Events: `restore_note(X, ts=10)`, `delete_note(X, ts=20)`.
+Expected: X is deleted (deletedTs=20, deleted=true).
+
+### 11.3 List delete/restore conflicts
+
+**T6: Delete and restore of same list, restore is newer.**
+Events: `delete_list(L, ts=10)`, `restore_list(L, ts=20)`.
+Expected: L alive (deletedTs=20, deleted=false). All pins intact.
+
+**T7: Delete and restore of same list, delete is newer.**
+Events: `restore_list(L, ts=10)`, `delete_list(L, ts=20)`.
+Expected: L deleted (deletedTs=20, deleted=true).
+
+### 11.4 Pin to deleted list
+
+**T8: Pin a page to a list that was concurrently deleted.**
+Events: `delete_list(L, ts=10)`, `pin_to_list(page P to L, ts=20)`.
+Expected: L is deleted. L's pins array contains P. If L is later restored, P is pinned.
+Key: `pin_to_list` must load with `includeDeleted: true` and update the entity regardless.
+
+**T9: Pin, then delete, then restore — pin survives the round-trip.**
+Events: `pin_to_list(P to L, ts=10)`, `delete_list(L, ts=20)`, `restore_list(L, ts=30)`.
+Expected: L alive. P is pinned to L. The pin was preserved through delete+restore.
+Key: All 6 orderings must produce the same state.
+
+**T10: Unpin from a deleted list.**
+Events: `delete_list(L, ts=10)`, `unpin_from_list(P from L, ts=20)`.
+Expected: L is deleted. P is NOT in L's pins. If L is later restored, P is not pinned.
+
+### 11.5 List tree structure conflicts
+
+**T11: Two devices reorganize the tree simultaneously.**
+Events: `update_list_tree(tree:[{A, children:[B]}, {C}], ts=10)`, `update_list_tree(tree:[{C, children:[A]}, {B}], ts=20)`.
+Expected: Tree is [{C, children:[A]}, {B}] (newer wins via LWW).
+
+**T12: One device reorganizes tree, other device creates a new list.**
+Events: `update_list_tree(tree:[{A}, {B}], ts=10)`, `create_list(C, ts=20)`.
+Expected: Tree is [{A}, {B}, {C}]. C is appended as top-level node because it exists but isn't in the winning tree.
+
+**T13: One device reorganizes tree, other device deletes a list.**
+Events: `update_list_tree(tree:[{A, children:[B]}, {C}], ts=10)`, `delete_list(B, ts=20)`.
+Expected: Tree is [{A}, {C}]. B removed from tree during reconciliation (including from A's children).
+
+### 11.6 Additive field conflicts
+
+**T14: Two devices both rate the same page.**
+Events: `rate_page(url, likes:+1, deviceId:A, ts=10)`, `rate_page(url, likes:+1, deviceId:B, ts=20)`.
+Expected: page.likes = original + 2. Each device's contribution tracked in `remotes` map. Both additions apply.
+
+**T15: Same device's rate_page replayed twice (idempotency).**
+Events: `rate_page(url, likes:+1, deviceId:A, ts=10)`, `rate_page(url, likes:+1, deviceId:A, ts=10)`.
+Expected: page.likes = original + 1 (not +2). Per-device timestamp guard prevents double-count.
+
+### 11.7 Mixed multi-operation scenarios
+
+**T16: Edit note + delete note + restore note — three-way.**
+Events: `replace_note(X → Y, ts=10)`, `delete_note(X, ts=20)`, `restore_note(X, ts=30)`.
+Expected: X alive (restore ts=30 wins over delete ts=20). Y also linked to page (replace created Y independently). Both X and Y exist.
+Key: all 6 orderings must produce the same state.
+
+**T17: Delete list + pin to list + restore list — three-way.**
+Events: `delete_list(L, ts=10)`, `pin_to_list(P to L, ts=20)`, `restore_list(L, ts=30)`.
+Expected: L alive (restore ts=30 > delete ts=10). P is pinned to L (pin applied to deleted entity, preserved through restore).
+Key: all 6 orderings must produce the same state.
+
+**T18: Create list + reorganize tree + delete — tree reconciliation.**
+Events: `create_list(C, ts=10)`, `update_list_tree(tree:[{A, children:[B]}], ts=20)`, `delete_list(A, ts=30)`.
+Expected: Tree is [{B}, {C}]. Tree wins (LWW), then reconcile: C appended (missing), A removed (deleted), B promoted to top-level (parent removed).
+
+### 11.8 Implementation correctness
+
+**T19: Page GC_TOMBSTONE does not block remote events.**
+Setup: Device A GC's page P (no pins, no notes). GC_TOMBSTONE in session cache.
+Event from Device B: `visit_page(P, ts=20)`.
+Expected: Page P is recreated as a fresh entity with visit data. GC_TOMBSTONE is treated as "not found" by sessionLoad, not as a valid entity.
+
+**T20: Rules on deleted list are preserved for restore.**
+Events: `delete_list(L, ts=10)`, `add_rule(rule R to L, ts=20)`, `restore_list(L, ts=30)`.
+Expected: L alive. Rule R is present on L. `add_rule` must load with `includeDeleted: true`.
+
+**T21: create_list updates the tree manifest.**
+Events: `create_list(C, ts=10)`. No `update_list_tree` event.
+Expected: C appears in `manifest/list-order.json` tree as a top-level node. `effectOf` for `create_list` must append to the tree if not present.

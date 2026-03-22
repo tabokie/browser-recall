@@ -1156,7 +1156,7 @@ async function refreshPins() {
     } else {
       const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
       const enriched = pinsResolved.map(r => enrichPinResult(r, pins, pageSnap));
-      renderListPinView(enriched, listId);
+      await renderListPinView(enriched, listId);
     }
   }
 }
@@ -1206,13 +1206,13 @@ async function showList(list) {
     if (pins.length === 0) {
       listPinsData = [];
       listPinsListId = listId;
-      renderSearchPanel();
+      await renderSearchPanel();
       document.getElementById('relatedResults').innerHTML = '<div class="no-results">No pinned pages</div>';
       document.getElementById('relatedChart').classList.remove('visible');
     } else {
       const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
       const enriched = pinsResolved.map(r => enrichPinResult(r, pins, pageSnap));
-      renderListPinView(enriched, listId);
+      await renderListPinView(enriched, listId);
     }
   } catch (error) {
     console.error('List load error:', error);
@@ -1636,10 +1636,10 @@ let listPinsData = [];
 let listPinsListId = null;
 
 // Render all pins into #relatedResults with search filtering support
-function renderListPinView(allPins, listId) {
+async function renderListPinView(allPins, listId) {
   listPinsData = allPins;
   listPinsListId = listId;
-  renderSearchPanel();
+  await renderSearchPanel();
   runListPinFilter();
 }
 
@@ -1727,7 +1727,7 @@ async function renderListSearchFilters() {
   await loadHistoryBatch();
 
   await loadFilterState();
-  renderSearchPanel();
+  await renderSearchPanel();
   runSearchFilterPipeline();
 }
 
@@ -2360,17 +2360,18 @@ function updateSidebarActive() {
 
 // --- Lists (pinned searches) ---
 async function loadListTree() {
-  const root = await readCacheable('list:system/root');
-  return buildTreeLevel(root?.childLists || []);
+  const order = await readCacheable('manifest:list-order');
+  return buildTreeFromManifest(order?.tree || []);
 }
-async function buildTreeLevel(keys) {
+async function buildTreeFromManifest(treeNodes) {
   const nodes = [];
-  for (const key of keys) {
+  for (const treeNode of treeNodes) {
+    const key = treeNode.id;
     const entity = await readCacheable(key);
     if (!entity || entity.deleted) continue;
     const slug = entity.slug || key.slice(5);
-    const children = entity.childLists?.length ? await buildTreeLevel(entity.childLists) : [];
-    const node = { slug, name: entity.name || slug, children, parentList: entity.parentList || 'list:system/root' };
+    const children = treeNode.children?.length ? await buildTreeFromManifest(treeNode.children) : [];
+    const node = { slug, name: entity.name || slug, children };
     nodes.push(node);
   }
   return nodes;
@@ -2405,30 +2406,8 @@ function saveFoldState() {
   chrome.storage.session.set({ listFoldState }).catch(() => {});
 }
 
-// Cached tree for isDescendant lookups during drag-drop
-let lastRenderedTree = [];
-
-function isDescendant(ancestorSlug, targetSlug) {
-  function search(nodes) {
-    for (const n of nodes) {
-      if (n.slug === ancestorSlug) return findInSubtree(n.children, targetSlug);
-      if (search(n.children)) return true;
-    }
-    return false;
-  }
-  function findInSubtree(nodes, slug) {
-    for (const n of nodes) {
-      if (n.slug === slug) return true;
-      if (findInSubtree(n.children, slug)) return true;
-    }
-    return false;
-  }
-  return search(lastRenderedTree);
-}
-
 async function renderLists() {
   const tree = await loadListTree();
-  lastRenderedTree = tree;
   listNameById.clear();
   (function walkTree(nodes) {
     for (const n of nodes) {
@@ -2539,8 +2518,7 @@ function createSidebarItem(node, depth) {
     e.preventDefault();
     if (e.dataTransfer.types.includes('application/x-list-reorder')) {
       const draggedId = e.dataTransfer.getData('application/x-list-reorder');
-      // Prevent dropping into own subtree
-      if (draggedId === lst.slug || isDescendant(draggedId, lst.slug)) {
+      if (draggedId === lst.slug) {
         e.dataTransfer.dropEffect = 'none';
         return;
       }
@@ -2583,47 +2561,62 @@ function createSidebarItem(node, depth) {
 
     if (e.dataTransfer.types.includes('application/x-list-reorder')) {
       const draggedId = e.dataTransfer.getData('application/x-list-reorder');
-      if (draggedId === lst.slug || isDescendant(draggedId, lst.slug)) return;
+      if (draggedId === lst.slug) return;
 
       // Determine drop zone
       const rect = item.getBoundingClientRect();
       const relY = (e.clientY - rect.top) / rect.height;
 
-      // Get dragged entity's current parent
-      const draggedEntity = await readCacheable('list:' + draggedId);
-      const fromParent = draggedEntity?.parentList || 'list:system/root';
-      const fromParentSlug = fromParent.startsWith('list:') ? fromParent.slice(5) : fromParent;
+      // Read current tree, apply the move, send full tree to background
+      const order = await readCacheable('manifest:list-order');
+      let tree = JSON.parse(JSON.stringify(order?.tree || []));
+
+      // Remove dragged node from tree (keeping its subtree)
+      let draggedNode = null;
+      function extractNode(nodes) {
+        for (let i = 0; i < nodes.length; i++) {
+          if (nodes[i].id === 'list:' + draggedId) {
+            draggedNode = nodes.splice(i, 1)[0];
+            return true;
+          }
+          if (nodes[i].children && extractNode(nodes[i].children)) return true;
+        }
+        return false;
+      }
+      extractNode(tree);
+      if (!draggedNode) draggedNode = { id: 'list:' + draggedId };
 
       if (relY >= 0.25 && relY <= 0.75) {
-        // --- Nest as child ---
-        const toParent = 'list:' + lst.slug;
-        const toEntity = await readCacheable(toParent);
-        const targetChildLists = toEntity?.childLists || [];
-        await chrome.runtime.sendMessage({
-          action: 'reparentList', listId: draggedId,
-          fromParent: fromParentSlug, toParent: lst.slug,
-          index: targetChildLists.length
-        });
-      } else {
-        // --- Reorder above/below ---
-        const targetParent = node.parentList || 'list:system/root';
-        const targetParentSlug = targetParent.startsWith('list:') ? targetParent.slice(5) : targetParent;
-        const parentEntity = await readCacheable(targetParent);
-        const siblings = parentEntity?.childLists || [];
-        let toIdx = siblings.indexOf('list:' + lst.slug);
-        if (toIdx === -1) toIdx = siblings.length;
-        if (relY >= 0.75) toIdx++;
-        // Adjust if dragged is already a sibling and comes before target
-        if (fromParentSlug === targetParentSlug) {
-          const fromIdx = siblings.indexOf('list:' + draggedId);
-          if (fromIdx !== -1 && fromIdx < toIdx) toIdx--;
+        // --- Nest as child of target ---
+        function appendToTarget(nodes) {
+          for (const n of nodes) {
+            if (n.id === 'list:' + lst.slug) {
+              if (!n.children) n.children = [];
+              n.children.push(draggedNode);
+              return true;
+            }
+            if (n.children && appendToTarget(n.children)) return true;
+          }
+          return false;
         }
-        await chrome.runtime.sendMessage({
-          action: 'reparentList', listId: draggedId,
-          fromParent: fromParentSlug, toParent: targetParentSlug,
-          index: toIdx
-        });
+        if (!appendToTarget(tree)) tree.push(draggedNode);
+      } else {
+        // --- Reorder above/below sibling ---
+        function insertNear(nodes) {
+          for (let i = 0; i < nodes.length; i++) {
+            if (nodes[i].id === 'list:' + lst.slug) {
+              const idx = relY < 0.25 ? i : i + 1;
+              nodes.splice(idx, 0, draggedNode);
+              return true;
+            }
+            if (nodes[i].children && insertNear(nodes[i].children)) return true;
+          }
+          return false;
+        }
+        if (!insertNear(tree)) tree.push(draggedNode);
       }
+
+      await chrome.runtime.sendMessage({ action: 'updateListTree', tree });
       await renderLists();
     } else {
       // --- Pin drop (existing logic) ---
@@ -3297,7 +3290,7 @@ document.addEventListener('visibilitychange', async () => {
 // --- Explore Search ---
 
 
-function renderSearchPanel() {
+async function renderSearchPanel() {
   const container = document.getElementById('listQueryBuilder');
   container.style.display = 'block';
   const isExplore = activeView.type === 'explore';
@@ -3323,7 +3316,7 @@ function renderSearchPanel() {
   html += '</div>';
 
   html += `<div class="filter-panel" id="filterPanel" style="display:${filterVisible ? 'flex' : 'none'}">`;
-  html += renderFilterPanelHtml();
+  html += await renderFilterPanelHtml();
   html += '</div>';
 
   html += '</div>';
@@ -3333,7 +3326,7 @@ function renderSearchPanel() {
   if (filterVisible) bindFilterEvents(container);
 }
 
-function renderFilterPanelHtml() {
+async function renderFilterPanelHtml() {
   let html = '';
   const isListView = activeView.type === 'list';
 
@@ -3356,7 +3349,7 @@ function renderFilterPanelHtml() {
   }
 
   // List membership bubbles
-  const lists = collectFilterLists();
+  const lists = await collectFilterLists();
   if (lists.length > 0) {
     html += '<div class="filter-section"><div class="filter-section-label">Lists</div>';
     html += '<div class="filter-bubbles">';
@@ -3391,7 +3384,8 @@ function renderFilterPanelHtml() {
 }
 
 // Collect list names for filter bubbles. In list context, exclude the current list.
-function collectFilterLists() {
+async function collectFilterLists() {
+  const tree = await loadListTree();
   const lists = [];
   function walk(nodes) {
     for (const node of nodes) {
@@ -3399,7 +3393,7 @@ function collectFilterLists() {
       if (node.children) walk(node.children);
     }
   }
-  walk(lastRenderedTree);
+  walk(tree);
   // In list view, exclude the active list
   if (activeView.type === 'list') {
     return lists.filter(l => l.slug !== activeView.id);
@@ -3411,7 +3405,7 @@ function collectFilterLists() {
 // Loads all list entities to get pins (allListPins may not have them all).
 async function buildListMembershipIndex() {
   const index = new Map(); // slug → Set<listSlug>
-  const lists = collectFilterLists();
+  const lists = await collectFilterLists();
   // Load entities for any lists not already in allListPins
   const toLoad = lists.filter(l => !allListPins[l.slug]);
   if (toLoad.length > 0) {
@@ -3475,10 +3469,10 @@ function bindSearchEvents(container) {
 
   // Remove buttons
   container.querySelectorAll('.search-row-remove').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.dataset.index);
       savedSearches.splice(idx, 1);
-      renderSearchPanel();
+      await renderSearchPanel();
       saveSearchQueries();
       runActiveSearchPipeline();
     });
@@ -3491,11 +3485,11 @@ function bindSearchEvents(container) {
       currentSearchInput = draftInput.value;
       runActiveSearchPipeline();
     });
-    draftInput.addEventListener('keydown', (e) => {
+    draftInput.addEventListener('keydown', async (e) => {
       if (e.key === 'Enter' && draftInput.value.trim()) {
         savedSearches.push(draftInput.value.trim());
         currentSearchInput = '';
-        renderSearchPanel();
+        await renderSearchPanel();
         saveSearchQueries();
         runActiveSearchPipeline();
         // Focus the new draft input

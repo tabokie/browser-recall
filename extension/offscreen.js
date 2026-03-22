@@ -221,6 +221,16 @@ async function handleRequest(request) {
         }
       }
 
+      case 'loadListOrder': {
+        try {
+          const fh = await fsStorage.resolveFile('manifest/list-order.json');
+          const entity = await fsStorage.readJson(fh);
+          return { success: true, entity };
+        } catch {
+          return { success: true, entity: { timestamp: 0, tree: [] } };
+        }
+      }
+
       case 'listInteractionFiles': {
         const files = await fsStorage.listInteractionFiles();
         return { success: true, files };
@@ -455,6 +465,13 @@ async function drainQueue() {
         } catch {
           roundCache.set(key, defaultEntity(key));
         }
+      } else if (key === 'manifest:list-order') {
+        try {
+          const fh = await fsStorage.resolveFile('manifest/list-order.json');
+          roundCache.set(key, await fsStorage.readJson(fh));
+        } catch {
+          roundCache.set(key, { timestamp: 0, tree: [] });
+        }
       }
     };
 
@@ -549,9 +566,9 @@ async function drainQueue() {
           const fh = await fsStorage.resolveFile('manifest/list-name-to-id.json', { create: true });
           await fsStorage.writeJson(fh, entity);
         });
-      } else if (key === 'list:system/root') {
-        await withLock('lists/system/root.json', async () => {
-          const fh = await fsStorage.resolveFile('lists/system/root.json', { create: true });
+      } else if (key === 'manifest:list-order') {
+        await withLock('manifest/list-order.json', async () => {
+          const fh = await fsStorage.resolveFile('manifest/list-order.json', { create: true });
           await fsStorage.writeJson(fh, entity);
         });
       }

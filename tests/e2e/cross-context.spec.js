@@ -9,14 +9,13 @@ test.describe('Cross-context consistency', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: {
-        timestamp: now, childLists: ['list:research'],
+      { path: 'manifest/list-order.json', data: {
+        timestamp: now, tree: [{ id: 'list:research' }],
       }},
       { path: 'lists/research.json', data: {
         slug: 'research', name: 'Research', timestamp: now, pins: [],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Research': 'research' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Research': 'research' } } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain',
         timestamp: now, parentIds: [], childIds: [],

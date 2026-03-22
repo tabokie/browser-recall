@@ -86,12 +86,12 @@ test.describe('Scale — larger data sets', () => {
 
   test('5 lists with 3 pins each all render correctly', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
-    const rootChildLists = [];
+    const rootTree = [];
     const files = [{ path: 'manifest/settings.json', data: { trimRules: [] } }];
 
     for (let l = 0; l < 5; l++) {
       const listSlug = `list-${l}`;
-      rootChildLists.push(`list:${listSlug}`);
+      rootTree.push({ id: `list:${listSlug}` });
 
       const pins = [];
       for (let p = 0; p < 3; p++) {
@@ -105,7 +105,7 @@ test.describe('Scale — larger data sets', () => {
       }
       files.push({
         path: `lists/${listSlug}.json`,
-        data: { slug: listSlug, name: `List ${l}`, timestamp: now, pins, parentList: 'list:system/root', childLists: [] },
+        data: { slug: listSlug, name: `List ${l}`, timestamp: now, pins },
       });
     }
 
@@ -122,7 +122,7 @@ test.describe('Scale — larger data sets', () => {
       }
     }
     files.push({ path: 'data/logs/2026-03-01.jsonl', lines: historyLines });
-    files.push({ path: 'lists/system/root.json', data: { timestamp: now, childLists: rootChildLists } });
+    files.push({ path: 'manifest/list-order.json', data: { timestamp: now, tree: rootTree } });
 
     await resetAndSeed(extContext, extensionId, files);
 
@@ -157,15 +157,14 @@ test.describe('Scale — larger data sets', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: {
-        timestamp: now, childLists: ['list:research'],
+      { path: 'manifest/list-order.json', data: {
+        timestamp: now, tree: [{ id: 'list:research' }],
       }},
       { path: 'lists/research.json', data: {
         slug: 'research', name: 'Research', timestamp: now,
         pins: [{ id: `page:${slug}`, pinnedAt: now }],
-        parentList: 'list:system/root', childLists: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Research': 'research' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Research': 'research' } } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Pinned Page', timestamp: now, parentIds: ['list:research'], childIds: [],
       }},

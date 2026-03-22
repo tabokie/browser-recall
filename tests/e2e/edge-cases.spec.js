@@ -144,9 +144,9 @@ test.describe('Empty and edge states', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], parentList: 'list:system/root', childLists: [] } },
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
       // No history, no page checkpoint — the URL has never been seen
     ]);
 
@@ -179,12 +179,11 @@ test.describe('Empty and edge states', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: {
-        timestamp: now, childLists: ['list:empty'],
+      { path: 'manifest/list-order.json', data: {
+        timestamp: now, tree: [{ id: 'list:empty' }],
       }},
       { path: 'lists/empty.json', data: {
         slug: 'empty', name: 'Empty List', timestamp: now, pins: [],
-        parentList: 'list:system/root', childLists: [],
       }},
     ]);
 
@@ -209,9 +208,9 @@ test.describe('Empty and edge states', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: now, childLists: ['list:reading'] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [], parentList: 'list:system/root', childLists: [] } },
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'root/Reading': 'reading' } } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Complex URL Page', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -274,12 +273,11 @@ test.describe('Unicode and special characters', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: {
-        timestamp: now, childLists: ['list:unicode-list'],
+      { path: 'manifest/list-order.json', data: {
+        timestamp: now, tree: [{ id: 'list:unicode-list' }],
       }},
       { path: 'lists/unicode-list.json', data: {
         slug: 'unicode-list', name, timestamp: now, pins: [],
-        parentList: 'list:system/root', childLists: [],
       }},
     ]);
 

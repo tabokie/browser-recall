@@ -13,14 +13,13 @@
 
   lists/                             # INTERNAL. List entity files.
     <listId>.json
-    system/
-      root.json                      #   Tree root (childLists)
 
   pages/                             # INTERNAL. Per-page entity files. GC'd when ineligible.
     <slug>.json
 
   manifest/                          # INTERNAL. Irregular-shape manifests.
-    list-name-to-id.json             #   list [parents, name] → internal ID
+    list-order.json                  #   Tree hierarchy + ordering ({ timestamp, tree: [{ id, children? }] })
+    list-name-to-id.json             #   Flat name → internal ID
     settings.json                    #   User settings
     orphaned.json                    #   Tracks deleted entities as entries [{ key, url? }] (recycle bin)
 ```
@@ -58,7 +57,7 @@ cacheSet(key, page)           ← populate session cache for next read
 
 ### UI Read Path (Cacheable Keys)
 
-UI pages read cached data via `utils.js` `readCacheable(key)`, where `key` is an entity key (e.g., `'lists'`, `'list:system/root'`, `'settings'`). Session cache stores entities under their entity keys and settings as a single `'settings'` object. Background's `readFs` handles key→filesystem resolution:
+UI pages read cached data via `utils.js` `readCacheable(key)`, where `key` is an entity key (e.g., `'manifest:list-order'`, `'list:<id>'`, `'settings'`). Session cache stores entities under their entity keys and settings as a single `'settings'` object. Background's `readFs` handles key→filesystem resolution:
 
 ```
 chrome.storage.session.get([key])     ← local session cache hit (fast, no IPC to background)
@@ -87,7 +86,7 @@ addLog(entry)
 ### Hydration (Startup)
 
 ```
-Phase 1:    Load base entities (settings, lists incl. list:system/root, shallow-page index) from filesystem
+Phase 1:    Load base entities (settings, lists, manifest:list-order, shallow-page index) from filesystem
 Phase 1.5:  Pre-load page entities referenced by logBuffer from filesystem
 Phase 2:    Replay ALL logBuffer entries via effectOf (brings session cache up-to-date)
 ```
@@ -275,12 +274,12 @@ This design exists because of the event-sourced architecture. The JSONL history 
 3. Snapshot directory `data/snapshots/<slug>-<ts>/` stays on disk
 
 **`delete_list` (replay.js):**
-1. Removes the list from parent's `childLists` (sidebar disappears)
+1. Removes list from `manifest:list-order` tree via `removeFromTree` (promotes children to parent level)
 2. Removes `list:<id>` from `parentIds` of all pinned pages
-3. Cascades delete to all descendant lists (computed from entity state by `effectOf`)
-4. Adds `list:<id>` to `manifest/orphaned.json`
-5. Removes list and descendants from `manifest/list-name-to-id.json`
-6. File `lists/<id>.json` stays on disk
+3. Adds `list:<id>` to `manifest/orphaned.json`
+4. Removes list from `manifest/list-name-to-id.json`
+5. File `lists/<id>.json` stays on disk
+6. Non-cascading — only the target list is deleted; children stay in tree
 
 **`replace_note` (replay.js):**
 1. Derives parent page from old note's `url` field, unlinks old `note:<old-slug>` from page's `childIds`

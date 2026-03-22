@@ -259,18 +259,18 @@ document.getElementById('pageNote').addEventListener('input', (e) => {
 
 // Lists — pin current page to lists
 async function loadLists() {
-  const root = await readCacheable('list:system/root');
-  const all = [], queue = [...(root?.childLists || [])], visited = new Set();
-  while (queue.length > 0) {
-    const key = queue.shift();
-    if (visited.has(key)) continue;
-    visited.add(key);
-    const entity = await readCacheable(key);
-    if (entity && !entity.deleted) {
-      all.push({ slug: entity.slug || key.slice(5), name: entity.name || '' });
-      if (entity.childLists) queue.push(...entity.childLists);
+  const order = await readCacheable('manifest:list-order');
+  const all = [];
+  async function walk(nodes) {
+    for (const node of nodes) {
+      const entity = await readCacheable(node.id);
+      if (entity && !entity.deleted) {
+        all.push({ slug: entity.slug || node.id.slice(5), name: entity.name || '' });
+      }
+      if (node.children) await walk(node.children);
     }
   }
+  await walk(order?.tree || []);
   return all;
 }
 
@@ -477,7 +477,7 @@ async function createListAndPin(name) {
   if (lists.some(c => c.name === name)) return;
 
   const listId = generateSlugFromTitle(name);
-  // saveListMeta's effectOf already adds to root's childLists — no manual append needed.
+  // saveListMeta's effectOf adds to tree manifest — no manual append needed.
   await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name });
 
   await toggleListPin(listId);

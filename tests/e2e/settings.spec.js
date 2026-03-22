@@ -58,24 +58,24 @@ test.describe('Settings persistence', () => {
     // Seed only system files — no user lists
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'lists/system/root.json', data: { timestamp: 1, childLists: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: 1, tree: [] } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
 
     // Wait for Hubs list to appear (created by first-run logic in hydrateCache)
     await helper.waitForFunction(async () => {
-      const root = await chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' });
-      return root.value?.childLists?.length > 0;
+      const root = await chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:list-order' });
+      return root.value?.tree?.length > 0;
     }, null, { timeout: 5000 });
 
     // Get root and find the Hubs list key
     const root = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:system/root' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:list-order' })
     );
-    expect(root.value.childLists.length).toBe(1);
+    expect(root.value.tree.length).toBe(1);
 
-    const hubsKey = root.value.childLists[0];
+    const hubsKey = root.value.tree[0].id;
     const hubs = await helper.evaluate((key) =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key })
     , hubsKey);

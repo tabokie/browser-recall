@@ -29,9 +29,9 @@ function makeLoad(store) {
 // Helper: base store with system entities for list tests
 function listStore(extra = {}) {
   return {
-    'manifest:name-to-id': { timestamp: 0, paths: { 'root/Test': 'test-id' } },
-    'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [], parentList: 'list:system/root', childLists: [] },
-    'list:system/root': { timestamp: 0, childLists: ['list:test-id'] },
+    'manifest:name-to-id': { timestamp: 0, paths: { 'Test': 'test-id' } },
+    'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [] },
+    'manifest:list-order': { timestamp: 0, tree: [{ id: 'list:test-id' }] },
     'manifest:orphaned': { timestamp: 0, entries: [] },
     ...extra,
   };
@@ -135,8 +135,8 @@ describe('defaultEntity', () => {
     expect(e.slug).toBe('abc');
     expect(e.pins).toEqual([]);
   });
-  it('returns root default', () => {
-    expect(defaultEntity('list:system/root')).toEqual({ timestamp: 0, childLists: [] });
+  it('returns list-order default', () => {
+    expect(defaultEntity('manifest:list-order')).toEqual({ timestamp: 0, tree: [] });
   });
   it('returns name-map default', () => {
     expect(defaultEntity('manifest:name-to-id')).toEqual({ timestamp: 0, paths: {} });
@@ -558,8 +558,8 @@ describe('effectOf: replace_note', () => {
     const store = {
       'note:n1': { slug: 'n1', url: 'https://a.com' },
       [rpPageKey]: { slug: rpPageSlug, timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
-      'manifest:name-to-id': { timestamp: 0, paths: { 'root/Test': 'test-id' } },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: 'note:n1', pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
+      'manifest:name-to-id': { timestamp: 0, paths: { 'Test': 'test-id' } },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: 'note:n1', pinnedAt: 50 }] },
       'manifest:orphaned': { timestamp: 0, entries: [] },
     };
     const result = await effectOf(
@@ -576,8 +576,8 @@ describe('effectOf: replace_note', () => {
     const store = {
       'note:n1': { slug: 'n1', url: 'https://a.com' },
       [rpPageKey]: { slug: rpPageSlug, timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
-      'manifest:name-to-id': { timestamp: 0, paths: { 'root/Test': 'test-id' } },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: 'note:n1', pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
+      'manifest:name-to-id': { timestamp: 0, paths: { 'Test': 'test-id' } },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: 'note:n1', pinnedAt: 50 }] },
       'manifest:orphaned': { timestamp: 0, entries: [] },
     };
     const result = await effectOf(
@@ -723,7 +723,7 @@ describe('effectOf: pin_to_list', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = listStore({
       [`page:${slug}`]: { slug, timestamp: 50, url: 'https://a.com', parentIds: ['list:test-id'], childIds: [] },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }] },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'pin_to_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
@@ -738,7 +738,7 @@ describe('effectOf: unpin_from_list', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = listStore({
       [`page:${slug}`]: { slug, timestamp: 50, url: 'https://a.com', parentIds: ['list:test-id'], childIds: [] },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }] },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'unpin_from_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
@@ -754,24 +754,27 @@ describe('effectOf: unpin_from_list', () => {
 // ---------------------------------------------------------------------------
 
 describe('effectOf: create_list', () => {
-  it('creates list, updates name-map and root', async () => {
+  it('creates list, updates name-map and tree manifest', async () => {
     const store = {
       'manifest:name-to-id': { timestamp: 0, paths: {} },
-      'list:system/root': { timestamp: 0, childLists: [] },
+      'manifest:list-order': { timestamp: 0, tree: [] },
     };
     const result = await effectOf(
       { timestamp: 100, action: 'create_list', name: 'My List', parents: [] },
       makeLoad(store),
     );
     // Find the generated list ID
-    const listKey = Object.keys(result).find(k => k.startsWith('list:') && k !== 'list:system/root');
+    const listKey = Object.keys(result).find(k => k.startsWith('list:'));
     expect(listKey).toBeTruthy();
     const listId = listKey.replace('list:', '');
     expect(result[listKey]).toBeTruthy();
     expect(result[listKey].name).toBe('My List');
-    expect(result[listKey].parentList).toBe('list:system/root');
-    expect(result['list:system/root'].childLists).toContain(listKey);
-    expect(result['manifest:name-to-id'].paths['root/My List']).toBe(listId);
+    expect(result[listKey].parentList).toBeUndefined();
+    // Tree manifest should contain the new list as top-level node
+    const tree = result['manifest:list-order'].tree;
+    expect(tree.some(n => n.id === listKey)).toBe(true);
+    // Flat name-to-id
+    expect(result['manifest:name-to-id'].paths['My List']).toBe(listId);
   });
 
   it('creates nested list under parent', async () => {
@@ -780,18 +783,23 @@ describe('effectOf: create_list', () => {
       { timestamp: 100, action: 'create_list', name: 'Child', parents: ['root', 'Test'] },
       makeLoad(store),
     );
-    const childKey = Object.keys(result).find(k => k.startsWith('list:') && k !== 'list:system/root' && k !== 'list:test-id');
+    const childKey = Object.keys(result).find(k => k.startsWith('list:') && k !== 'list:test-id');
     expect(childKey).toBeTruthy();
     const childId = childKey.replace('list:', '');
-    expect(result[childKey].parentList).toBe('list:test-id');
-    expect(result['list:test-id'].childLists).toContain(childKey);
-    expect(result['manifest:name-to-id'].paths['root/Test/Child']).toBe(childId);
+    expect(result[childKey].parentList).toBeUndefined();
+    // Tree manifest should have Child nested under Test
+    const tree = result['manifest:list-order'].tree;
+    const testNode = tree.find(n => n.id === 'list:test-id');
+    expect(testNode).toBeTruthy();
+    expect(testNode.children.some(n => n.id === childKey)).toBe(true);
+    // Flat name-to-id
+    expect(result['manifest:name-to-id'].paths['Child']).toBe(childId);
   });
 
   it('uses provided listId when present (migrated events)', async () => {
     const store = {
       'manifest:name-to-id': { timestamp: 0, paths: {} },
-      'list:system/root': { timestamp: 0, childLists: [] },
+      'manifest:list-order': { timestamp: 0, tree: [] },
     };
     const result = await effectOf(
       { timestamp: 100, action: 'create_list', name: 'Cinema', parents: [], listId: 'cinema-gfl1h7' },
@@ -799,8 +807,9 @@ describe('effectOf: create_list', () => {
     );
     expect(result['list:cinema-gfl1h7']).toBeTruthy();
     expect(result['list:cinema-gfl1h7'].name).toBe('Cinema');
-    expect(result['list:system/root'].childLists).toContain('list:cinema-gfl1h7');
-    expect(result['manifest:name-to-id'].paths['root/Cinema']).toBe('cinema-gfl1h7');
+    const tree = result['manifest:list-order'].tree;
+    expect(tree.some(n => n.id === 'list:cinema-gfl1h7')).toBe(true);
+    expect(result['manifest:name-to-id'].paths['Cinema']).toBe('cinema-gfl1h7');
   });
 });
 
@@ -809,15 +818,16 @@ describe('effectOf: create_list', () => {
 // ---------------------------------------------------------------------------
 
 describe('effectOf: update_list', () => {
-  it('renames list and updates name-map', async () => {
+  it('renames list and updates flat name-map (no cascade)', async () => {
     const store = listStore();
     const result = await effectOf(
       { timestamp: 100, action: 'update_list', parents: ['root'], name: 'Test', newName: 'Renamed' },
       makeLoad(store),
     );
     expect(result['list:test-id'].name).toBe('Renamed');
-    expect(result['manifest:name-to-id'].paths['root/Renamed']).toBe('test-id');
-    expect(result['manifest:name-to-id'].paths['root/Test']).toBeUndefined();
+    // Flat name-to-id: old name removed, new name added
+    expect(result['manifest:name-to-id'].paths['Renamed']).toBe('test-id');
+    expect(result['manifest:name-to-id'].paths['Test']).toBeUndefined();
   });
 
 });
@@ -827,21 +837,24 @@ describe('effectOf: update_list', () => {
 // ---------------------------------------------------------------------------
 
 describe('effectOf: delete_list', () => {
-  it('soft-deletes, removes from parent and name-map, orphans', async () => {
+  it('soft-deletes, removes from tree and name-map, orphans', async () => {
     const store = listStore();
     const result = await effectOf(
       { timestamp: 100, action: 'delete_list', parents: ['root'], name: 'Test' },
       makeLoad(store),
     );
     expect(result['list:test-id'].deleted).toBe(true);
-    expect(result['list:system/root'].childLists).not.toContain('list:test-id');
-    expect(result['manifest:name-to-id'].paths['root/Test']).toBeUndefined();
+    // Removed from tree manifest
+    const tree = result['manifest:list-order'].tree;
+    expect(tree.some(n => n.id === 'list:test-id')).toBe(false);
+    // Removed from flat name-to-id
+    expect(result['manifest:name-to-id'].paths['Test']).toBeUndefined();
     expect(result['manifest:orphaned'].entries.map(e => e.key)).toContain('list:test-id');
   });
 
   it('noop if already deleted', async () => {
     const store = listStore({
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', deleted: true, pins: [], parentList: 'list:system/root', childLists: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', deleted: true, pins: [] },
     });
     const load = async (key, opts) => {
       const e = store[key] ?? null;
@@ -855,28 +868,39 @@ describe('effectOf: delete_list', () => {
     expect(Object.keys(result)).toHaveLength(0);
   });
 
-  it('cascades to child lists', async () => {
+  it('promotes children when deleting a parent (non-cascading)', async () => {
     const store = listStore({
-      'manifest:name-to-id': { timestamp: 0, paths: { 'root/Test': 'test-id', 'root/Test/Child': 'child-id' } },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [], parentList: 'list:system/root', childLists: ['list:child-id'] },
-      'list:child-id': { timestamp: 0, slug: 'child-id', name: 'Child', pins: [], parentList: 'list:test-id', childLists: [] },
+      'manifest:name-to-id': { timestamp: 0, paths: { 'Test': 'test-id', 'Child': 'child-id' } },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [] },
+      'list:child-id': { timestamp: 0, slug: 'child-id', name: 'Child', pins: [] },
+      'manifest:list-order': { timestamp: 0, tree: [
+        { id: 'list:test-id', children: [{ id: 'list:child-id' }] }
+      ] },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'delete_list', parents: ['root'], name: 'Test' },
       makeLoad(store),
     );
-    expect(result['list:child-id'].deleted).toBe(true);
-    expect(result['manifest:orphaned'].entries.map(e => e.key)).toContain('list:child-id');
-    expect(result['manifest:name-to-id'].paths['root/Test/Child']).toBeUndefined();
+    // Parent is deleted
+    expect(result['list:test-id'].deleted).toBe(true);
+    // Child is NOT deleted (non-cascading)
+    expect(result['list:child-id']).toBeUndefined();
+    // Child is promoted to top-level in tree
+    const tree = result['manifest:list-order'].tree;
+    expect(tree.some(n => n.id === 'list:child-id')).toBe(true);
+    expect(tree.some(n => n.id === 'list:test-id')).toBe(false);
+    // Only parent removed from name-to-id
+    expect(result['manifest:name-to-id'].paths['Test']).toBeUndefined();
+    expect(result['manifest:name-to-id'].paths['Child']).toBe('child-id');
   });
 });
 
 describe('effectOf: restore_list', () => {
-  it('restores to root, re-adds to name-map, unorphans', async () => {
+  it('restores to top-level in tree, re-adds to name-map, unorphans', async () => {
     const store = {
       'manifest:name-to-id': { timestamp: 0, paths: {} },
-      'list:test-id': { slug: 'test-id', name: 'Test', deleted: true, timestamp: 50, pins: [], parentList: 'list:system/root', childLists: [] },
-      'list:system/root': { timestamp: 0, childLists: [] },
+      'list:test-id': { slug: 'test-id', name: 'Test', deleted: true, timestamp: 50, pins: [] },
+      'manifest:list-order': { timestamp: 0, tree: [] },
       'manifest:orphaned': { timestamp: 50, entries: [{ key: 'list:test-id' }] },
     };
     const load = async (key, opts) => {
@@ -889,8 +913,11 @@ describe('effectOf: restore_list', () => {
       load,
     );
     expect(result['list:test-id'].deleted).toBe(false);
-    expect(result['list:system/root'].childLists).toContain('list:test-id');
-    expect(result['manifest:name-to-id'].paths['root/Test']).toBe('test-id');
+    // Added to tree manifest as top-level
+    const tree = result['manifest:list-order'].tree;
+    expect(tree.some(n => n.id === 'list:test-id')).toBe(true);
+    // Flat name-to-id
+    expect(result['manifest:name-to-id'].paths['Test']).toBe('test-id');
     expect(result['manifest:orphaned'].entries.map(e => e.key)).not.toContain('list:test-id');
   });
 });
@@ -968,27 +995,46 @@ describe('effectOf: visit_page — REFERRER_CAP', () => {
   });
 });
 
-// effectOf: reparent_list
+// effectOf: update_list_tree
 // ---------------------------------------------------------------------------
 
-describe('effectOf: reparent_list', () => {
-  it('moves list between parents and updates name-map', async () => {
+describe('effectOf: update_list_tree', () => {
+  it('writes new tree structure (LWW)', async () => {
     const store = {
-      'manifest:name-to-id': { timestamp: 0, paths: { 'root/A': 'a-id', 'root/B': 'b-id' } },
-      'list:a-id': { timestamp: 0, slug: 'a-id', name: 'A', pins: [], parentList: 'list:system/root', childLists: [] },
-      'list:b-id': { timestamp: 0, slug: 'b-id', name: 'B', pins: [], parentList: 'list:system/root', childLists: [] },
-      'list:system/root': { timestamp: 0, childLists: ['list:a-id', 'list:b-id'] },
-      'manifest:orphaned': { timestamp: 0, entries: [] },
+      'manifest:list-order': { timestamp: 0, tree: [{ id: 'list:a-id' }, { id: 'list:b-id' }] },
     };
+    const newTree = [{ id: 'list:a-id', children: [{ id: 'list:b-id' }] }];
     const result = await effectOf(
-      { timestamp: 100, action: 'reparent_list', parents: ['root'], name: 'B', toParents: ['root', 'A'] },
+      { timestamp: 100, action: 'update_list_tree', tree: newTree },
       makeLoad(store),
     );
-    expect(result['list:b-id'].parentList).toBe('list:a-id');
-    expect(result['list:system/root'].childLists).not.toContain('list:b-id');
-    expect(result['list:a-id'].childLists).toContain('list:b-id');
-    expect(result['manifest:name-to-id'].paths['root/A/B']).toBe('b-id');
-    expect(result['manifest:name-to-id'].paths['root/B']).toBeUndefined();
+    expect(result['manifest:list-order'].tree).toEqual(newTree);
+    expect(result['manifest:list-order'].timestamp).toBe(100);
+  });
+
+  it('skips if older than current tree timestamp (LWW)', async () => {
+    const store = {
+      'manifest:list-order': { timestamp: 200, tree: [{ id: 'list:a-id' }] },
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'update_list_tree', tree: [{ id: 'list:b-id' }] },
+      makeLoad(store),
+    );
+    // Stale event — no changes
+    expect(Object.keys(result)).toHaveLength(0);
+  });
+
+  it('does not modify name-to-id (tree-independent)', async () => {
+    const store = {
+      'manifest:list-order': { timestamp: 0, tree: [{ id: 'list:a-id' }, { id: 'list:b-id' }] },
+      'manifest:name-to-id': { timestamp: 0, paths: { 'A': 'a-id', 'B': 'b-id' } },
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'update_list_tree', tree: [{ id: 'list:a-id', children: [{ id: 'list:b-id' }] }] },
+      makeLoad(store),
+    );
+    // name-to-id should NOT be in the result (not modified)
+    expect(result['manifest:name-to-id']).toBeUndefined();
   });
 });
 
@@ -1039,7 +1085,7 @@ describe('effectOf: page GC on unpin_from_list', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = listStore({
       [`page:${slug}`]: { slug, timestamp: 50, url: 'https://a.com', parentIds: ['list:test-id'], childIds: [] },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }] },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'unpin_from_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
@@ -1052,7 +1098,7 @@ describe('effectOf: page GC on unpin_from_list', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = listStore({
       [`page:${slug}`]: { slug, timestamp: 50, url: 'https://a.com', parentIds: ['list:test-id'], childIds: ['note:n1'] },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }] },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'unpin_from_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
@@ -1066,7 +1112,7 @@ describe('effectOf: page GC on unpin_from_list', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = listStore({
       [`page:${slug}`]: { slug, timestamp: 50, url: 'https://a.com', parentIds: ['list:test-id'], childIds: [], user_title: 'Custom' },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }], parentList: 'list:system/root', childLists: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }] },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'unpin_from_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
@@ -1187,9 +1233,7 @@ describe('effectOf: add_rule', () => {
     const store = listStore({
       'list:test-id': {
         timestamp: 50, slug: 'test-id', name: 'Test', pins: [],
-        rules: [{ id: ruleId, type: 'keyword', config: { pattern: 'test' }, createdAt: 50 }],
-        parentList: 'list:system/root', childLists: [],
-      },
+        rules: [{ id: ruleId, type: 'keyword', config: { pattern: 'test' }, createdAt: 50 }],      },
     });
     const result = await effectOf(
       {
@@ -1240,9 +1284,7 @@ describe('effectOf: remove_rule', () => {
     const store = listStore({
       'list:test-id': {
         timestamp: 50, slug: 'test-id', name: 'Test', pins: [],
-        rules: [{ id: 'rule-k-abc-1234', type: 'keyword', config: { pattern: 'test' }, createdAt: 50 }],
-        parentList: 'list:system/root', childLists: [],
-      },
+        rules: [{ id: 'rule-k-abc-1234', type: 'keyword', config: { pattern: 'test' }, createdAt: 50 }],      },
     });
     const result = await effectOf(
       { timestamp: 100, action: 'remove_rule', parents: ['root'], name: 'Test', ruleId: 'rule-k-abc-1234' },
@@ -1280,9 +1322,7 @@ describe('effectOf: update_rule', () => {
           id: 'rule-k-abc-1234', type: 'keyword',
           config: { pattern: 'old', fields: ['title'] },
           createdAt: 50,
-        }],
-        parentList: 'list:system/root', childLists: [],
-      },
+        }],      },
     });
     const result = await effectOf(
       {

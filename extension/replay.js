@@ -56,11 +56,11 @@ export function defaultEntity(key) {
   }
   if (key === 'manifest:settings') return { timestamp: 0 };
   if (key === 'manifest:orphaned') return { timestamp: 0, entries: [] };
-  if (key === 'list:system/root') return { timestamp: 0, childLists: [] };
+  if (key === 'manifest:list-order') return { timestamp: 0, tree: [] };
   if (key === 'manifest:name-to-id') return { timestamp: 0, paths: {} };
   if (key.startsWith('list:')) {
     const slug = key.slice('list:'.length);
-    return { timestamp: 0, slug, name: '', pins: [], rules: [], parentList: null, childLists: [] };
+    return { timestamp: 0, slug, name: '', pins: [], rules: [] };
   }
   return null;
 }
@@ -68,6 +68,79 @@ export function defaultEntity(key) {
 /** Load entity, falling back to defaultEntity for non-page/non-note keys. */
 async function loadOrDefault(key, load, opts) {
   return (await load(key, opts)) ?? defaultEntity(key);
+}
+
+// ---------------------------------------------------------------------------
+// Tree manifest helpers (for manifest:list-order)
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove a node from the tree by ID. Its children are promoted to the
+ * same position in the parent array (splice in place).
+ * Returns a new tree array (does not mutate input).
+ */
+function removeFromTree(tree, listId) {
+  const out = [];
+  for (const node of tree) {
+    if (node.id === listId) {
+      // Promote children to this level
+      if (node.children) {
+        for (const child of node.children) {
+          out.push(deepCloneTree(child));
+        }
+      }
+    } else {
+      const cloned = { id: node.id };
+      if (node.children) {
+        cloned.children = removeFromTree(node.children, listId);
+      }
+      out.push(cloned);
+    }
+  }
+  return out;
+}
+
+/**
+ * Append a node to the tree under a given parent.
+ * If parentId is null or not found, appends to top level.
+ * Returns a new tree array (does not mutate input).
+ */
+function appendToTree(tree, listId, parentId) {
+  const newNode = { id: listId };
+  if (!parentId) {
+    return [...tree.map(deepCloneTree), newNode];
+  }
+  // Try to find parentId in tree and append there
+  const cloned = tree.map(deepCloneTree);
+  if (appendToTreeRecursive(cloned, listId, parentId)) {
+    return cloned;
+  }
+  // Parent not found — append to top level
+  cloned.push(newNode);
+  return cloned;
+}
+
+/** Mutates `nodes` in place. Returns true if parent was found. */
+function appendToTreeRecursive(nodes, listId, parentId) {
+  for (const node of nodes) {
+    if (node.id === parentId) {
+      if (!node.children) node.children = [];
+      node.children.push({ id: listId });
+      return true;
+    }
+    if (node.children && appendToTreeRecursive(node.children, listId, parentId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function deepCloneTree(node) {
+  const cloned = { id: node.id };
+  if (node.children) {
+    cloned.children = node.children.map(deepCloneTree);
+  }
+  return cloned;
 }
 
 /**
@@ -146,10 +219,9 @@ export async function effectOf(entry, load) {
     if (name.startsWith('system/')) {
       return `list:${name}`;
     }
-    // User lists: resolve via manifest:name-to-id
+    // User lists: resolve via flat manifest:name-to-id (name → id)
     const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
-    const path = parents.length === 0 ? `root/${name}` : `${parents.join('/')}/${name}`;
-    const id = nameToId.paths?.[path];
+    const id = nameToId.paths?.[name];
     return id ? `list:${id}` : null;
   }
 
@@ -637,45 +709,37 @@ export async function effectOf(entry, load) {
   }
 
   // --- create_list ---
-  // Creates a new list entity. Generates internal ID, updates name-to-id, links to parent.
+  // Creates a new list entity. Generates internal ID, updates name-to-id and tree manifest.
   if (entry.action === 'create_list') {
     const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
     const paths = { ...nameToId.paths };
 
-    // Resolve parent from entry.parents array
+    // Resolve parent from entry.parents array (for tree placement)
     const parents = entry.parents || [];
-    let parentKey;
-    if (parents.length === 0) {
-      parentKey = 'list:system/root';
-    } else {
+    let parentKey = null;
+    if (parents.length > 0) {
       const parentName = parents[parents.length - 1];
       const parentParents = parents.slice(0, -1);
       parentKey = await resolveListKey(parentParents, parentName);
-      if (!parentKey) parentKey = 'list:system/root';
     }
 
     // Use provided listId (migrated events) or generate from name+timestamp (new events)
     const listId = entry.listId || (entry.name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').substring(0, 30) + '-' + Math.abs(hashString(entry.name + entry.timestamp)).toString(36));
     const listKey = `list:${listId}`;
 
-    // Create list entity
+    // Create list entity (no parentList/childLists)
     const entity = defaultEntity(listKey);
     entity.name = entry.name;
-    entity.parentList = parentKey;
     entity.timestamp = entry.timestamp;
     result[listKey] = entity;
 
-    // Add to parent's childLists
-    const parent = result[parentKey] || await loadOrDefault(parentKey, load);
-    const childLists = [...(parent.childLists || [])];
-    if (!childLists.includes(listKey)) childLists.push(listKey);
-    result[parentKey] = { ...parent, timestamp: entry.timestamp, childLists };
+    // Append to tree manifest
+    const treeEntity = result['manifest:list-order'] || await loadOrDefault('manifest:list-order', load);
+    const newTree = appendToTree(treeEntity.tree || [], listKey, parentKey);
+    result['manifest:list-order'] = { ...treeEntity, timestamp: entry.timestamp, tree: newTree };
 
-    // Update name-to-id
-    const fullPath = parents.length === 0
-      ? `root/${entry.name}`
-      : `${parents.join('/')}/${entry.name}`;
-    paths[fullPath] = listId;
+    // Update flat name-to-id
+    paths[entry.name] = listId;
     result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
 
     return result;
@@ -701,29 +765,13 @@ export async function effectOf(entry, load) {
       const oldName = entity.name;
       updated.name = entry.newName;
 
-      // Update name-to-id: rename this path and all descendant paths
+      // Update flat name-to-id: delete old name, add new name (no cascade)
       if (oldName !== entry.newName) {
         const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
         const paths = { ...nameToId.paths };
-        const oldPath = entry.parents.length === 0 ? `root/${entry.name}` : `${entry.parents.join('/')}/${entry.name}`;
-        const parentPath = oldPath.substring(0, oldPath.lastIndexOf('/'));
-        const newPath = `${parentPath}/${entry.newName}`;
-
-        // Rename: delete old path, add new path
-        const listId = paths[oldPath];
-        delete paths[oldPath];
-        paths[newPath] = listId;
-
-        // Rename all descendant paths
-        const oldPrefix = oldPath + '/';
-        for (const [p, id] of Object.entries(paths)) {
-          if (p.startsWith(oldPrefix)) {
-            const suffix = p.slice(oldPrefix.length);
-            delete paths[p];
-            paths[`${newPath}/${suffix}`] = id;
-          }
-        }
-
+        const listId = listKey.slice('list:'.length);
+        delete paths[oldName];
+        paths[entry.newName] = listId;
         result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
       }
     }
@@ -732,88 +780,17 @@ export async function effectOf(entry, load) {
     return result;
   }
 
-  // --- reparent_list ---
-  // Move list between parents. Uses full childNames for destination parent (last-write-wins).
-  if (entry.action === 'reparent_list') {
-    const listKey = await resolveListKey(entry.parents, entry.name);
-    if (!listKey) return result;
-
-    if (listKey.startsWith('list:system/')) return result;
-
-    const entity = await loadOrDefault(listKey, load);
-    const fromKey = entity.parentList || 'list:system/root';
-
-    // Resolve destination parent from toParents array
-    const toParents = entry.toParents || [];
-    let toKey;
-    if (toParents.length === 0) {
-      toKey = 'list:system/root';
-    } else {
-      const toName = toParents[toParents.length - 1];
-      const toParentParents = toParents.slice(0, -1);
-      toKey = await resolveListKey(toParentParents, toName);
-      if (!toKey) toKey = 'list:system/root';
-    }
-
-    // Remove from source parent's childLists
-    const fromEntity = result[fromKey] || await loadOrDefault(fromKey, load);
-    fromEntity.childLists = (fromEntity.childLists || []).filter(k => k !== listKey);
-    result[fromKey] = { ...fromEntity, timestamp: entry.timestamp };
-
-    // Update child's parentList
-    entity.parentList = toKey;
-    result[listKey] = { ...entity, timestamp: entry.timestamp };
-
-    // Update name-to-id FIRST (before childNames resolution, since moved list's path changes)
-    const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
-    const paths = { ...nameToId.paths };
-    const oldPath = entry.parents.length === 0 ? `root/${entry.name}` : `${entry.parents.join('/')}/${entry.name}`;
-    const toPath = toParents.length === 0 ? 'root' : toParents.join('/');
-    const newPath = `${toPath}/${entry.name}`;
-
-    if (oldPath !== newPath) {
-      const listId = paths[oldPath];
-      delete paths[oldPath];
-      paths[newPath] = listId;
-
-      // Move all descendant paths
-      const oldPrefix = oldPath + '/';
-      for (const [p, id] of Object.entries(paths)) {
-        if (p.startsWith(oldPrefix)) {
-          const suffix = p.slice(oldPrefix.length);
-          delete paths[p];
-          paths[`${newPath}/${suffix}`] = id;
-        }
-      }
-
-      result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
-    }
-
-    // Set destination parent's childLists from childNames (complete, last-write-wins)
-    const toEntity = (toKey === fromKey) ? result[fromKey] : (result[toKey] || await loadOrDefault(toKey, load));
-
-    if (entry.childNames) {
-      // Resolve child names to keys using the UPDATED name-to-id
-      const updatedNameToId = result['manifest:name-to-id'] || nameToId;
-      const childKeys = [];
-      for (const cname of entry.childNames) {
-        const childPath = `${toPath}/${cname}`;
-        const childId = updatedNameToId.paths?.[childPath];
-        if (childId) childKeys.push(`list:${childId}`);
-      }
-      result[toKey] = { ...toEntity, timestamp: entry.timestamp, childLists: childKeys };
-    } else {
-      // Fallback: just append to destination (for simple cases)
-      const cl = [...(toEntity.childLists || [])].filter(k => k !== listKey);
-      cl.push(listKey);
-      result[toKey] = { ...toEntity, timestamp: entry.timestamp, childLists: cl };
-    }
-
+  // --- update_list_tree ---
+  // Write the full tree structure. LWW by timestamp.
+  if (entry.action === 'update_list_tree') {
+    const treeEntity = result['manifest:list-order'] || await loadOrDefault('manifest:list-order', load);
+    if (treeEntity.timestamp && treeEntity.timestamp >= entry.timestamp) return result;
+    result['manifest:list-order'] = { ...treeEntity, timestamp: entry.timestamp, tree: entry.tree };
     return result;
   }
 
   // --- delete_list ---
-  // Soft-delete a list. Cascading effects derived from entity state.
+  // Soft-delete a single list. Non-cascading — children promoted in tree.
   if (entry.action === 'delete_list') {
     const listKey = await resolveListKey(entry.parents, entry.name);
     if (!listKey) return result;
@@ -827,23 +804,9 @@ export async function effectOf(entry, load) {
     // Mark deleted
     result[listKey] = { ...entity, timestamp: entry.timestamp, deleted: true };
 
-    // Remove from parent's childLists
-    const parentKey = entity.parentList || 'list:system/root';
-    const parent = result[parentKey] || await loadOrDefault(parentKey, load);
-    result[parentKey] = { ...parent, timestamp: entry.timestamp, childLists: (parent.childLists || []).filter(k => k !== listKey) };
-
-    // Soft-delete all descendant lists (BFS)
-    const queue = [...(entity.childLists || [])];
-    const visited = new Set();
-    while (queue.length > 0) {
-      const childKey = queue.shift();
-      if (visited.has(childKey)) continue;
-      visited.add(childKey);
-      const child = result[childKey] || await loadOrDefault(childKey, load);
-      result[childKey] = { ...child, timestamp: entry.timestamp, deleted: true };
-      await orphan(childKey, entry.timestamp);
-      if (child.childLists) queue.push(...child.childLists);
-    }
+    // Remove from tree manifest (promotes children to parent level)
+    const treeEntity = result['manifest:list-order'] || await loadOrDefault('manifest:list-order', load);
+    result['manifest:list-order'] = { ...treeEntity, timestamp: entry.timestamp, tree: removeFromTree(treeEntity.tree || [], listKey) };
 
     // Remove list key from all pinned page parentIds (notes don't track parentIds)
     const pins = entity.pins || [];
@@ -857,15 +820,11 @@ export async function effectOf(entry, load) {
       }
     }
 
-    // Remove from name-to-id (this list and all descendants)
+    // Remove from flat name-to-id
     const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
     const paths = { ...nameToId.paths };
-    const listPath = entry.parents.length === 0 ? `root/${entry.name}` : `${entry.parents.join('/')}/${entry.name}`;
-    delete paths[listPath];
-    const pathPrefix = listPath + '/';
-    for (const p of Object.keys(paths)) {
-      if (p.startsWith(pathPrefix)) delete paths[p];
-    }
+    const listName = entity.name || entry.name;
+    delete paths[listName];
     result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
 
     await orphan(listKey, entry.timestamp);
@@ -873,14 +832,13 @@ export async function effectOf(entry, load) {
   }
 
   // --- restore_list ---
-  // Restore a deleted list. Restores to root by default.
+  // Restore a deleted list. Adds to top-level of tree manifest.
   if (entry.action === 'restore_list') {
     // Resolve by name-to-id first; if not found (deleted), try to find by searching entities
     let listKey = await resolveListKey(entry.parents, entry.name);
 
     // Deleted lists are removed from name-to-id, so resolve from orphaned entities
     if (!listKey) {
-      // Scan orphaned entries for a list matching this name
       const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
       for (const oe of (orphanedEntity.entries || [])) {
         const key = oe.key;
@@ -897,29 +855,24 @@ export async function effectOf(entry, load) {
     // Load list entity with includeDeleted to preserve original fields
     const entity = await loadOrDefault(listKey, load, { includeDeleted: true });
     const restored = { ...entity, deleted: false, timestamp: entry.timestamp };
-
-    // Re-add to root's childLists (restored lists always go to root)
-    const root = result['list:system/root'] || await loadOrDefault('list:system/root', load);
-    const rootCL = [...(root.childLists || [])];
-    if (!rootCL.includes(listKey)) rootCL.push(listKey);
-    result['list:system/root'] = { ...root, timestamp: entry.timestamp, childLists: rootCL };
-    restored.parentList = 'list:system/root';
     result[listKey] = restored;
 
-    // Restore all descendants
-    const queue = [...(entity.childLists || [])];
-    const visited = new Set();
-    while (queue.length > 0) {
-      const childKey = queue.shift();
-      if (visited.has(childKey)) continue;
-      visited.add(childKey);
-      const child = result[childKey] || await loadOrDefault(childKey, load, { includeDeleted: true });
-      result[childKey] = { ...child, deleted: false, timestamp: entry.timestamp };
-      await unorphan(childKey, entry.timestamp);
-      if (child.childLists) queue.push(...child.childLists);
+    // Append to tree manifest as top-level node
+    const treeEntity = result['manifest:list-order'] || await loadOrDefault('manifest:list-order', load);
+    const tree = treeEntity.tree || [];
+    // Only add if not already in tree
+    const inTree = (function findInTree(nodes) {
+      for (const n of nodes) {
+        if (n.id === listKey) return true;
+        if (n.children && findInTree(n.children)) return true;
+      }
+      return false;
+    })(tree);
+    if (!inTree) {
+      result['manifest:list-order'] = { ...treeEntity, timestamp: entry.timestamp, tree: [...tree.map(deepCloneTree), { id: listKey }] };
     }
 
-    // Restore page parentIds for pins (notes don't track parentIds)
+    // Restore page parentIds for pins
     const pins = restored.pins || [];
     for (const pin of pins) {
       if (pin.id.startsWith(PAGE_PREFIX)) {
@@ -931,21 +884,12 @@ export async function effectOf(entry, load) {
       }
     }
 
-    // Re-add to name-to-id
+    // Re-add to flat name-to-id
     const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
     const paths = { ...nameToId.paths };
     const listName = restored.name || entry.name;
     const listId = listKey.slice('list:'.length);
-    paths[`root/${listName}`] = listId;
-    // Also re-add descendants
-    for (const childKey of visited) {
-      const child = result[childKey];
-      if (child?.name) {
-        const childId = childKey.slice('list:'.length);
-        // Simplified: put descendants directly under restored list
-        paths[`root/${listName}/${child.name}`] = childId;
-      }
-    }
+    paths[listName] = listId;
     result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
 
     await unorphan(listKey, entry.timestamp);

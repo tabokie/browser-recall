@@ -100,12 +100,11 @@ describe('readCacheable / readFs', () => {
         return { success: true, lists: [{ slug: 'a', name: 'A' }, { slug: 'b', name: 'B' }] };
       case 'loadNameMap':
         return { success: true, entity: { timestamp: 42, paths: { 'my-list': 'My List' } } };
+      case 'loadListOrder':
+        return { success: true, entity: { timestamp: 0, tree: [{ id: 'list:b' }, { id: 'list:a' }] } };
       case 'loadListEntity':
         if (msg.listId === 'my-custom-list') {
-          return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] } };
-        }
-        if (msg.listId === 'system/root') {
-          return { success: true, entity: { timestamp: 0, childLists: ['list:b', 'list:a'] } };
+          return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }] } };
         }
         return { success: true, entity: null };
       default:
@@ -135,6 +134,10 @@ describe('readCacheable / readFs', () => {
           const r = requestOffscreen({ action: 'loadNameMap' });
           value = r?.entity || { timestamp: 0, paths: {} }; break;
         }
+        case 'manifest:list-order': {
+          const r = requestOffscreen({ action: 'loadListOrder' });
+          value = r?.entity || { timestamp: 0, tree: [] }; break;
+        }
         default: {
           if (key.startsWith('list:')) {
             const listId = key.slice('list:'.length);
@@ -156,36 +159,32 @@ describe('readCacheable / readFs', () => {
       return readFs(key);
     };
 
-    // Traverse tree from root to get all list keys (mirrors background.js getAllListKeys)
+    // Walk tree manifest to get all list keys (mirrors background.js getAllListKeys)
     getAllListKeys = async () => {
-      const root = await readCacheable('list:system/root');
+      const order = await readCacheable('manifest:list-order');
       const result = [];
-      const queue = [...(root?.childLists || [])];
-      const visited = new Set();
-      while (queue.length > 0) {
-        const key = queue.shift();
-        if (visited.has(key)) continue;
-        visited.add(key);
-        result.push(key);
-        const entity = await readCacheable(key);
-        if (entity?.childLists) queue.push(...entity.childLists);
+      function walk(nodes) {
+        for (const node of (nodes || [])) {
+          result.push(node.id);
+          if (node.children) walk(node.children);
+        }
       }
+      walk(order?.tree || []);
       return result;
     };
   });
 
   // ── Session hit ──────────────────────────────────────────────────────
   it('returns cached value from session without offscreen call', async () => {
-    await session.set({ 'list:my-custom-list': { timestamp: 0, slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:example-abc', pinnedAt: 1 }], parentList: 'list:system/root', childLists: [] } });
+    await session.set({ 'list:my-custom-list': { timestamp: 0, slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:example-abc', pinnedAt: 1 }] } });
     const result = await readCacheable('list:my-custom-list');
-    expect(result).toEqual({ timestamp: 0, slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:example-abc', pinnedAt: 1 }], parentList: 'list:system/root', childLists: [] });
+    expect(result).toEqual({ timestamp: 0, slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:example-abc', pinnedAt: 1 }] });
     expect(offscreenCalls).toEqual([]); // No offscreen call
   });
 
-  it('getAllListKeys returns list keys from cached root without offscreen call', async () => {
+  it('getAllListKeys returns list keys from cached tree without offscreen call', async () => {
     await session.set({
-      'list:system/root': { timestamp: 0, childLists: ['list:x'] },
-      'list:x': { slug: 'x', name: 'X', parentList: 'list:system/root', childLists: [] },
+      'manifest:list-order': { timestamp: 0, tree: [{ id: 'list:x' }] },
     });
     const result = await getAllListKeys();
     expect(result).toEqual(['list:x']);
@@ -193,15 +192,11 @@ describe('readCacheable / readFs', () => {
   });
 
   // ── Session miss → filesystem fallback ───────────────────────────────
-  it('getAllListKeys falls back to filesystem for root then traverses tree', async () => {
-    // Root not in session — triggers readFs('list:system/root')
-    await session.set({
-      'list:b': { slug: 'b', name: 'B', parentList: 'list:system/root', childLists: [] },
-      'list:a': { slug: 'a', name: 'A', parentList: 'list:system/root', childLists: [] },
-    });
+  it('getAllListKeys falls back to filesystem for list-order then walks tree', async () => {
+    // list-order not in session — triggers readFs('manifest:list-order')
     const result = await getAllListKeys();
     expect(result).toEqual(['list:b', 'list:a']);
-    expect(offscreenCalls.some(c => c.action === 'loadListEntity' && c.listId === 'system/root')).toBe(true);
+    expect(offscreenCalls.some(c => c.action === 'loadListOrder')).toBe(true);
   });
 
   it('falls back to filesystem for name-to-id and caches result', async () => {
@@ -213,9 +208,9 @@ describe('readCacheable / readFs', () => {
 
   it('falls back to filesystem for custom list and caches result', async () => {
     const result = await readCacheable('list:my-custom-list');
-    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
+    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }] });
     expect(offscreenCalls.some(c => c.action === 'loadListEntity')).toBe(true);
-    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
+    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }] });
   });
 
   // ── Settings batch-load ──────────────────────────────────────────────
@@ -238,21 +233,19 @@ describe('readCacheable / readFs', () => {
   });
 
   // ── Lists ordering ───────────────────────────────────────────────────
-  it('getAllListKeys returns keys in childLists order', async () => {
+  it('getAllListKeys returns keys in tree order', async () => {
     await session.set({
-      'list:system/root': { timestamp: 0, childLists: ['list:b', 'list:a'] },
-      'list:b': { slug: 'b', name: 'B', parentList: 'list:system/root', childLists: [] },
-      'list:a': { slug: 'a', name: 'A', parentList: 'list:system/root', childLists: [] },
+      'manifest:list-order': { timestamp: 0, tree: [{ id: 'list:b' }, { id: 'list:a' }] },
     });
     const result = await getAllListKeys();
-    // 'b' should come before 'a' because childLists = [list:b, list:a]
+    // 'b' should come before 'a' because tree = [b, a]
     expect(result[0]).toBe('list:b');
     expect(result[1]).toBe('list:a');
     expect(offscreenCalls).toEqual([]);
   });
 
-  it('returns empty array when root has no children', async () => {
-    await session.set({ 'list:system/root': { timestamp: 0, childLists: [] } });
+  it('returns empty array when tree is empty', async () => {
+    await session.set({ 'manifest:list-order': { timestamp: 0, tree: [] } });
     const result = await getAllListKeys();
     expect(result).toEqual([]);
     expect(offscreenCalls).toEqual([]);
@@ -297,10 +290,10 @@ describe('readCacheable / readFs', () => {
   // ── #4: User list keys fall back to filesystem ─────────────────────
   it('falls back to filesystem for user list keys on session miss', async () => {
     const result = await readCacheable('list:my-custom-list');
-    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
+    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }] });
     expect(offscreenCalls.some(c => c.action === 'loadListEntity' && c.listId === 'my-custom-list')).toBe(true);
     // Should be cached after first load
-    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }], parentList: 'list:system/root', childLists: [] });
+    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }] });
   });
 
   it('returns null for user list key that does not exist on disk', async () => {

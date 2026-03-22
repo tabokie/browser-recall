@@ -98,6 +98,8 @@ for (const [key, value] of store) {
     path = join(outputDir, 'manifest', 'orphaned.json');
   } else if (key === 'manifest:name-to-id') {
     path = join(outputDir, 'manifest', 'list-name-to-id.json');
+  } else if (key === 'manifest:list-order') {
+    path = join(outputDir, 'manifest', 'list-order.json');
   } else if (key.startsWith('page:')) {
     const slug = key.slice('page:'.length);
     path = join(outputDir, 'pages', `${slug}.json`);
@@ -188,15 +190,11 @@ if (existsSync(join(DATA_DIR, 'lists'))) {
   }
 }
 
-// System lists
-for (const name of ['root']) {
-  entityPaths.set(`list:system/${name}`, `lists/system/${name}.json`);
-}
-
 // Manifest entities
 entityPaths.set('manifest:settings', 'manifest/settings.json');
 entityPaths.set('manifest:orphaned', 'manifest/orphaned.json');
 entityPaths.set('manifest:name-to-id', 'manifest/list-name-to-id.json');
+entityPaths.set('manifest:list-order', 'manifest/list-order.json');
 // Collect all keys (union of replayed + existing)
 const allKeys = new Set([...store.keys(), ...entityPaths.keys()]);
 
@@ -216,6 +214,13 @@ for (const key of [...allKeys].sort()) {
 
   // Skip keys where both are null
   if (replayed === null && existing === null) continue;
+
+  // Deleted entities: file stays on disk (deletion = unlink + orphan).
+  // If replay marks deleted and file exists, that's expected — skip.
+  if (raw?.deleted && existing !== null) {
+    matchCount++;
+    continue;
+  }
 
   // Replay produced entity but no existing file
   if (replayed !== null && existing === null) {

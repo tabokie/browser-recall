@@ -232,8 +232,8 @@ describe('Persistence round-trip', () => {
 
     // List metadata in self-describing files
     const listMeta = [
-      { slug: 'c1', name: 'AI', pins: [], rules: [], parentList: null, childLists: [] },
-      { slug: 'c2', name: 'Rust Lang', pins: [], rules: [], parentList: null, childLists: [] },
+      { slug: 'c1', name: 'AI', pins: [], rules: [] },
+      { slug: 'c2', name: 'Rust Lang', pins: [], rules: [] },
     ];
 
     it('data survives chrome.storage.local.clear() + hydrateCache', async () => {
@@ -307,7 +307,7 @@ describe('Persistence round-trip', () => {
 
     expect(loadedPins).toEqual([pinFromUrl('https://a.com', 100)]);
     expect(loadedSettings.trimRules).toEqual(['rule1']);
-    expect(meta).toEqual([{ slug: 'c1', name: 'Test', pins: [pinFromUrl('https://a.com', 100)], rules: [], parentList: null, childLists: [] }]);
+    expect(meta).toEqual([{ slug: 'c1', name: 'Test', pins: [pinFromUrl('https://a.com', 100)], rules: [] }]);
   });
 
   // ---- Per-list pin isolation (regression: lazy pins + bulk save deleted other files) ----

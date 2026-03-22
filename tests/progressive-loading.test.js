@@ -92,8 +92,6 @@ const TEST_LIST = {
   slug: 'col-rust',
   query: 'rust',
   name: 'Rust Lang',
-  parentList: 'list:system/root',
-  childLists: [],
 };
 
 // List whose query matches NO interactions in metadata (like "AI Core")
@@ -102,8 +100,6 @@ const TEST_LIST_NOHIT = {
   slug: 'col-nohit',
   query: 'xyzzy nonexistent query',
   name: 'No-Hit Query',
-  parentList: 'list:system/root',
-  childLists: [],
 };
 
 const TEST_LIST_PINS = {
@@ -135,9 +131,9 @@ const TEST_SETTINGS = {
   titleTrimRules: [],
 };
 
-const TEST_ROOT = {
+const TEST_LIST_ORDER = {
   timestamp: 0,
-  childLists: ['list:col-rust', 'list:col-nohit'],
+  tree: [{ id: 'list:col-rust' }, { id: 'list:col-nohit' }],
 };
 
 const FILES_NEWEST_FIRST = [
@@ -322,7 +318,7 @@ describe('Progressive loading', () => {
       case 'readCacheable':
         switch (msg.key) {
           case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
-          case 'list:system/root': return { success: true, value: TEST_ROOT };
+          case 'manifest:list-order': return { success: true, value: TEST_LIST_ORDER };
           case 'manifest:name-to-id': return { success: true, value: { timestamp: 0, paths: {} } };
           case 'manifest:orphaned': return { success: true, value: { timestamp: 0, entries: [] } };
           default: {
@@ -345,7 +341,7 @@ describe('Progressive loading', () => {
   function populateCache() {
     sessionData = {
       'manifest:settings': TEST_SETTINGS,
-      'list:system/root': { ...TEST_ROOT },
+      'manifest:list-order': { ...TEST_LIST_ORDER },
     };
     // Individual list entity keys (include pins for session cache hits)
     for (const list of TEST_LISTS) {
@@ -474,13 +470,13 @@ describe('Progressive loading', () => {
     await tick(50);
   });
 
-  it('Test 2: sidebar lists render from list:system/root even when individual entity keys are absent from session', async () => {
-    // Cache list:system/root but NOT individual list:<slug> keys in session.
-    // loadListTree() reads list:system/root, then readCacheable falls back to
+  it('Test 2: sidebar lists render from manifest:list-order even when individual entity keys are absent from session', async () => {
+    // Cache manifest:list-order but NOT individual list:<slug> keys in session.
+    // loadListTree() reads manifest:list-order, then readCacheable falls back to
     // the message handler for each child entity key.
     sessionData = {
       'manifest:settings': TEST_SETTINGS,
-      'list:system/root': { ...TEST_ROOT },
+      'manifest:list-order': { ...TEST_LIST_ORDER },
       // individual list:<slug> keys intentionally missing from session
     };
     localData = { logBuffer: [] };

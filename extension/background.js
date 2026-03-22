@@ -275,21 +275,18 @@ async function readCacheable(key, includeDeleted = false) {
   return value;
 }
 
-// Traverse the list tree (BFS) and return all list keys.
+// Collect all list keys from the tree manifest.
 async function getAllListKeys() {
   await hydrationDone;
-  const root = await readCacheable('list:system/root');
+  const order = await readCacheable('manifest:list-order');
   const result = [];
-  const queue = [...(root?.childLists || [])];
-  const visited = new Set();
-  while (queue.length > 0) {
-    const key = queue.shift();
-    if (visited.has(key)) continue;
-    visited.add(key);
-    result.push(key);
-    const entity = await readCacheable(key);
-    if (entity?.childLists) queue.push(...entity.childLists);
+  function walk(nodes) {
+    for (const node of nodes) {
+      result.push(node.id);
+      if (node.children) walk(node.children);
+    }
   }
+  walk(order?.tree || []);
   return result;
 }
 
@@ -318,6 +315,12 @@ async function readFs(key) {
       const r = await requestOffscreen({ action: 'loadOrphaned' });
       assertOffscreenSuccess(r, key);
       value = r.entity;
+      break;
+    }
+    case 'manifest:list-order': {
+      const r = await requestOffscreen({ action: 'loadListOrder' });
+      assertOffscreenSuccess(r, key);
+      value = r.entity || { timestamp: 0, tree: [] };
       break;
     }
     default: {
@@ -382,9 +385,9 @@ async function hydrateCache() {
   } catch (e) { console.warn('List metadata load failed:', e.message); }
 
   try {
-    const rootResp = await requestOffscreen({ action: 'loadListEntity', listId: 'system/root' });
-    if (rootResp?.success && rootResp.entity) await cacheSet('list:system/root', rootResp.entity);
-  } catch (e) { console.warn('Root entity load failed:', e.message); }
+    const orderResp = await requestOffscreen({ action: 'loadListOrder' });
+    if (orderResp?.success && orderResp.entity) await cacheSet('manifest:list-order', orderResp.entity);
+  } catch (e) { console.warn('List order load failed:', e.message); }
 
   try {
     const nmResp = await requestOffscreen({ action: 'loadNameMap' });
@@ -702,16 +705,42 @@ async function getListParentsAndName(listId) {
   if (listId.startsWith('system/')) {
     return { parents: [], name: listId };
   }
+  // Look up name from flat name-to-id
   const nameToId = await readCacheable('manifest:name-to-id');
   if (!nameToId?.paths) return null;
-  for (const [path, id] of Object.entries(nameToId.paths)) {
+  let listName = null;
+  for (const [name, id] of Object.entries(nameToId.paths)) {
     if (id === listId) {
-      const parts = path.split('/');
-      const name = parts.pop();
-      return { parents: parts, name };
+      listName = name;
+      break;
     }
   }
-  return null;
+  if (!listName) {
+    // Fallback: read entity directly for the name
+    const entity = await readCacheable(`list:${listId}`);
+    listName = entity?.name;
+  }
+  if (!listName) return null;
+
+  // Derive parent chain from tree manifest
+  const order = await readCacheable('manifest:list-order');
+  const parents = ['root'];
+  const listKey = `list:${listId}`;
+  function findAncestors(nodes, chain) {
+    for (const node of nodes) {
+      if (node.id === listKey) {
+        parents.push(...chain);
+        return true;
+      }
+      if (node.children) {
+        const entity = null; // We don't need entity names for parents array in events
+        if (findAncestors(node.children, [...chain, node.id])) return true;
+      }
+    }
+    return false;
+  }
+  findAncestors(order?.tree || [], []);
+  return { parents, name: listName };
 }
 
 // ─── Snapshot Capture ─────────────────────────────────────────────────
@@ -1435,10 +1464,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 name: request.name,
                 parents,
               });
-              // Look up the generated listId from name-to-id map
-              const fullPath = parents.length === 0 ? `root/${request.name}` : `${parents.join('/')}/${request.name}`;
+              // Look up the generated listId from flat name-to-id map
               const nameToId = await readCacheable('manifest:name-to-id');
-              const generatedId = nameToId?.paths?.[fullPath];
+              const generatedId = nameToId?.paths?.[request.name];
               sendResponse({ success: true, listId: generatedId });
               notifyMutation('lists');
               break;
@@ -1473,39 +1501,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'reparentList': {
-          // request: { listId, fromParent, toParent, index }
-          const pnRep = await getListParentsAndName(request.listId);
-          let toParents;
-          if (request.toParent === 'system/root') {
-            toParents = [];
-          } else {
-            const toPn = await getListParentsAndName(request.toParent);
-            if (!toPn) { sendResponse({ success: false, error: 'Target parent not found in name-to-id' }); break; }
-            toParents = [...toPn.parents, toPn.name];
-          }
-          if (!pnRep) {
-            sendResponse({ success: false, error: 'List not found in name-to-id' });
-            break;
-          }
-
-          // Build childNames: full ordered child list of destination parent after move
-          const toParentKey = 'list:' + request.toParent;
-          const toParentEntity = await readCacheable(toParentKey);
-          const existingChildren = [...(toParentEntity?.childLists || [])].filter(k => k !== 'list:' + request.listId);
-          existingChildren.splice(request.index, 0, 'list:' + request.listId);
-          const childNames = [];
-          for (const ck of existingChildren) {
-            const ce = await readCacheable(ck);
-            if (ce?.name) childNames.push(ce.name);
-          }
-
+        case 'updateListTree': {
+          // request: { tree } — full tree blob from UI
           await addLog({
             timestamp: Date.now(),
-            action: 'reparent_list',
-            parents: pnRep.parents, name: pnRep.name,
-            toParents,
-            childNames,
+            action: 'update_list_tree',
+            tree: request.tree,
           });
           sendResponse({ success: true });
           notifyMutation('lists');
