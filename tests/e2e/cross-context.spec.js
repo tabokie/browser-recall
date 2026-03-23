@@ -8,19 +8,19 @@ test.describe('Cross-context consistency', () => {
   test('pin from helper page reflects in already-open options list view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:research' }],
       }},
       { path: 'lists/research.json', data: {
-        slug: 'research', name: 'Research', timestamp: now, pins: [],
+        slug: 'research', name: 'Research', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Research': 'research' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Research': 'research' } } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain',
         timestamp: now, parentIds: [], childIds: [],
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
     ]);
@@ -49,7 +49,7 @@ test.describe('Cross-context consistency', () => {
 
   test('new page visit notification updates explore view in already-open options', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);

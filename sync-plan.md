@@ -8,17 +8,19 @@
 | Passive events | Sync all (visit_page, leave_page) | Cross-device page enrichment |
 | Transport | GitHub REST API from extension | No scripts, no external tools. User pastes repo URL + token in settings. |
 | Git topology | Shared repo, per-device branches | One repo to configure. Each device force-pushes its own branch. No conflicts. |
-| Log file naming | `data/logs/YYYY-MM-DD-<deviceId>.jsonl` | Device-specific files. No conflicts on sync. |
+| Log file naming | `data/logs/YYYY-MM-DD-<deviceName>.jsonl` | Device-specific files. No conflicts on sync. Device name chosen by user at sync enable. |
 | Storage retention | Force-push single commit with rolling window | Old data pruned from git but preserved on local disk. Repo size stays bounded. |
-| List ID clash | Accept duplicates | Two devices creating same-name list get two lists. User merges manually. |
-| Entry identity | deviceId:timestamp | Sufficient for dedup within a device |
-| Delete/restore conflict | LWW by timestamp | Later action wins. Simpler than voting; user's most recent intent prevails. |
+| List ID clash | Accept duplicates | Two devices creating same-name list get two lists (different `listOwner`). User merges manually. |
+| Device identity in logs | Derived from log filename, NOT stored in entries | `YYYY-MM-DD.jsonl` = no sync; `YYYY-MM-DD-<device>.jsonl` = sync. Replay derives device from filename, passes as context. |
+| Entry identity | filename-derived device + timestamp | Sufficient for dedup within a device |
+| Delete/restore conflict | LWW by timestamp via `deletedTs` | Later action wins. Simpler than voting; user's most recent intent prevails. |
 | Note edit conflict | Both survive as siblings | Two edits of same note → both new notes linked to page. User deletes unwanted one. |
 | List tree structure | Nested JSON blob in `manifest/list-order.json`, LWW | Hierarchy restored without commutativity cost. Whole-tree LWW + reconcile. No per-node structural events. |
 | Pin to deleted list | Still updates entity | Preserves data for potential restore. `pin_to_list` loads with `includeDeleted`. |
 | Peer config | Manual setup | User enters repo URL + token in extension settings |
 | Replay order | Local logs first, then remote logs per peer | No cross-device timestamp comparison |
-| List reference in events | Add `listId` field (resolved at emit time) | Survives renames. `parents`+`name` kept for readability. |
+| List reference in events | `name` + `listOwner` (compound key in manifest) | `listOwner` always present on list events (sync mode). `parents` dropped. `manifest:name-to-id` keys: `listOwner/name → id`. Self-descriptive in logs. |
+| List name uniqueness | Device-level unique names | Each device enforces unique list names. `(listName, listOwner)` is the identity. |
 | Note immutability | **DONE.** Notes are immutable — edits create new entity via `replace_note` | No file conflicts on sync. Full change history preserved in logs. |
 | No backward compat | Migrate data, don't add fallback code | Extension is in development. Migrate `~/portal-data` to new formats directly. |
 
@@ -102,43 +104,30 @@ GET /repos/{owner}/{repo}/git/blobs/{sha}      ← download file content
 
 ## 3. Event Schema Changes
 
-### 3.1 All events: add `deviceId`
+### 3.1 Device identity: derived from log filename
 
-Every log entry gets a `deviceId` field, populated at `addLog()` time:
+Device name is NOT stored in log entries. It is derived from the log filename at replay time:
+- `YYYY-MM-DD.jsonl` → no sync (deviceName = undefined)
+- `YYYY-MM-DD-<deviceName>.jsonl` → sync mode (deviceName passed as context to `effectOf`)
 
-```js
-// background.js addLog()
-entry.deviceId = localDeviceId;  // from settings
+`effectOf(entry, load, context = {})` receives `context.deviceName` from the caller. When truthy, sync-mode commutativity logic activates. When falsy, current single-device behavior.
+
+### 3.2 List-referencing events: `name` + `listOwner`
+
+Events that reference a list carry `name` (the list name) and `listOwner` (the device that owns the list). The `parents` field is dropped. `manifest:name-to-id` uses compound keys: `listOwner/name → id`.
+
+Example event (sync mode):
+```json
+{ "action": "pin_to_list", "name": "Favorites", "listOwner": "my-laptop", "items": ["https://..."] }
 ```
 
-Existing events without `deviceId` are treated as local (backward compat).
+Affected actions: `pin_to_list`, `unpin_from_list`, `create_list`, `update_list`, `delete_list`, `restore_list`, `add_rule`, `remove_rule`, `update_rule`.
 
-### 3.2 List-referencing events: add `listId`
+In non-sync mode, events continue to use `parents` + `name` (current format). The code paths are cleanly separated — no fallback mixing.
 
-Events that reference a list by `parents`+`name` gain a `listId` field, resolved at emit time. The `parents` and `name` fields are kept for human readability and name-to-id path maintenance.
+`resolveListKey(entry)` reads `entry.listOwner` + `entry.name` in sync mode, `entry.name` in non-sync mode.
 
-Affected actions and their call sites in `background.js`:
-
-| Action | Call sites (line) | New field |
-|--------|------------------|-----------|
-| `pin_to_list` | 612, 1016, 1391, 1817 | `listId` |
-| `unpin_from_list` | 1359 | `listId` |
-| `create_list` | 1418 | `listId` (pre-generated, see 3.3) |
-| `update_list` | 1432 | `listId` |
-| `delete_list` | 1458 | `listId` |
-| `restore_list` | 1547 | `listId` |
-| `update_list_tree` | (new) | (see §3.4) |
-| `add_rule` | 1737 | `listId` |
-| `remove_rule` | 1754 | `listId` |
-| `update_rule` | 1771 | `listId` |
-
-At each call site, the list ID is already available (e.g., `request.listId` or from `getListParentsAndName`). Just add it to the entry.
-
-### 3.3 `create_list`: pre-generate `listId`
-
-Currently, `effectOf` generates the list ID from `hash(name + timestamp)`. For sync, the ID must be in the event so remote devices use the same ID. Change: generate the ID in the handler, pass as `entry.listId`, and have `effectOf` use it (it already does: `entry.listId || hash(...)`).
-
-### 3.4 `update_list_tree`: tree structure event
+### 3.3 `update_list_tree`: tree structure event
 
 List hierarchy and ordering are stored as a single nested JSON blob in `manifest/list-order.json`, synced via a dedicated event. The entire tree is written on every structural change (reorder, reparent, nest/unnest):
 
@@ -166,9 +155,11 @@ Replaced by `update_list_tree`. No `reparent_list` action exists. Existing `repa
 
 ### 3.6 Device-specific log file naming
 
-Change `addLog()` → offscreen drain path to write to `data/logs/YYYY-MM-DD-<deviceId>.jsonl` instead of `data/logs/YYYY-MM-DD.jsonl`.
+When sync is enabled, the offscreen drain path writes to `data/logs/YYYY-MM-DD-<deviceName>.jsonl` instead of `data/logs/YYYY-MM-DD.jsonl`. The `deviceName` is passed from background to offscreen via the port channel.
 
-Hydration scans all `data/logs/*.jsonl` files, groups by device ID (parsed from filename), replays local device first then remotes.
+`loadInteractionFileRange` extracts the date prefix (first 10 chars of basename) for filtering, which works for both naming conventions.
+
+Hydration scans all `data/logs/*.jsonl` files, groups by device name (parsed from filename), replays local device first then remotes.
 
 ## 4. Entity Schema Changes
 
@@ -264,46 +255,50 @@ Each cursor tracks the last-replayed position in a peer's log (date file + line 
 
 ## 5. replay.js Commutativity Changes
 
-### 5.1 `resolveListKey`: prefer `listId`
+### 5.1 `resolveListKey`: compound key via `(name, listOwner)`
+
+Signature changes from `resolveListKey(parents, name)` to `resolveListKey(entry)`. Uses `context.deviceName` (from closure) to select lookup strategy:
 
 ```js
-async function resolveListKey(parents, name, entry) {
-  // Prefer stable ID from event (sync-safe)
-  if (entry?.listId) {
-    const id = entry.listId;
-    return id.startsWith('list:') ? id
-         : id.startsWith('system/') || id.startsWith('auto/') ? `list:${id}`
-         : `list:${id}`;
+async function resolveListKey(entry) {
+  const name = entry.name;
+  if (!name) return null;
+  if (name.startsWith('system/')) return `list:${name}`;
+  const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
+  if (context.deviceName) {
+    // Sync: compound key listOwner/name
+    const owner = entry.listOwner;
+    if (!owner) return null;
+    const id = nameToId.paths?.[owner + '/' + name];
+    return id ? `list:${id}` : null;
   }
-  // Fall back to parents+name resolution (legacy events without listId)
-  // ... existing logic ...
+  // Non-sync: flat key
+  const id = nameToId.paths?.[name];
+  return id ? `list:${id}` : null;
 }
 ```
 
-Pass `entry` to `resolveListKey` in every action branch that calls it.
+All ~9 callers change from `resolveListKey(entry.parents, entry.name)` to `resolveListKey(entry)`.
 
 ### 5.2 `rate_page` / `leave_page`: per-device timestamp guard
 
-```js
-// Before:
-if (entry.timestamp > prevTimestamp) {
-  updated.likes = (updated.likes || 0) + entry.likes;
-}
+In sync mode, uses `page.remotes[context.deviceName]` as per-device watermark. In non-sync mode, uses current `entry.timestamp > prevTimestamp` guard.
 
-// After:
-const deviceTs = (page.remotes?.[entry.deviceId]) || 0;
+```js
+// Sync mode:
+const deviceTs = (page.remotes?.[context.deviceName]) || 0;
 if (entry.timestamp > deviceTs) {
   updated.likes = (updated.likes || 0) + entry.likes;
   const remotes = { ...(page.remotes || {}) };
-  remotes[entry.deviceId] = entry.timestamp;
+  remotes[context.deviceName] = entry.timestamp;
   updated.remotes = remotes;
 }
 updated.timestamp = Math.max(page.timestamp || 0, entry.timestamp);
+
+// Non-sync mode: current behavior unchanged
 ```
 
-Same pattern for `leave_page` (`timeOnPage`, `scrollDepth`).
-
-Events without `deviceId` (legacy): use `entity.timestamp` as before (backward compat).
+Same pattern for `leave_page` (`timeOnPage`, `scrollDepth`). Device name comes from `context.deviceName` (derived from log filename), NOT from entries.
 
 ### 5.3 `pin_to_list` / `unpin_from_list`: operate on deleted lists
 
@@ -415,17 +410,13 @@ if (entry.action === 'restore_note') {
 
 ### 5.8 `entity.timestamp` semantics
 
-All `effectOf` branches that set `timestamp` use `Math.max`:
+All `effectOf` branches that set `timestamp` use `Math.max` **unconditionally** (both sync and non-sync modes):
 
 ```js
-// Before:
-result[pageKey] = { ...page, timestamp: entry.timestamp };
-
-// After:
 result[pageKey] = { ...page, timestamp: Math.max(page.timestamp || 0, entry.timestamp) };
 ```
 
-Ensures `entity.timestamp` is the latest modification across all devices, regardless of replay order. Used for display, sorting, and LRU eviction watermark.
+Safe in single-device mode (timestamps monotonically increase, so `Math.max` is a no-op). Ensures `entity.timestamp` is the latest modification across all devices in sync mode, regardless of replay order. Used for display, sorting, and LRU eviction watermark.
 
 ### 5.9 Commutativity summary
 
@@ -441,8 +432,8 @@ Ensures `entity.timestamp` is the latest modification across all devices, regard
 | `replace_note` | Both survive as siblings | Yes |
 | `delete_note` / `restore_note` | LWW via `deletedTs` | Yes |
 | `delete_note` vs `replace_note` | Edit wins (independent ops) | Yes |
-| `create_list` | ID in event, idempotent | Yes |
-| `update_list` (rename) | `listId` for resolution, last-write-wins on name | Yes |
+| `create_list` | ID from hash(name+ts), idempotent | Yes |
+| `update_list` (rename) | `(name, listOwner)` compound key, last-write-wins on name | Yes |
 | `delete_list` / `restore_list` | LWW via `deletedTs` | Yes |
 | `pin_to_list` vs `delete_list` | Pin applies to deleted entity; survives restore | Yes |
 | `update_list_tree` | LWW on whole tree blob + reconcile | Yes |
@@ -455,9 +446,10 @@ Ensures `entity.timestamp` is the latest modification across all devices, regard
 ### 6.1 Device initialization
 
 When user enables sync in settings:
-1. Generate `deviceId` via `crypto.randomUUID()`, store in `manifest/settings.json`
-2. User configures: GitHub repo URL + personal access token
-3. Extension creates a branch named `<deviceId>` in the repo (if not exists)
+1. User chooses a unique device name (human-readable, e.g., "my-laptop"), stored in `manifest/settings.json` as `deviceName`
+2. Run migration script (`scripts/migrate-sync-enable.mjs`) to transform data
+3. User configures: GitHub repo URL + personal access token
+4. Extension creates a branch named `<deviceName>` in the repo (if not exists)
 
 ### 6.2 Push cycle
 
@@ -494,9 +486,9 @@ Triggered after push, or on its own schedule.
 Remote entries are replayed in background.js using the same `effectOf` + `sessionWrite` pipeline, but NOT through `addLog`:
 
 ```js
-async function replayRemoteEntries(entries) {
+async function replayRemoteEntries(entries, peerDeviceName) {
   for (const entry of entries) {
-    const effects = await effectOf(entry, sessionLoad);
+    const effects = await effectOf(entry, sessionLoad, { deviceName: peerDeviceName });
     await sessionWrite(effects);
   }
   // Trigger entity checkpoint drain
@@ -528,62 +520,53 @@ Legacy log files (`YYYY-MM-DD.jsonl` without device suffix) are treated as local
 
 ## 7. Data Migration
 
-Per the project's data migration policy: migrate `~/portal-data` on disk first, then upgrade extension code.
+Migration runs when user enables sync, via `scripts/migrate-sync-enable.mjs`. Per the project's data migration policy: migrate `~/portal-data` on disk, no fallback code in extension.
 
-### 7.1 Entity migration
+### 7.1 Migration script (`scripts/migrate-sync-enable.mjs`)
 
-Script: `scripts/migrate-sync-schema.mjs`
+Prompts for device name, then:
 
-- `pages/*.json`: add `remotes: {}`
-- `lists/*.json`: add `deletedTs: 0`; remove `parentList`, `childLists` fields
-- `data/notes/*.json`: add `deletedTs: 0`
-- Create `manifest/sync-cursors.json`: `{ timestamp: 0, cursors: {} }`
+1. Store `deviceName` in `manifest/settings.json`
+2. Rename `data/logs/YYYY-MM-DD.jsonl` → `data/logs/YYYY-MM-DD-<deviceName>.jsonl`
+3. `pages/*.json`: add `remotes: {}`
+4. `lists/*.json`: add `owner: <deviceName>`, `deletedTs: 0`
+5. `manifest/list-name-to-id.json`: transform keys from `name` to `deviceName/name`
+6. All JSONL log entries with list references: add `listOwner: <deviceName>`, drop `parents`
+7. Create `manifest/sync-cursors.json`: `{ timestamp: 0, cursors: {} }`
 
-### 7.2 Log file migration
+### 7.2 Hierarchy removal migration (already done)
 
-Rename existing `data/logs/YYYY-MM-DD.jsonl` → `data/logs/YYYY-MM-DD-<deviceId>.jsonl`.
-
-Requires device ID generation before migration. The script generates one and writes it to `manifest/settings.json` if not present.
-
-### 7.3 Event migration
-
-Existing JSONL entries don't have `deviceId` or `listId`. No migration needed — `effectOf` treats missing `deviceId` as local and falls back to `parents`+`name` when `listId` is absent.
-
-### 7.4 Hierarchy removal migration
-
-- Strip `reparent_list` entries from JSONL history (action no longer exists)
-- Remove `parentList` and `childLists` fields from all list entity files
-- Remove `list:system/root` entity (no longer needed as tree root)
-- Generate `manifest/list-order.json` with nested tree from existing `list:system/root` hierarchy
+- ~~Strip `reparent_list` entries from JSONL history~~
+- ~~Remove `parentList`/`childLists` from entities, remove `list:system/root`~~
+- ~~Generate `manifest/list-order.json` from existing hierarchy~~
 
 ## 8. Implementation Phases
 
 ### Phase 0: Replay commutativity (no sync yet)
 
-Make `effectOf` order-independent. Prerequisite for sync, also improves single-device replay correctness.
+Make `effectOf` order-independent. Sync-specific fields (`deletedTs`, `remotes`, `listOwner`, `owner`) only appear when user enables sync — gated by `context.deviceName`. No fallback code.
 
-1. Data migration script (`scripts/migrate-sync-schema.mjs`):
-   - Remove list hierarchy: strip `reparent_list` events, remove `parentList`/`childLists` from entities, remove `list:system/root`
-   - Generate `manifest/list-order.json` with nested tree from existing `list:system/root` hierarchy
-   - Add entity fields: `remotes` (pages), `deletedTs` (lists, notes)
-   - Rename log files: `YYYY-MM-DD.jsonl` → `YYYY-MM-DD-<deviceId>.jsonl`
-2. Add `deviceId` to all entries in `addLog()` (background.js)
-3. Add `listId` to all list-referencing entries at call sites (background.js)
-4. Pre-generate `listId` for `create_list` (background.js handler)
-5. Remove `reparent_list` action entirely (background.js + replay.js)
-6. List tree structure: `update_list_tree` event + `manifest/list-order.json` LWW + reconcile (background.js + replay.js)
-7. LWW via `deletedTs` for all delete/restore branches (replay.js)
-8. `pin_to_list` / `unpin_from_list` load with `includeDeleted: true` (replay.js)
-9. `replace_note` both-survive: no code change needed (existing effectOf naturally handles it)
-10. Per-device timestamp guards for `rate_page`, `leave_page` (replay.js)
-11. `resolveListKey` prefers `entry.listId` (replay.js)
-12. `Math.max` for all `entity.timestamp` assignments (replay.js)
-13. Device-specific log file naming (`YYYY-MM-DD-<deviceId>.jsonl`)
-14. Tests: replay same entries in different orders, assert identical final state (see §11)
+Already done:
+- ~~Remove `reparent_list` action, replace with `update_list_tree`~~ (e1635f5)
+- ~~`replace_note` both-survive~~ (already works naturally)
+
+Steps:
+1. `Math.max` for all `entity.timestamp` assignments (unconditional, safe in single-device mode)
+2. `effectOf(entry, load, context = {})` — add context parameter. `context.deviceName` truthy = sync mode.
+3. `resolveListKey(entry)` — uses `(name, listOwner)` compound key in sync mode, flat `name` in non-sync
+4. LWW via `deletedTs` for delete/restore branches (sync mode only)
+5. `pin_to_list` / `unpin_from_list` / rules / `update_list` load with `includeDeleted: true` (sync mode only)
+6. Per-device timestamp guards for `rate_page`, `leave_page` via `remotes` map (sync mode only)
+7. Background/offscreen wiring: pass `context.deviceName` to all `effectOf` call sites
+8. `getListEventFields` refactor: returns `{ name, listOwner }` (sync) or `{ parents, name }` (non-sync)
+9. List-event emit sites: `listOwner` + drop `parents` (sync mode)
+10. Device-specific log file naming: `YYYY-MM-DD-<deviceName>.jsonl` (sync mode)
+11. Migration script (`scripts/migrate-sync-enable.mjs`): runs when user enables sync
+12. Commutativity tests: replay same entries in different orders, assert identical final state (see §11)
 
 ### Phase 1: Sync transport
 
-1. `deviceId` generation + storage in settings
+1. Device name setup + storage in settings (user-chosen, human-readable)
 2. Settings UI: repo URL, personal access token, sync toggle, retention window
 3. `SyncTransport` module — GitHub API adapter:
    - `listBranches()`, `getTree(branch)`, `getBlob(sha)`, `pushTree(branch, files)`

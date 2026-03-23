@@ -284,44 +284,61 @@ class FileSystemStorage {
     };
   }
 
-  // List all .jsonl filenames sorted newest-first
-  async listInteractionFiles() {
+  // Scan data/logs/<device>/ subdirectories for .jsonl files.
+  // Returns [{ device, name }] — internal format used by loadInteractionFileRange.
+  async _scanLogFiles() {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
     const logsDir = await this.resolveDir('data/logs');
     const files = [];
     for await (const entry of logsDir.values()) {
-      if (entry.kind === 'file' && entry.name.endsWith('.jsonl'))
-        files.push(entry.name);
+      if (entry.kind === 'directory') {
+        const subDir = await logsDir.getDirectoryHandle(entry.name);
+        for await (const f of subDir.values()) {
+          if (f.kind === 'file' && f.name.endsWith('.jsonl'))
+            files.push({ device: entry.name, name: f.name });
+        }
+      }
     }
-    files.sort().reverse(); // YYYY-MM-DD sorts chronologically; reverse = newest first
     return files;
+  }
+
+  // List all .jsonl filenames sorted newest-first (deduplicated across devices).
+  // Returns flat string array ['YYYY-MM-DD.jsonl', ...] deduplicated across devices.
+  async listInteractionFiles() {
+    const all = await this._scanLogFiles();
+    const unique = [...new Set(all.map(f => f.name))];
+    unique.sort().reverse(); // newest-first
+    return unique;
   }
 
   // Load interactions from JSONL files within a date range (inclusive).
   // fromDate/toDate are YYYY-MM-DD strings.
   // Returns { entries, files } — entries in chronological order, files sorted oldest-first.
   async loadInteractionFileRange(fromDate, toDate) {
-    const allFiles = await this.listInteractionFiles(); // newest-first
+    const allFiles = await this._scanLogFiles();
     const filtered = allFiles.filter(f => {
-      const dateStr = f.replace('.jsonl', '');
+      const dateStr = f.name.replace('.jsonl', '');
       return dateStr >= fromDate && dateStr <= toDate;
     });
-    filtered.sort(); // oldest-first for chronological reading
-    const entries = await this.loadInteractionFiles(filtered);
-    return { entries, files: filtered };
+    filtered.sort((a, b) => a.name.localeCompare(b.name)); // oldest-first for chronological reading
+    const entries = await this._loadFromDeviceFiles(filtered);
+    // Deduplicated file names for the caller
+    const fileNames = [...new Set(filtered.map(f => f.name))];
+    return { entries, files: fileNames };
   }
 
-  // Read and parse specific .jsonl files, return raw interactions
-  async loadInteractionFiles(filenames) {
+  // Read and parse .jsonl files from device-aware file list
+  async _loadFromDeviceFiles(fileList) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
     const interactions = [];
-    for (const name of filenames) {
+    for (const { device, name } of fileList) {
       try {
-        const fh = await this.resolveFile('data/logs/' + name);
+        const path = `data/logs/${device}/${name}`;
+        const fh = await this.resolveFile(path);
         const file = await fh.getFile();
         const text = await file.text();
         for (const line of text.split('\n')) {
@@ -333,6 +350,14 @@ class FileSystemStorage {
     return interactions;
   }
 
+  // Read and parse specific .jsonl files by flat name (searches all device dirs + root)
+  async loadInteractionFiles(filenames) {
+    const nameSet = new Set(filenames);
+    const allFiles = await this._scanLogFiles();
+    const matching = allFiles.filter(f => nameSet.has(f.name));
+    return this._loadFromDeviceFiles(matching);
+  }
+
   // Load all interactions from filesystem (metadata only, deduplicated)
   async loadAllInteractions() {
     if (!(await this.verifyPermission())) {
@@ -341,22 +366,22 @@ class FileSystemStorage {
 
     const interactionsByUrl = new Map();
 
-    // Read all .jsonl files from data/logs/
-    const historyDir = await this.resolveDir('data/logs');
-    for await (const entry of historyDir.values()) {
-      if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
+    // Read all .jsonl files from data/logs/<device>/ subdirectories
+    const logsDir = await this.resolveDir('data/logs');
+    for await (const dirEntry of logsDir.values()) {
+      if (dirEntry.kind !== 'directory') continue;
+      const subDir = await logsDir.getDirectoryHandle(dirEntry.name);
+      for await (const entry of subDir.values()) {
+        if (entry.kind !== 'file' || !entry.name.endsWith('.jsonl')) continue;
         const file = await entry.getFile();
         const text = await file.text();
-
-        // Parse JSONL (one JSON object per line)
         const lines = text.split('\n').filter(line => line.trim());
         for (const line of lines) {
           try {
             const interaction = JSON.parse(line);
-            // Deduplicate by URL — last write wins
             interactionsByUrl.set(interaction.url, interaction);
           } catch (error) {
-            console.error(`Error parsing line in ${entry.name}:`, error);
+            console.error(`Error parsing line in ${dirEntry.name}/${entry.name}:`, error);
           }
         }
       }
@@ -790,6 +815,7 @@ class FileSystemStorage {
         pins: data.pins || [],
         rules: data.rules || [],
       };
+      if (data.owner) listEntry.owner = data.owner;
       if (data.deleted) listEntry.deleted = true;
       if (data.timestamp) listEntry.timestamp = data.timestamp;
       return listEntry;

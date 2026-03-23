@@ -9,15 +9,15 @@ test.describe('List operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now, pins: [],
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -31,23 +31,23 @@ test.describe('List operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now,
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -68,26 +68,26 @@ test.describe('List operations', () => {
     const day2 = new Date('2026-03-01').getTime();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: day2, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: day2,
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: day2,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: day1 }],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: day2,
         parentIds: [], childIds: [], visitDates: [20260210, 20260301],
       }},
-      { path: 'data/logs/2026-02-10.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-02-10.jsonl', lines: [
         { timestamp: day1, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: day2, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: day2, paths: { 'Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: day2, paths: { 'test-device/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -107,22 +107,22 @@ test.describe('List operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now, pins: [],
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -150,23 +150,23 @@ test.describe('List operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now,
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
       ]},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -190,7 +190,7 @@ test.describe('List operations', () => {
 
   test('create a new list via saveListMeta alone, appears in sidebar', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: Date.now(), tree: [],
       }},
@@ -219,12 +219,12 @@ test.describe('List operations', () => {
     const slug2 = getSlugForUrl(url2);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:filtered' }],
       }},
       { path: 'lists/filtered.json', data: {
-        slug: 'filtered', name: 'Filtered', timestamp: now,
+        slug: 'filtered', name: 'Filtered', owner: 'test-device', timestamp: now,
         pins: [
           { id: `page:${slug1}`, pinnedAt: now },
           { id: `page:${slug2}`, pinnedAt: now },
@@ -238,7 +238,7 @@ test.describe('List operations', () => {
         slug: slug2, url: url2, title: 'Beta Page', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Filtered': 'filtered' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Filtered': 'filtered' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -285,19 +285,19 @@ test.describe('List operations', () => {
     // Seed with a page entity and pin
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:research' }],
       }},
       { path: 'lists/research.json', data: {
-        slug: 'research', name: 'Research', timestamp: now,
+        slug: 'research', name: 'Research', owner: 'test-device', timestamp: now,
         pins: [{ id: `page:${slug}`, pinnedAt: now }],
       }},
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'TOCTOU Page', timestamp: now, parentIds: [], childIds: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Research': 'research' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Research': 'research' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -331,19 +331,19 @@ test.describe('List operations', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [],
+        slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [],
       }},
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Immediate Pin', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -373,7 +373,7 @@ test.describe('List operations', () => {
   // This test verifies saveListMeta alone produces exactly one entry in the tree.
   test('saveListMeta adds to tree exactly once', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: Date.now(), tree: [],
       }},
@@ -409,18 +409,18 @@ test.describe('List operations', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [],
+        slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: `data/logs/${today}.jsonl`, lines: [
+      { path: `data/logs/test-device/${today}.jsonl`, lines: [
         { timestamp: now, action: 'visit_page', url, title: 'SPI Title Test Page' },
       ]},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -450,16 +450,16 @@ test.describe('List operations', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [],
+        slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
-      { path: `data/logs/${today}.jsonl`, lines: [
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
+      { path: `data/logs/test-device/${today}.jsonl`, lines: [
         { timestamp: now - 1000, action: 'visit_page', url: url1, title: 'Bulk Page One' },
         { timestamp: now, action: 'visit_page', url: url2, title: 'Bulk Page Two' },
       ]},
@@ -496,15 +496,15 @@ test.describe('List operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [],
+        slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -527,18 +527,18 @@ test.describe('List operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:keep' }, { id: 'list:remove' }],
       }},
       { path: 'lists/keep.json', data: {
-        slug: 'keep', name: 'Keep', timestamp: now, pins: [],
+        slug: 'keep', name: 'Keep', owner: 'test-device', timestamp: now, pins: [],
       }},
       { path: 'lists/remove.json', data: {
-        slug: 'remove', name: 'Remove', timestamp: now, pins: [],
+        slug: 'remove', name: 'Remove', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Keep': 'keep', 'Remove': 'remove' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Keep': 'keep', 'test-device/Remove': 'remove' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -561,15 +561,15 @@ test.describe('List operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:doomed' }],
       }},
       { path: 'lists/doomed.json', data: {
-        slug: 'doomed', name: 'Doomed', timestamp: now, pins: [],
+        slug: 'doomed', name: 'Doomed', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Doomed': 'doomed' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Doomed': 'doomed' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -594,14 +594,14 @@ test.describe('List operations', () => {
     const pageUrl = 'https://example.com/shallow-only';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now,
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now,
         pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: pageUrl, title: 'Shallow Page' },
       ]},
     ]);
@@ -647,14 +647,14 @@ test.describe('List operations', () => {
     const pageUrl = 'https://example.com/shallow-reclick';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now,
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now,
         pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: pageUrl, title: 'Shallow Reclick' },
       ]},
     ]);
@@ -697,13 +697,13 @@ test.describe('List operations', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now,
+        slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now,
         pins: [
           { id: `page:${slug1}`, pinnedAt: now },
           { id: `page:${slug2}`, pinnedAt: now },
@@ -717,7 +717,7 @@ test.describe('List operations', () => {
         slug: slug2, url: url2, title: 'Pin Two', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -744,19 +744,19 @@ test.describe('List operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now, pins: [],
+        slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -780,20 +780,20 @@ test.describe('List operations', () => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now,
+        slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: ['list:reading'], childIds: [], user_title: 'Kept',
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -820,13 +820,13 @@ test.describe('List operations', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [],
+        trimRules: [], deviceName: 'test-device',
       }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:doomed' }],
       }},
       { path: 'lists/doomed.json', data: {
-        slug: 'doomed', name: 'Doomed', timestamp: now,
+        slug: 'doomed', name: 'Doomed', owner: 'test-device', timestamp: now,
         pins: [
           { id: `page:${TEST_SLUG}`, pinnedAt: now },
           { id: `page:${slug2}`, pinnedAt: now },
@@ -840,7 +840,7 @@ test.describe('List operations', () => {
         slug: slug2, url: url2, title: 'Page 2', timestamp: now,
         parentIds: ['list:doomed'], childIds: [], user_title: 'Also Kept',
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Doomed': 'doomed' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Doomed': 'doomed' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -867,15 +867,15 @@ test.describe('List operations', () => {
   test('list with no pins shows empty state', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', timestamp: now,
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now,
         pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading List': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -895,9 +895,9 @@ test.describe('List operations', () => {
   test('explore filter panel toggles visibility', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: 'https://example.com/', title: 'Example' },
       ]},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
@@ -933,9 +933,9 @@ test.describe('List operations', () => {
   test('explore empty search shows all history', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now - 2000, action: 'visit_page', url: 'https://a.com/', title: 'Page A' },
         { timestamp: now - 1000, action: 'visit_page', url: 'https://b.com/', title: 'Page B' },
         { timestamp: now, action: 'visit_page', url: 'https://c.com/', title: 'Page C' },
@@ -963,9 +963,9 @@ test.describe('List operations', () => {
   test('explore adding search via UI persists across reload', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: 'https://example.com/', title: 'Example' },
       ]},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
@@ -1011,12 +1011,12 @@ test.describe('List operations', () => {
     const oldUrl = 'https://old.com/';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
-      { path: 'data/logs/2026-03-08.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-08.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: recentUrl, title: 'Recent Page' },
       ]},
-      { path: 'data/logs/2026-02-06.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-02-06.jsonl', lines: [
         { timestamp: now - 30 * DAY, action: 'visit_page', url: oldUrl, title: 'Old Page' },
       ]},
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
@@ -1079,14 +1079,14 @@ test.describe('List operations', () => {
     const highlightSlug = getSlugForUrl(highlightUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
       { path: `pages/${highlightSlug}.json`, data: {
         slug: highlightSlug, url: highlightUrl, title: 'Highlighted Page', timestamp: now,
         parentIds: [], childIds: [],
         notes: [{ excerpt: 'some highlight text', note: '', createdAt: now }],
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now - 1000, action: 'visit_page', url: plainUrl, title: 'Plain Page' },
         { timestamp: now, action: 'visit_page', url: highlightUrl, title: 'Highlighted Page' },
       ]},
@@ -1156,14 +1156,14 @@ test.describe('List operations', () => {
     const goSlug = getSlugForUrl(goUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:rust' }, { id: 'list:golang' }] } },
       { path: 'lists/rust.json', data: {
-        slug: 'rust', name: 'Rust', timestamp: now,
+        slug: 'rust', name: 'Rust', owner: 'test-device', timestamp: now,
         pins: [{ id: `page:${rustSlug}`, pinnedAt: now }],
       }},
       { path: 'lists/golang.json', data: {
-        slug: 'golang', name: 'Go', timestamp: now,
+        slug: 'golang', name: 'Go', owner: 'test-device', timestamp: now,
         pins: [{ id: `page:${goSlug}`, pinnedAt: now }],
       }},
       { path: `pages/${rustSlug}.json`, data: {
@@ -1175,11 +1175,11 @@ test.describe('List operations', () => {
         parentIds: [], childIds: [],
       }},
 
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now - 1000, action: 'visit_page', url: rustUrl, title: 'Rust Lang' },
         { timestamp: now, action: 'visit_page', url: goUrl, title: 'Go Dev' },
       ]},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Rust': 'rust', 'Go': 'golang' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Rust': 'rust', 'test-device/Go': 'golang' } } },
     ]);
 
     // Open Explore view — both results shown (no bubbles active)
@@ -1237,17 +1237,17 @@ test.describe('List operations', () => {
   test('nested list renders with indentation in sidebar', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:parent', children: [{ id: 'list:child' }] }],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent List', timestamp: now, pins: [],
+        slug: 'parent', name: 'Parent List', owner: 'test-device', timestamp: now, pins: [],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child List', timestamp: now, pins: [],
+        slug: 'child', name: 'Child List', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Parent List': 'parent', 'Child List': 'child' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Parent List': 'parent', 'test-device/Child List': 'child' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -1266,17 +1266,17 @@ test.describe('List operations', () => {
   test('fold toggle hides/shows nested children', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:parent', children: [{ id: 'list:child' }] }],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent', timestamp: now, pins: [],
+        slug: 'parent', name: 'Parent', owner: 'test-device', timestamp: now, pins: [],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [],
+        slug: 'child', name: 'Child', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Parent': 'parent', 'Child': 'child' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Parent': 'parent', 'test-device/Child': 'child' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -1297,7 +1297,7 @@ test.describe('List operations', () => {
   test('updateListTree moves list between parents', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [
           { id: 'list:a', children: [{ id: 'list:child' }] },
@@ -1305,15 +1305,15 @@ test.describe('List operations', () => {
         ],
       }},
       { path: 'lists/a.json', data: {
-        slug: 'a', name: 'List A', timestamp: now, pins: [],
+        slug: 'a', name: 'List A', owner: 'test-device', timestamp: now, pins: [],
       }},
       { path: 'lists/b.json', data: {
-        slug: 'b', name: 'List B', timestamp: now, pins: [],
+        slug: 'b', name: 'List B', owner: 'test-device', timestamp: now, pins: [],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [],
+        slug: 'child', name: 'Child', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'List A': 'a', 'List B': 'b', 'Child': 'child' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/List A': 'a', 'test-device/List B': 'b', 'test-device/Child': 'child' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1348,17 +1348,17 @@ test.describe('List operations', () => {
   test('deleteList with children promotes children (non-cascading)', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:parent', children: [{ id: 'list:child' }] }],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent', timestamp: now, pins: [],
+        slug: 'parent', name: 'Parent', owner: 'test-device', timestamp: now, pins: [],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [],
+        slug: 'child', name: 'Child', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Parent': 'parent', 'Child': 'child' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Parent': 'parent', 'test-device/Child': 'child' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1385,17 +1385,17 @@ test.describe('List operations', () => {
   test('restoreList adds list to top-level of tree', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:parent', children: [{ id: 'list:child' }] }],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent', timestamp: now, pins: [],
+        slug: 'parent', name: 'Parent', owner: 'test-device', timestamp: now, pins: [],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [],
+        slug: 'child', name: 'Child', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Parent': 'parent', 'Child': 'child' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Parent': 'parent', 'test-device/Child': 'child' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1433,12 +1433,12 @@ test.describe('List operations', () => {
   test('pin note via toggleListPin adds note to list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] }},
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now,
+        slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now,
         pins: [],
       }},
       { path: `data/notes/${NOTE_SLUG}.json`, data: {
@@ -1449,7 +1449,7 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${NOTE_SLUG}`],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1473,12 +1473,12 @@ test.describe('List operations', () => {
   test('unpin note via toggleListPin removes note from list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] }},
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now,
+        slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now,
         pins: [{ id: `note:${NOTE_SLUG}`, pinnedAt: now }],
       }},
       { path: `data/notes/${NOTE_SLUG}.json`, data: {
@@ -1489,7 +1489,7 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${NOTE_SLUG}`],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1513,12 +1513,12 @@ test.describe('List operations', () => {
   test('deleteNote removes note pin from list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] }},
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now,
+        slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now,
         pins: [{ id: `note:${NOTE_SLUG}`, pinnedAt: now }, { id: `page:${TEST_SLUG}`, pinnedAt: now }],
       }},
       { path: `data/notes/${NOTE_SLUG}.json`, data: {
@@ -1529,7 +1529,7 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: ['list:reading'], childIds: [`note:${NOTE_SLUG}`],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1559,7 +1559,7 @@ test.describe('List operations', () => {
   test('restoreNote re-links note to parent page and un-orphans', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] }},
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -1567,7 +1567,7 @@ test.describe('List operations', () => {
         timestamp: now, entries: [{ key: `note:${NOTE_SLUG}`, url: TEST_URL }],
       }},
       { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading', timestamp: now,
+        slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
       }},
       { path: `data/notes/${NOTE_SLUG}.json`, data: {
@@ -1579,7 +1579,7 @@ test.describe('List operations', () => {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: ['list:reading'], childIds: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1615,7 +1615,7 @@ test.describe('List operations', () => {
   // The drain in offscreen.js was missing a case for manifest:list-order.
   test('new list creation persists list-order.json through drain + rehydrate', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: Date.now(), tree: [],
       }},
@@ -1657,17 +1657,17 @@ test.describe('List operations', () => {
   test('new list creation preserves existing tree entries through drain', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:existing1' }, { id: 'list:existing2' }],
       }},
       { path: 'lists/existing1.json', data: {
-        slug: 'existing1', name: 'Existing One', timestamp: now, pins: [],
+        slug: 'existing1', name: 'Existing One', owner: 'test-device', timestamp: now, pins: [],
       }},
       { path: 'lists/existing2.json', data: {
-        slug: 'existing2', name: 'Existing Two', timestamp: now, pins: [],
+        slug: 'existing2', name: 'Existing Two', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Existing One': 'existing1', 'Existing Two': 'existing2' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Existing One': 'existing1', 'test-device/Existing Two': 'existing2' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1704,17 +1704,17 @@ test.describe('List operations', () => {
   test('updateListTree persists list-order.json through drain + rehydrate', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:parent', children: [{ id: 'list:child' }] }],
       }},
       { path: 'lists/parent.json', data: {
-        slug: 'parent', name: 'Parent', timestamp: now, pins: [],
+        slug: 'parent', name: 'Parent', owner: 'test-device', timestamp: now, pins: [],
       }},
       { path: 'lists/child.json', data: {
-        slug: 'child', name: 'Child', timestamp: now, pins: [],
+        slug: 'child', name: 'Child', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Parent': 'parent', 'Child': 'child' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Parent': 'parent', 'test-device/Child': 'child' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1752,16 +1752,16 @@ test.describe('List operations', () => {
     const now = Date.now();
     const noteSlug = '260301-deleted-note-xyz';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:pintest' }],
       }},
       { path: 'lists/pintest.json', data: {
-        slug: 'pintest', name: 'PinTest', timestamp: now,
+        slug: 'pintest', name: 'PinTest', owner: 'test-device', timestamp: now,
         pins: [],
       }},
       { path: 'manifest/list-name-to-id.json', data: {
-        timestamp: now, paths: { 'PinTest': 'pintest' },
+        timestamp: now, paths: { 'test-device/PinTest': 'pintest' },
       }},
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Deleted', note: 'Gone', cssPath: 'p',
@@ -1802,19 +1802,19 @@ test.describe('List operations', () => {
   test('page GC persists through drain: unpin removes ineligible page from disk', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:gctest' }],
       }},
       { path: 'lists/gctest.json', data: {
-        slug: 'gctest', name: 'GCTest', timestamp: now,
+        slug: 'gctest', name: 'GCTest', owner: 'test-device', timestamp: now,
         pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
       }},
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: ['list:gctest'], childIds: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'GCTest': 'gctest' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/GCTest': 'gctest' } } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -1849,12 +1849,12 @@ test.describe('List operations', () => {
     const slug2 = getSlugForUrl(url2);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:kbdel' }],
       }},
       { path: 'lists/kbdel.json', data: {
-        slug: 'kbdel', name: 'KB Del', timestamp: now,
+        slug: 'kbdel', name: 'KB Del', owner: 'test-device', timestamp: now,
         pins: [
           { id: `page:${slug1}`, pinnedAt: now },
           { id: `page:${slug2}`, pinnedAt: now },
@@ -1868,7 +1868,7 @@ test.describe('List operations', () => {
         slug: slug2, url: url2, title: 'KB Delete Two', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'KB Del': 'kbdel' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/KB Del': 'kbdel' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -1906,8 +1906,8 @@ test.describe('List operations', () => {
   test('Delete key on explore view shows info bubble', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: 'https://example.com/history-item', title: 'History Item' },
       ]},
     ]);
@@ -1941,12 +1941,12 @@ test.describe('List operations', () => {
     const slug2 = getSlugForUrl(url2);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:cplist' }],
       }},
       { path: 'lists/cplist.json', data: {
-        slug: 'cplist', name: 'Copy List', timestamp: now,
+        slug: 'cplist', name: 'Copy List', owner: 'test-device', timestamp: now,
         pins: [
           { id: `page:${slug1}`, pinnedAt: now },
           { id: `page:${slug2}`, pinnedAt: now },
@@ -1960,7 +1960,7 @@ test.describe('List operations', () => {
         slug: slug2, url: url2, title: 'Copy Two', timestamp: now,
         parentIds: [], childIds: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Copy List': 'cplist' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Copy List': 'cplist' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -2000,14 +2000,14 @@ test.describe('List operations', () => {
     const pasteSlug = getSlugForUrl(pasteUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:pastelist' }],
       }},
       { path: 'lists/pastelist.json', data: {
-        slug: 'pastelist', name: 'Paste List', timestamp: now, pins: [],
+        slug: 'pastelist', name: 'Paste List', owner: 'test-device', timestamp: now, pins: [],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Paste List': 'pastelist' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Paste List': 'pastelist' } } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -2044,8 +2044,8 @@ test.describe('List operations', () => {
   test('Ctrl+V outside list view shows info bubble', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: 'https://example.com/explore-item', title: 'Explore Item' },
       ]},
     ]);

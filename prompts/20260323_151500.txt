@@ -1,0 +1,19 @@
+- Take a look at sync-plan.md, what's the rational next move?
+- I agree on commutativity first. But we implement it thoroughly without leaving fallback code or legacy data. The new fields only occur when user enabled multi-device syncing, otherwise no visible to the code or in the data.
+- 1. Not mode or flag. When sync is off, logs are stored as <date>.jsonl. When sync is on, we ask user for a unique device name, and migrate log files to name <date>-<device>.jsonl. No need to store deviceId in logs (if I understand right).
+2. I hesitate on the listId part. As we established earlier, `data/` is open data. We aim to make it self-descriptive. Is listId strictly necessary? If so can we add both listName and listId to the logs?
+- For 2. Could we use (listName, deviceName) as the key in list-name-to-id.json? Also, I believe we no longer need to store "parents" in the logs because list-name-to-id already drops the parents. We have to enforce device-level name uniqueness
+- We can afford to always add the list device name in log
+- Actually listOwner sounds better? Or do you have other suggestion?
+- Yes, then come up with plan for the commutativity part
+- go forward without asking for confirmation
+- Are you sure the tests are comprehensive? As in covering the numerous edge cases we may or may not discussed.
+- yes
+- go
+- continue
+- continue
+- Let's assign a random device name initially even when user hasn't enabled sync. And when user configures sync for the first time, the default name is displayed but user can choose to edit it. The benefit of this is we can avoid checking deviceName for all the important replay logic and make tests in both modes cover each other.
+- Actually, to avoid renaming all logs, let's use sub-directory in `logs` to identify different devices
+- I recall you mentioned "backward compat" earlier. Make sure there is none backward compat code left in the codebase
+- What are you doing? You have run the same command for like 5 times already?
+- /finish

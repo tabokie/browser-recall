@@ -14,6 +14,9 @@ import {
 } from '../extension/replay.js';
 import { generateSlugFromUrl } from '../extension/utils.js';
 
+// Default device name for all tests (always-on)
+const CTX = { deviceName: 'test-device' };
+
 // Shared null load
 const nullLoad = async () => null;
 
@@ -29,8 +32,8 @@ function makeLoad(store) {
 // Helper: base store with system entities for list tests
 function listStore(extra = {}) {
   return {
-    'manifest:name-to-id': { timestamp: 0, paths: { 'Test': 'test-id' } },
-    'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [] },
+    'manifest:name-to-id': { timestamp: 0, paths: { 'test-device/Test': 'test-id' } },
+    'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', owner: 'test-device', pins: [] },
     'manifest:list-order': { timestamp: 0, tree: [{ id: 'list:test-id' }] },
     'manifest:orphaned': { timestamp: 0, entries: [] },
     ...extra,
@@ -67,7 +70,7 @@ describe('getAffectedKeys', () => {
   });
 
   it('returns empty set for list events (no url)', () => {
-    const keys = getAffectedKeys({ timestamp: 100, action: 'pin_to_list', parents: ['root'], name: 'Test', items: ['https://a.com'] });
+    const keys = getAffectedKeys({ timestamp: 100, action: 'pin_to_list', listOwner: 'test-device', name: 'Test', items: ['https://a.com'] });
     // pin_to_list has no entry.url at top level
     expect(keys.size).toBe(0);
   });
@@ -158,6 +161,7 @@ describe('effectOf: update_setting', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'update_setting', key: 'theme', value: 'dark' },
       makeLoad({ 'manifest:settings': { timestamp: 0 } }),
+      CTX,
     );
     expect(result['manifest:settings'].theme).toBe('dark');
     expect(result['manifest:settings'].timestamp).toBe(100);
@@ -167,6 +171,7 @@ describe('effectOf: update_setting', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'update_setting', key: 'x', value: 1 },
       nullLoad,
+      CTX,
     );
     expect(result['manifest:settings'].x).toBe(1);
   });
@@ -182,6 +187,7 @@ describe('effectOf: visit_page', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'visit_page', url: 'https://a.com', title: 'A' },
       makeLoad({ [`page:${slug}`]: { slug, timestamp: 0, parentIds: [], childIds: [] } }),
+      CTX,
     );
     expect(result[`page:${slug}`].url).toBe('https://a.com');
     expect(result[`page:${slug}`].title).toBe('A');
@@ -193,6 +199,7 @@ describe('effectOf: visit_page', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'visit_page', url: 'https://a.com', title: 'A' },
       nullLoad,
+      CTX,
     );
     expect(result[`page:${slug}`]).toBeUndefined();
   });
@@ -202,6 +209,7 @@ describe('effectOf: visit_page', () => {
     const result = await effectOf(
       { timestamp: new Date('2026-03-11').getTime(), action: 'visit_page', url: 'https://a.com', title: 'A' },
       makeLoad({ [`page:${slug}`]: { slug, timestamp: 0, parentIds: [], childIds: [] } }),
+      CTX,
     );
     expect(result[`page:${slug}`].visitDates).toContain(20260311);
   });
@@ -216,6 +224,7 @@ describe('effectOf: visit_page', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'visit_page', url: 'https://child.com', title: 'C', referrerUrl: 'https://parent.com' },
       makeLoad(store),
+      CTX,
     );
     expect(result[`page:${childSlug}`].parentIds).toContain(`page:${parentSlug}`);
     expect(result[`page:${parentSlug}`].childIds).toContain(`page:${childSlug}`);
@@ -231,6 +240,7 @@ describe('effectOf: visit_page', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'visit_page', url: 'https://github.com/user/repo', title: 'Repo', referrerUrl: 'https://github.com/' },
       makeLoad(store),
+      CTX,
     );
     expect(result[`page:${childSlug}`].parentIds).toContain(`page:${parentSlug}`);
     expect(result[`page:${parentSlug}`].childIds).toContain(`page:${childSlug}`);
@@ -247,6 +257,7 @@ describe('effectOf: leave_page', () => {
     const result = await effectOf(
       { timestamp: 200, action: 'leave_page', url: 'https://a.com', scrollDepth: 80, timeOnPage: 5000 },
       makeLoad({ [`page:${slug}`]: { slug, timestamp: 100, parentIds: [], childIds: [] } }),
+      CTX,
     );
     expect(result[`page:${slug}`].scrollDepth).toBe(80);
     expect(result[`page:${slug}`].timeOnPage).toBe(5000);
@@ -257,17 +268,19 @@ describe('effectOf: leave_page', () => {
     const result = await effectOf(
       { timestamp: 200, action: 'leave_page', url: 'https://a.com', scrollDepth: 80 },
       nullLoad,
+      CTX,
     );
     expect(result[`page:${slug}`]).toBeUndefined();
   });
 
-  it('idempotency: skips attention when timestamp <= prevTimestamp', async () => {
+  it('idempotency: skips attention when remotes[device] >= entry.timestamp', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const result = await effectOf(
       { timestamp: 100, action: 'leave_page', url: 'https://a.com', scrollDepth: 50, timeOnPage: 1000 },
-      makeLoad({ [`page:${slug}`]: { slug, timestamp: 100, scrollDepth: 30, timeOnPage: 2000, parentIds: [], childIds: [] } }),
+      makeLoad({ [`page:${slug}`]: { slug, timestamp: 100, scrollDepth: 30, timeOnPage: 2000, parentIds: [], childIds: [], remotes: { 'test-device': 100 } } }),
+      CTX,
     );
-    // timestamp not > prevTimestamp, so attention not applied
+    // remotes['test-device'] >= entry.timestamp, so attention not applied
     expect(result[`page:${slug}`].scrollDepth).toBe(30);
     expect(result[`page:${slug}`].timeOnPage).toBe(2000);
   });
@@ -277,6 +290,7 @@ describe('effectOf: leave_page', () => {
     const result = await effectOf(
       { timestamp: 200, action: 'leave_page', url: 'https://a.com', title: 'New Title' },
       makeLoad({ [`page:${slug}`]: { slug, timestamp: 100, title: 'Old', parentIds: [], childIds: [] } }),
+      CTX,
     );
     expect(result[`page:${slug}`].title).toBe('New Title');
   });
@@ -288,12 +302,14 @@ describe('effectOf: leave_page', () => {
     const r1 = await effectOf(
       { timestamp: 200, action: 'leave_page', url: 'https://a.com', timeOnPage: 2000 },
       makeLoad({ [pageKey]: { slug, timestamp: 100, parentIds: [], childIds: [] } }),
+      CTX,
     );
     expect(r1[pageKey].timeOnPage).toBe(2000);
     // Second leave: 500ms foreground delta (after tab switch back)
     const r2 = await effectOf(
       { timestamp: 300, action: 'leave_page', url: 'https://a.com', timeOnPage: 500 },
       makeLoad({ [pageKey]: { ...r1[pageKey] } }),
+      CTX,
     );
     expect(r2[pageKey].timeOnPage).toBe(2500);
   });
@@ -309,6 +325,7 @@ describe('effectOf: rename_page', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'rename_page', url: 'https://a.com', user_title: 'Custom' },
       nullLoad,
+      CTX,
     );
     expect(result[`page:${slug}`]).toBeTruthy();
     expect(result[`page:${slug}`].user_title).toBe('Custom');
@@ -319,6 +336,7 @@ describe('effectOf: rename_page', () => {
     const result = await effectOf(
       { timestamp: 200, action: 'rename_page', url: 'https://a.com', user_title: 'New Name' },
       makeLoad({ [`page:${slug}`]: { slug, timestamp: 100, user_title: 'Old', parentIds: [], childIds: [] } }),
+      CTX,
     );
     expect(result[`page:${slug}`].user_title).toBe('New Name');
   });
@@ -334,6 +352,7 @@ describe('effectOf: rate_page', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'rate_page', url: 'https://a.com', likes: 1 },
       nullLoad,
+      CTX,
     );
     expect(result[`page:${slug}`]).toBeTruthy();
     expect(result[`page:${slug}`].likes).toBe(1);
@@ -344,6 +363,7 @@ describe('effectOf: rate_page', () => {
     const result = await effectOf(
       { timestamp: 200, action: 'rate_page', url: 'https://a.com', likes: -1 },
       makeLoad({ [`page:${slug}`]: { slug, timestamp: 100, likes: 3, parentIds: [], childIds: [] } }),
+      CTX,
     );
     expect(result[`page:${slug}`].likes).toBe(2);
   });
@@ -353,15 +373,17 @@ describe('effectOf: rate_page', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'rate_page', url: 'https://a.com', likes: 1, title: 'Page A' },
       nullLoad,
+      CTX,
     );
     expect(result[`page:${slug}`].title).toBe('Page A');
   });
 
-  it('idempotency: skips likes when timestamp <= prevTimestamp', async () => {
+  it('idempotency: skips likes when remotes[device] >= entry.timestamp', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const result = await effectOf(
       { timestamp: 100, action: 'rate_page', url: 'https://a.com', likes: 1 },
-      makeLoad({ [`page:${slug}`]: { slug, timestamp: 100, likes: 3, parentIds: [], childIds: [] } }),
+      makeLoad({ [`page:${slug}`]: { slug, timestamp: 100, likes: 3, parentIds: [], childIds: [], remotes: { 'test-device': 100 } } }),
+      CTX,
     );
     expect(result[`page:${slug}`].likes).toBe(3);
   });
@@ -377,6 +399,7 @@ describe('effectOf: create_snapshot', () => {
     const result = await effectOf(
       { timestamp: 1000, action: 'create_snapshot', url: 'https://a.com', path: `snapshots/${slug}-1000` },
       nullLoad,
+      CTX,
     );
     const page = result[`page:${slug}`];
     expect(page).toBeTruthy();
@@ -388,6 +411,7 @@ describe('effectOf: create_snapshot', () => {
     const result = await effectOf(
       { timestamp: 1000, action: 'create_snapshot', url: 'https://a.com', path: `snapshots/${slug}-1000`, title: 'Snap Title' },
       nullLoad,
+      CTX,
     );
     expect(result[`page:${slug}`].title).toBe('Snap Title');
   });
@@ -397,6 +421,7 @@ describe('effectOf: create_snapshot', () => {
     const result = await effectOf(
       { timestamp: 2000, action: 'create_snapshot', url: 'https://a.com', path: `snapshots/${slug}-2000` },
       makeLoad({ [`page:${slug}`]: { slug, timestamp: 1000, parentIds: [], childIds: [`snapshot:${slug}-1000`] } }),
+      CTX,
     );
     expect(result[`page:${slug}`].childIds).toContain(`snapshot:${slug}-1000`);
     expect(result[`page:${slug}`].childIds).toContain(`snapshot:${slug}-2000`);
@@ -413,6 +438,7 @@ describe('effectOf: create_note', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'create_note', url: 'https://a.com', path: 'notes/n1.json' },
       nullLoad,
+      CTX,
     );
     expect(result[`page:${slug}`]).toBeTruthy();
     expect(result[`page:${slug}`].childIds).toContain('note:n1');
@@ -423,6 +449,7 @@ describe('effectOf: create_note', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'create_note', url: 'https://a.com', path: 'notes/n1.json', title: 'Note Page' },
       nullLoad,
+      CTX,
     );
     expect(result[`page:${slug}`].title).toBe('Note Page');
   });
@@ -432,6 +459,7 @@ describe('effectOf: create_note', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'create_note', url: 'https://a.com', path: 'notes/n2.json' },
       makeLoad({ [`page:${slug}`]: { slug, timestamp: 50, parentIds: [], childIds: ['note:n1'] } }),
+      CTX,
     );
     expect(result[`page:${slug}`].childIds).toContain('note:n1');
     expect(result[`page:${slug}`].childIds).toContain('note:n2');
@@ -454,15 +482,16 @@ describe('effectOf: delete_note', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'delete_note', url: 'https://a.com', path: 'notes/n1.json' },
       makeLoad(store),
+      CTX,
     );
     expect(result[pageKey].childIds).not.toContain('note:n1');
     expect(result['note:n1'].deleted).toBe(true);
     expect(result['manifest:orphaned'].entries).toContainEqual({ key: 'note:n1', url: 'https://a.com' });
   });
 
-  it('noop if already deleted', async () => {
+  it('noop if already deleted with deletedTs >= entry.timestamp', async () => {
     const store = {
-      'note:n1': { slug: 'n1', deleted: true, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', deleted: true, deletedTs: 200, url: 'https://a.com' },
       'manifest:orphaned': { timestamp: 0, entries: [{ key: 'note:n1', url: 'https://a.com' }] },
     };
     const load = async (key, opts) => {
@@ -473,6 +502,7 @@ describe('effectOf: delete_note', () => {
     const result = await effectOf(
       { timestamp: 200, action: 'delete_note', url: 'https://a.com', path: 'notes/n1.json' },
       load,
+      CTX,
     );
     expect(Object.keys(result)).toHaveLength(0);
   });
@@ -495,6 +525,7 @@ describe('effectOf: restore_note', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'restore_note', url: 'https://a.com', path: 'notes/n1.json' },
       load,
+      CTX,
     );
     expect(result[pageKey].childIds).toContain('note:n1');
     expect(result['note:n1'].deleted).toBe(false);
@@ -519,6 +550,7 @@ describe('effectOf: replace_note', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' },
       makeLoad(store),
+      CTX,
     );
     // Old note unlinked from page
     expect(result[rpPageKey].childIds).not.toContain('note:n1');
@@ -535,6 +567,7 @@ describe('effectOf: replace_note', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' },
       makeLoad(store),
+      CTX,
     );
     expect(result['note:n1'].deleted).toBe(true);
     expect(result['note:n1'].deletionReason).toBe('replaced');
@@ -550,6 +583,7 @@ describe('effectOf: replace_note', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' },
       makeLoad(store),
+      CTX,
     );
     expect(result['manifest:orphaned'].entries.map(e => e.key)).toContain('note:n1');
   });
@@ -558,13 +592,14 @@ describe('effectOf: replace_note', () => {
     const store = {
       'note:n1': { slug: 'n1', url: 'https://a.com' },
       [rpPageKey]: { slug: rpPageSlug, timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
-      'manifest:name-to-id': { timestamp: 0, paths: { 'Test': 'test-id' } },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: 'note:n1', pinnedAt: 50 }] },
+      'manifest:name-to-id': { timestamp: 0, paths: { 'test-device/Test': 'test-id' } },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', owner: 'test-device', pins: [{ id: 'note:n1', pinnedAt: 50 }] },
       'manifest:orphaned': { timestamp: 0, entries: [] },
     };
     const result = await effectOf(
       { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' },
       makeLoad(store),
+      CTX,
     );
     // Old note pin replaced with new note pin
     const pins = result['list:test-id'].pins;
@@ -576,22 +611,27 @@ describe('effectOf: replace_note', () => {
     const store = {
       'note:n1': { slug: 'n1', url: 'https://a.com' },
       [rpPageKey]: { slug: rpPageSlug, timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
-      'manifest:name-to-id': { timestamp: 0, paths: { 'Test': 'test-id' } },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: 'note:n1', pinnedAt: 50 }] },
+      'manifest:name-to-id': { timestamp: 0, paths: { 'test-device/Test': 'test-id' } },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', owner: 'test-device', pins: [{ id: 'note:n1', pinnedAt: 50 }] },
       'manifest:orphaned': { timestamp: 0, entries: [] },
     };
     const result = await effectOf(
       { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' },
       makeLoad(store),
+      CTX,
     );
     // New note inherits url from old note
     expect(result['note:n2'].url).toBe('https://a.com');
   });
 
-  it('noop if old note is already deleted', async () => {
+  it('proceeds even if old note is already deleted — both edits survive as siblings', async () => {
+    const pageSlug = generateSlugFromUrl('https://a.com');
+    const pageKey = `page:${pageSlug}`;
     const store = {
-      'note:n1': { slug: 'n1', deleted: true, url: 'https://a.com' },
+      'note:n1': { slug: 'n1', deleted: true, deletedTs: 50, url: 'https://a.com' },
+      [pageKey]: { slug: pageSlug, timestamp: 50, url: 'https://a.com', parentIds: [], childIds: [] },
       'manifest:orphaned': { timestamp: 0, entries: [{ key: 'note:n1', url: 'https://a.com' }] },
+      'manifest:name-to-id': { timestamp: 0, paths: {} },
     };
     const load = async (key, opts) => {
       const e = store[key] ?? null;
@@ -601,8 +641,13 @@ describe('effectOf: replace_note', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' },
       load,
+      CTX,
     );
-    expect(Object.keys(result)).toHaveLength(0);
+    // New note IS created (both edits survive as siblings)
+    expect(result['note:n2']).toBeDefined();
+    expect(result['note:n2'].url).toBe('https://a.com');
+    // New note linked to page
+    expect(result[pageKey].childIds).toContain('note:n2');
   });
 
   it('is idempotent (safe to replay twice)', async () => {
@@ -610,9 +655,10 @@ describe('effectOf: replace_note', () => {
       'note:n1': { slug: 'n1', url: 'https://a.com' },
       [rpPageKey]: { slug: rpPageSlug, timestamp: 50, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
       'manifest:orphaned': { timestamp: 0, entries: [] },
+      'manifest:name-to-id': { timestamp: 0, paths: {} },
     };
     const entry = { timestamp: 100, action: 'replace_note', url: 'https://a.com', path: 'notes/n2.json', oldPath: 'notes/n1.json' };
-    const result1 = await effectOf(entry, makeLoad(store));
+    const result1 = await effectOf(entry, makeLoad(store), CTX);
 
     // Apply result1 to store, then replay
     const store2 = { ...store };
@@ -625,10 +671,20 @@ describe('effectOf: replace_note', () => {
       if (!opts?.includeDeleted && e?.deleted) return null;
       return e;
     };
-    const result2 = await effectOf(entry, load2);
+    const result2 = await effectOf(entry, load2, CTX);
 
-    // Second replay should be a noop (old note already deleted)
-    expect(Object.keys(result2)).toHaveLength(0);
+    // Apply result2 to store2 for final state
+    const store3 = { ...store2 };
+    for (const [k, v] of Object.entries(result2)) {
+      if (v === null) delete store3[k];
+      else store3[k] = v;
+    }
+
+    // Final state converges: page has note:n2 (not n1), n1 is deleted, n2 has url
+    expect(store3[rpPageKey].childIds).toContain('note:n2');
+    expect(store3[rpPageKey].childIds).not.toContain('note:n1');
+    expect(store3['note:n1'].deleted).toBe(true);
+    expect(store3['note:n2'].url).toBe('https://a.com');
   });
 });
 
@@ -646,6 +702,7 @@ describe('effectOf: delete_snapshot', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'delete_snapshot', url: 'https://a.com', path: `snapshots/${slug}-1000` },
       makeLoad(store),
+      CTX,
     );
     expect(result[`page:${slug}`].childIds).not.toContain(`snapshot:${slug}-1000`);
     expect(result['manifest:orphaned'].entries).toContainEqual({ key: `snapshot:${slug}-1000`, url: 'https://a.com' });
@@ -662,6 +719,7 @@ describe('effectOf: restore_snapshot', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'restore_snapshot', url: 'https://a.com', path: `snapshots/${slug}-1000` },
       makeLoad(store),
+      CTX,
     );
     expect(result[`page:${slug}`].childIds).toContain(`snapshot:${slug}-1000`);
     expect(result['manifest:orphaned'].entries.map(e => e.key)).not.toContain(`snapshot:${slug}-1000`);
@@ -677,8 +735,9 @@ describe('effectOf: pin_to_list', () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = listStore();
     const result = await effectOf(
-      { timestamp: 100, action: 'pin_to_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
+      { timestamp: 100, action: 'pin_to_list', listOwner: 'test-device', name: 'Test', items: ['https://a.com'] },
       makeLoad(store),
+      CTX,
     );
     expect(result['list:test-id'].pins).toHaveLength(1);
     expect(result['list:test-id'].pins[0].id).toBe(`page:${slug}`);
@@ -686,22 +745,27 @@ describe('effectOf: pin_to_list', () => {
     expect(result[`page:${slug}`].parentIds).toContain('list:test-id');
   });
 
-  it('skips orphaned lists', async () => {
+  it('applies pin to deleted/orphaned list (preserved for restore)', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
     const store = listStore({ 'manifest:orphaned': { timestamp: 0, entries: [{ key: 'list:test-id' }] } });
     const result = await effectOf(
-      { timestamp: 100, action: 'pin_to_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
+      { timestamp: 100, action: 'pin_to_list', listOwner: 'test-device', name: 'Test', items: ['https://a.com'] },
       makeLoad(store),
+      CTX,
     );
-    expect(result['list:test-id']).toBeUndefined();
+    expect(result['list:test-id']).toBeDefined();
+    expect(result['list:test-id'].pins).toHaveLength(1);
+    expect(result['list:test-id'].pins[0].id).toBe(`page:${slug}`);
   });
 
   it('applies title from entry.titles to newly-created page entity', async () => {
     const slug = generateSlugFromUrl('https://a.com');
     const store = listStore();
     const result = await effectOf(
-      { timestamp: 100, action: 'pin_to_list', parents: ['root'], name: 'Test',
+      { timestamp: 100, action: 'pin_to_list', listOwner: 'test-device', name: 'Test',
         items: ['https://a.com'], titles: { 'https://a.com': 'Page A Title' } },
       makeLoad(store),
+      CTX,
     );
     expect(result[`page:${slug}`].title).toBe('Page A Title');
   });
@@ -712,9 +776,10 @@ describe('effectOf: pin_to_list', () => {
       [`page:${slug}`]: { slug, timestamp: 50, url: 'https://a.com', title: 'Existing Title', parentIds: [], childIds: [] },
     });
     const result = await effectOf(
-      { timestamp: 100, action: 'pin_to_list', parents: ['root'], name: 'Test',
+      { timestamp: 100, action: 'pin_to_list', listOwner: 'test-device', name: 'Test',
         items: ['https://a.com'], titles: { 'https://a.com': 'New Title' } },
       makeLoad(store),
+      CTX,
     );
     expect(result[`page:${slug}`].title).toBe('Existing Title');
   });
@@ -726,8 +791,9 @@ describe('effectOf: pin_to_list', () => {
       'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }] },
     });
     const result = await effectOf(
-      { timestamp: 100, action: 'pin_to_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
+      { timestamp: 100, action: 'pin_to_list', listOwner: 'test-device', name: 'Test', items: ['https://a.com'] },
       makeLoad(store),
+      CTX,
     );
     expect(result['list:test-id'].pins).toHaveLength(1);
   });
@@ -741,8 +807,9 @@ describe('effectOf: unpin_from_list', () => {
       'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }] },
     });
     const result = await effectOf(
-      { timestamp: 100, action: 'unpin_from_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
+      { timestamp: 100, action: 'unpin_from_list', listOwner: 'test-device', name: 'Test', items: ['https://a.com'] },
       makeLoad(store),
+      CTX,
     );
     expect(result['list:test-id'].pins).toHaveLength(0);
     expect(result[`page:${slug}`]).toBeNull();
@@ -760,8 +827,9 @@ describe('effectOf: create_list', () => {
       'manifest:list-order': { timestamp: 0, tree: [] },
     };
     const result = await effectOf(
-      { timestamp: 100, action: 'create_list', name: 'My List', parents: [] },
+      { timestamp: 100, action: 'create_list', name: 'My List', listOwner: 'test-device' },
       makeLoad(store),
+      CTX,
     );
     // Find the generated list ID
     const listKey = Object.keys(result).find(k => k.startsWith('list:'));
@@ -774,14 +842,16 @@ describe('effectOf: create_list', () => {
     const tree = result['manifest:list-order'].tree;
     expect(tree.some(n => n.id === listKey)).toBe(true);
     // Flat name-to-id
-    expect(result['manifest:name-to-id'].paths['My List']).toBe(listId);
+    expect(result['manifest:name-to-id'].paths['test-device/My List']).toBe(listId);
+    expect(result[listKey].owner).toBe('test-device');
   });
 
   it('creates nested list under parent', async () => {
     const store = listStore();
     const result = await effectOf(
-      { timestamp: 100, action: 'create_list', name: 'Child', parents: ['root', 'Test'] },
+      { timestamp: 100, action: 'create_list', name: 'Child', listOwner: 'test-device', parentListId: 'test-id' },
       makeLoad(store),
+      CTX,
     );
     const childKey = Object.keys(result).find(k => k.startsWith('list:') && k !== 'list:test-id');
     expect(childKey).toBeTruthy();
@@ -792,8 +862,8 @@ describe('effectOf: create_list', () => {
     const testNode = tree.find(n => n.id === 'list:test-id');
     expect(testNode).toBeTruthy();
     expect(testNode.children.some(n => n.id === childKey)).toBe(true);
-    // Flat name-to-id
-    expect(result['manifest:name-to-id'].paths['Child']).toBe(childId);
+    // Compound name-to-id
+    expect(result['manifest:name-to-id'].paths['test-device/Child']).toBe(childId);
   });
 
   it('uses provided listId when present (migrated events)', async () => {
@@ -802,14 +872,15 @@ describe('effectOf: create_list', () => {
       'manifest:list-order': { timestamp: 0, tree: [] },
     };
     const result = await effectOf(
-      { timestamp: 100, action: 'create_list', name: 'Cinema', parents: [], listId: 'cinema-gfl1h7' },
+      { timestamp: 100, action: 'create_list', name: 'Cinema', listOwner: 'test-device', listId: 'cinema-gfl1h7' },
       makeLoad(store),
+      CTX,
     );
     expect(result['list:cinema-gfl1h7']).toBeTruthy();
     expect(result['list:cinema-gfl1h7'].name).toBe('Cinema');
     const tree = result['manifest:list-order'].tree;
     expect(tree.some(n => n.id === 'list:cinema-gfl1h7')).toBe(true);
-    expect(result['manifest:name-to-id'].paths['Cinema']).toBe('cinema-gfl1h7');
+    expect(result['manifest:name-to-id'].paths['test-device/Cinema']).toBe('cinema-gfl1h7');
   });
 });
 
@@ -821,13 +892,14 @@ describe('effectOf: update_list', () => {
   it('renames list and updates flat name-map (no cascade)', async () => {
     const store = listStore();
     const result = await effectOf(
-      { timestamp: 100, action: 'update_list', parents: ['root'], name: 'Test', newName: 'Renamed' },
+      { timestamp: 100, action: 'update_list', listOwner: 'test-device', name: 'Test', newName: 'Renamed' },
       makeLoad(store),
+      CTX,
     );
     expect(result['list:test-id'].name).toBe('Renamed');
-    // Flat name-to-id: old name removed, new name added
-    expect(result['manifest:name-to-id'].paths['Renamed']).toBe('test-id');
-    expect(result['manifest:name-to-id'].paths['Test']).toBeUndefined();
+    // Compound name-to-id: old name removed, new name added
+    expect(result['manifest:name-to-id'].paths['test-device/Renamed']).toBe('test-id');
+    expect(result['manifest:name-to-id'].paths['test-device/Test']).toBeUndefined();
   });
 
 });
@@ -840,21 +912,23 @@ describe('effectOf: delete_list', () => {
   it('soft-deletes, removes from tree and name-map, orphans', async () => {
     const store = listStore();
     const result = await effectOf(
-      { timestamp: 100, action: 'delete_list', parents: ['root'], name: 'Test' },
+      { timestamp: 100, action: 'delete_list', listOwner: 'test-device', name: 'Test' },
       makeLoad(store),
+      CTX,
     );
     expect(result['list:test-id'].deleted).toBe(true);
     // Removed from tree manifest
     const tree = result['manifest:list-order'].tree;
     expect(tree.some(n => n.id === 'list:test-id')).toBe(false);
-    // Removed from flat name-to-id
-    expect(result['manifest:name-to-id'].paths['Test']).toBeUndefined();
+    // Removed from compound name-to-id
+    expect(result['manifest:name-to-id'].paths['test-device/Test']).toBeUndefined();
     expect(result['manifest:orphaned'].entries.map(e => e.key)).toContain('list:test-id');
+    expect(result['list:test-id'].deletedTs).toBe(100);
   });
 
-  it('noop if already deleted', async () => {
+  it('noop if already deleted with deletedTs >= entry.timestamp', async () => {
     const store = listStore({
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', deleted: true, pins: [] },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', owner: 'test-device', deleted: true, deletedTs: 200, pins: [] },
     });
     const load = async (key, opts) => {
       const e = store[key] ?? null;
@@ -862,24 +936,26 @@ describe('effectOf: delete_list', () => {
       return e;
     };
     const result = await effectOf(
-      { timestamp: 200, action: 'delete_list', parents: ['root'], name: 'Test' },
+      { timestamp: 200, action: 'delete_list', listOwner: 'test-device', name: 'Test' },
       load,
+      CTX,
     );
     expect(Object.keys(result)).toHaveLength(0);
   });
 
   it('promotes children when deleting a parent (non-cascading)', async () => {
     const store = listStore({
-      'manifest:name-to-id': { timestamp: 0, paths: { 'Test': 'test-id', 'Child': 'child-id' } },
-      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [] },
-      'list:child-id': { timestamp: 0, slug: 'child-id', name: 'Child', pins: [] },
+      'manifest:name-to-id': { timestamp: 0, paths: { 'test-device/Test': 'test-id', 'test-device/Child': 'child-id' } },
+      'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', owner: 'test-device', pins: [] },
+      'list:child-id': { timestamp: 0, slug: 'child-id', name: 'Child', owner: 'test-device', pins: [] },
       'manifest:list-order': { timestamp: 0, tree: [
         { id: 'list:test-id', children: [{ id: 'list:child-id' }] }
       ] },
     });
     const result = await effectOf(
-      { timestamp: 100, action: 'delete_list', parents: ['root'], name: 'Test' },
+      { timestamp: 100, action: 'delete_list', listOwner: 'test-device', name: 'Test' },
       makeLoad(store),
+      CTX,
     );
     // Parent is deleted
     expect(result['list:test-id'].deleted).toBe(true);
@@ -889,9 +965,9 @@ describe('effectOf: delete_list', () => {
     const tree = result['manifest:list-order'].tree;
     expect(tree.some(n => n.id === 'list:child-id')).toBe(true);
     expect(tree.some(n => n.id === 'list:test-id')).toBe(false);
-    // Only parent removed from name-to-id
-    expect(result['manifest:name-to-id'].paths['Test']).toBeUndefined();
-    expect(result['manifest:name-to-id'].paths['Child']).toBe('child-id');
+    // Only parent removed from compound name-to-id
+    expect(result['manifest:name-to-id'].paths['test-device/Test']).toBeUndefined();
+    expect(result['manifest:name-to-id'].paths['test-device/Child']).toBe('child-id');
   });
 });
 
@@ -899,7 +975,7 @@ describe('effectOf: restore_list', () => {
   it('restores to top-level in tree, re-adds to name-map, unorphans', async () => {
     const store = {
       'manifest:name-to-id': { timestamp: 0, paths: {} },
-      'list:test-id': { slug: 'test-id', name: 'Test', deleted: true, timestamp: 50, pins: [] },
+      'list:test-id': { slug: 'test-id', name: 'Test', owner: 'test-device', deleted: true, timestamp: 50, pins: [] },
       'manifest:list-order': { timestamp: 0, tree: [] },
       'manifest:orphaned': { timestamp: 50, entries: [{ key: 'list:test-id' }] },
     };
@@ -909,15 +985,16 @@ describe('effectOf: restore_list', () => {
       return e;
     };
     const result = await effectOf(
-      { timestamp: 100, action: 'restore_list', parents: ['root'], name: 'Test' },
+      { timestamp: 100, action: 'restore_list', listOwner: 'test-device', name: 'Test' },
       load,
+      CTX,
     );
     expect(result['list:test-id'].deleted).toBe(false);
     // Added to tree manifest as top-level
     const tree = result['manifest:list-order'].tree;
     expect(tree.some(n => n.id === 'list:test-id')).toBe(true);
-    // Flat name-to-id
-    expect(result['manifest:name-to-id'].paths['Test']).toBe('test-id');
+    // Compound name-to-id
+    expect(result['manifest:name-to-id'].paths['test-device/Test']).toBe('test-id');
     expect(result['manifest:orphaned'].entries.map(e => e.key)).not.toContain('list:test-id');
   });
 });
@@ -951,6 +1028,7 @@ describe('effectOf: visit_page — REFERRER_CAP', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'visit_page', url: 'https://example.com/child', title: 'Child', referrerUrl: newParentUrl },
       makeLoad(store),
+      CTX,
     );
 
     // parentIds should still be 50 (capped), with oldest evicted
@@ -984,6 +1062,7 @@ describe('effectOf: visit_page — REFERRER_CAP', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'visit_page', url: newChildUrl, title: 'New Child', referrerUrl: 'https://example.com/parent' },
       makeLoad(store),
+      CTX,
     );
 
     // childIds should still be 50 (capped), with oldest evicted
@@ -1007,6 +1086,7 @@ describe('effectOf: update_list_tree', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'update_list_tree', tree: newTree },
       makeLoad(store),
+      CTX,
     );
     expect(result['manifest:list-order'].tree).toEqual(newTree);
     expect(result['manifest:list-order'].timestamp).toBe(100);
@@ -1019,6 +1099,7 @@ describe('effectOf: update_list_tree', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'update_list_tree', tree: [{ id: 'list:b-id' }] },
       makeLoad(store),
+      CTX,
     );
     // Stale event — no changes
     expect(Object.keys(result)).toHaveLength(0);
@@ -1027,11 +1108,12 @@ describe('effectOf: update_list_tree', () => {
   it('does not modify name-to-id (tree-independent)', async () => {
     const store = {
       'manifest:list-order': { timestamp: 0, tree: [{ id: 'list:a-id' }, { id: 'list:b-id' }] },
-      'manifest:name-to-id': { timestamp: 0, paths: { 'A': 'a-id', 'B': 'b-id' } },
+      'manifest:name-to-id': { timestamp: 0, paths: { 'test-device/A': 'a-id', 'test-device/B': 'b-id' } },
     };
     const result = await effectOf(
       { timestamp: 100, action: 'update_list_tree', tree: [{ id: 'list:a-id', children: [{ id: 'list:b-id' }] }] },
       makeLoad(store),
+      CTX,
     );
     // name-to-id should NOT be in the result (not modified)
     expect(result['manifest:name-to-id']).toBeUndefined();
@@ -1088,8 +1170,9 @@ describe('effectOf: page GC on unpin_from_list', () => {
       'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }] },
     });
     const result = await effectOf(
-      { timestamp: 100, action: 'unpin_from_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
+      { timestamp: 100, action: 'unpin_from_list', listOwner: 'test-device', name: 'Test', items: ['https://a.com'] },
       makeLoad(store),
+      CTX,
     );
     expect(result[`page:${slug}`]).toBeNull();
   });
@@ -1101,8 +1184,9 @@ describe('effectOf: page GC on unpin_from_list', () => {
       'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }] },
     });
     const result = await effectOf(
-      { timestamp: 100, action: 'unpin_from_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
+      { timestamp: 100, action: 'unpin_from_list', listOwner: 'test-device', name: 'Test', items: ['https://a.com'] },
       makeLoad(store),
+      CTX,
     );
     expect(result[`page:${slug}`]).not.toBeNull();
     expect(result[`page:${slug}`].parentIds).not.toContain('list:test-id');
@@ -1115,8 +1199,9 @@ describe('effectOf: page GC on unpin_from_list', () => {
       'list:test-id': { timestamp: 0, slug: 'test-id', name: 'Test', pins: [{ id: `page:${slug}`, pinnedAt: 50 }] },
     });
     const result = await effectOf(
-      { timestamp: 100, action: 'unpin_from_list', parents: ['root'], name: 'Test', items: ['https://a.com'] },
+      { timestamp: 100, action: 'unpin_from_list', listOwner: 'test-device', name: 'Test', items: ['https://a.com'] },
       makeLoad(store),
+      CTX,
     );
     expect(result[`page:${slug}`]).not.toBeNull();
     expect(result[`page:${slug}`].user_title).toBe('Custom');
@@ -1140,6 +1225,7 @@ describe('effectOf: page GC on delete_note', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'delete_note', url: 'https://a.com', path: 'notes/n1.json' },
       makeLoad(store),
+      CTX,
     );
     expect(result[gcPageKey]).toBeNull();
   });
@@ -1153,6 +1239,7 @@ describe('effectOf: page GC on delete_note', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'delete_note', url: 'https://a.com', path: 'notes/n1.json' },
       makeLoad(store),
+      CTX,
     );
     expect(result[gcPageKey]).not.toBeNull();
     expect(result[gcPageKey].childIds).not.toContain('note:n1');
@@ -1173,6 +1260,7 @@ describe('effectOf: page GC on delete_snapshot', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'delete_snapshot', url: 'https://a.com', path: `snapshots/${slug}-1000` },
       makeLoad(store),
+      CTX,
     );
     expect(result[`page:${slug}`]).toBeNull();
   });
@@ -1186,6 +1274,7 @@ describe('effectOf: page GC on delete_snapshot', () => {
     const result = await effectOf(
       { timestamp: 100, action: 'delete_snapshot', url: 'https://a.com', path: `snapshots/${slug}-1000` },
       makeLoad(store),
+      CTX,
     );
     expect(result[`page:${slug}`]).not.toBeNull();
     expect(result[`page:${slug}`].childIds).not.toContain(`snapshot:${slug}-1000`);
@@ -1214,11 +1303,12 @@ describe('effectOf: add_rule', () => {
       {
         timestamp: 100,
         action: 'add_rule',
-        parents: ['root'],
+        listOwner: 'test-device',
         name: 'Test',
         rule: { type: 'keyword', config: { pattern: 'test', fields: ['title'] } },
       },
       makeLoad(store),
+      CTX,
     );
     expect(result['list:test-id']).toBeTruthy();
     expect(result['list:test-id'].rules).toHaveLength(1);
@@ -1239,28 +1329,31 @@ describe('effectOf: add_rule', () => {
       {
         timestamp: 100,
         action: 'add_rule',
-        parents: ['root'],
+        listOwner: 'test-device',
         name: 'Test',
         rule: { type: 'keyword', config: { pattern: 'test' }, id: ruleId },
       },
       makeLoad(store),
+      CTX,
     );
     expect(result['list:test-id'].rules).toHaveLength(1);
   });
 
-  it('skips orphaned lists', async () => {
+  it('applies rule to deleted/orphaned list (preserved for restore)', async () => {
     const store = listStore({ 'manifest:orphaned': { timestamp: 0, entries: [{ key: 'list:test-id' }] } });
     const result = await effectOf(
       {
         timestamp: 100,
         action: 'add_rule',
-        parents: ['root'],
+        listOwner: 'test-device',
         name: 'Test',
         rule: { type: 'keyword', config: { pattern: 'test' } },
       },
       makeLoad(store),
+      CTX,
     );
-    expect(result['list:test-id']).toBeUndefined();
+    expect(result['list:test-id']).toBeDefined();
+    expect(result['list:test-id'].rules).toHaveLength(1);
   });
 
   it('returns empty result for unknown list', async () => {
@@ -1269,11 +1362,12 @@ describe('effectOf: add_rule', () => {
       {
         timestamp: 100,
         action: 'add_rule',
-        parents: ['root'],
+        listOwner: 'test-device',
         name: 'NonExistent',
         rule: { type: 'keyword', config: { pattern: 'test' } },
       },
       makeLoad(store),
+      CTX,
     );
     expect(Object.keys(result)).toHaveLength(0);
   });
@@ -1287,8 +1381,9 @@ describe('effectOf: remove_rule', () => {
         rules: [{ id: 'rule-k-abc-1234', type: 'keyword', config: { pattern: 'test' }, createdAt: 50 }],      },
     });
     const result = await effectOf(
-      { timestamp: 100, action: 'remove_rule', parents: ['root'], name: 'Test', ruleId: 'rule-k-abc-1234' },
+      { timestamp: 100, action: 'remove_rule', listOwner: 'test-device', name: 'Test', ruleId: 'rule-k-abc-1234' },
       makeLoad(store),
+      CTX,
     );
     expect(result['list:test-id'].rules).toHaveLength(0);
     expect(result['list:test-id'].timestamp).toBe(100);
@@ -1297,19 +1392,22 @@ describe('effectOf: remove_rule', () => {
   it('is idempotent — removing non-existent rule is no-op', async () => {
     const store = listStore();
     const result = await effectOf(
-      { timestamp: 100, action: 'remove_rule', parents: ['root'], name: 'Test', ruleId: 'rule-k-nonexistent' },
+      { timestamp: 100, action: 'remove_rule', listOwner: 'test-device', name: 'Test', ruleId: 'rule-k-nonexistent' },
       makeLoad(store),
+      CTX,
     );
     expect(result['list:test-id'].rules).toHaveLength(0);
   });
 
-  it('skips orphaned lists', async () => {
+  it('applies remove_rule to deleted/orphaned list (preserved for restore)', async () => {
     const store = listStore({ 'manifest:orphaned': { timestamp: 0, entries: [{ key: 'list:test-id' }] } });
     const result = await effectOf(
-      { timestamp: 100, action: 'remove_rule', parents: ['root'], name: 'Test', ruleId: 'rule-k-abc-1234' },
+      { timestamp: 100, action: 'remove_rule', listOwner: 'test-device', name: 'Test', ruleId: 'rule-k-abc-1234' },
       makeLoad(store),
+      CTX,
     );
-    expect(result['list:test-id']).toBeUndefined();
+    expect(result['list:test-id']).toBeDefined();
+    expect(result['list:test-id'].rules).toHaveLength(0);
   });
 });
 
@@ -1328,12 +1426,13 @@ describe('effectOf: update_rule', () => {
       {
         timestamp: 100,
         action: 'update_rule',
-        parents: ['root'],
+        listOwner: 'test-device',
         name: 'Test',
         ruleId: 'rule-k-abc-1234',
         config: { pattern: 'new' },
       },
       makeLoad(store),
+      CTX,
     );
     const rule = result['list:test-id'].rules[0];
     expect(rule.config.pattern).toBe('new');
@@ -1348,29 +1447,601 @@ describe('effectOf: update_rule', () => {
       {
         timestamp: 100,
         action: 'update_rule',
-        parents: ['root'],
+        listOwner: 'test-device',
         name: 'Test',
         ruleId: 'rule-k-nonexistent',
         config: { pattern: 'test' },
       },
       makeLoad(store),
+      CTX,
     );
     expect(result['list:test-id'].rules).toHaveLength(0);
   });
 
-  it('skips orphaned lists', async () => {
+  it('applies update_rule to deleted/orphaned list (preserved for restore)', async () => {
     const store = listStore({ 'manifest:orphaned': { timestamp: 0, entries: [{ key: 'list:test-id' }] } });
     const result = await effectOf(
       {
         timestamp: 100,
         action: 'update_rule',
-        parents: ['root'],
+        listOwner: 'test-device',
         name: 'Test',
         ruleId: 'rule-k-abc-1234',
         config: { pattern: 'test' },
       },
       makeLoad(store),
+      CTX,
     );
-    expect(result['list:test-id']).toBeUndefined();
+    expect(result['list:test-id']).toBeDefined();
+    expect(result['list:test-id'].rules).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// effectOf: Math.max timestamp preservation
+// ---------------------------------------------------------------------------
+
+describe('effectOf: Math.max timestamp', () => {
+  it('visit_page preserves higher existing timestamp', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const page = { slug, timestamp: 500, url: 'https://a.com', parentIds: [], childIds: [] };
+    const result = await effectOf(
+      { timestamp: 100, action: 'visit_page', url: 'https://a.com', title: 'A' },
+      makeLoad({ [`page:${slug}`]: page }),
+      CTX,
+    );
+    expect(result[`page:${slug}`].timestamp).toBe(500);
+  });
+
+  it('leave_page preserves higher existing timestamp', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const page = { slug, timestamp: 500, parentIds: [], childIds: [] };
+    const result = await effectOf(
+      { timestamp: 100, action: 'leave_page', url: 'https://a.com', title: 'B' },
+      makeLoad({ [`page:${slug}`]: page }),
+      CTX,
+    );
+    expect(result[`page:${slug}`].timestamp).toBe(500);
+  });
+
+  it('rename_page preserves higher existing timestamp', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const page = { slug, timestamp: 500, url: 'https://a.com', parentIds: [], childIds: [] };
+    const result = await effectOf(
+      { timestamp: 100, action: 'rename_page', url: 'https://a.com', user_title: 'Renamed' },
+      makeLoad({ [`page:${slug}`]: page }),
+      CTX,
+    );
+    expect(result[`page:${slug}`].timestamp).toBe(500);
+  });
+
+  it('rate_page preserves higher existing timestamp', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const page = { slug, timestamp: 500, url: 'https://a.com', parentIds: [], childIds: [] };
+    const result = await effectOf(
+      { timestamp: 100, action: 'rate_page', url: 'https://a.com', likes: 1 },
+      makeLoad({ [`page:${slug}`]: page }),
+      CTX,
+    );
+    expect(result[`page:${slug}`].timestamp).toBe(500);
+  });
+
+  it('pin_to_list preserves higher existing list timestamp', async () => {
+    const store = listStore();
+    store['list:test-id'].timestamp = 500;
+    const result = await effectOf(
+      { timestamp: 100, action: 'pin_to_list', listOwner: 'test-device', name: 'Test', items: ['https://a.com'] },
+      makeLoad(store),
+      CTX,
+    );
+    expect(result['list:test-id'].timestamp).toBe(500);
+  });
+
+  it('update_setting preserves higher existing timestamp', async () => {
+    const result = await effectOf(
+      { timestamp: 100, action: 'update_setting', key: 'theme', value: 'dark' },
+      makeLoad({ 'manifest:settings': { timestamp: 500 } }),
+      CTX,
+    );
+    expect(result['manifest:settings'].timestamp).toBe(500);
+  });
+
+  it('create_list preserves higher existing manifest timestamps', async () => {
+    const store = {
+      'manifest:name-to-id': { timestamp: 500, paths: {} },
+      'manifest:list-order': { timestamp: 500, tree: [] },
+    };
+    const result = await effectOf(
+      { timestamp: 100, action: 'create_list', listOwner: 'test-device', name: 'NewList' },
+      makeLoad(store),
+      CTX,
+    );
+    expect(result['manifest:name-to-id'].timestamp).toBe(500);
+    expect(result['manifest:list-order'].timestamp).toBe(500);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// effectOf: sync mode — commutativity tests (sync-plan.md §11)
+// ---------------------------------------------------------------------------
+
+// Replay helper: apply events sequentially to a store copy
+async function replay(events, baseStore, contexts) {
+  const s = JSON.parse(JSON.stringify(baseStore));
+  for (let i = 0; i < events.length; i++) {
+    const ctx = Array.isArray(contexts) ? contexts[i] : contexts;
+    const effects = await effectOf(events[i], makeLoad(s), ctx);
+    Object.assign(s, effects);
+  }
+  return s;
+}
+
+// Generate all permutations of an array
+function permutations(arr) {
+  if (arr.length <= 1) return [arr];
+  const result = [];
+  for (let i = 0; i < arr.length; i++) {
+    const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
+    for (const perm of permutations(rest)) {
+      result.push([arr[i], ...perm]);
+    }
+  }
+  return result;
+}
+
+// Assert that replaying events in all orderings produces the same value for a key
+async function assertConverges(events, baseStore, ctx, key, assertFn) {
+  const perms = permutations(events);
+  const states = [];
+  for (const perm of perms) {
+    states.push(await replay(perm, baseStore, ctx));
+  }
+  for (let i = 1; i < states.length; i++) {
+    assertFn(states[i][key], states[0][key], `ordering ${i} diverged from ordering 0`);
+  }
+  return states[0];
+}
+
+// Shared note base store for note commutativity tests
+function noteBaseStore() {
+  const slug = generateSlugFromUrl('https://a.com');
+  return {
+    'note:n1': { slug: 'n1', url: 'https://a.com', excerpt: 'ex', note: 'text', cssPath: '' },
+    [`page:${slug}`]: { slug, timestamp: 0, url: 'https://a.com', parentIds: [], childIds: ['note:n1'] },
+    'manifest:orphaned': { timestamp: 0, entries: [] },
+    'manifest:name-to-id': { timestamp: 0, paths: {} },
+  };
+}
+
+describe('effectOf: sync commutativity — §11.1 note edit conflicts', () => {
+  it('T1: two devices edit same note — both new notes survive', async () => {
+    const base = noteBaseStore();
+    // Add note:n1 file data so replace_note can load it
+    base['note:newY'] = null;
+    base['note:newZ'] = null;
+    const events = [
+      { timestamp: 10, action: 'replace_note', path: 'notes/newY.json', oldPath: 'notes/n1.json', url: 'https://a.com' },
+      { timestamp: 20, action: 'replace_note', path: 'notes/newZ.json', oldPath: 'notes/n1.json', url: 'https://a.com' },
+    ];
+    const slug = generateSlugFromUrl('https://a.com');
+    const pageKey = `page:${slug}`;
+
+    const stateA = await replay(events, base, CTX);
+    const stateB = await replay([events[1], events[0]], base, CTX);
+
+    // Both orders: Y and Z linked to page, n1 orphaned
+    for (const state of [stateA, stateB]) {
+      const page = state[pageKey];
+      expect(page.childIds).toContain('note:newY');
+      expect(page.childIds).toContain('note:newZ');
+      expect(state['note:n1'].deleted).toBe(true);
+    }
+  });
+
+  it('T2: one device edits, other deletes same note — edit creates Y regardless', async () => {
+    const base = noteBaseStore();
+    const events = [
+      { timestamp: 10, action: 'replace_note', path: 'notes/newY.json', oldPath: 'notes/n1.json', url: 'https://a.com' },
+      { timestamp: 20, action: 'delete_note', path: 'notes/n1.json', url: 'https://a.com' },
+    ];
+    const slug = generateSlugFromUrl('https://a.com');
+    const pageKey = `page:${slug}`;
+
+    const stateA = await replay(events, base, CTX);
+    const stateB = await replay([events[1], events[0]], base, CTX);
+
+    for (const state of [stateA, stateB]) {
+      expect(state['note:newY']).toBeDefined();
+      expect(state['note:newY'].url).toBe('https://a.com');
+      expect(state[pageKey].childIds).toContain('note:newY');
+      expect(state['note:n1'].deleted).toBe(true);
+    }
+  });
+
+  it('T3: delete then edit (edit is newer) — same result as T2', async () => {
+    const base = noteBaseStore();
+    const events = [
+      { timestamp: 10, action: 'delete_note', path: 'notes/n1.json', url: 'https://a.com' },
+      { timestamp: 20, action: 'replace_note', path: 'notes/newY.json', oldPath: 'notes/n1.json', url: 'https://a.com' },
+    ];
+    const slug = generateSlugFromUrl('https://a.com');
+    const pageKey = `page:${slug}`;
+
+    const stateA = await replay(events, base, CTX);
+    const stateB = await replay([events[1], events[0]], base, CTX);
+
+    for (const state of [stateA, stateB]) {
+      expect(state['note:newY']).toBeDefined();
+      expect(state['note:n1'].deleted).toBe(true);
+    }
+  });
+});
+
+describe('effectOf: sync commutativity — §11.2 note delete/restore', () => {
+  it('T4: delete(10) + restore(20) — restore wins, both orders', async () => {
+    const base = noteBaseStore();
+    const events = [
+      { timestamp: 10, action: 'delete_note', path: 'notes/n1.json', url: 'https://a.com' },
+      { timestamp: 20, action: 'restore_note', path: 'notes/n1.json', url: 'https://a.com' },
+    ];
+    const state = await assertConverges(events, base, CTX, 'note:n1',
+      (a, b, msg) => {
+        expect(a.deleted, msg).toBe(b.deleted);
+        expect(a.deletedTs, msg).toBe(b.deletedTs);
+      });
+    expect(state['note:n1'].deleted).toBe(false);
+    expect(state['note:n1'].deletedTs).toBe(20);
+  });
+
+  it('T5: restore(10) + delete(20) — delete wins, both orders', async () => {
+    const base = noteBaseStore();
+    // Start with note already deleted so restore has something to restore
+    base['note:n1'].deleted = true;
+    base['note:n1'].deletedTs = 5;
+    base['manifest:orphaned'].entries = [{ key: 'note:n1', url: 'https://a.com' }];
+    const slug = generateSlugFromUrl('https://a.com');
+    base[`page:${slug}`].childIds = [];
+    const events = [
+      { timestamp: 10, action: 'restore_note', path: 'notes/n1.json', url: 'https://a.com' },
+      { timestamp: 20, action: 'delete_note', path: 'notes/n1.json', url: 'https://a.com' },
+    ];
+    const state = await assertConverges(events, base, CTX, 'note:n1',
+      (a, b, msg) => {
+        expect(a.deleted, msg).toBe(b.deleted);
+        expect(a.deletedTs, msg).toBe(b.deletedTs);
+      });
+    expect(state['note:n1'].deleted).toBe(true);
+    expect(state['note:n1'].deletedTs).toBe(20);
+  });
+});
+
+describe('effectOf: sync commutativity — §11.3 list delete/restore', () => {
+  it('T6: delete(10) + restore(20) — restore wins, both orders', async () => {
+    const base = listStore();
+    const events = [
+      { timestamp: 10, action: 'delete_list', name: 'Test', listOwner: 'test-device' },
+      { timestamp: 20, action: 'restore_list', name: 'Test', listOwner: 'test-device' },
+    ];
+    const state = await assertConverges(events, base, CTX, 'list:test-id',
+      (a, b, msg) => {
+        expect(a.deleted, msg).toBe(b.deleted);
+        expect(a.deletedTs, msg).toBe(b.deletedTs);
+      });
+    expect(state['list:test-id'].deleted).toBe(false);
+    expect(state['list:test-id'].deletedTs).toBe(20);
+  });
+
+  it('T7: restore(10) + delete(20) — delete wins, both orders', async () => {
+    const base = listStore();
+    base['list:test-id'].deleted = true;
+    base['list:test-id'].deletedTs = 5;
+    base['manifest:orphaned'].entries = [{ key: 'list:test-id' }];
+    base['manifest:name-to-id'].paths = {};
+    base['manifest:list-order'].tree = [];
+    const events = [
+      { timestamp: 10, action: 'restore_list', name: 'Test', listOwner: 'test-device' },
+      { timestamp: 20, action: 'delete_list', name: 'Test', listOwner: 'test-device' },
+    ];
+    const state = await assertConverges(events, base, CTX, 'list:test-id',
+      (a, b, msg) => {
+        expect(a.deleted, msg).toBe(b.deleted);
+        expect(a.deletedTs, msg).toBe(b.deletedTs);
+      });
+    expect(state['list:test-id'].deleted).toBe(true);
+    expect(state['list:test-id'].deletedTs).toBe(20);
+  });
+});
+
+describe('effectOf: sync commutativity — §11.4 pin to deleted list', () => {
+  it('T8: pin to concurrently deleted list — pin applies to deleted entity', async () => {
+    const base = listStore();
+    const events = [
+      { timestamp: 10, action: 'delete_list', name: 'Test', listOwner: 'test-device' },
+      { timestamp: 20, action: 'pin_to_list', name: 'Test', listOwner: 'test-device', items: ['https://a.com'] },
+    ];
+    const state = await assertConverges(events, base, CTX, 'list:test-id',
+      (a, b, msg) => {
+        expect(a.pins.length, msg).toBe(b.pins.length);
+        expect(a.deleted, msg).toBe(b.deleted);
+      });
+    expect(state['list:test-id'].deleted).toBe(true);
+    expect(state['list:test-id'].pins.length).toBe(1);
+  });
+
+  it('T9: pin(10) + delete(20) + restore(30) — all 6 orderings converge', async () => {
+    const base = listStore();
+    const events = [
+      { timestamp: 10, action: 'pin_to_list', name: 'Test', listOwner: 'test-device', items: ['https://a.com'] },
+      { timestamp: 20, action: 'delete_list', name: 'Test', listOwner: 'test-device' },
+      { timestamp: 30, action: 'restore_list', name: 'Test', listOwner: 'test-device' },
+    ];
+    const state = await assertConverges(events, base, CTX, 'list:test-id',
+      (a, b, msg) => {
+        expect(a.deleted, msg).toBe(b.deleted);
+        expect(a.pins.length, msg).toBe(b.pins.length);
+      });
+    expect(state['list:test-id'].deleted).toBe(false);
+    expect(state['list:test-id'].pins.length).toBe(1);
+  });
+
+  it('T10: unpin from deleted list — unpin applies', async () => {
+    const base = listStore();
+    const slug = generateSlugFromUrl('https://a.com');
+    base['list:test-id'].pins = [{ id: `page:${slug}`, pinnedAt: 5 }];
+    base[`page:${slug}`] = { slug, timestamp: 0, url: 'https://a.com', parentIds: ['list:test-id'], childIds: [] };
+    const events = [
+      { timestamp: 10, action: 'delete_list', name: 'Test', listOwner: 'test-device' },
+      { timestamp: 20, action: 'unpin_from_list', name: 'Test', listOwner: 'test-device', items: ['https://a.com'] },
+    ];
+    const state = await assertConverges(events, base, CTX, 'list:test-id',
+      (a, b, msg) => {
+        expect(a.pins.length, msg).toBe(b.pins.length);
+      });
+    expect(state['list:test-id'].pins.length).toBe(0);
+  });
+});
+
+describe('effectOf: sync commutativity — §11.5 list tree structure', () => {
+  it('T11: two tree updates — newer wins via LWW, both orders', async () => {
+    const base = {
+      'manifest:list-order': { timestamp: 0, tree: [] },
+      'manifest:name-to-id': { timestamp: 0, paths: {} },
+      'manifest:orphaned': { timestamp: 0, entries: [] },
+    };
+    const events = [
+      { timestamp: 10, action: 'update_list_tree', tree: [{ id: 'list:a' }, { id: 'list:b' }] },
+      { timestamp: 20, action: 'update_list_tree', tree: [{ id: 'list:c', children: [{ id: 'list:a' }] }, { id: 'list:b' }] },
+    ];
+    const state = await assertConverges(events, base, CTX, 'manifest:list-order',
+      (a, b, msg) => {
+        expect(JSON.stringify(a.tree), msg).toBe(JSON.stringify(b.tree));
+      });
+    expect(state['manifest:list-order'].tree[0].id).toBe('list:c');
+  });
+
+  it('T21: create_list appends to tree manifest', async () => {
+    const base = {
+      'manifest:name-to-id': { timestamp: 0, paths: {} },
+      'manifest:list-order': { timestamp: 0, tree: [] },
+    };
+    const result = await effectOf(
+      { timestamp: 10, action: 'create_list', name: 'NewList', listOwner: 'test-device' },
+      makeLoad(base), CTX,
+    );
+    const tree = result['manifest:list-order'].tree;
+    expect(tree.length).toBe(1);
+    expect(tree[0].id).toMatch(/^list:/);
+  });
+
+  it('T12: tree update + create_list — both orders include all lists', async () => {
+    const base = {
+      'manifest:name-to-id': { timestamp: 0, paths: { 'test-device/A': 'a-id', 'test-device/B': 'b-id' } },
+      'manifest:list-order': { timestamp: 0, tree: [{ id: 'list:a-id' }, { id: 'list:b-id' }] },
+      'manifest:orphaned': { timestamp: 0, entries: [] },
+      'list:a-id': { slug: 'a-id', name: 'A', owner: 'test-device', pins: [], timestamp: 0 },
+      'list:b-id': { slug: 'b-id', name: 'B', owner: 'test-device', pins: [], timestamp: 0 },
+    };
+    const events = [
+      { timestamp: 10, action: 'update_list_tree', tree: [{ id: 'list:a-id' }, { id: 'list:b-id' }] },
+      { timestamp: 20, action: 'create_list', name: 'C', listOwner: 'test-device' },
+    ];
+
+    // Helper: collect all IDs from a tree
+    function collectTreeIds(nodes) {
+      const ids = new Set();
+      for (const n of nodes) {
+        ids.add(n.id);
+        if (n.children) for (const id of collectTreeIds(n.children)) ids.add(id);
+      }
+      return ids;
+    }
+
+    const stateA = await replay(events, base, CTX);
+    const stateB = await replay([events[1], events[0]], base, CTX);
+    const idsA = collectTreeIds(stateA['manifest:list-order'].tree);
+    const idsB = collectTreeIds(stateB['manifest:list-order'].tree);
+    // Both orders should include A, B, and the new list C
+    expect(idsA.has('list:a-id')).toBe(true);
+    expect(idsA.has('list:b-id')).toBe(true);
+    expect(idsA.size).toBe(3); // A, B, C
+    expect(idsB.has('list:a-id')).toBe(true);
+    expect(idsB.has('list:b-id')).toBe(true);
+    expect(idsB.size).toBe(3);
+  });
+
+  it('T13: tree update + delete_list — both orders remove deleted list', async () => {
+    const base = {
+      'manifest:name-to-id': { timestamp: 0, paths: { 'test-device/A': 'a-id', 'test-device/B': 'b-id', 'test-device/C': 'c-id' } },
+      'manifest:list-order': { timestamp: 0, tree: [{ id: 'list:a-id', children: [{ id: 'list:b-id' }] }, { id: 'list:c-id' }] },
+      'manifest:orphaned': { timestamp: 0, entries: [] },
+      'list:a-id': { slug: 'a-id', name: 'A', owner: 'test-device', pins: [], timestamp: 0 },
+      'list:b-id': { slug: 'b-id', name: 'B', owner: 'test-device', pins: [], timestamp: 0 },
+      'list:c-id': { slug: 'c-id', name: 'C', owner: 'test-device', pins: [], timestamp: 0 },
+    };
+    const events = [
+      { timestamp: 10, action: 'update_list_tree', tree: [{ id: 'list:a-id', children: [{ id: 'list:b-id' }] }, { id: 'list:c-id' }] },
+      { timestamp: 20, action: 'delete_list', name: 'B', listOwner: 'test-device' },
+    ];
+
+    function collectTreeIds(nodes) {
+      const ids = new Set();
+      for (const n of nodes) {
+        ids.add(n.id);
+        if (n.children) for (const id of collectTreeIds(n.children)) ids.add(id);
+      }
+      return ids;
+    }
+
+    const stateA = await replay(events, base, CTX);
+    const stateB = await replay([events[1], events[0]], base, CTX);
+    const idsA = collectTreeIds(stateA['manifest:list-order'].tree);
+    const idsB = collectTreeIds(stateB['manifest:list-order'].tree);
+    // B should be removed from tree in both orders
+    expect(idsA.has('list:b-id')).toBe(false);
+    expect(idsA.has('list:a-id')).toBe(true);
+    expect(idsA.has('list:c-id')).toBe(true);
+    expect(idsB.has('list:b-id')).toBe(false);
+    expect(idsB.has('list:a-id')).toBe(true);
+    expect(idsB.has('list:c-id')).toBe(true);
+  });
+
+  it('T18: create + tree update + delete — all 6 orderings reconcile', async () => {
+    const base = {
+      'manifest:name-to-id': { timestamp: 0, paths: { 'test-device/A': 'a-id', 'test-device/B': 'b-id' } },
+      'manifest:list-order': { timestamp: 0, tree: [{ id: 'list:a-id' }, { id: 'list:b-id' }] },
+      'manifest:orphaned': { timestamp: 0, entries: [] },
+      'list:a-id': { slug: 'a-id', name: 'A', owner: 'test-device', pins: [], timestamp: 0 },
+      'list:b-id': { slug: 'b-id', name: 'B', owner: 'test-device', pins: [], timestamp: 0 },
+    };
+    const events = [
+      { timestamp: 10, action: 'create_list', name: 'C', listOwner: 'test-device' },
+      { timestamp: 20, action: 'update_list_tree', tree: [{ id: 'list:a-id', children: [{ id: 'list:b-id' }] }] },
+      { timestamp: 30, action: 'delete_list', name: 'A', listOwner: 'test-device' },
+    ];
+
+    function collectTreeIds(nodes) {
+      const ids = new Set();
+      for (const n of nodes) {
+        ids.add(n.id);
+        if (n.children) for (const id of collectTreeIds(n.children)) ids.add(id);
+      }
+      return ids;
+    }
+
+    // All 6 orderings should converge: B and C in tree, A removed
+    const perms = permutations(events);
+    const results = [];
+    for (const perm of perms) {
+      results.push(await replay(perm, base, CTX));
+    }
+    for (const state of results) {
+      const ids = collectTreeIds(state['manifest:list-order'].tree);
+      expect(ids.has('list:a-id')).toBe(false);
+      expect(ids.has('list:b-id')).toBe(true);
+      // C was created — find its key
+      const cKey = Object.keys(state).find(k => k.startsWith('list:') && state[k]?.name === 'C');
+      expect(cKey).toBeDefined();
+      expect(ids.has(cKey)).toBe(true);
+    }
+  });
+});
+
+describe('effectOf: sync commutativity — §11.6 additive fields', () => {
+  it('T14: two devices rate same page — both orders produce same likes', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const pageKey = `page:${slug}`;
+    const base = { [pageKey]: { slug, timestamp: 0, url: 'https://a.com', parentIds: [], childIds: [], likes: 0, remotes: {} } };
+    const events = [
+      { timestamp: 10, action: 'rate_page', url: 'https://a.com', likes: 1 },
+      { timestamp: 20, action: 'rate_page', url: 'https://a.com', likes: 1 },
+    ];
+    // Different device contexts per event
+    const ctxs = [{ deviceName: 'deviceA' }, { deviceName: 'deviceB' }];
+    const stateA = await replay(events, base, ctxs);
+    const stateB = await replay([events[1], events[0]], base, [ctxs[1], ctxs[0]]);
+    expect(stateA[pageKey].likes).toBe(2);
+    expect(stateB[pageKey].likes).toBe(2);
+  });
+
+  it('T15: same device rate replayed twice — no double-count', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const pageKey = `page:${slug}`;
+    const base = { [pageKey]: { slug, timestamp: 0, url: 'https://a.com', parentIds: [], childIds: [], likes: 0, remotes: {} } };
+    const entry = { timestamp: 10, action: 'rate_page', url: 'https://a.com', likes: 1 };
+    const state = await replay([entry, entry], base, { deviceName: 'deviceA' });
+    expect(state[pageKey].likes).toBe(1);
+  });
+
+  it('leave_page per-device timeOnPage — both orders accumulate', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const pageKey = `page:${slug}`;
+    const base = { [pageKey]: { slug, timestamp: 0, parentIds: [], childIds: [], timeOnPage: 0, remotes: {} } };
+    const events = [
+      { timestamp: 10, action: 'leave_page', url: 'https://a.com', timeOnPage: 5000 },
+      { timestamp: 20, action: 'leave_page', url: 'https://a.com', timeOnPage: 3000 },
+    ];
+    const ctxs = [{ deviceName: 'deviceA' }, { deviceName: 'deviceB' }];
+    const stateA = await replay(events, base, ctxs);
+    const stateB = await replay([events[1], events[0]], base, [ctxs[1], ctxs[0]]);
+    expect(stateA[pageKey].timeOnPage).toBe(8000);
+    expect(stateB[pageKey].timeOnPage).toBe(8000);
+  });
+});
+
+describe('effectOf: sync commutativity — §11.7 mixed multi-operation', () => {
+  it('T16: replace + delete + restore note — all 6 orderings converge', async () => {
+    const base = noteBaseStore();
+    const events = [
+      { timestamp: 10, action: 'replace_note', path: 'notes/newY.json', oldPath: 'notes/n1.json', url: 'https://a.com' },
+      { timestamp: 20, action: 'delete_note', path: 'notes/n1.json', url: 'https://a.com' },
+      { timestamp: 30, action: 'restore_note', path: 'notes/n1.json', url: 'https://a.com' },
+    ];
+    const slug = generateSlugFromUrl('https://a.com');
+    const pageKey = `page:${slug}`;
+    const state = await assertConverges(events, base, CTX, 'note:n1',
+      (a, b, msg) => {
+        expect(a.deleted, msg).toBe(b.deleted);
+        expect(a.deletedTs, msg).toBe(b.deletedTs);
+      });
+    // restore(30) > delete(20): n1 alive
+    expect(state['note:n1'].deleted).toBe(false);
+    expect(state['note:n1'].deletedTs).toBe(30);
+    // Y also exists (replace created it independently)
+    expect(state['note:newY']).toBeDefined();
+  });
+
+  it('T17: delete(10) + pin(20) + restore(30) list — all 6 orderings converge', async () => {
+    const base = listStore();
+    const events = [
+      { timestamp: 10, action: 'delete_list', name: 'Test', listOwner: 'test-device' },
+      { timestamp: 20, action: 'pin_to_list', name: 'Test', listOwner: 'test-device', items: ['https://a.com'] },
+      { timestamp: 30, action: 'restore_list', name: 'Test', listOwner: 'test-device' },
+    ];
+    const state = await assertConverges(events, base, CTX, 'list:test-id',
+      (a, b, msg) => {
+        expect(a.deleted, msg).toBe(b.deleted);
+        expect(a.pins.length, msg).toBe(b.pins.length);
+      });
+    expect(state['list:test-id'].deleted).toBe(false);
+    expect(state['list:test-id'].pins.length).toBe(1);
+  });
+});
+
+describe('effectOf: sync commutativity — §11.8 implementation correctness', () => {
+  it('T20: rules on deleted list preserved for restore — all 6 orderings', async () => {
+    const base = listStore();
+    const events = [
+      { timestamp: 10, action: 'delete_list', name: 'Test', listOwner: 'test-device' },
+      { timestamp: 20, action: 'add_rule', name: 'Test', listOwner: 'test-device', rule: { type: 'keyword', config: { pattern: 'test' } } },
+      { timestamp: 30, action: 'restore_list', name: 'Test', listOwner: 'test-device' },
+    ];
+    const state = await assertConverges(events, base, CTX, 'list:test-id',
+      (a, b, msg) => {
+        expect(a.deleted, msg).toBe(b.deleted);
+        expect((a.rules || []).length, msg).toBe((b.rules || []).length);
+      });
+    expect(state['list:test-id'].deleted).toBe(false);
+    expect(state['list:test-id'].rules.length).toBe(1);
   });
 });

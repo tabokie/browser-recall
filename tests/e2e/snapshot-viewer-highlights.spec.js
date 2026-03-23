@@ -13,7 +13,7 @@ test.describe('Snapshot viewer highlights', () => {
       '<body><p>The quick brown fox jumps over the lazy dog.</p></body></html>';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: `pages/${slug}.json`, data: {
         slug, url: pageUrl, title: 'Snap Test', timestamp: Date.now(),
         parentIds: [], childIds: [`note:${noteSlug}`, `snapshot:${slug}-${timestamp}`],

@@ -7,7 +7,7 @@
 ```
 <root>/
   data/                              # PUBLIC. Immutable/append-only. Other apps can read.
-    logs/<YYYY-MM-DD>.jsonl          #   Event history (source of truth)
+    logs/<device>/<YYYY-MM-DD>.jsonl  #   Event history by device (source of truth)
     snapshots/<slug>-<ts>/           #   Snapshot files (index.html, index.md, assets)
     notes/<noteSlug>.json            #   Notes and highlights (same format)
 
@@ -19,7 +19,7 @@
 
   manifest/                          # INTERNAL. Irregular-shape manifests.
     list-order.json                  #   Tree hierarchy + ordering ({ timestamp, tree: [{ id, children? }] })
-    list-name-to-id.json             #   Flat name → internal ID
+    list-name-to-id.json             #   Compound key (owner/name) → internal ID
     settings.json                    #   User settings
     orphaned.json                    #   Tracks deleted entities as entries [{ key, url? }] (recycle bin)
 ```
@@ -78,7 +78,7 @@ All mutations go through `addLog(entry)`:
 ```
 addLog(entry)
   → logBuffer.push(entry)              ← durable in chrome.storage.local
-  → effectOf(entry, sessionLoad)       ← replay against session cache
+  → effectOf(entry, sessionLoad, { deviceName })  ← replay against session cache
   → sessionWrite(effects)              ← update session cache
   → scheduleDrainNotify()              ← offscreen drains to filesystem
 ```
@@ -134,7 +134,7 @@ Internal entity references use typed keys with a prefix indicating the entity ki
 
 Used internally in: `page.parentIds`, `page.childIds`, list pin `id` fields. Notes use `url` (raw page URL) instead of typed references.
 
-**Events never use typed references.** Events reference pages by URL, notes/snapshots by relative path (`notes/...`, `snapshots/...`), and lists by `parents` array + `name`. `effectOf` translates between event fields and internal typed references.
+**Events never use typed references.** Events reference pages by URL, notes/snapshots by relative path (`notes/...`, `snapshots/...`), and lists by `listOwner` + `name` (compound key). `effectOf` translates between event fields and internal typed references.
 
 ## Module Responsibilities
 

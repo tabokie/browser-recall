@@ -11,6 +11,7 @@ test.describe('Page note textarea in detail card', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: `pages/${slug}.json`, data: {
         slug, url: PAGE_URL, title: PAGE_TITLE,
         parentIds: [], childIds: [`note:${noteSlug}`],
@@ -20,7 +21,7 @@ test.describe('Page note textarea in detail card', () => {
         slug: noteSlug, excerpt: null, note: 'Existing page note', cssPath: null,
         url: PAGE_URL,
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'leave_page', url: PAGE_URL, title: PAGE_TITLE, timeOnPage: 5, scrollDepth: 50 },
         { timestamp: now + 1, action: 'create_note', url: PAGE_URL, path: `notes/${noteSlug}.json` },
       ]},
@@ -48,12 +49,13 @@ test.describe('Page note textarea in detail card', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: `pages/${slug}.json`, data: {
         slug, url: PAGE_URL, title: PAGE_TITLE,
         parentIds: [], childIds: [],
         timestamps: [now],
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'leave_page', url: PAGE_URL, title: PAGE_TITLE, timeOnPage: 5, scrollDepth: 50 },
       ]},
     ]);
@@ -99,6 +101,7 @@ test.describe('Page note textarea in detail card', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: `pages/${slug}.json`, data: {
         slug, url: PAGE_URL, title: PAGE_TITLE,
         parentIds: [], childIds: [`note:${noteSlug}`],
@@ -108,7 +111,7 @@ test.describe('Page note textarea in detail card', () => {
         slug: noteSlug, excerpt: null, note: 'Old text', cssPath: null,
         url: PAGE_URL,
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'leave_page', url: PAGE_URL, title: PAGE_TITLE, timeOnPage: 5, scrollDepth: 50 },
         { timestamp: now + 1, action: 'create_note', url: PAGE_URL, path: `notes/${noteSlug}.json` },
       ]},
@@ -162,6 +165,7 @@ test.describe('Page note textarea in detail card', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: `pages/${slug}.json`, data: {
         slug, url: PAGE_URL, title: PAGE_TITLE,
         parentIds: [], childIds: [`note:${globalNoteSlug}`, `note:${highlightNoteSlug}`],
@@ -175,7 +179,7 @@ test.describe('Page note textarea in detail card', () => {
         slug: highlightNoteSlug, excerpt: 'Selected text', note: 'Highlight annotation', cssPath: 'p',
         url: PAGE_URL,
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'leave_page', url: PAGE_URL, title: PAGE_TITLE, timeOnPage: 5, scrollDepth: 50 },
         { timestamp: now + 1, action: 'create_note', url: PAGE_URL, path: `notes/${globalNoteSlug}.json` },
         { timestamp: now + 2, action: 'create_note', url: PAGE_URL, path: `notes/${highlightNoteSlug}.json` },
@@ -213,6 +217,7 @@ test.describe('Page note textarea in detail card', () => {
     // Seed old note file + page entity (reflecting create_note already applied).
     // Do NOT seed the new note file — simulates a missing file during replay.
     await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: `pages/${slug}.json`, data: {
         slug, url: PAGE_URL, title: PAGE_TITLE,
         parentIds: [], childIds: [`note:${oldNoteSlug}`],
@@ -222,7 +227,7 @@ test.describe('Page note textarea in detail card', () => {
         slug: oldNoteSlug, excerpt: 'Important quote', note: 'Original annotation',
         cssPath: 'div > p:nth-of-type(3)', url: PAGE_URL,
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'leave_page', url: PAGE_URL, title: PAGE_TITLE, timeOnPage: 5, scrollDepth: 50 },
         { timestamp: now + 1, action: 'create_note', url: PAGE_URL, path: `notes/${oldNoteSlug}.json` },
       ]},
@@ -267,12 +272,13 @@ test.describe('Page note textarea in detail card', () => {
 
     // Seed only the page entity — note will be created dynamically
     await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: `pages/${slug}.json`, data: {
         slug, url: PAGE_URL, title: PAGE_TITLE,
         parentIds: [], childIds: [],
         timestamp: now,
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'leave_page', url: PAGE_URL, title: PAGE_TITLE, timeOnPage: 5, scrollDepth: 50 },
       ]},
     ]);

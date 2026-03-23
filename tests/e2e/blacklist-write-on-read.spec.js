@@ -6,7 +6,7 @@ test.describe('Blacklist write-on-read bug', () => {
     // Seed settings WITHOUT urlBlacklist — simulates post-migration state
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [], relatedPagesLimit: 50,
+        trimRules: [], deviceName: 'test-device', relatedPagesLimit: 50,
       }},
     ]);
 
@@ -40,7 +40,7 @@ test.describe('Blacklist write-on-read bug', () => {
     // Seed settings WITH custom urlBlacklist
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [], relatedPagesLimit: 50,
+        trimRules: [], deviceName: 'test-device', relatedPagesLimit: 50,
         urlBlacklist: ['https://private.corp.example.com/', 'edge://'],
       }},
     ]);

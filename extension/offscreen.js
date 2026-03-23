@@ -36,6 +36,7 @@ chrome.runtime.onConnect.addListener((port) => {
     // Fire-and-forget drain trigger from background (no response needed)
     if (msg.action === 'drainEntries') {
       pendingDrainEntries = msg.entries;
+      if (msg.deviceName) pendingDeviceName = msg.deviceName;
       scheduleDrain();
       return;
     }
@@ -383,6 +384,7 @@ async function handleRequest(request) {
 let drainTimer = null;
 let draining = false;
 let pendingDrainEntries = null; // Set by port 'drainEntries' message
+let pendingDeviceName = null;   // Device name from drain message
 let lastDrainedTimestamp = 0;   // Local watermark — skip entries already written to JSONL
 
 function scheduleDrain() {
@@ -493,7 +495,7 @@ async function drainQueue() {
       entriesByDate.get(dateKey).push(entry);
 
       // Apply entry via unified effectOf
-      const updated = await effectOf(entry, load);
+      const updated = await effectOf(entry, load, { deviceName: pendingDeviceName });
 
       // Write updated entities back to round cache
       for (const [key, entity] of Object.entries(updated)) {
@@ -507,8 +509,10 @@ async function drainQueue() {
       lastTimestamp = entry.timestamp;
     }
 
-    // 1. Batch append to JSONL history files (proper append: keepExistingData + seek)
-    const historyDir = await fsStorage.resolveDir('data/logs');
+    // 1. Batch append to JSONL history files in device subdirectory
+    const logsDir = await fsStorage.resolveDir('data/logs');
+    // Ensure device subdirectory exists
+    const historyDir = await logsDir.getDirectoryHandle(pendingDeviceName || 'default', { create: true });
     for (const [dateKey, entries] of entriesByDate) {
       try {
         const fh = await historyDir.getFileHandle(`${dateKey}.jsonl`, { create: true });

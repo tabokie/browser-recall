@@ -9,11 +9,11 @@ test.describe('User journeys', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Journey Page', timestamp: now, parentIds: [], childIds: [],
       }},
-      { path: 'data/logs/2026-03-01.jsonl', lines: [
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url, title: 'Journey Page' },
       ]},
     ]);
@@ -73,7 +73,7 @@ test.describe('User journeys', () => {
 
     // Seed page entities so visit_page can enrich them with referrer relations
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
       { path: `pages/${parentSlug}.json`, data: {
         slug: parentSlug, url: parentUrl, title: 'Journey Parent', timestamp: now,
         parentIds: [], childIds: [],
@@ -121,7 +121,7 @@ test.describe('User journeys', () => {
 test.describe('Empty and edge states', () => {
   test('fresh state — options explore renders without error', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -143,10 +143,10 @@ test.describe('Empty and edge states', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [] } },
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
       // No history, no page checkpoint — the URL has never been seen
     ]);
 
@@ -178,12 +178,12 @@ test.describe('Empty and edge states', () => {
   test('empty list renders list view without error', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:empty' }],
       }},
       { path: 'lists/empty.json', data: {
-        slug: 'empty', name: 'Empty List', timestamp: now, pins: [],
+        slug: 'empty', name: 'Empty List', owner: 'test-device', timestamp: now, pins: [],
       }},
     ]);
 
@@ -207,10 +207,10 @@ test.describe('Empty and edge states', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', timestamp: now, pins: [] } },
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Reading': 'reading' } } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Complex URL Page', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -254,8 +254,8 @@ test.describe('Unicode and special characters', () => {
     const today = new Date(now).toISOString().slice(0, 10);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: `data/logs/${today}.jsonl`, lines: [
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: `data/logs/test-device/${today}.jsonl`, lines: [
         { timestamp: now, action: 'visit_page', url, title },
       ]},
     ]);
@@ -272,12 +272,12 @@ test.describe('Unicode and special characters', () => {
     const name = '阅读清单 📚';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:unicode-list' }],
       }},
       { path: 'lists/unicode-list.json', data: {
-        slug: 'unicode-list', name, timestamp: now, pins: [],
+        slug: 'unicode-list', name, owner: 'test-device', timestamp: now, pins: [],
       }},
     ]);
 
@@ -295,7 +295,7 @@ test.describe('Unicode and special characters', () => {
     });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
     ]);
 
     const page = await extContext.newPage();

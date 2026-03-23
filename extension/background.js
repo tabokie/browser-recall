@@ -15,6 +15,9 @@ const HISTORY_RECENT_DAYS = 7; // days of past history to cache for multi-day ch
 // Populated during hydration, immutable until next browser restart.
 let recentUrls = new Map();
 
+// Device name for this instance — always set (generated on first run, stored in settings).
+let localDeviceName = null;
+
 // Session storage: in-memory IPC, survives SW termination, cleared on browser restart.
 // hydrateCache() re-populates from filesystem on every startup.
 chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
@@ -152,7 +155,7 @@ async function drainNow() {
   try {
     await ensureLogBuffer();
     if (logBuffer.length > 0) {
-      offscreenPort.postMessage({ action: 'drainEntries', entries: logBuffer });
+      offscreenPort.postMessage({ action: 'drainEntries', entries: logBuffer, deviceName: localDeviceName });
     }
   } catch (e) {
     console.warn('drainNotify error:', e.message);
@@ -213,7 +216,7 @@ async function addLog(entry) {
     await ensureLogBuffer();
     logBuffer.push(entry);
     await chrome.storage.local.set({ logBuffer });
-    effects = await effectOf(entry, sessionLoad);
+    effects = await effectOf(entry, sessionLoad, { deviceName: localDeviceName });
     await sessionWrite(effects);
   });
   // Append to today's history date key in session (fire-and-forget).
@@ -372,6 +375,7 @@ async function hydrateCache() {
     const resp = await requestOffscreen({ action: 'loadSettings' });
     if (resp?.success && resp.settings) {
       await cacheSet('manifest:settings', resp.settings);
+      if (resp.settings.deviceName) localDeviceName = resp.settings.deviceName;
     }
   } catch (e) { console.warn('Settings load failed:', e.message); }
 
@@ -544,7 +548,7 @@ async function hydrateCache() {
   // sessionLoad → readCacheable → await hydrationDone → waiting for us.
   for (const entry of logBuffer) {
     try {
-      const effects = await effectOf(entry, sessionLoadDuringHydration);
+      const effects = await effectOf(entry, sessionLoadDuringHydration, { deviceName: localDeviceName });
       await sessionWrite(effects);
     } catch (e) { console.warn('Hydration replay failed for entry:', e.message); }
   }
@@ -567,9 +571,17 @@ async function hydrateCache() {
   console.log('Cache hydrated');
 }
 
+// Generate device name on first run — must run AFTER hydrateCache completes.
+async function ensureDeviceName() {
+  if (localDeviceName) return;
+  localDeviceName = crypto.randomUUID().slice(0, 8);
+  await addLog({ timestamp: Date.now(), action: 'update_setting', key: 'deviceName', value: localDeviceName });
+}
+
 // First-run default list creation — must run AFTER hydrateCache completes
 // because addLog → sessionLoad → readCacheable → await hydrationDone.
 async function ensureDefaultLists() {
+  await ensureDeviceName();
   try {
     const metaRespCheck = await requestOffscreen({ action: 'loadAllListMetadata' });
     const userLists = (metaRespCheck?.lists || []).filter(l => !l.slug.startsWith('system/'));
@@ -577,13 +589,13 @@ async function ensureDefaultLists() {
       await addLog({
         timestamp: Date.now(),
         action: 'create_list',
-        parents: [],
+        listOwner: localDeviceName,
         name: 'Hubs',
       });
       await addLog({
         timestamp: Date.now(),
         action: 'add_rule',
-        parents: [],
+        listOwner: localDeviceName,
         name: 'Hubs',
         rule: {
           type: 'smart',
@@ -697,50 +709,32 @@ chrome.runtime.onStartup.addListener(async () => {
 // ─── Save Page WE Integration ─────────────────────────────────────────
 initSavepageBridge();
 
-// ─── List Name Path Resolution ───────────────────────────────────────
-// Resolve a list internal ID to its name path using the name-map.
+// ─── List Event Fields ───────────────────────────────────────────────
+// Resolve a list internal ID to { name, listOwner } for event emission.
 
-async function getListParentsAndName(listId) {
-  // System lists: name IS the ID
+async function getListEventFields(listId) {
   if (listId.startsWith('system/')) {
-    return { parents: [], name: listId };
+    return { name: listId, listOwner: localDeviceName };
   }
-  // Look up name from flat name-to-id
   const nameToId = await readCacheable('manifest:name-to-id');
   if (!nameToId?.paths) return null;
+  // Reverse lookup: find compound key for this listId
   let listName = null;
-  for (const [name, id] of Object.entries(nameToId.paths)) {
+  for (const [key, id] of Object.entries(nameToId.paths)) {
     if (id === listId) {
-      listName = name;
+      const slashIdx = key.indexOf('/');
+      listName = slashIdx >= 0 ? key.slice(slashIdx + 1) : key;
       break;
     }
   }
   if (!listName) {
-    // Fallback: read entity directly for the name
     const entity = await readCacheable(`list:${listId}`);
     listName = entity?.name;
   }
   if (!listName) return null;
-
-  // Derive parent chain from tree manifest
-  const order = await readCacheable('manifest:list-order');
-  const parents = ['root'];
-  const listKey = `list:${listId}`;
-  function findAncestors(nodes, chain) {
-    for (const node of nodes) {
-      if (node.id === listKey) {
-        parents.push(...chain);
-        return true;
-      }
-      if (node.children) {
-        const entity = null; // We don't need entity names for parents array in events
-        if (findAncestors(node.children, [...chain, node.id])) return true;
-      }
-    }
-    return false;
-  }
-  findAncestors(order?.tree || [], []);
-  return { parents, name: listName };
+  const entity = await readCacheable(`list:${listId}`);
+  const owner = entity?.owner || localDeviceName;
+  return { name: listName, listOwner: owner };
 }
 
 // ─── Snapshot Capture ─────────────────────────────────────────────────
@@ -1029,12 +1023,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     const pageKey = 'page:' + generateSlugFromUrl(url);
                     const already = listPins.some(p => p.id === pageKey);
                     if (!already) {
-                      const pn = await getListParentsAndName(listSlug);
+                      const pn = await getListEventFields(listSlug);
                       if (pn) {
                         const pinEntry = {
                           timestamp: Date.now(),
                           action: 'pin_to_list',
-                          parents: pn.parents, name: pn.name,
+                          name: pn.name, listOwner: pn.listOwner,
                           items: [url]
                         };
                         if (title) pinEntry.titles = { [url]: title };
@@ -1376,7 +1370,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'toggleListPin': {
           try {
             const { listId, url, id: requestId } = request;
-            const pn = await getListParentsAndName(listId);
+            const pn = await getListEventFields(listId);
             if (!pn) { sendResponse({ success: false, error: 'List not found' }); break; }
 
             // Determine the item to pin/unpin: notes use path format, pages use URL
@@ -1402,7 +1396,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const pinLogEntry = {
               timestamp: Date.now(),
               action: isPinned ? 'unpin_from_list' : 'pin_to_list',
-              parents: pn.parents, name: pn.name,
+              name: pn.name, listOwner: pn.listOwner,
               items: [pinItem]
             };
             // Attach title for new page pins so ensurePageEntity gets it
@@ -1420,7 +1414,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'addListPins': {
-          const pn = await getListParentsAndName(request.listId);
+          const pn = await getListEventFields(request.listId);
           if (pn && request.urls.length > 0) {
             // Collect titles: from caller (request.titles) or page entities
             const titles = { ...(request.titles || {}) };
@@ -1434,7 +1428,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const pinEntry = {
               timestamp: Date.now(),
               action: 'pin_to_list',
-              parents: pn.parents, name: pn.name,
+              name: pn.name, listOwner: pn.listOwner,
               items: request.urls
             };
             if (Object.keys(titles).length > 0) pinEntry.titles = titles;
@@ -1448,32 +1442,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'saveListMeta': {
           const cached = request.listId ? await readCacheable('list:' + request.listId) : null;
-          const pn = request.listId ? await getListParentsAndName(request.listId) : null;
+          const pn = request.listId ? await getListEventFields(request.listId) : null;
 
           if (!cached) {
             // New list: create_list event
-            // Derive parents from request.parentPath: 'root' → [], 'root/Foo' → ['root', 'Foo']
-            let parents = [];
+            // Resolve parent for tree placement
+            let parentListId;
             if (request.parentPath && request.parentPath !== 'root') {
-              parents = request.parentPath.split('/');
+              // parentPath like 'root/list:some-id' — last segment is the parent
+              const parts = request.parentPath.split('/');
+              const lastPart = parts[parts.length - 1];
+              if (lastPart.startsWith('list:')) parentListId = lastPart.slice('list:'.length);
             }
             if (request.name) {
-              await addLog({
+              const createEntry = {
                 timestamp: Date.now(),
                 action: 'create_list',
+                listOwner: localDeviceName,
                 name: request.name,
-                parents,
-              });
-              // Look up the generated listId from flat name-to-id map
+              };
+              if (parentListId) createEntry.parentListId = parentListId;
+              await addLog(createEntry);
+              // Look up the generated listId from compound name-to-id map
               const nameToId = await readCacheable('manifest:name-to-id');
-              const generatedId = nameToId?.paths?.[request.name];
+              const generatedId = nameToId?.paths?.[localDeviceName + '/' + request.name];
               sendResponse({ success: true, listId: generatedId });
               notifyMutation('lists');
               break;
             }
           } else if (pn) {
             // Existing list: update_list event
-            const entry = { timestamp: Date.now(), action: 'update_list', parents: pn.parents, name: pn.name };
+            const entry = { timestamp: Date.now(), action: 'update_list', name: pn.name, listOwner: pn.listOwner };
             let hasChange = false;
             if (request.name !== undefined && cached.name !== request.name) {
               entry.newName = request.name;
@@ -1489,13 +1488,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'deleteList': {
-          const pnDel = await getListParentsAndName(request.listId);
+          const pnDel = await getListEventFields(request.listId);
           if (!pnDel) {
             sendResponse({ success: false, error: 'List not found in name-to-id' });
             break;
           }
           // Just parents+name — effectOf derives cascade from entity state
-          await addLog({ timestamp: Date.now(), action: 'delete_list', parents: pnDel.parents, name: pnDel.name });
+          await addLog({ timestamp: Date.now(), action: 'delete_list', name: pnDel.name, listOwner: pnDel.listOwner });
           sendResponse({ success: true });
           notifyMutation('lists');
           break;
@@ -1562,10 +1561,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const listId = request.listId;
           const entity = await readCacheable('list:' + listId, true);
           const name = entity?.name || listId;
+          const owner = entity?.owner || localDeviceName;
           await addLog({
             timestamp: Date.now(),
             action: 'restore_list',
-            parents: [], name,
+            name, listOwner: owner,
           });
           sendResponse({ success: true });
           notifyMutation('orphaned');
@@ -1740,7 +1740,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'addRule': {
           const { listId, rule } = request;
-          const listInfo = await getListParentsAndName(listId);
+          const listInfo = await getListEventFields(listId);
           if (!listInfo) { sendResponse({ success: false, error: 'List not found' }); break; }
 
           // Validate
@@ -1762,8 +1762,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           await addLog({
             timestamp: Date.now(),
             action: 'add_rule',
-            parents: listInfo.parents,
             name: listInfo.name,
+            listOwner: listInfo.listOwner,
             rule: { type: rule.type, config: rule.config },
           });
           sendResponse({ success: true });
@@ -1773,14 +1773,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'removeRule': {
           const { listId, ruleId } = request;
-          const listInfo = await getListParentsAndName(listId);
+          const listInfo = await getListEventFields(listId);
           if (!listInfo) { sendResponse({ success: false, error: 'List not found' }); break; }
 
           await addLog({
             timestamp: Date.now(),
             action: 'remove_rule',
-            parents: listInfo.parents,
             name: listInfo.name,
+            listOwner: listInfo.listOwner,
             ruleId,
           });
           sendResponse({ success: true });
@@ -1790,14 +1790,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'updateRule': {
           const { listId, ruleId, config } = request;
-          const listInfo = await getListParentsAndName(listId);
+          const listInfo = await getListEventFields(listId);
           if (!listInfo) { sendResponse({ success: false, error: 'List not found' }); break; }
 
           await addLog({
             timestamp: Date.now(),
             action: 'update_rule',
-            parents: listInfo.parents,
             name: listInfo.name,
+            listOwner: listInfo.listOwner,
             ruleId,
             config,
           });
@@ -1826,7 +1826,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               const matches = await matchRules(listEntity.rules, pageData, { sandbox });
               if (matches.length > 0) {
                 // Auto-pin: use the same parents/name path as the list
-                const listInfo = await getListParentsAndName(listId);
+                const listInfo = await getListEventFields(listId);
                 if (listInfo) {
                   // Check if already pinned
                   const slug = generateSlugFromUrl(entry.url);
@@ -1835,8 +1835,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     const sfPinEntry = {
                       timestamp: Date.now(),
                       action: 'pin_to_list',
-                      parents: listInfo.parents,
                       name: listInfo.name,
+                      listOwner: listInfo.listOwner,
                       items: [entry.url],
                     };
                     if (entry.title) sfPinEntry.titles = { [entry.url]: entry.title };

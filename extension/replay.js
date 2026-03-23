@@ -166,7 +166,7 @@ export function isPageEligible(entity) {
  * Returns { key: updatedEntity | null } for every affected key.
  * Each action branch loads what it needs and applies immediately.
  */
-export async function effectOf(entry, load) {
+export async function effectOf(entry, load, context = {}) {
   const result = {};
 
   // --- shared helpers for link/unlink/orphan across note, snap, and list branches ---
@@ -199,30 +199,39 @@ export async function effectOf(entry, load) {
       if (parentUrl) entry.url = parentUrl;
       entries.push(entry);
     }
-    result['manifest:orphaned'] = { ...orphaned, timestamp: ts, entries };
+    result['manifest:orphaned'] = { ...orphaned, timestamp: Math.max(orphaned.timestamp || 0, ts), entries };
   }
 
   async function unorphan(childKey, ts) {
     const orphaned = result['manifest:orphaned'] || await loadOrDefault('manifest:orphaned', load);
     const entries = (orphaned.entries || []).filter(e => e.key !== childKey);
-    result['manifest:orphaned'] = { ...orphaned, timestamp: ts, entries };
+    result['manifest:orphaned'] = { ...orphaned, timestamp: Math.max(orphaned.timestamp || 0, ts), entries };
   }
 
   /**
-   * Resolve a list from parents array + name to its internal list key via manifest:name-to-id.
+   * Resolve a list to its internal list key via manifest:name-to-id.
+   * Uses compound key entry.listOwner/name. Falls back to orphaned entity search.
    * System lists use their name directly as the ID.
-   * Returns null if user list not found in name-to-id.
+   * Returns null if user list not found in name-to-id or orphaned entities.
    */
-  async function resolveListKey(parents, name) {
+  async function resolveListKey(name) {
     if (!name) return null;
-    // System lists: name IS the ID
     if (name.startsWith('system/')) {
       return `list:${name}`;
     }
-    // User lists: resolve via flat manifest:name-to-id (name → id)
     const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
-    const id = nameToId.paths?.[name];
-    return id ? `list:${id}` : null;
+    const owner = entry.listOwner;
+    if (!owner) return null;
+    const id = nameToId.paths?.[owner + '/' + name];
+    if (id) return `list:${id}`;
+    // Fallback: search orphaned entities by owner+name (deleted lists removed from name-to-id)
+    const orphanedEntity = result['manifest:orphaned'] || await loadOrDefault('manifest:orphaned', load);
+    for (const oe of (orphanedEntity.entries || [])) {
+      if (!oe.key.startsWith('list:') || oe.key.startsWith('list:system/')) continue;
+      const entity = await load(oe.key, { includeDeleted: true });
+      if (entity?.owner === owner && entity?.name === name) return oe.key;
+    }
+    return null;
   }
 
   /**
@@ -256,10 +265,20 @@ export async function effectOf(entry, load) {
     return lists;
   }
 
+  /**
+   * Load a list entity for mutation. In sync mode, loads with includeDeleted
+   * (preserves data through delete/restore cycles). In non-sync, rejects
+   * orphaned lists (current behavior).
+   * Returns null if the list should be skipped.
+   */
+  async function loadListForMutation(listKey) {
+    return await loadOrDefault(listKey, load, { includeDeleted: true });
+  }
+
   // --- update_setting ---
   if (entry.action === 'update_setting') {
     const settings = await loadOrDefault('manifest:settings', load);
-    result['manifest:settings'] = { ...settings, [entry.key]: entry.value, timestamp: entry.timestamp };
+    result['manifest:settings'] = { ...settings, [entry.key]: entry.value, timestamp: Math.max(settings.timestamp || 0, entry.timestamp) };
     return result;
   }
 
@@ -271,7 +290,7 @@ export async function effectOf(entry, load) {
     const page = await load(pageKey);
 
     if (page) {
-      const updated = { ...page, timestamp: entry.timestamp };
+      const updated = { ...page, timestamp: Math.max(page.timestamp || 0, entry.timestamp) };
       if (entry.url) updated.url = entry.url;
       if (entry.title) updated.title = entry.title;
 
@@ -326,19 +345,23 @@ export async function effectOf(entry, load) {
 
     if (page) {
       const prevTimestamp = page.timestamp || 0;
-      const updated = { ...page, timestamp: entry.timestamp };
+      const updated = { ...page, timestamp: Math.max(prevTimestamp, entry.timestamp) };
 
       // Title: latest auto-detected from MutationObserver, folded into leave report
       if (entry.title) updated.title = entry.title;
 
-      // Attention (guard with prevTimestamp for idempotency)
-      if (entry.timestamp > prevTimestamp) {
+      // Attention guard: per-device via remotes map
+      const remotes = { ...(page.remotes || {}) };
+      const deviceTs = remotes[context.deviceName] || 0;
+      if (entry.timestamp > deviceTs) {
         if (entry.scrollDepth !== undefined) {
           updated.scrollDepth = Math.max(updated.scrollDepth || 0, entry.scrollDepth);
         }
         if (entry.timeOnPage !== undefined) {
           updated.timeOnPage = (updated.timeOnPage || 0) + entry.timeOnPage;
         }
+        remotes[context.deviceName] = entry.timestamp;
+        updated.remotes = remotes;
       }
 
       result[pageKey] = updated;
@@ -352,7 +375,7 @@ export async function effectOf(entry, load) {
   if (entry.action === 'rename_page') {
     const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp);
     const page = result[pageKey];
-    result[pageKey] = { ...page, user_title: entry.user_title, timestamp: entry.timestamp };
+    result[pageKey] = { ...page, user_title: entry.user_title, timestamp: Math.max(page.timestamp || 0, entry.timestamp) };
     return result;
   }
 
@@ -362,10 +385,15 @@ export async function effectOf(entry, load) {
     const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp, entry.title);
     const page = result[pageKey];
     const prevTimestamp = page.timestamp || 0;
-    const updated = { ...page, timestamp: entry.timestamp };
+    const updated = { ...page, timestamp: Math.max(prevTimestamp, entry.timestamp) };
 
-    if (entry.timestamp > prevTimestamp && entry.likes !== undefined) {
+    // Per-device guard via remotes map
+    const remotes = { ...(page.remotes || {}) };
+    const deviceTs = remotes[context.deviceName] || 0;
+    if (entry.timestamp > deviceTs && entry.likes !== undefined) {
       updated.likes = (updated.likes || 0) + entry.likes;
+      remotes[context.deviceName] = entry.timestamp;
+      updated.remotes = remotes;
     }
 
     result[pageKey] = updated;
@@ -379,7 +407,7 @@ export async function effectOf(entry, load) {
   if (entry.action === 'create_snapshot') {
     const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp, entry.title);
     const page = result[pageKey];
-    const updated = { ...page, timestamp: entry.timestamp };
+    const updated = { ...page, timestamp: Math.max(page.timestamp || 0, entry.timestamp) };
 
     // Snapshot key derived from path: "snapshots/<slug>-<ts>" → "snapshot:<slug>-<ts>"
     const snapKey = `${SNAPSHOT_PREFIX}${entry.path.slice('snapshots/'.length)}`;
@@ -416,7 +444,8 @@ export async function effectOf(entry, load) {
     const noteKey = `${NOTE_PREFIX}${noteSlug}`;
     // Load with includeDeleted; noop if already deleted
     const note = await loadOrDefault(noteKey, load, { includeDeleted: true });
-    if (note.deleted) return result;
+    // LWW via deletedTs
+    if (note.deletedTs && note.deletedTs >= entry.timestamp) return result;
 
     // Derive page key from note.url
     const noteUrl = note.url || entry.url;
@@ -435,7 +464,8 @@ export async function effectOf(entry, load) {
       result[lk] = { ...list, pins: (list.pins || []).filter(p => p.id !== noteKey) };
     }
     // Mark deleted
-    result[noteKey] = { ...note, deleted: true };
+    const deletedNote = { ...note, deleted: true, deletedTs: entry.timestamp };
+    result[noteKey] = deletedNote;
     await orphan(noteKey, entry.timestamp, noteUrl);
     return result;
   }
@@ -447,6 +477,9 @@ export async function effectOf(entry, load) {
     // Load with includeDeleted to preserve original entity fields
     const note = await loadOrDefault(noteKey, load, { includeDeleted: true });
 
+    // LWW via deletedTs
+    if (note.deletedTs && note.deletedTs >= entry.timestamp) return result;
+
     // Get parent URL from orphaned entries or note.url
     const orphaned = result['manifest:orphaned'] || await loadOrDefault('manifest:orphaned', load);
     const orphanEntry = (orphaned.entries || []).find(e => e.key === noteKey);
@@ -457,7 +490,8 @@ export async function effectOf(entry, load) {
       await linkChild(noteKey, [pageKey]);
     }
     // Clear deleted flag
-    result[noteKey] = { ...note, deleted: false };
+    const restoredNote = { ...note, deleted: false, deletedTs: entry.timestamp };
+    result[noteKey] = restoredNote;
     await unorphan(noteKey, entry.timestamp);
     return result;
   }
@@ -498,15 +532,16 @@ export async function effectOf(entry, load) {
     const newNoteSlug = entry.path.slice('notes/'.length, -'.json'.length);
     const newNoteKey = `${NOTE_PREFIX}${newNoteSlug}`;
 
-    // Load old note; noop if already deleted
+    // Load old note
     const oldNote = await loadOrDefault(oldNoteKey, load, { includeDeleted: true });
-    if (oldNote.deleted) return result;
 
     // Derive page key from old note's url
     const noteUrl = oldNote.url || entry.url;
     if (noteUrl) {
       const pageKey = PAGE_PREFIX + generateSlugFromUrl(noteUrl);
       await unlinkChild(oldNoteKey, [pageKey]);
+      // Page may have been GC'd by a concurrent delete_note; re-create it
+      await ensurePageEntity(noteUrl, entry.timestamp);
       await linkChild(newNoteKey, [pageKey]);
     }
 
@@ -538,14 +573,15 @@ export async function effectOf(entry, load) {
       };
     }
 
-    // Mark old note as replaced + orphan
-    result[oldNoteKey] = {
-      ...oldNote,
-      deleted: true,
-      deletionReason: 'replaced',
-      replacedBy: newNoteKey,
-    };
-    await orphan(oldNoteKey, entry.timestamp, noteUrl);
+    // Mark old note as replaced + orphan (LWW — only if our timestamp wins)
+    const oldDeletedTs = oldNote.deletedTs || 0;
+    if (entry.timestamp > oldDeletedTs) {
+      result[oldNoteKey] = {
+        ...oldNote, deleted: true, deletedTs: entry.timestamp,
+        deletionReason: 'replaced', replacedBy: newNoteKey,
+      };
+      await orphan(oldNoteKey, entry.timestamp, noteUrl);
+    }
 
     return result;
   }
@@ -553,16 +589,11 @@ export async function effectOf(entry, load) {
   // --- pin_to_list ---
   // Add items to a list. Items are URLs (for pages) or "notes/<slug>.json" paths (for notes).
   if (entry.action === 'pin_to_list') {
-    const listKey = await resolveListKey(entry.parents, entry.name);
+    const listKey = await resolveListKey(entry.name);
     if (!listKey) return result;
 
-    // Guard: reject actions on orphaned (deleted) lists
-    if (!listKey.startsWith('list:system/')) {
-      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      if ((orphanedEntity.entries || []).some(e => e.key === listKey)) return result;
-    }
-
-    const entity = await loadOrDefault(listKey, load);
+    const entity = await loadListForMutation(listKey);
+    if (!entity) return result;
     const pins = [...(entity.pins || [])];
 
     for (const item of (entry.items || [])) {
@@ -594,23 +625,18 @@ export async function effectOf(entry, load) {
       }
     }
 
-    result[listKey] = { ...entity, pins, timestamp: entry.timestamp };
+    result[listKey] = { ...entity, pins, timestamp: Math.max(entity.timestamp || 0, entry.timestamp) };
     return result;
   }
 
   // --- unpin_from_list ---
   // Remove items from a list. Items are URLs (for pages) or "notes/<slug>.json" paths (for notes).
   if (entry.action === 'unpin_from_list') {
-    const listKey = await resolveListKey(entry.parents, entry.name);
+    const listKey = await resolveListKey(entry.name);
     if (!listKey) return result;
 
-    // Guard: reject actions on orphaned (deleted) lists
-    if (!listKey.startsWith('list:system/')) {
-      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      if ((orphanedEntity.entries || []).some(e => e.key === listKey)) return result;
-    }
-
-    const entity = await loadOrDefault(listKey, load);
+    const entity = await loadListForMutation(listKey);
+    if (!entity) return result;
     const removeIds = new Set();
 
     for (const item of (entry.items || [])) {
@@ -625,7 +651,7 @@ export async function effectOf(entry, load) {
     }
 
     const pins = (entity.pins || []).filter(p => !removeIds.has(p.id));
-    result[listKey] = { ...entity, pins, timestamp: entry.timestamp };
+    result[listKey] = { ...entity, pins, timestamp: Math.max(entity.timestamp || 0, entry.timestamp) };
 
     // Update page parentIds: remove list key (notes don't track parentIds)
     for (const pinId of removeIds) {
@@ -645,15 +671,11 @@ export async function effectOf(entry, load) {
   // --- add_rule ---
   // Add a matching rule to a list.
   if (entry.action === 'add_rule') {
-    const listKey = await resolveListKey(entry.parents, entry.name);
+    const listKey = await resolveListKey(entry.name);
     if (!listKey) return result;
 
-    if (!listKey.startsWith('list:system/')) {
-      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      if ((orphanedEntity.entries || []).some(e => e.key === listKey)) return result;
-    }
-
-    const entity = await loadOrDefault(listKey, load);
+    const entity = await loadListForMutation(listKey);
+    if (!entity) return result;
     const rules = [...(entity.rules || [])];
     const ruleId = entry.rule.id || generateRuleId(entry.rule.type, entry.timestamp);
 
@@ -667,44 +689,36 @@ export async function effectOf(entry, load) {
       });
     }
 
-    result[listKey] = { ...entity, rules, timestamp: entry.timestamp };
+    result[listKey] = { ...entity, rules, timestamp: Math.max(entity.timestamp || 0, entry.timestamp) };
     return result;
   }
 
   // --- remove_rule ---
   // Remove a matching rule from a list by ID.
   if (entry.action === 'remove_rule') {
-    const listKey = await resolveListKey(entry.parents, entry.name);
+    const listKey = await resolveListKey(entry.name);
     if (!listKey) return result;
 
-    if (!listKey.startsWith('list:system/')) {
-      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      if ((orphanedEntity.entries || []).some(e => e.key === listKey)) return result;
-    }
-
-    const entity = await loadOrDefault(listKey, load);
+    const entity = await loadListForMutation(listKey);
+    if (!entity) return result;
     const rules = (entity.rules || []).filter(r => r.id !== entry.ruleId);
-    result[listKey] = { ...entity, rules, timestamp: entry.timestamp };
+    result[listKey] = { ...entity, rules, timestamp: Math.max(entity.timestamp || 0, entry.timestamp) };
     return result;
   }
 
   // --- update_rule ---
   // Update config of an existing rule by ID (merges config fields).
   if (entry.action === 'update_rule') {
-    const listKey = await resolveListKey(entry.parents, entry.name);
+    const listKey = await resolveListKey(entry.name);
     if (!listKey) return result;
 
-    if (!listKey.startsWith('list:system/')) {
-      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      if ((orphanedEntity.entries || []).some(e => e.key === listKey)) return result;
-    }
-
-    const entity = await loadOrDefault(listKey, load);
+    const entity = await loadListForMutation(listKey);
+    if (!entity) return result;
     const rules = (entity.rules || []).map(r => {
       if (r.id !== entry.ruleId) return r;
       return { ...r, config: { ...r.config, ...entry.config } };
     });
-    result[listKey] = { ...entity, rules, timestamp: entry.timestamp };
+    result[listKey] = { ...entity, rules, timestamp: Math.max(entity.timestamp || 0, entry.timestamp) };
     return result;
   }
 
@@ -714,14 +728,8 @@ export async function effectOf(entry, load) {
     const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
     const paths = { ...nameToId.paths };
 
-    // Resolve parent from entry.parents array (for tree placement)
-    const parents = entry.parents || [];
-    let parentKey = null;
-    if (parents.length > 0) {
-      const parentName = parents[parents.length - 1];
-      const parentParents = parents.slice(0, -1);
-      parentKey = await resolveListKey(parentParents, parentName);
-    }
+    // Resolve parent for tree placement (optional)
+    const parentKey = entry.parentListId ? `list:${entry.parentListId}` : null;
 
     // Use provided listId (migrated events) or generate from name+timestamp (new events)
     const listId = entry.listId || (entry.name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').substring(0, 30) + '-' + Math.abs(hashString(entry.name + entry.timestamp)).toString(36));
@@ -731,16 +739,18 @@ export async function effectOf(entry, load) {
     const entity = defaultEntity(listKey);
     entity.name = entry.name;
     entity.timestamp = entry.timestamp;
+    entity.owner = entry.listOwner;
     result[listKey] = entity;
 
     // Append to tree manifest
     const treeEntity = result['manifest:list-order'] || await loadOrDefault('manifest:list-order', load);
     const newTree = appendToTree(treeEntity.tree || [], listKey, parentKey);
-    result['manifest:list-order'] = { ...treeEntity, timestamp: entry.timestamp, tree: newTree };
+    result['manifest:list-order'] = { ...treeEntity, timestamp: Math.max(treeEntity.timestamp || 0, entry.timestamp), tree: newTree };
 
-    // Update flat name-to-id
-    paths[entry.name] = listId;
-    result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
+    // Update name-to-id: compound key owner/name
+    const nameKey = entry.listOwner + '/' + entry.name;
+    paths[nameKey] = listId;
+    result['manifest:name-to-id'] = { ...nameToId, timestamp: Math.max(nameToId.timestamp || 0, entry.timestamp), paths };
 
     return result;
   }
@@ -749,30 +759,29 @@ export async function effectOf(entry, load) {
   // Rename list.
   // entry.name identifies the current list; entry.newName is the rename target.
   if (entry.action === 'update_list') {
-    const listKey = await resolveListKey(entry.parents, entry.name);
+    const listKey = await resolveListKey(entry.name);
     if (!listKey) return result;
 
     // Guard: reject actions on orphaned (deleted) lists
-    if (!listKey.startsWith('list:system/')) {
-      const orphanedEntity = await loadOrDefault('manifest:orphaned', load);
-      if ((orphanedEntity.entries || []).some(e => e.key === listKey)) return result;
-    }
-
-    const entity = await loadOrDefault(listKey, load);
-    const updated = { ...entity, timestamp: entry.timestamp };
+    const entity = await loadListForMutation(listKey);
+    if (!entity) return result;
+    const updated = { ...entity, timestamp: Math.max(entity.timestamp || 0, entry.timestamp) };
 
     if (entry.newName !== undefined) {
       const oldName = entity.name;
       updated.name = entry.newName;
 
-      // Update flat name-to-id: delete old name, add new name (no cascade)
+      // Update name-to-id: delete old key, add new key
       if (oldName !== entry.newName) {
         const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
         const paths = { ...nameToId.paths };
         const listId = listKey.slice('list:'.length);
-        delete paths[oldName];
-        paths[entry.newName] = listId;
-        result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
+        const owner = entity.owner;
+        const oldKey = owner + '/' + oldName;
+        const newKey = owner + '/' + entry.newName;
+        delete paths[oldKey];
+        paths[newKey] = listId;
+        result['manifest:name-to-id'] = { ...nameToId, timestamp: Math.max(nameToId.timestamp || 0, entry.timestamp), paths };
       }
     }
 
@@ -782,31 +791,69 @@ export async function effectOf(entry, load) {
 
   // --- update_list_tree ---
   // Write the full tree structure. LWW by timestamp.
+  // In sync mode, reconcile the accepted tree against current entity state:
+  // remove deleted lists (promote children), append non-deleted lists missing from tree.
   if (entry.action === 'update_list_tree') {
     const treeEntity = result['manifest:list-order'] || await loadOrDefault('manifest:list-order', load);
     if (treeEntity.timestamp && treeEntity.timestamp >= entry.timestamp) return result;
-    result['manifest:list-order'] = { ...treeEntity, timestamp: entry.timestamp, tree: entry.tree };
+    // Reconcile the accepted tree against current entity state:
+    // remove deleted lists (promote children), append non-deleted lists missing from tree.
+    function collectIds(nodes) {
+      const ids = new Set();
+      for (const n of nodes) {
+        ids.add(n.id);
+        if (n.children) for (const id of collectIds(n.children)) ids.add(id);
+      }
+      return ids;
+    }
+    let newTree = entry.tree;
+    const treeIds = collectIds(newTree);
+    let reconciled = newTree.map(deepCloneTree);
+    // Remove deleted lists from tree (promotes children)
+    for (const id of treeIds) {
+      if (id.startsWith('list:system/')) continue;
+      const entity = await load(id, { includeDeleted: true });
+      if (entity?.deleted) {
+        reconciled = removeFromTree(reconciled, id);
+      }
+    }
+    // Append non-deleted lists that exist in name-to-id but are missing from tree
+    const reconciledIds = collectIds(reconciled);
+    const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
+    for (const listId of Object.values(nameToId.paths || {})) {
+      const listKey = `list:${listId}`;
+      if (reconciledIds.has(listKey)) continue;
+      if (listKey.startsWith('list:system/')) continue;
+      const entity = await load(listKey, { includeDeleted: true });
+      if (entity && !entity.deleted) {
+        reconciled.push({ id: listKey });
+        reconciledIds.add(listKey);
+      }
+    }
+    newTree = reconciled;
+    result['manifest:list-order'] = { ...treeEntity, timestamp: entry.timestamp, tree: newTree };
     return result;
   }
 
   // --- delete_list ---
   // Soft-delete a single list. Non-cascading — children promoted in tree.
   if (entry.action === 'delete_list') {
-    const listKey = await resolveListKey(entry.parents, entry.name);
+    const listKey = await resolveListKey(entry.name);
     if (!listKey) return result;
 
     if (listKey.startsWith('list:system/')) return result;
 
     const entity = await loadOrDefault(listKey, load, { includeDeleted: true });
-    // Noop if already deleted
-    if (entity.deleted) return result;
+    // LWW via deletedTs
+    if (entity.deletedTs && entity.deletedTs >= entry.timestamp) return result;
 
     // Mark deleted
-    result[listKey] = { ...entity, timestamp: entry.timestamp, deleted: true };
+    const deletedEntity = { ...entity, timestamp: Math.max(entity.timestamp || 0, entry.timestamp), deleted: true, deletedTs: entry.timestamp };
+    result[listKey] = deletedEntity;
 
     // Remove from tree manifest (promotes children to parent level)
     const treeEntity = result['manifest:list-order'] || await loadOrDefault('manifest:list-order', load);
-    result['manifest:list-order'] = { ...treeEntity, timestamp: entry.timestamp, tree: removeFromTree(treeEntity.tree || [], listKey) };
+    result['manifest:list-order'] = { ...treeEntity, timestamp: Math.max(treeEntity.timestamp || 0, entry.timestamp), tree: removeFromTree(treeEntity.tree || [], listKey) };
 
     // Remove list key from all pinned page parentIds (notes don't track parentIds)
     const pins = entity.pins || [];
@@ -820,12 +867,13 @@ export async function effectOf(entry, load) {
       }
     }
 
-    // Remove from flat name-to-id
+    // Remove from name-to-id
     const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
     const paths = { ...nameToId.paths };
     const listName = entity.name || entry.name;
-    delete paths[listName];
-    result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
+    const nameKey = entity.owner + '/' + listName;
+    delete paths[nameKey];
+    result['manifest:name-to-id'] = { ...nameToId, timestamp: Math.max(nameToId.timestamp || 0, entry.timestamp), paths };
 
     await orphan(listKey, entry.timestamp);
     return result;
@@ -835,7 +883,7 @@ export async function effectOf(entry, load) {
   // Restore a deleted list. Adds to top-level of tree manifest.
   if (entry.action === 'restore_list') {
     // Resolve by name-to-id first; if not found (deleted), try to find by searching entities
-    let listKey = await resolveListKey(entry.parents, entry.name);
+    let listKey = await resolveListKey(entry.name);
 
     // Deleted lists are removed from name-to-id, so resolve from orphaned entities
     if (!listKey) {
@@ -844,17 +892,19 @@ export async function effectOf(entry, load) {
         const key = oe.key;
         if (!key.startsWith('list:') || key.startsWith('list:system/')) continue;
         const entity = await load(key, { includeDeleted: true });
-        if (entity?.name === entry.name) {
-          listKey = key;
-          break;
-        }
+        if (!entity) continue;
+        if (entity.owner === entry.listOwner && entity.name === entry.name) { listKey = key; break; }
       }
     }
     if (!listKey) return result;
 
     // Load list entity with includeDeleted to preserve original fields
     const entity = await loadOrDefault(listKey, load, { includeDeleted: true });
-    const restored = { ...entity, deleted: false, timestamp: entry.timestamp };
+
+    // LWW via deletedTs
+    if (entity.deletedTs && entity.deletedTs >= entry.timestamp) return result;
+
+    const restored = { ...entity, deleted: false, timestamp: Math.max(entity.timestamp || 0, entry.timestamp), deletedTs: entry.timestamp };
     result[listKey] = restored;
 
     // Append to tree manifest as top-level node
@@ -869,7 +919,7 @@ export async function effectOf(entry, load) {
       return false;
     })(tree);
     if (!inTree) {
-      result['manifest:list-order'] = { ...treeEntity, timestamp: entry.timestamp, tree: [...tree.map(deepCloneTree), { id: listKey }] };
+      result['manifest:list-order'] = { ...treeEntity, timestamp: Math.max(treeEntity.timestamp || 0, entry.timestamp), tree: [...tree.map(deepCloneTree), { id: listKey }] };
     }
 
     // Restore page parentIds for pins
@@ -884,13 +934,14 @@ export async function effectOf(entry, load) {
       }
     }
 
-    // Re-add to flat name-to-id
+    // Re-add to name-to-id
     const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
     const paths = { ...nameToId.paths };
     const listName = restored.name || entry.name;
     const listId = listKey.slice('list:'.length);
-    paths[listName] = listId;
-    result['manifest:name-to-id'] = { ...nameToId, timestamp: entry.timestamp, paths };
+    const nameKey = restored.owner + '/' + listName;
+    paths[nameKey] = listId;
+    result['manifest:name-to-id'] = { ...nameToId, timestamp: Math.max(nameToId.timestamp || 0, entry.timestamp), paths };
 
     await unorphan(listKey, entry.timestamp);
     return result;
@@ -922,5 +973,5 @@ function hashString(str) {
  */
 export function applyLogToSettings(settings, entry) {
   if (entry.action !== 'update_setting') return settings;
-  return { ...settings, [entry.key]: entry.value, timestamp: entry.timestamp };
+  return { ...settings, [entry.key]: entry.value, timestamp: Math.max(settings.timestamp || 0, entry.timestamp) };
 }

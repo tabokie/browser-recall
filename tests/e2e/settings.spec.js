@@ -5,7 +5,7 @@ test.describe('Settings persistence', () => {
   test('seeded settings values display in settings modal', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [], relatedPagesLimit: 25, historyFileBatch: 5,
+        trimRules: [], deviceName: 'test-device', relatedPagesLimit: 25, historyFileBatch: 5,
       }},
     ]);
 
@@ -24,7 +24,7 @@ test.describe('Settings persistence', () => {
   test('changed setting persists after page reload', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'manifest/settings.json', data: {
-        trimRules: [], relatedPagesLimit: 50, historyFileBatch: 10,
+        trimRules: [], deviceName: 'test-device', relatedPagesLimit: 50, historyFileBatch: 10,
       }},
     ]);
 
@@ -57,7 +57,7 @@ test.describe('Settings persistence', () => {
   test('first-run creates Hubs default list with function rule', async ({ extContext, extensionId, setupDir }) => {
     // Seed only system files — no user lists
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: { timestamp: 1, tree: [] } },
     ]);
 

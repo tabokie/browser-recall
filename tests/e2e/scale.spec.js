@@ -15,8 +15,8 @@ test.describe('Scale — larger data sets', () => {
     }
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'data/logs/2026-03-01.jsonl', lines: entries },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: entries },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -65,9 +65,9 @@ test.describe('Scale — larger data sets', () => {
     }
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'data/logs/2026-02-28.jsonl', lines: day1 },
-      { path: 'data/logs/2026-03-01.jsonl', lines: day2 },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'data/logs/test-device/2026-02-28.jsonl', lines: day1 },
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: day2 },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -87,7 +87,7 @@ test.describe('Scale — larger data sets', () => {
   test('5 lists with 3 pins each all render correctly', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const rootTree = [];
-    const files = [{ path: 'manifest/settings.json', data: { trimRules: [] } }];
+    const files = [{ path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } }];
 
     for (let l = 0; l < 5; l++) {
       const listSlug = `list-${l}`;
@@ -105,7 +105,7 @@ test.describe('Scale — larger data sets', () => {
       }
       files.push({
         path: `lists/${listSlug}.json`,
-        data: { slug: listSlug, name: `List ${l}`, timestamp: now, pins },
+        data: { slug: listSlug, name: `List ${l}`, owner: 'test-device', timestamp: now, pins },
       });
     }
 
@@ -121,7 +121,7 @@ test.describe('Scale — larger data sets', () => {
         });
       }
     }
-    files.push({ path: 'data/logs/2026-03-01.jsonl', lines: historyLines });
+    files.push({ path: 'data/logs/test-device/2026-03-01.jsonl', lines: historyLines });
     files.push({ path: 'manifest/list-order.json', data: { timestamp: now, tree: rootTree } });
 
     await resetAndSeed(extContext, extensionId, files);
@@ -156,15 +156,15 @@ test.describe('Scale — larger data sets', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:research' }],
       }},
       { path: 'lists/research.json', data: {
-        slug: 'research', name: 'Research', timestamp: now,
+        slug: 'research', name: 'Research', owner: 'test-device', timestamp: now,
         pins: [{ id: `page:${slug}`, pinnedAt: now }],
       }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'Research': 'research' } } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Research': 'research' } } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Pinned Page', timestamp: now, parentIds: ['list:research'], childIds: [],
       }},

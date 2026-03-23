@@ -331,13 +331,13 @@ describe('options.js toggleResultPin sends url to background', () => {
 describe('background.js toggleListPin resolves pin ID', () => {
   const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
 
-  it('toggleListPin uses getListParentsAndName and addLog for pin toggle', () => {
+  it('toggleListPin uses getListEventFields and addLog for pin toggle', () => {
     // Extract a larger chunk since case block has nested break statements
     const startIdx = bgSource.indexOf("case 'toggleListPin'");
     expect(startIdx).toBeGreaterThan(-1);
     const handler = bgSource.substring(startIdx, startIdx + 2000);
-    // Should use getListParentsAndName to resolve list name and addLog to write pin action
-    expect(handler).toMatch(/getListParentsAndName/);
+    // Should use getListEventFields to resolve list name and addLog to write pin action
+    expect(handler).toMatch(/getListEventFields/);
     expect(handler).toMatch(/addLog/);
   });
 });
@@ -354,10 +354,10 @@ describe('background.js addListPins accepts urls', () => {
     expect(caseBlock[1]).toMatch(/request\.urls/);
   });
 
-  it('addListPins uses getListParentsAndName and addLog', () => {
+  it('addListPins uses getListEventFields and addLog', () => {
     const caseBlock = bgSource.match(/case\s+'addListPins'\s*:\s*\{([\s\S]*?)break;\s*\}/);
     expect(caseBlock).not.toBeNull();
-    expect(caseBlock[1]).toMatch(/getListParentsAndName/);
+    expect(caseBlock[1]).toMatch(/getListEventFields/);
     expect(caseBlock[1]).toMatch(/addLog/);
   });
 });
