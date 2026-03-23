@@ -1,0 +1,14 @@
+- There is an issue with the introduction of device in last commit. The logs are being written to "/data/logs/default" instead of "/data/logs/laptop".
+- Let's fix the data first. And I will thoroughly reload the extension to see if it's a problem with stale session cache
+- The "default" directory is created again, and when I try to pin_to_list, the list or page meta is not updated. The log in question is {"timestamp":1774253509088,"action":"pin_to_list","name":"Communism","listOwner":null,"items":["https://news.ycombinator.com/item?id=47013817"]}.
+- Reproduce in E2E to confirm your understanding
+- fix
+- I reloaded, it worked. But when adding a new list, it completely resets the "list-name-to-id.json" to contain only the new list. Investigate, reproduce, fix data, fix code
+- Let's remove "Communism" list from all data, and let me reload and recreate the list
+- Also restore the list-name-to-id file using replay script
+- The file looks good after reloading. Maybe it's a stale cache issue
+- Run rewrite verify one more time
+- Fix them all
+- Purge Jandan from the data
+- Purge only the offending list jandan from the data. Don't touch actual visits
+- /finish

@@ -4,13 +4,18 @@ import { join } from 'path';
 import { generateSlugFromUrl } from '../extension/utils.js';
 
 const DATA_DIR = join(process.env.HOME, 'portal-data');
-const HISTORY_DIR = join(DATA_DIR, 'history');
+const LOGS_DIR = join(DATA_DIR, 'data', 'logs');
 
+// Scan data/logs/<device>/*.jsonl subdirectories
 const entries = [];
-for (const f of readdirSync(HISTORY_DIR).filter(f => f.endsWith('.jsonl')).sort()) {
-  for (const line of readFileSync(join(HISTORY_DIR, f), 'utf-8').split('\n')) {
-    if (line.trim() === '') continue;
-    try { entries.push(JSON.parse(line)); } catch {}
+for (const deviceDir of readdirSync(LOGS_DIR)) {
+  const devicePath = join(LOGS_DIR, deviceDir);
+  try { if (!readdirSync(devicePath)) continue; } catch { continue; }
+  for (const f of readdirSync(devicePath).filter(f => f.endsWith('.jsonl')).sort()) {
+    for (const line of readFileSync(join(devicePath, f), 'utf-8').split('\n')) {
+      if (line.trim() === '') continue;
+      try { entries.push(JSON.parse(line)); } catch {}
+    }
   }
 }
 entries.sort((a, b) => a.timestamp - b.timestamp);

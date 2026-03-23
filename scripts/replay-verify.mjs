@@ -27,26 +27,27 @@ for (let i = 0; i < args.length; i++) {
 // 1. Load all log entries, sorted by timestamp
 // ---------------------------------------------------------------------------
 console.log('Loading logs...');
-const logFiles = readdirSync(LOGS_DIR)
-  .filter(f => f.endsWith('.jsonl'))
-  .sort();
-
+// Scan data/logs/<device>/*.jsonl subdirectories
 const allEntries = [];
-for (const file of logFiles) {
-  const lines = readFileSync(join(LOGS_DIR, file), 'utf-8').split('\n');
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    try {
-      allEntries.push(JSON.parse(line));
-    } catch (e) {
-      console.warn(`  SKIP bad JSON in ${file}: ${line.slice(0, 80)}`);
+for (const deviceDir of readdirSync(LOGS_DIR)) {
+  const devicePath = join(LOGS_DIR, deviceDir);
+  try { if (!readdirSync(devicePath)) continue; } catch { continue; }
+  for (const file of readdirSync(devicePath).filter(f => f.endsWith('.jsonl')).sort()) {
+    const lines = readFileSync(join(devicePath, file), 'utf-8').split('\n');
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        allEntries.push(JSON.parse(line));
+      } catch (e) {
+        console.warn(`  SKIP bad JSON in ${deviceDir}/${file}: ${line.slice(0, 80)}`);
+      }
     }
   }
 }
 
 // Sort by timestamp (stable — preserves file order for same-ts entries)
 allEntries.sort((a, b) => a.timestamp - b.timestamp);
-console.log(`  ${allEntries.length} entries from ${logFiles.length} files`);
+console.log(`  ${allEntries.length} entries`);
 
 // ---------------------------------------------------------------------------
 // 2. Replay all entries through effectOf, accumulating state in a Map
@@ -65,10 +66,19 @@ function loadFromDisk(key) {
 }
 const load = async (key) => store.get(key) ?? loadFromDisk(key) ?? null;
 
+// Load deviceName from settings for context
+const settingsPath = join(DATA_DIR, 'manifest', 'settings.json');
+let deviceName = 'unknown';
+if (existsSync(settingsPath)) {
+  try { deviceName = JSON.parse(readFileSync(settingsPath, 'utf-8')).deviceName || deviceName; } catch {}
+}
+console.log(`  Device: ${deviceName}`);
+const context = { deviceName };
+
 for (let i = 0; i < allEntries.length; i++) {
   const entry = allEntries[i];
   try {
-    const result = await effectOf(entry, load);
+    const result = await effectOf(entry, load, context);
     for (const [key, value] of Object.entries(result)) {
       store.set(key, value);
     }

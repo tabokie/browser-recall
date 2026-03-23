@@ -16,7 +16,19 @@ const HISTORY_RECENT_DAYS = 7; // days of past history to cache for multi-day ch
 let recentUrls = new Map();
 
 // Device name for this instance — always set (generated on first run, stored in settings).
+// Use getDeviceName() instead of reading directly — it lazy-loads from settings on cache miss.
 let localDeviceName = null;
+
+// Lazy getter: returns localDeviceName, loading from settings if null.
+// Handles both startup race (message before hydrateCache) and SW wakeup (no hydrateCache).
+async function getDeviceName() {
+  if (localDeviceName) return localDeviceName;
+  const settings = await readCacheable('manifest:settings');
+  if (settings?.deviceName) {
+    localDeviceName = settings.deviceName;
+  }
+  return localDeviceName;
+}
 
 // Session storage: in-memory IPC, survives SW termination, cleared on browser restart.
 // hydrateCache() re-populates from filesystem on every startup.
@@ -155,7 +167,7 @@ async function drainNow() {
   try {
     await ensureLogBuffer();
     if (logBuffer.length > 0) {
-      offscreenPort.postMessage({ action: 'drainEntries', entries: logBuffer, deviceName: localDeviceName });
+      offscreenPort.postMessage({ action: 'drainEntries', entries: logBuffer, deviceName: await getDeviceName() });
     }
   } catch (e) {
     console.warn('drainNotify error:', e.message);
@@ -216,7 +228,7 @@ async function addLog(entry) {
     await ensureLogBuffer();
     logBuffer.push(entry);
     await chrome.storage.local.set({ logBuffer });
-    effects = await effectOf(entry, sessionLoad, { deviceName: localDeviceName });
+    effects = await effectOf(entry, sessionLoad, { deviceName: await getDeviceName() });
     await sessionWrite(effects);
   });
   // Append to today's history date key in session (fire-and-forget).
@@ -714,7 +726,7 @@ initSavepageBridge();
 
 async function getListEventFields(listId) {
   if (listId.startsWith('system/')) {
-    return { name: listId, listOwner: localDeviceName };
+    return { name: listId, listOwner: await getDeviceName() };
   }
   const nameToId = await readCacheable('manifest:name-to-id');
   if (!nameToId?.paths) return null;
@@ -733,7 +745,7 @@ async function getListEventFields(listId) {
   }
   if (!listName) return null;
   const entity = await readCacheable(`list:${listId}`);
-  const owner = entity?.owner || localDeviceName;
+  const owner = entity?.owner || await getDeviceName();
   return { name: listName, listOwner: owner };
 }
 
@@ -1455,17 +1467,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               if (lastPart.startsWith('list:')) parentListId = lastPart.slice('list:'.length);
             }
             if (request.name) {
+              const deviceName = await getDeviceName();
               const createEntry = {
                 timestamp: Date.now(),
                 action: 'create_list',
-                listOwner: localDeviceName,
+                listOwner: deviceName,
                 name: request.name,
               };
               if (parentListId) createEntry.parentListId = parentListId;
               await addLog(createEntry);
               // Look up the generated listId from compound name-to-id map
               const nameToId = await readCacheable('manifest:name-to-id');
-              const generatedId = nameToId?.paths?.[localDeviceName + '/' + request.name];
+              const generatedId = nameToId?.paths?.[deviceName + '/' + request.name];
               sendResponse({ success: true, listId: generatedId });
               notifyMutation('lists');
               break;
@@ -1561,7 +1574,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const listId = request.listId;
           const entity = await readCacheable('list:' + listId, true);
           const name = entity?.name || listId;
-          const owner = entity?.owner || localDeviceName;
+          const owner = entity?.owner || await getDeviceName();
           await addLog({
             timestamp: Date.now(),
             action: 'restore_list',
@@ -1692,6 +1705,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // 2. Clear entity cache (session storage + in-memory LRU)
           await cacheClear();
           // 3. Reset ALL in-memory state (SW survives across tests)
+          localDeviceName = null;
           recentUrls = new Map();
           if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
           // 4. Tell offscreen to wipe directory and reset drain state
@@ -1721,6 +1735,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             await chrome.storage.local.set({ logBuffer });
           }
           await cacheClear();
+          localDeviceName = null;
           recentUrls = new Map();
           if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
           hydrationDone = hydrateCache();
@@ -1733,6 +1748,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'seedTestData': {
           const resp = await requestOffscreen({ action: 'seedTestData', files: request.files });
           sendResponse(resp);
+          break;
+        }
+
+        // Simulate the pre-hydration window: localDeviceName is null (module just loaded)
+        // but hydrationDone is resolved (initial Promise.resolve()). This is the state
+        // between SW start and hydrateCache() being called from onInstalled/onStartup.
+        case 'simulatePreHydrationForTest': {
+          localDeviceName = null;
+          // hydrationDone stays resolved — simulating the initial Promise.resolve()
+          sendResponse({ success: true });
           break;
         }
 

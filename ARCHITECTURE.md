@@ -78,10 +78,12 @@ All mutations go through `addLog(entry)`:
 ```
 addLog(entry)
   → logBuffer.push(entry)              ← durable in chrome.storage.local
-  → effectOf(entry, sessionLoad, { deviceName })  ← replay against session cache
+  → effectOf(entry, sessionLoad, { deviceName: await getDeviceName() })  ← replay against session cache
   → sessionWrite(effects)              ← update session cache
   → scheduleDrainNotify()              ← offscreen drains to filesystem
 ```
+
+`getDeviceName()` is an async lazy getter: returns cached `localDeviceName` if set, otherwise loads from settings via `readCacheable('manifest:settings')`. This handles messages arriving before `hydrateCache()` completes (pre-hydration window) and SW wakeup without re-hydration.
 
 ### Hydration (Startup)
 

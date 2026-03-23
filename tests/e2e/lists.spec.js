@@ -2070,4 +2070,93 @@ test.describe('List operations', () => {
 
     await options.close();
   });
+
+  // Regression: when localDeviceName is null (pre-hydration race window),
+  // create_list produces owner:null, then pin_to_list gets listOwner:null,
+  // and drains write to data/logs/default/ instead of data/logs/<device>/.
+  test('create_list during pre-hydration window must not produce null owner', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: {
+        trimRules: [], deviceName: 'test-device',
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Simulate the pre-hydration window: localDeviceName=null, hydrationDone already resolved
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'simulatePreHydrationForTest' })
+    );
+
+    // Create a list during this window — handler proceeds with localDeviceName=null
+    const createResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'saveListMeta', name: 'Test List' })
+    );
+    expect(createResult.success).toBe(true);
+    expect(createResult.listId).toBeTruthy();
+
+    // The list entity must have a non-null owner
+    const listEntity = await helper.evaluate((id) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: `list:${id}` })
+    , createResult.listId);
+    expect(listEntity.value).toBeTruthy();
+    expect(listEntity.value.owner).not.toBeNull();
+
+    await helper.close();
+  });
+
+  // Regression: creating a new list must not wipe existing entries from list-name-to-id
+  // — both in session cache AND on disk after drain.
+  test('create_list preserves existing name-to-id entries after drain', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: {
+        trimRules: [], deviceName: 'test-device',
+      }},
+      { path: 'manifest/list-order.json', data: {
+        timestamp: now, tree: [{ id: 'list:existing' }],
+      }},
+      { path: 'lists/existing.json', data: {
+        slug: 'existing', name: 'Existing List', owner: 'test-device', timestamp: now, pins: [],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: {
+        timestamp: now, paths: { 'test-device/Existing List': 'existing' },
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Create a new list
+    const createResult = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'saveListMeta', name: 'New List' })
+    );
+    expect(createResult.success).toBe(true);
+
+    // Session cache: name-to-id must have BOTH lists
+    const nameToId = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:name-to-id' })
+    );
+    expect(nameToId.value.paths['test-device/Existing List']).toBe('existing');
+    expect(nameToId.value.paths['test-device/New List']).toBeTruthy();
+
+    // Flush to disk
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+    );
+
+    // Rehydrate and verify disk state survived
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+    );
+    const afterDrain = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:name-to-id' })
+    );
+    expect(afterDrain.value.paths['test-device/Existing List']).toBe('existing');
+    expect(afterDrain.value.paths['test-device/New List']).toBeTruthy();
+
+    await helper.close();
+  });
 });
