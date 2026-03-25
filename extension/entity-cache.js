@@ -54,11 +54,14 @@ export async function cacheSet(key, value, { timestamp } = {}) {
   const idx = lruKeys.indexOf(key);
   if (idx >= 0) lruKeys.splice(idx, 1);
   lruKeys.push(key);
-  // Track timestamp — auto-extract from object if not provided
+  // Track timestamp — auto-extract max from timestamps map if not provided
   if (timestamp === undefined) {
-    timestamp = (value && typeof value === 'object' && !Array.isArray(value))
-      ? (value.timestamp || 0)
-      : 0;
+    if (value && typeof value === 'object' && !Array.isArray(value) && value.timestamps) {
+      const vals = Object.values(value.timestamps);
+      timestamp = vals.length ? Math.max(...vals) : 0;
+    } else {
+      timestamp = 0;
+    }
   }
   keyTimestamps.set(key, timestamp);
   // Apply default pin for new keys

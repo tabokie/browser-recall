@@ -387,7 +387,7 @@ async function resolvePinsForDisplay(pins) {
       const hist = historyByUrl.get(url);
       if (hist?.title) title = hist.title;
     }
-    return { ...p, url, title, user_title: ref?.user_title || null, isNote: ref?.isNote || false, childIds: ref?.childIds || [] };
+    return { ...p, url, title, user_title: ref?.user_title || null, isNote: ref?.isNote || false, childIds: ref?.childIds || [], parentIds: ref?.parentIds || [] };
   });
   return { pinsResolved, pageSnap };
 }
@@ -1702,7 +1702,7 @@ function renderFilteredPins(pins, listId, searchQuery) {
     resultRowHtml(r.user_title || r.title, r.url, {
       pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'related',
-      pinnedAt: r.pinnedAt, childIds: r.childIds, excludeListId: listId, likes: r.likes,
+      pinnedAt: r.pinnedAt, childIds: r.childIds, parentIds: r.parentIds, excludeListId: listId, likes: r.likes,
     })
   );
   bindPinClicks(relatedContainer, listId);
@@ -1789,6 +1789,7 @@ async function enrichFromEntityStorage(entries) {
     if (!entry.title && page.title) entry.title = page.title;
     if (!entry.user_title && page.user_title) entry.user_title = page.user_title;
     if (page.childIds) entry.childIds = page.childIds;
+    if (page.parentIds) entry.parentIds = page.parentIds;
     if (page.likes) entry.likes = page.likes;
   }
 }
@@ -1833,7 +1834,7 @@ async function displayInteractionRows(interactions) {
   const vs = getOrCreateGlobalScroller();
   vs._headerHtml = '';
   vs.setData(sorted, (e) =>
-    resultRowHtml(e.user_title || e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global', childIds: e.childIds, likes: e.likes })
+    resultRowHtml(e.user_title || e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global', childIds: e.childIds, parentIds: e.parentIds, likes: e.likes })
   );
 }
 
@@ -2045,7 +2046,7 @@ function attentionLevel(normalized) {
 
 function resultRowHtml(title, url, opts = {}) {
   const safeUrl = escapeHtml(url || '<unknown>');
-  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, cssClass, childIds = [], excludeListId, likes = 0 } = opts;
+  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, cssClass, childIds = [], parentIds = [], excludeListId, likes = 0 } = opts;
 
   const lastVisit = timestamps.length > 0 ? formatTime(Math.max(...timestamps)) : '';
   const normalized = maxAtt > 0 ? attScore / maxAtt : 0;
@@ -2063,15 +2064,12 @@ function resultRowHtml(title, url, opts = {}) {
   const hasNotes = childIds.some(id => id.startsWith('note:'));
   const hasSnaps = childIds.some(id => id.startsWith('snapshot:'));
   const belongedListNames = [];
-  if (url) {
-    const pageId = 'page:' + generateSlugFromUrl(url);
-    for (const [listId, pins] of Object.entries(allListPins)) {
-      if (excludeListId && listId === excludeListId) continue;
-      if (Array.isArray(pins) && pins.some(p => p.id === pageId)) {
-        const name = listNameById.get(listId);
-        if (name) belongedListNames.push(name);
-      }
-    }
+  for (const pid of parentIds) {
+    if (!pid.startsWith('list:') || pid.startsWith('list:system/')) continue;
+    const listSlug = pid.slice(5);
+    if (excludeListId && listSlug === excludeListId) continue;
+    const name = listNameById.get(listSlug);
+    if (name) belongedListNames.push(name);
   }
   const attLvl = attentionLevel(normalized);
   if (url) cardDataByUrl.set(url, {
@@ -3666,7 +3664,7 @@ async function runSearchFilterPipeline() {
     resultRowHtml(r.user_title || r.title, r.url, {
       attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'related',
-      childIds: r.childIds, likes: r.likes,
+      childIds: r.childIds, parentIds: r.parentIds, likes: r.likes,
     })
   );
 
@@ -3757,7 +3755,7 @@ async function openListFocusPanel(listId, listName) {
       html += pinsResolved.map(r => {
         const title = r.user_title || r.title || '<unknown>';
         return resultRowHtml(title, r.url, {
-          deletable: false, attScore: 0, maxAtt, timestamps: [r.pinnedAt || Date.now()], context: 'global', deletable: false, childIds: r.childIds
+          deletable: false, attScore: 0, maxAtt, timestamps: [r.pinnedAt || Date.now()], context: 'global', deletable: false, childIds: r.childIds, parentIds: r.parentIds
         });
       }).join('');
     }
@@ -3916,6 +3914,12 @@ async function restoreSidebarWidth() {
 async function initialize() {
   const _t0 = performance.now();
   const _timer = (label) => console.debug(`[init-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
+
+  // Verify device identity — CURRENT file must be readable
+  const deviceResp = await chrome.runtime.sendMessage({ action: 'getDeviceId' });
+  if (!deviceResp?.deviceId) {
+    throw new Error('Device identity unavailable — the CURRENT file may be missing or corrupted. Try reloading the extension.');
+  }
 
   // Load settings from filesystem
   relatedPagesLimit = await loadSettingsValue('relatedPagesLimit', 50);

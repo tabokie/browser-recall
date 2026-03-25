@@ -8,7 +8,8 @@ test.describe('Interactions — likes, notes, attention', () => {
   test('seeded page with likes returns correct value via getPageInfo', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain',
         timestamp: now, likes: 3, scrollDepth: 80, timeOnPage: 45000,
@@ -40,7 +41,8 @@ test.describe('Interactions — likes, notes, attention', () => {
   test('createNote via message, then getPageInfo returns the note WITHOUT flush', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain',
         timestamp: now, parentIds: [], childIds: [],
@@ -77,7 +79,8 @@ test.describe('Interactions — likes, notes, attention', () => {
   test('seeded page with attention data displays in explore view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'leave_page', url: TEST_URL, title: 'Example Domain',
           timeOnPage: 120000, scrollDepth: 95 },
@@ -96,7 +99,8 @@ test.describe('Interactions — likes, notes, attention', () => {
   test('like delta accumulates via addLog replay', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain',
         timestamp: now - 3000, likes: 0, parentIds: [], childIds: [],
@@ -129,7 +133,8 @@ test.describe('Interactions — likes, notes, attention', () => {
   test('createNote adds note to parent page childIds', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
@@ -164,7 +169,8 @@ test.describe('Interactions — likes, notes, attention', () => {
   test('createNote writes content to filesystem, log entry has no content', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
@@ -218,7 +224,8 @@ test.describe('Interactions — likes, notes, attention', () => {
     const now = Date.now();
     const noteSlug = '260301-test-note-abc';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`], user_title: 'Kept',
@@ -266,7 +273,8 @@ test.describe('Interactions — likes, notes, attention', () => {
     const now = Date.now();
     const noteSlug = '260301-update-test';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`], user_title: 'Kept',
@@ -337,7 +345,8 @@ test.describe('Interactions — likes, notes, attention', () => {
     const noteSlug = '260301-pinned-note';
     const listId = 'test-list-abc';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/TestList': listId } } },
       { path: 'list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/TestList': listId } } },
       { path: `lists/${listId}.json`, data: {
@@ -386,7 +395,8 @@ test.describe('Interactions — likes, notes, attention', () => {
     const now = Date.now();
     const noteSlug = '260301-roundtrip-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`], user_title: 'Kept',

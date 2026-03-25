@@ -11,7 +11,8 @@ test.describe('Page note textarea in detail card', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url: PAGE_URL, title: PAGE_TITLE,
         parentIds: [], childIds: [`note:${noteSlug}`],
@@ -49,7 +50,8 @@ test.describe('Page note textarea in detail card', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url: PAGE_URL, title: PAGE_TITLE,
         parentIds: [], childIds: [],
@@ -101,7 +103,8 @@ test.describe('Page note textarea in detail card', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url: PAGE_URL, title: PAGE_TITLE,
         parentIds: [], childIds: [`note:${noteSlug}`],
@@ -165,7 +168,8 @@ test.describe('Page note textarea in detail card', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url: PAGE_URL, title: PAGE_TITLE,
         parentIds: [], childIds: [`note:${globalNoteSlug}`, `note:${highlightNoteSlug}`],
@@ -217,7 +221,8 @@ test.describe('Page note textarea in detail card', () => {
     // Seed old note file + page entity (reflecting create_note already applied).
     // Do NOT seed the new note file — simulates a missing file during replay.
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url: PAGE_URL, title: PAGE_TITLE,
         parentIds: [], childIds: [`note:${oldNoteSlug}`],
@@ -272,7 +277,8 @@ test.describe('Page note textarea in detail card', () => {
 
     // Seed only the page entity — note will be created dynamically
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url: PAGE_URL, title: PAGE_TITLE,
         parentIds: [], childIds: [],

@@ -36,7 +36,7 @@ chrome.runtime.onConnect.addListener((port) => {
     // Fire-and-forget drain trigger from background (no response needed)
     if (msg.action === 'drainEntries') {
       pendingDrainEntries = msg.entries;
-      if (msg.deviceName) pendingDeviceName = msg.deviceName;
+      if (msg.deviceId) pendingDeviceId = msg.deviceId;
       scheduleDrain();
       return;
     }
@@ -201,6 +201,22 @@ async function handleRequest(request) {
         } catch {
           return { success: true, entity: { timestamp: 0, keys: [] } };
         }
+      }
+
+      case 'loadCurrent': {
+        const deviceId = await fsStorage.loadCurrent();
+        return { success: true, deviceId };
+      }
+
+      case 'initDevice': {
+        await fsStorage.initDevice(msg.deviceId);
+        return { success: true };
+      }
+
+      case 'deleteCurrent': {
+        const root = fsStorage.directoryHandle;
+        try { await root.removeEntry('CURRENT'); } catch {}
+        return { success: true };
       }
 
       case 'loadSettings': {
@@ -384,7 +400,7 @@ async function handleRequest(request) {
 let drainTimer = null;
 let draining = false;
 let pendingDrainEntries = null; // Set by port 'drainEntries' message
-let pendingDeviceName = null;   // Device name from drain message
+let pendingDeviceId = null;   // Device name from drain message
 let lastDrainedTimestamp = 0;   // Local watermark — skip entries already written to JSONL
 
 function scheduleDrain() {
@@ -444,7 +460,6 @@ async function drainQueue() {
         }
       } else if (key === 'manifest:settings') {
         let s = await fsStorage.loadSettings();
-        if (!s.timestamp) s.timestamp = 0;
         roundCache.set(key, s);
       } else if (key.startsWith('list:') && !key.startsWith('list:index/')) {
         const listId = key.slice('list:'.length);
@@ -472,7 +487,7 @@ async function drainQueue() {
           const fh = await fsStorage.resolveFile('manifest/list-order.json');
           roundCache.set(key, await fsStorage.readJson(fh));
         } catch {
-          roundCache.set(key, { timestamp: 0, tree: [] });
+          roundCache.set(key, defaultEntity(key));
         }
       }
     };
@@ -495,7 +510,7 @@ async function drainQueue() {
       entriesByDate.get(dateKey).push(entry);
 
       // Apply entry via unified effectOf
-      const updated = await effectOf(entry, load, { deviceName: pendingDeviceName });
+      const updated = await effectOf(entry, load, { deviceId: pendingDeviceId });
 
       // Write updated entities back to round cache
       for (const [key, entity] of Object.entries(updated)) {
@@ -512,7 +527,7 @@ async function drainQueue() {
     // 1. Batch append to JSONL history files in device subdirectory
     const logsDir = await fsStorage.resolveDir('data/logs');
     // Ensure device subdirectory exists
-    const historyDir = await logsDir.getDirectoryHandle(pendingDeviceName || 'default', { create: true });
+    const historyDir = await logsDir.getDirectoryHandle(pendingDeviceId, { create: true });
     for (const [dateKey, entries] of entriesByDate) {
       try {
         const fh = await historyDir.getFileHandle(`${dateKey}.jsonl`, { create: true });
@@ -558,7 +573,7 @@ async function drainQueue() {
       } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
         const listId = key.slice('list:'.length);
         await withLock('lists/' + listId + '.json', async () => {
-          await fsStorage.saveListMeta(listId, entity, entity.timestamp);
+          await fsStorage.saveListMeta(listId, entity);
         });
       } else if (key === 'manifest:orphaned') {
         await withLock('manifest/orphaned.json', async () => {

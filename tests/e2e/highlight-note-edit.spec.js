@@ -16,7 +16,8 @@ test.describe('Highlight note edit', () => {
 
     // Seed page entity + note with excerpt but empty note text
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url: pageUrl, title: 'Note Edit Test', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`],

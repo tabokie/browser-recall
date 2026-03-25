@@ -18,7 +18,7 @@
     <slug>.json
 
   manifest/                          # INTERNAL. Irregular-shape manifests.
-    list-order.json                  #   Tree hierarchy + ordering ({ timestamp, tree: [{ id, children? }] })
+    list-order.json                  #   Tree hierarchy + ordering ({ timestamps, tree: [{ id, children? }] })
     list-name-to-id.json             #   Compound key (owner/name) → internal ID
     settings.json                    #   User settings
     orphaned.json                    #   Tracks deleted entities as entries [{ key, url? }] (recycle bin)
@@ -78,12 +78,18 @@ All mutations go through `addLog(entry)`:
 ```
 addLog(entry)
   → logBuffer.push(entry)              ← durable in chrome.storage.local
-  → effectOf(entry, sessionLoad, { deviceName: await getDeviceName() })  ← replay against session cache
+  → effectOf(entry, sessionLoad, { deviceId: await getDeviceId() })  ← replay against session cache
   → sessionWrite(effects)              ← update session cache
   → scheduleDrainNotify()              ← offscreen drains to filesystem
 ```
 
-`getDeviceName()` is an async lazy getter: returns cached `localDeviceName` if set, otherwise loads from settings via `readCacheable('manifest:settings')`. This handles messages arriving before `hydrateCache()` completes (pre-hydration window) and SW wakeup without re-hydration.
+`getDeviceId()` is an async lazy getter: returns cached `localDeviceId` if set, otherwise loads from the plaintext `CURRENT` file via offscreen. This handles messages arriving before `hydrateCache()` completes (pre-hydration window) and SW wakeup without re-hydration.
+
+### Device Identity (`CURRENT` file)
+
+The device ID is stored as plaintext in a `CURRENT` file at the data root — separate from settings (which are shared across devices). The file is written once on first install by `ensureDeviceId()` and is **immutable** thereafter. Renaming would require updating all `timestamps` maps in entity checkpoints, so it is not supported.
+
+`ensureDeviceId()` generates a random 8-char UUID prefix, writes the `CURRENT` file, and pre-creates the `data/logs/<device>/` directory via `initDevice()` in offscreen.
 
 ### Hydration (Startup)
 
@@ -92,6 +98,24 @@ Phase 1:    Load base entities (settings, lists, manifest:list-order, shallow-pa
 Phase 1.5:  Pre-load page entities referenced by logBuffer from filesystem
 Phase 2:    Replay ALL logBuffer entries via effectOf (brings session cache up-to-date)
 ```
+
+### Replay Idempotency Requirement
+
+**Every `effectOf` action branch MUST be idempotent** — applying the same log entry twice against a state that already reflects it must produce the same result as applying it once.
+
+**Why this matters:** Entity files on disk are checkpoints, not the source of truth. The logBuffer (persisted in `chrome.storage.local`) is the authoritative record of undrained mutations. If a drain partially succeeds (writes some entities to disk) but crashes before clearing the logBuffer, the next hydration will replay the full logBuffer against disk state that already reflects some or all of those entries. Without idempotency, this produces corrupted state (double-counted attention, duplicate tree nodes, etc.).
+
+**Idempotency strategies used per action type:**
+
+| Strategy | Actions | How |
+|---|---|---|
+| Per-device timestamp guard (`timestamps` map) | `leave_page`, `rate_page` | Additive fields (`timeOnPage +=`, `likes +=`) skip if `entry.timestamp <= timestamps[deviceId]` |
+| LWW timestamp guard (`deletedTs`) | `delete_note`, `delete_snapshot`, `delete_list` | Skip if `deletedTs >= entry.timestamp` |
+| Duplicate check before insert | `pin_to_list`, `create_snapshot`, `create_note` | `!array.includes(key)` / `!array.some(p => p.id === id)` before push |
+| Existence check (skip if exists) | `create_list` | Skip entire operation if list entity already exists |
+| Pure overwrite / LWW | `visit_page`, `rename_page`, `update_setting`, `update_list_tree`, `update_list` | Last write wins — re-applying is a no-op |
+
+**When adding a new action type to `effectOf`:** identify which strategy applies, implement the guard, and add an E2E test that seeds the entity on disk then replays the same log entry via `setLogBufferForTest` + `rehydrateForTest({ keepLogBuffer: true })`.
 
 ## Page Entities
 

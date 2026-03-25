@@ -194,6 +194,9 @@ describe('History title enrichment', () => {
 
   function handleAction(msg) {
     switch (msg.action) {
+      case 'getDeviceId':
+        return { success: true, deviceId: 'test-device' };
+
       case 'listInteractionFiles':
         return { success: true, files: FILES_NEWEST_FIRST };
 

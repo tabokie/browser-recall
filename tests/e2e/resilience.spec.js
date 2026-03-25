@@ -11,7 +11,8 @@ test.describe('Round-trip persistence', () => {
   test('pin via helper page visible in options list view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [] } },
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
@@ -46,7 +47,8 @@ test.describe('Round-trip persistence', () => {
 
   test('new list via helper page visible in options sidebar', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -64,7 +66,8 @@ test.describe('Round-trip persistence', () => {
   test('note created via helper page visible in getPageInfo', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -98,7 +101,8 @@ test.describe('Accumulation correctness', () => {
     const slugs = urls.map(u => getSlugForUrl(u));
 
     const files = [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:bulk' }] } },
       { path: 'lists/bulk.json', data: { slug: 'bulk', name: 'Bulk', owner: 'test-device', timestamp: now, pins: [] } },
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Bulk': 'bulk' } } },
@@ -137,7 +141,8 @@ test.describe('Accumulation correctness', () => {
     localServer.addPage('/bounce', { title: 'Bounce', body: '<p>Bounce</p>' });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     const url = localServer.url('/tall-page');
@@ -188,7 +193,8 @@ test.describe('Cross-entity interference', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:alpha' }, { id: 'list:beta' }] } },
       { path: 'lists/alpha.json', data: {
         slug: 'alpha', name: 'Alpha', owner: 'test-device', timestamp: now,
@@ -231,7 +237,8 @@ test.describe('Cross-entity interference', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:doomed' }, { id: 'list:safe' }],
       }},
@@ -287,7 +294,8 @@ test.describe('Cross-entity interference', () => {
 
     // Seed page entities so visit_page can enrich them with referrer relations
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
       { path: `pages/${parentSlug}.json`, data: {
         slug: parentSlug, url: parentUrl, title: 'Shared Parent', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -334,5 +342,62 @@ test.describe('Cross-entity interference', () => {
     // Both children should independently show the shared parent
     expect(relA.parents.referrers).toContain(parentUrl);
     expect(relB.parents.referrers).toContain(parentUrl);
+  });
+});
+
+test.describe('Missing CURRENT file', () => {
+  test('options page shows fatal error when device ID is unavailable', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Simulate missing CURRENT: clears in-memory ID + deletes file
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'clearDeviceIdForTest' })
+    );
+
+    // Open options page — should show fatal error, not the normal UI
+    const options = await extContext.newPage();
+    await options.goto(`chrome-extension://${extensionId}/options.html`);
+
+    // Fatal error overlay should appear with informative message
+    const errorOverlay = options.locator('text=Device identity unavailable');
+    await expect(errorOverlay).toBeVisible({ timeout: 5000 });
+
+    // Reload button should be present
+    const reloadBtn = options.locator('#fatalReloadBtn');
+    await expect(reloadBtn).toBeVisible();
+
+    await options.close();
+    await helper.close();
+  });
+
+  test('popup shows fatal error when device ID is unavailable', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Simulate missing CURRENT
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'clearDeviceIdForTest' })
+    );
+
+    // Open popup — should show fatal error
+    const popup = await extContext.newPage();
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+
+    const errorOverlay = popup.locator('text=Device identity unavailable');
+    await expect(errorOverlay).toBeVisible({ timeout: 5000 });
+
+    await popup.close();
+    await helper.close();
   });
 });

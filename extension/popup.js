@@ -786,6 +786,12 @@ async function showDashboard(tab) {
 
 // Initialize dashboard
 (async () => {
+  // Verify device identity — CURRENT file must be readable
+  const deviceResp = await chrome.runtime.sendMessage({ action: 'getDeviceId' });
+  if (!deviceResp?.deviceId) {
+    throw new Error('Device identity unavailable — the CURRENT file may be missing or corrupted. Try reloading the extension.');
+  }
+
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
   const isSnapshotViewer = tab?.url?.startsWith(chrome.runtime.getURL('snapshot-viewer.html'));

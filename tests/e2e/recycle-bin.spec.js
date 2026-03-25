@@ -11,7 +11,8 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const noteSlug = '260304-restore-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Page with empty childIds (note was unlinked by del_note)
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -58,7 +59,8 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const listId = 'restore-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [],  // list was removed from root by del_list
@@ -127,7 +129,8 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const noteSlug = '260310-restore-fields';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
@@ -168,7 +171,8 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const listId = 'restore-fields-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [],
@@ -214,7 +218,8 @@ test.describe('Recycle bin', () => {
     const today = new Date(now).toISOString().slice(0, 10);
     const noteSlug = '260304-perm-del-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
@@ -264,7 +269,8 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const listId = 'perm-del-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Deleted list entity on disk
       { path: `lists/${listId}.json`, data: {
         slug: listId, name: 'Doomed List', owner: 'test-device', timestamp: now,
@@ -306,7 +312,8 @@ test.describe('Recycle bin', () => {
     const noteSlug = '260304-bulk-note';
     const listId = 'bulk-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Bulk delete', note: 'Gone', cssPath: 'p',
         url: '', timestamp: now,
@@ -355,7 +362,8 @@ test.describe('Recycle bin', () => {
     const noteSlug = '260304-ui-note';
     const listId = 'ui-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'UI test note', note: 'Visible', cssPath: 'p',
         url: '', timestamp: now,
@@ -394,7 +402,8 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const noteSlug = '260304-restore-ui-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
@@ -437,7 +446,8 @@ test.describe('Recycle bin', () => {
     const noteSlug = '260304-empty-note';
     const listId = 'empty-list';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `data/notes/${noteSlug}.json`, data: {
         slug: noteSlug, excerpt: 'Empty me', note: 'Gone', cssPath: 'p',
         url: '', timestamp: now,
@@ -478,7 +488,8 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const noteSlug = '260312-noop-del';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
@@ -515,7 +526,8 @@ test.describe('Recycle bin', () => {
     const now = Date.now();
     const noteSlug = '260312-dedup-restore';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Page that already has the note in childIds (simulates inconsistent state)
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,

@@ -8,7 +8,8 @@ test.describe('Cross-context consistency', () => {
   test('pin from helper page reflects in already-open options list view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:research' }],
       }},
@@ -49,7 +50,8 @@ test.describe('Cross-context consistency', () => {
 
   test('new page visit notification updates explore view in already-open options', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);

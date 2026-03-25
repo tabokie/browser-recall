@@ -12,7 +12,8 @@ test.describe('Snapshot entities', () => {
   test('listSnapshots returns snapshots from page entity childIds', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [SNAP_KEY],
@@ -40,7 +41,8 @@ test.describe('Snapshot entities', () => {
   test('deleteSnapshot removes from listSnapshots and adds to orphaned', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [SNAP_KEY], user_title: 'Kept',
@@ -78,7 +80,8 @@ test.describe('Snapshot entities', () => {
   test('restoreSnapshot re-adds to listSnapshots and clears orphaned', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Page with snapshot already removed from childIds
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
@@ -123,7 +126,8 @@ test.describe('Snapshot entities', () => {
     const now = Date.now();
     const today = new Date(now).toISOString().slice(0, 10);
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],
@@ -160,7 +164,8 @@ test.describe('Snapshot entities', () => {
   test('recycle bin shows snapshot with badge and restore works', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [],

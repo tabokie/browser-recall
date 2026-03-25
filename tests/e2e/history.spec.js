@@ -5,7 +5,8 @@ test.describe('History recording', () => {
   test('seeded history entry appears in options explore view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'leave_page', url: 'https://example.com/', title: 'Example Domain', timeOnPage: 5, scrollDepth: 50 },
       ]},
@@ -20,7 +21,8 @@ test.describe('History recording', () => {
 
   test('clean state between tests — no leftover data', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -32,7 +34,8 @@ test.describe('History recording', () => {
 
   test('content script auto-reports page visit', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     // Navigate to a real page — content script injects and sends reportPage
@@ -52,7 +55,8 @@ test.describe('History recording', () => {
   test('multiple entries appear sorted by recency (newest first)', async ({ extContext, extensionId, setupDir }) => {
     const base = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: base - 2000, action: 'visit_page', url: 'https://older.example.com/', title: 'Older Page' },
         { timestamp: base - 1000, action: 'visit_page', url: 'https://middle.example.com/', title: 'Middle Page' },
@@ -83,7 +87,8 @@ test.describe('History recording', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Enriched Title',
         timestamp: now, parentIds: [], childIds: [],
@@ -108,7 +113,8 @@ test.describe('History recording', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       // History entry has no title, but page entity does
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url },
@@ -140,7 +146,8 @@ test.describe('History recording', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Log entry has NO title field; no page entity seeded
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url },
@@ -165,8 +172,8 @@ test.describe('History recording', () => {
     localServer.addPage('/other', { title: 'Other Page', body: '<p>Other</p>' });
 
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        deviceName: 'test-device',
         titleTrimRules: [{ urlPrefix: 'http://127.0.0.1', action: 'remove_after_pipe' }],
         blacklist: [],
       }},

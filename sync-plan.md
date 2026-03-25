@@ -110,7 +110,7 @@ Device name is NOT stored in log entries. It is derived from the log filename at
 - `YYYY-MM-DD.jsonl` → no sync (deviceName = undefined)
 - `YYYY-MM-DD-<deviceName>.jsonl` → sync mode (deviceName passed as context to `effectOf`)
 
-`effectOf(entry, load, context = {})` receives `context.deviceName` from the caller. When truthy, sync-mode commutativity logic activates. When falsy, current single-device behavior.
+`effectOf(entry, load, context = {})` receives `context.deviceId` from the caller. When truthy, sync-mode commutativity logic activates. When falsy, current single-device behavior.
 
 ### 3.2 List-referencing events: `name` + `listOwner`
 
@@ -163,15 +163,15 @@ Hydration scans all `data/logs/*.jsonl` files, groups by device name (parsed fro
 
 ## 4. Entity Schema Changes
 
-### 4.1 Per-device timestamps: `remotes` map
+### 4.1 Per-device timestamps: `timestamps` map
 
-Entities that use timestamp guards for additive fields gain a `remotes` map:
+Entities that use timestamp guards for additive fields gain a `timestamps` map:
 
 ```json
 {
   "slug": "example-com-abc123",
   "timestamp": 1710600000000,
-  "remotes": {
+  "timestamps": {
     "device-B-id": 1710599000000,
     "device-C-id": 1710598000000
   },
@@ -181,9 +181,9 @@ Entities that use timestamp guards for additive fields gain a `remotes` map:
 ```
 
 - `timestamp`: max across all devices (used for display, sort, LRU eviction)
-- `remotes[deviceId]`: last-replayed timestamp from that device (used for additive-field idempotency guard)
+- `timestamps[deviceId]`: last-replayed timestamp from that device (used for additive-field idempotency guard)
 
-Only page entities need `remotes` (they have additive fields: `likes`, `timeOnPage`, `scrollDepth`). Other entities use set-based operations that are already idempotent.
+Only page entities need `timestamps` (they have additive fields: `likes`, `timeOnPage`, `scrollDepth`). Other entities use set-based operations that are already idempotent.
 
 ### 4.2 Delete/restore tracking: `deletedTs` LWW
 
@@ -257,7 +257,7 @@ Each cursor tracks the last-replayed position in a peer's log (date file + line 
 
 ### 5.1 `resolveListKey`: compound key via `(name, listOwner)`
 
-Signature changes from `resolveListKey(parents, name)` to `resolveListKey(entry)`. Uses `context.deviceName` (from closure) to select lookup strategy:
+Signature changes from `resolveListKey(parents, name)` to `resolveListKey(entry)`. Uses `context.deviceId` (from closure) to select lookup strategy:
 
 ```js
 async function resolveListKey(entry) {
@@ -265,7 +265,7 @@ async function resolveListKey(entry) {
   if (!name) return null;
   if (name.startsWith('system/')) return `list:${name}`;
   const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
-  if (context.deviceName) {
+  if (context.deviceId) {
     // Sync: compound key listOwner/name
     const owner = entry.listOwner;
     if (!owner) return null;
@@ -282,23 +282,23 @@ All ~9 callers change from `resolveListKey(entry.parents, entry.name)` to `resol
 
 ### 5.2 `rate_page` / `leave_page`: per-device timestamp guard
 
-In sync mode, uses `page.remotes[context.deviceName]` as per-device watermark. In non-sync mode, uses current `entry.timestamp > prevTimestamp` guard.
+In sync mode, uses `page.timestamps[context.deviceId]` as per-device watermark. In non-sync mode, uses current `entry.timestamp > prevTimestamp` guard.
 
 ```js
 // Sync mode:
-const deviceTs = (page.remotes?.[context.deviceName]) || 0;
+const deviceTs = (page.timestamps?.[context.deviceId]) || 0;
 if (entry.timestamp > deviceTs) {
   updated.likes = (updated.likes || 0) + entry.likes;
-  const remotes = { ...(page.remotes || {}) };
-  remotes[context.deviceName] = entry.timestamp;
-  updated.remotes = remotes;
+  const timestamps = { ...(page.timestamps || {}) };
+  timestamps[context.deviceId] = entry.timestamp;
+  updated.timestamps = timestamps;
 }
 updated.timestamp = Math.max(page.timestamp || 0, entry.timestamp);
 
 // Non-sync mode: current behavior unchanged
 ```
 
-Same pattern for `leave_page` (`timeOnPage`, `scrollDepth`). Device name comes from `context.deviceName` (derived from log filename), NOT from entries.
+Same pattern for `leave_page` (`timeOnPage`, `scrollDepth`). Device name comes from `context.deviceId` (derived from log filename), NOT from entries.
 
 ### 5.3 `pin_to_list` / `unpin_from_list`: operate on deleted lists
 
@@ -528,7 +528,7 @@ Prompts for device name, then:
 
 1. Store `deviceName` in `manifest/settings.json`
 2. Rename `data/logs/YYYY-MM-DD.jsonl` → `data/logs/YYYY-MM-DD-<deviceName>.jsonl`
-3. `pages/*.json`: add `remotes: {}`
+3. `pages/*.json`: add `timestamps: {}`
 4. `lists/*.json`: add `owner: <deviceName>`, `deletedTs: 0`
 5. `manifest/list-name-to-id.json`: transform keys from `name` to `deviceName/name`
 6. All JSONL log entries with list references: add `listOwner: <deviceName>`, drop `parents`
@@ -544,7 +544,7 @@ Prompts for device name, then:
 
 ### Phase 0: Replay commutativity (no sync yet)
 
-Make `effectOf` order-independent. Sync-specific fields (`deletedTs`, `remotes`, `listOwner`, `owner`) only appear when user enables sync — gated by `context.deviceName`. No fallback code.
+Make `effectOf` order-independent. Sync-specific fields (`deletedTs`, `timestamps`, `listOwner`, `owner`) only appear when user enables sync — gated by `context.deviceId`. No fallback code.
 
 Already done:
 - ~~Remove `reparent_list` action, replace with `update_list_tree`~~ (e1635f5)
@@ -552,12 +552,12 @@ Already done:
 
 Steps:
 1. `Math.max` for all `entity.timestamp` assignments (unconditional, safe in single-device mode)
-2. `effectOf(entry, load, context = {})` — add context parameter. `context.deviceName` truthy = sync mode.
+2. `effectOf(entry, load, context = {})` — add context parameter. `context.deviceId` truthy = sync mode.
 3. `resolveListKey(entry)` — uses `(name, listOwner)` compound key in sync mode, flat `name` in non-sync
 4. LWW via `deletedTs` for delete/restore branches (sync mode only)
 5. `pin_to_list` / `unpin_from_list` / rules / `update_list` load with `includeDeleted: true` (sync mode only)
-6. Per-device timestamp guards for `rate_page`, `leave_page` via `remotes` map (sync mode only)
-7. Background/offscreen wiring: pass `context.deviceName` to all `effectOf` call sites
+6. Per-device timestamp guards for `rate_page`, `leave_page` via `timestamps` map (sync mode only)
+7. Background/offscreen wiring: pass `context.deviceId` to all `effectOf` call sites
 8. `getListEventFields` refactor: returns `{ name, listOwner }` (sync) or `{ parents, name }` (non-sync)
 9. List-event emit sites: `listOwner` + drop `parents` (sync mode)
 10. Device-specific log file naming: `YYYY-MM-DD-<deviceName>.jsonl` (sync mode)
@@ -681,7 +681,7 @@ Expected: Tree is [{A}, {C}]. B removed from tree during reconciliation (includi
 
 **T14: Two devices both rate the same page.**
 Events: `rate_page(url, likes:+1, deviceId:A, ts=10)`, `rate_page(url, likes:+1, deviceId:B, ts=20)`.
-Expected: page.likes = original + 2. Each device's contribution tracked in `remotes` map. Both additions apply.
+Expected: page.likes = original + 2. Each device's contribution tracked in `timestamps` map. Both additions apply.
 
 **T15: Same device's rate_page replayed twice (idempotency).**
 Events: `rate_page(url, likes:+1, deviceId:A, ts=10)`, `rate_page(url, likes:+1, deviceId:A, ts=10)`.

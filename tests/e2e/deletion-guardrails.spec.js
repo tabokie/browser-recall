@@ -19,7 +19,8 @@ test.describe('Deletion guardrails', () => {
     const now = Date.now();
     const noteSlug = '260301-guardrail-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`],
@@ -55,7 +56,8 @@ test.describe('Deletion guardrails', () => {
     const today = new Date(now).toISOString().slice(0, 10);
     const noteSlug = '260301-ui-note';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
         parentIds: [], childIds: [`note:${noteSlug}`],
@@ -93,7 +95,8 @@ test.describe('Deletion guardrails', () => {
   test('deleted list entity returns null from readCacheable', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:to-delete' }] } },
       { path: 'lists/to-delete.json', data: {
         slug: 'to-delete', name: 'To Delete', owner: 'test-device', timestamp: now, pins: [],
@@ -124,7 +127,8 @@ test.describe('Deletion guardrails', () => {
   test('deleted list stays hidden after rehydration', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Disk checkpoint already has deleted: true (written by previous drain)
       { path: 'lists/rehydrate-del.json', data: {
         slug: 'rehydrate-del', name: 'Rehydrate Del', owner: 'test-device', timestamp: now,
@@ -156,7 +160,8 @@ test.describe('Deletion guardrails', () => {
     const pageUrl = 'https://example.com/pinme';
     const pageSlug = getSlugForUrl(pageUrl);
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:doomed' }],
       }},

@@ -16,18 +16,18 @@ const HISTORY_RECENT_DAYS = 7; // days of past history to cache for multi-day ch
 let recentUrls = new Map();
 
 // Device name for this instance — always set (generated on first run, stored in settings).
-// Use getDeviceName() instead of reading directly — it lazy-loads from settings on cache miss.
-let localDeviceName = null;
+// Use getDeviceId() instead of reading directly — it lazy-loads from CURRENT file on cache miss.
+let localDeviceId = null;
 
-// Lazy getter: returns localDeviceName, loading from settings if null.
+// Lazy getter: returns localDeviceId, loading from CURRENT file if null.
 // Handles both startup race (message before hydrateCache) and SW wakeup (no hydrateCache).
-async function getDeviceName() {
-  if (localDeviceName) return localDeviceName;
-  const settings = await readCacheable('manifest:settings');
-  if (settings?.deviceName) {
-    localDeviceName = settings.deviceName;
+async function getDeviceId() {
+  if (localDeviceId) return localDeviceId;
+  const resp = await requestOffscreen({ action: 'loadCurrent' });
+  if (resp?.success && resp.deviceId) {
+    localDeviceId = resp.deviceId;
   }
-  return localDeviceName;
+  return localDeviceId;
 }
 
 // Session storage: in-memory IPC, survives SW termination, cleared on browser restart.
@@ -167,7 +167,7 @@ async function drainNow() {
   try {
     await ensureLogBuffer();
     if (logBuffer.length > 0) {
-      offscreenPort.postMessage({ action: 'drainEntries', entries: logBuffer, deviceName: await getDeviceName() });
+      offscreenPort.postMessage({ action: 'drainEntries', entries: logBuffer, deviceId: await getDeviceId() });
     }
   } catch (e) {
     console.warn('drainNotify error:', e.message);
@@ -228,7 +228,7 @@ async function addLog(entry) {
     await ensureLogBuffer();
     logBuffer.push(entry);
     await chrome.storage.local.set({ logBuffer });
-    effects = await effectOf(entry, sessionLoad, { deviceName: await getDeviceName() });
+    effects = await effectOf(entry, sessionLoad, { deviceId: await getDeviceId() });
     await sessionWrite(effects);
   });
   // Append to today's history date key in session (fire-and-forget).
@@ -383,11 +383,17 @@ async function readFs(key) {
 
 async function hydrateCache() {
   // Phase 1: Load base entities from offscreen into session cache
+  // Load CURRENT file first — immutable device identity, must be available for Phase 2 replay.
+  // Errors here are fatal (filesystem corruption or permission loss) — let them propagate.
+  const currentResp = await requestOffscreen({ action: 'loadCurrent' });
+  if (currentResp?.success && currentResp.deviceId) {
+    localDeviceId = currentResp.deviceId;
+  }
+
   try {
     const resp = await requestOffscreen({ action: 'loadSettings' });
     if (resp?.success && resp.settings) {
       await cacheSet('manifest:settings', resp.settings);
-      if (resp.settings.deviceName) localDeviceName = resp.settings.deviceName;
     }
   } catch (e) { console.warn('Settings load failed:', e.message); }
 
@@ -560,7 +566,7 @@ async function hydrateCache() {
   // sessionLoad → readCacheable → await hydrationDone → waiting for us.
   for (const entry of logBuffer) {
     try {
-      const effects = await effectOf(entry, sessionLoadDuringHydration, { deviceName: localDeviceName });
+      const effects = await effectOf(entry, sessionLoadDuringHydration, { deviceId: localDeviceId });
       await sessionWrite(effects);
     } catch (e) { console.warn('Hydration replay failed for entry:', e.message); }
   }
@@ -583,17 +589,18 @@ async function hydrateCache() {
   console.log('Cache hydrated');
 }
 
-// Generate device name on first run — must run AFTER hydrateCache completes.
-async function ensureDeviceName() {
-  if (localDeviceName) return;
-  localDeviceName = crypto.randomUUID().slice(0, 8);
-  await addLog({ timestamp: Date.now(), action: 'update_setting', key: 'deviceName', value: localDeviceName });
+// Generate device name on first run — writes CURRENT file and creates log directory.
+// Must run AFTER hydrateCache completes (needs offscreen port).
+async function ensureDeviceId() {
+  if (localDeviceId) return;
+  localDeviceId = crypto.randomUUID().slice(0, 8);
+  await requestOffscreen({ action: 'initDevice', deviceId: localDeviceId });
 }
 
 // First-run default list creation — must run AFTER hydrateCache completes
 // because addLog → sessionLoad → readCacheable → await hydrationDone.
 async function ensureDefaultLists() {
-  await ensureDeviceName();
+  await ensureDeviceId();
   try {
     const metaRespCheck = await requestOffscreen({ action: 'loadAllListMetadata' });
     const userLists = (metaRespCheck?.lists || []).filter(l => !l.slug.startsWith('system/'));
@@ -601,13 +608,13 @@ async function ensureDefaultLists() {
       await addLog({
         timestamp: Date.now(),
         action: 'create_list',
-        listOwner: localDeviceName,
+        listOwner: localDeviceId,
         name: 'Hubs',
       });
       await addLog({
         timestamp: Date.now(),
         action: 'add_rule',
-        listOwner: localDeviceName,
+        listOwner: localDeviceId,
         name: 'Hubs',
         rule: {
           type: 'smart',
@@ -726,7 +733,7 @@ initSavepageBridge();
 
 async function getListEventFields(listId) {
   if (listId.startsWith('system/')) {
-    return { name: listId, listOwner: await getDeviceName() };
+    return { name: listId, listOwner: await getDeviceId() };
   }
   const nameToId = await readCacheable('manifest:name-to-id');
   if (!nameToId?.paths) return null;
@@ -745,7 +752,7 @@ async function getListEventFields(listId) {
   }
   if (!listName) return null;
   const entity = await readCacheable(`list:${listId}`);
-  const owner = entity?.owner || await getDeviceName();
+  const owner = entity?.owner || await getDeviceId();
   return { name: listName, listOwner: owner };
 }
 
@@ -939,7 +946,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             success: true, slug,
             interaction: page ? { url: page.url, title: page.title, user_title: page.user_title,
               scrollDepth: page.scrollDepth, timeOnPage: page.timeOnPage, likes: page.likes,
-              timestamp: page.timestamp, slug } : null,
+              timestamps: page.timestamps, slug } : null,
             snapshots,
             notes
           });
@@ -1128,6 +1135,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const resp = await requestOffscreen({ action: 'loadInteractionByUrl', url: request.url });
           console.debug(`[I/O] loadInteractionByUrl: ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse(resp);
+          break;
+        }
+
+        case 'getDeviceId': {
+          sendResponse({ success: true, deviceId: await getDeviceId() });
           break;
         }
 
@@ -1467,18 +1479,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               if (lastPart.startsWith('list:')) parentListId = lastPart.slice('list:'.length);
             }
             if (request.name) {
-              const deviceName = await getDeviceName();
+              const deviceId = await getDeviceId();
               const createEntry = {
                 timestamp: Date.now(),
                 action: 'create_list',
-                listOwner: deviceName,
+                listOwner: deviceId,
                 name: request.name,
               };
               if (parentListId) createEntry.parentListId = parentListId;
               await addLog(createEntry);
               // Look up the generated listId from compound name-to-id map
               const nameToId = await readCacheable('manifest:name-to-id');
-              const generatedId = nameToId?.paths?.[deviceName + '/' + request.name];
+              const generatedId = nameToId?.paths?.[deviceId + '/' + request.name];
               sendResponse({ success: true, listId: generatedId });
               notifyMutation('lists');
               break;
@@ -1574,7 +1586,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const listId = request.listId;
           const entity = await readCacheable('list:' + listId, true);
           const name = entity?.name || listId;
-          const owner = entity?.owner || await getDeviceName();
+          const owner = entity?.owner || await getDeviceId();
           await addLog({
             timestamp: Date.now(),
             action: 'restore_list',
@@ -1705,7 +1717,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // 2. Clear entity cache (session storage + in-memory LRU)
           await cacheClear();
           // 3. Reset ALL in-memory state (SW survives across tests)
-          localDeviceName = null;
+          localDeviceId = null;
           recentUrls = new Map();
           if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
           // 4. Tell offscreen to wipe directory and reset drain state
@@ -1735,7 +1747,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             await chrome.storage.local.set({ logBuffer });
           }
           await cacheClear();
-          localDeviceName = null;
+          localDeviceId = null;
           recentUrls = new Map();
           if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
           hydrationDone = hydrateCache();
@@ -1751,12 +1763,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        // Simulate the pre-hydration window: localDeviceName is null (module just loaded)
+        // Simulate the pre-hydration window: localDeviceId is null (module just loaded)
         // but hydrationDone is resolved (initial Promise.resolve()). This is the state
         // between SW start and hydrateCache() being called from onInstalled/onStartup.
         case 'simulatePreHydrationForTest': {
-          localDeviceName = null;
+          localDeviceId = null;
           // hydrationDone stays resolved — simulating the initial Promise.resolve()
+          sendResponse({ success: true });
+          break;
+        }
+
+        // Simulate missing CURRENT file: clears in-memory device ID and deletes CURRENT from disk.
+        // After this, getDeviceId() returns null — UI should show fatal error.
+        case 'clearDeviceIdForTest': {
+          localDeviceId = null;
+          try { await requestOffscreen({ action: 'deleteCurrent' }); } catch {}
           sendResponse({ success: true });
           break;
         }

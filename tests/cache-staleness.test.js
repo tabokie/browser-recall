@@ -309,6 +309,9 @@ describe('Cache staleness', () => {
       case 'loadPermanentDeletes':
         return { success: true, urls: [] };
 
+      case 'getDeviceId':
+        return { success: true, deviceId: 'test-device' };
+
       case 'readCacheable':
         // Simulate background readCacheable: dispatch to known handlers
         switch (msg.key) {

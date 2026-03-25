@@ -5,8 +5,9 @@ test.describe('Blacklist write-on-read bug', () => {
   test('opening options page without urlBlacklist does not write defaults to settings', async ({ extContext, extensionId, setupDir }) => {
     // Seed settings WITHOUT urlBlacklist — simulates post-migration state
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device', relatedPagesLimit: 50,
+        trimRules: [], relatedPagesLimit: 50,
       }},
     ]);
 
@@ -39,8 +40,9 @@ test.describe('Blacklist write-on-read bug', () => {
   test('custom blacklist is preserved through options page open', async ({ extContext, extensionId, setupDir }) => {
     // Seed settings WITH custom urlBlacklist
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device', relatedPagesLimit: 50,
+        trimRules: [], relatedPagesLimit: 50,
         urlBlacklist: ['https://private.corp.example.com/', 'edge://'],
       }},
     ]);

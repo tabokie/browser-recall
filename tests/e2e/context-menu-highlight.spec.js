@@ -9,7 +9,8 @@ test.describe('Context menu highlight', () => {
   test('contextMenuHighlight creates note for page', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${TEST_SLUG}.json`, data: {
         slug: TEST_SLUG, url: TEST_URL, title: 'Example Article', timestamp: now,
         parentIds: [], childIds: [],
@@ -43,7 +44,8 @@ test.describe('Context menu highlight', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url: pageUrl, title: 'Ctx Test', timestamp: now,
         parentIds: [], childIds: [],
@@ -80,7 +82,8 @@ test.describe('Context menu highlight', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: `pages/${slug}.json`, data: {
         slug, url: pageUrl, title: 'Multi', timestamp: now,
         parentIds: [], childIds: ['note:note-a', 'note:note-b'],

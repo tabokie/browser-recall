@@ -8,9 +8,9 @@ test.describe('List operations', () => {
   test('seeded list appears in sidebar', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -30,9 +30,9 @@ test.describe('List operations', () => {
   test('list with seeded pin shows page in pinned section', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -67,9 +67,9 @@ test.describe('List operations', () => {
     const day1 = new Date('2026-02-10').getTime();
     const day2 = new Date('2026-03-01').getTime();
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: day2, tree: [{ id: 'list:reading' }],
       }},
@@ -106,9 +106,9 @@ test.describe('List operations', () => {
   test('pin a page via toggleListPin, appears in already-open list view via mutation notification', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -149,9 +149,9 @@ test.describe('List operations', () => {
   test('unpin a page via toggleListPin, disappears from already-open list view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -190,7 +190,8 @@ test.describe('List operations', () => {
 
   test('create a new list via saveListMeta alone, appears in sidebar', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: Date.now(), tree: [],
       }},
@@ -219,7 +220,8 @@ test.describe('List operations', () => {
     const slug2 = getSlugForUrl(url2);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:filtered' }],
       }},
@@ -284,9 +286,9 @@ test.describe('List operations', () => {
 
     // Seed with a page entity and pin
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:research' }],
       }},
@@ -330,9 +332,9 @@ test.describe('List operations', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -373,7 +375,8 @@ test.describe('List operations', () => {
   // This test verifies saveListMeta alone produces exactly one entry in the tree.
   test('saveListMeta adds to tree exactly once', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: Date.now(), tree: [],
       }},
@@ -408,9 +411,9 @@ test.describe('List operations', () => {
     const today = new Date(now).toISOString().slice(0, 10);
 
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -449,9 +452,9 @@ test.describe('List operations', () => {
     const today = new Date(now).toISOString().slice(0, 10);
 
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -495,9 +498,9 @@ test.describe('List operations', () => {
   test('saveListMeta rename updates list entity name', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -526,9 +529,9 @@ test.describe('List operations', () => {
   test('deleteList removes entry from tree manifest', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:keep' }, { id: 'list:remove' }],
       }},
@@ -560,9 +563,9 @@ test.describe('List operations', () => {
   test('deleteList adds list key to orphaned list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:doomed' }],
       }},
@@ -594,7 +597,8 @@ test.describe('List operations', () => {
     const pageUrl = 'https://example.com/shallow-only';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now,
@@ -647,7 +651,8 @@ test.describe('List operations', () => {
     const pageUrl = 'https://example.com/shallow-reclick';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now,
@@ -696,9 +701,9 @@ test.describe('List operations', () => {
     const slug2 = getSlugForUrl(url2);
 
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -743,9 +748,9 @@ test.describe('List operations', () => {
   test('pin adds list to page parentIds', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -779,9 +784,9 @@ test.describe('List operations', () => {
   test('unpin removes list from page parentIds', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -819,9 +824,9 @@ test.describe('List operations', () => {
     const slug2 = getSlugForUrl(url2);
 
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:doomed' }],
       }},
@@ -867,7 +872,8 @@ test.describe('List operations', () => {
   test('list with no pins shows empty state', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -895,7 +901,8 @@ test.describe('List operations', () => {
   test('explore filter panel toggles visibility', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: 'https://example.com/', title: 'Example' },
@@ -933,7 +940,8 @@ test.describe('List operations', () => {
   test('explore empty search shows all history', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now - 2000, action: 'visit_page', url: 'https://a.com/', title: 'Page A' },
@@ -963,7 +971,8 @@ test.describe('List operations', () => {
   test('explore adding search via UI persists across reload', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: 'https://example.com/', title: 'Example' },
@@ -1011,7 +1020,8 @@ test.describe('List operations', () => {
     const oldUrl = 'https://old.com/';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
       { path: 'data/logs/test-device/2026-03-08.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: recentUrl, title: 'Recent Page' },
@@ -1079,7 +1089,8 @@ test.describe('List operations', () => {
     const highlightSlug = getSlugForUrl(highlightUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
       { path: `pages/${highlightSlug}.json`, data: {
         slug: highlightSlug, url: highlightUrl, title: 'Highlighted Page', timestamp: now,
@@ -1156,7 +1167,8 @@ test.describe('List operations', () => {
     const goSlug = getSlugForUrl(goUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:rust' }, { id: 'list:golang' }] } },
       { path: 'lists/rust.json', data: {
         slug: 'rust', name: 'Rust', owner: 'test-device', timestamp: now,
@@ -1237,7 +1249,8 @@ test.describe('List operations', () => {
   test('nested list renders with indentation in sidebar', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:parent', children: [{ id: 'list:child' }] }],
       }},
@@ -1266,7 +1279,8 @@ test.describe('List operations', () => {
   test('fold toggle hides/shows nested children', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:parent', children: [{ id: 'list:child' }] }],
       }},
@@ -1297,7 +1311,8 @@ test.describe('List operations', () => {
   test('updateListTree moves list between parents', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [
           { id: 'list:a', children: [{ id: 'list:child' }] },
@@ -1348,7 +1363,8 @@ test.describe('List operations', () => {
   test('deleteList with children promotes children (non-cascading)', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:parent', children: [{ id: 'list:child' }] }],
       }},
@@ -1385,7 +1401,8 @@ test.describe('List operations', () => {
   test('restoreList adds list to top-level of tree', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:parent', children: [{ id: 'list:child' }] }],
       }},
@@ -1433,7 +1450,8 @@ test.describe('List operations', () => {
   test('pin note via toggleListPin adds note to list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' }},
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -1473,7 +1491,8 @@ test.describe('List operations', () => {
   test('unpin note via toggleListPin removes note from list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' }},
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -1513,7 +1532,8 @@ test.describe('List operations', () => {
   test('deleteNote removes note pin from list', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' }},
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -1559,7 +1579,8 @@ test.describe('List operations', () => {
   test('restoreNote re-links note to parent page and un-orphans', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' }},
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:reading' }],
       }},
@@ -1615,7 +1636,8 @@ test.describe('List operations', () => {
   // The drain in offscreen.js was missing a case for manifest:list-order.
   test('new list creation persists list-order.json through drain + rehydrate', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: Date.now(), tree: [],
       }},
@@ -1657,7 +1679,8 @@ test.describe('List operations', () => {
   test('new list creation preserves existing tree entries through drain', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:existing1' }, { id: 'list:existing2' }],
       }},
@@ -1704,7 +1727,8 @@ test.describe('List operations', () => {
   test('updateListTree persists list-order.json through drain + rehydrate', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:parent', children: [{ id: 'list:child' }] }],
       }},
@@ -1752,7 +1776,8 @@ test.describe('List operations', () => {
     const now = Date.now();
     const noteSlug = '260301-deleted-note-xyz';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:pintest' }],
       }},
@@ -1802,7 +1827,8 @@ test.describe('List operations', () => {
   test('page GC persists through drain: unpin removes ineligible page from disk', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:gctest' }],
       }},
@@ -1849,7 +1875,8 @@ test.describe('List operations', () => {
     const slug2 = getSlugForUrl(url2);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:kbdel' }],
       }},
@@ -1906,7 +1933,8 @@ test.describe('List operations', () => {
   test('Delete key on explore view shows info bubble', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: 'https://example.com/history-item', title: 'History Item' },
       ]},
@@ -1941,7 +1969,8 @@ test.describe('List operations', () => {
     const slug2 = getSlugForUrl(url2);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:cplist' }],
       }},
@@ -2000,7 +2029,8 @@ test.describe('List operations', () => {
     const pasteSlug = getSlugForUrl(pasteUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:pastelist' }],
       }},
@@ -2044,7 +2074,8 @@ test.describe('List operations', () => {
   test('Ctrl+V outside list view shows info bubble', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now, action: 'visit_page', url: 'https://example.com/explore-item', title: 'Explore Item' },
       ]},
@@ -2078,9 +2109,9 @@ test.describe('List operations', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -2113,9 +2144,9 @@ test.describe('List operations', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-      }},
+        trimRules: [], }},
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:existing' }],
       }},
@@ -2156,6 +2187,111 @@ test.describe('List operations', () => {
     );
     expect(afterDrain.value.paths['test-device/Existing List']).toBe('existing');
     expect(afterDrain.value.paths['test-device/New List']).toBeTruthy();
+
+    await helper.close();
+  });
+
+  test('explore view shows list tags for pinned pages', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const url = 'https://example.com/tagged';
+    const slug = getSlugForUrl(url);
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }, { id: 'list:research' }] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [{ id: `page:${slug}`, pinnedAt: now }] } },
+      { path: 'lists/research.json', data: { slug: 'research', name: 'Research', owner: 'test-device', timestamp: now, pins: [{ id: `page:${slug}`, pinnedAt: now }] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading', 'test-device/Research': 'research' } } },
+      { path: `pages/${slug}.json`, data: { slug, url, title: 'Tagged Page', timestamp: now, parentIds: ['list:reading', 'list:research'], childIds: [] } },
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url, title: 'Tagged Page' },
+      ] },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.waitForSelector('.result-row', { timeout: 5000 });
+
+    // Both list tags should be visible in explore view without clicking into anything
+    const listTags = options.locator('.card-tag-list');
+    await expect(listTags).toHaveCount(2, { timeout: 5000 });
+    const tagTexts = await listTags.allTextContents();
+    expect(tagTexts.sort()).toEqual(['Reading', 'Research']);
+
+    await options.close();
+  });
+
+  test('list view shows other list tags but excludes current list', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const url = 'https://example.com/multi-list';
+    const slug = getSlugForUrl(url);
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:alpha' }, { id: 'list:beta' }] } },
+      { path: 'lists/alpha.json', data: { slug: 'alpha', name: 'Alpha', owner: 'test-device', timestamp: now, pins: [{ id: `page:${slug}`, pinnedAt: now }] } },
+      { path: 'lists/beta.json', data: { slug: 'beta', name: 'Beta', owner: 'test-device', timestamp: now, pins: [{ id: `page:${slug}`, pinnedAt: now }] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Alpha': 'alpha', 'test-device/Beta': 'beta' } } },
+      { path: `pages/${slug}.json`, data: { slug, url, title: 'Multi-List Page', timestamp: now, parentIds: ['list:alpha', 'list:beta'], childIds: [] } },
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url, title: 'Multi-List Page' },
+      ] },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Navigate to Alpha list
+    const listItem = options.locator('.sidebar-item[data-list-id="alpha"]');
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+    await waitForListView(options);
+
+    // Should show Beta tag but not Alpha (current list excluded)
+    const listTags = options.locator('#relatedResults .card-tag-list');
+    await expect(listTags).toHaveCount(1, { timeout: 5000 });
+    await expect(listTags.first()).toHaveText('Beta');
+
+    await options.close();
+  });
+
+  test('create_list replay is idempotent: no duplicate tree node on double-apply', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    // Seed disk state that already includes the list entity + tree node
+    // (simulates a prior drain that persisted the create_list effects)
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:mylist' }] } },
+      { path: 'lists/mylist.json', data: { slug: 'mylist', name: 'My List', owner: 'test-device', timestamp: now, pins: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/My List': 'mylist' } } },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Inject the same create_list entry into logBuffer (simulates logBuffer not
+    // being cleared after drain — the partial-drain crash scenario)
+    await helper.evaluate((entry) =>
+      chrome.runtime.sendMessage({ action: 'setLogBufferForTest', entries: [entry] })
+    , { timestamp: now, action: 'create_list', listOwner: 'test-device', name: 'My List', listId: 'mylist' });
+
+    // Rehydrate — Phase 2 replays the create_list against disk state that already has it
+    const resp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest', keepLogBuffer: true })
+    );
+    expect(resp.success).toBe(true);
+
+    // Verify tree has exactly one node, not two
+    const treeResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:list-order' })
+    );
+    const tree = treeResp.value.tree;
+    const nodeCount = tree.filter(n => n.id === 'list:mylist').length;
+    expect(nodeCount).toBe(1);
+
+    // Verify name-to-id is still correct
+    const nameResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:name-to-id' })
+    );
+    expect(nameResp.value.paths['test-device/My List']).toBe('mylist');
 
     await helper.close();
   });

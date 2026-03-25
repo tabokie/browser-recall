@@ -8,7 +8,8 @@ test.describe('Rule operations', () => {
   test('addRule adds keyword rule to list entity', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
@@ -41,7 +42,8 @@ test.describe('Rule operations', () => {
     const now = Date.now();
     const ruleId = 'rule-k-test-1234';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
@@ -67,7 +69,8 @@ test.describe('Rule operations', () => {
   test('rules survive flush + rehydrate round-trip', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
@@ -108,7 +111,8 @@ test.describe('Rule operations', () => {
   test('runRuleBatch with keyword rule auto-pins matching pages', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
@@ -146,7 +150,8 @@ test.describe('Rule operations', () => {
   test('addRule rejects smart rule with banned globals in fnSource', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
@@ -176,7 +181,8 @@ test.describe('Rule operations', () => {
   test('addRule stores smart rule with valid fnSource', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
@@ -213,7 +219,8 @@ test.describe('Rule operations', () => {
   test('runRuleBatch with smart rule executes sandbox and auto-pins', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
@@ -259,7 +266,8 @@ test.describe('Rule operations', () => {
     const now = Date.now();
     const hubsFnSource = "const p = new URL(page.url).pathname.toLowerCase(); if (p === '/' || p === '') return 1; if (p.includes('index')) return 1; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return 1; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover']; if (hub.some(k => last.includes(k))) return 1; return 0;";
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:hubs' }] } },
       { path: 'lists/hubs.json', data: {
         slug: 'hubs', name: 'Hubs', owner: 'test-device', timestamp: now, pins: [],
@@ -310,7 +318,8 @@ test.describe('Rules UI', () => {
   test('rules section visible when viewing a list with rules', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
@@ -342,7 +351,8 @@ test.describe('Rules UI', () => {
   test('add keyword rule via UI form', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
@@ -386,7 +396,8 @@ test.describe('Rules UI', () => {
   test('cancel button in edit row discards new rule', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
@@ -420,7 +431,8 @@ test.describe('Rules UI', () => {
   test('Enter key saves new rule', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
@@ -455,7 +467,8 @@ test.describe('Rules UI', () => {
     const now = Date.now();
     const ruleId = 'rule-k-test-0001';
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
@@ -493,7 +506,8 @@ test.describe('Rules UI', () => {
   test('rules section hidden when switching to explore view', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
@@ -519,7 +533,8 @@ test.describe('Rules UI', () => {
   test('rules section hidden for system lists', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:system/archive' }] } },
       { path: 'lists/system/archive.json', data: {
         slug: 'system/archive', name: 'Archive', timestamp: now, pins: [], rules: [],
@@ -543,7 +558,8 @@ test.describe('Rules UI', () => {
   test('type toggle switches form panels', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
@@ -580,7 +596,8 @@ test.describe('Rules UI', () => {
     const now = Date.now();
     const todayKey = new Date().toISOString().slice(0, 10);
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
@@ -620,7 +637,8 @@ test.describe('Rules UI', () => {
     const now = Date.now();
     const todayKey = new Date().toISOString().slice(0, 10);
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
@@ -664,7 +682,8 @@ test.describe('Rules UI', () => {
     const now = Date.now();
     const todayKey = new Date().toISOString().slice(0, 10);
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: {
         slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now,

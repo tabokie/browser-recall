@@ -34,7 +34,8 @@ test.describe('Navigation and referrer tracking', () => {
 
     // Seed page entities so visit_page can enrich them with referrer relations
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
       { path: `pages/${homeSlug}.json`, data: {
         slug: homeSlug, url: homeUrl, title: 'Home Page', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -88,7 +89,8 @@ test.describe('Navigation and referrer tracking', () => {
 
     // Seed page entities so visit_page can enrich them with referrer relations
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
       { path: `pages/${getSlugForUrl(chainAUrl)}.json`, data: {
         slug: getSlugForUrl(chainAUrl), url: chainAUrl, title: 'Chain A', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -134,7 +136,8 @@ test.describe('Navigation and referrer tracking', () => {
 
   test('multiple pages visited appear in explore with correct titles', async ({ extContext, extensionId, setupDir, localServer }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     const page = await extContext.newPage();
@@ -163,9 +166,9 @@ test.describe('Navigation and referrer tracking', () => {
 
   test('blacklisted URL is not recorded', async ({ extContext, extensionId, setupDir, localServer }) => {
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-        urlBlacklist: [localServer.url('/page-c')],
+        trimRules: [], urlBlacklist: [localServer.url('/page-c')],
       }},
     ]);
 
@@ -194,9 +197,9 @@ test.describe('Navigation and referrer tracking', () => {
 
     // Seed page entity so visit_page can enrich it when blacklist is bypassed
     await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], deviceName: 'test-device',
-        urlBlacklist: [url],
+        trimRules: [], urlBlacklist: [url],
       }},
       { path: `pages/${slug}.json`, data: {
         slug, url, title: 'Page C', timestamp: now, parentIds: [], childIds: [],
@@ -267,7 +270,8 @@ test.describe('Navigation and referrer tracking', () => {
 
   test('scroll depth and time on page recorded after navigation away', async ({ extContext, extensionId, setupDir, localServer }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     const page = await extContext.newPage();
@@ -309,7 +313,8 @@ test.describe('Navigation and referrer tracking', () => {
     });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
     ]);
 
     const page = await extContext.newPage();
@@ -360,7 +365,8 @@ test.describe('Navigation and referrer tracking', () => {
 
     // Seed page entities so visit_page can enrich them
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
       { path: `pages/${parentSlug}.json`, data: {
         slug: parentSlug, url: parentUrl, title: 'Parent Page', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -405,7 +411,8 @@ test.describe('Navigation and referrer tracking', () => {
     const today = new Date(now).toISOString().slice(0, 10);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
       { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [] } },
       { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
@@ -450,7 +457,8 @@ test.describe('Navigation and referrer tracking', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
       { path: `pages/${parentSlug}.json`, data: {
         slug: parentSlug, url: parentUrl, title: 'Idem Parent', timestamp: now, parentIds: [], childIds: [],
       }},
@@ -516,7 +524,8 @@ test.describe('Navigation and referrer tracking', () => {
     const slug = getSlugForUrl(noTitleUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Pre-create page entity so visit_page enriches it and leave_page title is stored
       { path: `pages/${slug}.json`, data: {
         slug, url: noTitleUrl, timestamp: 1, parentIds: [], childIds: [], user_title: 'Kept',

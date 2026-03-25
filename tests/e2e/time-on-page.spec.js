@@ -16,7 +16,8 @@ import { resetAndSeed, openHelperPage } from './helpers.js';
 test('timeOnPage reports foreground delta, not cumulative time since load', async ({ extContext, extensionId, setupDir, localServer }) => {
   localServer.addPage('/time-test', { title: 'Time Test', body: '<h1>Time Test</h1>' });
   await resetAndSeed(extContext, extensionId, [
-    { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device', blacklist: [] } },
+    { path: 'CURRENT', content: 'test-device' },
+    { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
   ]);
   const testUrl = localServer.url('/time-test');
 

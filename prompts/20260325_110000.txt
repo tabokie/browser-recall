@@ -1,0 +1,29 @@
+- In explore history UI, the metadata for individual pages seem to not be fetched eagerly. Some list don't have their list tags displayed until I click open the details.
+- The list pins might be a lot. Would it better performance wise to readCacheable(page) instead?
+- Good. Use this approach for list pin's tags render as well
+- In the last session, I noticed we have a fallback logic for deviceName to "default". I want it gone. We should always have a non-null deviceName
+- Do we use directory name to deduce the deviceName of log entries?
+- Where is the concept of deviceName actually used?
+- Then for example, when I have logs [X, set(device=newName)], after replaying in memory, the memory thinks device name is "newName". Then after extension reload, we try to replay the log buffer. But then X will be replayed using the new device name instead of the old one as it should be.
+- Actually, I wonder if there's a larger issue behind it. For example, during effectOf replay, we assume the load() functor returns a version of data that's immediately before the current log applies. To guarantee that constraint, we have to synchronize the data files for every log persisted. I believe right now we don't do that. And I am not sure if there will be subtle bugs caused by this "load() return newer data than log timestamp" condition.
+- I think the use of timestamp guard already point us toward the direction where idempotency matters. And it matters because we have this underlying issue of redundant replay. We need to be clear on this subtlty in documentations and uphold it for every log types.
+
+For the deviceName issue, let's discuss it after you have fixed the newly found issues with create_list
+- It was better that deviceId is immutable since the first use of the extension. Does chrome provide any such id?
+- First of all, settings is something that all devices share, but localDeviceName is not. We should use a file CURRENT to store the local device name. This file should be written when the extension is first installed, and a log directory using that name is created too. The name shouldn't be changed later on, because that would require updating all `remotes` data in entity checkpoints.
+
+Speaking of `remotes`, I want to rename it to `timestamps`, as it also include the local timestamp.
+- Did you change deviceName to deviceId? And did you migrated data and removed stale update_settings log?
+- Is CURRENT a json file or a plaintext file?
+- I saw there are error catching code for loading CURRENT. You should bubble that error to UI and disallow user using the extension. You should have E2E tests that verify the UI is informative.
+- Let me interrupt for a minute before you continue on the test fixes. When I reload the extention, and click on extension settings (portal UI), it always tells me "Device identity unavailable". Then I click on the "Reload Extension" button and things restored. But later when I open portal UI again, the same error occurs again.
+- continue
+- Use a random id as deviceId in ~/portal-data, as if it were generated in the normal path.
+
+Also, I see my entity files are still using `timestamp` instead of `timestamps: {}`. Is it expected or is the data forgotten to be migrated?
+- I think timestamp is the same as timestamps, except timestamp refers to current device. Am I wrong?
+- Are you sure? We shouldn't use the max timestamp of all devices to guard replay. Each log has their device provenance, and are guarded by their individual timestamp.
+- Yes, the device context is mandatory. Timestamps should include all devices including current. Right now I don't see the `timestamps` field in my files. Also, after last migration, the json files are all flat and not well formatted.
+- Why doesn't Lists, manifests have per-device concept? (For notes, there is no timestamp and no timestamps.)
+- Use timestamps for all files. It is future-proof. And it could be helpful for debugging even if not used right now.
+- /finish

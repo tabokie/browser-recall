@@ -11,6 +11,24 @@ const NOTE_PREFIX = 'note:';
 const SNAPSHOT_PREFIX = 'snapshot:';
 
 /**
+ * Get the maximum timestamp across all devices from an entity's timestamps map.
+ * Returns 0 if no timestamps are present.
+ */
+export function maxTimestamp(entity) {
+  const ts = entity?.timestamps;
+  if (!ts || typeof ts !== 'object') return 0;
+  const vals = Object.values(ts);
+  return vals.length ? Math.max(...vals) : 0;
+}
+
+/** Update the per-device timestamp on an entity, returning a shallow copy. */
+function touchTimestamp(entity, deviceId, ts) {
+  const timestamps = { ...(entity.timestamps || {}) };
+  timestamps[deviceId] = Math.max(timestamps[deviceId] || 0, ts);
+  return { ...entity, timestamps };
+}
+
+/**
  * Return the set of page keys that an entry affects.
  * Used by hydration to pre-load page entities referenced by logBuffer entries.
  */
@@ -48,19 +66,19 @@ export function getAffectedKeys(entry) {
 export function defaultEntity(key) {
   if (key.startsWith(PAGE_PREFIX)) {
     const slug = key.slice(PAGE_PREFIX.length);
-    return { slug, timestamp: 0, parentIds: [], childIds: [] };
+    return { slug, parentIds: [], childIds: [] };
   }
   if (key.startsWith(NOTE_PREFIX)) {
     const slug = key.slice(NOTE_PREFIX.length);
     return { slug, excerpt: null, note: null, cssPath: null, url: null };
   }
-  if (key === 'manifest:settings') return { timestamp: 0 };
-  if (key === 'manifest:orphaned') return { timestamp: 0, entries: [] };
-  if (key === 'manifest:list-order') return { timestamp: 0, tree: [] };
-  if (key === 'manifest:name-to-id') return { timestamp: 0, paths: {} };
+  if (key === 'manifest:settings') return {};
+  if (key === 'manifest:orphaned') return { entries: [] };
+  if (key === 'manifest:list-order') return { tree: [] };
+  if (key === 'manifest:name-to-id') return { paths: {} };
   if (key.startsWith('list:')) {
     const slug = key.slice('list:'.length);
-    return { timestamp: 0, slug, name: '', pins: [], rules: [] };
+    return { slug, name: '', pins: [], rules: [] };
   }
   return null;
 }
@@ -199,13 +217,13 @@ export async function effectOf(entry, load, context = {}) {
       if (parentUrl) entry.url = parentUrl;
       entries.push(entry);
     }
-    result['manifest:orphaned'] = { ...orphaned, timestamp: Math.max(orphaned.timestamp || 0, ts), entries };
+    result['manifest:orphaned'] = { ...touchTimestamp(orphaned, context.deviceId, ts), entries };
   }
 
   async function unorphan(childKey, ts) {
     const orphaned = result['manifest:orphaned'] || await loadOrDefault('manifest:orphaned', load);
     const entries = (orphaned.entries || []).filter(e => e.key !== childKey);
-    result['manifest:orphaned'] = { ...orphaned, timestamp: Math.max(orphaned.timestamp || 0, ts), entries };
+    result['manifest:orphaned'] = { ...touchTimestamp(orphaned, context.deviceId, ts), entries };
   }
 
   /**
@@ -278,7 +296,7 @@ export async function effectOf(entry, load, context = {}) {
   // --- update_setting ---
   if (entry.action === 'update_setting') {
     const settings = await loadOrDefault('manifest:settings', load);
-    result['manifest:settings'] = { ...settings, [entry.key]: entry.value, timestamp: Math.max(settings.timestamp || 0, entry.timestamp) };
+    result['manifest:settings'] = { ...touchTimestamp(settings, context.deviceId, entry.timestamp), [entry.key]: entry.value };
     return result;
   }
 
@@ -290,7 +308,7 @@ export async function effectOf(entry, load, context = {}) {
     const page = await load(pageKey);
 
     if (page) {
-      const updated = { ...page, timestamp: Math.max(page.timestamp || 0, entry.timestamp) };
+      const updated = touchTimestamp(page, context.deviceId, entry.timestamp);
       if (entry.url) updated.url = entry.url;
       if (entry.title) updated.title = entry.title;
 
@@ -328,7 +346,7 @@ export async function effectOf(entry, load, context = {}) {
             childIds.push(childRef);
             if (childIds.length > REFERRER_CAP) childIds.shift();
           }
-          result[referrerKey] = { ...parent, childIds, timestamp: Math.max(parent.timestamp || 0, entry.timestamp) };
+          result[referrerKey] = { ...touchTimestamp(parent, context.deviceId, entry.timestamp), childIds };
         }
       }
     }
@@ -344,15 +362,13 @@ export async function effectOf(entry, load, context = {}) {
     const page = await load(pageKey);
 
     if (page) {
-      const prevTimestamp = page.timestamp || 0;
-      const updated = { ...page, timestamp: Math.max(prevTimestamp, entry.timestamp) };
+      const updated = touchTimestamp(page, context.deviceId, entry.timestamp);
 
       // Title: latest auto-detected from MutationObserver, folded into leave report
       if (entry.title) updated.title = entry.title;
 
-      // Attention guard: per-device via remotes map
-      const remotes = { ...(page.remotes || {}) };
-      const deviceTs = remotes[context.deviceName] || 0;
+      // Attention guard: per-device timestamp (skip additive fields if already applied)
+      const deviceTs = (page.timestamps || {})[context.deviceId] || 0;
       if (entry.timestamp > deviceTs) {
         if (entry.scrollDepth !== undefined) {
           updated.scrollDepth = Math.max(updated.scrollDepth || 0, entry.scrollDepth);
@@ -360,8 +376,6 @@ export async function effectOf(entry, load, context = {}) {
         if (entry.timeOnPage !== undefined) {
           updated.timeOnPage = (updated.timeOnPage || 0) + entry.timeOnPage;
         }
-        remotes[context.deviceName] = entry.timestamp;
-        updated.remotes = remotes;
       }
 
       result[pageKey] = updated;
@@ -375,7 +389,7 @@ export async function effectOf(entry, load, context = {}) {
   if (entry.action === 'rename_page') {
     const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp);
     const page = result[pageKey];
-    result[pageKey] = { ...page, user_title: entry.user_title, timestamp: Math.max(page.timestamp || 0, entry.timestamp) };
+    result[pageKey] = { ...touchTimestamp(page, context.deviceId, entry.timestamp), user_title: entry.user_title };
     return result;
   }
 
@@ -384,16 +398,12 @@ export async function effectOf(entry, load, context = {}) {
   if (entry.action === 'rate_page') {
     const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp, entry.title);
     const page = result[pageKey];
-    const prevTimestamp = page.timestamp || 0;
-    const updated = { ...page, timestamp: Math.max(prevTimestamp, entry.timestamp) };
+    const updated = touchTimestamp(page, context.deviceId, entry.timestamp);
 
-    // Per-device guard via remotes map
-    const remotes = { ...(page.remotes || {}) };
-    const deviceTs = remotes[context.deviceName] || 0;
+    // Per-device guard (skip additive fields if already applied)
+    const deviceTs = (page.timestamps || {})[context.deviceId] || 0;
     if (entry.timestamp > deviceTs && entry.likes !== undefined) {
       updated.likes = (updated.likes || 0) + entry.likes;
-      remotes[context.deviceName] = entry.timestamp;
-      updated.remotes = remotes;
     }
 
     result[pageKey] = updated;
@@ -407,7 +417,7 @@ export async function effectOf(entry, load, context = {}) {
   if (entry.action === 'create_snapshot') {
     const { pageKey } = await ensurePageEntity(entry.url, entry.timestamp, entry.title);
     const page = result[pageKey];
-    const updated = { ...page, timestamp: Math.max(page.timestamp || 0, entry.timestamp) };
+    const updated = touchTimestamp(page, context.deviceId, entry.timestamp);
 
     // Snapshot key derived from path: "snapshots/<slug>-<ts>" → "snapshot:<slug>-<ts>"
     const snapKey = `${SNAPSHOT_PREFIX}${entry.path.slice('snapshots/'.length)}`;
@@ -625,7 +635,7 @@ export async function effectOf(entry, load, context = {}) {
       }
     }
 
-    result[listKey] = { ...entity, pins, timestamp: Math.max(entity.timestamp || 0, entry.timestamp) };
+    result[listKey] = { ...touchTimestamp(entity, context.deviceId, entry.timestamp), pins };
     return result;
   }
 
@@ -651,7 +661,7 @@ export async function effectOf(entry, load, context = {}) {
     }
 
     const pins = (entity.pins || []).filter(p => !removeIds.has(p.id));
-    result[listKey] = { ...entity, pins, timestamp: Math.max(entity.timestamp || 0, entry.timestamp) };
+    result[listKey] = { ...touchTimestamp(entity, context.deviceId, entry.timestamp), pins };
 
     // Update page parentIds: remove list key (notes don't track parentIds)
     for (const pinId of removeIds) {
@@ -689,7 +699,7 @@ export async function effectOf(entry, load, context = {}) {
       });
     }
 
-    result[listKey] = { ...entity, rules, timestamp: Math.max(entity.timestamp || 0, entry.timestamp) };
+    result[listKey] = { ...touchTimestamp(entity, context.deviceId, entry.timestamp), rules };
     return result;
   }
 
@@ -702,7 +712,7 @@ export async function effectOf(entry, load, context = {}) {
     const entity = await loadListForMutation(listKey);
     if (!entity) return result;
     const rules = (entity.rules || []).filter(r => r.id !== entry.ruleId);
-    result[listKey] = { ...entity, rules, timestamp: Math.max(entity.timestamp || 0, entry.timestamp) };
+    result[listKey] = { ...touchTimestamp(entity, context.deviceId, entry.timestamp), rules };
     return result;
   }
 
@@ -718,12 +728,13 @@ export async function effectOf(entry, load, context = {}) {
       if (r.id !== entry.ruleId) return r;
       return { ...r, config: { ...r.config, ...entry.config } };
     });
-    result[listKey] = { ...entity, rules, timestamp: Math.max(entity.timestamp || 0, entry.timestamp) };
+    result[listKey] = { ...touchTimestamp(entity, context.deviceId, entry.timestamp), rules };
     return result;
   }
 
   // --- create_list ---
   // Creates a new list entity. Generates internal ID, updates name-to-id and tree manifest.
+  // Idempotent: skips if entity already exists (guards against redundant replay after partial drain).
   if (entry.action === 'create_list') {
     const nameToId = result['manifest:name-to-id'] || await loadOrDefault('manifest:name-to-id', load);
     const paths = { ...nameToId.paths };
@@ -735,22 +746,26 @@ export async function effectOf(entry, load, context = {}) {
     const listId = entry.listId || (entry.name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').substring(0, 30) + '-' + Math.abs(hashString(entry.name + entry.timestamp)).toString(36));
     const listKey = `list:${listId}`;
 
+    // Idempotency: if entity already exists, this is a redundant replay — skip
+    const existing = result[listKey] !== undefined ? result[listKey] : await load(listKey);
+    if (existing) return result;
+
     // Create list entity (no parentList/childLists)
     const entity = defaultEntity(listKey);
     entity.name = entry.name;
-    entity.timestamp = entry.timestamp;
     entity.owner = entry.listOwner;
+    entity.timestamps = { [context.deviceId]: entry.timestamp };
     result[listKey] = entity;
 
     // Append to tree manifest
     const treeEntity = result['manifest:list-order'] || await loadOrDefault('manifest:list-order', load);
     const newTree = appendToTree(treeEntity.tree || [], listKey, parentKey);
-    result['manifest:list-order'] = { ...treeEntity, timestamp: Math.max(treeEntity.timestamp || 0, entry.timestamp), tree: newTree };
+    result['manifest:list-order'] = { ...touchTimestamp(treeEntity, context.deviceId, entry.timestamp), tree: newTree };
 
     // Update name-to-id: compound key owner/name
     const nameKey = entry.listOwner + '/' + entry.name;
     paths[nameKey] = listId;
-    result['manifest:name-to-id'] = { ...nameToId, timestamp: Math.max(nameToId.timestamp || 0, entry.timestamp), paths };
+    result['manifest:name-to-id'] = { ...touchTimestamp(nameToId, context.deviceId, entry.timestamp), paths };
 
     return result;
   }
@@ -765,7 +780,7 @@ export async function effectOf(entry, load, context = {}) {
     // Guard: reject actions on orphaned (deleted) lists
     const entity = await loadListForMutation(listKey);
     if (!entity) return result;
-    const updated = { ...entity, timestamp: Math.max(entity.timestamp || 0, entry.timestamp) };
+    const updated = touchTimestamp(entity, context.deviceId, entry.timestamp);
 
     if (entry.newName !== undefined) {
       const oldName = entity.name;
@@ -781,7 +796,7 @@ export async function effectOf(entry, load, context = {}) {
         const newKey = owner + '/' + entry.newName;
         delete paths[oldKey];
         paths[newKey] = listId;
-        result['manifest:name-to-id'] = { ...nameToId, timestamp: Math.max(nameToId.timestamp || 0, entry.timestamp), paths };
+        result['manifest:name-to-id'] = { ...touchTimestamp(nameToId, context.deviceId, entry.timestamp), paths };
       }
     }
 
@@ -795,7 +810,8 @@ export async function effectOf(entry, load, context = {}) {
   // remove deleted lists (promote children), append non-deleted lists missing from tree.
   if (entry.action === 'update_list_tree') {
     const treeEntity = result['manifest:list-order'] || await loadOrDefault('manifest:list-order', load);
-    if (treeEntity.timestamp && treeEntity.timestamp >= entry.timestamp) return result;
+    const treeDeviceTs = (treeEntity.timestamps || {})[context.deviceId] || 0;
+    if (treeDeviceTs >= entry.timestamp) return result;
     // Reconcile the accepted tree against current entity state:
     // remove deleted lists (promote children), append non-deleted lists missing from tree.
     function collectIds(nodes) {
@@ -831,7 +847,7 @@ export async function effectOf(entry, load, context = {}) {
       }
     }
     newTree = reconciled;
-    result['manifest:list-order'] = { ...treeEntity, timestamp: entry.timestamp, tree: newTree };
+    result['manifest:list-order'] = { ...touchTimestamp(treeEntity, context.deviceId, entry.timestamp), tree: newTree };
     return result;
   }
 
@@ -848,12 +864,12 @@ export async function effectOf(entry, load, context = {}) {
     if (entity.deletedTs && entity.deletedTs >= entry.timestamp) return result;
 
     // Mark deleted
-    const deletedEntity = { ...entity, timestamp: Math.max(entity.timestamp || 0, entry.timestamp), deleted: true, deletedTs: entry.timestamp };
+    const deletedEntity = { ...touchTimestamp(entity, context.deviceId, entry.timestamp), deleted: true, deletedTs: entry.timestamp };
     result[listKey] = deletedEntity;
 
     // Remove from tree manifest (promotes children to parent level)
     const treeEntity = result['manifest:list-order'] || await loadOrDefault('manifest:list-order', load);
-    result['manifest:list-order'] = { ...treeEntity, timestamp: Math.max(treeEntity.timestamp || 0, entry.timestamp), tree: removeFromTree(treeEntity.tree || [], listKey) };
+    result['manifest:list-order'] = { ...touchTimestamp(treeEntity, context.deviceId, entry.timestamp), tree: removeFromTree(treeEntity.tree || [], listKey) };
 
     // Remove list key from all pinned page parentIds (notes don't track parentIds)
     const pins = entity.pins || [];
@@ -873,7 +889,7 @@ export async function effectOf(entry, load, context = {}) {
     const listName = entity.name || entry.name;
     const nameKey = entity.owner + '/' + listName;
     delete paths[nameKey];
-    result['manifest:name-to-id'] = { ...nameToId, timestamp: Math.max(nameToId.timestamp || 0, entry.timestamp), paths };
+    result['manifest:name-to-id'] = { ...touchTimestamp(nameToId, context.deviceId, entry.timestamp), paths };
 
     await orphan(listKey, entry.timestamp);
     return result;
@@ -904,7 +920,7 @@ export async function effectOf(entry, load, context = {}) {
     // LWW via deletedTs
     if (entity.deletedTs && entity.deletedTs >= entry.timestamp) return result;
 
-    const restored = { ...entity, deleted: false, timestamp: Math.max(entity.timestamp || 0, entry.timestamp), deletedTs: entry.timestamp };
+    const restored = { ...touchTimestamp(entity, context.deviceId, entry.timestamp), deleted: false, deletedTs: entry.timestamp };
     result[listKey] = restored;
 
     // Append to tree manifest as top-level node
@@ -919,7 +935,7 @@ export async function effectOf(entry, load, context = {}) {
       return false;
     })(tree);
     if (!inTree) {
-      result['manifest:list-order'] = { ...treeEntity, timestamp: Math.max(treeEntity.timestamp || 0, entry.timestamp), tree: [...tree.map(deepCloneTree), { id: listKey }] };
+      result['manifest:list-order'] = { ...touchTimestamp(treeEntity, context.deviceId, entry.timestamp), tree: [...tree.map(deepCloneTree), { id: listKey }] };
     }
 
     // Restore page parentIds for pins
@@ -941,7 +957,7 @@ export async function effectOf(entry, load, context = {}) {
     const listId = listKey.slice('list:'.length);
     const nameKey = restored.owner + '/' + listName;
     paths[nameKey] = listId;
-    result['manifest:name-to-id'] = { ...nameToId, timestamp: Math.max(nameToId.timestamp || 0, entry.timestamp), paths };
+    result['manifest:name-to-id'] = { ...touchTimestamp(nameToId, context.deviceId, entry.timestamp), paths };
 
     await unorphan(listKey, entry.timestamp);
     return result;
@@ -971,7 +987,7 @@ function hashString(str) {
  * Entry: { timestamp, action: 'update_setting', key, value }
  * Returns new settings object (or original if entry is irrelevant).
  */
-export function applyLogToSettings(settings, entry) {
+export function applyLogToSettings(settings, entry, context = {}) {
   if (entry.action !== 'update_setting') return settings;
-  return { ...settings, [entry.key]: entry.value, timestamp: Math.max(settings.timestamp || 0, entry.timestamp) };
+  return { ...touchTimestamp(settings, context.deviceId, entry.timestamp), [entry.key]: entry.value };
 }

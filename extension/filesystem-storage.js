@@ -779,12 +779,12 @@ class FileSystemStorage {
   // Save list metadata (name) without touching pins.
   // Read-merge-write to preserve existing pins.
   // If name changes, the file is renamed (old deleted, new created).
-  async saveListMeta(listId, meta, timestamp = 0) {
+  async saveListMeta(listId, meta) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to write');
     }
     const path = this.#resolveListPath(listId);
-    await this.#readMergeWriteList(path, { ...meta, timestamp });
+    await this.#readMergeWriteList(path, meta);
   }
 
   // Delete a list file (from lists/{id}.json)
@@ -817,7 +817,7 @@ class FileSystemStorage {
       };
       if (data.owner) listEntry.owner = data.owner;
       if (data.deleted) listEntry.deleted = true;
-      if (data.timestamp) listEntry.timestamp = data.timestamp;
+      if (data.timestamps) listEntry.timestamps = data.timestamps;
       return listEntry;
     };
     try {
@@ -893,6 +893,37 @@ class FileSystemStorage {
 
     const fileHandle = await this.resolveFile('manifest/settings.json', { create: true });
     await this.writeJson(fileHandle, data);
+  }
+
+  // Load CURRENT file (immutable device identity, plaintext device ID)
+  async loadCurrent() {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+
+    try {
+      const fileHandle = await this.resolveFile('CURRENT');
+      const file = await fileHandle.getFile();
+      const text = (await file.text()).trim();
+      return text || null;
+    } catch (error) {
+      if (isNotFound(error)) return null;
+      throw error;
+    }
+  }
+
+  // Write CURRENT file + create device log directory (first install only)
+  async initDevice(deviceId) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to write directory');
+    }
+
+    const fileHandle = await this.resolveFile('CURRENT', { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(deviceId);
+    await writable.close();
+    // Pre-create log directory for this device
+    await this.resolveDir(`data/logs/${deviceId}`);
   }
 
 }

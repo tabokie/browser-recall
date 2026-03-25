@@ -15,7 +15,8 @@ test.describe('Scale — larger data sets', () => {
     }
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: entries },
     ]);
 
@@ -65,7 +66,8 @@ test.describe('Scale — larger data sets', () => {
     }
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'data/logs/test-device/2026-02-28.jsonl', lines: day1 },
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: day2 },
     ]);
@@ -87,7 +89,10 @@ test.describe('Scale — larger data sets', () => {
   test('5 lists with 3 pins each all render correctly', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const rootTree = [];
-    const files = [{ path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } }];
+    const files = [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+    ];
 
     for (let l = 0; l < 5; l++) {
       const listSlug = `list-${l}`;
@@ -156,7 +161,8 @@ test.describe('Scale — larger data sets', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [], deviceName: 'test-device' } },
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: {
         timestamp: now, tree: [{ id: 'list:research' }],
       }},
