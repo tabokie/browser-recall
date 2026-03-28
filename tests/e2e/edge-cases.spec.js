@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, getSlugForUrl, openHelperPage, openOptionsPage, waitForListView } from './helpers.js';
+import { resetAndSeed, getSlugForUrl, openHelperPage, openOptionsPage, waitForListView, waitForVisitRecorded } from './helpers.js';
 
 // Category 4: Full user journeys — multi-step flows combining several actions
 test.describe('User journeys', () => {
@@ -89,25 +89,17 @@ test.describe('User journeys', () => {
     // Navigate parent → child via link click
     const page = await extContext.newPage();
     await page.goto(parentUrl);
-    await page.waitForTimeout(300);
+    await page.waitForSelector('a[href="/j-child"]');
     await page.click('a[href="/j-child"]');
     await page.waitForURL('**/j-child');
-    await page.waitForTimeout(500);
 
     const helper = await openHelperPage(extContext, extensionId);
+    await waitForVisitRecorded(helper, page, childUrl, parentUrl);
 
-    // Wait for child visit to be recorded with referrer
-    await helper.waitForFunction((u) =>
-      chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
-        .then(r => r.success && r.parents.referrers.length > 0)
-    , childUrl, { timeout: 5000 });
-
-    // Verify child → parent relation
     const childRels = await helper.evaluate((u) =>
       chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
     , childUrl);
 
-    // Verify parent → child relation
     const parentRels = await helper.evaluate((u) =>
       chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
     , parentUrl);

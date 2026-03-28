@@ -2435,11 +2435,37 @@
       background: rgba(88, 136, 88, 0.08);
       color: var(--accent-green);
     }
+    .rule-entry.has-fn {
+      flex-direction: column;
+      align-items: stretch;
+      border-radius: var(--radius-lg);
+      padding: 6px 14px 8px;
+    }
+    .rule-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
+    .rule-entry.has-fn:hover .rule-action-btn { opacity: 1; }
     .rule-desc {
       flex: 1;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .rule-fn-source {
+      margin: 4px 0 0;
+      padding: 6px 10px;
+      background: rgba(53, 40, 32, 0.03);
+      border: 1px solid var(--border-glass);
+      border-radius: var(--radius-md);
+      font-family: var(--font-mono, 'SF Mono', 'Menlo', 'Consolas', monospace);
+      font-size: 11px;
+      line-height: 1.5;
+      color: var(--text-secondary);
+      white-space: pre;
+      overflow-x: auto;
     }
     .rule-action-btn {
       width: 20px;
@@ -2867,6 +2893,43 @@
             <button id="trimAddBtn" class="btn btn-primary">Add</button>
           </div>
           <div id="trimEntries" class="blacklist-entries"></div>
+        </div>
+
+        <!-- Sync -->
+        <div class="modal-section">
+          <h3>Sync</h3>
+          <p>Sync logs and notes across devices via a private GitHub repo.</p>
+          <div class="option">
+            <label>
+              <input type="checkbox" id="syncEnabled">
+              Enable sync
+            </label>
+          </div>
+          <div id="syncConfigFields" style="display:none;">
+            <div class="option" style="margin-top:8px;">
+              <label>Repository URL:
+                <input type="text" id="syncRepoUrl" placeholder="https://github.com/user/portal-sync" style="width:100%;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;margin-top:4px;">
+              </label>
+            </div>
+            <div class="option" style="margin-top:8px;">
+              <label>Personal access token:
+                <input type="password" id="syncToken" placeholder="ghp_..." style="width:100%;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;margin-top:4px;">
+              </label>
+            </div>
+            <div class="option" style="margin-top:8px;display:flex;gap:16px;">
+              <label>Interval (min):
+                <input type="number" id="syncIntervalMinutes" min="1" max="60" value="5" style="width:60px;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;">
+              </label>
+              <label>Retention (days):
+                <input type="number" id="syncRetentionDays" min="1" max="30" value="7" style="width:60px;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;">
+              </label>
+            </div>
+            <div class="modal-btn-group" style="margin-top:10px;">
+              <button id="syncSaveBtn" class="btn btn-primary">Save Sync Settings</button>
+              <button id="syncNowBtn" class="btn btn-secondary">Sync Now</button>
+            </div>
+            <div id="syncStatus" style="margin-top:8px;font-size:12px;color:#666;"></div>
+          </div>
         </div>
 
         <!-- Data management -->

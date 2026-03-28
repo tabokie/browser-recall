@@ -314,6 +314,32 @@ async function handleRequest(request) {
         return { success: true };
       }
 
+      case 'loadSyncManifest': {
+        try {
+          const fh = await fsStorage.resolveFile(`manifest/${request.key}.json`);
+          const data = await fsStorage.readJson(fh);
+          return { success: true, data };
+        } catch (e) {
+          if (e.name === 'NotFoundError') return { success: true, data: null };
+          throw e;
+        }
+      }
+
+      case 'loadRemoteLogEntries': {
+        const remotes = await fsStorage.loadRemoteLogEntries(request.localDeviceId);
+        return { success: true, remotes };
+      }
+
+      case 'collectSyncFiles': {
+        const files = await fsStorage.collectSyncFiles(request.deviceId, request.retentionDays);
+        return { success: true, files };
+      }
+
+      case 'writeSyncFiles': {
+        await fsStorage.writeSyncFiles(request.files);
+        return { success: true };
+      }
+
       case 'setTestDirectory': {
         // Use OPFS (Origin Private File System) as a no-user-gesture directory handle.
         // Creates a subdirectory inside OPFS so each reset can wipe cleanly.

@@ -264,7 +264,7 @@ test.describe('Rule operations', () => {
 
   test('runRuleBatch with Hubs function rule matches hub-like URLs', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
-    const hubsFnSource = "const p = new URL(page.url).pathname.toLowerCase(); if (p === '/' || p === '') return 1; if (p.includes('index')) return 1; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return 1; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover']; if (hub.some(k => last.includes(k))) return 1; return 0;";
+    const hubsFnSource = "const u = new URL(page.url); const p = u.pathname.toLowerCase(); const skip = ['s', 'search', 'query', 'q', 'target']; if (skip.some(k => u.searchParams.has(k))) return false; if (p === '/' || p === '') return u.search.length <= 100; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return true; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover', 'index']; if (hub.some(k => last.includes(k))) return !u.hash; return false;";
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
@@ -292,24 +292,89 @@ test.describe('Rule operations', () => {
           { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/about', title: 'About' },
           { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/blog', title: 'Posts' },
           { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/research/paper', title: 'Paper' },
+          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/?' + 'x'.repeat(200), title: 'Long QS' },
+          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/app/discover#/view/123', title: 'Hash route' },
+          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/index/article-slug', title: 'Mid-path index' },
+          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/?q=test', title: 'Search query' },
         ],
       })
     );
     expect(result.success).toBe(true);
     const matchedUrls = result.results.map(r => r.url);
-    // Root, index, depth-1 trailing slash, last-segment keyword
+    // Root, index (last segment), depth-1 trailing slash, last-segment keyword
     expect(matchedUrls).toContain('https://example.com/');
     expect(matchedUrls).toContain('https://example.com/index.html');
     expect(matchedUrls).toContain('https://example.com/docs/');       // depth-1 trailing slash
     expect(matchedUrls).toContain('https://example.com/blog');        // last segment = 'blog'
     expect(matchedUrls).not.toContain('https://example.com/about');   // no hub signal
     expect(matchedUrls).not.toContain('https://example.com/research/paper'); // 'research' != keyword
+    // New rejection cases
+    expect(matchedUrls).not.toContain('https://example.com/?' + 'x'.repeat(200)); // long query string
+    expect(matchedUrls).not.toContain('https://example.com/app/discover#/view/123'); // hash fragment
+    expect(matchedUrls).not.toContain('https://example.com/index/article-slug'); // index in mid-path only
+    expect(matchedUrls).not.toContain('https://example.com/?q=test'); // search/redirect query param
 
     // Verify auto-pin: 4 pages pinned
     const entity = await page.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:hubs' })
     );
     expect(entity.value.pins).toHaveLength(4);
+    await page.close();
+  });
+
+  test('visit_page auto-pins to lists with matching smart rules', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const hubsFnSource = "const u = new URL(page.url); const p = u.pathname.toLowerCase(); const skip = ['s', 'search', 'query', 'q', 'target']; if (skip.some(k => u.searchParams.has(k))) return false; if (p === '/' || p === '') return u.search.length <= 100; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return true; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover', 'index']; if (hub.some(k => last.includes(k))) return !u.hash; return false;";
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:hubs' }] } },
+      { path: 'lists/hubs.json', data: {
+        slug: 'hubs', name: 'Hubs', owner: 'test-device', timestamp: now, pins: [],
+        rules: [{
+          id: 'rule-s-hubs-0001', type: 'smart',
+          config: { description: 'Hub and landing pages', fnSource: hubsFnSource },
+          createdAt: now,
+        }],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Hubs': 'hubs' } } },
+    ]);
+
+    const page = await openHelperPage(extContext, extensionId);
+
+    // Visit a hub-like URL (root path) — should auto-pin to Hubs list
+    await page.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'reportPage', url: 'https://linux.do/', isInitialLoad: true, title: 'LINUX DO',
+      })
+    );
+
+    // Wait for smart rule evaluation to complete and pin to appear
+    const hubs = await page.evaluate(async () => {
+      for (let i = 0; i < 30; i++) {
+        const r = await chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:hubs' });
+        if (r?.value?.pins?.length > 0) return r;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      return chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:hubs' });
+    });
+    expect(hubs.value.pins).toHaveLength(1);
+    expect(hubs.value.pins[0].id).toBe('page:' + getSlugForUrl('https://linux.do/'));
+
+    // Visit a non-hub URL — should NOT auto-pin
+    await page.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'reportPage', url: 'https://linux.do/t/some-topic/12345', isInitialLoad: true, title: 'Some Topic',
+      })
+    );
+    await page.evaluate(() => new Promise(r => setTimeout(r, 500)));
+
+    const hubsAfter = await page.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:hubs' })
+    );
+    // Still only 1 pin — the non-hub URL was not matched
+    expect(hubsAfter.value.pins).toHaveLength(1);
+
     await page.close();
   });
 });

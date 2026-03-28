@@ -895,6 +895,81 @@ class FileSystemStorage {
     await this.writeJson(fileHandle, data);
   }
 
+  // ─── Sync helpers ─────────────────────────────────────────────────────
+
+  // Collect local files for sync push: device's logs (within retention) + all notes.
+  // Returns [{ path, content }].
+  async collectSyncFiles(deviceId, retentionDays = 7) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+    const files = [];
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - retentionDays);
+    const cutoffStr = cutoff.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    // Logs: data/logs/<deviceId>/YYYY-MM-DD.jsonl within retention
+    try {
+      const deviceDir = await this.resolveDir(`data/logs/${deviceId}`);
+      for await (const entry of deviceDir.values()) {
+        if (entry.kind !== 'file' || !entry.name.endsWith('.jsonl')) continue;
+        const dateStr = entry.name.replace('.jsonl', '');
+        if (dateStr < cutoffStr) continue;
+        const file = await entry.getFile();
+        files.push({ path: `data/logs/${deviceId}/${entry.name}`, content: await file.text() });
+      }
+    } catch (e) { if (!isNotFound(e)) throw e; }
+
+    // Notes: data/notes/*.json (all)
+    try {
+      const notesDir = await this.resolveDir('data/notes');
+      for await (const entry of notesDir.values()) {
+        if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue;
+        const file = await entry.getFile();
+        files.push({ path: `data/notes/${entry.name}`, content: await file.text() });
+      }
+    } catch (e) { if (!isNotFound(e)) throw e; }
+
+    return files;
+  }
+
+  // Write remote files to disk (logs and notes from peers).
+  // files: [{ path, content }]. Creates directories as needed.
+  async writeSyncFiles(files) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to write directory');
+    }
+    for (const { path, content } of files) {
+      const fh = await this.resolveFile(path, { create: true });
+      const writable = await fh.createWritable();
+      await writable.write(content);
+      await writable.close();
+    }
+  }
+
+  // Load all log entries from remote device directories.
+  // Returns [{ deviceId, entries }] — one per remote device, entries in chronological order.
+  async loadRemoteLogEntries(localDeviceId) {
+    if (!(await this.verifyPermission())) {
+      throw new Error('No permission to read directory');
+    }
+    const allFiles = await this._scanLogFiles();
+    // Group by device, exclude local
+    const byDevice = new Map();
+    for (const { device, name } of allFiles) {
+      if (device === localDeviceId) continue;
+      if (!byDevice.has(device)) byDevice.set(device, []);
+      byDevice.get(device).push({ device, name });
+    }
+    const result = [];
+    for (const [deviceId, files] of byDevice) {
+      files.sort((a, b) => a.name.localeCompare(b.name)); // oldest-first
+      const entries = await this._loadFromDeviceFiles(files);
+      if (entries.length > 0) result.push({ deviceId, entries });
+    }
+    return result;
+  }
+
   // Load CURRENT file (immutable device identity, plaintext device ID)
   async loadCurrent() {
     if (!(await this.verifyPermission())) {

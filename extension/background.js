@@ -5,6 +5,8 @@ import { effectOf } from './replay.js';
 import { validateRuleConfig, validateSmartRuleFn, matchRules, matchKeywordRule, buildPageDataFromEntry } from './rule-engine.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark, cacheClear } from './entity-cache.js';
+import { GitHubTransport, parseRepoUrl } from './sync-transport-github.js';
+import { SyncManager } from './sync-manager.js';
 
 console.log('Background script loading...');
 
@@ -251,6 +253,12 @@ async function addLog(entry) {
   }).catch(e => console.warn('[addLog] history cache update failed:', e.message));
   ensureOffscreenPort().catch(e => console.warn('[addLog] offscreen port failed:', e.message));
   scheduleDrainNotify();
+  // Refresh badge for active tab if a page entity was affected.
+  if (Object.keys(effects).some(k => k.startsWith('page:'))) {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([tab]) => {
+      if (tab) updateBadgeForTab(tab.id, tab.url);
+    }).catch(e => console.warn('[addLog] badge update failed:', e.message));
+  }
   return effects;
 }
 
@@ -586,6 +594,30 @@ async function hydrateCache() {
     await cacheSet(hk, entries, { timestamp: entry.timestamp });
   }
 
+  // Phase 3: Replay remote device log files (multi-device sync).
+  // Remote logs are pulled by sync and written to data/logs/<remoteDevice>/.
+  // Replay is idempotent (per-device timestamp guards) so re-replaying
+  // already-checkpointed entries is a safe no-op.
+  try {
+    const settings = await cacheGet('manifest:settings');
+    if (settings?.syncEnabled && localDeviceId) {
+      const resp = await requestOffscreen({ action: 'loadRemoteLogEntries', localDeviceId });
+      if (resp?.success && resp.remotes?.length > 0) {
+        let totalEntries = 0;
+        for (const { deviceId: peerId, entries } of resp.remotes) {
+          for (const entry of entries) {
+            try {
+              const effects = await effectOf(entry, sessionLoadDuringHydration, { deviceId: peerId });
+              await sessionWrite(effects);
+            } catch (e) { /* skip individual entry errors */ }
+          }
+          totalEntries += entries.length;
+        }
+        console.log(`Remote log replay: ${resp.remotes.length} peers, ${totalEntries} entries`);
+      }
+    }
+  } catch (e) { console.warn('Remote log replay failed:', e.message); }
+
   console.log('Cache hydrated');
 }
 
@@ -620,7 +652,19 @@ async function ensureDefaultLists() {
           type: 'smart',
           config: {
             description: 'Hub and landing pages',
-            fnSource: "const p = new URL(page.url).pathname.toLowerCase(); if (p === '/' || p === '') return 1; if (p.includes('index')) return 1; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return 1; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover']; if (hub.some(k => last.includes(k))) return 1; return 0;",
+            fnSource: [
+              "const u = new URL(page.url);",
+              "const p = u.pathname.toLowerCase();",
+              "const skip = ['s', 'search', 'query', 'q', 'target'];",
+              "if (skip.some(k => u.searchParams.has(k))) return false;",
+              "if (p === '/' || p === '') return u.search.length <= 100;",
+              "const parts = p.split('/').filter(Boolean);",
+              "if (parts.length === 1 && p.endsWith('/')) return true;",
+              "const last = parts[parts.length - 1] || '';",
+              "const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover', 'index'];",
+              "if (hub.some(k => last.includes(k))) return !u.hash;",
+              "return false;",
+            ].join('\n'),
           },
         },
       });
@@ -628,11 +672,51 @@ async function ensureDefaultLists() {
   } catch (e) { console.warn('First-run default list creation failed:', e.message); }
 }
 
+// ─── Smart-Rule Auto-Pin on Visit ────────────────────────────────────
+// Evaluate all lists with rules against a visited page and auto-pin matches.
+
+async function evaluateSmartRulesForVisit(url, title) {
+  const listKeys = await getAllListKeys();
+  const pageData = buildPageDataFromEntry({ url, title });
+  const sandbox = async (fnSource, pd) => {
+    const resp = await requestOffscreen({ action: 'executeSandboxFn', fnSource, pageData: pd });
+    if (!resp?.success) throw new Error('Sandbox execution failed');
+    return resp.score;
+  };
+  const pageKey = 'page:' + generateSlugFromUrl(url);
+
+  for (const listKey of listKeys) {
+    const listId = listKey.startsWith('list:') ? listKey.slice(5) : listKey;
+    const listEntity = await readCacheable('list:' + listId);
+    if (!listEntity?.rules?.length) continue;
+
+    const matches = await matchRules(listEntity.rules, pageData, { sandbox });
+    if (matches.length === 0) continue;
+
+    const alreadyPinned = (listEntity.pins || []).some(p => p.id === pageKey);
+    if (alreadyPinned) continue;
+
+    const listInfo = await getListEventFields(listId);
+    if (!listInfo) continue;
+
+    const pinEntry = {
+      timestamp: Date.now(),
+      action: 'pin_to_list',
+      name: listInfo.name,
+      listOwner: listInfo.listOwner,
+      items: [url],
+    };
+    if (title) pinEntry.titles = { [url]: title };
+    await addLog(pinEntry);
+    console.log(`Smart-rule: auto-pinned ${url} to ${listInfo.name}`);
+  }
+}
+
 // ─── Title Trimming ───────────────────────────────────────────────────
 
 async function trimTitle(rawTitle, url) {
   let title = rawTitle;
-  const titleTrimRules = (await readCacheable('manifest:settings')).titleTrimRules || [];
+  const titleTrimRules = (await readCacheable('manifest:settings') || {}).titleTrimRules || [];
   for (const rule of titleTrimRules) {
     if (url.startsWith(rule.urlPrefix)) {
       if (rule.action === 'remove_after_pipe') {
@@ -648,38 +732,207 @@ async function trimTitle(rawTitle, url) {
   return title.trim();
 }
 
+// ─── Badge indicator ─────────────────────────────────────────────────
+// Show a colored dot on the extension icon when the current page has data.
+// Blue = notes/snapshots, Green = in lists, Purple = both.
+
+async function updateBadgeForTab(tabId, url) {
+  try {
+    if (!url || !url.startsWith('http')) {
+      chrome.action.setBadgeText({ text: '', tabId });
+      return;
+    }
+    const slug = generateSlugFromUrl(url);
+    const page = await readCacheable('page:' + slug);
+    if (!page) {
+      chrome.action.setBadgeText({ text: '', tabId });
+      return;
+    }
+    const hasNotes = page.childIds?.some(c => c.startsWith('note:') || c.startsWith('snapshot:'));
+    const hasLists = page.parentIds?.some(id => id.startsWith('list:'));
+    if (!hasNotes && !hasLists) {
+      chrome.action.setBadgeText({ text: '', tabId });
+      return;
+    }
+    const color = hasNotes && hasLists ? '#9C27B0' : hasNotes ? '#4A90D9' : '#4CAF50';
+    chrome.action.setBadgeBackgroundColor({ color, tabId });
+    chrome.action.setBadgeText({ text: ' ', tabId });
+  } catch (e) {
+    // Non-critical — don't break navigation for a badge update failure.
+  }
+}
+
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    updateBadgeForTab(tabId, tab.url);
+  } catch (e) { /* tab may have been closed */ }
+});
+
 // ─── Supplementary referrer detection ─────────────────────────────────
 // Sites that suppress document.referrer via Referrer-Policy or rel="noreferrer"
 // leave an empty string in content script. webNavigation sees the real navigation.
 const getReferrer = (() => {
   const tabUrls = new Map();
-  const tabReferrers = new Map();
+  // Stores the resolved referrer (or null) once onCommitted fires.
+  const committed = new Map();
+  // Pending getReferrer() calls waiting for onCommitted to fire.
+  const waiters = new Map();
 
   chrome.webNavigation.onCommitted.addListener((details) => {
     if (details.frameId !== 0) return;
     const previousUrl = tabUrls.get(details.tabId);
-    if (details.transitionType === 'link' && previousUrl) {
-      tabReferrers.set(details.tabId, previousUrl);
-    }
+    const referrer = (details.transitionType === 'link' && previousUrl) ? previousUrl : null;
     tabUrls.set(details.tabId, details.url);
+    committed.set(details.tabId, referrer);
+    updateBadgeForTab(details.tabId, details.url);
+    // Wake up any pending getReferrer() call
+    const waiter = waiters.get(details.tabId);
+    if (waiter) {
+      clearTimeout(waiter.timer);
+      waiters.delete(details.tabId);
+      waiter.resolve(referrer);
+    }
   });
 
   chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
     const sourceUrl = tabUrls.get(details.sourceTabId);
-    if (sourceUrl) tabReferrers.set(details.tabId, sourceUrl);
+    if (sourceUrl) committed.set(details.tabId, sourceUrl);
   });
 
   chrome.tabs.onRemoved.addListener((tabId) => {
     tabUrls.delete(tabId);
-    tabReferrers.delete(tabId);
+    committed.delete(tabId);
+    const waiter = waiters.get(tabId);
+    if (waiter) {
+      clearTimeout(waiter.timer);
+      waiters.delete(tabId);
+      waiter.resolve(null);
+    }
   });
 
-  return (tabId) => {
-    const ref = tabReferrers.get(tabId);
-    tabReferrers.delete(tabId);
-    return ref;
+  // Async: returns the referrer URL or null. If onCommitted hasn't fired yet
+  // (race with content script), waits up to 200ms for it.
+  return async (tabId) => {
+    const ref = committed.get(tabId);
+    if (ref !== undefined) {
+      committed.delete(tabId);
+      return ref;
+    }
+    // onCommitted hasn't fired yet — wait briefly
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        waiters.delete(tabId);
+        resolve(null);
+      }, 200);
+      waiters.set(tabId, { resolve, timer });
+    });
   };
 })();
+
+// ─── Sync ────────────────────────────────────────────────────────────
+
+const SYNC_ALARM_NAME = 'portal-sync';
+let syncInProgress = false;
+let lastSyncResult = null; // { timestamp, pushed, pulled, error? }
+
+// Replay remote log entries via effectOf + sessionWrite.
+// Does NOT append to logBuffer or update history keys — remote entries are
+// already persisted in their own device-specific log files on disk.
+async function replayRemoteEntries(entries, peerDeviceId) {
+  for (const entry of entries) {
+    const effects = await effectOf(entry, sessionLoad, { deviceId: peerDeviceId });
+    await sessionWrite(effects);
+  }
+  scheduleDrainNotify();
+}
+
+// Build a SyncManager wired to offscreen filesystem and the GitHub transport.
+function buildSyncManager(repoUrl, token) {
+  const { owner, repo } = parseRepoUrl(repoUrl);
+  const transport = new GitHubTransport({ owner, repo, token });
+  return new SyncManager({
+    transport,
+    collectLocalFiles: (deviceId, retentionDays) =>
+      requestOffscreen({ action: 'collectSyncFiles', deviceId, retentionDays })
+        .then(r => r.files),
+    writeRemoteFiles: (files) =>
+      requestOffscreen({ action: 'writeSyncFiles', files }),
+    loadCursors: () =>
+      requestOffscreen({ action: 'loadSyncManifest', key: 'sync-cursors' })
+        .then(r => r.data || { cursors: {} }),
+    saveCursors: (data) =>
+      requestOffscreen({ action: 'saveJson', path: 'manifest/sync-cursors.json', data }),
+    loadPushState: () =>
+      requestOffscreen({ action: 'loadSyncManifest', key: 'sync-push-state' })
+        .then(r => r.data || { files: {} }),
+    savePushState: (data) =>
+      requestOffscreen({ action: 'saveJson', path: 'manifest/sync-push-state.json', data }),
+  });
+}
+
+async function performSync() {
+  if (syncInProgress) return { skipped: true };
+  syncInProgress = true;
+  try {
+    await hydrationDone;
+    const settings = await readCacheable('manifest:settings') || {};
+    if (!settings.syncEnabled) return { skipped: true };
+    const { syncRepoUrl, syncToken, syncRetentionDays } = settings;
+    if (!syncRepoUrl || !syncToken) return { skipped: true, error: 'Missing repo URL or token' };
+
+    const deviceId = await getDeviceId();
+    const mgr = buildSyncManager(syncRepoUrl, syncToken);
+
+    // Push local changes
+    const pushResult = await mgr.push(deviceId, { retentionDays: syncRetentionDays || 7 });
+
+    // Pull remote changes
+    const pullResult = await mgr.pull(deviceId);
+    let entriesReplayed = 0;
+    for (const { deviceId: peerId, entries } of pullResult.remoteEntries) {
+      await replayRemoteEntries(entries, peerId);
+      entriesReplayed += entries.length;
+    }
+
+    lastSyncResult = { timestamp: Date.now(), pushed: pushResult.pushed, pulled: entriesReplayed > 0, entriesReplayed };
+    console.log(`[sync] push=${pushResult.pushed} (${pushResult.fileCount} files), pull=${pullResult.remoteEntries.length} peers, ${entriesReplayed} entries`);
+    return lastSyncResult;
+  } catch (error) {
+    const msg = error.message;
+    const isAuthError = msg.includes('401') || (msg.includes('403') && !msg.includes('rate limit'));
+    const isNotFound = msg.includes('404');
+    lastSyncResult = { timestamp: Date.now(), pushed: false, pulled: false, error: msg };
+    if (isAuthError || isNotFound) {
+      // Permanent error — disable sync alarm to avoid repeated failures.
+      // User must fix settings and re-enable.
+      chrome.alarms.clear(SYNC_ALARM_NAME);
+      lastSyncResult.disabled = true;
+      console.warn(`[sync] permanent error, alarm disabled: ${msg}`);
+    } else {
+      console.warn(`[sync] transient error, will retry next cycle: ${msg}`);
+    }
+    return lastSyncResult;
+  } finally {
+    syncInProgress = false;
+  }
+}
+
+// Start or stop the sync alarm based on settings.
+async function updateSyncAlarm() {
+  const settings = await readCacheable('manifest:settings') || {};
+  if (settings.syncEnabled && settings.syncRepoUrl && settings.syncToken) {
+    const intervalMinutes = Math.max(1, settings.syncIntervalMinutes || 5);
+    chrome.alarms.create(SYNC_ALARM_NAME, { periodInMinutes: intervalMinutes });
+    console.log(`[sync] alarm set: every ${intervalMinutes} min`);
+  } else {
+    chrome.alarms.clear(SYNC_ALARM_NAME);
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === SYNC_ALARM_NAME) performSync();
+});
 
 // ─── Initialization ───────────────────────────────────────────────────
 
@@ -705,6 +958,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     hydrationDone = hydrateCache();
     await hydrationDone;
     await ensureDefaultLists();
+    updateSyncAlarm();
   }
 });
 
@@ -719,6 +973,7 @@ chrome.runtime.onStartup.addListener(async () => {
       hydrationDone = hydrateCache();
       await hydrationDone;
       await ensureDefaultLists();
+      updateSyncAlarm();
     }
   } catch (error) {
     console.warn('Startup hydration failed:', error.message);
@@ -988,7 +1243,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
 
             // Check blacklist
-            const rpSettings = await readCacheable('manifest:settings');
+            const rpSettings = await readCacheable('manifest:settings') || {};
             const urlBlacklist = rpSettings.urlBlacklist;
             const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
             if (!request.bypassBlacklist && blacklist.some(prefix => url.startsWith(prefix))) {
@@ -1015,7 +1270,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               // visit_page: always includes title, referrerUrl is raw URL
               let referrerUrl = request.referrer || null;
               if (!referrerUrl && sender.tab?.id != null) {
-                const bgRef = getReferrer(sender.tab.id);
+                const bgRef = await getReferrer(sender.tab.id);
                 if (bgRef) referrerUrl = bgRef;
               }
               // Skip self-referential
@@ -1066,6 +1321,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                   console.warn('Workspace: auto-pin/snapshot error:', err.message);
                 }
               }
+
+              // Smart-rule auto-pin: evaluate all lists with rules
+              evaluateSmartRulesForVisit(url, title).catch(err => {
+                console.warn('Smart-rule auto-pin error:', err.message);
+              });
 
               notifyMutation('interaction', { url });
             } else if (request.isLeaving) {
@@ -1938,6 +2198,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           } else {
             sendResponse({ success: true, results });
           }
+          break;
+        }
+
+        // ── Sync ──
+
+        case 'syncNow': {
+          const result = await performSync();
+          sendResponse({ success: true, ...result });
+          break;
+        }
+
+        case 'getSyncStatus': {
+          sendResponse({ success: true, syncInProgress, lastSyncResult });
+          break;
+        }
+
+        case 'updateSyncSettings': {
+          // Save sync settings and update alarm. Called after user changes sync config.
+          await updateSyncAlarm();
+          sendResponse({ success: true });
           break;
         }
 

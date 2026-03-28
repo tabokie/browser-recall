@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, getSlugForUrl, openHelperPage, openOptionsPage, waitForListView } from './helpers.js';
+import { resetAndSeed, getSlugForUrl, openHelperPage, openOptionsPage, waitForListView, waitForVisitRecorded } from './helpers.js';
 
 const TEST_URL = 'https://example.com/';
 const TEST_SLUG = getSlugForUrl(TEST_URL);
@@ -310,25 +310,19 @@ test.describe('Cross-entity interference', () => {
     // Navigate parent → child-a via link click
     const page = await extContext.newPage();
     await page.goto(parentUrl);
-    await page.waitForTimeout(300);
+    await page.waitForSelector('a[href="/child-a"]');
     await page.click('a[href="/child-a"]');
     await page.waitForURL('**/child-a');
-    await page.waitForTimeout(300);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    await waitForVisitRecorded(helper, page, childAUrl, parentUrl);
 
     // Navigate back to parent, then to child-b
     await page.goto(parentUrl);
-    await page.waitForTimeout(300);
+    await page.waitForSelector('a[href="/child-b"]');
     await page.click('a[href="/child-b"]');
     await page.waitForURL('**/child-b');
-    await page.waitForTimeout(300);
-
-    const helper = await openHelperPage(extContext, extensionId);
-
-    // Wait for child-b visit with referrer to be processed
-    await helper.waitForFunction((u) =>
-      chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
-        .then(r => r.success && r.parents.referrers.length > 0)
-    , childBUrl, { timeout: 5000 });
+    await waitForVisitRecorded(helper, page, childBUrl, parentUrl);
 
     const relA = await helper.evaluate((u) =>
       chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })

@@ -341,3 +341,96 @@ Currently, `loadNote()` in filesystem-storage.js returns `null` for missing file
 **options.js direct chrome.storage.local** — Three call sites remain:
 1. **WASM search** (`pipelinedSearch`): reads undrained logBuffer entries to search separately from on-disk JSONL (see "Pending Buffer for WASM Search" above).
 2. **Settings diagnostics** (`updateStatistics`, `updateCacheTable`): read logBuffer to display byte sizes and entry counts in the cache inspector UI.
+
+## Multi-Device Sync
+
+### Design
+
+Sync uses GitHub as a transport layer. Each device owns a branch in a shared repo, force-pushing a single orphan commit containing its current data. No merge conflicts — branches are independent.
+
+```
+Device A (branch: a1b2c3d4)           GitHub Repo              Device B (branch: e5f6g7h8)
+  data/logs/a1b2c3d4/...     ──push──▶  branch per device  ◀──push──  data/logs/e5f6g7h8/...
+  data/notes/...              ◀──pull──  read other branches ──pull──▶  data/notes/...
+```
+
+Scope: logs (within retention window) and notes. Snapshots excluded (too large).
+
+### Module Architecture
+
+```
+sync-manager.js (pure logic, injected deps — fully unit-testable)
+    ↓ uses
+sync-transport-github.js (HTTP calls with retry)
+
+background.js (wiring: alarms, message handlers, offscreen bridge)
+    ↓ delegates filesystem to
+offscreen.js (actions: collectSyncFiles, writeSyncFiles, loadSyncManifest, loadRemoteLogEntries)
+    ↓ uses
+filesystem-storage.js (File System Access API)
+```
+
+`SyncManager` receives all dependencies via constructor injection: `transport`, `collectLocalFiles`, `writeRemoteFiles`, `loadCursors`, `saveCursors`, `loadPushState`, `savePushState`. This makes it fully testable with mocked deps (no Chrome APIs).
+
+### Push Cycle
+
+1. `collectSyncFiles(deviceId, retentionDays)` via offscreen — scans `data/logs/<deviceId>/` (within retention) + all `data/notes/` → `[{path, content}]`
+2. Hash each file content (djb2 → base36), compare against `manifest/sync-push-state.json`
+3. If changes detected: `transport.pushTree(deviceId, changedFiles)` — creates blobs, tree, orphan commit, force-updates branch ref
+4. Save updated hashes to push state manifest
+
+### Pull Cycle
+
+1. `transport.listBranches()` — discover peers, filter out own device
+2. Load cursors from `manifest/sync-cursors.json`
+3. For each peer: skip if `treeSha` unchanged (cursor hit) → `transport.getTree(sha)` → diff file SHAs against cursor → download changed blobs
+4. Separate into logs (parse JSONL entries) vs notes (write to disk via `writeRemoteFiles`)
+5. Return `{ remoteEntries: [{ deviceId, entries }] }` for caller to replay
+6. Save updated cursors
+
+### Remote Entry Replay
+
+Remote entries use `effectOf` + `sessionWrite` — same replay pipeline as local entries — but do NOT:
+- Append to local logBuffer (persisted in their own device-specific files)
+- Drain to local JSONL (would duplicate)
+- Update `history:<date>` session keys (remote visits stay out of local timeline)
+
+Remote entries DO update entity state (pages, lists, notes, manifests) via session cache, checkpointed on next drain.
+
+**Replay is idempotent** thanks to per-device `timestamps` map guards (see "Replay Idempotency Requirement" above). Full log files are re-replayed on pull — no line-offset tracking needed.
+
+### Hydration with Multi-Device Logs
+
+On startup, when `syncEnabled`:
+1. Normal hydration (Phase 1 → 2) runs first (local entities + logBuffer)
+2. `loadRemoteLogEntries(localDeviceId)` via offscreen scans all `data/logs/*/` directories, excludes local device
+3. Each peer's entries replayed via `replayRemoteEntries(entries, peerDeviceId)`
+
+### Sync Manifests
+
+**Push state** (`manifest/sync-push-state.json`):
+```json
+{ "files": { "data/logs/dev1/2026-03-20.jsonl": "hash", ... } }
+```
+
+**Cursors** (`manifest/sync-cursors.json`):
+```json
+{ "cursors": { "peer-id": { "treeSha": "abc", "files": { "path": "blobSha" } } } }
+```
+
+### Error Handling
+
+`performSync()` classifies errors:
+- **Auth errors** (401/403) and **not-found** (404): permanent — disables alarm, sets `{ disabled: true }` in sync status. Options UI shows red "disabled" message.
+- **Transient errors** (5xx, network): keeps retrying via alarm. Options UI shows red "will retry" message.
+
+Transport layer (`_request`) retries transient errors with exponential backoff (500ms, 1000ms; max 2 retries). Rate-limit errors (403 + `X-RateLimit-Remaining: 0`) throw immediately without retry.
+
+### Settings
+
+Sync settings stored in `manifest/settings.json` alongside other extension settings:
+- `syncEnabled` (boolean): master toggle
+- `syncRepoUrl` (string): GitHub repo URL (parsed via `parseRepoUrl`)
+- `syncToken` (string): GitHub personal access token
+- `syncIntervalMinutes` (number, default 5): alarm interval
+- `syncRetentionDays` (number, default 7): log files older than this excluded from push

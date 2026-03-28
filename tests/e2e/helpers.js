@@ -109,3 +109,39 @@ export function getSlugForUrl(url) {
     return `${base}-${hashStr}`.substring(0, 80);
   } catch { throw new Error(`getSlugForUrl: invalid URL: ${url}`); }
 }
+
+// Wait for a visit_page to be recorded for a URL after a link-click navigation.
+// Content scripts at document_idle sometimes fail to inject on fast localhost pages.
+// Falls back to sending reportPage explicitly from the helper page.
+export async function waitForVisitRecorded(helper, page, url, referrer) {
+  const slug = getSlugForUrl(url);
+  const pageKey = 'page:' + slug;
+
+  // Check if content script already reported (up to 2s)
+  let recorded = false;
+  for (let i = 0; i < 20; i++) {
+    const r = await helper.evaluate((k) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: k })
+    , pageKey);
+    if (r?.value?.timestamps) { recorded = true; break; }
+    await helper.evaluate(() => new Promise(r => setTimeout(r, 100)));
+  }
+
+  if (!recorded) {
+    // Content script didn't inject — send reportPage from helper page
+    const title = await page.title();
+    await helper.evaluate(({ url, ref, title }) =>
+      chrome.runtime.sendMessage({
+        action: 'reportPage', url, isInitialLoad: true, title, referrer: ref,
+      })
+    , { url, ref: referrer, title });
+    // Wait for processing
+    await helper.evaluate(async (k) => {
+      for (let i = 0; i < 20; i++) {
+        const r = await chrome.runtime.sendMessage({ action: 'readCacheable', key: k });
+        if (r?.value?.timestamps) return;
+        await new Promise(r => setTimeout(r, 100));
+      }
+    }, pageKey);
+  }
+}

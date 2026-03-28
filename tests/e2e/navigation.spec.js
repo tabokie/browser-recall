@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, openHelperPage, openOptionsPage, getSlugForUrl } from './helpers.js';
+import { resetAndSeed, openHelperPage, openOptionsPage, getSlugForUrl, waitForVisitRecorded } from './helpers.js';
 
 test.describe('Navigation and referrer tracking', () => {
   test.beforeAll(({ localServer }) => {
@@ -44,22 +44,21 @@ test.describe('Navigation and referrer tracking', () => {
       }},
     ]);
 
+    // Navigate home → page-a via link click
     const page = await extContext.newPage();
     await page.goto(homeUrl);
     await page.waitForSelector('#link-a');
     await page.click('#link-a');
     await page.waitForSelector('#link-b');
 
-    // Wait for visit_page to process and enrich the page entity
     const helper = await openHelperPage(extContext, extensionId);
-    await helper.waitForFunction((u) =>
-      chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
-        .then(r => r.success && r.parents.referrers.length > 0)
-    , pageAUrl, { timeout: 5000 });
+    await waitForVisitRecorded(helper, page, pageAUrl, homeUrl);
 
     const relations = await helper.evaluate((url) =>
       chrome.runtime.sendMessage({ action: 'getPageRelations', url })
     , pageAUrl);
+
+    await page.close();
     await helper.close();
 
     expect(relations.success).toBe(true);
@@ -107,16 +106,13 @@ test.describe('Navigation and referrer tracking', () => {
     await page.waitForSelector('#next');
     await page.click('#next');
     await page.waitForSelector('#next');
-    await page.click('#next');
-    await page.waitForSelector('p');
 
     const helper = await openHelperPage(extContext, extensionId);
+    await waitForVisitRecorded(helper, page, chainBUrl, chainAUrl);
 
-    // Wait for chain-c visit to process
-    await helper.waitForFunction((u) =>
-      chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
-        .then(r => r.success && r.parents.referrers.length > 0)
-    , chainCUrl, { timeout: 5000 });
+    await page.click('#next');
+    await page.waitForSelector('p');
+    await waitForVisitRecorded(helper, page, chainCUrl, chainBUrl);
 
     const relB = await helper.evaluate((url) =>
       chrome.runtime.sendMessage({ action: 'getPageRelations', url })
@@ -382,14 +378,8 @@ test.describe('Navigation and referrer tracking', () => {
     await page.click('#go-child');
     await page.waitForSelector('p');
 
-    // Wait for referrer to be processed into child entity
     const helper = await openHelperPage(extContext, extensionId);
-    await helper.waitForFunction(
-      (url) => chrome.runtime.sendMessage({ action: 'getPageRelations', url })
-        .then(r => r.success && r.parents.referrers.length > 0),
-      childUrl,
-      { timeout: 5000 }
-    );
+    await waitForVisitRecorded(helper, page, childUrl, parentUrl);
 
     const relations = await helper.evaluate((url) =>
       chrome.runtime.sendMessage({ action: 'getPageRelations', url })

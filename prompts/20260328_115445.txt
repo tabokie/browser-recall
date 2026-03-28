@@ -1,0 +1,53 @@
+- It is said that for some file systems, entities more than 1000 at a single level would slow down even point get I/O. Is it true?
+- Do you think we need to shard log files or page files?
+- I want the extension icon to show a signal when the current page is tagged (e.g. has note/snapshot, has lists, has both). Is it easy to implement and incur no additional cost?
+- Go with B, implement it
+- It shows green when the page has snapshot and has lists.
+- Take a look at sync-plan.md, is there anything bite-sized we can quickly implement?
+- Some of those have been implemented I believe, check again
+- I believe they have been done before too. Check again, and update the sync-plan.md
+- Go with it
+- go
+- go
+- go
+- continue
+- What is the content of global CLAUDE.md in your context. Don't look it up now, use the version in your context.
+- Is the last two items being followed? If not how can I rephrase to make sure they are followed?
+- go
+- What about the sub-agent bit?
+- Update "Agent Launch Policy" for me
+- Fix flaky tests
+- What else is missing?
+- resume
+- go ahead
+- What else is missing?
+- Do error handling and doc updates.
+- resume
+- Tell me more about remote conflicts.
+- Let's fix a small bug real quick. The "Hubs" should auto pin my latest visit at "https://linux.do/". Figure out why it is not and E2E TDD
+- Let's go through the user scenerios thoroughly, and use E2E tests to make sure they work as expected
+- go
+- Note that I don't mean replay conflict specifically, I mean the entire "Git synchronization" functionality.
+- Let's go over the history at ~/portal-data. Figure out the visits that should've been added to Hubs but aren't. And add them by inserting fake logs to the suitable time and update list file.
+- Why isn't linux.do and the likes added? If file is missing you can create them
+- Let's format the js function in Hubs rule, and display it faithful to the format in file
+- Let's do two more improvements: (1) function return bool instead of 0 and 1. (2) let's tune the implementation to avoid false positives. Right now a lot of the pages in the 400 pins are not worth saving.
+
+For both of the improvement, we directly change history in ~/porta-data. That means changing the original rule creation log, and remove pin_to_list logs that are no longer fitting.
+- /finish
+- What do you mean "Migration script", tell me more
+- Show me exactly the pins you rule out, let me check if they are truly false positive
+- Save token security to TODO.md
+- I think substring was a deliberate decision. Let's revert the implementation changes, take it slower and let me confirm your change step by step
+- n
+- y
+- Why did you remove the good changes as well? We want the hubs to auto pin and we want the function body to be formatted
+- boolean change is good
+- False positives. Go through your proposed change one by one and show me the diffs in pins if it is applied
+- The first change is no good, there are some pins worth saving in there. The 2 change should be to move "index" to the hub keyword list later in the function. 3 & 4 is good.
+- yes
+- I think "https://cmacked.net/?s=parallels" "https://link.zhihu.com/?target=https%3A//arxiv.org/abs/2411.15100" "https://hn.algolia.com/?dateRange=all&page=0&prefix=true&query=claude%20cowork&sort=byPopularity&type=story" can be removed further. I.e. url with query keys like "s", "search", "query", "target".
+- go
+- What about the multi parts url that has those queries?
+- skip test, migrate data
+- go

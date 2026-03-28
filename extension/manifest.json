@@ -11,7 +11,8 @@
     "offscreen",
     "scripting",
     "webNavigation",
-    "contextMenus"
+    "contextMenus",
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"

@@ -1265,14 +1265,19 @@ function renderRulesList(listId, rules) {
     return;
   }
   const typeLabel = (t) => t === 'smart' ? 'function' : t;
-  container.innerHTML = rules.map(rule =>
-    `<div class="rule-entry" data-rule-id="${escapeHtml(rule.id)}">
-      <span class="rule-type-badge rule-type-${escapeHtml(rule.type)}">${escapeHtml(typeLabel(rule.type))}</span>
-      <span class="rule-desc">${escapeHtml(ruleDescription(rule))}</span>
-      <button class="rule-action-btn rule-edit" title="Edit">&#x270E;</button>
-      <button class="rule-action-btn rule-remove" title="Remove">&times;</button>
-    </div>`
-  ).join('');
+  container.innerHTML = rules.map(rule => {
+    const fnBlock = rule.type === 'smart' && rule.config?.fnSource
+      ? `<pre class="rule-fn-source">${escapeHtml(rule.config.fnSource)}</pre>` : '';
+    return `<div class="rule-entry${fnBlock ? ' has-fn' : ''}" data-rule-id="${escapeHtml(rule.id)}">
+      <div class="rule-header">
+        <span class="rule-type-badge rule-type-${escapeHtml(rule.type)}">${escapeHtml(typeLabel(rule.type))}</span>
+        <span class="rule-desc">${escapeHtml(ruleDescription(rule))}</span>
+        <button class="rule-action-btn rule-edit" title="Edit">&#x270E;</button>
+        <button class="rule-action-btn rule-remove" title="Remove">&times;</button>
+      </div>
+      ${fnBlock}
+    </div>`;
+  }).join('');
 
   container.querySelectorAll('.rule-edit').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -2998,6 +3003,58 @@ document.getElementById('captureSnapshotVideo').addEventListener('change', async
   showStatus('Settings saved', 'success');
 });
 
+// Sync settings
+document.getElementById('syncEnabled').addEventListener('change', () => {
+  document.getElementById('syncConfigFields').style.display =
+    document.getElementById('syncEnabled').checked ? 'block' : 'none';
+});
+
+document.getElementById('syncSaveBtn').addEventListener('click', async () => {
+  const enabled = document.getElementById('syncEnabled').checked;
+  const repoUrl = document.getElementById('syncRepoUrl').value.trim();
+  const token = document.getElementById('syncToken').value.trim();
+  const interval = parseInt(document.getElementById('syncIntervalMinutes').value) || 5;
+  const retention = parseInt(document.getElementById('syncRetentionDays').value) || 7;
+
+  if (enabled && (!repoUrl || !token)) {
+    showStatus('Repo URL and token are required', 'error');
+    return;
+  }
+
+  await saveSettingsValue('syncEnabled', enabled);
+  await saveSettingsValue('syncRepoUrl', repoUrl);
+  await saveSettingsValue('syncToken', token);
+  await saveSettingsValue('syncIntervalMinutes', Math.max(1, interval));
+  await saveSettingsValue('syncRetentionDays', Math.max(1, retention));
+  await sendAction('updateSyncSettings');
+  showStatus('Sync settings saved', 'success');
+});
+
+document.getElementById('syncNowBtn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('syncStatus');
+  statusEl.textContent = 'Syncing...';
+  try {
+    const result = await sendAction('syncNow');
+    if (result.skipped) {
+      statusEl.textContent = result.error || 'Sync skipped (not configured or already running)';
+    } else if (result.error) {
+      statusEl.style.color = '#c62828';
+      statusEl.textContent = result.disabled
+        ? `Sync disabled: ${result.error}. Fix settings and save again.`
+        : `Error (will retry): ${result.error}`;
+    } else {
+      statusEl.style.color = '#2e7d32';
+      const parts = [];
+      if (result.pushed) parts.push('pushed');
+      if (result.pulled) parts.push(`pulled ${result.entriesReplayed} entries`);
+      const time = new Date(result.timestamp).toLocaleTimeString();
+      statusEl.textContent = (parts.length ? parts.join(', ') : 'No changes') + ` at ${time}`;
+    }
+  } catch (e) {
+    statusEl.textContent = `Error: ${e.message}`;
+  }
+});
+
 // Clear all data
 document.getElementById('clearBtn').addEventListener('click', async () => {
   if (!confirm('WARNING: This will DELETE ALL FILES in your storage directory!\n\nThis cannot be undone. Are you absolutely sure?')) {
@@ -3927,6 +3984,14 @@ async function initialize() {
   historyFileBatch = await loadSettingsValue('historyFileBatch', 10);
   document.getElementById('historyFileBatch').value = historyFileBatch;
   document.getElementById('captureSnapshotVideo').checked = await loadSettingsValue('captureSnapshotVideo', false);
+  // Sync settings
+  const syncEnabled = await loadSettingsValue('syncEnabled', false);
+  document.getElementById('syncEnabled').checked = syncEnabled;
+  document.getElementById('syncConfigFields').style.display = syncEnabled ? 'block' : 'none';
+  document.getElementById('syncRepoUrl').value = await loadSettingsValue('syncRepoUrl', '');
+  document.getElementById('syncToken').value = await loadSettingsValue('syncToken', '');
+  document.getElementById('syncIntervalMinutes').value = await loadSettingsValue('syncIntervalMinutes', 5);
+  document.getElementById('syncRetentionDays').value = await loadSettingsValue('syncRetentionDays', 7);
   _timer('loadSettings');
 
   // Initialize chart tooltips

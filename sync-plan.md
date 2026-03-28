@@ -542,62 +542,58 @@ Prompts for device name, then:
 
 ## 8. Implementation Phases
 
-### Phase 0: Replay commutativity (no sync yet)
+### Phase 0: Replay commutativity (no sync yet) — COMPLETE
 
-Make `effectOf` order-independent. Sync-specific fields (`deletedTs`, `timestamps`, `listOwner`, `owner`) only appear when user enables sync — gated by `context.deviceId`. No fallback code.
+All `effectOf` branches are order-independent. Device-specific fields (`deletedTs`, `timestamps`, `listOwner`, `owner`) are always present (always-on device name, not gated by sync mode).
 
-Already done:
 - ~~Remove `reparent_list` action, replace with `update_list_tree`~~ (e1635f5)
 - ~~`replace_note` both-survive~~ (already works naturally)
+- ~~`Math.max` for all `entity.timestamp` assignments~~ (via `touchTimestamp` helper in replay.js)
+- ~~`effectOf(entry, load, context = {})` — context parameter with `context.deviceId`~~ (593ac8e)
+- ~~`resolveListKey(name)` — compound key `listOwner/name` via `entry.listOwner`~~ (1c85e49)
+- ~~LWW via `deletedTs` for delete/restore branches~~
+- ~~`pin_to_list` / `unpin_from_list` / rules / `update_list` load with `includeDeleted: true`~~ (via `loadListForMutation` helper)
+- ~~Per-device timestamp guards for `rate_page`, `leave_page` via `timestamps` map~~ (593ac8e)
+- ~~Background/offscreen wiring: pass `context.deviceId` to all `effectOf` call sites~~
+- ~~`getListEventFields` refactor: returns `{ name, listOwner }`~~
+- ~~List-event emit sites: `listOwner` field on all list events~~
+- ~~Device-specific log file naming: `data/logs/<deviceId>/YYYY-MM-DD.jsonl`~~ (subdirectory-based, 1c85e49)
+- ~~Migration script (`scripts/migrate-always-device.mjs`)~~
+- ~~Commutativity tests T1–T21: all permutation-based tests passing~~ (tests/replay.test.js)
 
-Steps:
-1. `Math.max` for all `entity.timestamp` assignments (unconditional, safe in single-device mode)
-2. `effectOf(entry, load, context = {})` — add context parameter. `context.deviceId` truthy = sync mode.
-3. `resolveListKey(entry)` — uses `(name, listOwner)` compound key in sync mode, flat `name` in non-sync
-4. LWW via `deletedTs` for delete/restore branches (sync mode only)
-5. `pin_to_list` / `unpin_from_list` / rules / `update_list` load with `includeDeleted: true` (sync mode only)
-6. Per-device timestamp guards for `rate_page`, `leave_page` via `timestamps` map (sync mode only)
-7. Background/offscreen wiring: pass `context.deviceId` to all `effectOf` call sites
-8. `getListEventFields` refactor: returns `{ name, listOwner }` (sync) or `{ parents, name }` (non-sync)
-9. List-event emit sites: `listOwner` + drop `parents` (sync mode)
-10. Device-specific log file naming: `YYYY-MM-DD-<deviceName>.jsonl` (sync mode)
-11. Migration script (`scripts/migrate-sync-enable.mjs`): runs when user enables sync
-12. Commutativity tests: replay same entries in different orders, assert identical final state (see §11)
+### Phase 1: Sync transport — COMPLETE
 
-### Phase 1: Sync transport
+- ~~Device name setup + storage in settings~~ (always-on device name via CURRENT file, 1c85e49)
+- ~~`host_permissions` for GitHub API~~ (`<all_urls>` already covers it)
+- ~~Settings UI: repo URL, personal access token, sync toggle, retention window~~ (options.html/options.js sync section)
+- ~~`SyncTransport` module — GitHub API adapter~~ (`sync-transport-github.js`: `listBranches()`, `getTree()`, `getBlob()`, `pushTree()` with retry)
 
-1. Device name setup + storage in settings (user-chosen, human-readable)
-2. Settings UI: repo URL, personal access token, sync toggle, retention window
-3. `SyncTransport` module — GitHub API adapter:
-   - `listBranches()`, `getTree(branch)`, `getBlob(sha)`, `pushTree(branch, files)`
-4. `host_permissions` in manifest.json for `https://api.github.com/*`
+### Phase 2: Push & pull — COMPLETE
 
-### Phase 2: Push & pull
+- ~~Push cycle: collect local files → compare with push state → create orphan commit → force-push branch~~ (`SyncManager.push()` + offscreen `collectSyncFiles`)
+- ~~Pull cycle: list branches → for each peer, compare tree → download new files → write to `data/`~~ (`SyncManager.pull()` + offscreen `writeSyncFiles`)
+- ~~Remote log replay: `replayRemoteEntries()` using `effectOf` + `sessionWrite`~~ (background.js `replayRemoteEntries`)
+- ~~Sync cursor tracking: `manifest/sync-cursors.json`~~ (SyncManager cursor load/save via offscreen `loadSyncManifest`)
+- ~~`chrome.alarms` for periodic sync~~ (background.js `updateSyncAlarm` + alarm listener)
+- ~~Manual sync button in settings UI~~ (options.js `syncNowBtn` handler)
 
-1. Push cycle: collect local files → compare with push state → create orphan commit → force-push branch
-2. Pull cycle: list branches → for each peer, compare tree → download new files → write to `data/`
-3. Remote log replay: `replayRemoteEntries()` using `effectOf` + `sessionWrite`
-4. Sync cursor tracking: `manifest/sync-cursors.json`
-5. `chrome.alarms` for periodic sync
-6. Manual sync button in settings UI
+### Phase 3: Polish — COMPLETE
 
-### Phase 3: Polish
-
-1. Sync status indicator (last sync time, peer list, errors)
-2. Hydration with multi-device log files (scan all `*.jsonl`, local first)
-3. Retention enforcement (exclude old logs from push)
-4. Error handling: network failures, auth errors, rate limits
-5. Conflict visibility: notification when restore-wins overrides a local delete
+- ~~Sync status indicator (last sync time, peer list, errors)~~ (options.js green/red status display + timestamp)
+- ~~Hydration with multi-device log files (scan all `*.jsonl`, local first)~~ (background.js hydration loads remote entries via `loadRemoteLogEntries` when syncEnabled)
+- ~~Retention enforcement (exclude old logs from push)~~ (`collectSyncFiles` filters by `retentionDays`)
+- ~~Error handling: network failures, auth errors, rate limits~~ (transport retry with backoff; `performSync` error classification: auth/404 → disable alarm; options UI disabled/retry messages)
+- Conflict visibility: notification when restore-wins overrides a local delete (deferred — no UI yet)
 
 ## 9. Implementation Notes
 
 These are correctness issues that must be addressed during implementation, not commutativity problems.
 
-**9.1 GC_TOMBSTONE must not block remote events.** `sessionLoad` (via `readCacheable`) must treat `GC_TOMBSTONE` (`{ __gc: true }`) as a cache miss, not a valid entity. Otherwise, remote events referencing a locally-GC'd page will spread `{ __gc: true, ...newFields }` into session cache — silent data corruption. Fix: add a `__gc` check in `readCacheable` or `sessionLoad` that returns `undefined` for tombstones.
+**~~9.1 GC_TOMBSTONE must not block remote events.~~** DONE — `readCacheable` returns `null` for `{ __gc: true }` sentinels (background.js:284).
 
-**9.2 All list-modifying operations must use `includeDeleted: true`.** Not just `pin_to_list` / `unpin_from_list` — also `add_rule`, `remove_rule`, `update_rule`, and `update_list`. These operations should update the entity even when deleted, so that data is preserved for potential restore. This is a uniform rule: if the entity supports delete/restore, all mutations load with `includeDeleted`.
+**~~9.2 All list-modifying operations must use `includeDeleted: true`.~~** DONE — `loadListForMutation` helper loads with `{ includeDeleted: true }`, used by all list-mutating `effectOf` branches.
 
-**9.3 `create_list` and `delete_list` must update the tree manifest.** `effectOf` for `create_list` should append the new list to `manifest/list-order.json` as a top-level node if not already present. `effectOf` for `delete_list` should remove the list from the tree. Without this, remote-created lists won't appear in the UI until the next `update_list_tree` event, and remote-deleted lists will linger in the tree.
+**~~9.3 `create_list` and `delete_list` must update the tree manifest.~~** DONE — `create_list` appends via `appendToTree`, `delete_list` removes via `removeFromTree` (replay.js).
 
 ## 10. Open Questions (deferred)
 

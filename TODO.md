@@ -9,6 +9,11 @@
 - [ ] **Add "degraded cache" test variants.** All tests mock `chrome.storage.session` as a reliable in-memory store. In reality, session cache can be empty after SW restart, extension disable/re-enable, or LRU eviction. Code that reads cache without disk fallback silently returns undefined. Bug 4: empty collections after disable/re-enable (neither `onInstalled` nor `onStartup` fires). Bug 13: pin resolution returned undefined because options.js assumed session was populated. Bug 18b: `getPageRelations` read stale `listCache:*` session keys instead of entity storage. Bug 18c: `readFs` had no case for user list keys, returning undefined on cache miss. Fix: for each integration test, add a variant where `chrome.storage.session.get()` returns `{}` for some keys, forcing fallback paths.
 - [ ] **Add contract tests for IPC boundaries.** Background ↔ offscreen uses a port channel with JSON messages. No test verifies the response shape from one side matches what the other expects — a rename on one side silently breaks the other. Bug 8: offscreen `loadPermanentDeletes` returned `{ urls }`, background expected `{ keys }`. Bug 17: `loadLists` migration changed data shape (`listOrder` lacks `qbTrees`), breaking consumers. Fix: test that offscreen response shapes match background expectations, and background response shapes match options/popup expectations.
 
+## Sync
+
+- [ ] **Token security.** GitHub personal access token is stored in plain `manifest/settings.json`. Acceptable for v1. Future: use OS keychain via native messaging, or encrypt at rest in `chrome.storage.local`.
+- [ ] **Conflict visibility UI.** No user notification when a remote LWW override silently wins (e.g., remote delete overrides local restore). Surface as transient notifications in the options page.
+
 ## Exploration / research
 
 - [x] **Snapshot viewer: treat blob: tab as original page (highlights + popup UI).** Fixed: `captureSnapshot` embeds `<meta name="x-portal-slug" content="{slug}">` in HTML; `getSlugForCurrentPage()` checks the meta tag first. Old snapshots degrade gracefully.
