@@ -1018,6 +1018,14 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
   if (url && /\.pdf(\?|#|$)/i.test(new URL(url).pathname)) {
     throw new Error('Cannot capture PDF pages');
   }
+  // Fallback: ask content script to check for Chrome's PDF viewer embed
+  try {
+    const pdfCheck = await chrome.tabs.sendMessage(tabId, { action: 'isPdfPage' });
+    if (pdfCheck?.isPdf) throw new Error('Cannot capture PDF pages');
+  } catch (e) {
+    if (e.message === 'Cannot capture PDF pages') throw e;
+    // Content script might not be loaded — proceed with capture
+  }
   const mdResp = await chrome.tabs.sendMessage(tabId, { action: 'extractMarkdown' });
   const html = await captureSavePage(tabId);
   const markdown = mdResp?.markdown || '';

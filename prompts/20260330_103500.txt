@@ -1,0 +1,7 @@
+- Sometimes, the first double-click to open a searched page doesn't work
+- resume
+- resume
+- go
+- "https://arxiv.org/pdf/2304.03442" is not recognized as pdf and no PDF hover widget is rendered
+- Use 2
+- /finish

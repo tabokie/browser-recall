@@ -97,7 +97,7 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 **Test infrastructure:** `setTestDirectory` (creates OPFS-backed directory handle for test use), `resetDirectory` (wipes all directory contents + resets drain state), `seedTestData` (writes JSON/JSONL files to directory)
 
 ### content.js handles (line ~875):
-`extractMarkdown`, `highlightSelection`, `removeHighlightMark`, `showHighlightsPanel`, `showCaptureNotification`, `showLikeNotification`
+`extractMarkdown`, `highlightSelection`, `removeHighlightMark`, `showHighlightsPanel`, `isPdfPage`, `showCaptureNotification`, `showLikeNotification`
 
 ### Save Page WE messages (savepage-bridge.js, `type` field — separate from `action` field):
 `scriptLoaded`, `setDelay`, `requestFrames`, `replyFrame`, `loadResource`, `stateChanged`, `savepageDone`, `saveExit`
@@ -130,7 +130,7 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **Background resource fetch**: `savepage-bridge.js` `loadSavepageResource()` (internal) — background fetches CORS resources for SPWE via `loadResource` message (10s timeout, 50MB size cap, video skipped by default via `captureSnapshotVideo` setting)
 - **Filesystem write**: `filesystem-storage.js` `captureSnapshot(slug, ts, md, html)` → `data/snapshots/{slug}-{ts}.md|.html`. Embeds `<meta name="x-portal-slug" content="{slug}">` in HTML for slug identity.
 - **Two-phase capture log**: after offscreen writes files, background calls `addLog({ action: 'page', url, mdPath, htmlPath })` — large content never in log buffer
-- **PDF guard**: `captureAndLog` rejects `.pdf` URLs with `'Cannot capture PDF pages'` error
+- **PDF guard**: `captureAndLog` rejects PDFs — first checks `.pdf` URL extension, then asks content script `isPdfPage` (DOM-based `embed[type="application/pdf"]` check) as fallback for extensionless PDF URLs (e.g. arXiv)
 - **Auto-snapshot**: workspace mode with `autoSnapshot` flag
 
 ### Highlight / Note System
@@ -144,7 +144,7 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **Snapshot viewer highlights**: `snapshot-viewer.html` + `snapshot-viewer.js` renders snapshot in srcdoc iframe; loads notes via `loadPageNotes` and applies highlights to iframe's DOM. Popup extracts slug from viewer URL params for `getPageInfo`.
 - **Context menu highlight**: right-click "Highlight Selected" → background `handleContextMenuHighlight` (ensureCheckpointIfMissing + saveNote + addLog + sends `showHighlightsPanel` to content script); uses `chrome.tabs.query({active:true, lastFocusedWindow:true})` to get real URL (workaround for Chrome PDF viewer reporting internal extension URL)
 - **Highlights panel**: `showHighlightsPanel(notes, pageSlug, {hint})` in content.js — Shadow DOM overlay listing all excerpt notes with inline edit textareas, delete buttons, draggable header; auto-shown on PDF pages (1500ms delay + MutationObserver re-creation guard, `__portalPanelDismissed` flag suppresses re-creation after user closes)
-- **PDF page support**: content.js `.pdf` URL detection auto-shows highlights panel with hint; DOM-based highlight marks not possible (PDFium plugin), but context menu `info.selectionText` works; `captureAndLog` rejects `.pdf` URLs with error
+- **PDF page support**: content.js detects PDFs via `.pdf` URL extension OR `embed[type="application/pdf"]` DOM check (covers extensionless URLs like arXiv); auto-shows highlights panel with hint after 1500ms; DOM-based highlight marks not possible (PDFium plugin), but context menu `info.selectionText` works
 - **Storage**: note entities in `notes/{slug}.json`; notes linked to parent pages via `page.childIds` containing `note:{slug}` keys
 
 ### Search & Ranking (WASM)
@@ -202,7 +202,7 @@ Same read actions as before + `saveListPins` + `loadListPinsById` + `loadAllList
 - **List view**: `options.js` `showList()` — pins-only view; loads pins per-list (cached in `allListPins`), resolves + enriches via `enrichPinResult()`, renders into `#relatedResults` via virtual scroller; simplified search input filters pins with `wordsMatchItem()`; time chart from pin data; rules section (collapsible, type badges + inline add form + run button)
 - **Pin refresh**: `options.js` `refreshPins()` — lightweight incremental re-render after pin toggle; for explore: runs search pipeline; for list: re-resolves pins and re-renders via `renderListPinView()`
 - **Virtual scrolling**: `virtual-scroller.js` `VirtualScroller` class — viewport-only rendering (~50-80 DOM nodes at any time); `appendData(newItems)` for demand-loading (items pre-sorted before append), `onLoadMore` callback triggers near end of data; imported by options.js, instances for global results and list explore
-- **Event delegation**: `bindResultDelegation(container)` — single container-level click/dblclick/dragstart handler, replaces per-row listeners; dragstart collects all `.selected` rows for multi-drag
+- **Event delegation**: `bindResultDelegation(container)` — single container-level click/dblclick/dragstart handler, replaces per-row listeners; click and dblclick both traverse `.result-item` → `.result-row` (extras area is outside `.result-row` but inside `.result-item`); dragstart collects all `.selected` rows for multi-drag
 - **Multi-drag drop**: list sidebar `drop` handler processes `{ items: [...] }` array, bulk-adds pins with single `saveAllListPins()` call
 - **Result rows**: `options.js` `resultRowHtml()` — attention dot, expand detail, pin (unified, always shown), delete, focus (hideable via `noFocusButton`), extra column cells via context
 - **Column headers**: `options.js` `columnHeaderHtml(context)` + `bindColumnHeaderClicks()` — delegated sort, "+" popover for extra columns

@@ -1129,6 +1129,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     window.__portalPanelDismissed = false; // Reset so new highlight shows panel
     showHighlightsPanel(request.notes || [], request.pageSlug);
     sendResponse({ success: true });
+  } else if (request.action === 'isPdfPage') {
+    sendResponse({ isPdf: !!document.querySelector('embed[type="application/pdf"]') });
   } else if (request.action === 'showCaptureNotification') {
     showCaptureNotification();
     sendResponse({ success: true });
@@ -1148,8 +1150,12 @@ reapplyHighlights();
 
 // On PDF pages, show highlights panel with hint.
 // Delay to let Chrome's PDF viewer finish initializing (it replaces DOM after content script runs).
+// Detect via URL (.pdf extension) OR DOM (Chrome injects <embed type="application/pdf">).
 try {
-  if (/\.pdf(\?|#|$)/i.test(new URL(window.location.href).pathname)) {
+  setTimeout(() => {
+    const isPdf = /\.pdf(\?|#|$)/i.test(new URL(window.location.href).pathname) ||
+                  !!document.querySelector('embed[type="application/pdf"]');
+    if (!isPdf) return;
     const pdfSlug = getSlugForCurrentPage();
     function showPdfPanel() {
       chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: pdfSlug }).then(resp => {
@@ -1160,15 +1166,14 @@ try {
         showHighlightsPanel([], pdfSlug, { hint: 'Select text and right-click to highlight' });
       });
     }
-    // Initial show after PDF viewer settles
-    setTimeout(showPdfPanel, 1500);
+    showPdfPanel();
     // Re-show if PDF viewer destroys the panel (but not if user dismissed it)
     new MutationObserver(() => {
       if (!document.getElementById('portal-highlights-panel') && !window.__portalPanelDismissed) {
         setTimeout(showPdfPanel, 500);
       }
     }).observe(document.body, { childList: true });
-  }
+  }, 1500);
 } catch {}
 
 // Before unload, send final attention report

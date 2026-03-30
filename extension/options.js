@@ -2146,9 +2146,11 @@ function bindResultDelegation(container) {
   });
 
   container.addEventListener('dblclick', (e) => {
-    const row = e.target.closest('.result-row');
-    if (!row) return;
     if (e.target.closest('.result-pin') || e.target.closest('.card-actions') || e.target.closest('.att-ctrl')) return;
+    const item = e.target.closest('.result-item');
+    if (!item) return;
+    const row = item.querySelector('.result-row');
+    if (!row) return;
     chrome.tabs.create({ url: row.dataset.url });
   });
 
