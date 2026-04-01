@@ -1,0 +1,46 @@
+- I want to rename this project. Use a similar format like "computer-use" or "browser-use". What do you suggest?
+- go
+- No, "use" is not mandatory. "format" refers to the <noun>-<verb> structure only
+- Go with browser-<verb>
+- okayish, any verb that's shorter and simpler?
+- Analyze the codebase and my previous prompts in ./prompts. We are pushing for product release. Do you think there's any gaps in terms of feature completeness, product quality, user experience, etc? Dig deep and be thorough, don't miss any details. If the analysis is too long, you can write to a file first.
+- Let's work on all of them. /grill
+- A
+- Go with A
+- During onboarding, show user a UI that explain why it needs a directory, and show a widget to configure it. There is a default path when configuring.
+Do not pop up a picker immediately when enter the setting page, that would be intimidating.
+- resume
+- Then no need for default, always let user pick
+- B if it can be implemented robust
+- Didn't we already have a cache eviction routine somewhere? I remembered asking you to do that.
+Also not sure what you meant by "fall through to background". Where do we set data in foreground and why do we do it? Should we consider background set failures as well?
+If we consider background set, then some of those cases cannot fall through easily. Because the dirty data (whose disk version hasn't caught up) is not available on disk.
+- Not sure if it's safe to evict pinned-but-non-dirty entries. Do you still abide by the dirty timestamp rules?
+- Here is the thing, I/O work is independent from background service. If memory is not enough, we should try to cache more aggresively (but do not violate dirty timestamp). If not working still, we pause the background service (print error like the other error handling paths). The 10MB limit you suggest is also good if this doesn't trigger Chrome level warning or something.
+- Here is the thing, I/O work is independent from background service. If memory is not enough, we should try to evict more aggresively (but do not violate dirty timestamp). If not working still, we pause the background service (print error like the other error handling paths). The 10MB limit you suggest is also good if this doesn't trigger Chrome level warning or something.
+- Yes. Even though we do experience data loss for new events. In all of the error conditions where service is paused, we should change the extension icon to a downtime state
+- A. When open settings page, he should err the specific errors and suggestions for all types of conditions, not just permission
+- A
+- Should allow debugging, but keep it light, debug / error two level is good enough. Should be configurable.
+- A, but not persistent
+- No confirmation. They are all saved in recycle bin anyway
+- B
+- Keep it simple, only two tier. UI state and dark mode and debug flag is in session. Others are in manifest
+- A
+- Add it to TODO.md, skip right now.
+- browser-recall, 1.0
+- Generate them all
+- A
+- A
+- 1> No need for multiple steps, ask for necessary configs and then we enter the normal home screen
+2> yes
+3> I think without the directory, options page cannot render? Choose whatever approach that is simple and elegant
+- A is mandatory, B&C is optional, user can skip them
+- looks good
+- looks good, let's write them into plans under ./plans directory, work meticulously and iteratively
+- You might need to write multple plan files, in format ./plans/00-<name>.md
+- No need. Disable plan mode. Are there any gaps between our conversation and the plan files?
+- You mentioned "master plan", I think you didn't write it to file (I interrupted). You should write master plan as the 00, others after it.
+
+You can merge previous 00 and 01
+- Change all the 0n-*.md under ./plans to 1n-*.md
