@@ -1,54 +1,67 @@
 # TODO
 
-- [ ] **Re-inject content scripts on extension reload/re-enable.** Content script's `chrome.runtime` context is permanently invalidated after extension reload or disable→re-enable. Fix: call `chrome.scripting.executeScript` from `onInstalled` in background.js to re-inject into all existing tabs. Requires idempotency guard and stale Shadow DOM cleanup in content.js.
-- [ ] Rename interaction to history across the codebase.
-- [ ] **Fix TODO comments in shipped code.** `popup.js:338` — URL discrepancy between `tab.url` and content script URL. `options.js:1027` — Exact match should use word-boundary matching. Both indicate incomplete feature work.
+- [ ] **Show downtime icon on stale content script tabs.** Content script's `chrome.runtime` context is permanently invalidated after extension reload or disable→re-enable. On `onInstalled`, set the extension icon to downtime for all existing tabs, prompting the user to refresh. No re-injection needed.
+- [x] Rename interaction to history across the codebase.
+- [x] **Fix TODO comments in shipped code.** `popup.js:338` — URL discrepancy between `tab.url` and content script URL. `options.js:1027` — Exact match should use word-boundary matching. Both indicate incomplete feature work.
+- [x] **Unify offscreen message key schema + contract tests.** Standardize the naming conventions and response shapes for all background ↔ offscreen port messages. Define a single message contract (request/response types, error envelope) and enforce it at the port channel boundary. Then add contract tests that verify offscreen response shapes match background expectations, and vice versa. (Consolidates IPC schema and contract testing into one effort.)
 
 ## Test infrastructure
 
-- [ ] **Extract testable modules from background.js.** `background.js` is a 1632-line monolith that can't be imported in Node (requires Chrome APIs). Tests for `processPageReport`, `addLog`, `resolvePageId`, etc. reimplement the logic inline — when the real code diverges, tests pass while the extension is broken. Bug 21: reimplemented `processPageReport` passed but real code deleted `isInitialLoad` before reaching the function. Bug 19b: reimplemented `addLog` had correct disk fallback but real code had `const arr = today || []`. Bug 8: offscreen returned `{ urls }` but background expected `{ keys }` — no test exercised the real IPC. Bug 17: `loadLists` changed data shape (dropped `qbTrees`), breaking `showList()`. Fix: move these functions into importable modules (like `replay.js` already is) so tests import the real code.
-- [ ] **Add "degraded cache" test variants.** All tests mock `chrome.storage.session` as a reliable in-memory store. In reality, session cache can be empty after SW restart, extension disable/re-enable, or LRU eviction. Code that reads cache without disk fallback silently returns undefined. Bug 4: empty collections after disable/re-enable (neither `onInstalled` nor `onStartup` fires). Bug 13: pin resolution returned undefined because options.js assumed session was populated. Bug 18b: `getPageRelations` read stale `listCache:*` session keys instead of entity storage. Bug 18c: `readFs` had no case for user list keys, returning undefined on cache miss. Fix: for each integration test, add a variant where `chrome.storage.session.get()` returns `{}` for some keys, forcing fallback paths.
-- [ ] **Add contract tests for IPC boundaries.** Background ↔ offscreen uses a port channel with JSON messages. No test verifies the response shape from one side matches what the other expects — a rename on one side silently breaks the other. Bug 8: offscreen `loadPermanentDeletes` returned `{ urls }`, background expected `{ keys }`. Bug 17: `loadLists` migration changed data shape (`listOrder` lacks `qbTrees`), breaking consumers. Fix: test that offscreen response shapes match background expectations, and background response shapes match options/popup expectations.
-- [ ] **Error-path test coverage.** No tests for: session quota exceeded, offscreen crash recovery, FS permission revocation mid-session, logBuffer overflow, concurrent `reportPage` from multiple tabs.
+- [x] **Add "degraded cache" test variants.** All tests mock `chrome.storage.session` as a reliable in-memory store. In reality, session cache can be empty after SW restart, extension disable/re-enable, or LRU eviction. Code that reads cache without disk fallback silently returns undefined. Fix: use parameterized tests — for each integration test, add a variant where `chrome.storage.session.get()` returns `{}` for some keys, forcing fallback paths.
+- [x] **Error-path test coverage.** No tests for: session quota exceeded, offscreen crash recovery, FS permission revocation mid-session, logBuffer overflow, concurrent `reportPage` from multiple tabs.
 - [ ] **Performance benchmarks.** No benchmarks for: startup with large datasets (1000+ pages), WASM search with 10K+ entries, drain with 1000+ logBuffer entries, session cache memory under load.
 
 ## Sync
 
-- [ ] **Token security.** GitHub personal access token is stored in plain `manifest/settings.json`. Acceptable for v1. Future: use OS keychain via native messaging, or encrypt at rest in `chrome.storage.local`.
+- [x] **Token security (P0).** GitHub OAuth Device Flow via `github-oauth.js`. Token stored in `chrome.storage.session` by default (session-only, cleared on browser restart). Optional "Remember on disk" persists to settings.json. Manual PAT entry as secondary option. Three-state auth UI (disconnected/device-flow/connected). Auth errors (401) clear token and stop sync.
 - [ ] **Conflict visibility UI.** No user notification when a remote LWW override silently wins (e.g., remote delete overrides local restore). Surface as transient notifications in the options page.
 
 ## Security
 
-- [ ] **Document smart rule sandbox security model.** Smart rules execute in a manifest-sandboxed page with `unsafe-eval`. Validation bans 16 globals via word-boundary regex but new globals could be missed (e.g., `Proxy`, `Reflect`). Low risk (users write their own rules) but the security model should be documented.
+- [x] **Document smart rule sandbox security model.** Smart rules execute in a manifest-sandboxed page with `unsafe-eval`. Validation bans 16 globals via word-boundary regex but new globals could be missed (e.g., `Proxy`, `Reflect`). Low risk (users write their own rules) but the security model should be documented.
 
 ## Resilience
 
-- [ ] **Sync rate limit backoff.** GitHub API rate limit errors (403 + `X-RateLimit-Remaining: 0`) are classified as transient, so the sync alarm keeps firing every 5 minutes. Read `X-RateLimit-Reset` header and delay next sync until that time, or implement exponential backoff for transient errors.
+- [x] **Sync rate limit backoff.** GitHub API rate limit errors (403 + `X-RateLimit-Remaining: 0`) are classified as transient, so the sync alarm keeps firing every 5 minutes. Read `X-RateLimit-Reset` header and delay next sync until that time, or implement exponential backoff for transient errors.
 
 ## UX Polish
 
 - [ ] **In-extension help / documentation.** No help page, FAQ, or feature guide. Keyboard shortcuts only shown as tiny text in popup footer. Workspace modes, rules, trim rules, and blacklist have no format guidance. Add a `?` icon that opens a help overlay, and inline help text for complex settings fields.
-- [ ] **Undo toast on delete.** Show "Deleted. [Undo]" toast at point of deletion instead of relying solely on recycle bin discoverability.
-- [ ] **Loading states.** Replace "Loading..." plain text with spinners or skeleton screens for WASM init, history batch loading, and sync operations.
-- [ ] **Hidden interactions.** Delete/action buttons only visible on hover (invisible on touch). No tooltips on icon-only buttons. Rules section collapsible with no visual hint.
-- [ ] **Responsive design.** No CSS media queries. Popup hardcoded to 400px. Options sidebar doesn't collapse on narrow windows.
+- [ ] **Snapshot capture progress feedback.** Capturing a page can take up to 60 seconds (Save Page WE timeout + per-resource fetches) with no visual indication. Show progress via extension icon (small circular progress badge) or as an overlay on the page. Surface timeouts clearly. *Requires icon design work.*
+- [x] **Loading states.** Replace "Loading..." plain text with spinners or skeleton screens for WASM init, history batch loading, and sync operations.
+- [ ] **Hidden interactions.** Several action buttons use `opacity: 0; pointer-events: none` revealed only on `:hover` — unreachable on touch/keyboard. Affected: card delete buttons (`.card-actions`, options.html:647), attention `···` button (`.att-ctrl-btn`, options.html:769), rule edit/remove buttons (`.rule-action-btn`, options.html:2589). Fix: always show these buttons (possibly dimmed), or use a long-press / context menu fallback for touch.
+- [x] **Responsive design.** Options sidebar doesn't collapse on narrow windows. Add a media query to collapse the sidebar below a breakpoint.
+
+## Bugs
+
+- [x] **Time chart shows truncated range on first visit.** Fixed: `listHistoryFiles` returns file sizes when `includeSizes: true`; options.js computes estimated visit counts per date from file sizes, passes `estimatedByDay` Map to `renderTimeChart`; chart shows lighter dashed bars for estimated dates, refines as real data loads.
+
+## Performance
+
+- [x] **Index-based page lookup instead of linear JSONL scan.** Replaced `loadHistoryByUrl` (O(files × entries) JSONL scan) with `readCacheable('page:' + slug)` — O(1) session cache hit or single file read. Added `checkpoint` flag on `visit_page` entries so blacklist-bypass captures create page entities. Removed dead `loadAllHistory` and `loadHistoryByUrl` from filesystem-storage.js/offscreen.js/background.js.
+
+## List Management
+
+- [x] **Bulk actions: search results + pin operations.** Multi-select (ctrl/shift+click) and drag-to-list already work, but there is no "select all" button or toolbar for batch operations. Add a select-all toggle, a toolbar with "Copy to list" / "Move to list" / "Delete" actions, and extend to filtered pin views. Implement search results and pin bulk actions together (shared selection UI pattern).
 
 ## Search
 
-- [ ] **Search within snapshots/notes.** WASM search only covers JSONL history entries (titles, URLs, body previews). No full-text search over snapshot HTML/markdown content or note text/annotations.
+- [x] **Search within snapshots/notes.** Four-phase progressive search: Phase 0 (in-memory title/URL), Phase 1 (WASM JSONL streaming), Phase 2a (WASM note search), Phase 2b (WASM snapshot search). Generation counter cancellation, match source badges, per-type concurrency limits.
 
 ## Feature Ideas
 
 - [ ] **Discovery features in Explore.** Explore is purely search-based. Could add: "Recently highlighted" filter, "Most visited" aggregation, tag/topic clustering, reading streak/activity summary.
 - [ ] **Notification/reminder system.** Set reminders to revisit pages, get notifications about stale pages, reading statistics.
 - [ ] **Richer page annotations.** Notes are limited to text excerpts. Could add: full-page comments, markdown formatting in annotations, links between notes.
-- [ ] **Alternative sync methods.** Sync is GitHub-only. Could add: file-based sync via cloud drives, WebDAV, simpler pairing mechanism.
+- [x] **Alternative sync methods.** Sync is GitHub-only. Could add: file-based sync via cloud drives, WebDAV, simpler pairing mechanism.
+- [x] **Import from browser bookmarks.** File-based import: user exports bookmarks HTML from browser, picks file in settings modal, selects folders via tri-state checkbox tree picker, imports as nested lists with pinned pages under a timestamped parent list. No `chrome.bookmarks` permission needed.
+- [x] **Event dot timeline in page details.** The page detail modal shows notes, snapshots, and list memberships but no chronological view of all events. Add a visual timeline (dot/line) showing visits, captures, highlights, and pin changes over time for a single page.
+- [x] **Distinguish auto-pinned pages.** Rule-triggered and workspace auto-pins include `source: 'auto'` on the `pin_to_list` log entry. The pin object stores this field, and the UI displays an "auto" tag on auto-pinned pages in list views.
 - [ ] **Browser history integration.** Extension tracks its own history but doesn't import/cross-reference Chrome's built-in history.
 
 ## Accessibility
 
-- [ ] **Semantic HTML + ARIA baseline.** Replace `<div>` click targets with `<button>`/`<a>`, add `role` attributes to custom widgets (virtual scroller, sidebar tree), add `aria-label` to icon-only buttons. Ensure tab order and keyboard navigation work throughout options page, popup, and content script UI.
-- [ ] **Keyboard navigation.** Visible focus indicators, `tabindex` management for custom widgets (sidebar tree, virtual scroller, modals), focus trapping in dialogs, skip-to-content links.
+- [x] **Accessibility pass (minimal).** Single pass: replace `<div>` click targets with `<button>`/`<a>`, add `role`/`aria-label` to custom widgets and icon-only buttons, add visible focus indicators. Keep it simple — no over-engineering.
 
 ## Exploration / research
 

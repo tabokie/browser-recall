@@ -1,0 +1,201 @@
+- Take a look at these items, understand them and formulate them to TODO.md:
+
+- select all search results, copy and paste to another list (260319)
+- filter pins, move them to another list, delete them in bulk (split) (260310)
+- lazy loading history, avoid loadInteractionByUrl (260308)
+- search snapshot (260224)
+- timeout of snapshot capture, show progress (260224)
+- unify offscreen message key schema (260224)
+- time chart doesn't expand to full range on first visit (260224)
+- Import from browser bookmark (260213)
+- In the page details, display involved events on a dot timeline (260211)
+- in metadata distinguish manual capture and automatic capture (260210)
+- Take a look at TODO.md. Read carefully with details. Identify the items that require planning, and those that don't. Then present the complex items one by one to discuss with me
+- Too complex. When context is broken, we change the extension icon to "downtime", prompting the user to refresh
+- Yes, we can discuss then actually implement it
+- Remove this item
+- parameterized sounds good
+- Together sounds good
+- Discuss late when implementing
+- Not in popup, we can display in extension icon (a small circle progress bar), or as an overlay on the page
+- Sidecar collapsing sounds reasonable
+- We should have a roughly correct count of each date. Maybe use file size to estimate
+- This needs more discussion, later
+- yes
+- How slow would it take to have no index? Mind you that the pages should be searched progressively, i.e. title and url matches return first, then snapshot matches populate it further
+- good
+- continue
+- All at once, keep it simple and minimum
+- later. Update the TODO.md based on our conversations
+- Work on TODO.md, pick one in your own criteria
+- /grill
+- good
+- good
+- good
+- good
+- Remind me what is the alarm for?
+- I want to have the capability to test extension without using my own personal browser, can you open a temporary browser with blank or seeded data, where I can perform manual test operations? If you can, you should write a small document explaining how to do it, so I can trigger later in a session
+- okay, go ahead
+- good, find another one to work on, choose to your own liking
+- No image, letImprovise,
+- No image, let's improvise first, make it different is enough
+- You could not process image, don't try to do it
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Let me try it, run it for me
+- 1. Why is there two browsers?
+2. The script should detect me closing the browser, and then run a diff over the data, print it out for you to analyze
+- How do we seed data in e2e tests and in your manual tests? I think we should aim to unify (i.e. a function that takes in event logs, and a target checkpoint progress)
+- Anything else missing? Is it safe to remove them from TODO.md?
+- 1> import is good
+2> those are exceptions, they implement their own seeding
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- /grill
+- Check if it's already implemented
+- Review it make sure nothing is missing, then check it off
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Run manual test
+- fix it
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Remember the workflow of manual test
+- the script itself should have comments to explain how it should be used as well, including how agent should analyze its results
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- yes
+- Find a todo item from TODO.md to work on, skip the icon related one, you cannot process image
+- Your approach sounds good, go ahead, TDD
+- Anything else missing? Is it safe to check it off?
+- Find a todo item from TODO.md to work on, skip the icon related one, you cannot process image
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Only need to identify pages pinned by rules. Use a "auto" tag to display this information
+- Anything else missing?
+- /grill
+- B
+- A
+- A, each import creates a new parent (with time)
+- A
+- A
+- A
+- We already show the count, no need to have special handling
+- Anything else missing?
+- User export from Chrome and import using file
+- A
+- B
+- A
+- A
+- B
+- A
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- B but (1) has a limit of failures, if exceed abort, (2) show the list of failures aside from count
+- C
+- A but count as failures
+- A
+- B
+- A for now
+- B
+- A
+- Write the plan in ./plans, you can start with 00-<name>.md
+- Actually, the current data is changed to data/logs. Should we use logs or events instead? What do you think
+- go
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Do not stash, and fix test errors regardless of whether they are caused by you
+- /grill Other than the task itself, there are two important points: (1) Data should be loaded in WASM end, not to copy between the interface. Dirty data at JS side should be searched also, their results are merged together. (2) Aim for responsiveness. Data should be returned immediately at each phrase. There should be tests guarding this behavior (already have similar tests)
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Anything else missing?
+- Anything else missing?
+- Check off
+- Run
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Explain 3, I don't remember the context
+- Write plans to ./plans, use number 01
+- Fix 4, help me check if ./plans 00 is implemented thoroughly, if so move it to ./plans/archive/
+- Anything from our conversations that's missing from the plan file?
+- sounds good
+- Improve the description of this item in TODO.md, then let's find another item to work on
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Yes, update the plan file
+- 5 needs work. We cannot afford saving Git auth token in plainsight. We should either (1) delegate the authentication to the Git platform (like GitHub), or (2) encrypt the auth and requires master password during browser reload (if session.storage is safe from being eardropped)
+- Yes, logseq uses Git based file storage, you can take insights from it
+- Work on it
+- I am not sure about the implementation details, but the general direction is to avoid blocking load of large data files. We should lazy load and optimize for responsiveness, do not load full data when the UI only displays a small subset.
+
+What do you think is the most elegant way to fix this, disregard what is proposed in TODO.md?
+- You should check Git history of logseq, see the version where they still use Git, also investigate why they switch away from it
+- Where exactly do we need to load full history using loadHistoryByUrl or loadAllHistory?
+- Good. readCacheable is good. But we also need to ensure the manual blacklist capture results in a page checkpoint being created
+- A flag is passed from content.js to explicitly demand a checkpoint
+- go
+- go, TDD
+- So what will the flow to acquire token be? Is user required to configure GitHub access token and copy to the extension setting? Or is there a one-click setup by GitHub?
+- Sounds good
+- expand this into a plan number 02 under ./plans, /grill
+- Anything else missing?
+- That sounds neat. How do we get the salt deterministically without others knowing it, mind you the code is open-source
+- Checked off the TODO?
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Sounds flaky, any support from Chrome to provide some id?
+- Any gaps between the plan file and what's implemented?
+- Work on 3
+- Fix all of them
+- Add an option to save token in plaintext on disk. If e.g. a thread has the ability to access files, it can directly delete the data which is equal to deleting sync repo.
+- repo scope is limited to only one repo right?
+- Anything else missing?
+- I agree, support both
+- project, already created one as we speak
+- Is it safe to move plan 01 to archive?
+- move
+- sounds good
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- yes
+- 10
+- no migration, no user yet
+- good
+- good
+- Are there gaps between our conversations and the plan file?
+- Fix
+- Anything else missing? Is it safe to archive the plan?
+- archive
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Explain 7
+- No need for toolbar, but select all key shortcuts should be supported for lists. For full history, using the shortcuts will show a grey cross popup. For search results, using the shortcuts on large result set (more than say 100) will show a error popup.
+- 1> list no cap
+2> transient
+3> looks good
+- Anything gaps between plan and what's implemented?
+- Anything else missing?
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Go
+- 4
+- TODO item checked off?
+- go ahead
+- Find a todo item to work on, skip the icon related one, you cannot process image
+- Explain feature ideas one by one
+- 4 & 7 is worth doing, plan them out
+- Any gaps between plans and what's implemented?
+- Anything else missing?
+- Could we have E2E tests for cache miss too?
+- Help me understand, how do you manage to only sync subfolders in the local folder sync mode?
+- Okay go ahead with plan
+- Anything else missing?
+- go
+- Check TODO items, if they are implemented already:
+a. Snapshot capture progress feedback
+b. Bulk actions: search results + pin operations
+c. Event dot timeline in page details
+- Mark a as require icon changes. Mark b & c off
+- Work on "Unify offscreen message key schema + contract tests"
+- go ahead, prefer E2E tests
+- Anything gaps between the plan and what's implemented?
+- Fix gaps
+- Any gaps between the plans?
+- current is fine
+- I am aware this is a fresh session, but many sessions before you have done a great deal of work. They updated TODO.md to track the progress.
+
+In light of this context, /finish
+- resume
+- Are you sure 02-token-security.md is not implemented? Check again thoroughly, read the plan in details first
+- That's weird. Let's move it out of archive and implement it right here
+- How to get it? I have an organization setup
+- id: Ov23lig3RT4WT6xGzMWN
+- Any gaps between the plan and what's implemented?
+- go on

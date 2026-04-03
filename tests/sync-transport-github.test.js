@@ -236,6 +236,36 @@ describe('GitHubTransport', () => {
       await expect(transport.listBranches()).rejects.toThrow(/rate limit/i);
     });
 
+    it('attaches rateLimitReset from X-RateLimit-Reset header', async () => {
+      const resetEpoch = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+      const resp = mockResponse({ message: 'API rate limit exceeded' }, 403);
+      resp.headers = new Headers({
+        'X-RateLimit-Remaining': '0',
+        'X-RateLimit-Reset': String(resetEpoch),
+      });
+      mockFetch.mockResolvedValueOnce(resp);
+      try {
+        await transport.listBranches();
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        expect(e.message).toMatch(/rate limit/i);
+        expect(e.rateLimitReset).toBe(resetEpoch);
+      }
+    });
+
+    it('sets rateLimitReset to null when X-RateLimit-Reset header is missing', async () => {
+      const resp = mockResponse({ message: 'API rate limit exceeded' }, 403);
+      resp.headers = new Headers({ 'X-RateLimit-Remaining': '0' });
+      mockFetch.mockResolvedValueOnce(resp);
+      try {
+        await transport.listBranches();
+        expect.unreachable('should have thrown');
+      } catch (e) {
+        expect(e.message).toMatch(/rate limit/i);
+        expect(e.rateLimitReset).toBeNull();
+      }
+    });
+
     it('throws on network error after retries', async () => {
       mockFetch.mockRejectedValue(new TypeError('Failed to fetch'));
       await expect(transport.listBranches()).rejects.toThrow('Failed to fetch');

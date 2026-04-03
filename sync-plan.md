@@ -157,7 +157,7 @@ Replaced by `update_list_tree`. No `reparent_list` action exists. Existing `repa
 
 When sync is enabled, the offscreen drain path writes to `data/logs/YYYY-MM-DD-<deviceName>.jsonl` instead of `data/logs/YYYY-MM-DD.jsonl`. The `deviceName` is passed from background to offscreen via the port channel.
 
-`loadInteractionFileRange` extracts the date prefix (first 10 chars of basename) for filtering, which works for both naming conventions.
+`loadHistoryFileRange` extracts the date prefix (first 10 chars of basename) for filtering, which works for both naming conventions.
 
 Hydration scans all `data/logs/*.jsonl` files, groups by device name (parsed from filename), replays local device first then remotes.
 

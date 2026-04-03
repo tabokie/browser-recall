@@ -2,7 +2,7 @@
   "name": "portal-extension",
   "version": "0.1.0",
   "type": "module",
-  "description": "Chrome extension for tracking and searching interaction history",
+  "description": "Chrome extension for tracking and searching browsing history",
   "scripts": {
     "build:wasm": "wasm-pack build --target web --out-dir extension/pkg",
     "build": "npm run build:wasm",
@@ -10,7 +10,9 @@
     "dev": "npm run watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "manual": "node scripts/manual-test-browser.mjs",
+    "manual:seed": "node scripts/manual-test-browser.mjs --seed"
   },
   "keywords": [
     "chrome-extension",

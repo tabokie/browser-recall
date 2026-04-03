@@ -1,14 +1,15 @@
 // Options page for Portal extension
 // Bookmark-manager style UI with sidebar navigation, search, and settings modal
 import { FileSystemStorage } from './filesystem-storage.js';
-import init, { Interaction, SearchEngine, searchBatch } from './pkg/portal_extension.js';
-import { mergeBufferIntoInteractions, getBufferContentMap, buildInteractionsForEngine, extractInteractionBuffer } from './search-helpers.js';
+import init, { HistoryEntry, SearchEngine, searchBatch, searchNotes, searchSnapshots } from './pkg/portal_extension.js';
+import { mergeBufferIntoHistory, getBufferContentMap, buildHistoryForEngine, extractHistoryBuffer } from './search-helpers.js';
 import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, escapeHtml, BODY_WORD_LIMIT } from './utils.js';
 import { attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
 import { initCharts, renderTimeChart, renderTimeChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './time-chart.js';
 import { VirtualScroller } from './virtual-scroller.js';
 import { entityTypeLabel } from './entity-types.js';
-
+import { requestDeviceCode, pollForToken, fetchGitHubUser, getGitHubRevokeUrl } from './github-oauth.js';
+// parseBookmarkHtml imported dynamically inside the block below
 const fsStorage = new FileSystemStorage();
 
 // ─── Utility ─────────────────────────────────────────────────────────
@@ -33,7 +34,7 @@ function showFatalError(message) {
 }
 
 let _errorBubbleTimer = null;
-function showErrorBubble(message) {
+function showErrorBubble(message, { suffix = ' \u2014 please reload the extension.' } = {}) {
   let bubble = document.getElementById('errorBubble');
   if (!bubble) {
     bubble = document.createElement('div');
@@ -41,10 +42,25 @@ function showErrorBubble(message) {
     bubble.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(180,30,30,0.92);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
     document.body.appendChild(bubble);
   }
-  bubble.textContent = message + ' — please reload the extension.';
+  bubble.textContent = message + suffix;
   bubble.style.opacity = '1';
   clearTimeout(_errorBubbleTimer);
   _errorBubbleTimer = setTimeout(() => { bubble.style.opacity = '0'; }, 4000);
+}
+
+let _blockedBubbleTimer = null;
+function showBlockedBubble(message) {
+  let bubble = document.getElementById('blockedBubble');
+  if (!bubble) {
+    bubble = document.createElement('div');
+    bubble.id = 'blockedBubble';
+    bubble.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(120,120,120,0.88);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
+    document.body.appendChild(bubble);
+  }
+  bubble.textContent = '\u2715 ' + message;
+  bubble.style.opacity = '1';
+  clearTimeout(_blockedBubbleTimer);
+  _blockedBubbleTimer = setTimeout(() => { bubble.style.opacity = '0'; }, 2000);
 }
 
 let _infoBubbleTimer = null;
@@ -76,9 +92,13 @@ let historyFileBatch = 10;        // files per load (configurable in settings)
 const HISTORY_MAX_FILES = 100;    // cap total loaded files
 let historyFiles = [];             // all JSONL filenames, newest-first
 let historyLoadedCount = 0;        // how many files loaded so far
-let historyByUrl = new Map();      // url → interaction (deduped, newest wins)
+let historyByUrl = new Map();      // url → history entry (deduped, newest wins)
 let historyAllEntries = [];        // all loaded entries (not deduped), for date-boundary rendering
 let historyLoading = false;        // guard against concurrent loads
+let historyFileSizes = {};         // filename → total byte size (for chart estimation)
+const DEFAULT_AVG_ENTRY_SIZE = 200;
+let avgEntrySize = DEFAULT_AVG_ENTRY_SIZE; // calibrated from loaded batches
+let historyBatchRawCount = 0;      // total raw entries from loaded JSONL files
 let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'list', query: '...', id: '...' } or { type: 'explore', query: '...', filter: '...' }
 let allListPins = {}; // listId -> [{ url, title, pinnedAt }]
 let lastClickedRow = null; // for shift-click range select
@@ -127,9 +147,9 @@ let cachedFieldRanges = null; // { field: { min, max } } — computed from data
 let relatedPagesLimit = 50; // configurable in settings
 
 // Compute actual data ranges for each range field (lightweight scan)
-function computeFieldRanges(interactions) {
+function computeFieldRanges(entries) {
   const byUrl = new Map();
-  for (const i of interactions) {
+  for (const i of entries) {
     if (!byUrl.has(i.url)) byUrl.set(i.url, []);
     byUrl.get(i.url).push(i);
   }
@@ -215,57 +235,311 @@ async function initWasm() {
   }
 }
 
-// --- Pipelined search ---
-let capturesMatchCache = null; // Map<queryString, Set<url>> — cleared on history reset
+// --- Progressive search ---
+let searchGeneration = 0;      // generation counter — stale phase callbacks are discarded
+let searchResults = [];         // master result array, mutated by mergeSearchResults
+let searchPendingPhases = 0;    // count of in-flight phases — spinner shown while > 0
 
-async function pipelinedSearch(query) {
-  await initWasm();
-  await fsStorage.loadDirectoryHandle();
-  const rootDir = fsStorage.directoryHandle;
-  if (!rootDir) throw new Error('No storage directory configured');
-  const historyDir = await rootDir.getDirectoryHandle('history');
-  const pagesDir = await rootDir.getDirectoryHandle('pages');
+// Run a limited-concurrency pool of async tasks, calling onResult after each completes.
+async function runPool(tasks, concurrency, onResult) {
+  let idx = 0;
+  async function next() {
+    while (idx < tasks.length) {
+      const i = idx++;
+      const result = await tasks[i]();
+      await onResult(result);
+    }
+  }
+  const workers = [];
+  for (let i = 0; i < Math.min(concurrency, tasks.length); i++) {
+    workers.push(next());
+  }
+  await Promise.all(workers);
+}
 
-  const filesResp = await sendAction({ action: 'listInteractionFiles' });
-  const files = filesResp.files;
+// Merge new results into searchResults. Dedup by URL, take max score, track sources.
+function mergeSearchResults(newResults, source, gen) {
+  if (gen !== searchGeneration) return; // stale generation — discard
+  for (const r of newResults) {
+    if (!r.url) continue;
+    const idx = searchResults.findIndex(e => e.url === r.url);
+    if (idx >= 0) {
+      const existing = searchResults[idx];
+      if ((r.score || 0) > (existing.score || 0)) existing.score = r.score;
+      if (!existing.matchSources) existing.matchSources = new Set();
+      existing.matchSources.add(source);
+    } else {
+      const entry = {
+        url: r.url,
+        title: r.title || '',
+        user_title: r.user_title,
+        slug: r.slug || generateSlugFromUrl(r.url),
+        timestamp: r.timestamp || Date.now(),
+        score: r.score || 0,
+        attScore: r.attScore || 0,
+        attDetail: r.attDetail || null,
+        notes: r.notes || [],
+        timestamps: r.timestamps || [r.timestamp || Date.now()],
+        latestTs: r.timestamp || Date.now(),
+        matchSources: new Set([source]),
+      };
+      searchResults.push(entry);
+    }
+  }
+}
 
-  // Write buffer overlay — read undrained entries before WASM processes JSONL on disk
-  const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
-  const interactionBuffer = extractInteractionBuffer(logBuffer);
-  bufferContentMap = getBufferContentMap(interactionBuffer);
-
-  // WASM reads files directly (no JS↔WASM data copy)
-  const CHUNK = 10;
-  const chunks = [];
-  for (let i = 0; i < files.length; i += CHUNK) {
-    chunks.push(files.slice(i, i + CHUNK));
+// Enrich new entries and render the current searchResults to the virtual scroller.
+async function renderProgressiveResults(gen) {
+  if (gen !== searchGeneration) return;
+  // Enrich all entries that haven't been enriched yet
+  const unenriched = searchResults.filter(r => !r._enriched);
+  if (unenriched.length > 0) {
+    await enrichFromEntityStorage(unenriched);
+    for (const r of unenriched) r._enriched = true;
+  }
+  // Apply filters
+  let results = searchResults;
+  if (!isDefaultFilterState(filterState)) {
+    const notFilterEnriched = results.filter(r => !r._filterEnriched);
+    if (notFilterEnriched.length > 0) {
+      await enrichForFilters(notFilterEnriched);
+      for (const r of notFilterEnriched) r._filterEnriched = true;
+    }
+    results = await applyFilters([...results]);
   }
 
-  const byUrl = new Map();
-  const batchResults = await Promise.all(
-    chunks.map(chunk => searchBatch(historyDir, pagesDir, query, chunk))
+  const relatedContainer = document.getElementById('relatedResults');
+  // Show "No results" when all phases are done and nothing matched
+  if (results.length === 0 && searchPendingPhases <= 0) {
+    relatedContainer.innerHTML = '<div class="no-results">No results</div>';
+    document.getElementById('relatedChart').classList.remove('visible');
+    return;
+  }
+
+  const effectiveSort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
+  const sorted = applySortOrder(results, effectiveSort);
+  const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
+
+  const vs = getOrCreateRelatedScroller();
+  vs._headerHtml = '';
+  vs.updateData(sorted, (r) =>
+    resultRowHtml(r.user_title || r.title, r.url, {
+      attScore: r.attScore, maxAtt, attDetail: r.attDetail,
+      notes: r.notes, timestamps: r.timestamps, context: 'related',
+      childIds: r.childIds, parentIds: r.parentIds, likes: r.likes,
+      matchSources: r.matchSources,
+    })
   );
-  for (const results of batchResults) {
-    for (const r of results) {
-      const existing = byUrl.get(r.url);
-      if (!existing || r.score > existing.score) byUrl.set(r.url, r);
+  // Update time chart
+  const chartData = sorted.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || Date.now(), attention: '' }));
+  renderTimeChartInto(
+    document.getElementById('relatedChart'),
+    document.getElementById('relatedChartBars'),
+    chartData,
+    'Explore results'
+  );
+  bindChartBarClick(document.getElementById('relatedChart'), document.getElementById('relatedResults'));
+}
+
+function showSearchSpinner() {
+  const el = document.getElementById('contentSearchSpinner');
+  if (el) el.style.display = '';
+}
+function hideSearchSpinner() {
+  const el = document.getElementById('contentSearchSpinner');
+  if (el) el.style.display = 'none';
+}
+function phaseComplete(gen) {
+  if (gen !== searchGeneration) return;
+  searchPendingPhases--;
+  if (searchPendingPhases <= 0) hideSearchSpinner();
+}
+
+// Phase 1: WASM JSONL streaming search with limited concurrency.
+// History files are in data/logs/{device}/ subdirectories. We iterate device dirs
+// and pass each device subdir handle + its filenames to WASM searchBatch.
+async function runPhase1(query, gen) {
+  try {
+    await initWasm();
+    await fsStorage.loadDirectoryHandle();
+    const rootDir = fsStorage.directoryHandle;
+    if (!rootDir) return;
+    const logsDir = await rootDir.getDirectoryHandle('data').then(d => d.getDirectoryHandle('logs'));
+    const pagesDir = await rootDir.getDirectoryHandle('pages');
+
+    // Dirty data: search logBuffer entries in JS
+    const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
+    const historyBuffer = extractHistoryBuffer(logBuffer);
+    bufferContentMap = getBufferContentMap(historyBuffer);
+    if (historyBuffer.length > 0) {
+      const engine = new SearchEngine();
+      buildHistoryForEngine(HistoryEntry, engine, historyBuffer, bufferContentMap);
+      const bufferResults = await engine.search(query, 0);
+      mergeSearchResults(bufferResults, 'history', gen);
+      await renderProgressiveResults(gen);
+    }
+
+    // Collect device subdirectories and their .jsonl files
+    const deviceTasks = []; // { dir: FileSystemDirectoryHandle, files: string[] }
+    for await (const entry of logsDir.values()) {
+      if (entry.kind !== 'directory') continue;
+      const deviceDir = await logsDir.getDirectoryHandle(entry.name);
+      const files = [];
+      for await (const f of deviceDir.values()) {
+        if (f.kind === 'file' && f.name.endsWith('.jsonl')) files.push(f.name);
+      }
+      if (files.length > 0) {
+        files.sort().reverse(); // newest-first
+        deviceTasks.push({ dir: deviceDir, files });
+      }
+    }
+
+    // Chunk across all device/file pairs and search with limited concurrency
+    const CHUNK = 10;
+    const tasks = [];
+    for (const { dir, files } of deviceTasks) {
+      for (let i = 0; i < files.length; i += CHUNK) {
+        const chunk = files.slice(i, i + CHUNK);
+        tasks.push(() => searchBatch(dir, pagesDir, query, chunk));
+      }
+    }
+    await runPool(tasks, 3, (results) => {
+      if (gen !== searchGeneration) return;
+      const formatted = results.map(r => ({
+        url: r.url, title: r.title, slug: generateSlugFromUrl(r.url),
+        timestamp: r.timestamp, score: r.score || 0,
+        intent: r.intent, attention: r.attention,
+        timestamps: [r.timestamp],
+      }));
+      mergeSearchResults(formatted, 'history', gen);
+      renderProgressiveResults(gen);
+    });
+  } catch (e) {
+    console.warn('[Phase1] WASM JSONL search failed:', e.message);
+  } finally {
+    phaseComplete(gen);
+  }
+}
+
+// Phase 2a: WASM note search.
+async function runPhase2a(query, gen) {
+  try {
+    await initWasm();
+    await fsStorage.loadDirectoryHandle();
+    const rootDir = fsStorage.directoryHandle;
+    if (!rootDir) return;
+    const notesDir = await rootDir.getDirectoryHandle('data').then(d => d.getDirectoryHandle('notes'));
+    const matches = await searchNotes(notesDir, query);
+    if (gen !== searchGeneration) return;
+    // Convert note matches to result entries — need page metadata from slug
+    const noteResults = [];
+    for (const m of matches) {
+      const slug = generateSlugFromUrl(m.url);
+      noteResults.push({
+        url: m.url, title: '', slug, timestamp: Date.now(),
+        score: 1.0, timestamps: [Date.now()],
+      });
+    }
+    mergeSearchResults(noteResults, 'note', gen);
+    await renderProgressiveResults(gen);
+  } catch (e) {
+    console.warn('[Phase2a] Note search failed:', e.message);
+  } finally {
+    phaseComplete(gen);
+  }
+}
+
+// Phase 2b: WASM snapshot search with limited concurrency.
+async function runPhase2b(query, gen) {
+  try {
+    await initWasm();
+    await fsStorage.loadDirectoryHandle();
+    const rootDir = fsStorage.directoryHandle;
+    if (!rootDir) return;
+    const snapshotsDir = await rootDir.getDirectoryHandle('data').then(d => d.getDirectoryHandle('snapshots'));
+
+    // List all .md files, group by slug, pick latest per slug
+    const allFiles = [];
+    for await (const entry of snapshotsDir.values()) {
+      if (entry.kind === 'file' && entry.name.endsWith('.md')) {
+        allFiles.push(entry.name);
+      }
+    }
+    const latestBySlug = new Map(); // slug → filename
+    const re = /^(.+)-(\d{13})\.md$/;
+    for (const name of allFiles) {
+      const m = name.match(re);
+      if (!m) continue;
+      const slug = m[1];
+      const ts = parseInt(m[2], 10);
+      const existing = latestBySlug.get(slug);
+      if (!existing || ts > existing.ts) {
+        latestBySlug.set(slug, { name, ts });
+      }
+    }
+    const fileNames = Array.from(latestBySlug.values()).map(v => v.name);
+
+    // Chunk and search with limited concurrency
+    const CHUNK = 10;
+    const chunks = [];
+    for (let i = 0; i < fileNames.length; i += CHUNK) {
+      chunks.push(fileNames.slice(i, i + CHUNK));
+    }
+    const tasks = chunks.map(chunk => () => searchSnapshots(snapshotsDir, query, chunk));
+    await runPool(tasks, 2, async (matches) => {
+      if (gen !== searchGeneration) return;
+      // Load page entities to get URLs for matched slugs
+      const slugs = matches.map(m => m.slug);
+      const pages = await Promise.all(slugs.map(s => readCacheable('page:' + s)));
+      const snapshotResults = [];
+      for (let i = 0; i < matches.length; i++) {
+        const page = pages[i];
+        if (!page || !page.url) continue;
+        snapshotResults.push({
+          url: page.url, title: page.title || '', slug: matches[i].slug,
+          timestamp: Date.now(), score: 0.5, timestamps: [Date.now()],
+        });
+      }
+      mergeSearchResults(snapshotResults, 'snapshot', gen);
+      await renderProgressiveResults(gen);
+    });
+  } catch (e) {
+    console.warn('[Phase2b] Snapshot search failed:', e.message);
+  } finally {
+    phaseComplete(gen);
+  }
+}
+
+// Four-phase progressive search orchestrator.
+// Phase 0: instant in-memory matching. Phase 1: WASM JSONL streaming.
+// Phase 2a: WASM notes. Phase 2b: WASM snapshots streaming.
+async function runProgressiveSearch(allQueries) {
+  const gen = ++searchGeneration;
+  searchResults = [];
+  const query = allQueries.join(' ');
+
+  // Phase 0: instant in-memory matching (existing wordsMatchItem logic)
+  const matchedUrls = new Set();
+  for (const q of allQueries) {
+    if (!q.trim()) continue;
+    const words = parseSearchWords(q);
+    for (const item of historyAllEntries) {
+      if (!item.url) continue;
+      if (wordsMatchItem(words, item)) matchedUrls.add(item.url);
     }
   }
+  const phase0Entries = historyAllEntries.filter(item => item.url && matchedUrls.has(item.url));
+  const phase0Results = processHistoryForDisplay(phase0Entries, { globalDedup: true })
+    .map(item => ({ ...item, score: 0, matchSources: new Set(['title']) }));
+  mergeSearchResults(phase0Results, 'title', gen);
+  await renderProgressiveResults(gen);
 
-  // Also search log buffer entries
-  if (interactionBuffer.length > 0) {
-    const engine = new SearchEngine();
-    buildInteractionsForEngine(Interaction, engine, interactionBuffer, bufferContentMap);
-    const bufferResults = await engine.search(query, 0);
-    for (const r of bufferResults) {
-      const existing = byUrl.get(r.url);
-      if (!existing || r.score > existing.score) byUrl.set(r.url, r);
-    }
-  }
-
-  const allResults = Array.from(byUrl.values());
-  allResults.sort((a, b) => (b.score || 0) - (a.score || 0));
-  return allResults;
+  // Fire Phase 1, 2a, 2b concurrently (with per-type concurrency limits)
+  searchPendingPhases = 3;
+  showSearchSpinner();
+  runPhase1(query, gen);
+  runPhase2a(query, gen);
+  runPhase2b(query, gen);
 }
 
 
@@ -276,8 +550,9 @@ async function initHistoryFiles() {
 
   // Always get file list from offscreen (no session cache for file list)
   try {
-    const resp = await sendAction({ action: 'listInteractionFiles' });
+    const resp = await sendAction({ action: 'listHistoryFiles', includeSizes: true });
     historyFiles = resp.files;
+    historyFileSizes = resp.sizes || {};
   } catch (error) {
     console.log('Filesystem not available:', error.message);
   }
@@ -285,8 +560,8 @@ async function initHistoryFiles() {
   // Merge today's history — session cache has disk + undrained entries via addLog
   const todayStr = new Date().toISOString().slice(0, 10);
   const todayEntries = await readCacheable('log:' + todayStr) || [];
-  const interactionBuffer = todayEntries.filter(e => (e.action === 'visit_page' || e.action === 'leave_page' || !e.action) && e.url);
-  for (const entry of interactionBuffer) {
+  const historyBuffer = todayEntries.filter(e => (e.action === 'visit_page' || e.action === 'leave_page' || !e.action) && e.url);
+  for (const entry of historyBuffer) {
     const existing = historyByUrl.get(entry.url);
     if (!existing || entry.timestamp > existing.timestamp) {
       historyByUrl.set(entry.url, entry);
@@ -301,7 +576,7 @@ async function initHistoryFiles() {
     }
     historyAllEntries.push(entry);
   }
-  bufferContentMap = getBufferContentMap(interactionBuffer);
+  bufferContentMap = getBufferContentMap(historyBuffer);
 }
 
 async function loadHistoryBatch() {
@@ -311,15 +586,15 @@ async function loadHistoryBatch() {
   const batch = historyFiles.slice(historyLoadedCount, historyLoadedCount + historyFileBatch);
   try {
     const t0 = performance.now();
-    const resp = await sendAction({ action: 'loadInteractionBatch', files: batch });
-    const interactions = resp.interactions;
+    const resp = await sendAction({ action: 'loadHistoryBatch', files: batch });
+    const batchEntries = resp.entries;
     const newItems = [];
     // Entries within a day file arrive oldest→newest. This isn't a full replay,
     // but we simulate replay semantics: newer values always win, and older
     // values are only kept when the newer entry omits the field (the "omit
     // unchanged fields" optimisation in background.js means later entries
     // often lack a title when it hasn't changed since the previous write).
-    for (const item of interactions) {
+    for (const item of batchEntries) {
       // Skip non-visit entries (settings, list ops, etc.)
       if (item.action && item.action !== 'visit_page' && item.action !== 'leave_page') continue;
       if (!item.url) continue;
@@ -333,8 +608,15 @@ async function loadHistoryBatch() {
       }
       newItems.push(item);
     }
-    console.debug(`[I/O] loadHistoryBatch: ${batch.length} files, ${interactions.length} items, ${newItems.length} new in ${(performance.now() - t0).toFixed(1)}ms`);
+    console.debug(`[I/O] loadHistoryBatch: ${batch.length} files, ${batchEntries.length} items, ${newItems.length} new in ${(performance.now() - t0).toFixed(1)}ms`);
     historyLoadedCount += batch.length;
+    // Calibrate avg entry size from loaded file data
+    historyBatchRawCount += batchEntries.length;
+    const loadedSize = historyFiles.slice(0, historyLoadedCount)
+      .reduce((sum, f) => sum + (historyFileSizes[f] || 0), 0);
+    if (loadedSize > 0 && historyBatchRawCount > 0) {
+      avgEntrySize = loadedSize / historyBatchRawCount;
+    }
     historyLoading = false;
     return newItems;
   } catch (error) {
@@ -350,13 +632,34 @@ function resetHistory() {
   historyByUrl.clear();
   historyAllEntries = [];
   historyLoading = false;
+  historyFileSizes = {};
+  avgEntrySize = DEFAULT_AVG_ENTRY_SIZE;
+  historyBatchRawCount = 0;
   cachedFieldRanges = null;
-  capturesMatchCache = null;
   allListPins = {};
 
   bufferContentMap = {};
+  searchGeneration++;    // invalidate any in-flight progressive search
+  searchResults = [];
+  searchPendingPhases = 0;
+  hideSearchSpinner();
 }
 
+// Estimate visit counts for unloaded JSONL files from file sizes.
+// Returns Map<dateStr, estimatedCount> for dates not yet loaded.
+function getEstimatedByDay() {
+  const estimated = new Map();
+  const loadedSet = new Set(historyFiles.slice(0, historyLoadedCount));
+  for (const filename of historyFiles) {
+    if (loadedSet.has(filename)) continue;
+    const dateStr = filename.replace('.jsonl', '');
+    const size = historyFileSizes[filename] || 0;
+    if (size > 0) {
+      estimated.set(dateStr, Math.max(1, Math.round(size / avgEntrySize)));
+    }
+  }
+  return estimated;
+}
 
 function getActivePinListId() {
   if (activeView.type === 'list') return activeView.id;
@@ -588,13 +891,18 @@ function parseSearchWords(query) {
   return words;
 }
 
+function matchesExactWithBoundary(text, q) {
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`).test(text);
+}
+
 function wordsMatchItem(words, item) {
   if (words.length === 0) return true;
   return words.every(({ q, exact }) => {
     const fields = [item.user_title, item.title, item.url];
     return fields.some(f => {
       if (!f) return false;
-      if (exact) return f.includes(q);
+      if (exact) return matchesExactWithBoundary(f, q);
       return f.toLowerCase().includes(q.toLowerCase());
     });
   });
@@ -955,22 +1263,22 @@ function resortActiveScroller(context) {
 }
 
 // --- Category filters ---
-function filterByCategory(interactions, category) {
+function filterByCategory(entries, category) {
   const now = Date.now();
   switch (category) {
     case 'today': {
       const startOfDay = new Date().setHours(0, 0, 0, 0);
-      return interactions.filter(i => i.timestamp >= startOfDay);
+      return entries.filter(i => i.timestamp >= startOfDay);
     }
     case 'week': {
       const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-      return interactions.filter(i => i.timestamp >= weekAgo);
+      return entries.filter(i => i.timestamp >= weekAgo);
     }
     case 'highlighted':
-      return interactions.filter(i => (i.likes > 0));
+      return entries.filter(i => (i.likes > 0));
     case 'all':
     default:
-      return interactions;
+      return entries;
   }
 }
 
@@ -991,11 +1299,12 @@ async function showCategory(category) {
   // Demand-load history
   await initHistoryFiles();
   await loadHistoryBatch();
-  const interactions = [...historyAllEntries];
-  interactions.sort((a, b) => b.timestamp - a.timestamp);
-  const filtered = filterByCategory(interactions, category);
-  renderTimeChart(filtered);
-  await displayInteractionRows(filtered);
+  const allEntries = [...historyAllEntries];
+  allEntries.sort((a, b) => b.timestamp - a.timestamp);
+  const filtered = filterByCategory(allEntries, category);
+  const estimatedByDay = category === 'all' ? getEstimatedByDay() : undefined;
+  renderTimeChart(filtered, estimatedByDay);
+  await displayHistoryRows(filtered);
 
   // Wire up demand-loading on scroll
   const vs = getOrCreateGlobalScroller();
@@ -1005,14 +1314,15 @@ async function showCategory(category) {
       const newFiltered = filterByCategory(newItems, activeView.value);
       if (newFiltered.length > 0) {
         const sort = currentSortState.column ? currentSortState : { column: 'lastVisit', direction: 'desc' };
-        const newEntries = processInteractionsForDisplay(newFiltered);
+        const newEntries = processHistoryForDisplay(newFiltered);
         await enrichFromEntityStorage(newEntries);
         vs.appendData(applySortOrder(newEntries, sort));
       }
-      // Re-render chart with all loaded history
-      const allInteractions = [...historyAllEntries];
-      const allFiltered = filterByCategory(allInteractions, activeView.value);
-      renderTimeChart(allFiltered);
+      // Re-render chart with all loaded history + updated estimates
+      const allLoaded = [...historyAllEntries];
+      const allFiltered = filterByCategory(allLoaded, activeView.value);
+      const updatedEstimates = activeView.value === 'all' ? getEstimatedByDay() : undefined;
+      renderTimeChart(allFiltered, updatedEstimates);
     }
   };
 }
@@ -1024,12 +1334,9 @@ function parseKeywordQuery(value) {
   return { q: value, exact: false };
 }
 
-// TODO: Exact match (quoted) should use word-boundary matching instead of plain
-// substring. Needs a robust approach that handles Unicode, punctuation-delimited
-// words (URLs, hyphenated terms), and multi-word phrases.
 function textMatches(text, q, exact) {
   if (!text) return false;
-  if (exact) return text.includes(q);
+  if (exact) return matchesExactWithBoundary(text, q);
   return text.toLowerCase().includes(q.toLowerCase());
 }
 
@@ -1039,12 +1346,7 @@ function matchKeyword(item, field, value) {
   const fields = normalizeFieldToArray(field);
   if (fields.includes('title') && (textMatches(item.user_title, q, exact) || textMatches(item.title, q, exact))) return true;
   if (fields.includes('url') && textMatches(item.url, q, exact)) return true;
-  if (fields.includes('captures')) {
-    const trimmed = value.trim();
-    if (capturesMatchCache && capturesMatchCache.has(trimmed)) {
-      if (capturesMatchCache.get(trimmed).has(item.url)) return true;
-    }
-  }
+  // 'captures' field search is handled by Phase 2b (WASM snapshot search) in progressive search
   if (fields.includes('highlights') && item.notes && item.notes.some(n => {
     if (n.excerpt === null) return false; // skip global notes
     const quotes = Array.isArray(n.excerpt) ? n.excerpt : [n.excerpt || ''];
@@ -1103,6 +1405,7 @@ function enrichPinResult(r, pins, pageSnap) {
     notes: source.notes || r.notes || [],
     timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
     pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
+    pinSource: pin?.source || r.pinSource || null,
   };
   if (source.user_title) enriched.user_title = source.user_title;
   return enriched;
@@ -1707,7 +2010,7 @@ function renderFilteredPins(pins, listId, searchQuery) {
     resultRowHtml(r.user_title || r.title, r.url, {
       pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'related',
-      pinnedAt: r.pinnedAt, childIds: r.childIds, parentIds: r.parentIds, excludeListId: listId, likes: r.likes,
+      pinnedAt: r.pinnedAt, pinSource: r.pinSource, childIds: r.childIds, parentIds: r.parentIds, excludeListId: listId, likes: r.likes,
     })
   );
   bindPinClicks(relatedContainer, listId);
@@ -1736,11 +2039,11 @@ async function renderListSearchFilters() {
   runSearchFilterPipeline();
 }
 
-// Convert raw interactions to display entries with date-boundary dedup.
+// Convert raw history entries to display entries with date-boundary dedup.
 // Each URL appears at most once per calendar day, sorted newest-first.
-function processInteractionsForDisplay(interactions, { globalDedup = false } = {}) {
+function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
   // Sort newest first
-  const sorted = [...interactions].sort((a, b) => b.timestamp - a.timestamp);
+  const sorted = [...entries].sort((a, b) => b.timestamp - a.timestamp);
 
   const results = [];
   const globalIndex = globalDedup ? new Map() : null; // url → index in results
@@ -1822,18 +2125,18 @@ async function enrichForFilters(entries) {
   }
 }
 
-async function displayInteractionRows(interactions) {
-  if (!interactions || interactions.length === 0) {
-    displayMessage('No interactions found');
+async function displayHistoryRows(entries) {
+  if (!entries || entries.length === 0) {
+    displayMessage('No history entries found');
     return;
   }
 
-  const entries = processInteractionsForDisplay(interactions);
-  await enrichFromEntityStorage(entries);
+  const displayEntries = processHistoryForDisplay(entries);
+  await enrichFromEntityStorage(displayEntries);
 
   // When sort is null, default to lastVisit desc
   const effectiveSort = currentSortState.column ? currentSortState : { column: 'lastVisit', direction: 'desc' };
-  const sorted = applySortOrder(entries, effectiveSort);
+  const sorted = applySortOrder(displayEntries, effectiveSort);
   const maxAtt = Math.max(...sorted.map(e => e.attScore), 0.1);
 
   const vs = getOrCreateGlobalScroller();
@@ -1847,10 +2150,10 @@ const PIN_SVG = '<svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c
 const DELETE_SVG = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
 
 
-// Group interactions by URL, return Map<url, interaction[]>
-function groupInteractionsByUrl(interactions) {
+// Group history entries by URL, return Map<url, entry[]>
+function groupHistoryByUrl(entries) {
   const map = new Map();
-  for (const i of interactions) {
+  for (const i of entries) {
     if (!map.has(i.url)) map.set(i.url, []);
     map.get(i.url).push(i);
   }
@@ -1915,7 +2218,78 @@ async function loadExtraDetail(url) {
     }
   }
 
-  return { notes, snapshots, belongedLists, slug, likes };
+  return { notes, snapshots, belongedLists, slug, likes, visitDates: pageEntity?.visitDates || [] };
+}
+
+const TIMELINE_INITIAL_LIMIT = 30;
+
+function collectTimelineEvents(visitDates, notes, snapshots) {
+  const events = [];
+
+  // Visits from visitDates (YYYYMMDD ints → midnight timestamps)
+  for (const yyyymmdd of visitDates) {
+    const y = Math.floor(yyyymmdd / 10000);
+    const m = Math.floor((yyyymmdd % 10000) / 100) - 1;
+    const d = yyyymmdd % 100;
+    events.push({ type: 'visit', timestamp: new Date(y, m, d).getTime() });
+  }
+
+  // Highlight notes (skip global page notes)
+  for (const n of notes) {
+    if (n.excerpt === null || n.deleted) continue;
+    const ts = n.timestamps ? Math.min(...Object.values(n.timestamps)) : 0;
+    if (!ts) continue;
+    const raw = Array.isArray(n.excerpt) ? n.excerpt.join(' ') : (n.excerpt || '');
+    events.push({ type: 'note', timestamp: ts, label: raw.substring(0, 60) + (raw.length > 60 ? '...' : '') });
+  }
+
+  // Snapshots
+  for (const s of snapshots) {
+    const formats = [s.hasHtml && 'html', s.hasMd && 'md'].filter(Boolean).join(', ');
+    events.push({ type: 'snapshot', timestamp: s.timestamp, label: formats });
+  }
+
+  events.sort((a, b) => b.timestamp - a.timestamp);
+  return events;
+}
+
+function renderTimelineHtml(events, limit = TIMELINE_INITIAL_LIMIT) {
+  if (events.length === 0) return '';
+
+  const fmtDate = (ts) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const typeLabels = { visit: 'Visited', note: 'Note', snapshot: 'Snapshot' };
+  const shown = events.slice(0, limit);
+  const remaining = events.length - shown.length;
+
+  // Group by date string
+  const groups = [];
+  let lastDate = null;
+  for (const ev of shown) {
+    const dateStr = fmtDate(ev.timestamp);
+    if (dateStr !== lastDate) {
+      groups.push({ date: dateStr, events: [] });
+      lastDate = dateStr;
+    }
+    groups[groups.length - 1].events.push(ev);
+  }
+
+  let html = '<div class="detail-timeline"><span class="detail-section-label">Timeline</span>';
+  for (const g of groups) {
+    html += `<div class="timeline-date-group"><div class="timeline-date-label">${escapeHtml(g.date)}</div>`;
+    for (const ev of g.events) {
+      const label = ev.type === 'visit' ? typeLabels.visit
+        : ev.type === 'note' ? `${typeLabels.note}: "${escapeHtml(ev.label)}"`
+        : `${typeLabels.snapshot} (${escapeHtml(ev.label)})`;
+      html += `<div class="timeline-event"><span class="timeline-dot ${ev.type}"></span><span class="timeline-event-label">${label}</span></div>`;
+    }
+    html += '</div>';
+  }
+
+  if (remaining > 0) {
+    html += `<button class="timeline-show-more">${remaining} more events</button>`;
+  }
+  html += '</div>';
+  return html;
 }
 
 function renderExtraDetailHtml(extra) {
@@ -1965,7 +2339,23 @@ function renderExtraDetailHtml(extra) {
     html += '</div></div>';
   }
 
+  // Event timeline
+  const timelineEvents = collectTimelineEvents(extra.visitDates, extra.notes, extra.snapshots);
+  html += renderTimelineHtml(timelineEvents);
+
   return html;
+}
+
+function bindTimelineShowMore(container, extra) {
+  const btn = container.querySelector('.timeline-show-more');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const allEvents = collectTimelineEvents(extra.visitDates, extra.notes, extra.snapshots);
+    const timeline = container.querySelector('.detail-timeline');
+    if (timeline) {
+      timeline.outerHTML = renderTimelineHtml(allEvents, Infinity);
+    }
+  });
 }
 
 function bindNoteDeleteButtons(container) {
@@ -2051,7 +2441,7 @@ function attentionLevel(normalized) {
 
 function resultRowHtml(title, url, opts = {}) {
   const safeUrl = escapeHtml(url || '<unknown>');
-  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, cssClass, childIds = [], parentIds = [], excludeListId, likes = 0 } = opts;
+  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, pinSource, cssClass, childIds = [], parentIds = [], excludeListId, likes = 0, matchSources } = opts;
 
   const lastVisit = timestamps.length > 0 ? formatTime(Math.max(...timestamps)) : '';
   const normalized = maxAtt > 0 ? attScore / maxAtt : 0;
@@ -2084,8 +2474,11 @@ function resultRowHtml(title, url, opts = {}) {
   const attCtrlHtml = `<div class="att-ctrl${attLvl ? ' ' + attLvl : ''}" data-url="${safeUrl}" data-title="${safeTitle}"><span class="att-ctrl-dot"></span><button class="att-ctrl-btn" title="View details">···</button></div>`;
   const listTagsHtml = belongedListNames.map(n => `<span class="card-tag card-tag-list">${escapeHtml(n)}</span>`).join('');
   const isLiked = likes > 0;
-  const hasExtras = hasNotes || hasSnaps || isLiked || listTagsHtml;
-  const extrasHtml = hasExtras ? `<div class="card-extras">${isLiked ? '<span class="card-tag card-tag-liked">liked</span>' : ''}${hasNotes ? '<span class="card-tag card-tag-note">note</span>' : ''}${hasSnaps ? '<span class="card-tag card-tag-snap">snapshot</span>' : ''}${listTagsHtml}</div>` : '';
+  const isAuto = pinSource === 'auto';
+  const matchNoteHit = matchSources && matchSources.has('note');
+  const matchSnapHit = matchSources && matchSources.has('snapshot');
+  const hasExtras = hasNotes || hasSnaps || isLiked || isAuto || listTagsHtml || matchNoteHit || matchSnapHit;
+  const extrasHtml = hasExtras ? `<div class="card-extras">${isAuto ? '<span class="card-tag card-tag-auto">auto</span>' : ''}${isLiked ? '<span class="card-tag card-tag-liked">liked</span>' : ''}${hasNotes ? '<span class="card-tag card-tag-note">note</span>' : ''}${hasSnaps ? '<span class="card-tag card-tag-snap">snapshot</span>' : ''}${matchNoteHit ? '<span class="card-tag card-tag-match-note">matched in note</span>' : ''}${matchSnapHit ? '<span class="card-tag card-tag-match-snap">matched in snapshot</span>' : ''}${listTagsHtml}</div>` : '';
   const cardActionsHtml = deletable ? `<div class="card-actions"><button class="result-delete" data-delete-url="${safeUrl}" data-delete-title="${safeTitle}" title="Delete">${DELETE_SVG}</button></div>` : '';
 
   return `<div class="result-item${cssClass ? ' ' + cssClass : ''}">
@@ -2140,6 +2533,7 @@ function bindResultDelegation(container) {
       lastClickedRow = row;
     } else {
       allRows.forEach(r => r.classList.remove('selected'));
+      container._virtualScroller?.clearSelection?.();
       row.classList.add('selected');
       lastClickedRow = row;
     }
@@ -2173,6 +2567,8 @@ function openPageDetailCard(url, title, attDetail = null, timestamps = []) {
   const overlay = document.createElement('div');
   overlay.id = 'pageDetailOverlay';
   overlay.className = 'page-detail-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closePageDetailCard(); });
 
   const card = document.createElement('div');
@@ -2182,7 +2578,7 @@ function openPageDetailCard(url, title, attDetail = null, timestamps = []) {
       <div class="page-detail-title">${escapeHtml(title || url)}</div>
       <button class="page-detail-close" title="Close">×</button>
     </div>
-    <div class="page-detail-body"><div class="page-detail-loading">Loading…</div></div>
+    <div class="page-detail-body"><div class="page-detail-loading"><span class="spinner"></span></div></div>
   `;
   card.querySelector('.page-detail-close').addEventListener('click', closePageDetailCard);
   overlay.appendChild(card);
@@ -2204,6 +2600,7 @@ function openPageDetailCard(url, title, attDetail = null, timestamps = []) {
     bindNoteDeleteButtons(body);
     bindSnapshotClickHandlers(body);
     bindPageNoteHandler(body, url);
+    bindTimelineShowMore(body, extra);
   });
 
   const onEsc = (e) => { if (e.key === 'Escape') closePageDetailCard(); };
@@ -2457,6 +2854,8 @@ function createSidebarItem(node, depth) {
   const lst = node;
   const item = document.createElement('div');
   item.className = 'sidebar-item';
+  item.setAttribute('role', 'button');
+  item.tabIndex = 0;
   item.dataset.listId = lst.slug;
   item.style.paddingLeft = (20 + depth * 16) + 'px';
 
@@ -2833,12 +3232,12 @@ async function updateStorageStatus() {
 }
 
 async function updateStatistics() {
-  const interactions = Array.from(historyByUrl.values());
-  document.getElementById('totalInteractions').textContent = interactions.length;
+  const allPages = Array.from(historyByUrl.values());
+  document.getElementById('totalHistory').textContent = allPages.length;
 
   const today = new Date().setHours(0, 0, 0, 0);
-  const todayCount = interactions.filter(i => i.timestamp >= today).length;
-  document.getElementById('todayInteractions').textContent = todayCount;
+  const todayCount = allPages.filter(i => i.timestamp >= today).length;
+  document.getElementById('todayHistory').textContent = todayCount;
 
   const result = await chrome.storage.local.get(['logBuffer']);
   document.getElementById('bufferSize').textContent = (result.logBuffer || []).length;
@@ -3011,21 +3410,62 @@ document.getElementById('syncEnabled').addEventListener('change', () => {
     document.getElementById('syncEnabled').checked ? 'block' : 'none';
 });
 
+function syncShowMethodFields(method) {
+  document.getElementById('syncGithubFields').style.display = method === 'github' ? 'block' : 'none';
+  document.getElementById('syncFilesystemFields').style.display = method === 'filesystem' ? 'block' : 'none';
+  document.getElementById('syncWebdavFields').style.display = method === 'webdav' ? 'block' : 'none';
+}
+
+document.getElementById('syncMethod').addEventListener('change', () => {
+  syncShowMethodFields(document.getElementById('syncMethod').value);
+});
+
+document.getElementById('selectSyncDirBtn').addEventListener('click', async () => {
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'documents' });
+    // Store handle in IndexedDB (same DB as main data directory).
+    const dbReq = indexedDB.open('PortalFS', 1);
+    dbReq.onsuccess = () => {
+      const db = dbReq.result;
+      const tx = db.transaction(['handles'], 'readwrite');
+      tx.objectStore('handles').put(handle, 'syncDirectory');
+      tx.oncomplete = async () => {
+        document.getElementById('syncFolderLabel').textContent = handle.name;
+        await saveSettingsValue('syncFolderName', handle.name);
+      };
+    };
+  } catch (e) {
+    if (e.name !== 'AbortError') showStatus('Failed to select folder: ' + e.message, 'error');
+  }
+});
+
 document.getElementById('syncSaveBtn').addEventListener('click', async () => {
   const enabled = document.getElementById('syncEnabled').checked;
-  const repoUrl = document.getElementById('syncRepoUrl').value.trim();
-  const token = document.getElementById('syncToken').value.trim();
+  const method = document.getElementById('syncMethod').value;
   const interval = parseInt(document.getElementById('syncIntervalMinutes').value) || 5;
   const retention = parseInt(document.getElementById('syncRetentionDays').value) || 7;
 
-  if (enabled && (!repoUrl || !token)) {
-    showStatus('Repo URL and token are required', 'error');
-    return;
+  if (enabled) {
+    if (method === 'github') {
+      const repoUrl = document.getElementById('syncRepoUrl').value.trim();
+      if (!repoUrl) { showStatus('Repository URL is required', 'error'); return; }
+      const authState = await sendAction({ action: 'getSyncAuthState' });
+      if (!authState.hasToken) { showStatus('GitHub not connected — click "Connect with GitHub" first', 'error'); return; }
+      await saveSettingsValue('syncRepoUrl', repoUrl);
+    } else if (method === 'filesystem') {
+      const folderName = await loadSettingsValue('syncFolderName', '');
+      if (!folderName) { showStatus('Please select a sync folder first', 'error'); return; }
+    } else if (method === 'webdav') {
+      const url = document.getElementById('syncWebdavUrl').value.trim();
+      if (!url) { showStatus('WebDAV URL is required', 'error'); return; }
+      await saveSettingsValue('syncWebdavUrl', url);
+      await saveSettingsValue('syncWebdavUser', document.getElementById('syncWebdavUser').value.trim());
+      await saveSettingsValue('syncWebdavPass', document.getElementById('syncWebdavPass').value.trim());
+    }
   }
 
   await saveSettingsValue('syncEnabled', enabled);
-  await saveSettingsValue('syncRepoUrl', repoUrl);
-  await saveSettingsValue('syncToken', token);
+  await saveSettingsValue('syncMethod', method);
   await saveSettingsValue('syncIntervalMinutes', Math.max(1, interval));
   await saveSettingsValue('syncRetentionDays', Math.max(1, retention));
   await sendAction('updateSyncSettings');
@@ -3034,16 +3474,21 @@ document.getElementById('syncSaveBtn').addEventListener('click', async () => {
 
 document.getElementById('syncNowBtn').addEventListener('click', async () => {
   const statusEl = document.getElementById('syncStatus');
-  statusEl.textContent = 'Syncing...';
+  statusEl.innerHTML = '<span class="spinner spinner-sm"></span> Syncing...';
   try {
     const result = await sendAction('syncNow');
     if (result.skipped) {
       statusEl.textContent = result.error || 'Sync skipped (not configured or already running)';
     } else if (result.error) {
       statusEl.style.color = '#c62828';
-      statusEl.textContent = result.disabled
-        ? `Sync disabled: ${result.error}. Fix settings and save again.`
-        : `Error (will retry): ${result.error}`;
+      if (result.authExpired) {
+        statusEl.textContent = 'GitHub authorization expired — please reconnect in Settings.';
+        syncShowAuthState('disconnected');
+      } else if (result.disabled) {
+        statusEl.textContent = `Sync disabled: ${result.error}. Fix settings and save again.`;
+      } else {
+        statusEl.textContent = `Error (will retry): ${result.error}`;
+      }
     } else {
       statusEl.style.color = '#2e7d32';
       const parts = [];
@@ -3057,12 +3502,100 @@ document.getElementById('syncNowBtn').addEventListener('click', async () => {
   }
 });
 
+// ─── GitHub Auth UI ──────────────────────────────────────────────────
+
+let deviceFlowAbort = null; // AbortController for cancelling device flow
+
+function syncShowAuthState(state, detail) {
+  document.getElementById('syncAuthDisconnected').style.display = state === 'disconnected' ? '' : 'none';
+  document.getElementById('syncAuthDeviceFlow').style.display = state === 'device-flow' ? '' : 'none';
+  document.getElementById('syncAuthConnected').style.display = state === 'connected' ? '' : 'none';
+  if (state === 'connected' && detail) {
+    document.getElementById('syncAuthDetail').textContent = detail;
+  }
+}
+
+document.getElementById('syncGithubConnectBtn').addEventListener('click', async () => {
+  try {
+    const { user_code, device_code, verification_uri, interval, expires_in } = await requestDeviceCode();
+    document.getElementById('syncDeviceCode').textContent = user_code;
+    syncShowAuthState('device-flow');
+
+    deviceFlowAbort = new AbortController();
+
+    document.getElementById('syncOpenGithubBtn').href = verification_uri;
+    document.getElementById('syncOpenGithubBtn').onclick = (e) => {
+      e.preventDefault();
+      window.open(verification_uri, '_blank');
+    };
+
+    const token = await pollForToken(device_code, interval, expires_in, deviceFlowAbort.signal);
+    const { login } = await fetchGitHubUser(token);
+    const remember = document.getElementById('syncRememberToken').checked;
+    await sendAction({ action: 'setSyncToken', token, remember, authMethod: 'oauth', githubUser: login });
+    syncShowAuthState('connected', `as @${login} via GitHub OAuth`);
+    deviceFlowAbort = null;
+  } catch (e) {
+    deviceFlowAbort = null;
+    if (!e.message.includes('cancel')) {
+      showStatus(`GitHub auth failed: ${e.message}`, 'error');
+    }
+    syncShowAuthState('disconnected');
+  }
+});
+
+document.getElementById('syncCopyCodeBtn').addEventListener('click', () => {
+  const code = document.getElementById('syncDeviceCode').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    document.getElementById('syncCopyCodeBtn').textContent = 'Copied!';
+    setTimeout(() => { document.getElementById('syncCopyCodeBtn').textContent = 'Copy'; }, 1500);
+  });
+});
+
+document.getElementById('syncCancelAuthBtn').addEventListener('click', () => {
+  if (deviceFlowAbort) { deviceFlowAbort.abort(); deviceFlowAbort = null; }
+  syncShowAuthState('disconnected');
+});
+
+document.getElementById('syncPatToggle').addEventListener('click', (e) => {
+  e.preventDefault();
+  const fields = document.getElementById('syncPatFields');
+  fields.style.display = fields.style.display === 'none' ? '' : 'none';
+});
+
+document.getElementById('syncPatSaveBtn').addEventListener('click', async () => {
+  const token = document.getElementById('syncPatInput').value.trim();
+  if (!token) { showStatus('Token is required', 'error'); return; }
+  try {
+    const { login } = await fetchGitHubUser(token);
+    const remember = document.getElementById('syncRememberToken').checked;
+    await sendAction({ action: 'setSyncToken', token, remember, authMethod: 'pat', githubUser: login });
+    syncShowAuthState('connected', `as @${login} via personal access token`);
+    document.getElementById('syncPatInput').value = '';
+    document.getElementById('syncPatFields').style.display = 'none';
+  } catch (e) {
+    showStatus(`Invalid token: ${e.message}`, 'error');
+  }
+});
+
+document.getElementById('syncDisconnectBtn').addEventListener('click', async () => {
+  await sendAction({ action: 'clearSyncToken' });
+  syncShowAuthState('disconnected');
+  const revokeUrl = getGitHubRevokeUrl();
+  showStatus(`Disconnected. <a href="${revokeUrl}" target="_blank" style="color:#1a73e8;">Revoke on GitHub</a>`, 'success');
+});
+
+document.getElementById('syncRememberToken').addEventListener('change', async () => {
+  const remember = document.getElementById('syncRememberToken').checked;
+  await sendAction({ action: 'toggleSyncRemember', remember });
+});
+
 // Clear all data
 document.getElementById('clearBtn').addEventListener('click', async () => {
   if (!confirm('WARNING: This will DELETE ALL FILES in your storage directory!\n\nThis cannot be undone. Are you absolutely sure?')) {
     return;
   }
-  if (!confirm('Final confirmation: Delete all interaction history files?')) {
+  if (!confirm('Final confirmation: Delete all history files?')) {
     return;
   }
 
@@ -3112,6 +3645,228 @@ function showStatus(message, type) {
   status.textContent = message;
   status.className = `status ${type}`;
   setTimeout(() => { status.className = 'status'; }, 5000);
+}
+
+// --- Import Bookmarks ---
+{
+  const fileInput = document.getElementById('bookmarkFileInput');
+  const treeContainer = document.getElementById('bookmarkTreeContainer');
+  const importBtn = document.getElementById('importBookmarksBtn');
+  const progressEl = document.getElementById('importProgress');
+  const failuresEl = document.getElementById('importFailures');
+
+  let parsedTree = null;
+  let parseBookmarkHtml = null;
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    if (!parseBookmarkHtml) {
+      const mod = await import('./bookmark-parser.js');
+      parseBookmarkHtml = mod.parseBookmarkHtml;
+    }
+    const text = await file.text();
+    parsedTree = parseBookmarkHtml(text);
+    renderBookmarkTree(parsedTree);
+    importBtn.disabled = true; // nothing checked yet
+    progressEl.textContent = '';
+    failuresEl.innerHTML = '';
+  });
+
+  function renderBookmarkTree(root) {
+    treeContainer.innerHTML = '';
+    treeContainer._items = [];
+    if (root.bookmarks.length > 0) {
+      const rootItem = createTreeItem({ title: '(Root bookmarks)', bookmarks: root.bookmarks, skipped: root.skipped || [], children: [], bookmarkCount: root.bookmarks.length, subfolderCount: 0 }, 0);
+      treeContainer.appendChild(rootItem.el);
+      treeContainer._items.push(rootItem);
+    }
+    for (const folder of root.children) {
+      const item = createTreeItem(folder, 0);
+      treeContainer.appendChild(item.el);
+      treeContainer._items.push(item);
+    }
+  }
+
+  function createTreeItem(folder, depth) {
+    const wrapper = document.createElement('div');
+
+    const row = document.createElement('div');
+    row.className = 'bookmark-tree-item';
+    row.style.paddingLeft = (depth * 16) + 'px';
+
+    // Toggle arrow
+    const toggle = document.createElement('button');
+    toggle.className = 'bm-toggle' + (folder.children.length === 0 ? ' leaf' : '');
+    row.appendChild(toggle);
+
+    // Checkbox
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    row.appendChild(cb);
+
+    // Label
+    const label = document.createElement('span');
+    label.className = 'bm-label';
+    label.textContent = folder.title;
+    row.appendChild(label);
+
+    // Count
+    const count = document.createElement('span');
+    count.className = 'bm-count';
+    const parts = [];
+    if (folder.bookmarkCount > 0) parts.push(`${folder.bookmarkCount} bookmark${folder.bookmarkCount !== 1 ? 's' : ''}`);
+    if (folder.subfolderCount > 0) parts.push(`${folder.subfolderCount} subfolder${folder.subfolderCount !== 1 ? 's' : ''}`);
+    count.textContent = parts.length > 0 ? `(${parts.join(', ')})` : '(empty)';
+    row.appendChild(count);
+
+    wrapper.appendChild(row);
+
+    // Children container
+    const childrenContainer = document.createElement('div');
+    childrenContainer.className = 'bookmark-tree-children' + (depth >= 1 ? ' collapsed' : '');
+    const childItems = [];
+    for (const child of folder.children) {
+      const childItem = createTreeItem(child, depth + 1);
+      childrenContainer.appendChild(childItem.el);
+      childItems.push(childItem);
+    }
+    wrapper.appendChild(childrenContainer);
+
+    // Toggle expand/collapse
+    if (folder.children.length > 0) {
+      toggle.classList.toggle('expanded', depth < 1);
+      toggle.addEventListener('click', () => {
+        const collapsed = childrenContainer.classList.toggle('collapsed');
+        toggle.classList.toggle('expanded', !collapsed);
+      });
+    }
+
+    // Checkbox: tri-state propagation
+    cb.addEventListener('change', () => {
+      // Propagate down: check/uncheck all descendants
+      setSubtreeChecked(childItems, cb.checked);
+      updateImportButton();
+    });
+
+    function getChecked() { return cb.checked; }
+    function getIndeterminate() { return cb.indeterminate; }
+    function setChecked(val) { cb.checked = val; cb.indeterminate = false; }
+    function setIndeterminate() { cb.indeterminate = true; cb.checked = false; }
+
+    function updateFromChildren() {
+      if (childItems.length === 0) return;
+      const allChecked = childItems.every(c => c.getChecked() && !c.getIndeterminate());
+      const noneChecked = childItems.every(c => !c.getChecked() && !c.getIndeterminate());
+      if (allChecked) setChecked(true);
+      else if (noneChecked) setChecked(false);
+      else setIndeterminate();
+    }
+
+    // Wire children to update parent
+    for (const child of childItems) {
+      child.onchange = () => {
+        updateFromChildren();
+        updateImportButton();
+      };
+    }
+
+    // Notify parent on change
+    let onchange = null;
+    cb.addEventListener('change', () => { if (item.onchange) item.onchange(); });
+
+    const item = {
+      el: wrapper,
+      folder,
+      getChecked,
+      getIndeterminate,
+      setChecked,
+      children: childItems,
+      get onchange() { return onchange; },
+      set onchange(fn) { onchange = fn; },
+    };
+    return item;
+  }
+
+  function setSubtreeChecked(items, checked) {
+    for (const item of items) {
+      item.setChecked(checked);
+      setSubtreeChecked(item.children, checked);
+    }
+  }
+
+  function updateImportButton() {
+    const items = treeContainer.querySelectorAll('.bookmark-tree-item input[type="checkbox"]');
+    const anyChecked = Array.from(items).some(cb => cb.checked);
+    importBtn.disabled = !anyChecked;
+  }
+
+  function collectCheckedTree(items) {
+    const result = [];
+    for (const item of items) {
+      if (item.getChecked() || item.getIndeterminate()) {
+        // Include this folder — collect its selected children recursively
+        const childSelected = collectCheckedTree(item.children);
+        result.push({
+          title: item.folder.title,
+          bookmarks: item.getChecked() ? item.folder.bookmarks : [],
+          skipped: item.getChecked() ? (item.folder.skipped || []) : [],
+          children: childSelected,
+        });
+      }
+    }
+    return result;
+  }
+
+  importBtn.addEventListener('click', async () => {
+    const selected = collectCheckedTree(treeContainer._items || []);
+    if (selected.length === 0) return;
+
+    importBtn.disabled = true;
+    importBtn.textContent = 'Importing...';
+    progressEl.textContent = 'Starting import...';
+    failuresEl.innerHTML = '';
+
+    const port = chrome.runtime.connect({ name: 'import-bookmarks' });
+    port.postMessage({ action: 'importBookmarks', tree: selected });
+
+    port.onMessage.addListener((msg) => {
+      if (msg.type === 'progress') {
+        progressEl.textContent = msg.text;
+      } else if (msg.type === 'done') {
+        progressEl.textContent = `Done! Imported ${msg.listCount} list${msg.listCount !== 1 ? 's' : ''} with ${msg.bookmarkCount} bookmark${msg.bookmarkCount !== 1 ? 's' : ''}.`;
+        if (msg.failures && msg.failures.length > 0) {
+          const details = document.createElement('details');
+          const summary = document.createElement('summary');
+          summary.textContent = `${msg.failures.length} item${msg.failures.length !== 1 ? 's' : ''} skipped`;
+          details.appendChild(summary);
+          const list = document.createElement('ul');
+          list.style.cssText = 'margin:4px 0;padding-left:20px;';
+          for (const f of msg.failures) {
+            const li = document.createElement('li');
+            li.textContent = `${f.title || f.url} — ${f.reason}`;
+            list.appendChild(li);
+          }
+          details.appendChild(list);
+          failuresEl.innerHTML = '';
+          failuresEl.appendChild(details);
+        }
+        importBtn.textContent = 'Import Selected';
+        importBtn.disabled = false;
+      } else if (msg.type === 'error') {
+        progressEl.textContent = 'Import failed: ' + msg.message;
+        importBtn.textContent = 'Import Selected';
+        importBtn.disabled = false;
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      if (importBtn.textContent === 'Importing...') {
+        importBtn.textContent = 'Import Selected';
+        importBtn.disabled = false;
+      }
+    });
+  });
 }
 
 // --- URL Blacklist ---
@@ -3246,14 +4001,14 @@ chrome.runtime.onMessage.addListener((request) => {
 
   const { type } = request;
 
-  if (type === 'interaction') {
+  if (type === 'history') {
     // New page visit — merge into historyByUrl and historyAllEntries
     clearTimeout(mutationRefreshTimer);
     mutationRefreshTimer = setTimeout(async () => {
       const todayEntries = await readCacheable('log:' + new Date().toISOString().slice(0, 10)) || [];
-      const interactionBuffer = todayEntries.filter(e => (e.action === 'visit_page' || e.action === 'leave_page' || !e.action) && e.url);
+      const historyBuffer = todayEntries.filter(e => (e.action === 'visit_page' || e.action === 'leave_page' || !e.action) && e.url);
       let changed = false;
-      for (const entry of interactionBuffer) {
+      for (const entry of historyBuffer) {
         const existing = historyByUrl.get(entry.url);
         if (!existing || entry.timestamp > existing.timestamp) {
           historyByUrl.set(entry.url, entry);
@@ -3321,14 +4076,14 @@ document.addEventListener('visibilitychange', async () => {
   // Re-list history files and load any new ones
   let historyChanged = false;
   try {
-    const filesResp = await sendAction({ action: 'listInteractionFiles' });
+    const filesResp = await sendAction({ action: 'listHistoryFiles' });
     const allFiles = filesResp.files;
     const newFiles = allFiles.filter(f => !historyFiles.includes(f));
     if (newFiles.length > 0) {
       historyFiles = allFiles;
-      const batchResp = await sendAction({ action: 'loadInteractionBatch', files: newFiles });
-      const newInteractions = batchResp.interactions;
-      for (const item of newInteractions) {
+      const batchResp = await sendAction({ action: 'loadHistoryBatch', files: newFiles });
+      const newEntries = batchResp.entries;
+      for (const item of newEntries) {
         if (!historyByUrl.has(item.url) || item.timestamp > historyByUrl.get(item.url).timestamp) {
           historyByUrl.set(item.url, item);
           historyChanged = true;
@@ -3340,7 +4095,7 @@ document.addEventListener('visibilitychange', async () => {
   }
 
   // Don't refreshCurrentView() here — mutation notifications from background already
-  // handle re-rendering for pin/list/interaction changes. A full re-render would
+  // handle re-rendering for pin/list/history changes. A full re-render would
   // destroy scroll position, block enable/disable state, and expanded details.
 });
 
@@ -3669,36 +4424,18 @@ async function runSearchFilterPipeline() {
   const allQueries = [...savedSearches];
   if (currentSearchInput.trim()) allQueries.push(currentSearchInput.trim());
 
-  let results;
-  let showAllHistory = false;
-
-  if (allQueries.length === 0 || allQueries.every(q => !q.trim())) {
-    // No search queries → show all history
-    showAllHistory = true;
-    results = processInteractionsForDisplay(
-      historyAllEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
-    ).map(item => ({ ...item, relevance: 0 }));
-    await enrichFromEntityStorage(results);
-  } else {
-    // OR across queries: item matches if ANY query matches (AND within each query)
-    const matchedUrls = new Set();
-    for (const query of allQueries) {
-      if (!query.trim()) continue;
-      const words = parseSearchWords(query);
-      for (const item of historyAllEntries) {
-        if (!item.url || pinnedSlugs.has(generateSlugFromUrl(item.url))) continue;
-        if (wordsMatchItem(words, item)) {
-          matchedUrls.add(item.url);
-        }
-      }
-    }
-
-    const filteredEntries = historyAllEntries.filter(item =>
-      item.url && matchedUrls.has(item.url)
-    );
-    results = processInteractionsForDisplay(filteredEntries, { globalDedup: true }).map(item => ({ ...item, relevance: 0 }));
-    await enrichFromEntityStorage(results);
+  if (allQueries.length > 0 && allQueries.some(q => q.trim())) {
+    // Progressive multi-phase search: Phase 0 (in-memory) renders instantly,
+    // then Phase 1 (WASM JSONL), 2a (notes), 2b (snapshots) fire concurrently.
+    await runProgressiveSearch(allQueries);
+    return;
   }
+
+  // No search queries → show all history (demand-loaded)
+  let results = processHistoryForDisplay(
+    historyAllEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
+  ).map(item => ({ ...item, relevance: 0 }));
+  await enrichFromEntityStorage(results);
 
   // Enrich with page entity data when filters need it, then apply filters
   if (!isDefaultFilterState(filterState)) {
@@ -3728,20 +4465,18 @@ async function runSearchFilterPipeline() {
   );
 
   // Demand-load more history when scrolling (for all-history mode)
-  if (showAllHistory) {
-    vs.onLoadMore = async () => {
-      const newItems = await loadHistoryBatch();
-      if (newItems.length > 0) {
-        const filtered = newItems.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)));
-        const newResults = processInteractionsForDisplay(filtered).map(item => ({ ...item, relevance: 0 }));
-        await enrichFromEntityStorage(newResults);
-        if (newResults.length > 0) {
-          const sort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
-          vs.appendData(applySortOrder(newResults, sort));
-        }
+  vs.onLoadMore = async () => {
+    const newItems = await loadHistoryBatch();
+    if (newItems.length > 0) {
+      const filtered = newItems.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)));
+      const newResults = processHistoryForDisplay(filtered).map(item => ({ ...item, relevance: 0 }));
+      await enrichFromEntityStorage(newResults);
+      if (newResults.length > 0) {
+        const sort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
+        vs.appendData(applySortOrder(newResults, sort));
       }
-    };
-  }
+    }
+  };
 
   // Time chart for explore results
   const chartData = results.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || Date.now(), attention: '' }));
@@ -3760,7 +4495,7 @@ async function openFocusPanel(url, title) {
   const overlay = document.getElementById('focusOverlay');
   const content = document.getElementById('focusContent');
 
-  content.innerHTML = '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">Loading...</div></div></div>';
+  content.innerHTML = '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty"><span class="spinner"></span></div></div></div>';
   overlay.classList.add('visible');
 
   try {
@@ -3771,10 +4506,10 @@ async function openFocusPanel(url, title) {
     }
 
     // Compute similar pages from loaded history
-    const seedInteraction = historyByUrl.get(url);
+    const seedEntry = historyByUrl.get(url);
     let similar = [];
-    if (seedInteraction) {
-      const seed = { ...seedInteraction, timestamps: [seedInteraction.timestamp || Date.now()], attScore: 0, attDetail: null, notes: [] };
+    if (seedEntry) {
+      const seed = { ...seedEntry, timestamps: [seedEntry.timestamp || Date.now()], attScore: 0, attDetail: null, notes: [] };
       const candidates = Array.from(historyByUrl.values())
         .filter(i => i.url !== url)
         .map(i => ({ ...i, timestamps: [i.timestamp || Date.now()], attScore: 0, attDetail: null, notes: [] }));
@@ -3791,7 +4526,7 @@ async function openListFocusPanel(listId, listName) {
   const overlay = document.getElementById('focusOverlay');
   const content = document.getElementById('focusContent');
 
-  content.innerHTML = '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">Loading...</div></div></div>';
+  content.innerHTML = '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty"><span class="spinner"></span></div></div></div>';
   overlay.classList.add('visible');
 
   try {
@@ -3814,7 +4549,7 @@ async function openListFocusPanel(listId, listName) {
       html += pinsResolved.map(r => {
         const title = r.user_title || r.title || '<unknown>';
         return resultRowHtml(title, r.url, {
-          deletable: false, attScore: 0, maxAtt, timestamps: [r.pinnedAt || Date.now()], context: 'global', deletable: false, childIds: r.childIds, parentIds: r.parentIds
+          deletable: false, attScore: 0, maxAtt, timestamps: [r.pinnedAt || Date.now()], context: 'global', pinSource: r.source || null, childIds: r.childIds, parentIds: r.parentIds
         });
       }).join('');
     }
@@ -3959,6 +4694,26 @@ function initSidebarResize() {
   });
 }
 
+// --- Sidebar responsive toggle ---
+function initSidebarToggle() {
+  const toggle = document.getElementById('sidebarToggle');
+  const overlay = document.getElementById('sidebarOverlay');
+  const sidebar = document.querySelector('.sidebar');
+  if (!toggle || !overlay || !sidebar) return;
+  toggle.addEventListener('click', () => {
+    sidebar.classList.toggle('sidebar-open');
+  });
+  overlay.addEventListener('click', () => {
+    sidebar.classList.remove('sidebar-open');
+  });
+  // Close sidebar on narrow screens when navigating
+  sidebar.addEventListener('click', (e) => {
+    if (e.target.closest('.sidebar-item') || e.target.closest('.explore-btn')) {
+      sidebar.classList.remove('sidebar-open');
+    }
+  });
+}
+
 async function restoreSidebarWidth() {
   try {
     const { sidebarWidth } = await chrome.storage.session.get(['sidebarWidth']);
@@ -3990,8 +4745,26 @@ async function initialize() {
   const syncEnabled = await loadSettingsValue('syncEnabled', false);
   document.getElementById('syncEnabled').checked = syncEnabled;
   document.getElementById('syncConfigFields').style.display = syncEnabled ? 'block' : 'none';
+  const syncMethod = await loadSettingsValue('syncMethod', 'github');
+  document.getElementById('syncMethod').value = syncMethod;
+  syncShowMethodFields(syncMethod);
   document.getElementById('syncRepoUrl').value = await loadSettingsValue('syncRepoUrl', '');
-  document.getElementById('syncToken').value = await loadSettingsValue('syncToken', '');
+  // Load GitHub auth state from background (token lives in session, not settings)
+  try {
+    const authState = await sendAction({ action: 'getSyncAuthState' });
+    if (authState.hasToken) {
+      const method = authState.authMethod === 'pat' ? 'personal access token' : 'GitHub OAuth';
+      const user = authState.githubUser ? `as @${authState.githubUser} ` : '';
+      syncShowAuthState('connected', `${user}via ${method}`);
+    } else {
+      syncShowAuthState('disconnected');
+    }
+    document.getElementById('syncRememberToken').checked = authState.rememberToken;
+  } catch { syncShowAuthState('disconnected'); }
+  document.getElementById('syncFolderLabel').textContent = await loadSettingsValue('syncFolderName', '');
+  document.getElementById('syncWebdavUrl').value = await loadSettingsValue('syncWebdavUrl', '');
+  document.getElementById('syncWebdavUser').value = await loadSettingsValue('syncWebdavUser', '');
+  document.getElementById('syncWebdavPass').value = await loadSettingsValue('syncWebdavPass', '');
   document.getElementById('syncIntervalMinutes').value = await loadSettingsValue('syncIntervalMinutes', 5);
   document.getElementById('syncRetentionDays').value = await loadSettingsValue('syncRetentionDays', 7);
   _timer('loadSettings');
@@ -4004,6 +4777,7 @@ async function initialize() {
   await loadFoldState();
   restoreSidebarWidth();
   initSidebarResize();
+  initSidebarToggle();
   _timer('sidebarInit');
 
   // Render sidebar concurrently with heavy data (don't block on sidebar)
@@ -4097,5 +4871,20 @@ document.addEventListener('keydown', async (e) => {
     const listId = activeView.id;
     await chrome.runtime.sendMessage({ action: 'addListPins', listId, urls: urls });
     refreshPins();
+  }
+
+  if (e.key === 'a') {
+    e.preventDefault();
+    if (activeView.type === 'list') {
+      relatedVirtualScroller?.selectAll();
+    } else if (activeView.type === 'explore' && searchResults.length > 0) {
+      if (searchResults.length > 100) {
+        showErrorBubble('Too many results to select (limit: 100)', { suffix: '' });
+      } else {
+        relatedVirtualScroller?.selectAll();
+      }
+    } else {
+      showBlockedBubble('Select all is not available here');
+    }
   }
 });

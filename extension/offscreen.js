@@ -54,9 +54,21 @@ chrome.runtime.onConnect.addListener((port) => {
 
 const fileLocks = new Map();
 
+const LOCK_TIMEOUT_MS = 30000;
+
 function withLock(key, fn) {
   const prev = fileLocks.get(key) || Promise.resolve();
-  const next = prev.catch(() => {}).then(() => fn());
+  const next = prev.catch(() => {}).then(() => {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`withLock('${key}') timed out after ${LOCK_TIMEOUT_MS}ms`));
+      }, LOCK_TIMEOUT_MS);
+      fn().then(
+        (result) => { clearTimeout(timer); resolve(result); },
+        (error) => { clearTimeout(timer); reject(error); },
+      );
+    });
+  });
   fileLocks.set(key, next);
   next.catch(() => {}).then(() => {
     if (fileLocks.get(key) === next) fileLocks.delete(key);
@@ -147,13 +159,6 @@ async function handleRequest(request) {
         return { success: true, notesMap };
       }
 
-      case 'loadInteractionByUrl': {
-        const t0 = performance.now();
-        const interaction = await fsStorage.loadInteractionByUrl(request.url);
-        console.debug(`[I/O] loadInteractionByUrl: ${(performance.now() - t0).toFixed(1)}ms`);
-        return { success: true, interaction };
-      }
-
       case 'loadPageBatch': {
         const t0 = performance.now();
         const pages = await fsStorage.loadPageBatch(request.slugs);
@@ -209,7 +214,7 @@ async function handleRequest(request) {
       }
 
       case 'initDevice': {
-        await fsStorage.initDevice(msg.deviceId);
+        await fsStorage.initDevice(request.deviceId);
         return { success: true };
       }
 
@@ -248,21 +253,25 @@ async function handleRequest(request) {
         }
       }
 
-      case 'listInteractionFiles': {
-        const files = await fsStorage.listInteractionFiles();
-        return { success: true, files };
+      case 'listHistoryFiles': {
+        const files = await fsStorage.listHistoryFiles();
+        const resp = { success: true, files };
+        if (request.includeSizes) {
+          resp.sizes = await fsStorage.listHistoryFileSizes();
+        }
+        return resp;
       }
 
-      case 'loadInteractionBatch': {
+      case 'loadHistoryBatch': {
         const t0 = performance.now();
-        const interactions = await fsStorage.loadInteractionFiles(request.files);
-        console.debug(`[I/O] loadInteractionBatch: ${request.files.length} files, ${interactions.length} items in ${(performance.now() - t0).toFixed(1)}ms`);
-        return { success: true, interactions };
+        const entries = await fsStorage.loadHistoryFiles(request.files);
+        console.debug(`[I/O] loadHistoryBatch: ${request.files.length} files, ${entries.length} items in ${(performance.now() - t0).toFixed(1)}ms`);
+        return { success: true, entries };
       }
 
       case 'loadHistoryRange': {
         const t0 = performance.now();
-        const { entries, files } = await fsStorage.loadInteractionFileRange(request.from, request.to);
+        const { entries, files } = await fsStorage.loadHistoryFileRange(request.from, request.to);
         console.debug(`[I/O] loadHistoryRange(${request.from}..${request.to}): ${files.length} files, ${entries.length} entries in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, entries, files };
       }
@@ -337,6 +346,32 @@ async function handleRequest(request) {
 
       case 'writeSyncFiles': {
         await fsStorage.writeSyncFiles(request.files);
+        return { success: true };
+      }
+
+      // Filesystem sync transport I/O (operates on separate sync directory)
+      case 'syncFsListDeviceDirs': {
+        const dirs = await fsStorage.syncFsListDeviceDirs();
+        return { success: true, dirs };
+      }
+      case 'syncFsListFiles': {
+        const files = await fsStorage.syncFsListFiles(request.deviceDir);
+        return { success: true, files };
+      }
+      case 'syncFsReadFile': {
+        const content = await fsStorage.syncFsReadFile(request.path);
+        return { success: true, content };
+      }
+      case 'syncFsWriteFile': {
+        await fsStorage.syncFsWriteFile(request.path, request.content);
+        return { success: true };
+      }
+      case 'syncFsEnsureDir': {
+        await fsStorage.syncFsEnsureDir(request.path);
+        return { success: true };
+      }
+      case 'syncFsRemoveFile': {
+        await fsStorage.syncFsRemoveFile(request.path);
         return { success: true };
       }
 
@@ -419,7 +454,7 @@ async function handleRequest(request) {
 // ─── Log Buffer Drain ─────────────────────────────────────────────────
 // Background sends 'drainEntries' messages via port (handled above in
 // the port.onMessage listener). Entries flow:
-//   1. Append log line to history/YYYY-MM-DD.jsonl
+//   1. Append log line to data/logs/YYYY-MM-DD.jsonl
 //   2. Checkpoint entity file via shared replay functions
 //   3. Send watermark back to background for pruning
 
@@ -453,7 +488,7 @@ async function drainQueue() {
       return;
     }
     let logBuffer = pendingDrainEntries;
-    pendingDrainEntries = null;
+    // Don't clear pendingDrainEntries yet — clear only after successful JSONL write
     // Skip entries already drained (prevents duplicates across drain cycles)
     logBuffer = logBuffer.filter(e => e.timestamp > lastDrainedTimestamp);
     if (logBuffer.length === 0) {
@@ -572,50 +607,58 @@ async function drainQueue() {
       }
     }
 
-    // 2. Flush dirty entities from round cache to disk (pure save, no post-processing)
+    // JSONL writes succeeded — safe to clear pending entries
+    pendingDrainEntries = null;
+
+    // 2. Flush dirty entities from round cache to disk (per-entity try/catch
+    //    so one failure doesn't prevent others from saving)
     for (const key of dirtyKeys) {
-      const entity = roundCache.get(key);
-      if (entity === null || entity === undefined) {
-        // GC'd page entity — delete its checkpoint file
+      try {
+        const entity = roundCache.get(key);
+        if (entity === null || entity === undefined) {
+          // GC'd page entity — delete its checkpoint file
+          if (key.startsWith('page:')) {
+            const slug = key.slice(5);
+            await withLock('pages/' + slug + '.json', () => fsStorage.deletePage(slug));
+          }
+          continue;
+        }
+
         if (key.startsWith('page:')) {
           const slug = key.slice(5);
-          await withLock('pages/' + slug + '.json', () => fsStorage.deletePage(slug));
+          await withLock('pages/' + slug + '.json', () => fsStorage.savePage(slug, entity));
+        } else if (key.startsWith('note:')) {
+          const slug = key.slice(5);
+          // Strip entity-only fields — note files are immutable primary data.
+          // Mutable state (deleted, replacedBy, etc.) lives in session cache only.
+          const { slug: s, excerpt, note, cssPath, url } = entity;
+          const fileData = { slug: s, excerpt, note, cssPath, url };
+          await withLock('data/notes/' + slug + '.json', () => fsStorage.saveNote(slug, fileData));
+        } else if (key === 'manifest:settings') {
+          await withLock('manifest/settings.json', () => fsStorage.saveSettings(entity));
+        } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
+          const listId = key.slice('list:'.length);
+          await withLock('lists/' + listId + '.json', async () => {
+            await fsStorage.saveListMeta(listId, entity);
+          });
+        } else if (key === 'manifest:orphaned') {
+          await withLock('manifest/orphaned.json', async () => {
+            const fh = await fsStorage.resolveFile('manifest/orphaned.json', { create: true });
+            await fsStorage.writeJson(fh, entity);
+          });
+        } else if (key === 'manifest:name-to-id') {
+          await withLock('manifest/list-name-to-id.json', async () => {
+            const fh = await fsStorage.resolveFile('manifest/list-name-to-id.json', { create: true });
+            await fsStorage.writeJson(fh, entity);
+          });
+        } else if (key === 'manifest:list-order') {
+          await withLock('manifest/list-order.json', async () => {
+            const fh = await fsStorage.resolveFile('manifest/list-order.json', { create: true });
+            await fsStorage.writeJson(fh, entity);
+          });
         }
-        continue;
-      }
-
-      if (key.startsWith('page:')) {
-        const slug = key.slice(5);
-        await withLock('pages/' + slug + '.json', () => fsStorage.savePage(slug, entity));
-      } else if (key.startsWith('note:')) {
-        const slug = key.slice(5);
-        // Strip entity-only fields — note files are immutable primary data.
-        // Mutable state (deleted, replacedBy, etc.) lives in session cache only.
-        const { slug: s, excerpt, note, cssPath, url } = entity;
-        const fileData = { slug: s, excerpt, note, cssPath, url };
-        await withLock('data/notes/' + slug + '.json', () => fsStorage.saveNote(slug, fileData));
-      } else if (key === 'manifest:settings') {
-        await withLock('manifest/settings.json', () => fsStorage.saveSettings(entity));
-      } else if (key.startsWith('list:') && !key.startsWith('list:system/') && !key.startsWith('list:index/')) {
-        const listId = key.slice('list:'.length);
-        await withLock('lists/' + listId + '.json', async () => {
-          await fsStorage.saveListMeta(listId, entity);
-        });
-      } else if (key === 'manifest:orphaned') {
-        await withLock('manifest/orphaned.json', async () => {
-          const fh = await fsStorage.resolveFile('manifest/orphaned.json', { create: true });
-          await fsStorage.writeJson(fh, entity);
-        });
-      } else if (key === 'manifest:name-to-id') {
-        await withLock('manifest/list-name-to-id.json', async () => {
-          const fh = await fsStorage.resolveFile('manifest/list-name-to-id.json', { create: true });
-          await fsStorage.writeJson(fh, entity);
-        });
-      } else if (key === 'manifest:list-order') {
-        await withLock('manifest/list-order.json', async () => {
-          const fh = await fsStorage.resolveFile('manifest/list-order.json', { create: true });
-          await fsStorage.writeJson(fh, entity);
-        });
+      } catch (e) {
+        console.error(`Entity flush failed for ${key}:`, e);
       }
     }
 

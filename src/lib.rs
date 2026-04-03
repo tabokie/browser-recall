@@ -38,10 +38,10 @@ extern "C" {
     async fn text(this: &WebFile) -> Result<JsValue, JsValue>;
 }
 
-/// Represents a portal interaction (webpage visit, document read, etc.)
+/// Represents a history entry (webpage visit, document read, etc.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[wasm_bindgen(getter_with_clone)]
-pub struct Interaction {
+pub struct HistoryEntry {
     pub timestamp: i64,
     pub url: String,
     pub title: String,
@@ -51,11 +51,11 @@ pub struct Interaction {
 }
 
 #[wasm_bindgen]
-impl Interaction {
+impl HistoryEntry {
     #[wasm_bindgen(constructor)]
-    pub fn new(url: String, title: String) -> Interaction {
+    pub fn new(url: String, title: String) -> HistoryEntry {
         let timestamp = js_sys::Date::now() as i64;
-        Interaction {
+        HistoryEntry {
             timestamp,
             url,
             title,
@@ -98,9 +98,9 @@ struct SearchResult {
     score: f64,
 }
 
-/// Raw interaction data from JSONL files (deserialization target)
+/// Raw history data from JSONL files (deserialization target)
 #[derive(Deserialize)]
-struct InteractionData {
+struct HistoryData {
     timestamp: i64,
     url: String,
     title: String,
@@ -127,7 +127,7 @@ pub enum RankingAlgorithm {
 /// predicates) from options.js into WASM so all filtering and scoring happens in one pass.
 #[wasm_bindgen]
 pub struct SearchEngine {
-    interactions: Vec<Interaction>,
+    entries: Vec<HistoryEntry>,
 }
 
 #[wasm_bindgen]
@@ -135,13 +135,13 @@ impl SearchEngine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> SearchEngine {
         SearchEngine {
-            interactions: Vec::new(),
+            entries: Vec::new(),
         }
     }
 
-    #[wasm_bindgen(js_name = addInteraction)]
-    pub fn add_interaction(&mut self, interaction: Interaction) {
-        self.interactions.push(interaction);
+    #[wasm_bindgen(js_name = addEntry)]
+    pub fn add_entry(&mut self, entry: HistoryEntry) {
+        self.entries.push(entry);
     }
 
     #[wasm_bindgen(js_name = search)]
@@ -152,13 +152,14 @@ impl SearchEngine {
     }
 
     fn search_internal(&self, query: &str, algorithm: RankingAlgorithm) -> Vec<SearchResult> {
-        let query_lower = query.to_lowercase();
-        let mut results: Vec<SearchResult> = self.interactions
+        let words = parse_query_words(query);
+        if words.is_empty() {
+            return Vec::new();
+        }
+        let mut results: Vec<SearchResult> = self.entries
             .iter()
             .filter(|i| {
-                i.title.to_lowercase().contains(&query_lower) ||
-                i.content.to_lowercase().contains(&query_lower) ||
-                i.intent.to_lowercase().contains(&query_lower)
+                words_match_fields(&words, &[&i.title, &i.content, &i.intent])
             })
             .map(|i| SearchResult {
                 url: i.url.clone(),
@@ -166,7 +167,7 @@ impl SearchEngine {
                 timestamp: i.timestamp,
                 intent: i.intent.clone(),
                 attention: i.attention.clone(),
-                score: content_score(i, &query_lower),
+                score: content_score(i, &words),
             })
             .collect();
 
@@ -195,18 +196,103 @@ impl SearchEngine {
     }
 }
 
-fn content_score(interaction: &Interaction, query: &str) -> f64 {
+/// A parsed query word: either an exact (quoted) phrase or a substring match.
+#[derive(Debug, Clone)]
+struct QueryWord {
+    text: String, // lowercased
+    exact: bool,
+}
+
+/// Parse a query string into words, matching JS `parseSearchWords` semantics.
+/// Quoted phrases stay together ("react hooks" → one exact word).
+/// Unquoted tokens are individual substring matches. ALL words must match (AND).
+fn parse_query_words(query: &str) -> Vec<QueryWord> {
+    let mut words = Vec::new();
+    let mut chars = query.chars().peekable();
+
+    while let Some(&ch) = chars.peek() {
+        if ch == '"' {
+            chars.next(); // consume opening quote
+            let mut phrase = String::new();
+            while let Some(&c) = chars.peek() {
+                if c == '"' {
+                    chars.next(); // consume closing quote
+                    break;
+                }
+                phrase.push(c);
+                chars.next();
+            }
+            if !phrase.is_empty() {
+                words.push(QueryWord { text: phrase.to_lowercase(), exact: true });
+            }
+        } else if ch.is_whitespace() {
+            chars.next();
+        } else {
+            let mut token = String::new();
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() || c == '"' {
+                    break;
+                }
+                token.push(c);
+                chars.next();
+            }
+            if !token.is_empty() {
+                words.push(QueryWord { text: token.to_lowercase(), exact: false });
+            }
+        }
+    }
+
+    words
+}
+
+/// Check if a word matches within text. Exact words use word-boundary matching.
+fn word_matches_text(word: &QueryWord, text: &str) -> bool {
+    let lower = text.to_lowercase();
+    if word.exact {
+        // Word-boundary match: look for the phrase surrounded by non-alphanumeric chars (or string edges)
+        let needle = &word.text;
+        let mut start = 0;
+        while let Some(pos) = lower[start..].find(needle) {
+            let abs_pos = start + pos;
+            let end_pos = abs_pos + needle.len();
+            let at_word_start = abs_pos == 0
+                || !lower.as_bytes()[abs_pos - 1].is_ascii_alphanumeric();
+            let at_word_end = end_pos == lower.len()
+                || !lower.as_bytes()[end_pos].is_ascii_alphanumeric();
+            if at_word_start && at_word_end {
+                return true;
+            }
+            start = abs_pos + 1;
+            if start >= lower.len() {
+                break;
+            }
+        }
+        false
+    } else {
+        lower.contains(&word.text)
+    }
+}
+
+/// Check if ALL query words match in at least one of the given text fields.
+/// Each word must match in at least one field (AND across words, OR across fields per word).
+fn words_match_fields(words: &[QueryWord], fields: &[&str]) -> bool {
+    words.iter().all(|w| {
+        fields.iter().any(|f| word_matches_text(w, f))
+    })
+}
+
+fn content_score(entry: &HistoryEntry, words: &[QueryWord]) -> f64 {
     let mut score = 0.0;
 
-    if interaction.title.to_lowercase().contains(query) {
+    if words.iter().all(|w| word_matches_text(w, &entry.title)) {
         score += 2.0;
     }
 
-    if interaction.content.to_lowercase().contains(query) {
+    if !entry.content.is_empty() && words.iter().all(|w| word_matches_text(w, &entry.content)) {
         score += 1.0;
     }
 
-    if interaction.intent.to_lowercase().contains(query) {
+    if !entry.intent.is_empty() && words.iter().all(|w| word_matches_text(w, &entry.intent)) {
         score += 1.5;
     }
 
@@ -267,7 +353,7 @@ pub async fn search_batch(
     let pages: &FileSystemDirectoryHandle = pages_dir.unchecked_ref();
 
     let mut seen_urls = HashSet::new();
-    let mut interactions: Vec<InteractionData> = Vec::new();
+    let mut entries: Vec<HistoryData> = Vec::new();
 
     // 1. Read JSONL files, dedup by URL (first occurrence = newest file wins)
     for name in &file_names {
@@ -281,9 +367,9 @@ pub async fn search_batch(
             if line.trim().is_empty() {
                 continue;
             }
-            if let Ok(item) = serde_json::from_str::<InteractionData>(line) {
+            if let Ok(item) = serde_json::from_str::<HistoryData>(line) {
                 if seen_urls.insert(item.url.clone()) {
-                    interactions.push(item);
+                    entries.push(item);
                 }
             }
         }
@@ -291,7 +377,7 @@ pub async fn search_batch(
 
     // 2. Load content for each slug
     let mut content_map: HashMap<String, String> = HashMap::new();
-    let slugs: HashSet<&str> = interactions
+    let slugs: HashSet<&str> = entries
         .iter()
         .filter_map(|i| i.slug.as_deref())
         .collect();
@@ -309,14 +395,14 @@ pub async fn search_batch(
 
     // 3. Build engine + search
     let mut engine = SearchEngine::new();
-    for item in &interactions {
+    for item in &entries {
         let c = item
             .slug
             .as_deref()
             .and_then(|s| content_map.get(s))
             .cloned()
             .unwrap_or_default();
-        engine.add_interaction(Interaction {
+        engine.add_entry(HistoryEntry {
             timestamp: item.timestamp,
             url: item.url.clone(),
             title: item.title.clone(),
@@ -327,6 +413,179 @@ pub async fn search_batch(
     }
 
     engine.search(&query, RankingAlgorithm::Content)
+}
+
+/// Note JSON structure from data/notes/{slug}.json
+#[derive(Deserialize)]
+struct NoteData {
+    #[serde(default)]
+    slug: Option<String>,
+    #[serde(default)]
+    excerpt: serde_json::Value, // string or array of strings
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+}
+
+/// Result from searchNotes: the note's URL and slug
+#[derive(Serialize)]
+struct NoteMatch {
+    url: String,
+    #[serde(rename = "noteSlug")]
+    note_slug: String,
+}
+
+/// Result from searchSnapshots: the page slug
+#[derive(Serialize)]
+struct SnapshotMatch {
+    slug: String,
+}
+
+/// Iterate all entries in a FileSystemDirectoryHandle, returning (name, kind) pairs.
+async fn list_directory(dir: &FileSystemDirectoryHandle) -> Result<Vec<(String, String)>, JsValue> {
+    let iter = dir.values();
+    let mut entries = Vec::new();
+    loop {
+        let next = JsFuture::from(iter.next()?).await?;
+        let done = js_sys::Reflect::get(&next, &JsValue::from_str("done"))?;
+        if done.as_bool().unwrap_or(true) {
+            break;
+        }
+        let entry = js_sys::Reflect::get(&next, &JsValue::from_str("value"))?;
+        let name = js_sys::Reflect::get(&entry, &JsValue::from_str("name"))?
+            .as_string()
+            .unwrap_or_default();
+        let kind = js_sys::Reflect::get(&entry, &JsValue::from_str("kind"))?
+            .as_string()
+            .unwrap_or_default();
+        entries.push((name, kind));
+    }
+    Ok(entries)
+}
+
+/// Search all note JSON files in a directory for query matches.
+/// Returns matching notes with their URL and slug.
+#[wasm_bindgen(js_name = "searchNotes")]
+pub async fn search_notes(
+    notes_dir: JsValue,
+    query: String,
+) -> Result<JsValue, JsValue> {
+    let dir: &FileSystemDirectoryHandle = notes_dir.unchecked_ref();
+    let words = parse_query_words(&query);
+    if words.is_empty() {
+        return serde_wasm_bindgen::to_value(&Vec::<NoteMatch>::new())
+            .map_err(|e| JsValue::from_str(&e.to_string()));
+    }
+
+    let entries = list_directory(dir).await?;
+    let mut matches = Vec::new();
+
+    for (name, kind) in &entries {
+        if kind != "file" || !name.ends_with(".json") {
+            continue;
+        }
+        let fh_val = match dir.get_file_handle(name).await {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let fh: &FileSystemFileHandle = fh_val.unchecked_ref();
+        let text = match read_file_text(fh).await {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let note: NoteData = match serde_json::from_str(&text) {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+
+        // Collect searchable text fields from the note
+        let mut fields: Vec<String> = Vec::new();
+        match &note.excerpt {
+            serde_json::Value::String(s) => fields.push(s.clone()),
+            serde_json::Value::Array(arr) => {
+                for v in arr {
+                    if let Some(s) = v.as_str() {
+                        fields.push(s.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+        if let Some(ref n) = note.note {
+            fields.push(n.clone());
+        }
+
+        let field_refs: Vec<&str> = fields.iter().map(|s| s.as_str()).collect();
+        if words_match_fields(&words, &field_refs) {
+            if let Some(url) = note.url {
+                let note_slug = note.slug.unwrap_or_else(|| {
+                    name.trim_end_matches(".json").to_string()
+                });
+                matches.push(NoteMatch { url, note_slug });
+            }
+        }
+    }
+
+    serde_wasm_bindgen::to_value(&matches)
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Search a batch of snapshot .md files for query matches.
+/// file_names are pre-filtered (latest per slug only) and chunked by JS.
+/// Returns matching slugs extracted from filenames.
+#[wasm_bindgen(js_name = "searchSnapshots")]
+pub async fn search_snapshots(
+    snapshots_dir: JsValue,
+    query: String,
+    file_names: Vec<String>,
+) -> Result<JsValue, JsValue> {
+    let dir: &FileSystemDirectoryHandle = snapshots_dir.unchecked_ref();
+    let words = parse_query_words(&query);
+    if words.is_empty() {
+        return serde_wasm_bindgen::to_value(&Vec::<SnapshotMatch>::new())
+            .map_err(|e| JsValue::from_str(&e.to_string()));
+    }
+
+    let mut matches = Vec::new();
+
+    for name in &file_names {
+        // Extract slug from filename: {slug}-{timestamp13}.md
+        let slug = match extract_slug_from_snapshot_name(name) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        let fh_val = match dir.get_file_handle(name).await {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let fh: &FileSystemFileHandle = fh_val.unchecked_ref();
+        let content = match read_file_text(fh).await {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        if words_match_fields(&words, &[&content]) {
+            matches.push(SnapshotMatch { slug });
+        }
+    }
+
+    serde_wasm_bindgen::to_value(&matches)
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Extract page slug from snapshot filename like "my-page-slug-1709251200000.md"
+fn extract_slug_from_snapshot_name(name: &str) -> Option<String> {
+    let name = name.strip_suffix(".md")?;
+    // Find the last '-' followed by exactly 13 digits (Unix ms timestamp)
+    let last_dash = name.rfind('-')?;
+    let ts_part = &name[last_dash + 1..];
+    if ts_part.len() == 13 && ts_part.chars().all(|c| c.is_ascii_digit()) {
+        Some(name[..last_dash].to_string())
+    } else {
+        None
+    }
 }
 
 #[wasm_bindgen(start)]

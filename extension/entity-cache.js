@@ -49,7 +49,27 @@ export async function cacheGet(key) {
 }
 
 export async function cacheSet(key, value, { timestamp } = {}) {
-  await chrome.storage.session.set({ [key]: value });
+  try {
+    await chrome.storage.session.set({ [key]: value });
+  } catch (e) {
+    if (e.name === 'QuotaExceededError') {
+      await emergencyEvict();
+      try {
+        await chrome.storage.session.set({ [key]: value });
+      } catch (e2) {
+        if (e2.name === 'QuotaExceededError') {
+          // Last resort: evict unflushed unpinned keys too
+          await emergencyEvict({ includeUnflushed: true });
+          await chrome.storage.session.set({ [key]: value });
+          // If this still throws, it propagates — nothing left to evict
+        } else {
+          throw e2;
+        }
+      }
+    } else {
+      throw e;
+    }
+  }
   // Update LRU position
   const idx = lruKeys.indexOf(key);
   if (idx >= 0) lruKeys.splice(idx, 1);
@@ -84,6 +104,29 @@ export async function cacheRemove(key) {
   if (idx >= 0) lruKeys.splice(idx, 1);
   keyTimestamps.delete(key);
   pinnedKeys.delete(key);
+}
+
+// ─── Emergency Eviction (quota exceeded) ─────────────────────────────
+// Aggressively evicts unpinned keys to free space. By default only evicts
+// flushed keys (ts <= persistWatermark). With includeUnflushed, evicts all
+// unpinned keys as a last resort.
+
+async function emergencyEvict({ includeUnflushed = false } = {}) {
+  const toRemove = [];
+  for (const key of lruKeys) {
+    if (pinnedKeys.has(key)) continue;
+    if (!includeUnflushed) {
+      const ts = keyTimestamps.get(key) || 0;
+      if (ts > persistWatermark) continue;
+    }
+    toRemove.push(key);
+  }
+  if (toRemove.length > 0) {
+    await chrome.storage.session.remove(toRemove);
+    const removeSet = new Set(toRemove);
+    lruKeys = lruKeys.filter(k => !removeSet.has(k));
+    for (const k of toRemove) keyTimestamps.delete(k);
+  }
 }
 
 // ─── Eviction ─────────────────────────────────────────────────────────

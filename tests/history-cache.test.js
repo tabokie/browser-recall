@@ -2,7 +2,7 @@
  * History cache tests.
  *
  * Verifies:
- * - loadInteractionFileRange filters files by date range
+ * - loadHistoryFileRange filters files by date range
  * - Multi-day visit check uses recentUrls Set (built from per-date history keys)
  * - logBuffer dedup against today's history date key
  * - addLog appends to today's log:YYYY-MM-DD key
@@ -40,30 +40,30 @@ function makeSessionMock(initial = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. loadInteractionFileRange — filesystem-storage.js
+// 1. loadHistoryFileRange — filesystem-storage.js
 // ---------------------------------------------------------------------------
 
-describe('loadInteractionFileRange', () => {
+describe('loadHistoryFileRange', () => {
   function createFsStorage(files) {
     return {
-      async listInteractionFiles() {
+      async listHistoryFiles() {
         return Object.keys(files).sort().reverse();
       },
-      async loadInteractionFiles(filenames) {
+      async loadHistoryFiles(filenames) {
         const entries = [];
         for (const f of filenames) {
           if (files[f]) entries.push(...files[f]);
         }
         return entries;
       },
-      async loadInteractionFileRange(fromDate, toDate) {
-        const allFiles = await this.listInteractionFiles();
+      async loadHistoryFileRange(fromDate, toDate) {
+        const allFiles = await this.listHistoryFiles();
         const filtered = allFiles.filter(f => {
           const dateStr = f.replace('.jsonl', '');
           return dateStr >= fromDate && dateStr <= toDate;
         });
         filtered.sort();
-        const entries = await this.loadInteractionFiles(filtered);
+        const entries = await this.loadHistoryFiles(filtered);
         return { entries, files: filtered };
       },
     };
@@ -76,7 +76,7 @@ describe('loadInteractionFileRange', () => {
       '2026-02-27.jsonl': [{ timestamp: 3, url: 'https://c.com', action: 'visit_page' }],
       '2026-02-28.jsonl': [{ timestamp: 4, url: 'https://d.com', action: 'visit_page' }],
     });
-    const result = await fs.loadInteractionFileRange('2026-02-26', '2026-02-27');
+    const result = await fs.loadHistoryFileRange('2026-02-26', '2026-02-27');
     expect(result.files).toHaveLength(2);
     expect(result.entries).toHaveLength(2);
     expect(result.entries.map(e => e.url)).toEqual(['https://b.com', 'https://c.com']);
@@ -86,7 +86,7 @@ describe('loadInteractionFileRange', () => {
     const fs = createFsStorage({
       '2026-02-25.jsonl': [{ timestamp: 1, url: 'https://a.com' }],
     });
-    const result = await fs.loadInteractionFileRange('2026-03-01', '2026-03-05');
+    const result = await fs.loadHistoryFileRange('2026-03-01', '2026-03-05');
     expect(result.files).toHaveLength(0);
     expect(result.entries).toHaveLength(0);
   });
@@ -98,7 +98,7 @@ describe('loadInteractionFileRange', () => {
       '2026-02-22.jsonl': [{ timestamp: 3, url: 'https://end.com' }],
       '2026-02-23.jsonl': [{ timestamp: 4, url: 'https://after.com' }],
     });
-    const result = await fs.loadInteractionFileRange('2026-02-21', '2026-02-22');
+    const result = await fs.loadHistoryFileRange('2026-02-21', '2026-02-22');
     expect(result.files).toHaveLength(2);
     expect(result.entries.map(e => e.url)).toEqual(['https://start.com', 'https://end.com']);
   });

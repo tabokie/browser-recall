@@ -34,7 +34,7 @@ function pinFromUrl(url, pinnedAt) {
 // ---------------------------------------------------------------------------
 // Test data
 // ---------------------------------------------------------------------------
-function makeInteraction(url, title, timestamp, opts = {}) {
+function makeEntry(url, title, timestamp, opts = {}) {
   const slug = url.replace(/[^a-z0-9]/gi, '-').substring(0, 40);
   return { id: `${timestamp}-${slug}`, url, title, timestamp, slug, intent: opts.intent || '' };
 }
@@ -46,12 +46,12 @@ const FILE1_DATE = '2026-02-15';
 const FILE2_DATE = '2026-02-14';
 const FILE3_DATE = '2026-02-13';
 
-function makeFileInteractions(dateStr, startIdx, count, titlePrefix) {
+function makeFileEntries(dateStr, startIdx, count, titlePrefix) {
   const base = new Date(dateStr + 'T12:00:00Z').getTime();
   const result = [];
   for (let i = 0; i < count; i++) {
     const ts = base + i * 60000;
-    result.push(makeInteraction(
+    result.push(makeEntry(
       `https://example.com/${titlePrefix.toLowerCase()}${startIdx + i}`,
       `${titlePrefix} Page ${startIdx + i}`,
       ts,
@@ -61,9 +61,9 @@ function makeFileInteractions(dateStr, startIdx, count, titlePrefix) {
   return result;
 }
 
-const FILE1_INTERACTIONS = makeFileInteractions(FILE1_DATE, 0, 20, 'Today');
-const FILE2_INTERACTIONS = makeFileInteractions(FILE2_DATE, 20, 20, 'Yesterday');
-const FILE3_INTERACTIONS = makeFileInteractions(FILE3_DATE, 40, 20, 'OldDay');
+const FILE1_ENTRIES = makeFileEntries(FILE1_DATE, 0, 20, 'Today');
+const FILE2_ENTRIES = makeFileEntries(FILE2_DATE, 20, 20, 'Yesterday');
+const FILE3_ENTRIES = makeFileEntries(FILE3_DATE, 40, 20, 'OldDay');
 
 const TEST_LIST = { slug: 'col-rust', query: 'rust', name: 'Rust Lang' };
 // List with no query — only pinned pages, pins on same domain as history
@@ -75,7 +75,7 @@ const TEST_LIST_PINS = {
     pinFromUrl('https://rust-lang.org/doc1', NOW - DAY),
     pinFromUrl('https://rust-lang.org/doc2', NOW - DAY),
   ],
-  // Pins on example.com — same domain as FILE1_INTERACTIONS, enabling hostname-based related pages
+  // Pins on example.com — same domain as FILE1_ENTRIES, enabling hostname-based related pages
   'col-noq': [
     pinFromUrl('https://example.com/today0', NOW - DAY),
     pinFromUrl('https://example.com/today1', NOW - DAY),
@@ -112,9 +112,9 @@ const FILES_NEWEST_FIRST = [
 ];
 
 const FILE_MAP = {
-  [`${FILE1_DATE}.jsonl`]: FILE1_INTERACTIONS,
-  [`${FILE2_DATE}.jsonl`]: FILE2_INTERACTIONS,
-  [`${FILE3_DATE}.jsonl`]: FILE3_INTERACTIONS,
+  [`${FILE1_DATE}.jsonl`]: FILE1_ENTRIES,
+  [`${FILE2_DATE}.jsonl`]: FILE2_ENTRIES,
+  [`${FILE3_DATE}.jsonl`]: FILE3_ENTRIES,
 };
 
 // ---------------------------------------------------------------------------
@@ -137,11 +137,10 @@ vi.mock('../extension/filesystem-storage.js', () => ({
     async verifyPermission() { return true; }
     async loadDirectoryHandle() { return this.directoryHandle; }
     async selectDirectory() { return { success: true, name: 'test' }; }
-    async loadAllInteractions() { return []; }
     async loadAllContent() { return {}; }
     async loadSettings() { return (await mockFsHandler.fn('loadSettings', {})).settings || {}; }
-    async listInteractionFiles() { return (await mockFsHandler.fn('listInteractionFiles', {})).files || []; }
-    async loadInteractionFiles(files) { return (await mockFsHandler.fn('loadInteractionBatch', { files })).interactions || []; }
+    async listHistoryFiles() { return (await mockFsHandler.fn('listHistoryFiles', {})).files || []; }
+    async loadHistoryFiles(files) { return (await mockFsHandler.fn('loadHistoryBatch', { files })).entries || []; }
     async loadListPins() { return (await mockFsHandler.fn('loadListPins', {})).pins || {}; }
     async loadListPinsById(id) { return (await mockFsHandler.fn('loadListPinsById', { listId: id })).pins || []; }
     async loadPermanentDeletes() { return (await mockFsHandler.fn('loadPermanentDeletes', {})).urls || []; }
@@ -153,7 +152,7 @@ vi.mock('../extension/filesystem-storage.js', () => ({
 }));
 
 vi.mock('../extension/pkg/portal_extension.js', () => {
-  class MockInteraction {
+  class MockHistoryEntry {
     constructor(url, title) { this.url = url; this.title = title; }
     set id(v) { this._id = v; }
     set timestamp(v) { this._timestamp = v; }
@@ -164,7 +163,7 @@ vi.mock('../extension/pkg/portal_extension.js', () => {
 
   class MockSearchEngine {
     constructor() { this._items = []; }
-    addInteraction(item) { this._items.push(item); }
+    addEntry(item) { this._items.push(item); }
     async search(query) {
       const q = query.toLowerCase();
       return this._items
@@ -175,7 +174,7 @@ vi.mock('../extension/pkg/portal_extension.js', () => {
 
   return {
     default: async () => {},
-    Interaction: MockInteraction,
+    HistoryEntry: MockHistoryEntry,
     SearchEngine: MockSearchEngine,
     searchBatch: (...args) => mockSearchBatchFn(...args),
   };
@@ -196,7 +195,8 @@ const styleContent = styleMatch ? styleMatch[1] : '';
 // ---------------------------------------------------------------------------
 // Test suite
 // ---------------------------------------------------------------------------
-describe('Cache staleness', () => {
+describe.each(['warm', 'degraded'])('Cache staleness (%s cache)', (cacheMode) => {
+  const isDegraded = cacheMode === 'degraded';
   let sessionData;  // chrome.storage.session
   let localData;    // chrome.storage.local
   let deferreds;
@@ -219,10 +219,11 @@ describe('Cache staleness', () => {
     return {
       get: vi.fn(async (keys) => {
         const data = dataRef();
-        if (!keys) return { ...data };
+        if (!keys) return isDegraded ? {} : { ...data };
         if (typeof keys === 'string') keys = [keys];
         const result = {};
         for (const k of keys) {
+          if (isDegraded && /^(manifest:|list:|page:|note:)/.test(k)) continue;
           if (k in data) result[k] = data[k];
         }
         return result;
@@ -271,15 +272,15 @@ describe('Cache staleness', () => {
 
   function handleAction(msg) {
     switch (msg.action) {
-      case 'listInteractionFiles':
+      case 'listHistoryFiles':
         return { success: true, files: FILES_NEWEST_FIRST };
 
-      case 'loadInteractionBatch': {
-        const interactions = [];
+      case 'loadHistoryBatch': {
+        const entries = [];
         for (const f of msg.files) {
-          if (FILE_MAP[f]) interactions.push(...FILE_MAP[f]);
+          if (FILE_MAP[f]) entries.push(...FILE_MAP[f]);
         }
-        return { success: true, interactions };
+        return { success: true, entries };
       }
 
       case 'loadContentBatch':
@@ -316,7 +317,7 @@ describe('Cache staleness', () => {
         // Simulate background readCacheable: dispatch to known handlers
         switch (msg.key) {
           case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
-          case 'manifest:list-order': return { success: true, value: testRootData || TEST_LIST_ORDER };
+          case 'manifest:list-order': return { success: true, value: testRootData || sessionData['manifest:list-order'] || TEST_LIST_ORDER };
           case 'manifest:name-to-id': return { success: true, value: testNameMapData || { timestamp: 0, paths: {} } };
           case 'manifest:orphaned': return { success: true, value: { timestamp: 0, entries: [] } };
           default: {
@@ -325,17 +326,16 @@ describe('Cache staleness', () => {
               const slug = msg.key.slice('page:'.length);
               return { success: true, value: testPageData[slug] || null };
             }
-            // Resolve list entity keys with pins from testListPins
+            // Resolve list entity keys — sessionData first (has test modifications), then TEST_LISTS
             if (msg.key && msg.key.startsWith('list:')) {
               const listId = msg.key.slice('list:'.length);
-              const list = TEST_LISTS.find(l => l.slug === listId);
-              if (list) {
-                return { success: true, value: { ...list, pins: testListPins[listId] || [] } };
-              }
-              // Check dynamically-added lists in sessionData
               if (sessionData[msg.key]) {
                 const entity = sessionData[msg.key];
                 return { success: true, value: { ...entity, pins: testListPins[listId] || entity.pins || [] } };
+              }
+              const list = TEST_LISTS.find(l => l.slug === listId);
+              if (list) {
+                return { success: true, value: { ...list, pins: testListPins[listId] || [] } };
               }
             }
             return { success: true, value: undefined };
@@ -402,10 +402,13 @@ describe('Cache staleness', () => {
     return [...document.querySelectorAll('#relatedResults .result-item')];
   }
 
+  // Cache-specific tests only run in warm mode (degraded tests cache fallback paths)
+  const warmOnly = isDegraded ? it.skip : it;
+
   // ---------------------------------------------------------------------------
   // T1: resetHistory clears pageReadCache + allListPins
   // ---------------------------------------------------------------------------
-  it('T1: resetHistory clears pageReadCache and allListPins', async () => {
+  warmOnly('T1: resetHistory clears pageReadCache and allListPins', async () => {
     populateCache();
 
     // Page entities on disk (filesystem fallback for readCacheable session miss)
@@ -470,7 +473,7 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T2: visibilitychange invalidates list pins
   // ---------------------------------------------------------------------------
-  it('T2: visibilitychange invalidates list pins', async () => {
+  warmOnly('T2: visibilitychange invalidates list pins', async () => {
     populateCache();
 
     await importOptions();
@@ -506,7 +509,7 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T3: visibilitychange loads new history files
   // ---------------------------------------------------------------------------
-  it('T3: visibilitychange loads new history files', async () => {
+  warmOnly('T3: visibilitychange loads new history files', async () => {
     populateCache();
 
     await importOptions();
@@ -515,25 +518,25 @@ describe('Cache staleness', () => {
     // Default view is Explore — verify it rendered
     expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
 
-    // Add a 4th history file with new interactions
+    // Add a 4th history file with new entries
     const FILE4_DATE = '2026-02-12';
-    const FILE4_INTERACTIONS = makeFileInteractions(FILE4_DATE, 60, 10, 'Extra');
+    const FILE4_ENTRIES = makeFileEntries(FILE4_DATE, 60, 10, 'Extra');
 
-    // Override listInteractionFiles to return 4 files
-    actionOverrides['listInteractionFiles'] = () => ({
+    // Override listHistoryFiles to return 4 files
+    actionOverrides['listHistoryFiles'] = () => ({
       success: true,
       files: [...FILES_NEWEST_FIRST, `${FILE4_DATE}.jsonl`],
     });
-    // Override loadInteractionBatch to include the new file
+    // Override loadHistoryBatch to include the new file
     let loadBatchCalls = 0;
-    actionOverrides['loadInteractionBatch'] = (msg) => {
+    actionOverrides['loadHistoryBatch'] = (msg) => {
       loadBatchCalls++;
-      const interactions = [];
+      const entries = [];
       for (const f of msg.files) {
-        if (FILE_MAP[f]) interactions.push(...FILE_MAP[f]);
-        if (f === `${FILE4_DATE}.jsonl`) interactions.push(...FILE4_INTERACTIONS);
+        if (FILE_MAP[f]) entries.push(...FILE_MAP[f]);
+        if (f === `${FILE4_DATE}.jsonl`) entries.push(...FILE4_ENTRIES);
       }
-      return { success: true, interactions };
+      return { success: true, entries };
     };
 
     chrome.runtime.sendMessage.mockClear();
@@ -615,7 +618,7 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T8: WASM search crash doesn't prevent related pages from showing
   // ---------------------------------------------------------------------------
-  it('T8: list shows related pages even when pipelinedSearch throws', async () => {
+  it('T8: list shows related pages even when progressive search throws', async () => {
     populateCache();
 
     // Make searchBatch throw (simulates WASM RuntimeError: memory access out of bounds)
@@ -627,14 +630,14 @@ describe('Cache staleness', () => {
     await tick(100);
 
     // Open col-rust — has query "rust", pins on rust-lang.org
-    // pipelinedSearch("rust") will call searchBatch which throws
+    // progressive search("rust") will call searchBatch which throws
     // But related pages should still be computed from loaded history
     const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-rust"]');
     expect(collItem).not.toBeNull();
     collItem.click();
     await tick(300);
 
-    // Pinned section should show 3 pins (rendered in Phase 1, before pipelinedSearch)
+    // Pinned section should show 3 pins (rendered in Phase 1, before progressive search)
     expect(pinnedOnlyRows().length).toBe(3);
 
     // Related section should have results from historyByUrl
@@ -649,7 +652,7 @@ describe('Cache staleness', () => {
     populateCache();
 
     // col-noq has query '' and pins on example.com (same domain as history)
-    // Give it a query so it goes through pipelinedSearch path
+    // Give it a query so it goes through progressive search path
     // Override session cache with modified list (include pins)
     sessionData['list:col-noq'] = { slug: 'col-noq', query: 'example', name: 'Example List', pins: testListPins['col-noq'] || [] };
 
@@ -676,7 +679,7 @@ describe('Cache staleness', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // T10: logBuffer with object attention doesn't crash pipelinedSearch
+  // T10: logBuffer with object attention doesn't crash progressive search
   // ---------------------------------------------------------------------------
   it('T10: object attention in logBuffer entries does not crash search', async () => {
     populateCache();
@@ -699,13 +702,13 @@ describe('Cache staleness', () => {
     await importOptions();
     await tick(100);
 
-    // Open col-today — pipelinedSearch("today") runs; logBuffer entries have object attention
+    // Open col-today — progressive search("today") runs; logBuffer entries have object attention
     const collItem = document.querySelector('#listsList .sidebar-item[data-list-id="col-today"]');
     expect(collItem).not.toBeNull();
     collItem.click();
     await tick(300);
 
-    // Should not crash — object attention is stringified by buildInteractionsForEngine
+    // Should not crash — object attention is stringified by buildHistoryForEngine
     expect(pinnedOnlyRows().length).toBe(1);
   });
 
@@ -715,13 +718,13 @@ describe('Cache staleness', () => {
   it('T11: pinned rows show attention from history when page has no attention', async () => {
     populateCache();
 
-    // col-noq pins are on example.com/today0 and today1 — same URLs as FILE1_INTERACTIONS
-    // Give those interactions attention data
+    // col-noq pins are on example.com/today0 and today1 — same URLs as FILE1_ENTRIES
+    // Give those entries attention data
     const attentionJson = JSON.stringify({ scrollDepth: 50, timeOnPage: 120000 });
-    const saved0 = { ...FILE1_INTERACTIONS[0] };
-    const saved1 = { ...FILE1_INTERACTIONS[1] };
-    FILE1_INTERACTIONS[0] = { ...FILE1_INTERACTIONS[0], attention: attentionJson };
-    FILE1_INTERACTIONS[1] = { ...FILE1_INTERACTIONS[1], attention: attentionJson };
+    const saved0 = { ...FILE1_ENTRIES[0] };
+    const saved1 = { ...FILE1_ENTRIES[1] };
+    FILE1_ENTRIES[0] = { ...FILE1_ENTRIES[0], attention: attentionJson };
+    FILE1_ENTRIES[1] = { ...FILE1_ENTRIES[1], attention: attentionJson };
 
     // Page entities WITHOUT attention (simulates pages with no attention data)
     for (const [slug, url] of SLUG_TO_URL) {
@@ -739,7 +742,7 @@ describe('Cache staleness', () => {
       await tick(500);
 
       // The pinned rows should have non-zero attention despite pages lacking it
-      // because historyByUrl has the attention data from JSONL interactions
+      // because historyByUrl has the attention data from JSONL entries
       const rows = pinnedOnlyRows();
       expect(rows.length).toBe(2);
 
@@ -749,15 +752,15 @@ describe('Cache staleness', () => {
       expect(titles.every(t => t && t !== '<unknown>')).toBe(true);
     } finally {
       // Restore test data for other tests
-      FILE1_INTERACTIONS[0] = saved0;
-      FILE1_INTERACTIONS[1] = saved1;
+      FILE1_ENTRIES[0] = saved0;
+      FILE1_ENTRIES[1] = saved1;
     }
   });
 
   // ---------------------------------------------------------------------------
   // T12: visibilitychange on Explore reloads explore pins
   // ---------------------------------------------------------------------------
-  it('T12: visibilitychange on Explore view preserves explore state', async () => {
+  warmOnly('T12: visibilitychange on Explore view preserves explore state', async () => {
     populateCache();
 
     await importOptions();
@@ -797,7 +800,7 @@ describe('Cache staleness', () => {
       const base = new Date(fileDates[f] + 'T12:00:00Z').getTime();
       const items = [];
       for (let i = 0; i < 5; i++) {
-        items.push(makeInteraction(
+        items.push(makeEntry(
           `https://example.com/f${f}-i${i}`,
           `File ${f} Page ${i}`,
           base + i * 60000
@@ -806,15 +809,15 @@ describe('Cache staleness', () => {
       allFileData[allFiles[f]] = items;
     }
 
-    actionOverrides['listInteractionFiles'] = () => ({
+    actionOverrides['listHistoryFiles'] = () => ({
       success: true, files: allFiles,
     });
-    actionOverrides['loadInteractionBatch'] = (msg) => {
-      const interactions = [];
+    actionOverrides['loadHistoryBatch'] = (msg) => {
+      const entries = [];
       for (const f of msg.files) {
-        if (allFileData[f]) interactions.push(...allFileData[f]);
+        if (allFileData[f]) entries.push(...allFileData[f]);
       }
-      return { success: true, interactions };
+      return { success: true, entries };
     };
     // No explore pins → showAllHistory path with onLoadMore
     // Override all list pins to empty for this test
@@ -860,7 +863,7 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T14: visibilitychange does not full-re-render explore view
   // ---------------------------------------------------------------------------
-  it('T14: visibilitychange preserves search panel state', async () => {
+  warmOnly('T14: visibilitychange preserves search panel state', async () => {
     populateCache();
 
     await importOptions();
@@ -885,7 +888,7 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T16: pin mutation notification does not revert in-memory pin changes
   // ---------------------------------------------------------------------------
-  it('T16: explore view survives mutation notification from background', async () => {
+  warmOnly('T16: explore view survives mutation notification from background', async () => {
     populateCache();
 
     await importOptions();
@@ -910,7 +913,7 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T15: empty session cache (disable/re-enable) still loads lists via fallback
   // ---------------------------------------------------------------------------
-  it('T15: empty session cache still loads lists via fallback', async () => {
+  warmOnly('T15: empty session cache still loads lists via fallback', async () => {
     // Do NOT call populateCache() — simulate disable/re-enable clearing session
     sessionData = {};
     localData = { logBuffer: [] };
@@ -977,7 +980,7 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T18: page: pin resolves via readCacheable when not in session cache
   // ---------------------------------------------------------------------------
-  it('T18: page pin falls back to readCacheable when not in session', async () => {
+  warmOnly('T18: page pin falls back to readCacheable when not in session', async () => {
     populateCache();
 
     const PAGE_URL = 'https://uncached.example.com/page';
@@ -1014,7 +1017,7 @@ describe('Cache staleness', () => {
   // ---------------------------------------------------------------------------
   // T19: page pin resolves via readCacheable when page entity not in session
   // ---------------------------------------------------------------------------
-  it('T19: page pin falls back to readCacheable when page entity not in session', async () => {
+  warmOnly('T19: page pin falls back to readCacheable when page entity not in session', async () => {
     populateCache();
 
     const FALLBACK_URL = 'https://fallback.example.com/page';

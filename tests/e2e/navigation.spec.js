@@ -181,24 +181,19 @@ test.describe('Navigation and referrer tracking', () => {
     await helper.close();
 
     expect(info.success).toBe(true);
-    expect(info.interaction).toBeNull();
+    expect(info.entry).toBeNull();
 
     await page.close();
   });
 
   test('blacklisted URL: "Capture It" overrides blacklist, revisit is tracked', async ({ extContext, extensionId, setupDir, localServer }) => {
     const url = localServer.url('/page-c');
-    const slug = getSlugForUrl(url);
-    const now = Date.now();
 
-    // Seed page entity so visit_page can enrich it when blacklist is bypassed
+    // No page entity seeded — bypassBlacklist creates it via checkpoint flag
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
         trimRules: [], urlBlacklist: [url],
-      }},
-      { path: `pages/${slug}.json`, data: {
-        slug, url, title: 'Page C', timestamp: now, parentIds: [], childIds: [],
       }},
     ]);
 
@@ -239,12 +234,12 @@ test.describe('Navigation and referrer tracking', () => {
     const bypassEntries = (hist.value || []).filter(e => e.url === url);
     expect(bypassEntries.length).toBeGreaterThanOrEqual(1);
 
-    // Verify getPageInfo returns the page (entity was seeded)
+    // Verify getPageInfo returns the page (entity created by checkpoint)
     let info = await helper.evaluate((u) =>
       chrome.runtime.sendMessage({ action: 'getPageInfo', url: u })
     , url);
-    expect(info.interaction).not.toBeNull();
-    expect(info.interaction.url).toBe(url);
+    expect(info.entry).not.toBeNull();
+    expect(info.entry.url).toBe(url);
     await helper.close();
 
     // Step 3: Navigate away and revisit — should still be tracked (already in DB)
@@ -257,8 +252,8 @@ test.describe('Navigation and referrer tracking', () => {
     info = await helper.evaluate((u) =>
       chrome.runtime.sendMessage({ action: 'getPageInfo', url: u })
     , url);
-    expect(info.interaction).not.toBeNull();
-    expect(info.interaction.url).toBe(url);
+    expect(info.entry).not.toBeNull();
+    expect(info.entry.url).toBe(url);
     await helper.close();
 
     await page.close();
@@ -324,7 +319,7 @@ test.describe('Navigation and referrer tracking', () => {
     await helper.waitForFunction(
       async (url) => {
         const resp = await chrome.runtime.sendMessage({ action: 'getPageInfo', url });
-        return resp?.interaction != null;
+        return resp?.entry != null;
       },
       localServer.url('/self-link'),
       { timeout: 10000 }

@@ -98,6 +98,8 @@
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    :focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; border-radius: 4px; }
+    :focus:not(:focus-visible) { outline: none; }
 
     body {
       font-family: var(--font-body);
@@ -503,6 +505,16 @@
       box-shadow: 0 0 6px var(--accent-primary-glow);
     }
 
+    .chart-bar.estimated {
+      background: rgba(142, 125, 109, 0.08);
+      border: 1px dashed rgba(142, 125, 109, 0.15);
+      box-sizing: border-box;
+    }
+
+    .chart-bar-group.estimated .chart-bar {
+      cursor: default;
+    }
+
     .chart-tooltip {
       position: absolute;
       background: var(--text-primary);
@@ -692,6 +704,12 @@
       border-color: rgba(184, 80, 64, 0.12);
     }
 
+    .card-tag-auto {
+      background: rgba(120, 150, 160, 0.1);
+      color: #6a8a96;
+      border-color: rgba(120, 150, 160, 0.15);
+    }
+
     .card-tag-list {
       background: var(--accent-primary-soft);
       color: var(--accent-primary);
@@ -843,6 +861,9 @@
     .page-detail-loading {
       color: var(--text-muted);
       font-style: italic;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .detail-url {
@@ -1020,6 +1041,84 @@
       border-color: var(--accent-blue);
     }
 
+    /* ── Event Timeline ── */
+    .detail-timeline {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .detail-timeline .detail-section-label {
+      margin-bottom: 6px;
+      display: block;
+    }
+    .timeline-date-group {
+      position: relative;
+      padding-left: 18px;
+      margin-bottom: 2px;
+    }
+    .timeline-date-group::before {
+      content: '';
+      position: absolute;
+      left: 5px;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: var(--border-subtle);
+    }
+    .timeline-date-group:last-of-type::before {
+      bottom: 50%;
+    }
+    .timeline-date-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      padding: 4px 0 2px;
+    }
+    .timeline-event {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 0;
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+    .timeline-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      margin-left: -14px;
+    }
+    .timeline-dot.visit {
+      background: var(--accent-blue);
+    }
+    .timeline-dot.note {
+      background: var(--accent-primary);
+    }
+    .timeline-dot.snapshot {
+      background: var(--accent-green);
+    }
+    .timeline-event-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .timeline-show-more {
+      display: inline-block;
+      margin: 4px 0 0 18px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: var(--accent-primary);
+      background: var(--accent-primary-soft);
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+    }
+    .timeline-show-more:hover {
+      background: var(--accent-primary-glow);
+    }
+
     .pinned-divider {
       padding: 6px 24px;
       font-size: 11px;
@@ -1043,6 +1142,40 @@
       color: var(--text-muted);
       padding: 48px 24px;
       font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border-subtle);
+      border-top-color: var(--text-secondary);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      flex-shrink: 0;
+    }
+    .spinner.spinner-sm { width: 12px; height: 12px; border-width: 1.5px; }
+    .content-search-spinner {
+      display: flex;
+      align-items: center;
+      padding: 4px 12px;
+    }
+    .card-tag-match-note {
+      background: var(--accent-blue-soft);
+      color: var(--accent-blue);
+      border-color: rgba(80, 128, 176, 0.12);
+      font-style: italic;
+    }
+    .card-tag-match-snap {
+      background: var(--accent-green-soft);
+      color: var(--accent-green);
+      border-color: rgba(88, 136, 88, 0.12);
+      font-style: italic;
     }
 
     /* ── Settings modal ── */
@@ -1443,6 +1576,107 @@
       padding: 2px 6px;
       border-radius: 3px;
       flex-shrink: 0;
+    }
+
+    /* ── Import Bookmarks tree picker ── */
+    .import-file-row {
+      margin-bottom: 8px;
+    }
+    .import-file-row input[type="file"] {
+      font-size: 13px;
+      color: var(--text-primary);
+    }
+    .bookmark-tree-container {
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 8px;
+      margin-bottom: 8px;
+      background: var(--bg-surface);
+      scrollbar-color: rgba(180, 160, 140, 0.35) transparent;
+      scrollbar-width: thin;
+    }
+    .bookmark-tree-container::-webkit-scrollbar { width: 6px; }
+    .bookmark-tree-container::-webkit-scrollbar-track { background: transparent; }
+    .bookmark-tree-container::-webkit-scrollbar-thumb { background: rgba(180, 160, 140, 0.35); border-radius: 3px; }
+    .bookmark-tree-placeholder {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      font-style: italic;
+    }
+    .bookmark-tree-item {
+      display: flex;
+      align-items: center;
+      height: 28px;
+      font-size: 13px;
+      color: var(--text-primary);
+      user-select: none;
+    }
+    .bookmark-tree-item .bm-toggle {
+      width: 16px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 0;
+    }
+    .bookmark-tree-item .bm-toggle::before {
+      content: '';
+      display: block;
+      width: 0;
+      height: 0;
+      border-left: 5px solid var(--text-tertiary);
+      border-top: 4px solid transparent;
+      border-bottom: 4px solid transparent;
+      transition: transform 0.15s;
+    }
+    .bookmark-tree-item .bm-toggle.expanded::before {
+      transform: rotate(90deg);
+    }
+    .bookmark-tree-item .bm-toggle.leaf {
+      visibility: hidden;
+    }
+    .bookmark-tree-item input[type="checkbox"] {
+      margin: 0 6px 0 0;
+      flex-shrink: 0;
+    }
+    .bookmark-tree-item .bm-label {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .bookmark-tree-item .bm-count {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      margin-left: 6px;
+      flex-shrink: 0;
+    }
+    .bookmark-tree-children {
+      display: block;
+    }
+    .bookmark-tree-children.collapsed {
+      display: none;
+    }
+    .import-progress {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 8px;
+    }
+    .import-failures {
+      font-size: 12px;
+      color: var(--accent-red);
+      margin-top: 4px;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+    .import-failures summary {
+      cursor: pointer;
+      font-weight: 500;
     }
 
     .sidebar-item.drag-over {
@@ -2666,6 +2900,52 @@
       background: rgba(248, 113, 113, 0.06);
       border-radius: 4px;
     }
+
+    /* ── Sidebar toggle (hidden on wide screens) ── */
+    #sidebarToggle {
+      display: none;
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: none;
+      border-radius: 50%;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+    #sidebarToggle:hover { background: var(--bg-surface-hover); }
+    #sidebarToggle svg { width: 18px; height: 18px; fill: currentColor; }
+
+    .sidebar-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.25);
+      z-index: 99;
+    }
+
+    /* ── Responsive: collapse sidebar below 768px ── */
+    @media (max-width: 768px) {
+      .sidebar {
+        display: none;
+        position: fixed;
+        left: 0; top: 0;
+        height: 100vh;
+        margin: 0;
+        border-radius: 0 var(--radius-xl) var(--radius-xl) 0;
+        z-index: 100;
+      }
+      .sidebar.sidebar-open {
+        display: flex;
+      }
+      .sidebar-open ~ .sidebar-overlay {
+        display: block;
+      }
+      .sidebar-resize-handle { display: none; }
+      #sidebarToggle { display: flex; }
+    }
   </style>
 </head>
 <body>
@@ -2690,7 +2970,7 @@
         <div class="lists-empty" id="listsEmpty">Pin a search to create a list</div>
       </div>
       <div class="sidebar-section-label" style="margin-top:12px">System</div>
-      <div class="sidebar-item" id="recycleBinBtn">
+      <div class="sidebar-item" id="recycleBinBtn" role="button" tabindex="0">
         <span class="icon"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></span>
         <span class="label">Recycle Bin</span>
         <span class="recycle-count" id="recycleBinCount"></span>
@@ -2699,13 +2979,17 @@
   </div>
 
   <div class="sidebar-resize-handle" id="sidebarResizeHandle"></div>
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
   <!-- Main panel -->
   <div class="main">
     <div class="main-header">
+      <button id="sidebarToggle" title="Toggle sidebar">
+        <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+      </button>
       <span class="main-title" id="mainTitle">Explore</span>
       <input class="main-title-input" id="mainTitleInput" type="text" style="display:none">
-      <button class="confirm-title-btn" id="confirmTitleBtn" style="display:none">&#x2713;</button>
+      <button class="confirm-title-btn" id="confirmTitleBtn" style="display:none" title="Confirm">&#x2713;</button>
     </div>
 
     <div class="query-builder" id="queryBuilder" style="display:none">
@@ -2764,6 +3048,7 @@
         <div class="chart-bars" id="relatedChartBars"></div>
         <div class="chart-tooltip" id="relatedChartTooltip"></div>
       </div>
+      <div id="contentSearchSpinner" class="content-search-spinner" style="display:none"><span class="spinner"></span></div>
       <div class="section-results-wrapper" id="relatedResultsWrapper">
         <div class="results-container" id="relatedResults"></div>
       </div>
@@ -2782,17 +3067,17 @@
   </div>
 
   <!-- Settings modal -->
-  <div class="modal-overlay" id="settingsModal">
+  <div class="modal-overlay" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="modal">
       <div class="modal-header">
-        <h2>Settings</h2>
-        <button class="modal-close" id="settingsClose">&times;</button>
+        <h2 id="settingsTitle">Settings</h2>
+        <button class="modal-close" id="settingsClose" title="Close">&times;</button>
       </div>
       <div class="modal-body">
         <!-- Storage -->
         <div class="modal-section">
           <h3>Storage Location</h3>
-          <p>All interaction history is stored locally in human-readable JSONL format.</p>
+          <p>All browsing history is stored locally in human-readable JSONL format.</p>
           <div id="storageLocation" class="storage-location not-configured">
             <strong>Status:</strong> <span id="storageStatus">Not configured</span><br>
             <span id="storagePathContainer" style="display: none;">
@@ -2815,11 +3100,11 @@
           <h3>Statistics</h3>
           <div class="stats">
             <div class="stat-card">
-              <div class="stat-number" id="totalInteractions">0</div>
+              <div class="stat-number" id="totalHistory">0</div>
               <div class="stat-label">Total</div>
             </div>
             <div class="stat-card">
-              <div class="stat-number" id="todayInteractions">0</div>
+              <div class="stat-number" id="todayHistory">0</div>
               <div class="stat-label">Today</div>
             </div>
             <div class="stat-card">
@@ -2839,7 +3124,7 @@
           <table class="cache-table">
             <thead><tr><th>Key</th><th style="text-align:right">Size</th></tr></thead>
             <tbody id="cacheTableBody">
-              <tr><td colspan="2" style="color:#999">Loading...</td></tr>
+              <tr><td colspan="2" style="color:#999"><span class="spinner spinner-sm"></span></td></tr>
             </tbody>
           </table>
           <div class="modal-btn-group" style="margin-top: 10px;">
@@ -2898,7 +3183,7 @@
         <!-- Sync -->
         <div class="modal-section">
           <h3>Sync</h3>
-          <p>Sync logs and notes across devices via a private GitHub repo.</p>
+          <p>Sync logs and notes across devices.</p>
           <div class="option">
             <label>
               <input type="checkbox" id="syncEnabled">
@@ -2907,15 +3192,91 @@
           </div>
           <div id="syncConfigFields" style="display:none;">
             <div class="option" style="margin-top:8px;">
-              <label>Repository URL:
-                <input type="text" id="syncRepoUrl" placeholder="https://github.com/user/portal-sync" style="width:100%;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;margin-top:4px;">
+              <label>Method:
+                <select id="syncMethod" style="padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;margin-left:6px;">
+                  <option value="github">GitHub</option>
+                  <option value="filesystem">Local Folder</option>
+                  <option value="webdav">WebDAV</option>
+                </select>
               </label>
             </div>
-            <div class="option" style="margin-top:8px;">
-              <label>Personal access token:
-                <input type="password" id="syncToken" placeholder="ghp_..." style="width:100%;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;margin-top:4px;">
-              </label>
+            <!-- GitHub -->
+            <div id="syncGithubFields">
+              <div class="option" style="margin-top:8px;">
+                <label>Repository URL:
+                  <input type="text" id="syncRepoUrl" placeholder="https://github.com/user/portal-sync" style="width:100%;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;margin-top:4px;">
+                </label>
+              </div>
+              <div class="option" style="margin-top:8px;">
+                <label style="font-size:13px;color:#555;">Authentication:</label>
+                <!-- Disconnected state -->
+                <div id="syncAuthDisconnected" style="margin-top:6px;">
+                  <button id="syncGithubConnectBtn" class="btn btn-primary" style="font-size:13px;">Connect with GitHub</button>
+                  <span style="margin:0 8px;color:#999;font-size:12px;">or</span>
+                  <a href="#" id="syncPatToggle" style="font-size:12px;color:#1a73e8;">Use personal access token</a>
+                  <div id="syncPatFields" style="display:none;margin-top:8px;">
+                    <input type="password" id="syncPatInput" placeholder="ghp_..." style="width:100%;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;">
+                    <button id="syncPatSaveBtn" class="btn btn-secondary" style="margin-top:6px;font-size:12px;">Save Token</button>
+                  </div>
+                </div>
+                <!-- Device flow in-progress -->
+                <div id="syncAuthDeviceFlow" style="display:none;margin-top:6px;">
+                  <div style="font-size:13px;">Enter this code on GitHub:</div>
+                  <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+                    <code id="syncDeviceCode" style="font-size:18px;font-weight:bold;letter-spacing:2px;padding:4px 10px;background:#f1f3f4;border-radius:4px;"></code>
+                    <button id="syncCopyCodeBtn" class="btn btn-secondary" style="font-size:12px;">Copy</button>
+                  </div>
+                  <div style="margin-top:6px;display:flex;align-items:center;gap:12px;">
+                    <a href="#" id="syncOpenGithubBtn" style="font-size:12px;color:#1a73e8;">Open GitHub &#8599;</a>
+                    <span style="font-size:12px;color:#666;"><span class="spinner spinner-sm"></span> Waiting for authorization...</span>
+                    <button id="syncCancelAuthBtn" class="btn btn-secondary" style="font-size:12px;">Cancel</button>
+                  </div>
+                </div>
+                <!-- Connected state -->
+                <div id="syncAuthConnected" style="display:none;margin-top:6px;">
+                  <div style="font-size:13px;color:#333;">
+                    <span style="color:#1e8e3e;">&#10003;</span>
+                    Connected <span id="syncAuthDetail"></span>
+                  </div>
+                  <button id="syncDisconnectBtn" class="btn btn-secondary" style="margin-top:6px;font-size:12px;">Disconnect</button>
+                </div>
+              </div>
+              <div class="option" style="margin-top:8px;">
+                <label style="font-size:13px;cursor:pointer;">
+                  <input type="checkbox" id="syncRememberToken"> Remember token on disk
+                </label>
+                <div style="font-size:11px;color:#999;margin-top:2px;">Session-only by default (cleared on browser restart)</div>
+              </div>
             </div>
+            <!-- Local Folder -->
+            <div id="syncFilesystemFields" style="display:none;">
+              <div class="option" style="margin-top:8px;">
+                <label>Sync folder (e.g. Dropbox, iCloud, OneDrive):</label>
+                <div style="margin-top:4px;display:flex;align-items:center;gap:8px;">
+                  <button id="selectSyncDirBtn" class="btn btn-secondary">Select Folder</button>
+                  <span id="syncFolderLabel" style="font-size:12px;color:#666;"></span>
+                </div>
+              </div>
+            </div>
+            <!-- WebDAV -->
+            <div id="syncWebdavFields" style="display:none;">
+              <div class="option" style="margin-top:8px;">
+                <label>WebDAV URL:
+                  <input type="text" id="syncWebdavUrl" placeholder="https://dav.example.com/portal-sync/" style="width:100%;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;margin-top:4px;">
+                </label>
+              </div>
+              <div class="option" style="margin-top:8px;">
+                <label>Username:
+                  <input type="text" id="syncWebdavUser" style="width:100%;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;margin-top:4px;">
+                </label>
+              </div>
+              <div class="option" style="margin-top:8px;">
+                <label>Password:
+                  <input type="password" id="syncWebdavPass" style="width:100%;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;margin-top:4px;">
+                </label>
+              </div>
+            </div>
+            <!-- Shared -->
             <div class="option" style="margin-top:8px;display:flex;gap:16px;">
               <label>Interval (min):
                 <input type="number" id="syncIntervalMinutes" min="1" max="60" value="5" style="width:60px;padding:4px 6px;border:1px solid #dadce0;border-radius:4px;font-size:13px;">
@@ -2930,6 +3291,23 @@
             </div>
             <div id="syncStatus" style="margin-top:8px;font-size:12px;color:#666;"></div>
           </div>
+        </div>
+
+        <!-- Import Bookmarks -->
+        <div class="modal-section">
+          <h3>Import Bookmarks</h3>
+          <p>Import bookmarks exported from any browser (HTML format).</p>
+          <div class="import-file-row">
+            <input type="file" id="bookmarkFileInput" accept=".html,.htm">
+          </div>
+          <div id="bookmarkTreeContainer" class="bookmark-tree-container">
+            <span class="bookmark-tree-placeholder">Select an exported bookmarks file to preview folders.</span>
+          </div>
+          <div class="modal-btn-group">
+            <button id="importBookmarksBtn" class="btn btn-primary" disabled>Import Selected</button>
+          </div>
+          <div id="importProgress" class="import-progress"></div>
+          <div id="importFailures" class="import-failures"></div>
         </div>
 
         <!-- Data management -->

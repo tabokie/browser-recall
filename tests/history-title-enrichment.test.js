@@ -116,11 +116,10 @@ vi.mock('../extension/filesystem-storage.js', () => ({
     async verifyPermission() { return true; }
     async loadDirectoryHandle() { return this.directoryHandle; }
     async selectDirectory() { return { success: true, name: 'test' }; }
-    async loadAllInteractions() { return []; }
     async loadAllContent() { return {}; }
     async loadSettings() { return (await mockFsHandler.fn('loadSettings', {})).settings || {}; }
-    async listInteractionFiles() { return (await mockFsHandler.fn('listInteractionFiles', {})).files || []; }
-    async loadInteractionFiles(files) { return (await mockFsHandler.fn('loadInteractionBatch', { files })).interactions || []; }
+    async listHistoryFiles() { return (await mockFsHandler.fn('listHistoryFiles', {})).files || []; }
+    async loadHistoryFiles(files) { return (await mockFsHandler.fn('loadHistoryBatch', { files })).entries || []; }
     async loadListPins() { return (await mockFsHandler.fn('loadListPins', {})).pins || {}; }
     async loadListPinsById(id) { return (await mockFsHandler.fn('loadListPinsById', { listId: id })).pins || []; }
     async loadPermanentDeletes() { return (await mockFsHandler.fn('loadPermanentDeletes', {})).urls || []; }
@@ -132,7 +131,7 @@ vi.mock('../extension/filesystem-storage.js', () => ({
 }));
 
 vi.mock('../extension/pkg/portal_extension.js', () => {
-  class MockInteraction {
+  class MockHistoryEntry {
     constructor(url, title) { this.url = url; this.title = title; }
     set id(v) { this._id = v; }
     set timestamp(v) { this._timestamp = v; }
@@ -143,13 +142,13 @@ vi.mock('../extension/pkg/portal_extension.js', () => {
 
   class MockSearchEngine {
     constructor() { this._items = []; }
-    addInteraction(item) { this._items.push(item); }
+    addEntry(item) { this._items.push(item); }
     async search(query) { return []; }
   }
 
   return {
     default: async () => {},
-    Interaction: MockInteraction,
+    HistoryEntry: MockHistoryEntry,
     SearchEngine: MockSearchEngine,
     searchBatch: (...args) => mockSearchBatchFn(...args),
   };
@@ -197,15 +196,15 @@ describe('History title enrichment', () => {
       case 'getDeviceId':
         return { success: true, deviceId: 'test-device' };
 
-      case 'listInteractionFiles':
+      case 'listHistoryFiles':
         return { success: true, files: FILES_NEWEST_FIRST };
 
-      case 'loadInteractionBatch': {
-        const interactions = [];
+      case 'loadHistoryBatch': {
+        const entries = [];
         for (const f of msg.files) {
-          if (FILE_MAP[f]) interactions.push(...FILE_MAP[f]);
+          if (FILE_MAP[f]) entries.push(...FILE_MAP[f]);
         }
-        return { success: true, interactions };
+        return { success: true, entries };
       }
 
       case 'loadPermanentDeletes':

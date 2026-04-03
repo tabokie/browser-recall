@@ -87,8 +87,8 @@ describe('No silent response defaults — options.js', () => {
     expect(optionsSource).not.toMatch(/filesResp\?\.files\s*\|\|\s*\[\]/);
   });
 
-  it('does not use resp?.interactions || [] or batchResp?.interactions || []', () => {
-    expect(optionsSource).not.toMatch(/(?:resp|batchResp)\?\.interactions\s*\|\|\s*\[\]/);
+  it('does not use resp?.entries || [] or batchResp?.entries || []', () => {
+    expect(optionsSource).not.toMatch(/(?:resp|batchResp)\?\.entries\s*\|\|\s*\[\]/);
   });
 
   it('does not use notesResp?.notesMap || {}', () => {

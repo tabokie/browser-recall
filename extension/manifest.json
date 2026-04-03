@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Portal - Knowledge Management",
   "version": "0.1.0",
-  "description": "Track and search your interaction history with external data sources",
+  "description": "Track and search your browsing history with external data sources",
   "permissions": [
     "storage",
     "tabs",

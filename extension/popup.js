@@ -3,7 +3,7 @@ import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, readCach
 
 let currentSlug = '';
 let currentNotes = [];
-let currentInteraction = null;
+let currentEntry = null;
 let currentUrl = '';
 let currentTitle = '';
 let currentTab = null;
@@ -67,7 +67,7 @@ function renderSnapshots(snapshots) {
   }
 
   container.innerHTML = snapshots.map(snap => `
-    <div class="snapshot-row" data-ts="${snap.timestamp}">
+    <div class="snapshot-row" role="button" tabindex="0" data-ts="${snap.timestamp}">
       <span class="snapshot-time">${escapeHtml(formatTimestamp(snap.timestamp))}</span>
       <span class="snapshot-badges">
         ${snap.hasMd ? `<span class="badge md" data-ts="${snap.timestamp}">MD</span>` : ''}
@@ -98,21 +98,21 @@ function renderSnapshots(snapshots) {
   });
 }
 
-// Render attention section (flat fields on interaction entity)
-function renderAttention(interaction) {
+// Render attention section (flat fields on history entry)
+function renderAttention(entry) {
   const container = document.getElementById('attentionGrid');
 
-  if (!interaction || (interaction.scrollDepth === undefined && interaction.timeOnPage === undefined)) {
+  if (!entry || (entry.scrollDepth === undefined && entry.timeOnPage === undefined)) {
     container.innerHTML = '<div class="empty-state">No data</div>';
     return;
   }
 
   const items = [];
-  if (interaction.scrollDepth !== undefined) {
-    items.push(`<span class="attention-item"><strong>Scroll:</strong> ${Math.round(interaction.scrollDepth)}%</span>`);
+  if (entry.scrollDepth !== undefined) {
+    items.push(`<span class="attention-item"><strong>Scroll:</strong> ${Math.round(entry.scrollDepth)}%</span>`);
   }
-  if (interaction.timeOnPage !== undefined) {
-    items.push(`<span class="attention-item"><strong>Time:</strong> ${formatDuration(interaction.timeOnPage)}</span>`);
+  if (entry.timeOnPage !== undefined) {
+    items.push(`<span class="attention-item"><strong>Time:</strong> ${formatDuration(entry.timeOnPage)}</span>`);
   }
 
   container.innerHTML = items.length > 0
@@ -120,9 +120,9 @@ function renderAttention(interaction) {
     : '<div class="empty-state">No data</div>';
 }
 
-function renderLikes(interaction) {
+function renderLikes(entry) {
   const el = document.getElementById('pageLikes');
-  const likes = interaction?.likes || 0;
+  const likes = entry?.likes || 0;
   if (likes > 0) {
     el.textContent = `Liked (${likes})`;
     el.style.display = '';
@@ -307,7 +307,7 @@ async function renderListChips() {
 
   let html = topLists.map(({ list }) => {
     const pinned = isPagePinned(allPins, list.slug, currentUrl);
-    return `<span class="list-chip${pinned ? ' selected' : ''}" data-list-id="${list.slug}">
+    return `<span class="list-chip${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">
       <span class="list-chip-check">${pinned ? '&#10003;' : ''}</span>
       ${escapeHtml(list.name)}
     </span>`;
@@ -335,12 +335,6 @@ async function renderListChips() {
   });
 }
 
-// TODO: currentUrl comes from tab.url, which may differ from the URL the content
-// script reported (e.g. YouTube SPA adds &pp= after load). This causes slug
-// mismatches — background computes a different slug than the checkpoint's.
-// Fix: ask the content script for the canonical URL it reported, or maintain a
-// url→slug reverse index in background so slug lookups survive URL mutations.
-// Same issue affects getPageInfo and ensureCheckpointIfMissing.
 async function toggleListPin(listId) {
   await chrome.runtime.sendMessage({ action: 'toggleListPin', listId, url: currentUrl });
 }
@@ -386,7 +380,7 @@ function openListPicker(lists, allPins) {
 
     let rowsHtml = filtered.map(c => {
       const pinned = isPagePinned(allPins, c.slug, currentUrl);
-      return `<div class="list-picker-row${pinned ? ' selected' : ''}" data-list-id="${c.slug}">
+      return `<div class="list-picker-row${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${c.slug}">
         <span class="list-picker-row-check">${pinned ? '&#10003;' : ''}</span>
         <span>${escapeHtml(c.name)}</span>
       </div>`;
@@ -399,7 +393,7 @@ function openListPicker(lists, allPins) {
         (c.name).toLowerCase() === inputVal.toLowerCase()
       );
       if (!exactMatch) {
-        rowsHtml += `<div class="list-picker-create" id="listPickerCreate">Create "${escapeHtml(inputVal)}"</div>`;
+        rowsHtml += `<div class="list-picker-create" id="listPickerCreate" role="button" tabindex="0">Create "${escapeHtml(inputVal)}"</div>`;
       }
     }
 
@@ -528,7 +522,7 @@ async function renderWorkspaceBar() {
   } else {
     listsContainer.innerHTML = lists.map(list => {
       const selected = workspace.listIds.includes('list:' + list.slug);
-      return `<span class="ws-list-chip${selected ? ' selected' : ''}" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
+      return `<span class="ws-list-chip${selected ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
     }).join('');
 
     listsContainer.querySelectorAll('.ws-list-chip').forEach(chip => {
@@ -568,11 +562,12 @@ document.getElementById('triToggle').addEventListener('click', async (e) => {
 
   // Exiting private mode: record the current page visit and show details
   if (wasPrivate && newMode !== 'private' && currentTab) {
+    const url = currentTab._effectiveUrl || currentTab.url;
     await chrome.runtime.sendMessage({
       action: 'reportPage',
-      url: currentTab.url,
+      url,
       title: currentTab.title || null,
-      slug: generateSlugFromUrl(currentTab.url),
+      slug: generateSlugFromUrl(url),
       isInitialLoad: true
     });
     await showDashboard(currentTab);
@@ -618,12 +613,12 @@ function startEditingTitle() {
     newTitleEl.addEventListener('click', startEditingTitle);
     input.replaceWith(newTitleEl);
 
-    if (newTitle !== currentTitle && currentInteraction) {
-      currentInteraction.user_title = newTitle;
+    if (newTitle !== currentTitle && currentEntry) {
+      currentEntry.user_title = newTitle;
       try {
         await chrome.runtime.sendMessage({
           action: 'reportPage',
-          url: currentInteraction.url,
+          url: currentEntry.url,
           user_title: newTitle
         });
         console.log('[popup] User title updated to:', newTitle);
@@ -682,10 +677,12 @@ async function showDashboard(tab) {
     detachedContent = null;
   }
 
-  currentUrl = tab.url;
+  // Use the resolved effective URL (set in init, falls back to tab.url)
+  const effectiveUrl = tab._effectiveUrl || tab.url;
+  currentUrl = effectiveUrl;
   currentTitle = tab.title || '<unknown>';
   document.getElementById('pageTitle').textContent = currentTitle;
-  document.getElementById('pageUrl').textContent = tab.url;
+  document.getElementById('pageUrl').textContent = effectiveUrl;
 
   // For snapshot viewer tabs, extract slug from URL params instead of deriving from URL
   const viewerPrefix = chrome.runtime.getURL('snapshot-viewer.html');
@@ -693,11 +690,11 @@ async function showDashboard(tab) {
     const viewerParams = new URL(tab.url).searchParams;
     currentSlug = viewerParams.get('slug') || '';
   } else {
-    currentSlug = generateSlugFromUrl(tab.url);
+    currentSlug = generateSlugFromUrl(effectiveUrl);
   }
 
-  // Build a fallback interaction from tab info
-  currentInteraction = {
+  // Build a fallback entry from tab info
+  currentEntry = {
     timestamp: Date.now(),
     url: tab.url,
     title: tab.title || null,
@@ -712,20 +709,20 @@ async function showDashboard(tab) {
     console.log('[popup] getPageInfo response:', info);
 
     if (info && info.success) {
-      if (info.interaction) {
-        currentInteraction = info.interaction;
+      if (info.entry) {
+        currentEntry = info.entry;
         // Use user_title if set, otherwise auto-detected title
-        currentTitle = info.interaction.user_title || info.interaction.title || tab.title || '<unknown>';
+        currentTitle = info.entry.user_title || info.entry.title || tab.title || '<unknown>';
         document.getElementById('pageTitle').textContent = currentTitle;
         // For snapshot viewer tabs, show the original page URL
-        if (info.interaction.url) {
-          currentUrl = info.interaction.url;
-          document.getElementById('pageUrl').textContent = info.interaction.url;
+        if (info.entry.url) {
+          currentUrl = info.entry.url;
+          document.getElementById('pageUrl').textContent = info.entry.url;
         }
       }
       renderSnapshots(info.snapshots);
-      renderAttention(info.interaction);
-      renderLikes(info.interaction);
+      renderAttention(info.entry);
+      renderLikes(info.entry);
       renderNotes(info.notes);
       console.log(`[popup] Loaded ${info.notes?.length || 0} notes, ${info.snapshots?.length || 0} snapshots`);
     } else {
@@ -752,7 +749,7 @@ async function showDashboard(tab) {
   // Re-check tab title after 1s — some sites set a generic title initially
   // Skip if user has set a custom title (user_title takes precedence)
   const initialTitle = tab.title || '';
-  const hasUserTitle = currentInteraction?.user_title;
+  const hasUserTitle = currentEntry?.user_title;
   if (!hasUserTitle) {
     setTimeout(async () => {
       try {
@@ -773,8 +770,8 @@ async function showDashboard(tab) {
           url: tab.url,
           title: freshTitle
         });
-        if (currentInteraction) {
-          currentInteraction.title = freshTitle;
+        if (currentEntry) {
+          currentEntry.title = freshTitle;
         }
         console.log('[popup] Auto-updated title to:', freshTitle);
       } catch (error) {
@@ -802,6 +799,16 @@ async function showDashboard(tab) {
 
   currentTab = tab;
 
+  // Resolve the URL the content script originally reported. SPAs may mutate
+  // tab.url via pushState (e.g. YouTube adding &pp=), producing a different
+  // slug than the one under which data was stored.
+  let effectiveUrl = tab.url;
+  try {
+    const reported = await chrome.runtime.sendMessage({ action: 'getReportedUrl', tabId: tab.id });
+    if (reported?.success && reported.url) effectiveUrl = reported.url;
+  } catch {}
+  tab._effectiveUrl = effectiveUrl;
+
   // Private mode: show only the toggle bar, remove page details entirely
   const wsCheck = await loadWorkspace();
   if (wsCheck.mode === 'private') {
@@ -814,10 +821,9 @@ async function showDashboard(tab) {
     return;
   }
 
-  // Skip blacklist if the page has visit history (previously captured)
-  let hasVisitHistory = false;
-  const resp = await chrome.runtime.sendMessage({ action: 'loadInteractionByUrl', url: tab.url });
-  hasVisitHistory = !!(resp && resp.interaction);
+  // Skip blacklist if the page has a page entity (previously captured)
+  const pageSlug = generateSlugFromUrl(effectiveUrl);
+  const hasVisitHistory = !!(await readCacheable('page:' + pageSlug));
 
   // Check blacklist only for pages with no visit history
   const urlBlacklist = (await readCacheable('manifest:settings')).urlBlacklist;
@@ -830,19 +836,19 @@ async function showDashboard(tab) {
       chrome.runtime.openOptionsPage();
     });
 
-    // "Capture It" — write interaction + snapshot, then show dashboard (visit history will bypass blacklist next time)
+    // "Capture It" — write history entry + snapshot, then show dashboard (visit history will bypass blacklist next time)
     document.getElementById('captureOnceBtn').addEventListener('click', async () => {
       const btn = document.getElementById('captureOnceBtn');
       btn.disabled = true;
       btn.textContent = 'Capturing...';
 
       try {
-        const slug = generateSlugFromUrl(tab.url);
+        const slug = generateSlugFromUrl(effectiveUrl);
 
         // Record page visit (bypassBlacklist: explicit user override)
         await chrome.runtime.sendMessage({
           action: 'reportPage',
-          url: tab.url,
+          url: effectiveUrl,
           title: tab.title || null,
           slug,
           isInitialLoad: true,

@@ -6,16 +6,23 @@ import { validateRuleConfig, validateSmartRuleFn, matchRules, matchKeywordRule, 
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark, cacheClear } from './entity-cache.js';
 import { GitHubTransport, parseRepoUrl } from './sync-transport-github.js';
+import { FilesystemTransport } from './sync-transport-filesystem.js';
+import { WebDAVTransport } from './sync-transport-webdav.js';
 import { SyncManager } from './sync-manager.js';
 
 console.log('Background script loading...');
 
 const DRAIN_INTERVAL_MS = 5000; // 5 seconds — data is safe in chrome.storage.local until drained
 const HISTORY_RECENT_DAYS = 7; // days of past history to cache for multi-day checks
+const LOG_BUFFER_MAX_SIZE = 2000; // max entries before forced eviction
 
 // In-memory Map of URL → visitDates (YYYYMMDD[]) from history:recent (past days).
 // Populated during hydration, immutable until next browser restart.
 let recentUrls = new Map();
+
+// tabId → URL from the content script's initial reportPage.
+// Used by popup to avoid slug mismatch when tab.url drifts (SPA pushState, etc.).
+const tabReportedUrls = new Map();
 
 // Device name for this instance — always set (generated on first run, stored in settings).
 // Use getDeviceId() instead of reading directly — it lazy-loads from CURRENT file on cache miss.
@@ -52,7 +59,7 @@ async function setupOffscreenDocument() {
     await chrome.offscreen.createDocument({
       url: 'offscreen.html',
       reasons: ['LOCAL_STORAGE'],
-      justification: 'Manage filesystem operations for interaction history'
+      justification: 'Manage filesystem operations for browsing history'
     });
     console.log('Offscreen document created');
   } catch (e) {
@@ -74,6 +81,11 @@ function connectToOffscreen() {
   offscreenPort.onDisconnect.addListener(() => {
     offscreenPort = null;
     console.warn('Offscreen port disconnected');
+    // Resolve all pending callbacks with error — prevents leaked promises
+    for (const [id, cb] of portCallbacks) {
+      cb({ success: false, error: 'Offscreen port disconnected' });
+    }
+    portCallbacks.clear();
   });
   // Kick drain for any entries buffered while offscreen was down
   scheduleDrainNotify();
@@ -84,6 +96,7 @@ async function handleOffscreenResponse(msg) {
     // Watermark from offscreen flush — prune entries at or before watermark timestamp
     await ensureLogBuffer();
     logBuffer = logBuffer.filter(e => e.timestamp > msg.watermark);
+    logBufferWatermark = msg.watermark;
     chrome.storage.local.set({ logBuffer });
     setEntityCacheWatermark(msg.watermark);
     return;
@@ -116,10 +129,21 @@ async function requestOffscreen(params) {
 // these are logical locks, not file locks — files live in offscreen only.
 
 const rwLocks = new Map();
+const LOCK_TIMEOUT_MS = 30000;
 
 function withLock(key, fn) {
   const prev = rwLocks.get(key) || Promise.resolve();
-  const next = prev.catch(() => {}).then(() => fn());
+  const next = prev.catch(() => {}).then(() => {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`withLock('${key}') timed out after ${LOCK_TIMEOUT_MS}ms`));
+      }, LOCK_TIMEOUT_MS);
+      fn().then(
+        (result) => { clearTimeout(timer); resolve(result); },
+        (error) => { clearTimeout(timer); reject(error); },
+      );
+    });
+  });
   rwLocks.set(key, next);
   next.catch(() => {}).then(() => {
     if (rwLocks.get(key) === next) rwLocks.delete(key);
@@ -139,10 +163,11 @@ function notifyMutation(type, detail) {
 // Event-sourced log entries. Ground truth during SW lifetime.
 // Backed up to storage.local['logBuffer'] for durability.
 // Background notifies offscreen via port ('drainEntries') to drain entries
-// to history/YYYY-MM-DD.jsonl and checkpoint entity files.
+// to data/logs/YYYY-MM-DD.jsonl and checkpoint entity files.
 // Lazy-restored on first access so idle wake-ups don't lose unflushed entries.
 
 let logBuffer = null; // null = not yet restored from storage.local
+let logBufferWatermark = 0; // last drain watermark — entries ≤ this are safely on disk
 
 async function ensureLogBuffer() {
   if (logBuffer !== null) return;
@@ -181,7 +206,25 @@ async function appendLog(entry) {
   await withLock('logBuffer', async () => {
     await ensureLogBuffer();
     logBuffer.push(entry);
-    await chrome.storage.local.set({ logBuffer });
+
+    // Cap enforcement: prevent unbounded growth when drain is stalled
+    if (logBuffer.length > LOG_BUFFER_MAX_SIZE) {
+      const before = logBuffer.length;
+      // First pass: drop entries already persisted to disk
+      logBuffer = logBuffer.filter(e => e.timestamp > logBufferWatermark);
+      if (logBuffer.length > LOG_BUFFER_MAX_SIZE) {
+        // Still over limit — drop oldest (bounded data loss)
+        logBuffer = logBuffer.slice(logBuffer.length - LOG_BUFFER_MAX_SIZE);
+      }
+      console.warn(`logBuffer capped: ${before} → ${logBuffer.length}`);
+    }
+
+    try {
+      await chrome.storage.local.set({ logBuffer });
+    } catch (e) {
+      console.warn('logBuffer persist failed (quota?):', e.message);
+      // In-memory buffer still has the entry — it will be drained to disk by offscreen
+    }
   });
   ensureOffscreenPort().catch(() => {});
   scheduleDrainNotify();
@@ -263,10 +306,12 @@ async function addLog(entry) {
 }
 
 // Build a visit_page log entry. Title omitted when absent (slow-loading pages).
-function buildVisitPageEntry(url, title, referrerUrl) {
+// checkpoint: true forces page entity creation (used by explicit user capture of blacklisted URLs).
+function buildVisitPageEntry(url, title, referrerUrl, { checkpoint } = {}) {
   const entry = { timestamp: Date.now(), action: 'visit_page', url };
   if (title) entry.title = title;
   if (referrerUrl) entry.referrerUrl = referrerUrl;
+  if (checkpoint) entry.checkpoint = true;
   return entry;
 }
 
@@ -503,8 +548,8 @@ async function hydrateCache() {
         // files returned by loadHistoryRange are within range, skip
       }
       // We can't enumerate session keys, but we can check known old dates
-      // by looking at files older than our range from listInteractionFiles
-      const allFilesResp = await requestOffscreen({ action: 'listInteractionFiles' });
+      // by looking at files older than our range from listHistoryFiles
+      const allFilesResp = await requestOffscreen({ action: 'listHistoryFiles' });
       const allFiles = allFilesResp?.files || []; // Missing files listing is non-fatal
       for (const f of allFiles) {
         const d = f.replace('.jsonl', '');
@@ -705,6 +750,7 @@ async function evaluateSmartRulesForVisit(url, title) {
       name: listInfo.name,
       listOwner: listInfo.listOwner,
       items: [url],
+      source: 'auto',
     };
     if (title) pinEntry.titles = { [url]: title };
     await addLog(pinEntry);
@@ -830,11 +876,47 @@ const getReferrer = (() => {
   };
 })();
 
+chrome.tabs.onRemoved.addListener((tabId) => {
+  tabReportedUrls.delete(tabId);
+});
+
 // ─── Sync ────────────────────────────────────────────────────────────
 
 const SYNC_ALARM_NAME = 'portal-sync';
+const SYNC_RATE_LIMIT_ALARM = 'portal-sync-rate-limit';
+const RATE_LIMIT_FALLBACK_MS = 15 * 60 * 1000; // 15 minutes
+const SYNC_SESSION_TOKEN_KEY = '__syncToken';
 let syncInProgress = false;
-let lastSyncResult = null; // { timestamp, pushed, pulled, error? }
+let lastSyncResult = null; // { timestamp, pushed, pulled, error?, rateLimitedUntil? }
+let rateLimitedUntil = 0; // epoch ms; 0 = not rate-limited
+
+// Read the sync token from chrome.storage.session (never hits disk directly).
+async function getSyncSessionToken() {
+  try {
+    const data = await chrome.storage.session.get([SYNC_SESSION_TOKEN_KEY]);
+    return data[SYNC_SESSION_TOKEN_KEY] || null;
+  } catch { return null; }
+}
+
+// Store the sync token in chrome.storage.session.
+async function setSyncSessionToken(token) {
+  if (token) {
+    await chrome.storage.session.set({ [SYNC_SESSION_TOKEN_KEY]: token });
+  } else {
+    await chrome.storage.session.remove([SYNC_SESSION_TOKEN_KEY]);
+  }
+}
+
+// On startup, load token from disk → session if "Remember on disk" is enabled.
+async function loadSyncTokenFromDisk() {
+  const settings = await readCacheable('manifest:settings') || {};
+  if (settings.syncRememberToken && settings.syncToken) {
+    const existing = await getSyncSessionToken();
+    if (!existing) {
+      await setSyncSessionToken(settings.syncToken);
+    }
+  }
+}
 
 // Replay remote log entries via effectOf + sessionWrite.
 // Does NOT append to logBuffer or update history keys — remote entries are
@@ -847,10 +929,44 @@ async function replayRemoteEntries(entries, peerDeviceId) {
   scheduleDrainNotify();
 }
 
-// Build a SyncManager wired to offscreen filesystem and the GitHub transport.
-function buildSyncManager(repoUrl, token) {
-  const { owner, repo } = parseRepoUrl(repoUrl);
-  const transport = new GitHubTransport({ owner, repo, token });
+// Build a SyncManager wired to offscreen filesystem and the configured transport.
+function buildSyncManager(settings, { githubToken } = {}) {
+  const method = settings.syncMethod || 'github';
+  let transport;
+  switch (method) {
+    case 'github': {
+      const { owner, repo } = parseRepoUrl(settings.syncRepoUrl);
+      transport = new GitHubTransport({ owner, repo, token: githubToken });
+      break;
+    }
+    case 'filesystem': {
+      transport = new FilesystemTransport({
+        listDeviceDirs: () =>
+          requestOffscreen({ action: 'syncFsListDeviceDirs' }).then(r => r.dirs),
+        listFiles: (deviceDir) =>
+          requestOffscreen({ action: 'syncFsListFiles', deviceDir }).then(r => r.files),
+        readFile: (path) =>
+          requestOffscreen({ action: 'syncFsReadFile', path }).then(r => r.content),
+        writeFile: (path, content) =>
+          requestOffscreen({ action: 'syncFsWriteFile', path, content }),
+        ensureDir: (path) =>
+          requestOffscreen({ action: 'syncFsEnsureDir', path }),
+        removeFile: (path) =>
+          requestOffscreen({ action: 'syncFsRemoveFile', path }),
+      });
+      break;
+    }
+    case 'webdav': {
+      transport = new WebDAVTransport({
+        url: settings.syncWebdavUrl,
+        username: settings.syncWebdavUser,
+        password: settings.syncWebdavPass,
+      });
+      break;
+    }
+    default:
+      throw new Error(`Unknown sync method: ${method}`);
+  }
   return new SyncManager({
     transport,
     collectLocalFiles: (deviceId, retentionDays) =>
@@ -873,19 +989,33 @@ function buildSyncManager(repoUrl, token) {
 
 async function performSync() {
   if (syncInProgress) return { skipped: true };
+  if (rateLimitedUntil > Date.now()) {
+    const retryTime = new Date(rateLimitedUntil).toLocaleTimeString();
+    return { skipped: true, error: `Rate limited, will retry at ${retryTime}` };
+  }
   syncInProgress = true;
+  let method = 'github';
   try {
     await hydrationDone;
     const settings = await readCacheable('manifest:settings') || {};
     if (!settings.syncEnabled) return { skipped: true };
-    const { syncRepoUrl, syncToken, syncRetentionDays } = settings;
-    if (!syncRepoUrl || !syncToken) return { skipped: true, error: 'Missing repo URL or token' };
+    method = settings.syncMethod || 'github';
+    let githubToken = null;
+    if (method === 'github') {
+      githubToken = await getSyncSessionToken();
+      if (!settings.syncRepoUrl || !githubToken)
+        return { skipped: true, error: !githubToken ? 'GitHub not connected — authorize in Settings' : 'Missing repo URL' };
+    }
+    if (method === 'filesystem' && !settings.syncFolderName)
+      return { skipped: true, error: 'No sync folder selected' };
+    if (method === 'webdav' && !settings.syncWebdavUrl)
+      return { skipped: true, error: 'Missing WebDAV URL' };
 
     const deviceId = await getDeviceId();
-    const mgr = buildSyncManager(syncRepoUrl, syncToken);
+    const mgr = buildSyncManager(settings, { githubToken });
 
     // Push local changes
-    const pushResult = await mgr.push(deviceId, { retentionDays: syncRetentionDays || 7 });
+    const pushResult = await mgr.push(deviceId, { retentionDays: settings.syncRetentionDays || 7 });
 
     // Pull remote changes
     const pullResult = await mgr.pull(deviceId);
@@ -895,22 +1025,46 @@ async function performSync() {
       entriesReplayed += entries.length;
     }
 
+    // Successful sync — clear any lingering rate limit state
+    rateLimitedUntil = 0;
     lastSyncResult = { timestamp: Date.now(), pushed: pushResult.pushed, pulled: entriesReplayed > 0, entriesReplayed };
     console.log(`[sync] push=${pushResult.pushed} (${pushResult.fileCount} files), pull=${pullResult.remoteEntries.length} peers, ${entriesReplayed} entries`);
     return lastSyncResult;
   } catch (error) {
     const msg = error.message;
-    const isAuthError = msg.includes('401') || (msg.includes('403') && !msg.includes('rate limit'));
-    const isNotFound = msg.includes('404');
     lastSyncResult = { timestamp: Date.now(), pushed: false, pulled: false, error: msg };
-    if (isAuthError || isNotFound) {
-      // Permanent error — disable sync alarm to avoid repeated failures.
-      // User must fix settings and re-enable.
-      chrome.alarms.clear(SYNC_ALARM_NAME);
-      lastSyncResult.disabled = true;
-      console.warn(`[sync] permanent error, alarm disabled: ${msg}`);
+    // GitHub-specific rate limit and auth error handling.
+    if (method === 'github') {
+      const isRateLimit = msg.includes('rate limit');
+      const isAuthError = msg.includes('401') || (msg.includes('403') && !isRateLimit);
+      const isNotFound = msg.includes('404');
+      if (isAuthError) {
+        await setSyncSessionToken(null);
+        chrome.alarms.clear(SYNC_ALARM_NAME);
+        lastSyncResult.disabled = true;
+        lastSyncResult.authExpired = true;
+        console.warn(`[sync] auth error, token cleared, alarm disabled: ${msg}`);
+      } else if (isNotFound) {
+        chrome.alarms.clear(SYNC_ALARM_NAME);
+        lastSyncResult.disabled = true;
+        console.warn(`[sync] permanent error, alarm disabled: ${msg}`);
+      } else if (isRateLimit) {
+        const resetEpochSec = error.rateLimitReset;
+        const resetMs = resetEpochSec
+          ? resetEpochSec * 1000 + 60_000
+          : Date.now() + RATE_LIMIT_FALLBACK_MS;
+        rateLimitedUntil = resetMs;
+        chrome.alarms.clear(SYNC_ALARM_NAME);
+        chrome.alarms.create(SYNC_RATE_LIMIT_ALARM, { when: resetMs });
+        const retryTime = new Date(resetMs).toLocaleTimeString();
+        lastSyncResult.error = `Rate limited, will retry at ${retryTime}`;
+        lastSyncResult.rateLimitedUntil = resetMs;
+        console.warn(`[sync] rate limited until ${retryTime}`);
+      } else {
+        console.warn(`[sync] transient error, will retry next cycle: ${msg}`);
+      }
     } else {
-      console.warn(`[sync] transient error, will retry next cycle: ${msg}`);
+      console.warn(`[sync] error (${method}): ${msg}`);
     }
     return lastSyncResult;
   } finally {
@@ -921,17 +1075,35 @@ async function performSync() {
 // Start or stop the sync alarm based on settings.
 async function updateSyncAlarm() {
   const settings = await readCacheable('manifest:settings') || {};
-  if (settings.syncEnabled && settings.syncRepoUrl && settings.syncToken) {
+  const method = settings.syncMethod || 'github';
+  const githubToken = method === 'github' ? await getSyncSessionToken() : null;
+  const configured = method === 'github' ? (settings.syncRepoUrl && githubToken)
+    : method === 'filesystem' ? settings.syncFolderName
+    : method === 'webdav' ? settings.syncWebdavUrl
+    : false;
+  if (settings.syncEnabled && configured) {
+    rateLimitedUntil = 0;
+    chrome.alarms.clear(SYNC_RATE_LIMIT_ALARM);
     const intervalMinutes = Math.max(1, settings.syncIntervalMinutes || 5);
     chrome.alarms.create(SYNC_ALARM_NAME, { periodInMinutes: intervalMinutes });
     console.log(`[sync] alarm set: every ${intervalMinutes} min`);
   } else {
     chrome.alarms.clear(SYNC_ALARM_NAME);
+    chrome.alarms.clear(SYNC_RATE_LIMIT_ALARM);
   }
 }
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === SYNC_ALARM_NAME) performSync();
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === SYNC_ALARM_NAME) {
+    performSync();
+  } else if (alarm.name === SYNC_RATE_LIMIT_ALARM) {
+    // Rate limit window expired — attempt sync, restore periodic alarm on success.
+    rateLimitedUntil = 0;
+    const result = await performSync();
+    if (!result.error || !result.rateLimitedUntil) {
+      await updateSyncAlarm();
+    }
+  }
 });
 
 // ─── Initialization ───────────────────────────────────────────────────
@@ -958,6 +1130,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     hydrationDone = hydrateCache();
     await hydrationDone;
     await ensureDefaultLists();
+    await loadSyncTokenFromDisk();
     updateSyncAlarm();
   }
 });
@@ -973,6 +1146,7 @@ chrome.runtime.onStartup.addListener(async () => {
       hydrationDone = hydrateCache();
       await hydrationDone;
       await ensureDefaultLists();
+      await loadSyncTokenFromDisk();
       updateSyncAlarm();
     }
   } catch (error) {
@@ -1161,7 +1335,7 @@ chrome.commands.onCommand.addListener(async (command) => {
       const rateEntry = { timestamp: Date.now(), action: 'rate_page', url: tab.url, likes: delta };
       if (tab.title) rateEntry.title = tab.title;
       await addLog(rateEntry);
-      notifyMutation('interaction', { url: tab.url });
+      notifyMutation('history', { url: tab.url });
       chrome.tabs.sendMessage(tab.id, { action: 'showLikeNotification', delta }).catch(() => {});
     } catch (error) {
       console.warn(`[${command}] ERROR:`, error.message, error);
@@ -1180,6 +1354,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       switch (request.action) {
 
         // ── Tab-dependent (background-only) ──
+
+        case 'getReportedUrl': {
+          const reportedUrl = tabReportedUrls.get(request.tabId) || null;
+          sendResponse({ success: true, url: reportedUrl });
+          break;
+        }
 
         case 'getPageInfo': {
           const slug = request.slug || generateSlugFromUrl(request.url);
@@ -1207,7 +1387,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // page is null for pages without entities — popup uses tab.title as fallback
           sendResponse({
             success: true, slug,
-            interaction: page ? { url: page.url, title: page.title, user_title: page.user_title,
+            entry: page ? { url: page.url, title: page.title, user_title: page.user_title,
               scrollDepth: page.scrollDepth, timeOnPage: page.timeOnPage, likes: page.likes,
               timestamps: page.timestamps, slug } : null,
             snapshots,
@@ -1260,8 +1440,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const todayEntries = await readCacheable(todayKey) || [];
                 const inSession = todayEntries.some(e => e.url === url);
                 if (!inSession) {
-                  const existing = await requestOffscreen({ action: 'loadInteractionByUrl', url });
-                  if (!existing || !existing.interaction) {
+                  const pageSlug = generateSlugFromUrl(url);
+                  const existing = await readCacheable('page:' + pageSlug);
+                  if (!existing) {
                     console.log(`Skipping blacklisted URL (not in database): ${url}`);
                     sendResponse({ success: true });
                     return;
@@ -1275,6 +1456,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
 
             if (request.isInitialLoad) {
+              // Track the URL the content script reported for this tab.
+              // Popup uses this to avoid slug mismatch when tab.url drifts (SPA pushState).
+              if (sender.tab?.id != null) {
+                tabReportedUrls.set(sender.tab.id, url);
+              }
               // visit_page: always includes title, referrerUrl is raw URL
               let referrerUrl = request.referrer || null;
               if (!referrerUrl && sender.tab?.id != null) {
@@ -1289,7 +1475,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               }
 
               const title = request.title ? await trimTitle(request.title, url) : '';
-              const entry = buildVisitPageEntry(url, title, referrerUrl);
+              const entry = buildVisitPageEntry(url, title, referrerUrl, { checkpoint: request.bypassBlacklist });
               await addLog(entry);
 
               // First-visit extras: workspace
@@ -1311,7 +1497,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                           timestamp: Date.now(),
                           action: 'pin_to_list',
                           name: pn.name, listOwner: pn.listOwner,
-                          items: [url]
+                          items: [url],
+                          source: 'auto',
                         };
                         if (title) pinEntry.titles = { [url]: title };
                         await addLog(pinEntry);
@@ -1335,7 +1522,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 console.warn('Smart-rule auto-pin error:', err.message);
               });
 
-              notifyMutation('interaction', { url });
+              notifyMutation('history', { url });
             } else if (request.isLeaving) {
               // leave_page: attention data + latest title
               const title = request.title ? await trimTitle(request.title, url) : null;
@@ -1398,14 +1585,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'loadInteractionByUrl': {
-          const t0 = performance.now();
-          const resp = await requestOffscreen({ action: 'loadInteractionByUrl', url: request.url });
-          console.debug(`[I/O] loadInteractionByUrl: ${(performance.now() - t0).toFixed(1)}ms`);
-          sendResponse(resp);
-          break;
-        }
-
         case 'getDeviceId': {
           sendResponse({ success: true, deviceId: await getDeviceId() });
           break;
@@ -1462,16 +1641,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
-        case 'listInteractionFiles': {
-          const resp = await requestOffscreen({ action: 'listInteractionFiles' });
+        case 'listHistoryFiles': {
+          const resp = await requestOffscreen({ action: 'listHistoryFiles', includeSizes: request.includeSizes });
           sendResponse(resp);
           break;
         }
 
-        case 'loadInteractionBatch': {
+        case 'loadHistoryBatch': {
           const t0 = performance.now();
-          const resp = await requestOffscreen({ action: 'loadInteractionBatch', files: request.files });
-          console.debug(`[I/O] loadInteractionBatch: ${request.files.length} files in ${(performance.now() - t0).toFixed(1)}ms`);
+          const resp = await requestOffscreen({ action: 'loadHistoryBatch', files: request.files });
+          console.debug(`[I/O] loadHistoryBatch: ${request.files.length} files in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse(resp);
           break;
         }
@@ -1987,6 +2166,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // 3. Reset ALL in-memory state (SW survives across tests)
           localDeviceId = null;
           recentUrls = new Map();
+          tabReportedUrls.clear();
+          rateLimitedUntil = 0;
+          lastSyncResult = null;
+          syncInProgress = false;
+          chrome.alarms.clear(SYNC_RATE_LIMIT_ALARM);
           if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
           // 4. Tell offscreen to wipe directory and reset drain state
           await requestOffscreen({ action: 'resetDirectory' });
@@ -1994,6 +2178,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           hydrationDone = hydrateCache();
           await hydrationDone;
           await ensureDefaultLists();
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'setRateLimitForTest': {
+          // Simulate rate-limited state for testing backoff behavior.
+          rateLimitedUntil = request.until || 0;
+          lastSyncResult = request.until
+            ? { timestamp: Date.now(), pushed: false, pulled: false,
+                error: `Rate limited, will retry at ${new Date(request.until).toLocaleTimeString()}`,
+                rateLimitedUntil: request.until }
+            : null;
           sendResponse({ success: true });
           break;
         }
@@ -2152,6 +2348,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                       name: listInfo.name,
                       listOwner: listInfo.listOwner,
                       items: [entry.url],
+                      source: 'auto',
                     };
                     if (entry.title) sfPinEntry.titles = { [entry.url]: entry.title };
                     await addLog(sfPinEntry);
@@ -2229,6 +2426,62 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
+        case 'setSyncToken': {
+          // Store token in session. Optionally persist to disk if remember is on.
+          await setSyncSessionToken(request.token);
+          const stEntries = [];
+          if (request.remember) {
+            stEntries.push({ key: 'syncToken', value: request.token });
+            stEntries.push({ key: 'syncRememberToken', value: true });
+          } else {
+            stEntries.push({ key: 'syncToken', value: null });
+            stEntries.push({ key: 'syncRememberToken', value: false });
+          }
+          if (request.authMethod) stEntries.push({ key: 'syncAuthMethod', value: request.authMethod });
+          if (request.githubUser) stEntries.push({ key: 'syncGitHubUser', value: request.githubUser });
+          for (const { key, value } of stEntries) {
+            await addLog({ timestamp: Date.now(), action: 'update_setting', key, value });
+          }
+          await updateSyncAlarm();
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'clearSyncToken': {
+          await setSyncSessionToken(null);
+          for (const key of ['syncToken', 'syncRememberToken', 'syncAuthMethod', 'syncGitHubUser']) {
+            await addLog({ timestamp: Date.now(), action: 'update_setting', key, value: null });
+          }
+          await updateSyncAlarm();
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'toggleSyncRemember': {
+          const token = await getSyncSessionToken();
+          if (request.remember && token) {
+            await addLog({ timestamp: Date.now(), action: 'update_setting', key: 'syncToken', value: token });
+          } else if (!request.remember) {
+            await addLog({ timestamp: Date.now(), action: 'update_setting', key: 'syncToken', value: null });
+          }
+          await addLog({ timestamp: Date.now(), action: 'update_setting', key: 'syncRememberToken', value: !!request.remember });
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'getSyncAuthState': {
+          const token = await getSyncSessionToken();
+          const settings = await readCacheable('manifest:settings') || {};
+          sendResponse({
+            success: true,
+            hasToken: !!token,
+            authMethod: settings.syncAuthMethod || null,
+            githubUser: settings.syncGitHubUser || null,
+            rememberToken: !!settings.syncRememberToken,
+          });
+          break;
+        }
+
         default:
           sendResponse({ success: false, error: `Unknown action: ${request.action}` });
       }
@@ -2239,4 +2492,113 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   })();
 
   return true;
+});
+
+// ─── Import Bookmarks (port-based for progress streaming) ────────────
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'import-bookmarks') return;
+
+  port.onMessage.addListener(async (msg) => {
+    if (msg.action !== 'importBookmarks') return;
+    const { tree } = msg;
+    const deviceId = await getDeviceId();
+    const failures = [];
+    let listCount = 0;
+    let bookmarkCount = 0;
+    const FAIL_LIMIT = 20;
+    let aborted = false;
+
+    function extractListId(effects) {
+      const key = Object.keys(effects).find(k => k.startsWith('list:') && k !== 'manifest:list-order' && k !== 'manifest:name-to-id');
+      return key ? key.slice(5) : null;
+    }
+
+    // Create wrapping parent list
+    const parentName = `Imported Bookmarks (${new Date().toLocaleString()})`;
+    let parentEffects;
+    try {
+      parentEffects = await addLog({
+        timestamp: Date.now(), action: 'create_list',
+        listOwner: deviceId, name: parentName,
+      });
+    } catch (e) {
+      port.postMessage({ type: 'error', message: 'Failed to create parent list: ' + e.message });
+      return;
+    }
+    const parentListId = extractListId(parentEffects);
+
+    async function processFolder(node, parentId) {
+      if (aborted) return;
+
+      // Create list for this folder
+      let effects;
+      try {
+        effects = await addLog({
+          timestamp: Date.now(), action: 'create_list',
+          listOwner: deviceId, name: node.title || 'Untitled',
+          ...(parentId ? { parentListId: parentId } : {}),
+        });
+      } catch (e) {
+        port.postMessage({ type: 'error', message: 'Failed to create list "' + node.title + '": ' + e.message });
+        aborted = true;
+        return;
+      }
+      listCount++;
+      const listId = extractListId(effects);
+      port.postMessage({ type: 'progress', text: `Creating list ${listCount}...` });
+
+      // Pin bookmarks
+      if (node.bookmarks && node.bookmarks.length > 0 && listId) {
+        const pn = await getListEventFields(listId);
+        if (pn) {
+          const urls = [];
+          const titles = {};
+          for (const bm of node.bookmarks) {
+            urls.push(bm.url);
+            if (bm.title) titles[bm.url] = bm.title;
+          }
+          try {
+            const pinEntry = {
+              timestamp: Date.now(), action: 'pin_to_list',
+              name: pn.name, listOwner: pn.listOwner, items: urls,
+            };
+            if (Object.keys(titles).length > 0) pinEntry.titles = titles;
+            await addLog(pinEntry);
+            bookmarkCount += urls.length;
+          } catch (e) {
+            for (const u of urls) failures.push({ url: u, reason: e.message });
+          }
+        }
+      }
+
+      // Record skipped URLs as failures
+      for (const s of (node.skipped || [])) {
+        failures.push({ url: s.url, title: s.title, reason: s.reason });
+      }
+
+      if (failures.length >= FAIL_LIMIT) {
+        port.postMessage({ type: 'error', message: `Too many failures (${failures.length}), aborting.` });
+        aborted = true;
+        return;
+      }
+
+      port.postMessage({ type: 'progress', text: `Pinning bookmarks ${bookmarkCount}...` });
+
+      // Recurse into children
+      for (const child of (node.children || [])) {
+        await processFolder(child, listId);
+        if (aborted) return;
+      }
+    }
+
+    for (const folder of tree) {
+      await processFolder(folder, parentListId);
+      if (aborted) break;
+    }
+
+    if (!aborted) {
+      notifyMutation('lists');
+      port.postMessage({ type: 'done', listCount, bookmarkCount, failures });
+    }
+  });
 });

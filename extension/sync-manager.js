@@ -1,8 +1,25 @@
-// Sync orchestration: push local files to GitHub, pull remote files from peers.
+// Sync orchestration: push local files, pull remote files from peers.
 // Pure logic — all I/O injected via constructor deps.
 
+/**
+ * Transport interface — any sync backend must implement these 5 methods.
+ *
+ * @typedef {Object} SyncTransport
+ * @property {() => Promise<Array<{name: string, sha: string}>>} listBranches
+ *   List all device slots. `name` = device ID, `sha` = opaque change token
+ *   (git commit SHA, content hash, ETag composite, etc.).
+ * @property {(sha: string) => Promise<Array<{path: string, sha: string}>>} getTree
+ *   Given a branch's change token, return flat file listing with per-file sha.
+ * @property {(sha: string) => Promise<string>} getBlob
+ *   Retrieve file content by its per-file sha.
+ * @property {(branch: string, files: Array<{path: string, content: string}>) => Promise<{sha: string}>} pushTree
+ *   Write a full snapshot of files to the given device slot. Returns new change token.
+ * @property {(name: string, sha: string) => Promise<void>} createBranch
+ *   Create a new device slot (called on first push if slot doesn't exist).
+ */
+
 // Simple string hash for change detection (not cryptographic).
-function hashContent(str) {
+export function hashContent(str) {
   let h = 0;
   for (let i = 0; i < str.length; i++) {
     h = ((h << 5) - h + str.charCodeAt(i)) | 0;

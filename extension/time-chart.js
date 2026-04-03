@@ -1,41 +1,56 @@
 // Time chart — rendering, tooltips, bar click filtering, and highlight sync
 
-function aggregateVisitsByDay(interactions) {
+function aggregateVisitsByDay(entries) {
   const byDay = new Map();
-  for (const i of interactions) {
+  for (const i of entries) {
     const dayKey = new Date(i.timestamp).toISOString().slice(0, 10);
     const prev = byDay.get(dayKey) || 0;
     byDay.set(dayKey, prev + 1); // count visits per day
   }
   // Sort by date
-  const entries = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  return entries; // [[dateStr, count], ...]
+  const sorted = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  return sorted; // [[dateStr, count], ...]
 }
 
-export function renderTimeChartInto(chartEl, barsEl, interactions, label) {
+export function renderTimeChartInto(chartEl, barsEl, entries, label, estimatedByDay) {
   if (label !== undefined) {
     const labelEl = chartEl.querySelector('.chart-label');
     if (labelEl) labelEl.textContent = label;
   }
 
-  if (!interactions || interactions.length === 0) {
-    chartEl.classList.remove('visible');
-    return;
-  }
-
-  const data = aggregateVisitsByDay(interactions);
-  if (data.length === 0) {
-    chartEl.classList.remove('visible');
-    return;
-  }
-
+  const data = aggregateVisitsByDay(entries || []);
   const scoreMap = new Map(data);
-  const maxScore = Math.max(...data.map(d => d[1]), 0.1);
+  const hasEstimates = estimatedByDay && estimatedByDay.size > 0;
+
+  if (data.length === 0 && !hasEstimates) {
+    chartEl.classList.remove('visible');
+    return;
+  }
+
+  // Collect all dates with data (real or estimated)
+  const allDataDates = [...scoreMap.keys()];
+  if (hasEstimates) {
+    for (const date of estimatedByDay.keys()) {
+      if (!scoreMap.has(date)) allDataDates.push(date);
+    }
+  }
+  allDataDates.sort();
+
+  if (allDataDates.length === 0) {
+    chartEl.classList.remove('visible');
+    return;
+  }
+
+  const maxScore = Math.max(
+    ...data.map(d => d[1]),
+    ...(hasEstimates ? [...estimatedByDay.values()] : []),
+    0.1
+  );
   const chartHeight = 44;
 
   // Expand range: 1st of earliest UTC month → last data day (all UTC)
-  const firstDate = new Date(data[0][0] + 'T00:00:00Z');
-  const lastDate = new Date(data[data.length - 1][0] + 'T00:00:00Z');
+  const firstDate = new Date(allDataDates[0] + 'T00:00:00Z');
+  const lastDate = new Date(allDataDates[allDataDates.length - 1] + 'T00:00:00Z');
   const rangeStart = new Date(Date.UTC(firstDate.getUTCFullYear(), firstDate.getUTCMonth(), 1));
 
   const days = [];
@@ -58,6 +73,11 @@ export function renderTimeChartInto(chartEl, barsEl, interactions, label) {
     if (score != null) {
       const barH = Math.max(2, Math.round((score / maxScore) * chartHeight));
       return `<div class="chart-bar-group has-data" data-date="${dateStr}" data-score="${score.toFixed(1)}"><div class="chart-bar" style="height:${barH}px"></div></div>`;
+    }
+    const estScore = hasEstimates ? estimatedByDay.get(dateStr) : undefined;
+    if (estScore != null) {
+      const barH = Math.max(2, Math.round((estScore / maxScore) * chartHeight));
+      return `<div class="chart-bar-group has-data estimated" data-date="${dateStr}" data-score="${estScore.toFixed(1)}"><div class="chart-bar estimated" style="height:${barH}px"></div></div>`;
     }
     return `<div class="chart-bar-group" data-date="${dateStr}"></div>`;
   }).join('');
@@ -82,12 +102,13 @@ export function renderTimeChartInto(chartEl, barsEl, interactions, label) {
   chartEl.classList.add('visible');
 }
 
-export function renderTimeChart(interactions) {
+export function renderTimeChart(entries, estimatedByDay) {
   renderTimeChartInto(
     document.getElementById('timeChart'),
     document.getElementById('chartBars'),
-    interactions,
-    'Visits over time'
+    entries,
+    'Visits over time',
+    estimatedByDay
   );
   bindChartBarClick(document.getElementById('timeChart'), document.getElementById('results'));
 }
@@ -100,8 +121,11 @@ function bindChartTooltip(chartEl) {
     const group = e.target.closest('.chart-bar-group.has-data');
     if (!group) { tooltip.style.display = 'none'; return; }
     const count = Math.round(parseFloat(group.dataset.score));
+    const isEstimated = group.classList.contains('estimated');
     const visits = count === 1 ? 'visit' : 'visits';
-    tooltip.textContent = `${group.dataset.date}: ${count} ${visits}`;
+    tooltip.textContent = isEstimated
+      ? `${group.dataset.date}: ~${count} ${visits} (estimated)`
+      : `${group.dataset.date}: ${count} ${visits}`;
     tooltip.style.display = 'block';
     const rect = group.getBoundingClientRect();
     const chartRect = chartEl.getBoundingClientRect();
@@ -178,7 +202,8 @@ export function bindChartBarClick(chartEl, resultsContainer) {
     const bar = e.target.closest('.chart-bar');
     if (!bar) return;
     const group = bar.closest('.chart-bar-group');
-    if (group) group.classList.toggle('active');
+    if (!group || group.classList.contains('estimated')) return;
+    group.classList.toggle('active');
     applyDateFilter(chartEl, resultsContainer);
     syncChartHighlights();
   });

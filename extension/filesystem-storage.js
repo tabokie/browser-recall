@@ -1,5 +1,5 @@
 // File System Storage using File System Access API
-// Manages writing interactions to a user-selected directory
+// Manages writing history entries to a user-selected directory
 import { generateSlugFromUrl } from './utils.js';
 
 function isNotFound(error) {
@@ -230,15 +230,15 @@ class FileSystemStorage {
     this.clearCache();
   }
 
-  // Write interaction metadata to JSONL and content to pages/
-  async writeInteraction(interaction, markdown, html) {
+  // Write history entry metadata to JSONL and content to pages/
+  async writeHistoryEntry(entry, markdown, html) {
     try {
       if (!(await this.verifyPermission())) {
         throw new Error('No permission to write to directory');
       }
 
       // Write metadata to JSONL (without content field)
-      const metadata = { ...interaction };
+      const metadata = { ...entry };
       delete metadata.content;
 
       const date = new Date(metadata.timestamp);
@@ -285,8 +285,8 @@ class FileSystemStorage {
   }
 
   // Scan data/logs/<device>/ subdirectories for .jsonl files.
-  // Returns [{ device, name }] — internal format used by loadInteractionFileRange.
-  async _scanLogFiles() {
+  // Returns [{ device, name }] — internal format used by loadHistoryFileRange.
+  async _scanLogFiles({ includeSizes = false } = {}) {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
@@ -296,8 +296,14 @@ class FileSystemStorage {
       if (entry.kind === 'directory') {
         const subDir = await logsDir.getDirectoryHandle(entry.name);
         for await (const f of subDir.values()) {
-          if (f.kind === 'file' && f.name.endsWith('.jsonl'))
-            files.push({ device: entry.name, name: f.name });
+          if (f.kind === 'file' && f.name.endsWith('.jsonl')) {
+            const item = { device: entry.name, name: f.name };
+            if (includeSizes) {
+              const file = await f.getFile();
+              item.size = file.size;
+            }
+            files.push(item);
+          }
         }
       }
     }
@@ -306,17 +312,27 @@ class FileSystemStorage {
 
   // List all .jsonl filenames sorted newest-first (deduplicated across devices).
   // Returns flat string array ['YYYY-MM-DD.jsonl', ...] deduplicated across devices.
-  async listInteractionFiles() {
+  async listHistoryFiles() {
     const all = await this._scanLogFiles();
     const unique = [...new Set(all.map(f => f.name))];
     unique.sort().reverse(); // newest-first
     return unique;
   }
 
-  // Load interactions from JSONL files within a date range (inclusive).
+  // Return { filename: totalSize } for all JSONL files, summed across devices.
+  async listHistoryFileSizes() {
+    const all = await this._scanLogFiles({ includeSizes: true });
+    const sizes = {};
+    for (const f of all) {
+      sizes[f.name] = (sizes[f.name] || 0) + f.size;
+    }
+    return sizes;
+  }
+
+  // Load history entries from JSONL files within a date range (inclusive).
   // fromDate/toDate are YYYY-MM-DD strings.
   // Returns { entries, files } — entries in chronological order, files sorted oldest-first.
-  async loadInteractionFileRange(fromDate, toDate) {
+  async loadHistoryFileRange(fromDate, toDate) {
     const allFiles = await this._scanLogFiles();
     const filtered = allFiles.filter(f => {
       const dateStr = f.name.replace('.jsonl', '');
@@ -334,7 +350,7 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
-    const interactions = [];
+    const entries = [];
     for (const { device, name } of fileList) {
       try {
         const path = `data/logs/${device}/${name}`;
@@ -343,55 +359,19 @@ class FileSystemStorage {
         const text = await file.text();
         for (const line of text.split('\n')) {
           if (!line.trim()) continue;
-          try { interactions.push(JSON.parse(line)); } catch {}
+          try { entries.push(JSON.parse(line)); } catch {}
         }
       } catch (error) { if (!isNotFound(error)) throw error; }
     }
-    return interactions;
+    return entries;
   }
 
   // Read and parse specific .jsonl files by flat name (searches all device dirs + root)
-  async loadInteractionFiles(filenames) {
+  async loadHistoryFiles(filenames) {
     const nameSet = new Set(filenames);
     const allFiles = await this._scanLogFiles();
     const matching = allFiles.filter(f => nameSet.has(f.name));
     return this._loadFromDeviceFiles(matching);
-  }
-
-  // Load all interactions from filesystem (metadata only, deduplicated)
-  async loadAllInteractions() {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to read directory');
-    }
-
-    const interactionsByUrl = new Map();
-
-    // Read all .jsonl files from data/logs/<device>/ subdirectories
-    const logsDir = await this.resolveDir('data/logs');
-    for await (const dirEntry of logsDir.values()) {
-      if (dirEntry.kind !== 'directory') continue;
-      const subDir = await logsDir.getDirectoryHandle(dirEntry.name);
-      for await (const entry of subDir.values()) {
-        if (entry.kind !== 'file' || !entry.name.endsWith('.jsonl')) continue;
-        const file = await entry.getFile();
-        const text = await file.text();
-        const lines = text.split('\n').filter(line => line.trim());
-        for (const line of lines) {
-          try {
-            const interaction = JSON.parse(line);
-            interactionsByUrl.set(interaction.url, interaction);
-          } catch (error) {
-            console.error(`Error parsing line in ${dirEntry.name}/${entry.name}:`, error);
-          }
-        }
-      }
-    }
-
-    // Convert to array and sort by timestamp
-    const interactions = Array.from(interactionsByUrl.values());
-    interactions.sort((a, b) => a.timestamp - b.timestamp);
-
-    return interactions;
   }
 
   // Load all notes from notes/ directory
@@ -655,36 +635,6 @@ class FileSystemStorage {
   async deleteNote(slug) {
     const notesDir = await this.resolveDir('data/notes');
     await this.softDelete(notesDir, `${slug}.json`);
-  }
-
-  // Load a single interaction metadata by URL from JSONL files
-  async loadInteractionByUrl(url) {
-    if (!(await this.verifyPermission())) {
-      throw new Error('No permission to read directory');
-    }
-
-    let match = null;
-
-    const logsDir = await this.resolveDir('data/logs');
-    for await (const entry of logsDir.values()) {
-      if (entry.kind === 'file' && entry.name.endsWith('.jsonl')) {
-        const file = await entry.getFile();
-        const text = await file.text();
-        const lines = text.split('\n').filter(line => line.trim());
-
-        for (const line of lines) {
-          try {
-            const interaction = JSON.parse(line);
-            if (interaction.url === url) {
-              // Last write wins (same dedup logic as loadAllInteractions)
-              match = interaction;
-            }
-          } catch (error) {}
-        }
-      }
-    }
-
-    return match;
   }
 
   // Read-merge-write a list entity file: reads existing JSON, shallow-merges updates, writes back.
@@ -968,6 +918,123 @@ class FileSystemStorage {
       if (entries.length > 0) result.push({ deviceId, entries });
     }
     return result;
+  }
+
+  // --- Sync directory methods (separate directory for cloud-synced folder) ---
+
+  async selectSyncDirectory() {
+    try {
+      this.syncDirectoryHandle = await window.showDirectoryPicker({
+        mode: 'readwrite',
+        startIn: 'documents'
+      });
+      const db = await this.initDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction([this.storeName], 'readwrite');
+        const store = tx.objectStore(this.storeName);
+        const req = store.put(this.syncDirectoryHandle, 'syncDirectory');
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+      return { success: true, name: this.syncDirectoryHandle.name };
+    } catch (error) {
+      if (error.name === 'AbortError') return { success: false, error: 'User cancelled' };
+      throw error;
+    }
+  }
+
+  async _getSyncDir() {
+    if (!this.syncDirectoryHandle) {
+      const db = await this.initDB();
+      this.syncDirectoryHandle = await new Promise((resolve, reject) => {
+        const tx = db.transaction([this.storeName], 'readonly');
+        const store = tx.objectStore(this.storeName);
+        const req = store.get('syncDirectory');
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    if (!this.syncDirectoryHandle) throw new Error('No sync directory configured');
+    const opts = { mode: 'readwrite' };
+    if ((await this.syncDirectoryHandle.queryPermission(opts)) !== 'granted') {
+      if ((await this.syncDirectoryHandle.requestPermission(opts)) !== 'granted') {
+        throw new Error('Sync directory permission denied');
+      }
+    }
+    return this.syncDirectoryHandle;
+  }
+
+  async syncFsListDeviceDirs() {
+    const root = await this._getSyncDir();
+    const dirs = [];
+    for await (const entry of root.values()) {
+      if (entry.kind === 'directory') dirs.push(entry.name);
+    }
+    return dirs;
+  }
+
+  async syncFsListFiles(deviceDir) {
+    const root = await this._getSyncDir();
+    let dir;
+    try { dir = await root.getDirectoryHandle(deviceDir); } catch { return []; }
+    const results = [];
+    await this._syncWalkDir(dir, '', results);
+    return results;
+  }
+
+  async _syncWalkDir(dirHandle, prefix, results) {
+    for await (const entry of dirHandle.values()) {
+      const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.kind === 'file') {
+        const file = await entry.getFile();
+        results.push({ path: entryPath, content: await file.text(), size: file.size });
+      } else if (entry.kind === 'directory') {
+        await this._syncWalkDir(entry, entryPath, results);
+      }
+    }
+  }
+
+  async syncFsReadFile(path) {
+    const root = await this._getSyncDir();
+    const segments = path.split('/');
+    let current = root;
+    for (let i = 0; i < segments.length - 1; i++) {
+      current = await current.getDirectoryHandle(segments[i]);
+    }
+    const fh = await current.getFileHandle(segments[segments.length - 1]);
+    const file = await fh.getFile();
+    return await file.text();
+  }
+
+  async syncFsWriteFile(path, content) {
+    const root = await this._getSyncDir();
+    const segments = path.split('/');
+    let current = root;
+    for (let i = 0; i < segments.length - 1; i++) {
+      current = await current.getDirectoryHandle(segments[i], { create: true });
+    }
+    const fh = await current.getFileHandle(segments[segments.length - 1], { create: true });
+    const w = await fh.createWritable();
+    await w.write(content);
+    await w.close();
+  }
+
+  async syncFsEnsureDir(path) {
+    const root = await this._getSyncDir();
+    let current = root;
+    for (const seg of path.split('/')) {
+      current = await current.getDirectoryHandle(seg, { create: true });
+    }
+  }
+
+  async syncFsRemoveFile(path) {
+    const root = await this._getSyncDir();
+    const segments = path.split('/');
+    let current = root;
+    for (let i = 0; i < segments.length - 1; i++) {
+      current = await current.getDirectoryHandle(segments[i]);
+    }
+    await current.removeEntry(segments[segments.length - 1]);
   }
 
   // Load CURRENT file (immutable device identity, plaintext device ID)

@@ -114,7 +114,7 @@ Common issues:
 ## Next Steps
 
 After building:
-1. Browse some websites to collect interaction data
+1. Browse some websites to collect browsing history
 2. Try searching with different ranking algorithms
 3. Explore the options page
 4. Customize the Rust search algorithms in `src/lib.rs`

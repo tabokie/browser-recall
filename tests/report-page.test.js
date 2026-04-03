@@ -15,9 +15,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Inline reimplementation of entry builders (mirrors background.js logic)
 // ---------------------------------------------------------------------------
 
-function buildVisitPageEntry(url, title, referrerUrl) {
+function buildVisitPageEntry(url, title, referrerUrl, { checkpoint } = {}) {
   const entry = { timestamp: Date.now(), action: 'visit_page', url, title: title || '' };
   if (referrerUrl) entry.referrerUrl = referrerUrl;
+  if (checkpoint) entry.checkpoint = true;
   return entry;
 }
 
@@ -87,6 +88,16 @@ describe('buildVisitPageEntry', () => {
   it('does not include referrerId field (old format)', () => {
     const entry = buildVisitPageEntry(url, 'Page', 'https://google.com');
     expect(entry.referrerId).toBeUndefined();
+  });
+
+  it('includes checkpoint flag when set', () => {
+    const entry = buildVisitPageEntry(url, 'Page', null, { checkpoint: true });
+    expect(entry.checkpoint).toBe(true);
+  });
+
+  it('omits checkpoint flag when not set', () => {
+    const entry = buildVisitPageEntry(url, 'Page', null);
+    expect(entry.checkpoint).toBeUndefined();
   });
 });
 

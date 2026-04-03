@@ -104,8 +104,8 @@ describe('state preservation across re-renders', () => {
     expect(body, 'runSearchFilterPipeline should NOT use vs.setData').not.toContain('vs.setData(');
   });
 
-  it('interaction mutation uses runSearchFilterPipeline for explore/list views', () => {
-    const branch = extractMutationBranch('interaction');
-    expect(branch, 'interaction branch should call runSearchFilterPipeline').toContain('runSearchFilterPipeline()');
+  it('history mutation uses runSearchFilterPipeline for explore/list views', () => {
+    const branch = extractMutationBranch('history');
+    expect(branch, 'history branch should call runSearchFilterPipeline').toContain('runSearchFilterPipeline()');
   });
 });

@@ -1,10 +1,10 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, getSlugForUrl, openOptionsPage, openHelperPage } from './helpers.js';
+import { resetAndSeed, getSlugForUrl, openOptionsPage, openHelperPage, waitForListView } from './helpers.js';
 
 const TEST_URL = 'https://example.com/';
 const TEST_SLUG = getSlugForUrl(TEST_URL);
 
-test.describe('Interactions — likes, notes, attention', () => {
+test.describe('History — likes, notes, attention', () => {
   test('seeded page with likes returns correct value via getPageInfo', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
@@ -26,11 +26,11 @@ test.describe('Interactions — likes, notes, attention', () => {
     , TEST_URL);
 
     expect(info.success).toBe(true);
-    expect(info.interaction).toBeTruthy();
-    expect(info.interaction.likes).toBe(3);
-    expect(info.interaction.scrollDepth).toBe(80);
-    expect(info.interaction.timeOnPage).toBe(45000);
-    expect(info.interaction.title).toBe('Example Domain');
+    expect(info.entry).toBeTruthy();
+    expect(info.entry.likes).toBe(3);
+    expect(info.entry.scrollDepth).toBe(80);
+    expect(info.entry.timeOnPage).toBe(45000);
+    expect(info.entry.title).toBe('Example Domain');
 
     await page.close();
   });
@@ -116,8 +116,8 @@ test.describe('Interactions — likes, notes, attention', () => {
     , TEST_URL);
 
     expect(info.success).toBe(true);
-    expect(info.interaction).toBeTruthy();
-    expect(info.interaction.likes).toBe(0);
+    expect(info.entry).toBeTruthy();
+    expect(info.entry.likes).toBe(0);
 
     await page.close();
   });
@@ -445,5 +445,263 @@ test.describe('Interactions — likes, notes, attention', () => {
     expect(orphaned.value.entries.map(e => e.key)).toContain(`note:${noteSlug}`);
 
     await helper.close();
+  });
+});
+
+test.describe('Select-all keyboard shortcut (Ctrl/Cmd+A)', () => {
+  test('list view: Ctrl+A selects all pinned rows', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const listId = 'sel-list-001';
+    const pins = [];
+    const seedFiles = [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/SelectList': listId } } },
+      { path: 'list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/SelectList': listId } } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: `list:${listId}` }] } },
+    ];
+
+    // Seed 5 pages and pin them to the list
+    for (let i = 0; i < 5; i++) {
+      const url = `https://sel-test.com/page${i}`;
+      const slug = getSlugForUrl(url);
+      pins.push({ id: `page:${slug}`, pinnedAt: now - i * 1000 });
+      seedFiles.push({
+        path: `pages/${slug}.json`,
+        data: { slug, url, title: `Select Page ${i}`, timestamp: now, parentIds: [], childIds: [] },
+      });
+    }
+    seedFiles.push({
+      path: `lists/${listId}.json`,
+      data: { slug: listId, name: 'SelectList', owner: 'test-device', timestamp: now, pins, rules: [] },
+    });
+
+    await resetAndSeed(extContext, extensionId, seedFiles);
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Navigate to the list
+    await options.click(`[data-list-id="${listId}"]`);
+    await waitForListView(options);
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 5,
+      { timeout: 10000 }
+    );
+
+    // Press Ctrl+A (Meta on Mac)
+    await options.keyboard.press('Meta+a');
+
+    // All 5 rows should be selected
+    const selectedCount = await options.$$eval('#relatedResults .result-row.selected', els => els.length);
+    expect(selectedCount).toBe(5);
+
+    await options.close();
+  });
+
+  test('non-list/non-search view: Ctrl+A shows blocked toast', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    // Options page opens in explore view with no search — Ctrl+A should be blocked
+
+    await options.keyboard.press('Meta+a');
+
+    // Blocked bubble should appear
+    await options.waitForFunction(
+      () => {
+        const bubble = document.getElementById('blockedBubble');
+        return bubble && bubble.style.opacity === '1';
+      },
+      { timeout: 3000 }
+    );
+
+    await options.close();
+  });
+
+  test('search results: Ctrl+A selects all when <=100 results', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const logLines = [];
+    // 5 matching pages
+    for (let i = 0; i < 5; i++) {
+      logLines.push({
+        timestamp: now - i * 1000,
+        action: 'visit_page',
+        url: `https://searchsel.com/p${i}`,
+        title: `SearchSel Page ${i}`,
+      });
+    }
+    // 5 non-matching pages (so initial explore shows 10, search shows 5)
+    for (let i = 0; i < 5; i++) {
+      logLines.push({
+        timestamp: now - (5 + i) * 1000,
+        action: 'visit_page',
+        url: `https://other.com/x${i}`,
+        title: `Other Page ${i}`,
+      });
+    }
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: logLines },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Wait for initial explore to load all 10
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 10,
+      { timeout: 10000 }
+    );
+
+    // Type a search that matches only 5
+    const searchInput = options.locator('#searchDraftInput');
+    await searchInput.fill('searchsel');
+
+    // Wait for search to filter down to 5 results
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length === 5,
+      { timeout: 10000 }
+    );
+
+    // Blur the search input so Ctrl+A isn't intercepted by the INPUT guard
+    await options.evaluate(() => document.activeElement?.blur());
+    await options.keyboard.press('Meta+a');
+
+    const selectedCount = await options.$$eval('#relatedResults .result-row.selected', els => els.length);
+    expect(selectedCount).toBe(5);
+
+    await options.close();
+  });
+
+  test('search results: Ctrl+A shows error when >100 results', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const logLines = [];
+    // 110 matching pages
+    for (let i = 0; i < 110; i++) {
+      logLines.push({
+        timestamp: now - i * 1000,
+        action: 'visit_page',
+        url: `https://bigsel.com/p${i}`,
+        title: `BigSel Page ${i}`,
+      });
+    }
+    // 5 non-matching (so we can detect search is active vs initial explore)
+    for (let i = 0; i < 5; i++) {
+      logLines.push({
+        timestamp: now - (110 + i) * 1000,
+        action: 'visit_page',
+        url: `https://nomatch.com/x${i}`,
+        title: `NoMatch Page ${i}`,
+      });
+    }
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: logLines },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Wait for initial explore to show some results
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length > 0,
+      { timeout: 15000 }
+    );
+
+    // Search that matches 110 pages
+    const searchInput = options.locator('#searchDraftInput');
+    await searchInput.fill('bigsel');
+
+    // Wait for search spinner to appear (indicates search started) then disappear
+    await options.waitForFunction(
+      () => {
+        const spinner = document.getElementById('contentSearchSpinner');
+        return spinner && spinner.style.display !== 'none';
+      },
+      { timeout: 10000 }
+    );
+    await options.waitForFunction(
+      () => {
+        const spinner = document.getElementById('contentSearchSpinner');
+        return !spinner || spinner.style.display === 'none';
+      },
+      { timeout: 30000 }
+    );
+
+    // Blur the search input so Ctrl+A isn't intercepted by the INPUT guard
+    await options.evaluate(() => document.activeElement?.blur());
+    await options.keyboard.press('Meta+a');
+
+    // Error bubble should appear
+    await options.waitForFunction(
+      () => {
+        const bubble = document.getElementById('errorBubble');
+        return bubble && bubble.style.opacity === '1';
+      },
+      { timeout: 3000 }
+    );
+
+    await options.close();
+  });
+
+  test('single click after Ctrl+A clears select-all', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const listId = 'sel-clear-001';
+    const pins = [];
+    const seedFiles = [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/ClearList': listId } } },
+      { path: 'list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/ClearList': listId } } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: `list:${listId}` }] } },
+    ];
+
+    for (let i = 0; i < 3; i++) {
+      const url = `https://clearsel.com/page${i}`;
+      const slug = getSlugForUrl(url);
+      pins.push({ id: `page:${slug}`, pinnedAt: now - i * 1000 });
+      seedFiles.push({
+        path: `pages/${slug}.json`,
+        data: { slug, url, title: `ClearSel Page ${i}`, timestamp: now, parentIds: [], childIds: [] },
+      });
+    }
+    seedFiles.push({
+      path: `lists/${listId}.json`,
+      data: { slug: listId, name: 'ClearList', owner: 'test-device', timestamp: now, pins, rules: [] },
+    });
+
+    await resetAndSeed(extContext, extensionId, seedFiles);
+    const options = await openOptionsPage(extContext, extensionId);
+
+    await options.click(`[data-list-id="${listId}"]`);
+    await waitForListView(options);
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 3,
+      { timeout: 10000 }
+    );
+
+    // Select all
+    await options.keyboard.press('Meta+a');
+    let selectedCount = await options.$$eval('#relatedResults .result-row.selected', els => els.length);
+    expect(selectedCount).toBe(3);
+
+    // Single click on the first row (no modifier)
+    await options.click('#relatedResults .result-row');
+
+    selectedCount = await options.$$eval('#relatedResults .result-row.selected', els => els.length);
+    expect(selectedCount).toBe(1);
+
+    await options.close();
   });
 });

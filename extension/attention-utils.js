@@ -28,11 +28,11 @@ export function attentionColor(normalizedScore) {
   }
 }
 
-// Compute aggregate attention for a group of interactions (flat fields)
-export function aggregateAttention(interactions) {
+// Compute aggregate attention for a group of history entries (flat fields)
+export function aggregateAttention(entries) {
   let total = 0;
   let att = null;
-  for (const i of interactions) {
+  for (const i of entries) {
     if (i.scrollDepth !== undefined || i.timeOnPage !== undefined || i.likes !== undefined) {
       total += attentionStrength(i);
       att = i; // keep last one for details

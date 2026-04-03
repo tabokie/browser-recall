@@ -245,6 +245,32 @@ describe('effectOf: visit_page', () => {
     expect(result[`page:${childSlug}`].parentIds).toContain(`page:${parentSlug}`);
     expect(result[`page:${parentSlug}`].childIds).toContain(`page:${childSlug}`);
   });
+
+  it('creates entity when checkpoint flag is set (no pre-existing entity)', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const result = await effectOf(
+      { timestamp: 100, action: 'visit_page', url: 'https://a.com', title: 'A', checkpoint: true },
+      nullLoad,
+      CTX,
+    );
+    const page = result[`page:${slug}`];
+    expect(page).toBeDefined();
+    expect(page.url).toBe('https://a.com');
+    expect(page.title).toBe('A');
+    expect(page.timestamps?.['test-device']).toBe(100);
+  });
+
+  it('checkpoint enriches existing entity same as normal visit', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const result = await effectOf(
+      { timestamp: 200, action: 'visit_page', url: 'https://a.com', title: 'Updated', checkpoint: true },
+      makeLoad({ [`page:${slug}`]: { slug, url: 'https://a.com', title: 'Old', timestamps: { 'test-device': 100 }, parentIds: [], childIds: [] } }),
+      CTX,
+    );
+    const page = result[`page:${slug}`];
+    expect(page.title).toBe('Updated');
+    expect(page.timestamps['test-device']).toBe(200);
+  });
 });
 
 // ---------------------------------------------------------------------------

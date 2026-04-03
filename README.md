@@ -1,6 +1,6 @@
 # Portal Extension
 
-A Chrome extension for tracking and searching your interaction history with external data sources (webpages, documents, etc.). Built with **file-system-first architecture** - your data is always stored in human-readable files on your local machine.
+A Chrome extension for tracking and searching your browsing history with external data sources (webpages, documents, etc.). Built with **file-system-first architecture** - your data is always stored in human-readable files on your local machine.
 
 ## 🌟 Key Features
 
@@ -34,7 +34,7 @@ Chrome MV3 extension with event-sourced storage. Background service worker holds
 
 ### Current Implementation
 
-- ✅ **Interaction Tracking**: Automatically captures page visits with:
+- ✅ **History Tracking**: Automatically captures page visits with:
   - URL and title
   - Timestamp
   - User intent (search queries, input fields)

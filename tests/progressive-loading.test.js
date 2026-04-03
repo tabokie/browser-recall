@@ -36,7 +36,7 @@ function pinFromUrl(url, pinnedAt) {
 // ---------------------------------------------------------------------------
 // Test data
 // ---------------------------------------------------------------------------
-function makeInteraction(url, title, timestamp, opts = {}) {
+function makeEntry(url, title, timestamp, opts = {}) {
   const slug = url.replace(/[^a-z0-9]/gi, '-').substring(0, 40);
   return { id: `${timestamp}-${slug}`, url, title, timestamp, slug, intent: opts.intent || '' };
 }
@@ -44,17 +44,17 @@ function makeInteraction(url, title, timestamp, opts = {}) {
 const NOW = Date.now();
 const DAY = 86400000;
 
-// 60 interactions across 3 daily files, newest first
+// 60 history entries across 3 daily files, newest first
 const FILE1_DATE = '2026-02-15'; // today — newest
 const FILE2_DATE = '2026-02-14';
 const FILE3_DATE = '2026-02-13';
 
-function makeFileInteractions(dateStr, startIdx, count, titlePrefix) {
+function makeFileEntries(dateStr, startIdx, count, titlePrefix) {
   const base = new Date(dateStr + 'T12:00:00Z').getTime();
   const result = [];
   for (let i = 0; i < count; i++) {
     const ts = base + i * 60000;
-    result.push(makeInteraction(
+    result.push(makeEntry(
       `https://example.com/${titlePrefix.toLowerCase()}${startIdx + i}`,
       `${titlePrefix} Page ${startIdx + i}`,
       ts,
@@ -65,11 +65,11 @@ function makeFileInteractions(dateStr, startIdx, count, titlePrefix) {
 }
 
 // Rust-related pages (will match list query)
-function makeRustInteractions() {
+function makeRustEntries() {
   const base = new Date('2026-02-15T10:00:00Z').getTime();
   const result = [];
   for (let i = 0; i < 25; i++) {
-    result.push(makeInteraction(
+    result.push(makeEntry(
       `https://rust-lang.org/doc${i}`,
       `Rust Documentation ${i}`,
       base + i * 60000,
@@ -79,14 +79,14 @@ function makeRustInteractions() {
   return result;
 }
 
-const FILE1_INTERACTIONS = makeFileInteractions(FILE1_DATE, 0, 20, 'Today');
-const FILE2_INTERACTIONS = makeFileInteractions(FILE2_DATE, 20, 20, 'Yesterday');
-const FILE3_INTERACTIONS = makeFileInteractions(FILE3_DATE, 40, 20, 'OldDay');
-const RUST_INTERACTIONS = makeRustInteractions();
-// Rust interactions are in file1 (today)
-const ALL_FILE1 = [...FILE1_INTERACTIONS, ...RUST_INTERACTIONS];
+const FILE1_ENTRIES = makeFileEntries(FILE1_DATE, 0, 20, 'Today');
+const FILE2_ENTRIES = makeFileEntries(FILE2_DATE, 20, 20, 'Yesterday');
+const FILE3_ENTRIES = makeFileEntries(FILE3_DATE, 40, 20, 'OldDay');
+const RUST_ENTRIES = makeRustEntries();
+// Rust entries are in file1 (today)
+const ALL_FILE1 = [...FILE1_ENTRIES, ...RUST_ENTRIES];
 
-const ALL_INTERACTIONS = [...ALL_FILE1, ...FILE2_INTERACTIONS, ...FILE3_INTERACTIONS];
+const ALL_ENTRIES = [...ALL_FILE1, ...FILE2_ENTRIES, ...FILE3_ENTRIES];
 
 const TEST_LIST = {
   slug: 'col-rust',
@@ -94,7 +94,7 @@ const TEST_LIST = {
   name: 'Rust Lang',
 };
 
-// List whose query matches NO interactions in metadata (like "AI Core")
+// List whose query matches NO entries in metadata (like "AI Core")
 // but whose pins share hostname with loaded history → related pages should still appear
 const TEST_LIST_NOHIT = {
   slug: 'col-nohit',
@@ -109,7 +109,7 @@ const TEST_LIST_PINS = {
     pinFromUrl('https://rust-lang.org/doc2', NOW - DAY),
   ],
   'col-nohit': [
-    // Pin from example.com — shares hostname with FILE1_INTERACTIONS (Today Page 0..19)
+    // Pin from example.com — shares hostname with FILE1_ENTRIES (Today Page 0..19)
     pinFromUrl('https://example.com/today0', NOW - DAY),
   ],
 };
@@ -142,11 +142,11 @@ const FILES_NEWEST_FIRST = [
   `${FILE3_DATE}.jsonl`,
 ];
 
-// Map filename → interactions for loadInteractionBatch mock
+// Map filename → entries for loadHistoryBatch mock
 const FILE_MAP = {
   [`${FILE1_DATE}.jsonl`]: ALL_FILE1,
-  [`${FILE2_DATE}.jsonl`]: FILE2_INTERACTIONS,
-  [`${FILE3_DATE}.jsonl`]: FILE3_INTERACTIONS,
+  [`${FILE2_DATE}.jsonl`]: FILE2_ENTRIES,
+  [`${FILE3_DATE}.jsonl`]: FILE3_ENTRIES,
 };
 
 // ---------------------------------------------------------------------------
@@ -156,15 +156,41 @@ const FILE_MAP = {
 // We must set up mocks BEFORE dynamic import of options.js.
 // vi.mock calls are hoisted above imports by vitest.
 
-// Hoisted mock for searchBatch — configurable per-test
-const { mockSearchBatchFn, mockFsHandler } = vi.hoisted(() => ({
+// Hoisted mock for searchBatch/searchNotes/searchSnapshots — configurable per-test
+const { mockSearchBatchFn, mockSearchNotesFn, mockSearchSnapshotsFn, mockFsHandler, mockDirChildren } = vi.hoisted(() => ({
   mockSearchBatchFn: vi.fn(async () => []),
+  mockSearchNotesFn: vi.fn(async () => []),
+  mockSearchSnapshotsFn: vi.fn(async () => []),
   mockFsHandler: { fn: (action, msg) => ({ success: true }) },
+  // Configurable per-test: path → [child entries]. Paths are slash-separated from root.
+  mockDirChildren: { map: {} },
 }));
 
-// Mock directory handle for FileSystem Access API
-function mockDirectoryHandle() {
-  return { getDirectoryHandle: async () => mockDirectoryHandle() };
+// Mock directory handle for FileSystem Access API.
+// Uses mockDirChildren.map to resolve children by path.
+// Path format: 'data/logs/device1' → children of that directory.
+function mockDirectoryHandle(currentPath = '') {
+  const children = mockDirChildren.map[currentPath] || [];
+  return {
+    getDirectoryHandle: async (name) => {
+      const childPath = currentPath ? `${currentPath}/${name}` : name;
+      return mockDirectoryHandle(childPath);
+    },
+    getFileHandle: async (name) => {
+      // Return a mock file handle (WASM searchBatch is mocked, won't actually read)
+      return { getFile: async () => ({ text: async () => '' }) };
+    },
+    values: function() {
+      let idx = 0;
+      return {
+        [Symbol.asyncIterator]() { return this; },
+        async next() {
+          if (idx >= children.length) return { done: true, value: undefined };
+          return { done: false, value: children[idx++] };
+        },
+      };
+    },
+  };
 }
 
 vi.mock('../extension/filesystem-storage.js', () => ({
@@ -174,11 +200,11 @@ vi.mock('../extension/filesystem-storage.js', () => ({
     async verifyPermission() { return true; }
     async loadDirectoryHandle() { return this.directoryHandle; }
     async selectDirectory() { return { success: true, name: 'test' }; }
-    async loadAllInteractions() { return []; }
     async loadAllContent() { return {}; }
     async loadSettings() { return (await mockFsHandler.fn('loadSettings', {})).settings || {}; }
-    async listInteractionFiles() { return (await mockFsHandler.fn('listInteractionFiles', {})).files || []; }
-    async loadInteractionFiles(files) { return (await mockFsHandler.fn('loadInteractionBatch', { files })).interactions || []; }
+    async listHistoryFiles() { return (await mockFsHandler.fn('listHistoryFiles', {})).files || []; }
+    async listHistoryFileSizes() { return (await mockFsHandler.fn('listHistoryFiles', { includeSizes: true })).sizes || {}; }
+    async loadHistoryFiles(files) { return (await mockFsHandler.fn('loadHistoryBatch', { files })).entries || []; }
     async loadListPins() { return (await mockFsHandler.fn('loadListPins', {})).pins || {}; }
     async loadListPinsById(id) { return (await mockFsHandler.fn('loadListPinsById', { listId: id })).pins || []; }
     async loadPermanentDeletes() { return (await mockFsHandler.fn('loadPermanentDeletes', {})).urls || []; }
@@ -190,7 +216,7 @@ vi.mock('../extension/filesystem-storage.js', () => ({
 }));
 
 vi.mock('../extension/pkg/portal_extension.js', () => {
-  class MockInteraction {
+  class MockHistoryEntry {
     constructor(url, title) { this.url = url; this.title = title; }
     set id(v) { this._id = v; }
     set timestamp(v) { this._timestamp = v; }
@@ -201,7 +227,7 @@ vi.mock('../extension/pkg/portal_extension.js', () => {
 
   class MockSearchEngine {
     constructor() { this._items = []; }
-    addInteraction(item) { this._items.push(item); }
+    addEntry(item) { this._items.push(item); }
     async search(query) {
       // Simple substring match on title
       const q = query.toLowerCase();
@@ -213,9 +239,11 @@ vi.mock('../extension/pkg/portal_extension.js', () => {
 
   return {
     default: async () => {}, // init()
-    Interaction: MockInteraction,
+    HistoryEntry: MockHistoryEntry,
     SearchEngine: MockSearchEngine,
     searchBatch: (...args) => mockSearchBatchFn(...args),
+    searchNotes: (...args) => mockSearchNotesFn(...args),
+    searchSnapshots: (...args) => mockSearchSnapshotsFn(...args),
   };
 });
 
@@ -236,21 +264,24 @@ const styleContent = styleMatch ? styleMatch[1] : '';
 // ---------------------------------------------------------------------------
 // Test suite
 // ---------------------------------------------------------------------------
-describe('Progressive loading', () => {
+describe.each(['warm', 'degraded'])('Progressive loading (%s cache)', (cacheMode) => {
+  const isDegraded = cacheMode === 'degraded';
   /** @type {Record<string, {promise: Promise, resolve: Function}>} */
   let deferreds;
   let sessionData;  // chrome.storage.session
   let localData;    // chrome.storage.local
   let initPromise;
+  let actionOverrides = {};
 
   function makeStorageMock(dataRef) {
     return {
       get: vi.fn(async (keys) => {
         const data = dataRef();
-        if (!keys) return { ...data };
+        if (!keys) return isDegraded ? {} : { ...data };
         if (typeof keys === 'string') keys = [keys];
         const result = {};
         for (const k of keys) {
+          if (isDegraded && /^(manifest:|list:|page:|note:)/.test(k)) continue;
           if (k in data) result[k] = data[k];
         }
         return result;
@@ -290,19 +321,20 @@ describe('Progressive loading', () => {
   }
 
   function handleAction(msg) {
+    if (actionOverrides[msg.action]) return actionOverrides[msg.action](msg);
     switch (msg.action) {
       case 'getDeviceId':
         return { success: true, deviceId: 'test-device' };
 
-      case 'listInteractionFiles':
+      case 'listHistoryFiles':
         return { success: true, files: FILES_NEWEST_FIRST };
 
-      case 'loadInteractionBatch': {
-        const interactions = [];
+      case 'loadHistoryBatch': {
+        const entries = [];
         for (const f of msg.files) {
-          if (FILE_MAP[f]) interactions.push(...FILE_MAP[f]);
+          if (FILE_MAP[f]) entries.push(...FILE_MAP[f]);
         }
-        return { success: true, interactions };
+        return { success: true, entries };
       }
 
       case 'loadPermanentDeletes':
@@ -321,11 +353,15 @@ describe('Progressive loading', () => {
       case 'readCacheable':
         switch (msg.key) {
           case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
-          case 'manifest:list-order': return { success: true, value: TEST_LIST_ORDER };
+          case 'manifest:list-order': return { success: true, value: sessionData['manifest:list-order'] || TEST_LIST_ORDER };
           case 'manifest:name-to-id': return { success: true, value: { timestamp: 0, paths: {} } };
           case 'manifest:orphaned': return { success: true, value: { timestamp: 0, entries: [] } };
           default: {
-            // Return individual list entities by slug with pins
+            // Check sessionData first (has test modifications and dynamically added entities)
+            if (msg.key in sessionData) {
+              return { success: true, value: sessionData[msg.key] };
+            }
+            // Fall back to static TEST_LISTS
             for (const list of TEST_LISTS) {
               if (msg.key === 'list:' + list.slug) {
                 return { success: true, value: { ...list, pins: TEST_LIST_PINS[list.slug] || [] } };
@@ -368,6 +404,12 @@ describe('Progressive loading', () => {
     vi.resetModules();
     mockSearchBatchFn.mockReset();
     mockSearchBatchFn.mockImplementation(async () => []);
+    mockSearchNotesFn.mockReset();
+    mockSearchNotesFn.mockImplementation(async () => []);
+    mockSearchSnapshotsFn.mockReset();
+    mockSearchSnapshotsFn.mockImplementation(async () => []);
+    mockDirChildren.map = {};
+    actionOverrides = {};
     // Set up minimal DOM
     document.head.innerHTML = `<style>${styleContent}</style>`;
     document.body.innerHTML = bodyContent;
@@ -442,16 +484,16 @@ describe('Progressive loading', () => {
   // Tests
   // ---------------------------------------------------------------------------
 
-  it('Test 1: clear cache, pause sidebar lists & interaction list → frames only', async () => {
+  it('Test 1: clear cache, pause sidebar lists & history list → frames only', async () => {
     clearCache();
 
     // Pause: readCacheable (blocks renderLists + loadSettingsValue)
-    // AND interaction file listing
+    // AND history file listing
     deferreds['readCacheable'] = createDeferred();
-    deferreds['listInteractionFiles'] = createDeferred();
+    deferreds['listHistoryFiles'] = createDeferred();
 
     // Import triggers initialize() — it blocks at readCacheable('manifest:settings') cache miss
-    // and at initHistoryFiles() (listInteractionFiles paused)
+    // and at initHistoryFiles() (listHistoryFiles paused)
     const importDone = importOptions();
     await tick(50);
 
@@ -468,7 +510,7 @@ describe('Progressive loading', () => {
 
     // Clean up: resolve deferreds so initialize can finish
     deferreds['readCacheable'].resolve();
-    deferreds['listInteractionFiles'].resolve();
+    deferreds['listHistoryFiles'].resolve();
     await importDone;
     await tick(50);
   });
@@ -500,11 +542,11 @@ describe('Progressive loading', () => {
     await tick(100);
   });
 
-  it('Test 3: pause interaction list only → frames + sidebar lists visible', async () => {
+  it('Test 3: pause history list only → frames + sidebar lists visible', async () => {
     populateCache();
 
-    // Pause interaction file listing → loadData() blocks
-    deferreds['listInteractionFiles'] = createDeferred();
+    // Pause history file listing → loadData() blocks
+    deferreds['listHistoryFiles'] = createDeferred();
 
     const importDone = importOptions();
     await tick(100);
@@ -519,7 +561,7 @@ describe('Progressive loading', () => {
     expect(listLayoutVisible()).toBe(false);
 
     // Unblock
-    deferreds['listInteractionFiles'].resolve();
+    deferreds['listHistoryFiles'].resolve();
     await importDone;
     await tick(100);
 
@@ -584,8 +626,8 @@ describe('Progressive loading', () => {
   it('Test 5: load list fully, then reopen with search paused → pinned section renders from cache', async () => {
     populateCache();
 
-    // Configure searchBatch to return rust interactions (matching "rust" query)
-    const rustResults = RUST_INTERACTIONS.map(i => ({
+    // Configure searchBatch to return rust entries (matching "rust" query)
+    const rustResults = RUST_ENTRIES.map(i => ({
       url: i.url, title: i.title, score: 1.0, timestamp: i.timestamp,
     }));
     mockSearchBatchFn.mockImplementation(async () => rustResults);
@@ -706,5 +748,293 @@ describe('Progressive loading', () => {
     // Search panel should be rendered (no saved searches = shows all history)
     const searchPanel = document.querySelector('.search-filters-panel');
     expect(searchPanel).not.toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Estimated chart bars
+  // -------------------------------------------------------------------------
+  describe('Estimated chart bars', () => {
+    // 25 files spanning Dec 2025 through Jan 2026, newest-first
+    const EST_FILES = [];
+    const EST_SIZES = {};
+    const EST_FILE_MAP = {};
+    for (let i = 0; i < 25; i++) {
+      const d = new Date(Date.UTC(2025, 11, 8 + i)); // Dec 8 2025 → Jan 1 2026
+      const dateStr = d.toISOString().slice(0, 10);
+      const filename = dateStr + '.jsonl';
+      EST_FILES.push(filename);
+      EST_SIZES[filename] = 2000 + i * 200; // varying sizes, ~10–22 entries per file
+    }
+    // Sort newest-first
+    EST_FILES.sort().reverse();
+    // Only create entries for the 10 newest files (the first batch)
+    for (let i = 0; i < 10; i++) {
+      const filename = EST_FILES[i];
+      const dateStr = filename.replace('.jsonl', '');
+      EST_FILE_MAP[filename] = makeFileEntries(dateStr, i * 5, 5, `Est${i}`);
+    }
+
+    it('Test 8: chart shows estimated bars for unloaded files', async () => {
+      populateCache();
+
+      actionOverrides['listHistoryFiles'] = (msg) => ({
+        success: true,
+        files: EST_FILES,
+        sizes: msg.includeSizes ? EST_SIZES : undefined,
+      });
+      actionOverrides['loadHistoryBatch'] = (msg) => {
+        const entries = [];
+        for (const f of msg.files) {
+          if (EST_FILE_MAP[f]) entries.push(...EST_FILE_MAP[f]);
+        }
+        return { success: true, entries };
+      };
+
+      // Inject a category button BEFORE importing so options.js binds its event listener
+      const sidebarContent = document.querySelector('.sidebar-content');
+      const allBtn = document.createElement('div');
+      allBtn.className = 'sidebar-item';
+      allBtn.dataset.category = 'all';
+      sidebarContent.appendChild(allBtn);
+
+      const importDone = importOptions();
+      await importDone;
+      await tick(200);
+
+      // Click to navigate to All History (showCategory('all') renders the main time chart)
+      allBtn.click();
+      await tick(300);
+
+      // Chart should be visible
+      expect(chartFrameVisible()).toBe(true);
+
+      // Should have estimated bars for unloaded dates (15 files not in first batch)
+      const estimatedGroups = document.querySelectorAll('#chartBars .chart-bar-group.estimated');
+      expect(estimatedGroups.length).toBeGreaterThan(0);
+
+      // Should have real bars for loaded dates
+      const realGroups = document.querySelectorAll('#chartBars .chart-bar-group.has-data:not(.estimated)');
+      expect(realGroups.length).toBeGreaterThan(0);
+
+      // Date range should start from Dec 1 (month boundary of Dec 8)
+      const allGroups = document.querySelectorAll('#chartBars .chart-bar-group');
+      const firstDate = allGroups[0]?.dataset.date;
+      expect(firstDate).toBe('2025-12-01');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Content search responsiveness tests
+  // ---------------------------------------------------------------------------
+  describe('Progressive content search', () => {
+    // Configure mock filesystem tree so Phase 1 finds device dirs and Phase 2b finds snapshots
+    function setupMockDirTree() {
+      mockDirChildren.map = {
+        // data/logs has one device subdirectory
+        'data/logs': [{ kind: 'directory', name: 'test-device' }],
+        // device subdir has one .jsonl file
+        'data/logs/test-device': [{ kind: 'file', name: '2026-02-15.jsonl' }],
+        // data/notes is empty (notes mock handles results)
+        'data/notes': [],
+        // data/snapshots is empty (snapshots mock handles results)
+        'data/snapshots': [],
+      };
+    }
+
+    // Helper: type a query into the Explore search draft input and trigger search
+    async function typeSearchQuery(query) {
+      const draftInput = document.querySelector('#searchDraftInput');
+      expect(draftInput).not.toBeNull();
+      draftInput.value = query;
+      draftInput.dispatchEvent(new Event('input'));
+      // Debounce is 300ms for explore
+      await tick(350);
+    }
+
+    it('T-content-1: Phase 0 renders before Phase 1/2 complete', async () => {
+      populateCache();
+      setupMockDirTree();
+
+      const importDone = importOptions();
+      await importDone;
+      await tick(100);
+
+      // Block all WASM phases
+      const searchDeferred = createDeferred();
+      const notesDeferred = createDeferred();
+      const snapshotsDeferred = createDeferred();
+      mockSearchBatchFn.mockImplementation(async () => {
+        await searchDeferred.promise;
+        return [];
+      });
+      mockSearchNotesFn.mockImplementation(async () => {
+        await notesDeferred.promise;
+        return [];
+      });
+      mockSearchSnapshotsFn.mockImplementation(async () => {
+        await snapshotsDeferred.promise;
+        return [];
+      });
+
+      // Type a query that matches a title in loaded history (Phase 0 match)
+      await typeSearchQuery('Today');
+      await tick(50);
+
+      // Phase 0: in-memory title matches should be visible immediately
+      const rows = pinnedOnlyRows(); // reads #relatedResults .result-item
+      expect(rows.length).toBeGreaterThan(0);
+
+      // Spinner should be visible (WASM phases still running)
+      const spinner = document.getElementById('contentSearchSpinner');
+      expect(spinner?.style.display).not.toBe('none');
+
+      // Clean up
+      searchDeferred.resolve();
+      notesDeferred.resolve();
+      snapshotsDeferred.resolve();
+      await tick(200);
+    });
+
+    it('T-content-2: Phase 1 streaming — first chunk renders before second completes', async () => {
+      populateCache();
+      // Need 11+ files to trigger 2 chunks (CHUNK=10)
+      const manyFiles = [];
+      for (let i = 0; i < 15; i++) manyFiles.push({ kind: 'file', name: `2026-02-${String(i + 1).padStart(2, '0')}.jsonl` });
+      mockDirChildren.map = {
+        'data/logs': [{ kind: 'directory', name: 'test-device' }],
+        'data/logs/test-device': manyFiles,
+        'data/notes': [],
+        'data/snapshots': [],
+      };
+
+      const importDone = importOptions();
+      await importDone;
+      await tick(100);
+
+      // First call returns results immediately, second blocks
+      const secondChunkDeferred = createDeferred();
+      let callCount = 0;
+      mockSearchBatchFn.mockImplementation(async () => {
+        callCount++;
+        if (callCount > 1) {
+          await secondChunkDeferred.promise;
+          return [{ url: 'https://extra.com/late', title: 'Late Result', score: 1.0, timestamp: Date.now() }];
+        }
+        return [{ url: 'https://chunk1.com/first', title: 'First Chunk', score: 2.0, timestamp: Date.now() }];
+      });
+      // Notes and snapshots return empty immediately
+      mockSearchNotesFn.mockImplementation(async () => []);
+      mockSearchSnapshotsFn.mockImplementation(async () => []);
+
+      await typeSearchQuery('chunk');
+      await tick(100);
+
+      // First chunk's results should be visible
+      const html = document.getElementById('relatedResults').innerHTML;
+      expect(html).toContain('First Chunk');
+
+      // Resolve second chunk
+      secondChunkDeferred.resolve();
+      await tick(200);
+
+      // Now both results should be present
+      const html2 = document.getElementById('relatedResults').innerHTML;
+      expect(html2).toContain('First Chunk');
+      expect(html2).toContain('Late Result');
+    });
+
+    it('T-content-3: Phase 2 results merge without destroying Phase 0/1 results', async () => {
+      populateCache();
+      setupMockDirTree();
+
+      const importDone = importOptions();
+      await importDone;
+      await tick(100);
+
+      // Phase 1 returns a result immediately
+      mockSearchBatchFn.mockImplementation(async () => {
+        return [{ url: 'https://phase1.com/hit', title: 'Phase1 Hit', score: 2.0, timestamp: Date.now() }];
+      });
+
+      // Phase 2a (notes) blocks
+      const notesDeferred = createDeferred();
+      mockSearchNotesFn.mockImplementation(async () => {
+        await notesDeferred.promise;
+        return [{ url: 'https://noteonly.com/special', noteSlug: 'note-special' }];
+      });
+      mockSearchSnapshotsFn.mockImplementation(async () => []);
+
+      // Ensure page entity exists for the note URL so enrichment works
+      const noteSlug = generateSlugFromUrl('https://noteonly.com/special');
+      sessionData['page:' + noteSlug] = { slug: noteSlug, url: 'https://noteonly.com/special', title: 'Note Only Page' };
+
+      await typeSearchQuery('special');
+      await tick(200);
+
+      // Phase 0/1 results should be visible
+      const html = document.getElementById('relatedResults').innerHTML;
+      expect(html).toContain('Phase1 Hit');
+      const countBefore = pinnedOnlyRows().length;
+
+      // Resolve notes phase — should add new result without destroying existing
+      notesDeferred.resolve();
+      await tick(200);
+
+      const html2 = document.getElementById('relatedResults').innerHTML;
+      // Original Phase 1 result still present
+      expect(html2).toContain('Phase1 Hit');
+      // New note result added
+      expect(pinnedOnlyRows().length).toBeGreaterThanOrEqual(countBefore);
+    });
+
+    it('T-content-4: Stale generation results are discarded', async () => {
+      populateCache();
+      setupMockDirTree();
+
+      const importDone = importOptions();
+      await importDone;
+      await tick(100);
+
+      // Block all WASM phases on deferreds
+      const reactDeferred = createDeferred();
+      const vueDeferred = createDeferred();
+
+      mockSearchBatchFn.mockImplementation(async (...args) => {
+        const query = args[2]; // searchBatch(dir, pagesDir, query, files)
+        if (query.includes('react')) {
+          await reactDeferred.promise;
+          return [{ url: 'https://react.dev/docs', title: 'React Docs', score: 2.0, timestamp: Date.now() }];
+        }
+        if (query.includes('vue')) {
+          await vueDeferred.promise;
+          return [{ url: 'https://vuejs.org/docs', title: 'Vue Docs', score: 2.0, timestamp: Date.now() }];
+        }
+        return [];
+      });
+      mockSearchNotesFn.mockImplementation(async () => []);
+      mockSearchSnapshotsFn.mockImplementation(async () => []);
+
+      // Fire first search: "react"
+      await typeSearchQuery('react');
+      await tick(50);
+
+      // Fire second search: "vue" (supersedes "react", increments generation)
+      await typeSearchQuery('vue');
+      await tick(50);
+
+      // Resolve "react" results — should be discarded (stale generation)
+      reactDeferred.resolve();
+      await tick(200);
+
+      const html = document.getElementById('relatedResults').innerHTML;
+      expect(html).not.toContain('React Docs');
+
+      // Resolve "vue" results — should appear
+      vueDeferred.resolve();
+      await tick(200);
+
+      const html2 = document.getElementById('relatedResults').innerHTML;
+      expect(html2).toContain('Vue Docs');
+    });
   });
 });

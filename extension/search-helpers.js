@@ -5,35 +5,35 @@
  * The logBuffer contains entries of different types: visits (action: 'visit_page')
  * and mutations (other action values). This returns only visit entries.
  */
-export function extractInteractionBuffer(logBuffer) {
+export function extractHistoryBuffer(logBuffer) {
   return logBuffer.filter(e => !e.action || e.action === 'visit_page' || e.action === 'leave_page');
 }
 
 /**
- * Merge log buffer visit entries into the interactions array, deduplicating
+ * Merge log buffer visit entries into the history entries array, deduplicating
  * by URL (last-write-wins).
  *
- * Mutates and returns { interactions }.
+ * Mutates and returns { entries }.
  */
-export function mergeBufferIntoInteractions(interactions, buffer) {
+export function mergeBufferIntoHistory(entries, buffer) {
   const indexByUrl = new Map();
-  interactions.forEach((interaction, i) => {
-    indexByUrl.set(interaction.url, i);
+  entries.forEach((entry, i) => {
+    indexByUrl.set(entry.url, i);
   });
 
-  for (const entry of buffer) {
+  for (const bufEntry of buffer) {
     // Log buffer entries are flat (url, title, timestamp, slug, etc.)
-    const existingIdx = indexByUrl.get(entry.url);
+    const existingIdx = indexByUrl.get(bufEntry.url);
     if (existingIdx !== undefined) {
-      interactions[existingIdx] = entry;
+      entries[existingIdx] = bufEntry;
     } else {
-      indexByUrl.set(entry.url, interactions.length);
-      interactions.push(entry);
+      indexByUrl.set(bufEntry.url, entries.length);
+      entries.push(bufEntry);
     }
   }
 
-  interactions.sort((a, b) => a.timestamp - b.timestamp);
-  return { interactions };
+  entries.sort((a, b) => a.timestamp - b.timestamp);
+  return { entries };
 }
 
 /**
@@ -46,24 +46,24 @@ export function getBufferContentMap(buffer) {
 }
 
 /**
- * Build WASM Interaction objects from raw data and add them to a SearchEngine.
+ * Build WASM HistoryEntry objects from raw data and add them to a SearchEngine.
  *
- * @param {Function} InteractionClass – the WASM Interaction constructor
- * @param {object}   engine           – a SearchEngine instance
- * @param {Array}    dataList         – raw interaction objects
- * @param {object}   contentMap       – slug → markdown content
+ * @param {Function} HistoryEntryClass – the WASM HistoryEntry constructor
+ * @param {object}   engine            – a SearchEngine instance
+ * @param {Array}    dataList          – raw history entry objects
+ * @param {object}   contentMap        – slug → markdown content
  */
-export function buildInteractionsForEngine(InteractionClass, engine, dataList, contentMap) {
+export function buildHistoryForEngine(HistoryEntryClass, engine, dataList, contentMap) {
   for (const data of dataList) {
-    const interaction = new InteractionClass(data.url, data.title);
-    interaction.timestamp = BigInt(data.timestamp);
+    const entry = new HistoryEntryClass(data.url, data.title);
+    entry.timestamp = BigInt(data.timestamp);
     // intent removed: not very useful
 
-    interaction.setContent((data.slug && contentMap[data.slug]) || '');
+    entry.setContent((data.slug && contentMap[data.slug]) || '');
 
     // Build attention string for WASM engine from flat fields
     const hasAtt = data.scrollDepth !== undefined || data.timeOnPage !== undefined || data.likes !== undefined;
-    interaction.setAttention(hasAtt ? JSON.stringify({ scrollDepth: data.scrollDepth, timeOnPage: data.timeOnPage, likes: data.likes }) : '');
-    engine.addInteraction(interaction);
+    entry.setAttention(hasAtt ? JSON.stringify({ scrollDepth: data.scrollDepth, timeOnPage: data.timeOnPage, likes: data.likes }) : '');
+    engine.addEntry(entry);
   }
 }

@@ -40,7 +40,7 @@ session cache (hot)  →  filesystem checkpoints (cold)
    via entity-cache.js           via offscreen loadPageBatch
 ```
 
-- **Session cache**: in-memory IPC via `chrome.storage.session`, managed by `entity-cache.js` (500-entry LRU with watermark-gated eviction). Survives SW termination, cleared on browser restart.
+- **Session cache**: in-memory IPC via `chrome.storage.session`, managed by `entity-cache.js` (500-entry LRU with watermark-gated eviction). On `QuotaExceededError`, `cacheSet` performs emergency eviction (flushed unpinned keys first, then unflushed as last resort) and retries. Survives SW termination, cleared on browser restart.
 - **Filesystem checkpoints**: `pages/<slug>.json` files on disk. Loaded via offscreen `loadPageBatch`.
 
 ### Read Path
@@ -78,12 +78,22 @@ All mutations go through `addLog(entry)`:
 ```
 addLog(entry)
   → logBuffer.push(entry)              ← durable in chrome.storage.local
+  → cap enforcement (LOG_BUFFER_MAX_SIZE=2000: drop drained, then oldest)
+  → chrome.storage.local.set({ logBuffer })  ← try/catch (quota fail preserves in-memory)
   → effectOf(entry, sessionLoad, { deviceId: await getDeviceId() })  ← replay against session cache
   → sessionWrite(effects)              ← update session cache
   → scheduleDrainNotify()              ← offscreen drains to filesystem
 ```
 
 `getDeviceId()` is an async lazy getter: returns cached `localDeviceId` if set, otherwise loads from the plaintext `CURRENT` file via offscreen. This handles messages arriving before `hydrateCache()` completes (pre-hydration window) and SW wakeup without re-hydration.
+
+### Error Resilience
+
+- **Session quota**: `cacheSet` catches `QuotaExceededError`, runs `emergencyEvict()` (flushed unpinned keys first, unflushed as last resort, never pinned), retries. Throws meaningful error if eviction exhausted.
+- **logBuffer overflow**: Capped at `LOG_BUFFER_MAX_SIZE` (2000). Drops drained entries (ts <= watermark) first, then oldest. `chrome.storage.local.set` failure logged but does not lose in-memory entries.
+- **Offscreen crash**: Port `onDisconnect` resolves all pending `portCallbacks` with `{ success: false }` and clears the Map. `connectToOffscreen` on reconnect calls `scheduleDrainNotify` to resume drain.
+- **FS permission revocation**: `drainQueue` clears `pendingDrainEntries` only after successful JSONL writes (preserved for retry on failure). Per-entity checkpoint flush wrapped in individual try/catch — one entity failure does not block others.
+- **Lock timeout**: Both background and offscreen `withLock` have `LOCK_TIMEOUT_MS` (30s) timeout to prevent permanent deadlock from hung operations.
 
 ### Device Identity (`CURRENT` file)
 
@@ -219,18 +229,33 @@ Two invariants ensure `readCacheable('page:*')` / `readCacheable('note:*')` / et
 
 **Consequence:** `readFs` (the filesystem fallback in `readCacheable`) does NOT need to replay logBuffer entries. For any key with undrained mutations, the session cache will have the up-to-date entity. `readFs` only runs on a true cache miss — meaning no undrained mutations exist for that key, so the disk checkpoint is authoritative.
 
-### Pending Buffer for WASM Search
+### Progressive Search Architecture
 
-`pipelinedSearch()` in options.js reads `chrome.storage.local.get(['logBuffer'])` directly to get the exact undrained delta. WASM searches JSONL files on disk, so only undrained entries need to be searched separately. The raw logBuffer (not `history:<today>`) avoids double-processing entries already in JSONL.
+Explore search uses four concurrent phases with a generation counter for cancellation:
+
+| Phase | Source | WASM fn | Concurrency |
+|-------|--------|---------|-------------|
+| 0 | In-memory `historyAllEntries` | — (JS `wordsMatchItem`) | Instant |
+| 1 | `data/logs/{device}/*.jsonl` | `searchBatch` | 3 chunks |
+| 2a | `data/notes/*.json` | `searchNotes` | 1 call |
+| 2b | `data/snapshots/*.md` (latest per slug) | `searchSnapshots` | 2 chunks |
+
+All WASM functions read files directly from `FileSystemDirectoryHandle` refs — no JS↔WASM data copying. Phase 0 renders instantly; Phases 1/2a/2b fire concurrently and merge results incrementally via `mergeSearchResults` (dedup by URL, max score, track match sources). `renderProgressiveResults` enriches, filters, re-sorts, and calls `vs.updateData` after each merge.
+
+**Dirty data**: Only `logBuffer` (undrained JSONL entries). Phase 1 reads it from `chrome.storage.local` and searches via JS `SearchEngine`. Notes and snapshots are flushed to disk before UI responds.
+
+**Generation counter**: `searchGeneration` increments on each new search. Phase callbacks check their generation before merging — stale results from superseded queries are discarded silently.
+
+**Query matching**: WASM `parse_query_words` splits on whitespace (quoted phrases stay together). All words must match (AND). Quoted words use word-boundary matching. Consistent with JS `parseSearchWords` / `wordsMatchItem`.
 
 ### Known Architectural Exceptions
 
 **options.js direct FileSystemStorage access** — options.js instantiates its own `FileSystemStorage` for:
-1. **WASM search pipeline** (`pipelinedSearch`): reads `history/` JSONL files directly via the WASM `searchBatch()` API for zero-copy performance. Routing through background→offscreen would require serializing file contents across IPC boundaries.
+1. **Progressive WASM search** (`runPhase1`/`runPhase2a`/`runPhase2b`): passes `FileSystemDirectoryHandle` refs directly to WASM `searchBatch`/`searchNotes`/`searchSnapshots` for zero-copy file reads. Routing through background→offscreen would require serializing file contents across IPC boundaries.
 2. **Directory picker UI** (`selectDirectory`): the File System Access `showDirectoryPicker()` API requires user gesture in a document context — can't be proxied through background.
 3. **Settings page diagnostics** (`getDirectoryInfo`, data purge): inspects/manages the storage directory.
 
-These bypass the background→offscreen pipeline. The tradeoff is acceptable because (a) the WASM search is read-only and operates on immutable JSONL history files, (b) directory picker is a one-time setup action, (c) diagnostics are developer-facing.
+These bypass the background→offscreen pipeline. The tradeoff is acceptable because (a) the WASM search is read-only and operates on immutable files, (b) directory picker is a one-time setup action, (c) diagnostics are developer-facing.
 
 ## Rules (Materialized Search Rules)
 
@@ -267,7 +292,26 @@ For keyword rules, `matchKeywordRule` automatically checks `body` when present i
 
 ### Security
 
-Smart rule functions are validated by `validateSmartRuleFn()` before storage: word-boundary regex scan for 16 banned globals (fetch, chrome, window, document, navigator, globalThis, eval, Function, setTimeout, setInterval, WebSocket, Worker, localStorage, sessionStorage, indexedDB, importScripts). Max 10KB source. Execution is sandboxed in a manifest-declared sandbox page (separate origin, no extension API access).
+**Threat model.** Users write their own smart rule functions — there is no untrusted third-party code execution. The primary risk is accidental misuse (infinite loops, unintended network calls) rather than adversarial attack. The sandbox exists as defense-in-depth, not as a trust boundary against a malicious author.
+
+**Defense layers (defense-in-depth):**
+
+| Layer | Mechanism | What it prevents |
+|-------|-----------|-----------------|
+| **Static validation** | `validateSmartRuleFn()` in `rule-engine.js` scans source with `\b<name>\b` word-boundary regex for 16 banned globals: `fetch`, `chrome`, `window`, `document`, `navigator`, `globalThis`, `eval`, `Function`, `setTimeout`, `setInterval`, `WebSocket`, `Worker`, `localStorage`, `sessionStorage`, `indexedDB`, `importScripts` | Network access, DOM manipulation, extension API access, dynamic code generation, timer abuse |
+| **Size limit** | Max 10KB source (`MAX_FN_SOURCE_BYTES`) | Resource exhaustion via oversized payloads |
+| **Manifest sandbox** | `smart-rule-sandbox.html` declared in manifest `"sandbox"` key — runs in a unique origin with no extension API access | Even if validation is bypassed, `chrome.*` APIs are unavailable |
+| **Iframe isolation** | Sandbox loaded as hidden `<iframe>` inside offscreen document, communicates only via `postMessage` | No direct access to offscreen or background globals |
+| **Execution timeout** | 5-second timeout in `executeSandbox()` (`offscreen.js`) | Infinite loops, long-running computations |
+| **Output clamping** | Return value coerced to number in 0–1 range | No data exfiltration via return value |
+
+**Known gaps in static validation.** The word-boundary regex approach has inherent limitations:
+
+- **Unbanned globals**: `Proxy`, `Reflect`, `Symbol`, `WeakRef`, `FinalizationRegistry`, `SharedArrayBuffer`, `Atomics`, `structuredClone` are not banned. These are low-risk in the sandbox context (no I/O, no DOM) but could be used for metaprogramming or object introspection.
+- **String construction bypass**: `this.constructor.constructor('return fetch')()` or bracket notation (`this['constru' + 'ctor']`) can evade word-boundary regex. The manifest sandbox is the real enforcement layer here — even successfully constructing `fetch` would execute in a sandboxed origin with no cookies or extension permissions.
+- **Property access**: `event.source` is available inside the `message` handler in `smart-rule-sandbox.js`, but user code runs inside `new Function('page', fnSource)` which does not close over `event`.
+
+**Accepted risk.** Since users author their own rules, the static validation is a convenience guardrail (catch mistakes early with clear error messages), not a security boundary. The manifest sandbox provides the actual isolation guarantee.
 
 ### UI (Options Page)
 
@@ -338,8 +382,8 @@ Currently, `loadNote()` in filesystem-storage.js returns `null` for missing file
 | List | Yes | `delete_list` | Unlinks from all pinned pages, removes from sidebar, cascades to descendants |
 | Page | Automatic (GC) | — | Pages are GC'd during replay when they become ineligible (see Page Eligibility GC) |
 
-**options.js direct chrome.storage.local** — Three call sites remain:
-1. **WASM search** (`pipelinedSearch`): reads undrained logBuffer entries to search separately from on-disk JSONL (see "Pending Buffer for WASM Search" above).
+**options.js direct chrome.storage.local** — Two call sites remain:
+1. **Progressive search Phase 1** (`runPhase1`): reads undrained logBuffer entries to search separately from on-disk JSONL (see "Progressive Search Architecture" above).
 2. **Settings diagnostics** (`updateStatistics`, `updateCacheTable`): read logBuffer to display byte sizes and entry counts in the cache inspector UI.
 
 ## Multi-Device Sync

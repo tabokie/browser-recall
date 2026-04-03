@@ -14,6 +14,7 @@ export class VirtualScroller {
     this._expandedIdx = -1;         // index of currently expanded row
     this._expandedExtraH = 0;       // extra height from expansion
     this._savedNodes = new Map();   // detached stateful DOM nodes (selected rows that scrolled out)
+    this._selectAllActive = false;  // when true, freshly rendered rows get .selected
     this.onLoadMore = null;         // callback when user scrolls near end of data
     this._scrollHandler = () => requestAnimationFrame(() => this._render());
     scrollEl.addEventListener('scroll', this._scrollHandler);
@@ -28,6 +29,7 @@ export class VirtualScroller {
     this.renderedRange = { start: -1, end: -1 };
     this._expandedIdx = -1;
     this._expandedExtraH = 0;
+    this._selectAllActive = false;
     this._savedNodes.clear();
     this._render(true);
   }
@@ -58,6 +60,7 @@ export class VirtualScroller {
     this.renderedRange = { start: -1, end: -1 };
     this._expandedIdx = -1;
     this._expandedExtraH = 0;
+    this._selectAllActive = false;
     this._savedNodes.clear();
     this._render(true);
   }
@@ -116,6 +119,21 @@ export class VirtualScroller {
       const extraAfter = (this._expandedIdx >= end) ? this._expandedExtraH : 0;
       this.containerEl.style.paddingBottom = (base + extraAfter) + 'px';
     }
+  }
+
+  selectAll() {
+    this._selectAllActive = true;
+    for (const row of this.containerEl.querySelectorAll('.result-row')) {
+      row.classList.add('selected');
+    }
+  }
+
+  clearSelection() {
+    this._selectAllActive = false;
+    for (const row of this.containerEl.querySelectorAll('.result-row.selected')) {
+      row.classList.remove('selected');
+    }
+    this._savedNodes.clear();
   }
 
   _totalHeight() {
@@ -253,6 +271,13 @@ export class VirtualScroller {
     }
 
     this.renderedRange = { start, end };
+
+    // Apply select-all to freshly rendered rows
+    if (this._selectAllActive) {
+      for (const row of this.containerEl.querySelectorAll('.result-row:not(.selected)')) {
+        row.classList.add('selected');
+      }
+    }
 
     // Trigger load-more when approaching the end of data
     if (this.onLoadMore && end >= this.data.length - this.buffer * 2) {

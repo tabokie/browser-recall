@@ -84,11 +84,11 @@ describe('mutation refresh completeness', () => {
     expect(pinsBranch, 'pins branch should call refreshCurrentView()').toContain('refreshCurrentView()');
   });
 
-  it('interaction mutation branch refreshes all view types (not just category)', () => {
-    const interactionBranch = extractMutationBranch('interaction');
+  it('history mutation branch refreshes all view types (not just category)', () => {
+    const historyBranch = extractMutationBranch('history');
     // Should call refreshCurrentView() unconditionally on change, not gated to category
-    expect(interactionBranch).toContain('refreshCurrentView()');
-    expect(interactionBranch, 'should not gate refresh to category-only').not.toMatch(
+    expect(historyBranch).toContain('refreshCurrentView()');
+    expect(historyBranch, 'should not gate refresh to category-only').not.toMatch(
       /activeView\.type\s*===\s*'category'/
     );
   });

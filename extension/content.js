@@ -12,7 +12,7 @@ chrome.storage.session.get(['workspace'], (result) => {
 });
 
 function initContentScript() {
-let currentInteractionId = null;
+let currentHistoryId = null;
 let maxScrollDepth = 0;
 let lastActiveTime = Date.now(); // reset on visibility→visible; null after leave report
 
@@ -762,7 +762,7 @@ function onLeavePage() {
 }
 
 // Initial visit report
-currentInteractionId = window.location.href;
+currentHistoryId = window.location.href;
 const initialDelta = {
   title: document.title,
   slug: getSlugForCurrentPage(),

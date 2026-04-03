@@ -91,6 +91,8 @@
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    :focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; border-radius: 4px; }
+    :focus:not(:focus-visible) { outline: none; }
 
     body {
       width: 400px;
@@ -764,6 +766,21 @@
       text-align: center;
       padding: 32px;
       color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border-subtle);
+      border-top-color: var(--text-secondary);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
     }
 
     .blacklisted {
@@ -835,7 +852,7 @@
   </style>
 </head>
 <body>
-  <div id="loading" class="popup-shell loading">Loading...</div>
+  <div id="loading" class="popup-shell loading"><span class="spinner"></span></div>
 
   <div id="blacklisted" class="popup-shell blacklisted" style="display: none;">
     <div class="blacklisted-icon">&#x26D4;</div>
@@ -850,9 +867,9 @@
       <div class="workspace-header">
         <div class="tri-toggle" id="triToggle">
           <div class="tri-toggle-knob"></div>
-          <div class="tri-toggle-zone left" data-mode="workspace">Workspace</div>
-          <div class="tri-toggle-zone center" data-mode="default">Default</div>
-          <div class="tri-toggle-zone right" data-mode="private">Private</div>
+          <div class="tri-toggle-zone left" role="button" tabindex="0" data-mode="workspace">Workspace</div>
+          <div class="tri-toggle-zone center" role="button" tabindex="0" data-mode="default">Default</div>
+          <div class="tri-toggle-zone right" role="button" tabindex="0" data-mode="private">Private</div>
         </div>
       </div>
       <div class="workspace-config" id="workspaceConfig" style="display: none;">

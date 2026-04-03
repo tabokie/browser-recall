@@ -69,15 +69,15 @@ function createLogBuffer(storageLocal) {
     await storageLocal.set({ logBuffer });
   }
 
-  async function appendVisit(interaction) {
+  async function appendVisit(visit) {
     const entry = {
-      timestamp: interaction.timestamp,
-      url: interaction.url,
-      title: interaction.title,
-      slug: interaction.slug,
-      intent: interaction.intent || '',
+      timestamp: visit.timestamp,
+      url: visit.url,
+      title: visit.title,
+      slug: visit.slug,
+      intent: visit.intent || '',
     };
-    if (interaction.referrer) entry.referrer = interaction.referrer;
+    if (visit.referrer) entry.referrer = visit.referrer;
     await appendLog(entry);
   }
 

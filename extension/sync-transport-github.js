@@ -45,7 +45,11 @@ export class GitHubTransport {
         const resp = await fetch(url, opts);
         if (resp.ok) return resp.json();
         if (resp.status === 403 && resp.headers.get('X-RateLimit-Remaining') === '0') {
-          throw new Error(`GitHub API rate limit exceeded (403)`);
+          const resetHeader = resp.headers.get('X-RateLimit-Reset');
+          const resetEpoch = resetHeader ? parseInt(resetHeader, 10) : null;
+          const err = new Error(`GitHub API rate limit exceeded (403)`);
+          err.rateLimitReset = (resetEpoch && !isNaN(resetEpoch)) ? resetEpoch : null;
+          throw err;
         }
         const text = await resp.text().catch(() => '');
         lastError = new Error(`GitHub API error ${resp.status}: ${text}`);

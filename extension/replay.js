@@ -302,10 +302,13 @@ export async function effectOf(entry, load, context = {}) {
 
   // --- visit_page ---
   // Enriches existing page entities only. Passive visits do NOT create entities.
+  // Exception: checkpoint flag forces entity creation (used by explicit user capture).
   if (entry.action === 'visit_page') {
     const slug = generateSlugFromUrl(entry.url);
     const pageKey = PAGE_PREFIX + slug;
-    const page = await load(pageKey);
+    const page = entry.checkpoint
+      ? (await ensurePageEntity(entry.url, entry.timestamp, entry.title)).page
+      : await load(pageKey);
 
     if (page) {
       const updated = touchTimestamp(page, context.deviceId, entry.timestamp);
@@ -621,7 +624,9 @@ export async function effectOf(entry, load, context = {}) {
       }
 
       if (!pins.some(p => p.id === pinId)) {
-        pins.push({ id: pinId, pinnedAt: entry.timestamp });
+        const pin = { id: pinId, pinnedAt: entry.timestamp };
+        if (entry.source) pin.source = entry.source;
+        pins.push(pin);
       }
 
       // Update page parentIds with list key (notes don't track parentIds)
