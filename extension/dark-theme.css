@@ -1,0 +1,139 @@
+/* Dark theme variable overrides — shared by options.html and popup.html */
+
+/* System preference: dark unless user explicitly chose light */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) {
+    --bg-base: #1a1412;
+    --bg-ambient: radial-gradient(ellipse at 20% 20%, rgba(140, 80, 40, 0.15) 0%, transparent 50%),
+                  radial-gradient(ellipse at 80% 60%, rgba(100, 80, 140, 0.08) 0%, transparent 50%),
+                  linear-gradient(160deg, #1e1814 0%, #1a1410 40%, #16120e 100%);
+    --bg-surface: rgba(40, 32, 28, 0.6);
+    --bg-surface-solid: rgba(40, 32, 28, 0.85);
+    --bg-surface-hover: rgba(50, 40, 34, 0.7);
+    --bg-surface-active: rgba(60, 48, 38, 0.8);
+    --bg-sidebar: rgba(30, 26, 22, 0.7);
+
+    --border-glass: rgba(80, 68, 58, 0.4);
+    --border-glass-strong: rgba(90, 76, 64, 0.5);
+    --border-subtle: rgba(100, 85, 70, 0.2);
+    --border-hover: rgba(224, 128, 64, 0.4);
+
+    --text-primary: #e8ddd0;
+    --text-secondary: #b8a898;
+    --text-muted: #887868;
+
+    --accent-primary: #e08040;
+    --accent-primary-hover: #c87030;
+    --accent-primary-glow: rgba(224, 128, 64, 0.25);
+    --accent-primary-soft: rgba(224, 128, 64, 0.12);
+    --accent-blue: #6898c8;
+    --accent-blue-soft: rgba(104, 152, 200, 0.12);
+    --accent-green: #70a070;
+    --accent-green-soft: rgba(112, 160, 112, 0.12);
+    --accent-red: #d06050;
+    --accent-red-soft: rgba(208, 96, 80, 0.12);
+
+    --shadow-float:
+      0 0.5px 0.5px rgba(0, 0, 0, 0.1),
+      0 1px 2px rgba(0, 0, 0, 0.12),
+      0 3px 6px rgba(0, 0, 0, 0.12),
+      0 8px 16px rgba(0, 0, 0, 0.1);
+    --shadow-float-hover:
+      0 0.5px 1px rgba(0, 0, 0, 0.12),
+      0 2px 4px rgba(0, 0, 0, 0.15),
+      0 6px 12px rgba(0, 0, 0, 0.14),
+      0 14px 28px rgba(0, 0, 0, 0.12);
+    --shadow-elevated:
+      0 1px 2px rgba(0, 0, 0, 0.12),
+      0 4px 8px rgba(0, 0, 0, 0.15),
+      0 12px 24px rgba(0, 0, 0, 0.14),
+      0 24px 48px rgba(0, 0, 0, 0.12);
+
+    --highlight-top: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    --highlight-top-strong: inset 0 1.5px 0 rgba(255, 255, 255, 0.08);
+    --highlight-edge: inset 0 0 0 0.5px rgba(255, 255, 255, 0.04);
+
+    /* Component-level overrides for hardcoded light colors */
+    --bg-frosted: rgba(40, 32, 28, 0.5);
+    --bg-frosted-strong: rgba(40, 32, 28, 0.65);
+    --bg-input: rgba(30, 26, 22, 0.4);
+    --bg-warm-tint: rgba(35, 28, 24, 0.6);
+    --bg-warm-hover: rgba(50, 40, 34, 0.7);
+    --bg-tab-active: rgba(50, 40, 34, 0.8);
+    --border-section: rgba(100, 85, 70, 0.15);
+    --scrollbar-thumb: rgba(100, 85, 70, 0.4);
+    --glass-shine: linear-gradient(170deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 40%, transparent 100%);
+    --glass-inset: inset 0 16px 24px -12px rgba(255, 255, 255, 0.04);
+    --btn-glow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+
+    color-scheme: dark;
+  }
+}
+
+/* Explicit dark: always dark regardless of system preference */
+html[data-theme="dark"] {
+  --bg-base: #1a1412;
+  --bg-ambient: radial-gradient(ellipse at 20% 20%, rgba(140, 80, 40, 0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 60%, rgba(100, 80, 140, 0.08) 0%, transparent 50%),
+                linear-gradient(160deg, #1e1814 0%, #1a1410 40%, #16120e 100%);
+  --bg-surface: rgba(40, 32, 28, 0.6);
+  --bg-surface-solid: rgba(40, 32, 28, 0.85);
+  --bg-surface-hover: rgba(50, 40, 34, 0.7);
+  --bg-surface-active: rgba(60, 48, 38, 0.8);
+  --bg-sidebar: rgba(30, 26, 22, 0.7);
+
+  --border-glass: rgba(80, 68, 58, 0.4);
+  --border-glass-strong: rgba(90, 76, 64, 0.5);
+  --border-subtle: rgba(100, 85, 70, 0.2);
+  --border-hover: rgba(224, 128, 64, 0.4);
+
+  --text-primary: #e8ddd0;
+  --text-secondary: #b8a898;
+  --text-muted: #887868;
+
+  --accent-primary: #e08040;
+  --accent-primary-hover: #c87030;
+  --accent-primary-glow: rgba(224, 128, 64, 0.25);
+  --accent-primary-soft: rgba(224, 128, 64, 0.12);
+  --accent-blue: #6898c8;
+  --accent-blue-soft: rgba(104, 152, 200, 0.12);
+  --accent-green: #70a070;
+  --accent-green-soft: rgba(112, 160, 112, 0.12);
+  --accent-red: #d06050;
+  --accent-red-soft: rgba(208, 96, 80, 0.12);
+
+  --shadow-float:
+    0 0.5px 0.5px rgba(0, 0, 0, 0.1),
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    0 3px 6px rgba(0, 0, 0, 0.12),
+    0 8px 16px rgba(0, 0, 0, 0.1);
+  --shadow-float-hover:
+    0 0.5px 1px rgba(0, 0, 0, 0.12),
+    0 2px 4px rgba(0, 0, 0, 0.15),
+    0 6px 12px rgba(0, 0, 0, 0.14),
+    0 14px 28px rgba(0, 0, 0, 0.12);
+  --shadow-elevated:
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    0 4px 8px rgba(0, 0, 0, 0.15),
+    0 12px 24px rgba(0, 0, 0, 0.14),
+    0 24px 48px rgba(0, 0, 0, 0.12);
+
+  --highlight-top: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --highlight-top-strong: inset 0 1.5px 0 rgba(255, 255, 255, 0.08);
+  --highlight-edge: inset 0 0 0 0.5px rgba(255, 255, 255, 0.04);
+
+  /* Component-level overrides for hardcoded light colors */
+  --bg-frosted: rgba(40, 32, 28, 0.5);
+  --bg-frosted-strong: rgba(40, 32, 28, 0.65);
+  --bg-input: rgba(30, 26, 22, 0.4);
+  --bg-warm-tint: rgba(35, 28, 24, 0.6);
+  --bg-warm-hover: rgba(50, 40, 34, 0.7);
+  --bg-tab-active: rgba(50, 40, 34, 0.8);
+  --border-section: rgba(100, 85, 70, 0.15);
+  --scrollbar-thumb: rgba(100, 85, 70, 0.4);
+  --glass-shine: linear-gradient(170deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 40%, transparent 100%);
+  --glass-inset: inset 0 16px 24px -12px rgba(255, 255, 255, 0.04);
+  --btn-glow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+
+  color-scheme: dark;
+}

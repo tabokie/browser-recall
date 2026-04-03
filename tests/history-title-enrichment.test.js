@@ -196,6 +196,9 @@ describe('History title enrichment', () => {
       case 'getDeviceId':
         return { success: true, deviceId: 'test-device' };
 
+      case 'hasDirectoryHandle':
+        return { success: true, hasHandle: true };
+
       case 'listHistoryFiles':
         return { success: true, files: FILES_NEWEST_FIRST };
 

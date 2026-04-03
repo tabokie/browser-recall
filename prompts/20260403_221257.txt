@@ -1,0 +1,77 @@
+- Let's optimize responsiveness. Right now when history contains large amount of log files, the UI freezes before showing any visits. I am not sure if the issue occurs when log are few too. Investigate this and TDD, the purpose is to reduce UI lagging
+- Let's work on search experience. Right now we support quoted exact match search. For unquoted keywords, I want to support fuzz search.
+Explore what libraries or algorithms do popular open-source search tools use to perform fuzz search. And explore what popular commertial search tools like algolia use. Figure out what is the best fit for our use case.
+- sounds good
+- uFuzzy + Levenshtein sounds good, plan this out, write to ./plans 03
+- Fix tests regardless of whether it's caused by you
+- Leave fuzzy search alone, it is being worked on by another session
+- Are there gaps between plan and what's implemented?
+- Are there gaps between plan and what's implemented?
+- go
+- Run a manual test using sufficiently large seed data, with 20% of them having actual enrichment files. I will manually evaluate the experience
+- Feels good. One minor issue, when I click open the page details, there is a very brief black screen before the window pops up. Could you investigate?
+- Check again, is it safe to move plans 03 to archive?
+- Archive it
+- Help me understand the scoring and sorting algorithm for search. The context is I want to fix an issue: I search, open a page from the search, go back and the new visit appears in search in a different position. This causes the search view to be unstable.
+- It's fixed. Where did you put the test seed data? We should put it under a folder for reuse (with a case name) but git ignore it
+- 1. Does search engine has its own scoring like relevance or something?
+2. We should use the creation time to sort when there is no other scores or scores are equal. In some cases the creation time is not available. We should modify the data model to store it and migrate old data.
+- Wait a minute, then how do we control the data? Using script arguments?
+- Go for 1. The generation script for a specific case is short-lived. Put it inside the seed case folder, don't checkout to Git.
+- Go for first option
+- Good, is the document markdowns updated?
+- Actually I meant the document around manual testing
+- Take a look at ./plans 10~19. Work on it progressively. Another session is working on search FYI.
+- go ahead
+- Another session is working on logger right now, expect failures coming from their ends
+- Are there any gaps left?
+- Are there gaps between plan 11 and what's implemented?
+- close them
+- close them all
+- Don't stash when another session is working. Try to fix it regardless of who caused it
+- Before we move on, what is the next steps (plans), are there multiple plans to work in parallel?
+- Work on ./plans 17
+- Work on ./plans 12
+- Gaps between plan and what's implemented?
+- go ahead
+- fix all
+- Review the implementation of plan 12, down to every details, improve the implementation if necessary, it was done by another model
+- Can we work on other plans? Plan 12 is blocked on icon works
+- Review the implementation of plan 12, down to every details, improve the implementation if necessary, it was done by another model. Do not attempt to view and process images/icons, your API doesn't support it
+- Any gaps between plan and what's implemented?
+- update them
+- Any gaps between plan and what's implemented?
+- Go ahead
+- Work on ./plans, plan 11/12/17 have been implemented or being implemented, pick the next in line
+- go ahead
+- plans 11,12,13,17 have been worked or being worked on. Find the next in line to work on
+- go
+- Any gaps between plan 13 and what's implemented?
+- go ahead
+- Are there gaps between plan and what's implemented?
+- Are there gaps between plan and what's implemented?
+- What is this plan number?
+- What is this plan number?
+- Plan 11~14, 17 have been done. Find another one to work on
+- go
+- Plan 11~15, 17 have been done or being worked on. Find another one to work on
+- go ahead
+- resume
+- Are there gaps between plan and the implementation?
+- Are there gaps between plan and what's implemented?
+- replace all
+- Plan 11~17 have been implemented. What to work on next?
+- go ahead
+- Anything else missing?
+- Can we work on plans 19 when plan 18 is being worked on by another session? Or do we have to wait for it to finish?
+- go ahead
+- work on plan 19 but leave the parts that's blocked on 18
+- Any gaps between plan and what's implemented?
+- work on plan 19, it is already partially implemented. Do not attempt to view or modify image/icon, your API doesn't support it
+- I am aware this is a fresh session, but many sessions before you have done a great deal of work. In light of this context, /finish
+- 1> run it here
+2> don't archive just yet
+3> update
+4> screenshots can wait, we have some rough edges to fix later
+- Fix the test failures properly, even if only flaky
+- all of them

@@ -26,6 +26,9 @@ extension/vendor/
 *.swo
 *~
 
+# Manual test seed cases
+seeds/
+
 # OS
 .DS_Store
 Thumbs.db

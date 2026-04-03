@@ -9,6 +9,8 @@ import { initCharts, renderTimeChart, renderTimeChartInto, bindChartBarClick, sy
 import { VirtualScroller } from './virtual-scroller.js';
 import { entityTypeLabel } from './entity-types.js';
 import { requestDeviceCode, pollForToken, fetchGitHubUser, getGitHubRevokeUrl } from './github-oauth.js';
+import { logDebug, logError } from './logger.js';
+import { applyTheme } from './theme.js';
 // parseBookmarkHtml imported dynamically inside the block below
 const fsStorage = new FileSystemStorage();
 
@@ -20,6 +22,53 @@ function autoResizeTextarea(textarea) {
 }
 
 // ─── Error UI ────────────────────────────────────────────────────────
+
+const ERROR_CODE_MESSAGES = {
+  fs_permission:   { text: 'Storage access was revoked', action: 'regrant' },
+  session_quota:   { text: 'Session storage full',       action: 'reload' },
+  local_quota:     { text: 'Local storage full',         action: 'reload' },
+  offscreen_crash: { text: 'Storage worker crashed',     action: 'reload' },
+};
+
+function showServiceErrorBanner(svcErr) {
+  const banner  = document.getElementById('serviceErrorBanner');
+  const msgEl   = document.getElementById('serviceErrorMessage');
+  const reloadBtn  = document.getElementById('serviceErrorReloadBtn');
+  const regrantBtn = document.getElementById('serviceErrorRegrantBtn');
+  if (!banner || !msgEl) return;
+
+  const info = ERROR_CODE_MESSAGES[svcErr.code] || { text: svcErr.message || 'Service unavailable', action: 'reload' };
+  msgEl.textContent = info.text;
+
+  reloadBtn.style.display  = info.action === 'reload'   ? '' : 'none';
+  regrantBtn.style.display = info.action === 'regrant'  ? '' : 'none';
+
+  reloadBtn.onclick = () => chrome.runtime.reload();
+  regrantBtn.onclick = async () => {
+    try {
+      await fsStorage.selectDirectory();
+      await chrome.runtime.sendMessage({ action: 'resumeService' });
+      banner.style.display = 'none';
+    } catch {}
+  };
+
+  banner.style.display = 'flex';
+}
+
+// Listen for serviceError changes while options page is open (service pauses mid-session).
+if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'session') return;
+  if ('serviceError' in changes) {
+    const svcErr = changes.serviceError.newValue;
+    const banner = document.getElementById('serviceErrorBanner');
+    if (!banner) return;
+    if (svcErr) {
+      showServiceErrorBanner(svcErr);
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+});
 
 function showFatalError(message) {
   const overlay = document.createElement('div');
@@ -230,7 +279,7 @@ async function initWasm() {
       await init();
       wasmInitialized = true;
     } catch (error) {
-      console.error('WASM init failed:', error);
+      logError('WASM init failed:', error);
     }
   }
 }
@@ -266,6 +315,7 @@ function mergeSearchResults(newResults, source, gen) {
     if (idx >= 0) {
       const existing = searchResults[idx];
       if ((r.score || 0) > (existing.score || 0)) existing.score = r.score;
+      if (r.createdAt && (!existing.createdAt || r.createdAt < existing.createdAt)) existing.createdAt = r.createdAt;
       if (!existing.matchSources) existing.matchSources = new Set();
       existing.matchSources.add(source);
     } else {
@@ -276,6 +326,7 @@ function mergeSearchResults(newResults, source, gen) {
         slug: r.slug || generateSlugFromUrl(r.url),
         timestamp: r.timestamp || Date.now(),
         score: r.score || 0,
+        createdAt: r.createdAt || 0,
         attScore: r.attScore || 0,
         attDetail: r.attDetail || null,
         notes: r.notes || [],
@@ -316,7 +367,7 @@ async function renderProgressiveResults(gen) {
     return;
   }
 
-  const effectiveSort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
+  const effectiveSort = relatedSortState.column ? relatedSortState : { column: 'relevance', direction: 'desc' };
   const sorted = applySortOrder(results, effectiveSort);
   const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
 
@@ -330,6 +381,7 @@ async function renderProgressiveResults(gen) {
       matchSources: r.matchSources,
     })
   );
+  relatedContainer.dataset.searchCount = String(searchResults.length);
   // Update time chart
   const chartData = sorted.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || Date.now(), attention: '' }));
   renderTimeChartInto(
@@ -415,7 +467,7 @@ async function runPhase1(query, gen) {
       renderProgressiveResults(gen);
     });
   } catch (e) {
-    console.warn('[Phase1] WASM JSONL search failed:', e.message);
+    logDebug('[Phase1] WASM JSONL search failed:', e.message);
   } finally {
     phaseComplete(gen);
   }
@@ -443,7 +495,7 @@ async function runPhase2a(query, gen) {
     mergeSearchResults(noteResults, 'note', gen);
     await renderProgressiveResults(gen);
   } catch (e) {
-    console.warn('[Phase2a] Note search failed:', e.message);
+    logDebug('[Phase2a] Note search failed:', e.message);
   } finally {
     phaseComplete(gen);
   }
@@ -497,17 +549,38 @@ async function runPhase2b(query, gen) {
         if (!page || !page.url) continue;
         snapshotResults.push({
           url: page.url, title: page.title || '', slug: matches[i].slug,
-          timestamp: Date.now(), score: 0.5, timestamps: [Date.now()],
+          timestamp: Date.now(), score: 1.0, timestamps: [Date.now()],
         });
       }
       mergeSearchResults(snapshotResults, 'snapshot', gen);
       await renderProgressiveResults(gen);
     });
   } catch (e) {
-    console.warn('[Phase2b] Snapshot search failed:', e.message);
+    logDebug('[Phase2b] Snapshot search failed:', e.message);
   } finally {
     phaseComplete(gen);
   }
+}
+
+// Lightweight title/URL scorer for Phase 0 (mirrors WASM content_score weights).
+function phase0Score(item, words) {
+  let score = 0;
+  const title = (item.user_title || item.title || '').toLowerCase();
+  const url = (item.url || '').toLowerCase();
+  for (const { q, exact } of words) {
+    const ql = q.toLowerCase();
+    if (exact) {
+      const escaped = ql.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`\\b${escaped}\\b`);
+      if (re.test(title)) score += 2.0;
+      else if (re.test(url)) score += 0.5;
+    } else {
+      if (title.includes(ql)) score += 2.0;
+      else if (url.includes(ql)) score += 0.5;
+      else score += 0.3; // fuzzy-only match (Phase 0 already filtered to matches)
+    }
+  }
+  return words.length > 0 ? score / words.length : 0;
 }
 
 // Four-phase progressive search orchestrator.
@@ -518,19 +591,23 @@ async function runProgressiveSearch(allQueries) {
   searchResults = [];
   const query = allQueries.join(' ');
 
-  // Phase 0: instant in-memory matching (existing wordsMatchItem logic)
+  // Phase 0: instant in-memory matching with fuzzy support for unquoted words
   const matchedUrls = new Set();
-  for (const q of allQueries) {
-    if (!q.trim()) continue;
-    const words = parseSearchWords(q);
-    for (const item of historyAllEntries) {
-      if (!item.url) continue;
-      if (wordsMatchItem(words, item)) matchedUrls.add(item.url);
+  const words = parseSearchWords(query);
+  if (words.length > 0) {
+    // Build haystack: one string per entry combining all searchable fields
+    const haystack = historyAllEntries.map(item =>
+      [item.user_title || '', item.title || '', item.url || ''].join(' ')
+    );
+    const matchedIndices = fuzzyMatchPhase0(words, haystack, historyAllEntries);
+    for (const idx of matchedIndices) {
+      const item = historyAllEntries[idx];
+      if (item.url) matchedUrls.add(item.url);
     }
   }
   const phase0Entries = historyAllEntries.filter(item => item.url && matchedUrls.has(item.url));
   const phase0Results = processHistoryForDisplay(phase0Entries, { globalDedup: true })
-    .map(item => ({ ...item, score: 0, matchSources: new Set(['title']) }));
+    .map(item => ({ ...item, score: phase0Score(item, words), matchSources: new Set(['title']) }));
   mergeSearchResults(phase0Results, 'title', gen);
   await renderProgressiveResults(gen);
 
@@ -554,7 +631,7 @@ async function initHistoryFiles() {
     historyFiles = resp.files;
     historyFileSizes = resp.sizes || {};
   } catch (error) {
-    console.log('Filesystem not available:', error.message);
+    logDebug('Filesystem not available:', error.message);
   }
 
   // Merge today's history — session cache has disk + undrained entries via addLog
@@ -608,7 +685,7 @@ async function loadHistoryBatch() {
       }
       newItems.push(item);
     }
-    console.debug(`[I/O] loadHistoryBatch: ${batch.length} files, ${batchEntries.length} items, ${newItems.length} new in ${(performance.now() - t0).toFixed(1)}ms`);
+    logDebug(`[I/O] loadHistoryBatch: ${batch.length} files, ${batchEntries.length} items, ${newItems.length} new in ${(performance.now() - t0).toFixed(1)}ms`);
     historyLoadedCount += batch.length;
     // Calibrate avg entry size from loaded file data
     historyBatchRawCount += batchEntries.length;
@@ -620,7 +697,7 @@ async function loadHistoryBatch() {
     historyLoading = false;
     return newItems;
   } catch (error) {
-    console.log('Error loading history batch:', error.message);
+    logDebug('Error loading history batch:', error.message);
     historyLoading = false;
     return [];
   }
@@ -908,6 +985,50 @@ function wordsMatchItem(words, item) {
   });
 }
 
+// Phase 0 fuzzy matching: uses uFuzzy for unquoted words, exact boundary for quoted.
+// Returns Set of matching indices into historyAllEntries.
+// Falls back to substring matching when uFuzzy is not loaded (e.g. in tests).
+function fuzzyMatchPhase0(words, haystack, entries) {
+  const hasFuzzy = typeof uFuzzy !== 'undefined';
+  const uf = hasFuzzy ? new uFuzzy({ intraMode: 1 }) : null;
+  let matchingIndices = null;
+  for (const { q, exact } of words) {
+    let wordMatches;
+    if (exact) {
+      wordMatches = new Set();
+      for (let i = 0; i < entries.length; i++) {
+        const item = entries[i];
+        const fields = [item.user_title, item.title, item.url];
+        if (fields.some(f => f && matchesExactWithBoundary(f, q))) {
+          wordMatches.add(i);
+        }
+      }
+    } else if (uf) {
+      const [idxs] = uf.search(haystack, q);
+      wordMatches = new Set(idxs || []);
+    } else {
+      // Fallback: substring matching (original behavior)
+      const ql = q.toLowerCase();
+      wordMatches = new Set();
+      for (let i = 0; i < entries.length; i++) {
+        const item = entries[i];
+        const fields = [item.user_title, item.title, item.url];
+        if (fields.some(f => f && f.toLowerCase().includes(ql))) {
+          wordMatches.add(i);
+        }
+      }
+    }
+    if (matchingIndices === null) {
+      matchingIndices = wordMatches;
+    } else {
+      for (const i of matchingIndices) {
+        if (!wordMatches.has(i)) matchingIndices.delete(i);
+      }
+    }
+  }
+  return matchingIndices || new Set();
+}
+
 function isDefaultFilterState(state) {
   return state.firstSeen.lo === null && state.firstSeen.hi === null
     && state.lastSeen.lo === null && state.lastSeen.hi === null
@@ -1062,9 +1183,14 @@ function applySortOrder(items, sortState) {
         bv = b.visitCount || (b.timestamps ? b.timestamps.length : 0);
         return dir * (av - bv);
       case 'relevance':
-        av = a.relevance || 0;
-        bv = b.relevance || 0;
-        return dir * (av - bv);
+        av = a.score || 0;
+        bv = b.score || 0;
+        if (av !== bv) return dir * (av - bv);
+        // Tiebreaker: createdAt ascending (older first) for stable ordering.
+        // Fall back to earliest timestamp when createdAt is missing (passive visits without entities).
+        av = a.createdAt || Math.min(...(a.timestamps || [Infinity]));
+        bv = b.createdAt || Math.min(...(b.timestamps || [Infinity]));
+        return av - bv;
       default:
         return 0;
     }
@@ -1315,8 +1441,9 @@ async function showCategory(category) {
       if (newFiltered.length > 0) {
         const sort = currentSortState.column ? currentSortState : { column: 'lastVisit', direction: 'desc' };
         const newEntries = processHistoryForDisplay(newFiltered);
-        await enrichFromEntityStorage(newEntries);
         vs.appendData(applySortOrder(newEntries, sort));
+        // Enrich in background — re-render visible rows when done
+        enrichFromEntityStorage(newEntries).then(() => vs.refreshVisible());
       }
       // Re-render chart with all loaded history + updated estimates
       const allLoaded = [...historyAllEntries];
@@ -1420,7 +1547,7 @@ function enrichPinResult(r, pins, pageSnap) {
 
 async function showExplore() {
   const _t0 = performance.now();
-  const _timer = (label) => console.debug(`[explore-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
+  const _timer = (label) => logDebug(`[explore-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
 
   activeView = { type: 'explore', name: null };
   updateSidebarActive();
@@ -1436,7 +1563,7 @@ async function showExplore() {
     await renderListSearchFilters();
     _timer('renderListSearchFilters');
   } catch (error) {
-    console.error('Explore load error:', error);
+    logError('Explore load error:', error);
     document.getElementById('relatedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
   }
   document.body.dataset.ready = 'true';
@@ -1518,7 +1645,7 @@ async function showList(list) {
       await renderListPinView(enriched, listId);
     }
   } catch (error) {
-    console.error('List load error:', error);
+    logError('List load error:', error);
     document.getElementById('relatedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
   }
 }
@@ -2099,6 +2226,7 @@ async function enrichFromEntityStorage(entries) {
     if (page.childIds) entry.childIds = page.childIds;
     if (page.parentIds) entry.parentIds = page.parentIds;
     if (page.likes) entry.likes = page.likes;
+    if (page.createdAt && !entry.createdAt) entry.createdAt = page.createdAt;
   }
 }
 
@@ -2132,7 +2260,6 @@ async function displayHistoryRows(entries) {
   }
 
   const displayEntries = processHistoryForDisplay(entries);
-  await enrichFromEntityStorage(displayEntries);
 
   // When sort is null, default to lastVisit desc
   const effectiveSort = currentSortState.column ? currentSortState : { column: 'lastVisit', direction: 'desc' };
@@ -2141,9 +2268,12 @@ async function displayHistoryRows(entries) {
 
   const vs = getOrCreateGlobalScroller();
   vs._headerHtml = '';
-  vs.setData(sorted, (e) =>
-    resultRowHtml(e.user_title || e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global', childIds: e.childIds, parentIds: e.parentIds, likes: e.likes })
-  );
+  const renderFn = (e) =>
+    resultRowHtml(e.user_title || e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global', childIds: e.childIds, parentIds: e.parentIds, likes: e.likes });
+  vs.setData(sorted, renderFn);
+
+  // Enrich in background — mutates entries in place, then re-render visible rows
+  enrichFromEntityStorage(displayEntries).then(() => vs.refreshVisible());
 }
 
 const PIN_SVG = '<svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>';
@@ -2374,7 +2504,7 @@ function bindNoteDeleteButtons(container) {
           noteSlug
         });
       } catch (err) {
-        console.error('Delete note error:', err);
+        logError('Delete note error:', err);
         return;
       }
 
@@ -2426,7 +2556,7 @@ function bindPageNoteHandler(container, url) {
           }
         }
       } catch (err) {
-        console.error('[options] Page note save error:', err);
+        logError('[options] Page note save error:', err);
       }
     }, 500);
   });
@@ -2583,6 +2713,8 @@ function openPageDetailCard(url, title, attDetail = null, timestamps = []) {
   card.querySelector('.page-detail-close').addEventListener('click', closePageDetailCard);
   overlay.appendChild(card);
   document.body.appendChild(overlay);
+  // Allow one frame for backdrop-filter compositing before fading in
+  requestAnimationFrame(() => overlay.classList.add('visible'));
 
   loadExtraDetail(url).then(extra => {
     const body = card.querySelector('.page-detail-body');
@@ -3049,7 +3181,7 @@ function createSidebarItem(node, depth) {
           }
         }
       } catch (err) {
-        console.error('Drop error:', err);
+        logError('Drop error:', err);
       }
     }
   });
@@ -3184,12 +3316,15 @@ initMarqueeForElements(
 );
 
 // --- Settings modal ---
-document.getElementById('settingsBtn').addEventListener('click', () => {
+document.getElementById('settingsBtn').addEventListener('click', async () => {
   document.getElementById('settingsModal').classList.add('open');
   updateStorageStatus();
   updateStatistics();
   renderBlacklist();
   renderTrimRules();
+  // Populate debug logging checkbox from session storage
+  const { debugLogging } = await chrome.storage.session.get(['debugLogging']);
+  document.getElementById('debugLoggingToggle').checked = !!debugLogging;
 });
 
 document.getElementById('settingsClose').addEventListener('click', () => {
@@ -3383,6 +3518,12 @@ document.getElementById('changeDirBtn').addEventListener('click', async () => {
   changeDirBtn.textContent = 'Change Directory';
 });
 
+document.getElementById('themeSelect').addEventListener('change', async () => {
+  const theme = document.getElementById('themeSelect').value;
+  await chrome.storage.session.set({ theme });
+  await applyTheme();
+});
+
 document.getElementById('relatedPagesLimit').addEventListener('change', async () => {
   const val = parseInt(document.getElementById('relatedPagesLimit').value) || 50;
   relatedPagesLimit = Math.max(1, val);
@@ -3402,6 +3543,12 @@ document.getElementById('historyFileBatch').addEventListener('change', async () 
 document.getElementById('captureSnapshotVideo').addEventListener('change', async () => {
   await saveSettingsValue('captureSnapshotVideo', document.getElementById('captureSnapshotVideo').checked);
   showStatus('Settings saved', 'success');
+});
+
+// Debug logging toggle (session-stored, resets on browser restart)
+document.getElementById('debugLoggingToggle').addEventListener('change', async () => {
+  const enabled = document.getElementById('debugLoggingToggle').checked;
+  await chrome.storage.session.set({ debugLogging: enabled });
 });
 
 // Sync settings
@@ -4091,7 +4238,7 @@ document.addEventListener('visibilitychange', async () => {
       }
     }
   } catch (error) {
-    console.debug('visibilitychange refresh failed:', error.message);
+    logDebug('visibilitychange refresh failed:', error.message);
   }
 
   // Don't refreshCurrentView() here — mutation notifications from background already
@@ -4435,10 +4582,11 @@ async function runSearchFilterPipeline() {
   let results = processHistoryForDisplay(
     historyAllEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
   ).map(item => ({ ...item, relevance: 0 }));
-  await enrichFromEntityStorage(results);
 
-  // Enrich with page entity data when filters need it, then apply filters
-  if (!isDefaultFilterState(filterState)) {
+  const hasActiveFilters = !isDefaultFilterState(filterState);
+  if (hasActiveFilters) {
+    // Filters depend on enriched data — must await
+    await enrichFromEntityStorage(results);
     await enrichForFilters(results);
   }
   results = await applyFilters(results);
@@ -4464,16 +4612,21 @@ async function runSearchFilterPipeline() {
     })
   );
 
+  // When no active filters, enrich in background and refresh visible rows
+  if (!hasActiveFilters) {
+    enrichFromEntityStorage(results).then(() => vs.refreshVisible());
+  }
+
   // Demand-load more history when scrolling (for all-history mode)
   vs.onLoadMore = async () => {
     const newItems = await loadHistoryBatch();
     if (newItems.length > 0) {
       const filtered = newItems.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)));
       const newResults = processHistoryForDisplay(filtered).map(item => ({ ...item, relevance: 0 }));
-      await enrichFromEntityStorage(newResults);
       if (newResults.length > 0) {
         const sort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
         vs.appendData(applySortOrder(newResults, sort));
+        enrichFromEntityStorage(newResults).then(() => vs.refreshVisible());
       }
     }
   };
@@ -4725,15 +4878,97 @@ async function restoreSidebarWidth() {
   } catch (e) { /* ignore */ }
 }
 
+// ─── Onboarding ─────────────────────────────────────────────────────
+
+function showOnboarding() {
+  const el = document.getElementById('onboarding');
+  el.style.display = 'flex';
+  document.querySelector('.sidebar').style.display = 'none';
+
+  const dirBtn = document.getElementById('onboardingDirBtn');
+  const dirStatus = document.getElementById('onboardingDirStatus');
+  const optionalSection = document.getElementById('onboardingOptional');
+  const startBtn = document.getElementById('onboardingStartBtn');
+
+  dirBtn.addEventListener('click', async () => {
+    const result = await fsStorage.selectDirectory();
+    if (result.success) {
+      dirStatus.textContent = result.name;
+      optionalSection.style.display = 'block';
+      startBtn.disabled = false;
+    }
+    // On cancel (AbortError): stay on same screen, button available
+  });
+
+  startBtn.addEventListener('click', async () => {
+    startBtn.disabled = true;
+    startBtn.textContent = 'Setting up...';
+
+    // Initialize filesystem + optional device name (writes CURRENT, re-hydrates)
+    const deviceName = document.getElementById('onboardingDeviceName').value.trim();
+    const initMsg = { action: 'initializeFilesystem' };
+    if (deviceName) initMsg.deviceName = deviceName;
+    await sendAction(initMsg);
+
+    // Save optional sync settings (after init so settings.json exists)
+    const syncRepo = document.getElementById('onboardingSyncRepo').value.trim();
+    const syncToken = document.getElementById('onboardingSyncToken').value.trim();
+    if (syncRepo) {
+      await saveSettingsValue('syncEnabled', true);
+      await saveSettingsValue('syncRepoUrl', syncRepo);
+      if (syncToken) {
+        await sendAction({ action: 'setSyncToken', token: syncToken, method: 'pat' });
+      }
+    }
+
+    // Hide onboarding, show normal UI, run full init
+    el.style.display = 'none';
+    document.querySelector('.sidebar').style.display = '';
+
+    await initializeMain();
+  });
+}
+
 async function initialize() {
+  // Apply theme before any rendering to minimize flash
+  const currentTheme = await applyTheme();
+
+  // Check if first run (no directory configured)
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'hasDirectoryHandle' });
+    if (resp?.success && !resp.hasHandle) {
+      showOnboarding();
+      document.body.dataset.ready = 'true';
+      return;
+    }
+  } catch {}
+
+  await initializeMain(currentTheme);
+}
+
+async function initializeMain(currentTheme) {
+  // Apply theme if not already done (e.g. coming from onboarding)
+  if (!currentTheme) currentTheme = await applyTheme();
+
   const _t0 = performance.now();
-  const _timer = (label) => console.debug(`[init-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
+  const _timer = (label) => logDebug(`[init-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
+
+  // Check for service downtime (paused state) and show error banner if set
+  try {
+    const { serviceError: svcErr } = await chrome.storage.session.get(['serviceError']);
+    if (svcErr) {
+      showServiceErrorBanner(svcErr);
+    }
+  } catch {}
 
   // Verify device identity — CURRENT file must be readable
   const deviceResp = await chrome.runtime.sendMessage({ action: 'getDeviceId' });
   if (!deviceResp?.deviceId) {
     throw new Error('Device identity unavailable — the CURRENT file may be missing or corrupted. Try reloading the extension.');
   }
+
+  // Theme select — reflects current value from applyTheme()
+  document.getElementById('themeSelect').value = currentTheme;
 
   // Load settings from filesystem
   relatedPagesLimit = await loadSettingsValue('relatedPagesLimit', 50);

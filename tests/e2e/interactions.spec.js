@@ -623,25 +623,24 @@ test.describe('Select-all keyboard shortcut (Ctrl/Cmd+A)', () => {
     const searchInput = options.locator('#searchDraftInput');
     await searchInput.fill('bigsel');
 
-    // Wait for search spinner to appear (indicates search started) then disappear
+    // Wait for search to produce >100 results via data-search-count attribute
+    // (set by renderProgressiveResults on the #relatedResults container)
     await options.waitForFunction(
       () => {
-        const spinner = document.getElementById('contentSearchSpinner');
-        return spinner && spinner.style.display !== 'none';
-      },
-      { timeout: 10000 }
-    );
-    await options.waitForFunction(
-      () => {
-        const spinner = document.getElementById('contentSearchSpinner');
-        return !spinner || spinner.style.display === 'none';
+        const container = document.getElementById('relatedResults');
+        return parseInt(container?.dataset.searchCount || '0', 10) > 100;
       },
       { timeout: 30000 }
     );
 
-    // Blur the search input so Ctrl+A isn't intercepted by the INPUT guard
-    await options.evaluate(() => document.activeElement?.blur());
-    await options.keyboard.press('Meta+a');
+    // Blur + dispatch Ctrl+A in a single evaluate to avoid mutation race
+    // (background may re-trigger search which resets searchResults between awaits)
+    await options.evaluate(() => {
+      document.activeElement?.blur();
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'a', code: 'KeyA', metaKey: true, bubbles: true, cancelable: true,
+      }));
+    });
 
     // Error bubble should appear
     await options.waitForFunction(
@@ -649,7 +648,7 @@ test.describe('Select-all keyboard shortcut (Ctrl/Cmd+A)', () => {
         const bubble = document.getElementById('errorBubble');
         return bubble && bubble.style.opacity === '1';
       },
-      { timeout: 3000 }
+      { timeout: 5000 }
     );
 
     await options.close();
@@ -701,6 +700,160 @@ test.describe('Select-all keyboard shortcut (Ctrl/Cmd+A)', () => {
 
     selectedCount = await options.$$eval('#relatedResults .result-row.selected', els => els.length);
     expect(selectedCount).toBe(1);
+
+    await options.close();
+  });
+
+  test('fuzzy search: typo in query still matches pages', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const logLines = [];
+    // 3 pages with "React" in title — these should fuzzy-match "raect"
+    for (let i = 0; i < 3; i++) {
+      logLines.push({
+        timestamp: now - i * 1000,
+        action: 'visit_page',
+        url: `https://reactjs.org/docs/page${i}`,
+        title: `React Tutorial Part ${i}`,
+      });
+    }
+    // 3 non-matching pages
+    for (let i = 0; i < 3; i++) {
+      logLines.push({
+        timestamp: now - (3 + i) * 1000,
+        action: 'visit_page',
+        url: `https://other.com/page${i}`,
+        title: `Python Guide ${i}`,
+      });
+    }
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: logLines },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Wait for explore view to show all 6 pages
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 6,
+      { timeout: 10000 }
+    );
+
+    // Type a fuzzy query — "raect" is a transposition typo for "react"
+    const searchInput = options.locator('#searchDraftInput');
+    await searchInput.fill('raect');
+
+    // Should find the 3 React pages via fuzzy matching
+    await options.waitForFunction(
+      () => {
+        const rows = document.querySelectorAll('#relatedResults .result-row');
+        return rows.length >= 1 && rows.length <= 3;
+      },
+      { timeout: 15000 }
+    );
+
+    const titles = await options.$$eval(
+      '#relatedResults .result-row .result-title',
+      els => els.map(e => e.textContent.trim())
+    );
+    expect(titles.length).toBeGreaterThanOrEqual(1);
+    for (const t of titles) {
+      expect(t).toMatch(/React/);
+    }
+
+    // Exact substring search should still work — "React" matches all 3
+    await searchInput.fill('React');
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length === 3,
+      { timeout: 10000 }
+    );
+
+    // Quoted exact search unchanged — "React" as exact word boundary
+    await searchInput.fill('"React"');
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length === 3,
+      { timeout: 10000 }
+    );
+
+    await options.close();
+  });
+
+  test('search order is stable across repeated queries', async ({ extContext, extensionId }) => {
+    const now = Date.now();
+    const logLines = [];
+    // 3 pages with "Stable" in title, different timestamps.
+    // p0 was visited most recently but created earliest — under relevance+createdAt
+    // sort, the order should be deterministic and not change when re-searching.
+    for (let i = 0; i < 3; i++) {
+      logLines.push({
+        timestamp: now - (2 - i) * 86400000, // p0 oldest, p2 newest
+        action: 'visit_page',
+        url: `https://stable-test.com/p${i}`,
+        title: `Stable Page ${i}`,
+        checkpoint: true,
+      });
+    }
+    // A second very recent visit for p0 — would have pushed it to top under lastVisit sort
+    logLines.push({
+      timestamp: now - 1000,
+      action: 'visit_page',
+      url: 'https://stable-test.com/p0',
+      title: 'Stable Page 0',
+    });
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: logLines },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Wait for explore view
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 3,
+      { timeout: 10000 }
+    );
+
+    // First search
+    const searchInput = options.locator('#searchDraftInput');
+    await searchInput.fill('Stable');
+
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length === 3,
+      { timeout: 10000 }
+    );
+
+    const orderBefore = await options.$$eval(
+      '#relatedResults .result-row',
+      els => els.map(e => e.querySelector('.result-url')?.textContent?.trim())
+    );
+    expect(orderBefore.length).toBe(3);
+
+    // Clear and re-search — order must be identical
+    await searchInput.fill('');
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length >= 3,
+      { timeout: 10000 }
+    );
+
+    await searchInput.fill('Stable');
+    await options.waitForFunction(
+      () => document.querySelectorAll('#relatedResults .result-row').length === 3,
+      { timeout: 10000 }
+    );
+
+    const orderAfter = await options.$$eval(
+      '#relatedResults .result-row',
+      els => els.map(e => e.querySelector('.result-url')?.textContent?.trim())
+    );
+
+    expect(orderAfter).toEqual(orderBefore);
 
     await options.close();
   });

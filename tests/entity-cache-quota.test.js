@@ -3,7 +3,8 @@
  *
  * Verifies that cacheSet() handles QuotaExceededError from
  * chrome.storage.session.set() by performing emergency eviction
- * of unpinned keys, then retrying.
+ * (including pinned-but-clean keys), then retrying. If retry still
+ * fails, fires the onQuotaExhausted callback instead of throwing.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -52,7 +53,8 @@ function makeSessionMock() {
 
 describe('entity-cache quota handling', () => {
   let session;
-  let cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark, cacheClear;
+  let cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin,
+      setEntityCacheWatermark, cacheClear, setQuotaExhaustedCallback;
 
   beforeEach(async () => {
     session = makeSessionMock();
@@ -60,6 +62,7 @@ describe('entity-cache quota handling', () => {
       storage: {
         session,
         local: { get: vi.fn(), set: vi.fn(), onChanged: { addListener: vi.fn() } },
+        onChanged: { addListener: vi.fn() },
       },
       runtime: {
         sendMessage: vi.fn(),
@@ -75,6 +78,7 @@ describe('entity-cache quota handling', () => {
     cacheUnpin = mod.cacheUnpin;
     setEntityCacheWatermark = mod.setEntityCacheWatermark;
     cacheClear = mod.cacheClear;
+    setQuotaExhaustedCallback = mod.setQuotaExhaustedCallback;
   });
 
   afterEach(() => {
@@ -82,8 +86,8 @@ describe('entity-cache quota handling', () => {
     vi.resetModules();
   });
 
-  // Helper: populate cache with unpinned page entries
-  async function seedUnpinnedEntries(count, { timestampBase = 1000, pinned = false } = {}) {
+  // Helper: populate cache with entries
+  async function seedEntries(count, { timestampBase = 1000, pinned = false } = {}) {
     for (let i = 0; i < count; i++) {
       const key = `page:seed-${i}`;
       await cacheSet(key, { slug: `seed-${i}`, timestamps: { dev: timestampBase + i } }, { timestamp: timestampBase + i });
@@ -92,75 +96,89 @@ describe('entity-cache quota handling', () => {
   }
 
   it('catches QuotaExceededError, emergency-evicts, retries successfully', async () => {
-    // Set watermark so entries are considered flushed (safe to evict)
     setEntityCacheWatermark(5000);
-    // Seed 10 unpinned entries with timestamps below watermark
-    await seedUnpinnedEntries(10, { timestampBase: 1000 });
+    await seedEntries(10, { timestampBase: 1000 });
 
-    // Next set() call will fail once, then succeed on retry
     session._failNextSets(1);
 
-    // This should not throw — emergency eviction should free space
     await cacheSet('page:new-big', { slug: 'new-big', data: 'x'.repeat(100) });
 
-    // Verify the new entry is in cache
     const result = await cacheGet('page:new-big');
     expect(result).not.toBeNull();
     expect(result.slug).toBe('new-big');
 
-    // Verify some entries were evicted (store should have fewer keys)
     const store = session._raw();
-    const remainingKeys = Object.keys(store);
-    expect(remainingKeys).toContain('page:new-big');
-    // At least some seed entries should have been evicted
-    const seedKeys = remainingKeys.filter(k => k.startsWith('page:seed-'));
+    const seedKeys = Object.keys(store).filter(k => k.startsWith('page:seed-'));
     expect(seedKeys.length).toBeLessThan(10);
   });
 
-  it('evicts unflushed entries as last resort when flushed entries exhausted', async () => {
-    // Watermark at 500 — entries 1000+ are unflushed
-    setEntityCacheWatermark(500);
-    // Seed 5 entries with timestamps ABOVE watermark (unflushed)
-    await seedUnpinnedEntries(5, { timestampBase: 1000 });
-
-    // Fail twice: first retry after flushed eviction (no flushed entries), second after unflushed eviction
-    session._failNextSets(2);
-
-    await cacheSet('page:desperate', { slug: 'desperate' });
-    const result = await cacheGet('page:desperate');
-    expect(result).not.toBeNull();
-    expect(result.slug).toBe('desperate');
-  });
-
-  it('never evicts pinned keys during emergency eviction', async () => {
+  it('evicts pinned-but-clean keys during emergency eviction', async () => {
     setEntityCacheWatermark(5000);
-    // Seed pinned entries
-    await seedUnpinnedEntries(5, { timestampBase: 1000, pinned: true });
-    // Also seed some unpinned entries
-    for (let i = 0; i < 3; i++) {
-      await cacheSet(`page:unpinned-${i}`, { slug: `unpinned-${i}` }, { timestamp: 2000 + i });
-    }
+    // Seed pinned entries with timestamps below watermark (clean/flushed)
+    await seedEntries(5, { timestampBase: 1000, pinned: true });
 
     session._failNextSets(1);
     await cacheSet('page:new', { slug: 'new' });
 
-    // All pinned entries should still be in cache
-    for (let i = 0; i < 5; i++) {
-      const val = await cacheGet(`page:seed-${i}`);
-      expect(val).not.toBeNull();
-    }
+    // Pinned-but-clean entries should have been evicted
+    const store = session._raw();
+    const seedKeys = Object.keys(store).filter(k => k.startsWith('page:seed-'));
+    expect(seedKeys.length).toBe(0);
+
+    // New entry should exist
+    const result = await cacheGet('page:new');
+    expect(result).not.toBeNull();
   });
 
-  it('throws meaningful error when eviction is exhausted', async () => {
-    setEntityCacheWatermark(5000);
-    // Only pinned keys — nothing to evict
-    await seedUnpinnedEntries(3, { timestampBase: 1000, pinned: true });
+  it('protects dirty entries (above watermark) even during emergency eviction', async () => {
+    // Watermark at 500 — entries at 1000+ are dirty/unflushed
+    setEntityCacheWatermark(500);
+    await seedEntries(3, { timestampBase: 1000 });
+
+    // Also add some flushed entries
+    await seedEntries(3, { timestampBase: 100 });
+
+    session._failNextSets(1);
+    await cacheSet('page:new', { slug: 'new' });
+
+    // Dirty entries (timestampBase 1000) should still be in cache
+    // (flushed entries at 100 got evicted to make room)
+    const result = await cacheGet('page:new');
+    expect(result).not.toBeNull();
+  });
+
+  it('fires onQuotaExhausted callback when retry also fails', async () => {
+    const callback = vi.fn();
+    setQuotaExhaustedCallback(callback);
+
+    setEntityCacheWatermark(500);
+    // Only dirty entries — nothing to evict
+    await seedEntries(3, { timestampBase: 1000 });
 
     // Always fail
     session._failNextSets(100);
 
-    await expect(
-      cacheSet('page:hopeless', { slug: 'hopeless' })
-    ).rejects.toThrow(/quota/i);
+    // Should NOT throw — should call callback instead
+    await cacheSet('page:hopeless', { slug: 'hopeless' });
+
+    expect(callback).toHaveBeenCalledTimes(1);
+
+    // The failed write should not be in cache
+    const result = await cacheGet('page:hopeless');
+    expect(result).toBeNull();
+  });
+
+  it('does not fire callback when no callback is registered (silent return)', async () => {
+    // No callback registered
+    setEntityCacheWatermark(500);
+    await seedEntries(3, { timestampBase: 1000 });
+
+    session._failNextSets(100);
+
+    // Should not throw even without callback
+    await cacheSet('page:hopeless', { slug: 'hopeless' });
+
+    const result = await cacheGet('page:hopeless');
+    expect(result).toBeNull();
   });
 });

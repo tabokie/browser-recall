@@ -1,5 +1,7 @@
 // Popup — current-page dashboard
 import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, readCacheable, sendAction, saveSettingsValue, escapeHtml } from './utils.js';
+import { logDebug, logError } from './logger.js';
+import { applyTheme } from './theme.js';
 
 let currentSlug = '';
 let currentNotes = [];
@@ -179,7 +181,7 @@ function renderNotes(notes) {
           chrome.tabs.sendMessage(tab.id, { action: 'removeHighlightMark', noteSlug }).catch(() => {});
         }
       } catch (e) {
-        console.error('[popup] Delete note error:', e);
+        logError('[popup] Delete note error:', e);
       }
 
       currentNotes = currentNotes.filter(n => n.slug !== noteSlug);
@@ -199,7 +201,7 @@ function renderNotes(notes) {
       clearTimeout(saveTimeout);
       saveTimeout = setTimeout(async () => {
         const currentSlugForSave = textarea.dataset.noteSlug;
-        console.log(`[popup] Saving note for slug=${currentSlugForSave}`);
+        logDebug(`[popup] Saving note for slug=${currentSlugForSave}`);
         try {
           const resp = await chrome.runtime.sendMessage({
             action: 'updateNote',
@@ -210,7 +212,7 @@ function renderNotes(notes) {
             textarea.dataset.noteSlug = resp.noteSlug;
           }
         } catch (error) {
-          console.error('[popup] Note save error:', error);
+          logError('[popup] Note save error:', error);
         }
       }, 500);
     });
@@ -252,7 +254,7 @@ document.getElementById('pageNote').addEventListener('input', (e) => {
         }
       }
     } catch (error) {
-      console.error('[popup] Page note save error:', error);
+      logError('[popup] Page note save error:', error);
     }
   }, 500);
 });
@@ -476,7 +478,7 @@ async function createListAndPin(name) {
 
   await toggleListPin(listId);
 
-  console.log('[popup] Created list and pinned page:', name);
+  logDebug('[popup] Created list and pinned page:', name);
 }
 
 // Workspace mode (session-only, not persisted to disk)
@@ -621,9 +623,9 @@ function startEditingTitle() {
           url: currentEntry.url,
           user_title: newTitle
         });
-        console.log('[popup] User title updated to:', newTitle);
+        logDebug('[popup] User title updated to:', newTitle);
       } catch (error) {
-        console.error('[popup] Failed to save user title:', error);
+        logError('[popup] Failed to save user title:', error);
       }
     }
   }
@@ -648,19 +650,19 @@ document.getElementById('captureBtn').addEventListener('click', async () => {
   btn.textContent = 'Capturing...';
 
   try {
-    console.log('[popup] Capturing snapshot...');
+    logDebug('[popup] Capturing snapshot...');
     const resp = await chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' });
-    console.log('[popup] Capture response:', resp);
+    logDebug('[popup] Capture response:', resp);
     if (resp && resp.success) {
       const snapshotsResp = await sendAction({ action: 'listSnapshots', slug: currentSlug });
       renderSnapshots(snapshotsResp.snapshots || []);
     } else {
-      console.warn('[popup] Capture failed:', resp);
+      logDebug('[popup] Capture failed:', resp);
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab) chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: resp?.error || 'Capture failed' }).catch(() => {});
     }
   } catch (error) {
-    console.error('[popup] Capture error:', error);
+    logError('[popup] Capture error:', error);
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
     if (tab) chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: error.message || 'Capture failed' }).catch(() => {});
   }
@@ -704,9 +706,9 @@ async function showDashboard(tab) {
 
   // Fetch page info from background (which queries offscreen)
   try {
-    console.log(`[popup] Fetching page info for slug=${currentSlug}`);
+    logDebug(`[popup] Fetching page info for slug=${currentSlug}`);
     const info = await chrome.runtime.sendMessage({ action: 'getPageInfo', slug: currentSlug });
-    console.log('[popup] getPageInfo response:', info);
+    logDebug('[popup] getPageInfo response:', info);
 
     if (info && info.success) {
       if (info.entry) {
@@ -724,12 +726,12 @@ async function showDashboard(tab) {
       renderAttention(info.entry);
       renderLikes(info.entry);
       renderNotes(info.notes);
-      console.log(`[popup] Loaded ${info.notes?.length || 0} notes, ${info.snapshots?.length || 0} snapshots`);
+      logDebug(`[popup] Loaded ${info.notes?.length || 0} notes, ${info.snapshots?.length || 0} snapshots`);
     } else {
-      console.warn('[popup] getPageInfo returned failure:', info);
+      logDebug('[popup] getPageInfo returned failure:', info);
     }
   } catch (error) {
-    console.error('[popup] Could not load page info:', error);
+    logError('[popup] Could not load page info:', error);
   }
 
   // Render list chips and workspace bar
@@ -773,9 +775,9 @@ async function showDashboard(tab) {
         if (currentEntry) {
           currentEntry.title = freshTitle;
         }
-        console.log('[popup] Auto-updated title to:', freshTitle);
+        logDebug('[popup] Auto-updated title to:', freshTitle);
       } catch (error) {
-        console.warn('[popup] Title re-check failed:', error);
+        logDebug('[popup] Title re-check failed:', error);
       }
     }, 1000);
   }
@@ -783,6 +785,9 @@ async function showDashboard(tab) {
 
 // Initialize dashboard
 (async () => {
+  // Apply theme before any rendering to minimize flash
+  await applyTheme();
+
   // Verify device identity — CURRENT file must be readable
   const deviceResp = await chrome.runtime.sendMessage({ action: 'getDeviceId' });
   if (!deviceResp?.deviceId) {
@@ -861,9 +866,9 @@ async function showDashboard(tab) {
           chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: resp.error || 'Capture failed' }).catch(() => {});
         }
 
-        console.log('[popup] Capture once completed for blacklisted page');
+        logDebug('[popup] Capture once completed for blacklisted page');
       } catch (error) {
-        console.error('[popup] Capture once failed:', error);
+        logError('[popup] Capture once failed:', error);
         chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: error.message || 'Capture failed' }).catch(() => {});
       }
 

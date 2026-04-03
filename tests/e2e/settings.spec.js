@@ -90,4 +90,61 @@ test.describe('Settings persistence', () => {
     expect(hubs.value.rules[0].type).toBe('smart');
     expect(hubs.value.rules[0].config.fnSource).toContain('pathname');
   });
+
+  test('debug logging toggle writes to session storage', async ({ extContext, extensionId, setupDir }) => {
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Open settings and verify toggle is initially unchecked
+    await options.click('#settingsBtn');
+    await options.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
+    const isCheckedBefore = await options.isChecked('#debugLoggingToggle');
+    expect(isCheckedBefore).toBe(false);
+
+    // Enable debug logging
+    await options.check('#debugLoggingToggle');
+
+    // Verify session storage was updated
+    const afterEnable = await options.evaluate(() =>
+      chrome.storage.session.get(['debugLogging'])
+    );
+    expect(afterEnable.debugLogging).toBe(true);
+
+    // Disable debug logging
+    await options.uncheck('#debugLoggingToggle');
+    const afterDisable = await options.evaluate(() =>
+      chrome.storage.session.get(['debugLogging'])
+    );
+    expect(afterDisable.debugLogging).toBe(false);
+    await options.close();
+  });
+
+  test('debug logging toggle reflects saved state on reopen', async ({ extContext, extensionId, setupDir }) => {
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Enable debug logging
+    await options.click('#settingsBtn');
+    await options.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
+    await options.check('#debugLoggingToggle');
+
+    // Close and reopen settings modal
+    await options.click('#settingsClose');
+    await options.waitForSelector('#settingsModal', { state: 'hidden', timeout: 3000 });
+    await options.click('#settingsBtn');
+    await options.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
+
+    // Toggle should still be checked
+    const isChecked = await options.isChecked('#debugLoggingToggle');
+    expect(isChecked).toBe(true);
+    await options.close();
+  });
 });

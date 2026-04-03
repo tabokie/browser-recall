@@ -42,7 +42,11 @@ import { buildSeedFiles } from '../tests/seed-builder.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const extPath = path.join(__dirname, '../extension');
+const seedsDir = path.join(__dirname, '../seeds');
 const seed = process.argv.includes('--seed');
+// --case <name> loads seeds/<name>.mjs
+const caseIdx = process.argv.indexOf('--case');
+const seedCase = caseIdx >= 0 ? process.argv[caseIdx + 1] : null;
 
 // --- State dump: read all entities via the extension's message API ---
 
@@ -315,6 +319,44 @@ if (seed) {
     process.exit(1);
   }
   console.log('Sample data seeded (3 pages, 1 note).');
+}
+
+if (seedCase) {
+  const casePath = path.join(seedsDir, seedCase + '.mjs');
+  if (!fs.existsSync(casePath)) {
+    console.error(`Seed case not found: ${casePath}`);
+    process.exit(1);
+  }
+  console.log(`Loading seed case: ${seedCase}`);
+  const { default: generateSeed } = await import(casePath);
+  const { events, entities, deviceId, settings } = generateSeed();
+
+  console.log(`  ${events.length} events, ${Object.keys(entities || {}).length} entity overrides`);
+
+  const sampleFiles = await buildSeedFiles(events, {
+    deviceId,
+    settings: settings || {},
+    entities: entities || {},
+  });
+
+  console.log(`  ${sampleFiles.length} seed files generated. Uploading...`);
+
+  const seedResult = await setupPage.evaluate((files) =>
+    chrome.runtime.sendMessage({ action: 'seedTestData', files })
+  , sampleFiles);
+  if (!seedResult?.success) {
+    console.error('seedTestData failed:', seedResult);
+    process.exit(1);
+  }
+
+  const rehydrateResult = await setupPage.evaluate(() =>
+    chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+  );
+  if (!rehydrateResult?.success) {
+    console.error('rehydrateForTest failed:', rehydrateResult);
+    process.exit(1);
+  }
+  console.log(`Seed case "${seedCase}" ready.`);
 }
 
 await setupPage.close();

@@ -68,6 +68,7 @@ test.describe('Sync rate limit backoff', () => {
         syncEnabled: true,
         syncRepoUrl: 'https://github.com/user/repo',
         syncToken: 'ghp_test',
+        syncRememberToken: true,
       }},
     ]);
 

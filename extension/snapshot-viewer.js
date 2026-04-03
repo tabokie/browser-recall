@@ -1,3 +1,5 @@
+import { logDebug } from './logger.js';
+
 const params = new URLSearchParams(location.search);
 const slug = params.get('slug');
 const ts = params.get('ts');
@@ -73,7 +75,7 @@ frame.addEventListener('load', async () => {
       });
     });
   } catch (e) {
-    console.warn('[snapshot-viewer] highlight injection failed:', e);
+    logDebug('[snapshot-viewer] highlight injection failed:', e);
   }
 });
 

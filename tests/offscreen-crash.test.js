@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Extract port channel logic from background.js for unit testing.
 // ---------------------------------------------------------------------------
 
-function createPortChannel() {
+function createPortChannel({ nowFn } = {}) {
   let offscreenPort = null;
   let portCallId = 0;
   const portCallbacks = new Map();
@@ -21,6 +21,26 @@ function createPortChannel() {
 
   // Mock: tracks calls to setupOffscreenDocument
   const setupCalls = [];
+
+  // Crash-loop detection
+  const CRASH_LOOP_THRESHOLD = 3;
+  const CRASH_LOOP_WINDOW_MS = 60_000;
+  const offscreenDisconnects = [];
+  let pauseServiceCalls = [];
+
+  const _now = nowFn || (() => Date.now());
+
+  function trackOffscreenDisconnect() {
+    const now = _now();
+    offscreenDisconnects.push(now);
+    // Prune old entries
+    while (offscreenDisconnects.length && offscreenDisconnects[0] < now - CRASH_LOOP_WINDOW_MS) {
+      offscreenDisconnects.shift();
+    }
+    if (offscreenDisconnects.length >= CRASH_LOOP_THRESHOLD) {
+      pauseServiceCalls.push({ code: 'offscreen_crash', message: `Storage worker crashed ${CRASH_LOOP_THRESHOLD} times in ${CRASH_LOOP_WINDOW_MS / 1000}s` });
+    }
+  }
 
   function createMockPort() {
     const listeners = { message: [], disconnect: [] };
@@ -52,6 +72,7 @@ function createPortChannel() {
         cb({ success: false, error: 'Offscreen port disconnected' });
       }
       portCallbacks.clear();
+      trackOffscreenDisconnect();
     });
     drainScheduled = true; // mirrors scheduleDrainNotify()
   }
@@ -85,6 +106,8 @@ function createPortChannel() {
     get setupCalls() { return setupCalls; },
     get drainScheduled() { return drainScheduled; },
     resetDrainFlag() { drainScheduled = false; },
+    get pauseServiceCalls() { return pauseServiceCalls; },
+    get offscreenDisconnects() { return offscreenDisconnects; },
   };
 }
 
@@ -194,5 +217,59 @@ describe('Offscreen crash recovery', () => {
 
     // connectToOffscreen calls scheduleDrainNotify
     expect(channel.drainScheduled).toBe(true);
+  });
+});
+
+describe('Offscreen crash-loop detection', () => {
+  it('triggers pauseService after 3 disconnects within 60s', () => {
+    let now = 1000;
+    const channel = createPortChannel({ nowFn: () => now });
+
+    // Disconnect 1
+    channel.connectToOffscreen();
+    channel.port._fireDisconnect();
+    expect(channel.pauseServiceCalls).toHaveLength(0);
+
+    // Disconnect 2 — 10s later
+    now += 10_000;
+    channel.connectToOffscreen();
+    channel.port._fireDisconnect();
+    expect(channel.pauseServiceCalls).toHaveLength(0);
+
+    // Disconnect 3 — another 10s later (still within 60s window)
+    now += 10_000;
+    channel.connectToOffscreen();
+    channel.port._fireDisconnect();
+    expect(channel.pauseServiceCalls).toHaveLength(1);
+    expect(channel.pauseServiceCalls[0].code).toBe('offscreen_crash');
+  });
+
+  it('does not trigger pauseService after a single disconnect', () => {
+    const channel = createPortChannel();
+    channel.connectToOffscreen();
+    channel.port._fireDisconnect();
+    expect(channel.pauseServiceCalls).toHaveLength(0);
+  });
+
+  it('does not trigger pauseService when disconnects are spread over >60s', () => {
+    let now = 1000;
+    const channel = createPortChannel({ nowFn: () => now });
+
+    // Disconnect 1
+    channel.connectToOffscreen();
+    channel.port._fireDisconnect();
+
+    // Disconnect 2 — 31s later
+    now += 31_000;
+    channel.connectToOffscreen();
+    channel.port._fireDisconnect();
+
+    // Disconnect 3 — 31s after that (62s after first — outside window)
+    now += 31_000;
+    channel.connectToOffscreen();
+    channel.port._fireDisconnect();
+
+    // First disconnect is pruned (62s old), only 2 remain in window
+    expect(channel.pauseServiceCalls).toHaveLength(0);
   });
 });

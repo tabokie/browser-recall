@@ -4,13 +4,14 @@ import { generateSlugFromUrl, generateNoteSlug, dateKeyFromTimestamp } from './u
 import { effectOf } from './replay.js';
 import { validateRuleConfig, validateSmartRuleFn, matchRules, matchKeywordRule, buildPageDataFromEntry } from './rule-engine.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
-import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark, cacheClear } from './entity-cache.js';
+import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark, cacheClear, setQuotaExhaustedCallback } from './entity-cache.js';
 import { GitHubTransport, parseRepoUrl } from './sync-transport-github.js';
 import { FilesystemTransport } from './sync-transport-filesystem.js';
 import { WebDAVTransport } from './sync-transport-webdav.js';
 import { SyncManager } from './sync-manager.js';
+import { logDebug, logError } from './logger.js';
 
-console.log('Background script loading...');
+logDebug('Background script loading...');
 
 const DRAIN_INTERVAL_MS = 5000; // 5 seconds — data is safe in chrome.storage.local until drained
 const HISTORY_RECENT_DAYS = 7; // days of past history to cache for multi-day checks
@@ -28,6 +29,10 @@ const tabReportedUrls = new Map();
 // Use getDeviceId() instead of reading directly — it lazy-loads from CURRENT file on cache miss.
 let localDeviceId = null;
 
+// Service error state: null = healthy, { code, message, timestamp } = paused.
+// Error codes: 'session_quota', 'local_quota', 'offscreen_crash', 'fs_permission'.
+let serviceError = null;
+
 // Lazy getter: returns localDeviceId, loading from CURRENT file if null.
 // Handles both startup race (message before hydrateCache) and SW wakeup (no hydrateCache).
 async function getDeviceId() {
@@ -38,6 +43,31 @@ async function getDeviceId() {
   }
   return localDeviceId;
 }
+
+// ─── Service Downtime State ───────────────────────────────────────────
+
+function pauseService(code, message) {
+  serviceError = { code, message, timestamp: Date.now() };
+  chrome.action.setIcon({ path: { 16: 'icons/icon16-down.png', 48: 'icons/icon48-down.png', 128: 'icons/icon128-down.png' } });
+  chrome.storage.session.set({ serviceError }).catch(() => {});
+  logError(`Service paused: [${code}] ${message}`);
+}
+
+function resumeService() {
+  serviceError = null;
+  chrome.action.setIcon({ path: { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' } });
+  chrome.storage.session.remove(['serviceError']).catch(() => {});
+  logDebug('Service resumed');
+}
+
+function isServicePaused() {
+  return serviceError !== null;
+}
+
+// Register quota exhausted callback — bridges entity-cache to downtime infrastructure.
+setQuotaExhaustedCallback(() => {
+  pauseService('session_quota', 'Session storage full — all cached entities are dirty (unflushed). This usually means drain is stuck.');
+});
 
 // Session storage: in-memory IPC, survives SW termination, cleared on browser restart.
 // hydrateCache() re-populates from filesystem on every startup.
@@ -61,7 +91,7 @@ async function setupOffscreenDocument() {
       reasons: ['LOCAL_STORAGE'],
       justification: 'Manage filesystem operations for browsing history'
     });
-    console.log('Offscreen document created');
+    logDebug('Offscreen document created');
   } catch (e) {
     // TOCTOU: another caller created the document between getContexts and createDocument
     if (e.message?.includes('single offscreen')) return;
@@ -75,17 +105,34 @@ let offscreenPort = null;
 let portCallId = 0;
 const portCallbacks = new Map();
 
+// Crash-loop detection: 3 disconnects within 60s → pause service
+const offscreenDisconnects = [];
+const CRASH_LOOP_THRESHOLD = 3;
+const CRASH_LOOP_WINDOW_MS = 60_000;
+
+function trackOffscreenDisconnect() {
+  const now = Date.now();
+  offscreenDisconnects.push(now);
+  while (offscreenDisconnects.length && offscreenDisconnects[0] < now - CRASH_LOOP_WINDOW_MS) {
+    offscreenDisconnects.shift();
+  }
+  if (offscreenDisconnects.length >= CRASH_LOOP_THRESHOLD) {
+    pauseService('offscreen_crash', `Storage worker crashed ${CRASH_LOOP_THRESHOLD} times in ${CRASH_LOOP_WINDOW_MS / 1000}s`);
+  }
+}
+
 function connectToOffscreen() {
   offscreenPort = chrome.runtime.connect({ name: 'bg-offscreen' });
   offscreenPort.onMessage.addListener(handleOffscreenResponse);
   offscreenPort.onDisconnect.addListener(() => {
     offscreenPort = null;
-    console.warn('Offscreen port disconnected');
+    logDebug('Offscreen port disconnected');
     // Resolve all pending callbacks with error — prevents leaked promises
     for (const [id, cb] of portCallbacks) {
       cb({ success: false, error: 'Offscreen port disconnected' });
     }
     portCallbacks.clear();
+    trackOffscreenDisconnect();
   });
   // Kick drain for any entries buffered while offscreen was down
   scheduleDrainNotify();
@@ -97,8 +144,12 @@ async function handleOffscreenResponse(msg) {
     await ensureLogBuffer();
     logBuffer = logBuffer.filter(e => e.timestamp > msg.watermark);
     logBufferWatermark = msg.watermark;
-    chrome.storage.local.set({ logBuffer });
+    await persistLogBuffer();
     setEntityCacheWatermark(msg.watermark);
+    consecutiveDrainFailures = 0;
+    if (isServicePaused() && serviceError?.code === 'fs_permission') {
+      resumeService();
+    }
     return;
   }
   const cb = portCallbacks.get(msg.id);
@@ -174,7 +225,18 @@ async function ensureLogBuffer() {
   const { logBuffer: stored = [] } = await chrome.storage.local.get(['logBuffer']);
   logBuffer = stored;
   if (logBuffer.length > 0) {
-    console.log(`Restored ${logBuffer.length} pending log entries from storage.local`);
+    logDebug(`Restored ${logBuffer.length} pending log entries from storage.local`);
+  }
+}
+
+async function persistLogBuffer() {
+  try {
+    await chrome.storage.local.set({ logBuffer });
+  } catch (e) {
+    if (e.message?.includes('QUOTA_BYTES') || e.message?.includes('quota')) {
+      pauseService('local_quota', `Local storage full — logBuffer has ${logBuffer.length} undrained entries. Drain may be stuck.`);
+    }
+    throw e;
   }
 }
 
@@ -182,6 +244,8 @@ async function ensureLogBuffer() {
 // Offscreen documents don't receive chrome.storage.onChanged events
 // (only chrome.runtime is available). Send entries via port instead.
 let drainNotifyTimer = null;
+let consecutiveDrainFailures = 0;
+const DRAIN_FAILURE_THRESHOLD = 12; // 12 × 5s = 60s of stuck drain
 
 function scheduleDrainNotify() {
   if (drainNotifyTimer) return;
@@ -195,9 +259,13 @@ async function drainNow() {
     await ensureLogBuffer();
     if (logBuffer.length > 0) {
       offscreenPort.postMessage({ action: 'drainEntries', entries: logBuffer, deviceId: await getDeviceId() });
+      consecutiveDrainFailures++;
+      if (consecutiveDrainFailures >= DRAIN_FAILURE_THRESHOLD) {
+        pauseService('fs_permission', 'Storage drain has failed for 60+ seconds. File system permission may have been revoked.');
+      }
     }
   } catch (e) {
-    console.warn('drainNotify error:', e.message);
+    logDebug('drainNotify error:', e.message);
   }
 }
 
@@ -216,13 +284,12 @@ async function appendLog(entry) {
         // Still over limit — drop oldest (bounded data loss)
         logBuffer = logBuffer.slice(logBuffer.length - LOG_BUFFER_MAX_SIZE);
       }
-      console.warn(`logBuffer capped: ${before} → ${logBuffer.length}`);
+      logDebug(`logBuffer capped: ${before} → ${logBuffer.length}`);
     }
 
     try {
-      await chrome.storage.local.set({ logBuffer });
+      await persistLogBuffer();
     } catch (e) {
-      console.warn('logBuffer persist failed (quota?):', e.message);
       // In-memory buffer still has the entry — it will be drained to disk by offscreen
     }
   });
@@ -268,11 +335,14 @@ async function sessionWrite(effects) {
 // Returns effectOf result { key: entity | null }.
 // Serialized via logBuffer lock so concurrent calls see each other's cache writes.
 async function addLog(entry) {
+  if (isServicePaused()) {
+    throw new Error(`Service paused [${serviceError.code}]`);
+  }
   let effects;
   await withLock('logBuffer', async () => {
     await ensureLogBuffer();
     logBuffer.push(entry);
-    await chrome.storage.local.set({ logBuffer });
+    await persistLogBuffer();
     effects = await effectOf(entry, sessionLoad, { deviceId: await getDeviceId() });
     await sessionWrite(effects);
   });
@@ -284,7 +354,7 @@ async function addLog(entry) {
   cacheGet(todayKey).then(async today => {
     if (today == null) {
       // Cache miss — load from disk. Should not happen after hydration.
-      console.warn(`[addLog] history cache miss for ${todayKey}, loading from disk`);
+      logDebug(`[addLog] history cache miss for ${todayKey}, loading from disk`);
       const dateStr = dateKeyFromTimestamp(entry.timestamp);
       const resp = await requestOffscreen({ action: 'loadHistoryRange', from: dateStr, to: dateStr });
       assertOffscreenSuccess(resp, todayKey);
@@ -293,14 +363,14 @@ async function addLog(entry) {
     today.push(entry);
     cacheSet(todayKey, today, { timestamp: entry.timestamp });
     cachePin(todayKey);
-  }).catch(e => console.warn('[addLog] history cache update failed:', e.message));
-  ensureOffscreenPort().catch(e => console.warn('[addLog] offscreen port failed:', e.message));
+  }).catch(e => logDebug('[addLog] history cache update failed:', e.message));
+  ensureOffscreenPort().catch(e => logDebug('[addLog] offscreen port failed:', e.message));
   scheduleDrainNotify();
   // Refresh badge for active tab if a page entity was affected.
   if (Object.keys(effects).some(k => k.startsWith('page:'))) {
     chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([tab]) => {
       if (tab) updateBadgeForTab(tab.id, tab.url);
-    }).catch(e => console.warn('[addLog] badge update failed:', e.message));
+    }).catch(e => logDebug('[addLog] badge update failed:', e.message));
   }
   return effects;
 }
@@ -448,7 +518,7 @@ async function hydrateCache() {
     if (resp?.success && resp.settings) {
       await cacheSet('manifest:settings', resp.settings);
     }
-  } catch (e) { console.warn('Settings load failed:', e.message); }
+  } catch (e) { logDebug('Settings load failed:', e.message); }
 
   try {
     const metaResp = await requestOffscreen({ action: 'loadAllListMetadata' });
@@ -457,19 +527,19 @@ async function hydrateCache() {
         await cacheSet('list:' + list.slug, list);
       }
     }
-  } catch (e) { console.warn('List metadata load failed:', e.message); }
+  } catch (e) { logDebug('List metadata load failed:', e.message); }
 
   try {
     const orderResp = await requestOffscreen({ action: 'loadListOrder' });
     if (orderResp?.success && orderResp.entity) await cacheSet('manifest:list-order', orderResp.entity);
-  } catch (e) { console.warn('List order load failed:', e.message); }
+  } catch (e) { logDebug('List order load failed:', e.message); }
 
   try {
     const nmResp = await requestOffscreen({ action: 'loadNameMap' });
     if (nmResp?.success && nmResp.entity) {
       await cacheSet('manifest:name-to-id', nmResp.entity);
     }
-  } catch (e) { console.warn('Name-map load failed:', e.message); }
+  } catch (e) { logDebug('Name-map load failed:', e.message); }
 
   // Phase 1.1 (default list creation) runs AFTER hydrateCache returns —
   // it uses addLog() which calls readCacheable → await hydrationDone,
@@ -560,8 +630,8 @@ async function hydrateCache() {
       }
     }
 
-    console.log(`History cache: ${todayEntries.length} today, ${recentUrls.size} recent URLs`);
-  } catch (e) { console.warn('History cache load failed:', e.message); }
+    logDebug(`History cache: ${todayEntries.length} today, ${recentUrls.size} recent URLs`);
+  } catch (e) { logDebug('History cache load failed:', e.message); }
 
   // Phase 1.6: Pre-load page entities referenced by logBuffer from filesystem
   await ensureLogBuffer();
@@ -572,7 +642,7 @@ async function hydrateCache() {
     let todayForDedup = await cacheGet(todayKey);
     if (todayForDedup == null) {
       // Cache miss — load from disk. Should not happen after hydration.
-      console.warn(`[dedup] history cache miss for ${todayKey}, loading from disk`);
+      logDebug(`[dedup] history cache miss for ${todayKey}, loading from disk`);
       const dateStr = dateKeyFromTimestamp(Date.now());
       const resp = await requestOffscreen({ action: 'loadHistoryRange', from: dateStr, to: dateStr });
       assertOffscreenSuccess(resp, todayKey);
@@ -583,8 +653,8 @@ async function hydrateCache() {
       const before = logBuffer.length;
       logBuffer = logBuffer.filter(e => !flushedTimestamps.has(e.timestamp));
       if (logBuffer.length < before) {
-        console.log(`logBuffer dedup: ${before} → ${logBuffer.length} (${before - logBuffer.length} already flushed)`);
-        await chrome.storage.local.set({ logBuffer });
+        logDebug(`logBuffer dedup: ${before} → ${logBuffer.length} (${before - logBuffer.length} already flushed)`);
+        await persistLogBuffer();
       }
     }
   }
@@ -610,7 +680,7 @@ async function hydrateCache() {
             await cacheSet('page:' + slug, page);
           }
         }
-      } catch (e) { console.warn('Page pre-load failed:', e.message); }
+      } catch (e) { logDebug('Page pre-load failed:', e.message); }
     }
   }
 
@@ -621,7 +691,7 @@ async function hydrateCache() {
     try {
       const effects = await effectOf(entry, sessionLoadDuringHydration, { deviceId: localDeviceId });
       await sessionWrite(effects);
-    } catch (e) { console.warn('Hydration replay failed for entry:', e.message); }
+    } catch (e) { logDebug('Hydration replay failed for entry:', e.message); }
   }
 
   // Phase 2.5: Append logBuffer entries to their history:<date> keys.
@@ -658,12 +728,12 @@ async function hydrateCache() {
           }
           totalEntries += entries.length;
         }
-        console.log(`Remote log replay: ${resp.remotes.length} peers, ${totalEntries} entries`);
+        logDebug(`Remote log replay: ${resp.remotes.length} peers, ${totalEntries} entries`);
       }
     }
-  } catch (e) { console.warn('Remote log replay failed:', e.message); }
+  } catch (e) { logDebug('Remote log replay failed:', e.message); }
 
-  console.log('Cache hydrated');
+  logDebug('Cache hydrated');
 }
 
 // Generate device name on first run — writes CURRENT file and creates log directory.
@@ -714,7 +784,7 @@ async function ensureDefaultLists() {
         },
       });
     }
-  } catch (e) { console.warn('First-run default list creation failed:', e.message); }
+  } catch (e) { logDebug('First-run default list creation failed:', e.message); }
 }
 
 // ─── Smart-Rule Auto-Pin on Visit ────────────────────────────────────
@@ -754,7 +824,7 @@ async function evaluateSmartRulesForVisit(url, title) {
     };
     if (title) pinEntry.titles = { [url]: title };
     await addLog(pinEntry);
-    console.log(`Smart-rule: auto-pinned ${url} to ${listInfo.name}`);
+    logDebug(`Smart-rule: auto-pinned ${url} to ${listInfo.name}`);
   }
 }
 
@@ -1028,7 +1098,7 @@ async function performSync() {
     // Successful sync — clear any lingering rate limit state
     rateLimitedUntil = 0;
     lastSyncResult = { timestamp: Date.now(), pushed: pushResult.pushed, pulled: entriesReplayed > 0, entriesReplayed };
-    console.log(`[sync] push=${pushResult.pushed} (${pushResult.fileCount} files), pull=${pullResult.remoteEntries.length} peers, ${entriesReplayed} entries`);
+    logDebug(`[sync] push=${pushResult.pushed} (${pushResult.fileCount} files), pull=${pullResult.remoteEntries.length} peers, ${entriesReplayed} entries`);
     return lastSyncResult;
   } catch (error) {
     const msg = error.message;
@@ -1043,11 +1113,11 @@ async function performSync() {
         chrome.alarms.clear(SYNC_ALARM_NAME);
         lastSyncResult.disabled = true;
         lastSyncResult.authExpired = true;
-        console.warn(`[sync] auth error, token cleared, alarm disabled: ${msg}`);
+        logDebug(`[sync] auth error, token cleared, alarm disabled: ${msg}`);
       } else if (isNotFound) {
         chrome.alarms.clear(SYNC_ALARM_NAME);
         lastSyncResult.disabled = true;
-        console.warn(`[sync] permanent error, alarm disabled: ${msg}`);
+        logDebug(`[sync] permanent error, alarm disabled: ${msg}`);
       } else if (isRateLimit) {
         const resetEpochSec = error.rateLimitReset;
         const resetMs = resetEpochSec
@@ -1059,12 +1129,12 @@ async function performSync() {
         const retryTime = new Date(resetMs).toLocaleTimeString();
         lastSyncResult.error = `Rate limited, will retry at ${retryTime}`;
         lastSyncResult.rateLimitedUntil = resetMs;
-        console.warn(`[sync] rate limited until ${retryTime}`);
+        logDebug(`[sync] rate limited until ${retryTime}`);
       } else {
-        console.warn(`[sync] transient error, will retry next cycle: ${msg}`);
+        logDebug(`[sync] transient error, will retry next cycle: ${msg}`);
       }
     } else {
-      console.warn(`[sync] error (${method}): ${msg}`);
+      logDebug(`[sync] error (${method}): ${msg}`);
     }
     return lastSyncResult;
   } finally {
@@ -1086,7 +1156,7 @@ async function updateSyncAlarm() {
     chrome.alarms.clear(SYNC_RATE_LIMIT_ALARM);
     const intervalMinutes = Math.max(1, settings.syncIntervalMinutes || 5);
     chrome.alarms.create(SYNC_ALARM_NAME, { periodInMinutes: intervalMinutes });
-    console.log(`[sync] alarm set: every ${intervalMinutes} min`);
+    logDebug(`[sync] alarm set: every ${intervalMinutes} min`);
   } else {
     chrome.alarms.clear(SYNC_ALARM_NAME);
     chrome.alarms.clear(SYNC_RATE_LIMIT_ALARM);
@@ -1109,7 +1179,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 // ─── Initialization ───────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener(async () => {
-  console.log('Portal extension installed');
+  logDebug('Browser Recall extension installed');
 
   chrome.contextMenus.create({
     id: 'portal-highlight',
@@ -1119,14 +1189,14 @@ chrome.runtime.onInstalled.addListener(async () => {
 
   await ensureOffscreenPort();
   await ensureLogBuffer();
-  console.log('Storage initialized');
+  logDebug('Storage initialized');
 
   const response = await requestOffscreen({ action: 'getDirectoryInfo' });
   if (!response.info) {
-    console.log('Filesystem not configured - user needs to select directory');
+    logDebug('Filesystem not configured - user needs to select directory');
     chrome.runtime.openOptionsPage();
   } else {
-    console.log('Filesystem configured:', response.info.name);
+    logDebug('Filesystem configured:', response.info.name);
     hydrationDone = hydrateCache();
     await hydrationDone;
     await ensureDefaultLists();
@@ -1138,7 +1208,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onStartup.addListener(async () => {
   await ensureOffscreenPort();
   await ensureLogBuffer();
-  console.log('Extension started');
+  logDebug('Extension started');
 
   try {
     const response = await requestOffscreen({ action: 'getDirectoryInfo' });
@@ -1150,7 +1220,7 @@ chrome.runtime.onStartup.addListener(async () => {
       updateSyncAlarm();
     }
   } catch (error) {
-    console.warn('Startup hydration failed:', error.message);
+    logDebug('Startup hydration failed:', error.message);
   }
 });
 
@@ -1280,14 +1350,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!activeTab?.url) return;
   if (tab?.title && activeTab.title !== tab.title) {
-    console.warn('[context-menu] Active tab title mismatch, skipping');
+    logDebug('[context-menu] Active tab title mismatch, skipping');
     return;
   }
 
   try {
     await handleContextMenuHighlight(activeTab.url, activeTab.title, info.selectionText.trim(), activeTab.id);
   } catch (error) {
-    console.warn('[context-menu] Highlight error:', error.message);
+    logDebug('[context-menu] Highlight error:', error.message);
     if (activeTab.id > 0) {
       chrome.tabs.sendMessage(activeTab.id, {
         action: 'showErrorNotification',
@@ -1300,14 +1370,14 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 // ─── Keyboard Shortcuts ───────────────────────────────────────────────
 
 chrome.commands.onCommand.addListener(async (command) => {
-  console.log(`[background] Command received: ${command}`);
+  logDebug(`[background] Command received: ${command}`);
 
   const workspace = await cacheGet('workspace');
   if (workspace && workspace.mode === 'private') return;
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
-    console.log('[background] Command ignored: no suitable tab');
+    logDebug('[background] Command ignored: no suitable tab');
     return;
   }
 
@@ -1318,16 +1388,16 @@ chrome.commands.onCommand.addListener(async (command) => {
       await captureAndLog(tab.id, slug, timestamp, tab.url, tab.title);
       chrome.tabs.sendMessage(tab.id, { action: 'showCaptureNotification' }).catch(() => {});
     } catch (error) {
-      console.warn('[capture] ERROR:', error.message, error);
+      logDebug('[capture] ERROR:', error.message, error);
       chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: error.message }).catch(() => {});
     }
   } else if (command === 'highlight-selection') {
     try {
-      console.log(`[background] Sending highlightSelection to tab ${tab.id}`);
+      logDebug(`[background] Sending highlightSelection to tab ${tab.id}`);
       const resp = await chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
-      console.log('[background] highlightSelection response:', resp);
+      logDebug('[background] highlightSelection response:', resp);
     } catch (error) {
-      console.warn('[background] Could not highlight selection:', error.message);
+      logDebug('[background] Could not highlight selection:', error.message);
     }
   } else if (command === 'like-page' || command === 'dislike-page') {
     const delta = command === 'like-page' ? 1 : -1;
@@ -1338,7 +1408,7 @@ chrome.commands.onCommand.addListener(async (command) => {
       notifyMutation('history', { url: tab.url });
       chrome.tabs.sendMessage(tab.id, { action: 'showLikeNotification', delta }).catch(() => {});
     } catch (error) {
-      console.warn(`[${command}] ERROR:`, error.message, error);
+      logDebug(`[${command}] ERROR:`, error.message, error);
     }
   }
 });
@@ -1406,7 +1476,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             await captureAndLog(tab.id, slug, timestamp, tab.url, tab.title);
             sendResponse({ success: true, timestamp });
           } catch (error) {
-            console.warn('[capture-popup] ERROR:', error.message, error);
+            logDebug('[capture-popup] ERROR:', error.message, error);
             sendResponse({ success: false, error: error.message });
           }
           break;
@@ -1422,6 +1492,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'reportPage': {
           try {
+            if (isServicePaused()) {
+              sendResponse({ success: false, error: 'Service paused', code: serviceError.code });
+              break;
+            }
             const url = request.url;
 
             const rpWorkspace = await cacheGet('workspace');
@@ -1443,12 +1517,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                   const pageSlug = generateSlugFromUrl(url);
                   const existing = await readCacheable('page:' + pageSlug);
                   if (!existing) {
-                    console.log(`Skipping blacklisted URL (not in database): ${url}`);
+                    logDebug(`Skipping blacklisted URL (not in database): ${url}`);
                     sendResponse({ success: true });
                     return;
                   }
                 }
-                console.log(`Blacklisted URL but already in database, continuing: ${url}`);
+                logDebug(`Blacklisted URL but already in database, continuing: ${url}`);
               } else {
                 sendResponse({ success: true });
                 return;
@@ -1502,24 +1576,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         };
                         if (title) pinEntry.titles = { [url]: title };
                         await addLog(pinEntry);
-                        console.log(`Workspace: auto-pinned ${url} to ${pn.name}`);
+                        logDebug(`Workspace: auto-pinned ${url} to ${pn.name}`);
                       }
                     }
                   }
 
                   if (rpWorkspace.autoSnapshot && sender.tab) {
                     captureAndLog(sender.tab.id, slug, entry.timestamp, url, title).catch(err => {
-                      console.warn('[auto-snapshot] ERROR:', err.message, err);
+                      logDebug('[auto-snapshot] ERROR:', err.message, err);
                     });
                   }
                 } catch (err) {
-                  console.warn('Workspace: auto-pin/snapshot error:', err.message);
+                  logDebug('Workspace: auto-pin/snapshot error:', err.message);
                 }
               }
 
               // Smart-rule auto-pin: evaluate all lists with rules
               evaluateSmartRulesForVisit(url, title).catch(err => {
-                console.warn('Smart-rule auto-pin error:', err.message);
+                logDebug('Smart-rule auto-pin error:', err.message);
               });
 
               notifyMutation('history', { url });
@@ -1539,10 +1613,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               });
             }
 
-            console.log(`Processed page report: ${url} (initial=${!!request.isInitialLoad}, leaving=${!!request.isLeaving})`);
+            logDebug(`Processed page report: ${url} (initial=${!!request.isInitialLoad}, leaving=${!!request.isLeaving})`);
             sendResponse({ success: true });
           } catch (error) {
-            console.error('Error processing reportPage:', error);
+            logError('Error processing reportPage:', error);
             sendResponse({ success: false, error: error.message });
           }
           break;
@@ -1552,7 +1626,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'clearWriteQueue': {
           logBuffer = [];
-          await chrome.storage.local.set({ logBuffer });
+          await persistLogBuffer();
           sendResponse({ success: true });
           break;
         }
@@ -1580,7 +1654,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const note = await readCacheable(ref);
             if (note) notes.push(note);
           }
-          console.debug(`[I/O] loadPageNotes(${request.slug}): ${notes.length} notes in ${(performance.now() - t0).toFixed(1)}ms`);
+          logDebug(`[I/O] loadPageNotes(${request.slug}): ${notes.length} notes in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, notes });
           break;
         }
@@ -1609,7 +1683,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const ts = parseInt(ref.slice(ref.lastIndexOf('-') + 1), 10);
             return { timestamp: ts, hasMd: true, hasHtml: true };
           }).sort((a, b) => b.timestamp - a.timestamp);
-          console.debug(`[I/O] listSnapshots(${slug}): ${snapshots.length} from entity in ${(performance.now() - t0).toFixed(1)}ms`);
+          logDebug(`[I/O] listSnapshots(${slug}): ${snapshots.length} from entity in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse({ success: true, snapshots });
           break;
         }
@@ -1650,7 +1724,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'loadHistoryBatch': {
           const t0 = performance.now();
           const resp = await requestOffscreen({ action: 'loadHistoryBatch', files: request.files });
-          console.debug(`[I/O] loadHistoryBatch: ${request.files.length} files in ${(performance.now() - t0).toFixed(1)}ms`);
+          logDebug(`[I/O] loadHistoryBatch: ${request.files.length} files in ${(performance.now() - t0).toFixed(1)}ms`);
           sendResponse(resp);
           break;
         }
@@ -2046,6 +2120,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'permanentDelete': {
+          if (isServicePaused()) { sendResponse({ success: false, error: 'Service paused', code: serviceError.code }); break; }
           const key = request.key;
           // 1. Drain all pending log entries first
           await ensureOffscreenPort();
@@ -2084,6 +2159,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         case 'permanentDeleteAll': {
+          if (isServicePaused()) { sendResponse({ success: false, error: 'Service paused', code: serviceError.code }); break; }
           // 1. Drain all pending log entries first
           await ensureOffscreenPort();
           await drainNow();
@@ -2121,6 +2197,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'initializeFilesystem': {
           const resp = await requestOffscreen({ action: 'initializeFilesystem' });
+          if (!resp?.success) { sendResponse(resp); break; }
+          // Write custom device name if provided (before hydration reads CURRENT)
+          if (request.deviceName) {
+            localDeviceId = request.deviceName;
+            await requestOffscreen({ action: 'initDevice', deviceId: request.deviceName });
+          }
+          // Re-hydrate now that filesystem is available
+          hydrationDone = hydrateCache();
+          await hydrationDone;
+          await ensureDefaultLists();
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'hasDirectoryHandle': {
+          const resp = await requestOffscreen({ action: 'hasDirectoryHandle' });
           sendResponse(resp);
           break;
         }
@@ -2160,7 +2252,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'resetForTest': {
           // 1. Clear logBuffer
           logBuffer = [];
-          await chrome.storage.local.set({ logBuffer });
+          await persistLogBuffer();
           // 2. Clear entity cache (session storage + in-memory LRU)
           await cacheClear();
           // 3. Reset ALL in-memory state (SW survives across tests)
@@ -2170,14 +2262,51 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           rateLimitedUntil = 0;
           lastSyncResult = null;
           syncInProgress = false;
+          serviceError = null;
+          consecutiveDrainFailures = 0;
           chrome.alarms.clear(SYNC_RATE_LIMIT_ALARM);
           if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
-          // 4. Tell offscreen to wipe directory and reset drain state
+          // 4. Re-establish test directory (offscreen may have restarted after
+          //    killOffscreenForTest, losing its OPFS handle) then wipe it
+          await requestOffscreen({ action: 'setTestDirectory' });
           await requestOffscreen({ action: 'resetDirectory' });
           // 5. Re-hydrate from (now empty) filesystem
           hydrationDone = hydrateCache();
           await hydrationDone;
           await ensureDefaultLists();
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'pauseServiceForTest': {
+          // Simulate a service pause for testing the downtime UI.
+          pauseService(request.code || 'session_quota', request.message || 'Test pause');
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'resumeService': {
+          resumeService();
+          consecutiveDrainFailures = 0;
+          // Re-run hydration so service is fully operational again.
+          hydrationDone = hydrateCache();
+          await hydrationDone;
+          scheduleDrainNotify();
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'clearDirectoryHandleForTest': {
+          const resp = await requestOffscreen({ action: 'clearDirectoryHandleForTest' });
+          localDeviceId = null;
+          sendResponse(resp);
+          break;
+        }
+
+        case 'killOffscreenForTest': {
+          // Close the offscreen document to simulate a crash.
+          // This triggers onDisconnect → reject pending callbacks + crash-loop tracking.
+          try { await chrome.offscreen.closeDocument(); } catch (_) { /* already closed */ }
           sendResponse({ success: true });
           break;
         }
@@ -2197,7 +2326,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'setLogBufferForTest': {
           // Inject entries into logBuffer for testing hydration replay paths.
           logBuffer = request.entries || [];
-          await chrome.storage.local.set({ logBuffer });
+          await persistLogBuffer();
           sendResponse({ success: true });
           break;
         }
@@ -2208,7 +2337,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // Pass keepLogBuffer:true to preserve injected logBuffer entries for replay.
           if (!request.keepLogBuffer) {
             logBuffer = [];
-            await chrome.storage.local.set({ logBuffer });
+            await persistLogBuffer();
           }
           await cacheClear();
           localDeviceId = null;
@@ -2217,6 +2346,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           hydrationDone = hydrateCache();
           await hydrationDone;
           await ensureDefaultLists();
+          await loadSyncTokenFromDisk();
           sendResponse({ success: true });
           break;
         }
@@ -2409,6 +2539,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // ── Sync ──
 
         case 'syncNow': {
+          if (isServicePaused()) { sendResponse({ success: false, error: 'Service paused', code: serviceError.code }); break; }
           const result = await performSync();
           sendResponse({ success: true, ...result });
           break;
@@ -2486,7 +2617,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse({ success: false, error: `Unknown action: ${request.action}` });
       }
     } catch (error) {
-      console.error('Error handling message:', error);
+      logError('Error handling message:', error);
       sendResponse({ success: false, error: error.message });
     }
   })();

@@ -65,6 +65,13 @@ export class VirtualScroller {
     this._render(true);
   }
 
+  // Re-render currently visible rows (e.g. after in-place data mutation like enrichment).
+  refreshVisible() {
+    if (!this.renderRow || this.data.length === 0) return;
+    this.renderedRange = { start: -1, end: -1 };
+    this._render(true);
+  }
+
   // Append new items to the dataset (for demand-loading).
   // Updates padding so the scrollbar reflects the new total height.
   appendData(newItems) {

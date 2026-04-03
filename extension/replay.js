@@ -262,7 +262,7 @@ export async function effectOf(entry, load, context = {}) {
     const pageKey = PAGE_PREFIX + slug;
     let page = result[pageKey] !== undefined ? result[pageKey] : await load(pageKey);
     if (!page) {
-      page = { ...defaultEntity(pageKey), url };
+      page = { ...defaultEntity(pageKey), url, createdAt: ts };
       if (title) page.title = title;
     }
     result[pageKey] = page;

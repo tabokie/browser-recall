@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "manual": "node scripts/manual-test-browser.mjs",
-    "manual:seed": "node scripts/manual-test-browser.mjs --seed"
+    "manual:seed": "node scripts/manual-test-browser.mjs --seed",
+    "manual:case": "node scripts/manual-test-browser.mjs --case"
   },
   "keywords": [
     "chrome-extension",

@@ -71,6 +71,22 @@ background: session cache → readFs()  ← filesystem via offscreen, caches int
 
 `loadSettingsValue(subKey, default)` reads `(await readCacheable('settings'))?.[subKey]` and returns `defaultValue` when the sub-field is `undefined`.
 
+### History Rendering (Non-blocking Enrichment)
+
+History rows render immediately from log data (title, URL, timestamps), before entity enrichment completes. Enrichment (`enrichFromEntityStorage`) runs in the background and mutates entries in place, then `vs.refreshVisible()` re-renders visible rows to show entity-derived tags (liked, note, snapshot, list badges).
+
+```
+displayHistoryRows(entries)
+  processHistoryForDisplay()         ← sync: dedup, sort, build display entries
+  vs.setData(sorted, renderFn)       ← immediate: rows visible with log-only data
+  enrichFromEntityStorage(entries)    ← background: batch readCacheable('page:*')
+    .then(() => vs.refreshVisible()) ← re-render visible rows with entity tags
+```
+
+Same pattern applies to `onLoadMore` (demand-loading on scroll): `vs.appendData()` first, then background enrichment. When non-default filters are active in explore view, enrichment must await (filters depend on enriched fields).
+
+File reads in `filesystem-storage.js` `_loadFromDeviceFiles()` are parallelized via `Promise.all` (all files in a batch read concurrently).
+
 ### Write Path
 
 All mutations go through `addLog(entry)`:
@@ -94,6 +110,29 @@ addLog(entry)
 - **Offscreen crash**: Port `onDisconnect` resolves all pending `portCallbacks` with `{ success: false }` and clears the Map. `connectToOffscreen` on reconnect calls `scheduleDrainNotify` to resume drain.
 - **FS permission revocation**: `drainQueue` clears `pendingDrainEntries` only after successful JSONL writes (preserved for retry on failure). Per-entity checkpoint flush wrapped in individual try/catch — one entity failure does not block others.
 - **Lock timeout**: Both background and offscreen `withLock` have `LOCK_TIMEOUT_MS` (30s) timeout to prevent permanent deadlock from hung operations.
+
+### Service Downtime (Unified Error State)
+
+When a fatal condition is detected (session quota exhausted, local quota exhausted, offscreen crash loop, FS permission revoked), the background enters a **paused** state:
+
+```
+pauseService(code, message)
+  → serviceError = { code, message, timestamp }
+  → chrome.action.setIcon(downtime icons)
+  → chrome.storage.session.set({ serviceError })
+
+resumeService()
+  → serviceError = null
+  → chrome.action.setIcon(normal icons)
+  → chrome.storage.session.remove(['serviceError'])
+  → re-run hydrateCache()
+```
+
+**Mutation guard:** `addLog(entry)` throws `Error('Service paused [code]')` when `isServicePaused()` is true. The outer `catch` in the message listener converts this to `{ success: false, error }`. Explicit `isServicePaused()` guards also exist on `reportPage`, `permanentDelete`, `permanentDeleteAll`, and `syncNow` to avoid unnecessary work before reaching `addLog`.
+
+**Error codes:** `session_quota`, `local_quota`, `offscreen_crash`, `fs_permission`. Each maps to a specific message and action button in the options page error banner.
+
+**Options page banner:** `#serviceErrorBanner` (fixed top bar) — read from `chrome.storage.session` on `initialize()`, live-updated via `chrome.storage.onChanged` listener. `fs_permission` shows "Re-grant Access" button (calls `fsStorage.selectDirectory()` + `resumeService`); all others show "Reload Extension" button (calls `chrome.runtime.reload()`).
 
 ### Device Identity (`CURRENT` file)
 
@@ -140,6 +179,8 @@ Page entities are created **only by explicit user actions** — never by passive
 - `rate_page` — user likes/unlikes a page
 
 `visit_page` and `leave_page` **only enrich existing entities** (title, attention data, referrer links). Passive visits that don't match an existing entity leave no entity footprint — they exist only as JSONL history entries.
+
+All entity creation goes through `ensurePageEntity(url, ts, title)`, which sets `createdAt` to the entry timestamp when creating a new entity. `createdAt` is immutable — subsequent visits/actions do not overwrite it. Used as a stable sort tiebreaker in search results (relevance score primary, `createdAt` secondary).
 
 ### Page Eligibility GC
 

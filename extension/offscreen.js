@@ -11,8 +11,9 @@
 import { FileSystemStorage } from './filesystem-storage.js';
 import { effectOf, defaultEntity } from './replay.js';
 import { generateNoteSlug, dateKeyFromTimestamp } from './utils.js';
+import { logDebug, logError } from './logger.js';
 
-console.log('Offscreen document loaded');
+logDebug('Offscreen document loaded');
 
 const fsStorage = new FileSystemStorage();
 
@@ -24,7 +25,7 @@ let pendingWatermark = 0; // Stored when drain completes but port is disconnecte
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'bg-offscreen') return;
   bgPort = port;
-  console.log('Port connected to background');
+  logDebug('Port connected to background');
 
   // Deliver any watermark that was pending while port was disconnected
   if (pendingWatermark > 0) {
@@ -46,7 +47,7 @@ chrome.runtime.onConnect.addListener((port) => {
 
   port.onDisconnect.addListener(() => {
     bgPort = null;
-    console.warn('Port disconnected from background');
+    logDebug('Port disconnected from background');
   });
 });
 
@@ -91,6 +92,15 @@ async function handleRequest(request) {
         return { success: true };
       }
 
+      case 'hasDirectoryHandle': {
+        return { success: true, hasHandle: !!fsStorage.directoryHandle };
+      }
+
+      case 'clearDirectoryHandleForTest': {
+        fsStorage.directoryHandle = null;
+        return { success: true };
+      }
+
       case 'getDirectoryInfo': {
         const info = await fsStorage.getDirectoryInfo();
         return { success: true, info };
@@ -99,7 +109,7 @@ async function handleRequest(request) {
       case 'listSnapshots': {
         const t0 = performance.now();
         const snapshots = await fsStorage.listSnapshots(request.slug);
-        console.debug(`[I/O] listSnapshots(${request.slug}): ${snapshots.length} snapshots in ${(performance.now() - t0).toFixed(1)}ms`);
+        logDebug(`[I/O] listSnapshots(${request.slug}): ${snapshots.length} snapshots in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, snapshots };
       }
 
@@ -148,21 +158,21 @@ async function handleRequest(request) {
       case 'loadPageNotes': {
         const t0 = performance.now();
         const notes = await fsStorage.loadPageNotes(request.slug);
-        console.debug(`[I/O] loadPageNotes(${request.slug}): ${notes.length} notes in ${(performance.now() - t0).toFixed(1)}ms`);
+        logDebug(`[I/O] loadPageNotes(${request.slug}): ${notes.length} notes in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, notes };
       }
 
       case 'loadAllNotes': {
         const t0 = performance.now();
         const notesMap = await fsStorage.loadAllNotes();
-        console.debug(`[I/O] loadAllNotes: ${Object.keys(notesMap).length} pages in ${(performance.now() - t0).toFixed(1)}ms`);
+        logDebug(`[I/O] loadAllNotes: ${Object.keys(notesMap).length} pages in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, notesMap };
       }
 
       case 'loadPageBatch': {
         const t0 = performance.now();
         const pages = await fsStorage.loadPageBatch(request.slugs);
-        console.debug(`[I/O] loadPageBatch: ${request.slugs.length} slugs in ${(performance.now() - t0).toFixed(1)}ms`);
+        logDebug(`[I/O] loadPageBatch: ${request.slugs.length} slugs in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, pages };
       }
 
@@ -175,11 +185,11 @@ async function handleRequest(request) {
         const t0 = performance.now();
         if (request.listId) {
           const pins = await fsStorage.loadListPinsById(request.listId);
-          console.debug(`[I/O] loadListPins(${request.listId}): ${pins.length} pins in ${(performance.now() - t0).toFixed(1)}ms`);
+          logDebug(`[I/O] loadListPins(${request.listId}): ${pins.length} pins in ${(performance.now() - t0).toFixed(1)}ms`);
           return { success: true, pins };
         } else {
           const allPins = await fsStorage.loadListPins();
-          console.debug(`[I/O] loadListPins: ${Object.keys(allPins).length} lists in ${(performance.now() - t0).toFixed(1)}ms`);
+          logDebug(`[I/O] loadListPins: ${Object.keys(allPins).length} lists in ${(performance.now() - t0).toFixed(1)}ms`);
           return { success: true, pins: allPins };
         }
       }
@@ -187,14 +197,14 @@ async function handleRequest(request) {
       case 'loadListPinsById': {
         const t0 = performance.now();
         const pins = await fsStorage.loadListPinsById(request.listId);
-        console.debug(`[I/O] loadListPinsById(${request.listId}): ${pins.length} pins in ${(performance.now() - t0).toFixed(1)}ms`);
+        logDebug(`[I/O] loadListPinsById(${request.listId}): ${pins.length} pins in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, pins };
       }
 
       case 'loadListEntity': {
         const t0 = performance.now();
         const entity = await fsStorage.loadListPinsEntity(request.listId);
-        console.debug(`[I/O] loadListEntity(${request.listId}): ${(performance.now() - t0).toFixed(1)}ms`);
+        logDebug(`[I/O] loadListEntity(${request.listId}): ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, entity };
       }
 
@@ -227,7 +237,7 @@ async function handleRequest(request) {
       case 'loadSettings': {
         const t0 = performance.now();
         const settings = await fsStorage.loadSettings();
-        console.debug(`[I/O] loadSettings: ${Object.keys(settings).length} keys in ${(performance.now() - t0).toFixed(1)}ms`);
+        logDebug(`[I/O] loadSettings: ${Object.keys(settings).length} keys in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, settings };
       }
 
@@ -236,7 +246,7 @@ async function handleRequest(request) {
         try {
           const fh = await fsStorage.resolveFile('manifest/list-name-to-id.json');
           const entity = await fsStorage.readJson(fh);
-          console.debug(`[I/O] loadNameMap: ${(performance.now() - t0).toFixed(1)}ms`);
+          logDebug(`[I/O] loadNameMap: ${(performance.now() - t0).toFixed(1)}ms`);
           return { success: true, entity };
         } catch {
           return { success: true, entity: { timestamp: 0, paths: {} } };
@@ -265,14 +275,14 @@ async function handleRequest(request) {
       case 'loadHistoryBatch': {
         const t0 = performance.now();
         const entries = await fsStorage.loadHistoryFiles(request.files);
-        console.debug(`[I/O] loadHistoryBatch: ${request.files.length} files, ${entries.length} items in ${(performance.now() - t0).toFixed(1)}ms`);
+        logDebug(`[I/O] loadHistoryBatch: ${request.files.length} files, ${entries.length} items in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, entries };
       }
 
       case 'loadHistoryRange': {
         const t0 = performance.now();
         const { entries, files } = await fsStorage.loadHistoryFileRange(request.from, request.to);
-        console.debug(`[I/O] loadHistoryRange(${request.from}..${request.to}): ${files.length} files, ${entries.length} entries in ${(performance.now() - t0).toFixed(1)}ms`);
+        logDebug(`[I/O] loadHistoryRange(${request.from}..${request.to}): ${files.length} files, ${entries.length} entries in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, entries, files };
       }
 
@@ -297,7 +307,7 @@ async function handleRequest(request) {
       case 'loadAllListMetadata': {
         const t0 = performance.now();
         const lists = await fsStorage.loadAllListMetadata();
-        console.debug(`[I/O] loadAllListMetadata: ${lists.length} lists in ${(performance.now() - t0).toFixed(1)}ms`);
+        logDebug(`[I/O] loadAllListMetadata: ${lists.length} lists in ${(performance.now() - t0).toFixed(1)}ms`);
         return { success: true, lists };
       }
 
@@ -446,7 +456,7 @@ async function handleRequest(request) {
         return { success: false, error: `Unknown action: ${request.action}` };
     }
   } catch (error) {
-    console.error('Error handling request:', error);
+    logError('Error handling request:', error);
     return { success: false, error: error.message };
   }
 }
@@ -476,7 +486,7 @@ async function drainQueue() {
 
   try {
     if (!(await fsStorage.verifyPermission())) {
-      console.warn('Drain: no filesystem permission, retrying in 30s');
+      logDebug('Drain: no filesystem permission, retrying in 30s');
       setTimeout(scheduleDrain, 30000);
       draining = false;
       return;
@@ -600,7 +610,7 @@ async function drainQueue() {
         }
         await writable.close();
       } catch (e) {
-        console.error('JSONL append failed:', e);
+        logError('JSONL append failed:', e);
         setTimeout(scheduleDrain, 30000);
         draining = false;
         return;
@@ -658,7 +668,7 @@ async function drainQueue() {
           });
         }
       } catch (e) {
-        console.error(`Entity flush failed for ${key}:`, e);
+        logError(`Entity flush failed for ${key}:`, e);
       }
     }
 
@@ -678,7 +688,7 @@ async function drainQueue() {
       }
     }
   } catch (e) {
-    console.error('drainQueue error:', e);
+    logError('drainQueue error:', e);
     setTimeout(scheduleDrain, 30000);
   }
 
@@ -693,14 +703,14 @@ async function initialize() {
     const hasPermission = await fsStorage.verifyPermission();
 
     if (hasPermission) {
-      console.log('Filesystem storage ready');
+      logDebug('Filesystem storage ready');
       // Trigger initial drain in case there are pending log entries
       scheduleDrain();
     } else {
-      console.log('No filesystem permission yet');
+      logDebug('No filesystem permission yet');
     }
   } catch (error) {
-    console.log('Filesystem not configured yet:', error.message);
+    logDebug('Filesystem not configured yet:', error.message);
   }
 }
 

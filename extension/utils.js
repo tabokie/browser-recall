@@ -1,4 +1,5 @@
 // Shared utility functions
+import { logDebug } from './logger.js';
 
 /** Max words of page body text captured for rule matching. Duplicated in content.js (non-module). */
 export const BODY_WORD_LIMIT = 200;
@@ -12,7 +13,7 @@ export async function readCacheable(key, includeDeleted = false) {
       if (!includeDeleted && cached[key]?.deleted) return null;
       return cached[key];
     }
-  } catch (e) { console.warn('[readCacheable] session cache error:', e.message); }
+  } catch (e) { logDebug('[readCacheable] session cache error:', e.message); }
   const resp = await chrome.runtime.sendMessage({ action: 'readCacheable', key, includeDeleted });
   if (resp?.success === false) {
     throw new Error(resp.error || `Failed to load ${key}`);
@@ -40,7 +41,7 @@ export async function saveSettingsValue(key, value) {
   try {
     await chrome.runtime.sendMessage({ action: 'saveSettingsKey', key, value });
   } catch (error) {
-    console.warn('saveSettingsValue file write failed:', error.message);
+    logDebug('saveSettingsValue file write failed:', error.message);
   }
 }
 

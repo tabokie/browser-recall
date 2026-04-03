@@ -1,27 +1,28 @@
 // Save Page WE bridge — handles SPWE message protocol and capture orchestration
 // Only uses Chrome APIs (scripting, tabs, fetch). No deps back to background.js.
+import { logDebug } from './logger.js';
 
 const savepageResolvers = new Map();
 
 export function captureSavePage(tabId) {
   return new Promise((resolve, reject) => {
     savepageResolvers.set(tabId, { resolve, reject });
-    console.log('[savepage] injecting scripts into tab', tabId);
+    logDebug('[savepage] injecting scripts into tab', tabId);
 
     // Inject content-frame.js into all frames, then content.js into main frame
     chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
       files: ['savepage/content-frame.js']
     }).then(() => {
-      console.log('[savepage] content-frame.js injected, now injecting content.js');
+      logDebug('[savepage] content-frame.js injected, now injecting content.js');
       return chrome.scripting.executeScript({
         target: { tabId },
         files: ['savepage/content.js']
       });
     }).then(() => {
-      console.log('[savepage] content.js injected, waiting for scriptLoaded message');
+      logDebug('[savepage] content.js injected, waiting for scriptLoaded message');
     }).catch(err => {
-      console.warn('[savepage] injection error:', err.message);
+      logDebug('[savepage] injection error:', err.message);
       savepageResolvers.delete(tabId);
       reject(err);
     });
@@ -117,7 +118,7 @@ export function initSavepageBridge() {
     switch (message.type) {
       case 'scriptLoaded':
         // Reply with performAction to kick off the save
-        console.log('[savepage] scriptLoaded received from tab', tabId);
+        logDebug('[savepage] scriptLoaded received from tab', tabId);
         if (tabId != null) {
           chrome.tabs.sendMessage(tabId, {
             type: 'performAction',
@@ -165,19 +166,19 @@ export function initSavepageBridge() {
         break;
 
       case 'savepageDone': {
-        console.log('[savepage] savepageDone from tab', tabId, 'html length:', message.html?.length);
+        logDebug('[savepage] savepageDone from tab', tabId, 'html length:', message.html?.length);
         const resolver = savepageResolvers.get(tabId);
         if (resolver) {
           savepageResolvers.delete(tabId);
           resolver.resolve(message.html);
         } else {
-          console.warn('[savepage] savepageDone but no resolver for tab', tabId);
+          logDebug('[savepage] savepageDone but no resolver for tab', tabId);
         }
         break;
       }
 
       case 'saveExit': {
-        console.warn('[savepage] saveExit from tab', tabId);
+        logDebug('[savepage] saveExit from tab', tabId);
         const resolver = savepageResolvers.get(tabId);
         if (resolver) {
           savepageResolvers.delete(tabId);

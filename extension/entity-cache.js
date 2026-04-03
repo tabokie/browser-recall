@@ -5,11 +5,21 @@
 // when count exceeds EVICTION_LIMIT, but only if timestamp <= persistWatermark
 // (i.e., already flushed to disk).
 
+import { logError } from './logger.js';
+
 let lruKeys = []; // LRU order: oldest at index 0, newest at end
 const keyTimestamps = new Map(); // key → timestamp for watermark guard
 const pinnedKeys = new Set();
 let persistWatermark = 0;
 const EVICTION_LIMIT = 500; // max unpinned keys before eviction
+
+// ─── Quota Exhausted Callback ────────────────────────────────────────
+// Registered by background.js to call pauseService without circular imports.
+let onQuotaExhausted = null;
+
+export function setQuotaExhaustedCallback(cb) {
+  onQuotaExhausted = cb;
+}
 
 // ─── Default Pin Policy ───────────────────────────────────────────────
 // Returns true if key should be pinned by default (never evicted).
@@ -53,18 +63,17 @@ export async function cacheSet(key, value, { timestamp } = {}) {
     await chrome.storage.session.set({ [key]: value });
   } catch (e) {
     if (e.name === 'QuotaExceededError') {
+      logError('Session quota exceeded, attempting emergency eviction');
       await emergencyEvict();
       try {
         await chrome.storage.session.set({ [key]: value });
-      } catch (e2) {
-        if (e2.name === 'QuotaExceededError') {
-          // Last resort: evict unflushed unpinned keys too
-          await emergencyEvict({ includeUnflushed: true });
-          await chrome.storage.session.set({ [key]: value });
-          // If this still throws, it propagates — nothing left to evict
-        } else {
-          throw e2;
+      } catch (retryErr) {
+        if (retryErr.name === 'QuotaExceededError') {
+          logError('Session quota still exceeded after emergency eviction');
+          onQuotaExhausted?.();
+          return; // Don't update LRU tracking for failed write
         }
+        throw retryErr;
       }
     } else {
       throw e;
@@ -107,25 +116,25 @@ export async function cacheRemove(key) {
 }
 
 // ─── Emergency Eviction (quota exceeded) ─────────────────────────────
-// Aggressively evicts unpinned keys to free space. By default only evicts
-// flushed keys (ts <= persistWatermark). With includeUnflushed, evicts all
-// unpinned keys as a last resort.
+// Aggressively evicts ALL keys with timestamp <= persistWatermark,
+// including pinned keys. Only dirty entries (above watermark) are protected.
+// Ignores pin status and EVICTION_LIMIT — this is a last-resort measure.
 
-async function emergencyEvict({ includeUnflushed = false } = {}) {
+async function emergencyEvict() {
   const toRemove = [];
   for (const key of lruKeys) {
-    if (pinnedKeys.has(key)) continue;
-    if (!includeUnflushed) {
-      const ts = keyTimestamps.get(key) || 0;
-      if (ts > persistWatermark) continue;
-    }
+    const ts = keyTimestamps.get(key) || 0;
+    if (ts > persistWatermark) continue; // dirty — protect
     toRemove.push(key);
   }
   if (toRemove.length > 0) {
     await chrome.storage.session.remove(toRemove);
     const removeSet = new Set(toRemove);
     lruKeys = lruKeys.filter(k => !removeSet.has(k));
-    for (const k of toRemove) keyTimestamps.delete(k);
+    for (const k of toRemove) {
+      keyTimestamps.delete(k);
+      pinnedKeys.delete(k);
+    }
   }
 }
 

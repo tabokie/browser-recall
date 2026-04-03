@@ -1,6 +1,7 @@
 // File System Storage using File System Access API
 // Manages writing history entries to a user-selected directory
 import { generateSlugFromUrl } from './utils.js';
+import { logError } from './logger.js';
 
 function isNotFound(error) {
   return error?.name === 'NotFoundError';
@@ -261,7 +262,7 @@ class FileSystemStorage {
 
       return { success: true };
     } catch (error) {
-      console.error('Error writing to filesystem:', error);
+      logError('Error writing to filesystem:', error);
       return { success: false, error: error.message };
     }
   }
@@ -350,20 +351,24 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
-    const entries = [];
-    for (const { device, name } of fileList) {
+    const results = await Promise.all(fileList.map(async ({ device, name }) => {
       try {
         const path = `data/logs/${device}/${name}`;
         const fh = await this.resolveFile(path);
         const file = await fh.getFile();
         const text = await file.text();
+        const fileEntries = [];
         for (const line of text.split('\n')) {
           if (!line.trim()) continue;
-          try { entries.push(JSON.parse(line)); } catch {}
+          try { fileEntries.push(JSON.parse(line)); } catch {}
         }
-      } catch (error) { if (!isNotFound(error)) throw error; }
-    }
-    return entries;
+        return fileEntries;
+      } catch (error) {
+        if (!isNotFound(error)) throw error;
+        return [];
+      }
+    }));
+    return results.flat();
   }
 
   // Read and parse specific .jsonl files by flat name (searches all device dirs + root)

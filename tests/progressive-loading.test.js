@@ -326,6 +326,9 @@ describe.each(['warm', 'degraded'])('Progressive loading (%s cache)', (cacheMode
       case 'getDeviceId':
         return { success: true, deviceId: 'test-device' };
 
+      case 'hasDirectoryHandle':
+        return { success: true, hasHandle: true };
+
       case 'listHistoryFiles':
         return { success: true, files: FILES_NEWEST_FIRST };
 
@@ -400,7 +403,7 @@ describe.each(['warm', 'degraded'])('Progressive loading (%s cache)', (cacheMode
     localData = {};
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
     mockSearchBatchFn.mockReset();
     mockSearchBatchFn.mockImplementation(async () => []);
@@ -420,6 +423,12 @@ describe.each(['warm', 'degraded'])('Progressive loading (%s cache)', (cacheMode
     }
 
     setupChromeMock();
+
+    // Provide uFuzzy global for fuzzyMatchPhase0 (loaded via <script> in real extension)
+    if (!globalThis.uFuzzy) {
+      const { default: uFuzzyModule } = await import('@leeoniya/ufuzzy');
+      globalThis.uFuzzy = uFuzzyModule;
+    }
   });
 
   afterEach(async () => {
@@ -754,16 +763,19 @@ describe.each(['warm', 'degraded'])('Progressive loading (%s cache)', (cacheMode
   // Estimated chart bars
   // -------------------------------------------------------------------------
   describe('Estimated chart bars', () => {
-    // 25 files spanning Dec 2025 through Jan 2026, newest-first
+    // 100 files spanning Sep–Dec 2025, newest-first.
+    // Using 100 files ensures that even after explore's onLoadMore chains
+    // (historyFileBatch=10, HISTORY_MAX_FILES=100), some files remain unloaded
+    // when showCategory('all') runs with only a few hundred ms of tick.
     const EST_FILES = [];
     const EST_SIZES = {};
     const EST_FILE_MAP = {};
-    for (let i = 0; i < 25; i++) {
-      const d = new Date(Date.UTC(2025, 11, 8 + i)); // Dec 8 2025 → Jan 1 2026
+    for (let i = 0; i < 100; i++) {
+      const d = new Date(Date.UTC(2025, 8, 24 + i)); // Sep 24 2025 → Jan 1 2026
       const dateStr = d.toISOString().slice(0, 10);
       const filename = dateStr + '.jsonl';
       EST_FILES.push(filename);
-      EST_SIZES[filename] = 2000 + i * 200; // varying sizes, ~10–22 entries per file
+      EST_SIZES[filename] = 2000 + (i % 20) * 200; // varying sizes
     }
     // Sort newest-first
     EST_FILES.sort().reverse();
@@ -808,7 +820,7 @@ describe.each(['warm', 'degraded'])('Progressive loading (%s cache)', (cacheMode
       // Chart should be visible
       expect(chartFrameVisible()).toBe(true);
 
-      // Should have estimated bars for unloaded dates (15 files not in first batch)
+      // Should have estimated bars for unloaded dates
       const estimatedGroups = document.querySelectorAll('#chartBars .chart-bar-group.estimated');
       expect(estimatedGroups.length).toBeGreaterThan(0);
 
@@ -816,10 +828,10 @@ describe.each(['warm', 'degraded'])('Progressive loading (%s cache)', (cacheMode
       const realGroups = document.querySelectorAll('#chartBars .chart-bar-group.has-data:not(.estimated)');
       expect(realGroups.length).toBeGreaterThan(0);
 
-      // Date range should start from Dec 1 (month boundary of Dec 8)
+      // Date range should start from Sep 1 (month boundary of Sep 24)
       const allGroups = document.querySelectorAll('#chartBars .chart-bar-group');
       const firstDate = allGroups[0]?.dataset.date;
-      expect(firstDate).toBe('2025-12-01');
+      expect(firstDate).toBe('2025-09-01');
     });
   });
 
@@ -1035,6 +1047,279 @@ describe.each(['warm', 'degraded'])('Progressive loading (%s cache)', (cacheMode
 
       const html2 = document.getElementById('relatedResults').innerHTML;
       expect(html2).toContain('Vue Docs');
+    });
+
+    it('T-content-5: Phase 0 fuzzy matching finds typo queries via uFuzzy', async () => {
+      populateCache();
+      setupMockDirTree();
+
+      const importDone = importOptions();
+      await importDone;
+      await tick(100);
+
+      // Block WASM phases so only Phase 0 results appear
+      const searchDeferred = createDeferred();
+      const notesDeferred = createDeferred();
+      const snapshotsDeferred = createDeferred();
+      mockSearchBatchFn.mockImplementation(async () => {
+        await searchDeferred.promise;
+        return [];
+      });
+      mockSearchNotesFn.mockImplementation(async () => {
+        await notesDeferred.promise;
+        return [];
+      });
+      mockSearchSnapshotsFn.mockImplementation(async () => {
+        await snapshotsDeferred.promise;
+        return [];
+      });
+
+      // "Todya" is a transposition typo for "Today" — should fuzzy-match "Today Page X"
+      await typeSearchQuery('Todya');
+      await tick(50);
+
+      const rows = pinnedOnlyRows();
+      expect(rows.length).toBeGreaterThan(0);
+
+      // All results should be "Today" pages
+      for (const row of rows) {
+        const titleEl = row.querySelector('.result-title');
+        expect(titleEl.textContent).toMatch(/Today/);
+      }
+
+      // Exact substring should also still work
+      searchDeferred.resolve();
+      notesDeferred.resolve();
+      snapshotsDeferred.resolve();
+      await tick(200);
+    });
+
+    it('T-content-6: Phase 0 exact substring still works when uFuzzy is loaded', async () => {
+      populateCache();
+      setupMockDirTree();
+
+      const importDone = importOptions();
+      await importDone;
+      await tick(100);
+
+      // Block WASM phases
+      mockSearchBatchFn.mockImplementation(async () => []);
+      mockSearchNotesFn.mockImplementation(async () => []);
+      mockSearchSnapshotsFn.mockImplementation(async () => []);
+
+      // "Today" exact substring match — should work as before
+      await typeSearchQuery('Today');
+      await tick(50);
+
+      const rows = pinnedOnlyRows();
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        const titleEl = row.querySelector('.result-title');
+        expect(titleEl.textContent).toMatch(/Today/);
+      }
+    });
+
+    it('T-content-7: Quoted exact match is unaffected by fuzzy matching', async () => {
+      populateCache();
+      setupMockDirTree();
+
+      const importDone = importOptions();
+      await importDone;
+      await tick(100);
+
+      // Block WASM phases
+      mockSearchBatchFn.mockImplementation(async () => []);
+      mockSearchNotesFn.mockImplementation(async () => []);
+      mockSearchSnapshotsFn.mockImplementation(async () => []);
+
+      // Quoted "Today" should still use word-boundary matching
+      await typeSearchQuery('"Today"');
+      await tick(50);
+
+      const rows = pinnedOnlyRows();
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        const titleEl = row.querySelector('.result-title');
+        expect(titleEl.textContent).toMatch(/Today/);
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Non-blocking enrichment tests
+  // ---------------------------------------------------------------------------
+  describe('Non-blocking enrichment', () => {
+    // Page entities with extra fields (childIds, parentIds, likes) that only
+    // appear after enrichment. These simulate the enrichment adding tags to rows.
+    // Use the same slug format as makeEntry (url.replace(/[^a-z0-9]/gi, '-').substring(0, 40))
+    const PAGE_ENTITIES = {};
+    for (let i = 0; i < 20; i++) {
+      const url = `https://example.com/today${i}`;
+      const slug = url.replace(/[^a-z0-9]/gi, '-').substring(0, 40);
+      PAGE_ENTITIES[slug] = {
+        slug,
+        url,
+        title: `Enriched Today ${i}`,
+        childIds: ['note:n1'],        // triggers "note" tag
+        parentIds: ['list:col-rust'],  // triggers list tag
+        likes: 1,                      // triggers "liked" tag
+      };
+    }
+
+    it('T-enrich-1: showCategory renders rows before enrichment completes', async () => {
+      populateCache();
+
+      // Defer all page: readCacheable lookups (enrichment path)
+      const enrichDeferred = createDeferred();
+      const originalHandler = (msg) => {
+        switch (msg.key) {
+          case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
+          case 'manifest:list-order': return { success: true, value: sessionData['manifest:list-order'] || TEST_LIST_ORDER };
+          case 'manifest:name-to-id': return { success: true, value: { timestamp: 0, paths: {} } };
+          case 'manifest:orphaned': return { success: true, value: { timestamp: 0, entries: [] } };
+          default: {
+            if (msg.key in sessionData) return { success: true, value: sessionData[msg.key] };
+            for (const list of TEST_LISTS) {
+              if (msg.key === 'list:' + list.slug) return { success: true, value: { ...list, pins: TEST_LIST_PINS[list.slug] || [] } };
+            }
+            return { success: true, value: undefined };
+          }
+        }
+      };
+      actionOverrides['readCacheable'] = async (msg) => {
+        // Non-page keys resolve immediately
+        if (!msg.key.startsWith('page:')) return originalHandler(msg);
+        // Page keys wait for enrichDeferred
+        await enrichDeferred.promise;
+        const slug = msg.key.slice(5);
+        const entity = PAGE_ENTITIES[slug];
+        return { success: true, value: entity || undefined };
+      };
+
+      // Also make session.get miss for page: keys (forces readCacheable fallback)
+      for (const key of Object.keys(sessionData)) {
+        if (key.startsWith('page:')) delete sessionData[key];
+      }
+
+      // Inject category button BEFORE importing so options.js binds its event listener
+      const sidebarContent = document.querySelector('.sidebar-content');
+      const allBtn = document.createElement('div');
+      allBtn.className = 'sidebar-item';
+      allBtn.dataset.category = 'all';
+      sidebarContent.appendChild(allBtn);
+
+      // Let initialize() complete (renders Explore by default)
+      const importDone = importOptions();
+      await importDone;
+      await tick(100);
+
+      // Click "All History"
+      allBtn.click();
+      await tick(200);
+
+      // Key assertion: rows should be visible BEFORE enrichment resolves
+      const rows = resultRows();
+      expect(rows.length).toBeGreaterThan(0);
+
+      // Enrichment tags should NOT be present yet (enrichment still pending)
+      const likedTags = document.querySelectorAll('#results .card-tag-liked');
+      expect(likedTags.length).toBe(0);
+
+      // Now resolve enrichment
+      enrichDeferred.resolve();
+      await tick(200);
+
+      // After enrichment, tags should appear on re-rendered rows
+      const likedTagsAfter = document.querySelectorAll('#results .card-tag-liked');
+      expect(likedTagsAfter.length).toBeGreaterThan(0);
+    });
+
+    it('T-enrich-2: onLoadMore appends rows before enrichment completes', async () => {
+      populateCache();
+
+      // Create many files so first batch doesn't load them all
+      const MANY_FILES = [];
+      const MANY_FILE_MAP = {};
+      for (let i = 0; i < 20; i++) {
+        const d = new Date(Date.UTC(2026, 1, 15 - i));
+        const dateStr = d.toISOString().slice(0, 10);
+        const filename = dateStr + '.jsonl';
+        MANY_FILES.push(filename);
+        MANY_FILE_MAP[filename] = makeFileEntries(dateStr, i * 5, 5, `Batch${i}`);
+      }
+      MANY_FILES.sort().reverse();
+
+      actionOverrides['listHistoryFiles'] = () => ({
+        success: true,
+        files: MANY_FILES,
+        sizes: {},
+      });
+      actionOverrides['loadHistoryBatch'] = (msg) => {
+        const entries = [];
+        for (const f of msg.files) {
+          if (MANY_FILE_MAP[f]) entries.push(...MANY_FILE_MAP[f]);
+        }
+        return { success: true, entries };
+      };
+
+      // Defer page enrichment
+      const enrichDeferred = createDeferred();
+      actionOverrides['readCacheable'] = async (msg) => {
+        if (!msg.key.startsWith('page:')) {
+          // Fall through to default handling for non-page keys
+          if (msg.key === 'manifest:settings') return { success: true, value: TEST_SETTINGS };
+          if (msg.key === 'manifest:list-order') return { success: true, value: sessionData['manifest:list-order'] || TEST_LIST_ORDER };
+          if (msg.key === 'manifest:name-to-id') return { success: true, value: { timestamp: 0, paths: {} } };
+          if (msg.key === 'manifest:orphaned') return { success: true, value: { timestamp: 0, entries: [] } };
+          if (msg.key in sessionData) return { success: true, value: sessionData[msg.key] };
+          for (const list of TEST_LISTS) {
+            if (msg.key === 'list:' + list.slug) return { success: true, value: { ...list, pins: TEST_LIST_PINS[list.slug] || [] } };
+          }
+          return { success: true, value: undefined };
+        }
+        await enrichDeferred.promise;
+        return { success: true, value: undefined };
+      };
+
+      // Remove page: keys from session so readCacheable falls back
+      for (const key of Object.keys(sessionData)) {
+        if (key.startsWith('page:')) delete sessionData[key];
+      }
+
+      // Inject category button BEFORE importing so options.js binds its event listener
+      const sidebarContent = document.querySelector('.sidebar-content');
+      const allBtn = document.createElement('div');
+      allBtn.className = 'sidebar-item';
+      allBtn.dataset.category = 'all';
+      sidebarContent.appendChild(allBtn);
+
+      const importDone = importOptions();
+      await importDone;
+      await tick(100);
+
+      // Navigate to All History
+      allBtn.click();
+      await tick(200);
+
+      // Initial batch rows should be visible
+      const initialRows = resultRows();
+      expect(initialRows.length).toBeGreaterThan(0);
+      const initialCount = initialRows.length;
+
+      // Trigger onLoadMore (simulates scroll near end)
+      const vs = document.getElementById('results')._virtualScroller;
+      expect(vs).toBeDefined();
+      expect(vs.onLoadMore).toBeTypeOf('function');
+      vs.onLoadMore();
+      await tick(200);
+
+      // New rows should be appended WITHOUT waiting for enrichment
+      const afterLoadMore = vs.data.length;
+      expect(afterLoadMore).toBeGreaterThan(initialCount);
+
+      // Clean up
+      enrichDeferred.resolve();
+      await tick(100);
     });
   });
 });

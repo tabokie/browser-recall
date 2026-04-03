@@ -271,6 +271,26 @@ describe('effectOf: visit_page', () => {
     expect(page.title).toBe('Updated');
     expect(page.timestamps['test-device']).toBe(200);
   });
+
+  it('checkpoint sets createdAt when creating new entity', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const result = await effectOf(
+      { timestamp: 100, action: 'visit_page', url: 'https://a.com', title: 'A', checkpoint: true },
+      nullLoad,
+      CTX,
+    );
+    expect(result[`page:${slug}`].createdAt).toBe(100);
+  });
+
+  it('visit_page does not overwrite createdAt on existing entity', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const result = await effectOf(
+      { timestamp: 200, action: 'visit_page', url: 'https://a.com', title: 'A' },
+      makeLoad({ [`page:${slug}`]: { slug, createdAt: 50, parentIds: [], childIds: [], timestamps: { 'test-device': 100 } } }),
+      CTX,
+    );
+    expect(result[`page:${slug}`].createdAt).toBe(50);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -402,6 +422,26 @@ describe('effectOf: rate_page', () => {
       CTX,
     );
     expect(result[`page:${slug}`].title).toBe('Page A');
+  });
+
+  it('sets createdAt when creating new entity', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const result = await effectOf(
+      { timestamp: 100, action: 'rate_page', url: 'https://a.com', likes: 1 },
+      nullLoad,
+      CTX,
+    );
+    expect(result[`page:${slug}`].createdAt).toBe(100);
+  });
+
+  it('does not overwrite createdAt on existing entity', async () => {
+    const slug = generateSlugFromUrl('https://a.com');
+    const result = await effectOf(
+      { timestamp: 200, action: 'rate_page', url: 'https://a.com', likes: 1 },
+      makeLoad({ [`page:${slug}`]: { slug, createdAt: 50, likes: 0, parentIds: [], childIds: [], timestamps: { 'test-device': 100 } } }),
+      CTX,
+    );
+    expect(result[`page:${slug}`].createdAt).toBe(50);
   });
 
   it('idempotency: skips likes when timestamps[device] >= entry.timestamp', async () => {

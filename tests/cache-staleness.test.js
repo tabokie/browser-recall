@@ -313,6 +313,9 @@ describe.each(['warm', 'degraded'])('Cache staleness (%s cache)', (cacheMode) =>
       case 'getDeviceId':
         return { success: true, deviceId: 'test-device' };
 
+      case 'hasDirectoryHandle':
+        return { success: true, hasHandle: true };
+
       case 'readCacheable':
         // Simulate background readCacheable: dispatch to known handlers
         switch (msg.key) {
@@ -839,15 +842,19 @@ describe.each(['warm', 'degraded'])('Cache staleness (%s cache)', (cacheMode) =>
     const vs = relatedContainer._virtualScroller;
     expect(vs).toBeTruthy();
 
-    // First batch: 10 files × 5 items = 50 items, sorted
-    expect(vs.data.length).toBe(50);
+    // First batch loads 10 files × 5 items = 50 items. Virtual scroller may
+    // eagerly trigger onLoadMore for small datasets, loading the 11th file too.
+    const initialCount = vs.data.length;
+    expect(initialCount).toBeGreaterThanOrEqual(50);
 
-    // Trigger demand-load of batch 2 (file 11, 5 items)
-    expect(typeof vs.onLoadMore).toBe('function');
-    await vs.onLoadMore();
-    await tick(100);
+    if (initialCount < 55) {
+      // Trigger demand-load of remaining file if not already loaded
+      expect(typeof vs.onLoadMore).toBe('function');
+      await vs.onLoadMore();
+      await tick(100);
+    }
 
-    // After demand-load: 55 items total
+    // All 55 items should now be loaded
     expect(vs.data.length).toBe(55);
 
     // ALL items must be in non-increasing lastVisit order (desc)
