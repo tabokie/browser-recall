@@ -218,6 +218,51 @@ describe('GitHubTransport', () => {
     });
   });
 
+  describe('empty repo initialization', () => {
+    it('initializes repo via Contents API when blob creation returns 409', async () => {
+      const files = [{ path: 'data/notes/n.json', content: '{}' }];
+
+      // First blob creation fails with 409 (empty repo)
+      mockFetch.mockResolvedValueOnce(mockResponse(
+        { message: 'Git Repository is empty.', status: '409' }, 409,
+      ));
+      // _initializeEmptyRepo: PUT contents/.gitkeep
+      mockFetch.mockResolvedValueOnce(mockResponse({ content: { sha: 'init-sha' } }, 201));
+      // Retry blob creation succeeds
+      mockFetch.mockResolvedValueOnce(mockResponse({ sha: 'b1' }, 201));
+      // tree
+      mockFetch.mockResolvedValueOnce(mockResponse({ sha: 't1' }, 201));
+      // commit
+      mockFetch.mockResolvedValueOnce(mockResponse({ sha: 'c1' }, 201));
+      // ref update (branch doesn't exist yet on fresh repo)
+      mockFetch.mockResolvedValueOnce(mockResponse({ message: 'Reference does not exist' }, 422));
+      // create ref fallback
+      mockFetch.mockResolvedValueOnce(mockResponse({ ref: 'refs/heads/dev1', object: { sha: 'c1' } }, 201));
+
+      const result = await transport.pushTree('dev1', files);
+      expect(result).toEqual({ sha: 'c1' });
+
+      // Verify the init call: PUT /repos/.../contents/.gitkeep
+      const initCall = mockFetch.mock.calls[1];
+      expect(initCall[0]).toBe('https://api.github.com/repos/testuser/testrepo/contents/.gitkeep');
+      expect(initCall[1].method).toBe('PUT');
+      const initBody = JSON.parse(initCall[1].body);
+      expect(initBody.message).toMatch(/init/i);
+      expect(initBody.branch).toBe('dev1');
+    });
+  });
+
+  describe('deleteBranch', () => {
+    it('deletes the branch ref via DELETE', async () => {
+      mockFetch.mockResolvedValueOnce(mockResponse(null, 204));
+      await transport.deleteBranch('dev1');
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.github.com/repos/testuser/testrepo/git/refs/heads/dev1',
+        expect.objectContaining({ method: 'DELETE' }),
+      );
+    });
+  });
+
   describe('error handling', () => {
     it('throws on 401 unauthorized', async () => {
       mockFetch.mockResolvedValueOnce(mockResponse({ message: 'Bad credentials' }, 401));

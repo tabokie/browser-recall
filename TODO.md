@@ -13,7 +13,7 @@
 
 ## Sync
 
-- [x] **Token security (P0).** GitHub OAuth Device Flow via `github-oauth.js`. Token stored in `chrome.storage.session` by default (session-only, cleared on browser restart). Optional "Remember on disk" persists to settings.json. Manual PAT entry as secondary option. Three-state auth UI (disconnected/device-flow/connected). Auth errors (401) clear token and stop sync.
+- [x] **Token security (P0).** Personal access token auth via `github-oauth.js`. Token stored in `chrome.storage.session` by default (session-only, cleared on browser restart). Optional "Remember on disk" persists to settings.json. Two-state auth UI (disconnected/connected). Auth errors (401) clear token and stop sync.
 - [ ] **Conflict visibility UI.** No user notification when a remote LWW override silently wins (e.g., remote delete overrides local restore). Surface as transient notifications in the options page.
 
 ## Security

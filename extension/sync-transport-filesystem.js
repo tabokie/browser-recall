@@ -88,4 +88,14 @@ export class FilesystemTransport {
   async createBranch(name) {
     await this._ensureDir(name);
   }
+
+  async deleteBranch(name) {
+    let files;
+    try {
+      files = await this._listFiles(name);
+    } catch { return; }
+    for (const f of files) {
+      try { await this._removeFile(`${name}/${f.path}`); } catch { /* best-effort */ }
+    }
+  }
 }

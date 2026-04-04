@@ -147,6 +147,43 @@ test.describe('Rule operations', () => {
     await page.close();
   });
 
+  test('addRule rejects smart rule with syntax error in fnSource', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+    ]);
+
+    const page = await openHelperPage(extContext, extensionId);
+    const result = await page.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'addRule',
+        listId: 'reading',
+        rule: {
+          type: 'smart',
+          config: {
+            description: 'broken syntax',
+            fnSource: 'return page.title.length >>',
+          },
+        },
+      })
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/compile|SyntaxError|Unexpected/i);
+
+    // Verify rule was NOT saved
+    const entity = await page.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+    );
+    expect(entity.value.rules).toHaveLength(0);
+    await page.close();
+  });
+
   test('addRule rejects smart rule with banned globals in fnSource', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
@@ -786,6 +823,137 @@ test.describe('Rules UI', () => {
     // Pinned pages section should appear with both pages checked, 1 match
     await expect(options.locator('#rulesPinsPreview')).toBeVisible({ timeout: 10000 });
     await expect(options.locator('#rulesPinsPreviewCount')).toContainText('1 matches (2 checked)', { timeout: 10000 });
+
+    await options.close();
+  });
+
+  test('function rule hides body in display mode, shows when editing', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const fnSource = 'return page.title.length > 10 ? 1 : 0;';
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
+        rules: [{ id: 'rule-s-test-0001', type: 'smart', config: { description: 'Long titles', fnSource }, createdAt: now }],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.locator('.sidebar-item[data-list-id="reading"]').click();
+    await waitForListView(options);
+
+    // In display mode: function body should be hidden
+    const ruleEntry = options.locator('.rule-entry');
+    await expect(ruleEntry).toBeVisible({ timeout: 5000 });
+    await expect(ruleEntry.locator('.rule-type-badge')).toHaveText('function');
+    await expect(ruleEntry.locator('.rule-desc')).toHaveText('Long titles');
+    await expect(ruleEntry.locator('.rule-fn-source')).toHaveCount(0);
+
+    // Click edit — function source should be visible in textarea
+    await ruleEntry.locator('.rule-edit').click();
+    const editRow = options.locator('.rule-entry.rule-editing');
+    await expect(editRow).toBeVisible();
+    await expect(editRow.locator('.rule-smart-fn-input')).toBeVisible();
+    await expect(editRow.locator('.rule-smart-fn-input')).toHaveValue(fnSource);
+
+    await options.close();
+  });
+
+  test('function rule textarea has at least 20 rows in edit mode', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.locator('.sidebar-item[data-list-id="reading"]').click();
+    await waitForListView(options);
+
+    // Open add form and switch to function type
+    await options.locator('#rulesAddBtn').click();
+    await options.locator('.rule-type-option[data-type="smart"]').click();
+
+    const textarea = options.locator('.rule-smart-fn-input');
+    await expect(textarea).toBeVisible();
+    await expect(textarea).toHaveAttribute('rows', '20');
+
+    await options.close();
+  });
+
+  test('Enter in function textarea creates newline instead of saving', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.locator('.sidebar-item[data-list-id="reading"]').click();
+    await waitForListView(options);
+
+    // Open add form and switch to function type
+    await options.locator('#rulesAddBtn').click();
+    await options.locator('.rule-type-option[data-type="smart"]').click();
+
+    const textarea = options.locator('.rule-smart-fn-input');
+    await textarea.click();
+    await textarea.fill('const x = 1;');
+    await textarea.press('Enter');
+    await textarea.type('return x;');
+
+    // Edit row should still be open (Enter didn't save)
+    await expect(options.locator('.rule-entry.rule-editing')).toBeVisible();
+    // Textarea should contain both lines
+    const value = await textarea.inputValue();
+    expect(value).toContain('const x = 1;\nreturn x;');
+
+    await options.close();
+  });
+
+  test('function rule textarea has JS syntax highlighting', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
+      { path: 'lists/reading.json', data: {
+        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.locator('.sidebar-item[data-list-id="reading"]').click();
+    await waitForListView(options);
+
+    // Open add form and switch to function type
+    await options.locator('#rulesAddBtn').click();
+    await options.locator('.rule-type-option[data-type="smart"]').click();
+
+    const textarea = options.locator('.rule-smart-fn-input');
+    await textarea.fill('const x = "hello";\nreturn x;');
+
+    // Highlight overlay should exist and contain highlighted tokens
+    const highlightPre = options.locator('.rule-fn-highlight');
+    await expect(highlightPre).toBeVisible();
+    // Should have keyword spans (const, return)
+    await expect(highlightPre.locator('.tok-keyword')).not.toHaveCount(0);
+    // Should have string span ("hello")
+    await expect(highlightPre.locator('.tok-string')).not.toHaveCount(0);
 
     await options.close();
   });

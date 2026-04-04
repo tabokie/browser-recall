@@ -147,4 +147,81 @@ test.describe('Settings persistence', () => {
     expect(isChecked).toBe(true);
     await options.close();
   });
+
+  test('storage status shows Connected when directory is configured', async ({ extContext, extensionId, setupDir }) => {
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.click('#settingsBtn');
+    await options.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
+
+    const storageStatus = options.locator('#storageStatus');
+    await expect(storageStatus).toHaveText('Connected', { timeout: 5000 });
+
+    await options.close();
+  });
+});
+
+test.describe('Clear Cache & Reload', () => {
+  test('reloads the options page after clearing cache', async ({ extContext, extensionId }) => {
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Open settings modal
+    await options.click('#settingsBtn');
+    await options.waitForSelector('#settingsModal.open', { timeout: 5000 });
+
+    // Click "Clear Cache & Reload" — expect page navigation (reload)
+    await Promise.all([
+      options.waitForNavigation({ timeout: 10000 }),
+      options.click('#clearCacheBtn'),
+    ]);
+
+    // Wait for reload to complete
+    await options.waitForSelector('[data-ready]', { timeout: 10000 });
+
+    // After reload, the settings modal should be closed (page fresh)
+    const modalOpen = await options.$eval('#settingsModal', el => el.classList.contains('open'));
+    expect(modalOpen).toBe(false);
+
+    await options.close();
+  });
+});
+
+test.describe('Scrollbar styling', () => {
+  test('all scrollable elements use transparent gutter', async ({ extContext, extensionId }) => {
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Check that the global scrollbar styling is applied via the * selector
+    const hasThinScrollbar = await options.evaluate(() => {
+      const style = getComputedStyle(document.body);
+      return style.scrollbarWidth === 'thin';
+    });
+    expect(hasThinScrollbar).toBe(true);
+
+    // Check sidebar scrollbar uses transparent track (via scrollbar-color)
+    const sidebarScrollbarColor = await options.evaluate(() => {
+      const sidebar = document.querySelector('.sidebar-content');
+      if (!sidebar) return '';
+      return getComputedStyle(sidebar).scrollbarColor;
+    });
+    // scrollbar-color should resolve to "auto" (browser default) or contain both thumb and track colors
+    // When set to "var(--scrollbar-thumb) transparent", it resolves to "<color> transparent"
+    // or "<color> rgba(0, 0, 0, 0)" — just verify it's not the browser default "auto"
+    expect(sidebarScrollbarColor).not.toBe('auto');
+
+    await options.close();
+  });
 });

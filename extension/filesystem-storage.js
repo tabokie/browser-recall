@@ -360,7 +360,11 @@ class FileSystemStorage {
         const fileEntries = [];
         for (const line of text.split('\n')) {
           if (!line.trim()) continue;
-          try { fileEntries.push(JSON.parse(line)); } catch {}
+          try {
+            const entry = JSON.parse(line);
+            entry.deviceId = device;
+            fileEntries.push(entry);
+          } catch {}
         }
         return fileEntries;
       } catch (error) {

@@ -1075,9 +1075,9 @@ test.describe('List operations', () => {
     expect(titles).toContain('Recent Page');
     expect(titles).not.toContain('Old Page');
 
-    // Verify the hi label updated
-    const hiLabel = options.locator('.filter-range[data-key="lastSeen"] .qb-dual-range-hi-label');
-    await expect(hiLabel).toHaveText('7d ago');
+    // Verify a label updated to an absolute date (YYYY-MM-DD format)
+    const loLabel = options.locator('.filter-range[data-key="lastSeen"] .qb-dual-range-lo-label');
+    await expect(loLabel).toHaveText(/^\d{4}-\d{2}-\d{2}$/);
 
     await options.close();
   });
@@ -2294,5 +2294,47 @@ test.describe('List operations', () => {
     expect(nameResp.value.paths['test-device/My List']).toBe('mylist');
 
     await helper.close();
+  });
+
+  test('create list button in sidebar adds a new list at first position', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: {
+        timestamp: now, tree: [{ id: 'list:existing' }],
+      }},
+      { path: 'lists/existing.json', data: {
+        slug: 'existing', name: 'Existing List', owner: 'test-device', timestamp: now, pins: [],
+      }},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Existing List': 'existing' } } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // The create list button should be visible
+    const createBtn = options.locator('#createListBtn');
+    await expect(createBtn).toBeVisible({ timeout: 5000 });
+
+    // Click it — inline input should appear
+    await createBtn.click();
+    const input = options.locator('.inline-list-create');
+    await expect(input).toBeVisible({ timeout: 3000 });
+
+    // Type name and press Enter
+    await input.fill('My New List');
+    await input.press('Enter');
+
+    // Wait for the new list to appear in sidebar
+    await options.waitForFunction(() => {
+      const items = document.querySelectorAll('#listsList .sidebar-item');
+      return items.length >= 2 && [...items].some(el => el.querySelector('.label')?.textContent === 'My New List');
+    }, { timeout: 5000 });
+
+    // Verify it's at the first position
+    const firstItem = options.locator('#listsList .sidebar-item').first();
+    await expect(firstItem.locator('.label')).toHaveText('My New List');
+
+    await options.close();
   });
 });

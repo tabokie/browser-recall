@@ -366,8 +366,22 @@ async function addLog(entry) {
   }).catch(e => logDebug('[addLog] history cache update failed:', e.message));
   ensureOffscreenPort().catch(e => logDebug('[addLog] offscreen port failed:', e.message));
   scheduleDrainNotify();
-  // Refresh badge for active tab if a page entity was affected.
-  if (Object.keys(effects).some(k => k.startsWith('page:'))) {
+  // Refresh badge for all tabs whose page entity was affected.
+  const affectedPageKeys = Object.keys(effects).filter(k => k.startsWith('page:'));
+  if (affectedPageKeys.length > 0) {
+    // Collect URLs for affected pages (from effects or entry)
+    const urls = new Set();
+    for (const key of affectedPageKeys) {
+      const entity = effects[key];
+      if (entity?.url) urls.add(entity.url);
+      else if (entry.url) urls.add(entry.url);
+    }
+    // Update all tabs matching affected URLs, plus active tab as fallback
+    if (urls.size > 0) {
+      chrome.tabs.query({ url: [...urls] }).then(tabs => {
+        for (const tab of tabs) updateBadgeForTab(tab.id, tab.url);
+      }).catch(e => logDebug('[addLog] badge query failed:', e.message));
+    }
     chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([tab]) => {
       if (tab) updateBadgeForTab(tab.id, tab.url);
     }).catch(e => logDebug('[addLog] badge update failed:', e.message));
@@ -755,13 +769,14 @@ async function ensureDefaultLists() {
       await addLog({
         timestamp: Date.now(),
         action: 'create_list',
-        listOwner: localDeviceId,
+        listOwner: 'system',
+        listId: 'hubs',
         name: 'Hubs',
       });
       await addLog({
         timestamp: Date.now(),
         action: 'add_rule',
-        listOwner: localDeviceId,
+        listOwner: 'system',
         name: 'Hubs',
         rule: {
           type: 'smart',
@@ -956,6 +971,7 @@ const SYNC_ALARM_NAME = 'portal-sync';
 const SYNC_RATE_LIMIT_ALARM = 'portal-sync-rate-limit';
 const RATE_LIMIT_FALLBACK_MS = 15 * 60 * 1000; // 15 minutes
 const SYNC_SESSION_TOKEN_KEY = '__syncToken';
+const SYNC_DEVICES_KEY = '__syncRemoteDevices';
 let syncInProgress = false;
 let lastSyncResult = null; // { timestamp, pushed, pulled, error?, rateLimitedUntil? }
 let rateLimitedUntil = 0; // epoch ms; 0 = not rate-limited
@@ -975,6 +991,26 @@ async function setSyncSessionToken(token) {
   } else {
     await chrome.storage.session.remove([SYNC_SESSION_TOKEN_KEY]);
   }
+}
+
+// Read the sync device list from chrome.storage.session.
+async function _loadSyncDevices() {
+  try {
+    const data = await chrome.storage.session.get([SYNC_DEVICES_KEY]);
+    return data[SYNC_DEVICES_KEY] || [];
+  } catch { return []; }
+}
+
+// Paused devices — persisted in chrome.storage.local.
+const PAUSED_DEVICES_KEY = 'syncPausedDevices';
+async function _loadPausedDevices() {
+  try {
+    const data = await chrome.storage.local.get([PAUSED_DEVICES_KEY]);
+    return data[PAUSED_DEVICES_KEY] || {};
+  } catch { return {}; }
+}
+async function _savePausedDevices(paused) {
+  await chrome.storage.local.set({ [PAUSED_DEVICES_KEY]: paused });
 }
 
 // On startup, load token from disk → session if "Remember on disk" is enabled.
@@ -1081,18 +1117,63 @@ async function performSync() {
     if (method === 'webdav' && !settings.syncWebdavUrl)
       return { skipped: true, error: 'Missing WebDAV URL' };
 
-    const deviceId = await getDeviceId();
+    let deviceId = await getDeviceId();
     const mgr = buildSyncManager(settings, { githubToken });
+    const pausedDevices = await _loadPausedDevices();
 
-    // Push local changes
-    const pushResult = await mgr.push(deviceId, { retentionDays: settings.syncRetentionDays || 7 });
+    // Push local changes — skip if local device is paused
+    let pushResult = { pushed: false, fileCount: 0 };
+    if (!pausedDevices[deviceId]) {
+      pushResult = await mgr.push(deviceId, { retentionDays: settings.syncRetentionDays || 7 });
+      if (pushResult.collision) {
+        localDeviceId = crypto.randomUUID().slice(0, 8);
+        await requestOffscreen({ action: 'initDevice', deviceId: localDeviceId });
+        deviceId = localDeviceId;
+        logDebug(`[sync] device ID collision, regenerated: ${deviceId}`);
+        pushResult = await mgr.push(deviceId, { retentionDays: settings.syncRetentionDays || 7 });
+      }
+      // Update local device push status immediately (before pull)
+      if (pushResult.pushed) {
+        const oldDevices = await _loadSyncDevices();
+        const updated = oldDevices.map(d =>
+          d.deviceId === deviceId ? { ...d, lastPushed: Date.now() } : d
+        );
+        if (!updated.some(d => d.deviceId === deviceId)) {
+          updated.unshift({ deviceId, lastPushed: Date.now() });
+        }
+        await chrome.storage.session.set({ [SYNC_DEVICES_KEY]: updated });
+      }
+    }
 
-    // Pull remote changes
+    // Pull remote changes — skip replay for paused devices
     const pullResult = await mgr.pull(deviceId);
     let entriesReplayed = 0;
     for (const { deviceId: peerId, entries } of pullResult.remoteEntries) {
+      if (pausedDevices[peerId]) continue;
       await replayRemoteEntries(entries, peerId);
       entriesReplayed += entries.length;
+    }
+
+    // Update full device list with pull timestamps
+    if (pullResult.devices) {
+      const now = Date.now();
+      const oldDevices = await _loadSyncDevices();
+      const oldMap = {};
+      for (const d of oldDevices) oldMap[d.deviceId] = d;
+      const changedSet = new Set(pullResult.changedPeers || []);
+      const devices = pullResult.devices.map(b => {
+        const old = oldMap[b.name];
+        if (b.name === deviceId) {
+          // Preserve lastPushed written above
+          return { deviceId: b.name, lastPushed: old?.lastPushed || null };
+        }
+        return { deviceId: b.name, lastPulled: changedSet.has(b.name) ? now : (old?.lastPulled || null) };
+      });
+      if (!devices.some(d => d.deviceId === deviceId)) {
+        const old = oldMap[deviceId];
+        devices.unshift({ deviceId, lastPushed: old?.lastPushed || null });
+      }
+      await chrome.storage.session.set({ [SYNC_DEVICES_KEY]: devices });
     }
 
     // Successful sync — clear any lingering rate limit state
@@ -1257,7 +1338,31 @@ async function getListEventFields(listId) {
 
 // ─── Snapshot Capture ─────────────────────────────────────────────────
 
+// Spinner badge for snapshot capture — animated dot sequence on extension icon
+let spinnerInterval = null;
+function startSpinnerBadge(tabId) {
+  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  let i = 0;
+  chrome.action.setBadgeBackgroundColor({ color: '#D07030', tabId });
+  chrome.action.setBadgeText({ text: frames[0], tabId });
+  spinnerInterval = setInterval(() => {
+    i = (i + 1) % frames.length;
+    chrome.action.setBadgeText({ text: frames[i], tabId }).catch(e => logDebug('[spinner] badge update failed:', e.message));
+  }, 100);
+}
+async function stopSpinnerBadge(tabId) {
+  if (spinnerInterval) { clearInterval(spinnerInterval); spinnerInterval = null; }
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    await updateBadgeForTab(tabId, tab.url);
+  } catch {
+    chrome.action.setBadgeText({ text: '', tabId }).catch(e => logDebug('[spinner] badge clear failed:', e.message));
+  }
+}
+
 async function captureAndLog(tabId, slug, timestamp, url, title) {
+  startSpinnerBadge(tabId);
+  try {
   // PDF pages render via a native plugin — no extractable content
   if (url && /\.pdf(\?|#|$)/i.test(new URL(url).pathname)) {
     throw new Error('Cannot capture PDF pages');
@@ -1288,6 +1393,9 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
   if (title) snapEntry.title = title;
   await addLog(snapEntry);
   notifyMutation('snapshot', { slug });
+  } finally {
+    stopSpinnerBadge(tabId);
+  }
 }
 
 // ─── Context Menu ─────────────────────────────────────────────────────
@@ -2397,6 +2505,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               sendResponse({ success: false, error: fnValidation.errors.join('; ') });
               break;
             }
+            // Compile-check via sandbox (CSP blocks new Function in background)
+            const compileResp = await requestOffscreen({ action: 'executeSandboxFn', fnSource: rule.config.fnSource, pageData: { title: '', url: '', body: '' } });
+            if (!compileResp?.success) {
+              sendResponse({ success: false, error: `Function failed to compile: ${compileResp?.error || 'unknown error'}` });
+              break;
+            }
           }
 
           await addLog({
@@ -2550,6 +2664,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
         }
 
+        case 'syncListDevices': {
+          // Quick: just list remote branches to populate device list UI.
+          try {
+            await hydrationDone;
+            const settings = await readCacheable('manifest:settings') || {};
+            if (!settings.syncEnabled) { sendResponse({ success: true, devices: [] }); break; }
+            let githubToken = null;
+            if ((settings.syncMethod || 'github') === 'github') {
+              githubToken = await getSyncSessionToken();
+              if (!settings.syncRepoUrl || !githubToken) { sendResponse({ success: true, devices: [] }); break; }
+            }
+            const mgr = buildSyncManager(settings, { githubToken });
+            const branches = await mgr.transport.listBranches();
+            const ownId = await getDeviceId();
+            const oldDevices = await _loadSyncDevices();
+            const oldMap = {};
+            for (const d of oldDevices) oldMap[d.deviceId] = d;
+            const devices = branches.map(b => ({
+              deviceId: b.name,
+              lastPushed: oldMap[b.name]?.lastPushed || null,
+              lastPulled: oldMap[b.name]?.lastPulled || null,
+            }));
+            if (ownId && !devices.some(d => d.deviceId === ownId)) {
+              devices.unshift({ deviceId: ownId, lastPushed: null });
+            }
+            await chrome.storage.session.set({ [SYNC_DEVICES_KEY]: devices });
+            const paused = await _loadPausedDevices();
+            for (const d of devices) d.paused = !!paused[d.deviceId];
+            sendResponse({ success: true, devices, localDeviceId: ownId });
+          } catch (e) {
+            sendResponse({ success: true, devices: [] });
+          }
+          break;
+        }
+
         case 'updateSyncSettings': {
           // Save sync settings and update alarm. Called after user changes sync config.
           await updateSyncAlarm();
@@ -2610,6 +2759,48 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             githubUser: settings.syncGitHubUser || null,
             rememberToken: !!settings.syncRememberToken,
           });
+          break;
+        }
+
+        case 'getSyncDevices': {
+          const devices = await _loadSyncDevices();
+          const ownId = await getDeviceId();
+          // Ensure local device is always present even before first sync
+          if (ownId && !devices.some(d => d.deviceId === ownId)) {
+            devices.unshift({ deviceId: ownId, lastPushed: null });
+          }
+          const paused = await _loadPausedDevices();
+          for (const d of devices) d.paused = !!paused[d.deviceId];
+          sendResponse({ success: true, devices, localDeviceId: ownId });
+          break;
+        }
+
+        case 'toggleSyncDevicePaused': {
+          const paused = await _loadPausedDevices();
+          if (paused[request.deviceId]) {
+            delete paused[request.deviceId];
+          } else {
+            paused[request.deviceId] = true;
+          }
+          await _savePausedDevices(paused);
+          sendResponse({ success: true, paused: !!paused[request.deviceId] });
+          break;
+        }
+
+        case 'deleteSyncDevice': {
+          if (isServicePaused()) { sendResponse({ success: false, error: 'Service paused', code: serviceError.code }); break; }
+          const settings = await readCacheable('manifest:settings') || {};
+          let githubToken = null;
+          if ((settings.syncMethod || 'github') === 'github') {
+            githubToken = await getSyncSessionToken();
+          }
+          const mgr = buildSyncManager(settings, { githubToken });
+          await mgr.deleteDevice(request.deviceId);
+          // Remove from session device list
+          const currentDevices = await _loadSyncDevices();
+          const filtered = currentDevices.filter(d => d.deviceId !== request.deviceId);
+          await chrome.storage.session.set({ [SYNC_DEVICES_KEY]: filtered });
+          sendResponse({ success: true });
           break;
         }
 

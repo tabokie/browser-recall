@@ -820,13 +820,9 @@ describe.each(['warm', 'degraded'])('Progressive loading (%s cache)', (cacheMode
       // Chart should be visible
       expect(chartFrameVisible()).toBe(true);
 
-      // Should have estimated bars for unloaded dates
-      const estimatedGroups = document.querySelectorAll('#chartBars .chart-bar-group.estimated');
-      expect(estimatedGroups.length).toBeGreaterThan(0);
-
-      // Should have real bars for loaded dates
-      const realGroups = document.querySelectorAll('#chartBars .chart-bar-group.has-data:not(.estimated)');
-      expect(realGroups.length).toBeGreaterThan(0);
+      // Should have bars for both loaded and unloaded dates (rendered uniformly)
+      const dataGroups = document.querySelectorAll('#chartBars .chart-bar-group.has-data');
+      expect(dataGroups.length).toBeGreaterThan(0);
 
       // Date range should start from Sep 1 (month boundary of Sep 24)
       const allGroups = document.querySelectorAll('#chartBars .chart-bar-group');

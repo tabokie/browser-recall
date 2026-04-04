@@ -468,6 +468,50 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     await helper.close();
   });
 
+  // --- System list dedup across devices ---
+
+  test('Hubs list with stable system owner is not duplicated across devices', async ({ extContext, extensionId, setupDir }) => {
+    // Device A already created Hubs with stable owner/id.
+    // Device B (remote) also emits create_list for Hubs with same stable id.
+    // After hydration, only one Hubs should exist.
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'dev-local' },
+      { path: 'manifest/settings.json', data: { syncEnabled: true } },
+      { path: 'manifest/list-order.json', data: { timestamps: {}, tree: [{ id: 'list:hubs', children: [] }] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamps: {}, paths: { 'system/Hubs': 'hubs' } } },
+      { path: 'lists/hubs.json', data: {
+        slug: 'hubs', name: 'Hubs', owner: 'system', timestamps: { 'dev-a': 100 },
+        pins: [], rules: [{ id: 'r1', type: 'smart', config: { description: 'Hub pages', fnSource: 'return false;' } }],
+      }},
+      // Remote device also emitted create_list for Hubs with same stable id
+      { path: 'data/logs/dev-b/2026-03-25.jsonl', lines: [
+        { timestamp: 200, action: 'create_list', name: 'Hubs', listOwner: 'system', listId: 'hubs' },
+      ]},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Only one Hubs list should exist in the tree
+    const tree = await readEntity(helper, 'manifest:list-order');
+    const hubsNodes = (tree?.tree || []).filter(n => n.id === 'list:hubs');
+    expect(hubsNodes.length).toBe(1);
+
+    // The entity should still have its rules (not overwritten)
+    const hubs = await readEntity(helper, 'list:hubs');
+    expect(hubs).toBeTruthy();
+    expect(hubs.name).toBe('Hubs');
+    expect(hubs.rules).toHaveLength(1);
+
+    // name-to-id should have exactly one entry for Hubs
+    const nameToId = await readEntity(helper, 'manifest:name-to-id');
+    expect(nameToId.paths['system/Hubs']).toBe('hubs');
+    // No device-specific Hubs entries
+    const hubsEntries = Object.entries(nameToId.paths).filter(([, v]) => v === 'hubs');
+    expect(hubsEntries.length).toBe(1);
+
+    await helper.close();
+  });
+
   // --- Tree reorganization LWW ---
 
   test('tree reorganization — newer tree wins via per-device LWW', async ({ extContext, extensionId, setupDir }) => {

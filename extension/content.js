@@ -683,18 +683,19 @@ function showHighlightEditOverlay(mark, text, noteSlug, existingNote, pageSlug) 
   textarea.addEventListener('input', () => { autoResize(); });
 
   let saved = false;
-  function saveAndClose() {
+  async function saveAndClose() {
     if (saved) return;
     saved = true;
     const note = textarea.value;
     if (note !== existingNote && noteSlug) {
-      chrome.runtime.sendMessage({
-        action: 'updateNote',
-        noteSlug,
-        note
-      }).then(resp => {
+      try {
+        const resp = await chrome.runtime.sendMessage({
+          action: 'updateNote',
+          noteSlug,
+          note
+        });
         if (resp?.noteSlug) mark.dataset.noteSlug = resp.noteSlug;
-      }).catch(() => {});
+      } catch {}
     }
     host.remove();
   }
@@ -992,7 +993,17 @@ function showHighlightsPanel(notes, pageSlug, { hint } = {}) {
     const origValue = ta.value;
     ta.addEventListener('blur', () => {
       if (ta.value !== origValue) chrome.runtime.sendMessage({ action: 'updateNote', noteSlug, note: ta.value })
-        .then(resp => { if (resp?.noteSlug) { noteSlug = resp.noteSlug; item.dataset.noteSlug = resp.noteSlug; } })
+        .then(resp => {
+          if (resp?.noteSlug) {
+            const oldSlug = noteSlug;
+            noteSlug = resp.noteSlug;
+            item.dataset.noteSlug = resp.noteSlug;
+            // Update matching mark(s) in the page so re-click uses the new slug
+            document.querySelectorAll(`mark.portal-highlight[data-note-slug="${oldSlug}"]`).forEach(m => {
+              m.dataset.noteSlug = resp.noteSlug;
+            });
+          }
+        })
         .catch(() => {});
     });
     ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') ta.blur(); });

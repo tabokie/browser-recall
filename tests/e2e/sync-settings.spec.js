@@ -41,13 +41,16 @@ test.describe('Sync settings UI', () => {
 
     // Enable sync but leave repo URL empty and no token connected
     await options.locator('#syncEnabled').check();
-    await options.click('#syncSaveBtn');
+    await options.click('#syncNowBtn');
 
-    // Should show error about repo URL or token
+    // Should show validation error in sync status area or toast
     await options.waitForFunction(
       () => {
-        const status = document.querySelector('.status');
-        return status?.textContent?.includes('required') || status?.textContent?.includes('not connected');
+        const syncStatus = document.getElementById('syncStatus');
+        const toast = document.querySelector('.status');
+        return (syncStatus?.textContent?.includes('Fix settings') ||
+                toast?.textContent?.includes('required') ||
+                toast?.textContent?.includes('not connected'));
       },
       { timeout: 5000 }
     );
@@ -98,7 +101,6 @@ test.describe('Sync settings UI', () => {
     await expect(options.locator('#syncAuthConnected')).toBeVisible();
     const authDetail = await options.textContent('#syncAuthDetail');
     expect(authDetail).toContain('testuser');
-    expect(authDetail).toContain('personal access token');
 
     // Remember checkbox should be checked
     await expect(options.locator('#syncRememberToken')).toBeChecked();
@@ -161,7 +163,6 @@ test.describe('Sync settings UI', () => {
     // Disconnected state should be visible, connected hidden
     await expect(options.locator('#syncAuthDisconnected')).toBeVisible();
     await expect(options.locator('#syncAuthConnected')).toBeHidden();
-    await expect(options.locator('#syncAuthDeviceFlow')).toBeHidden();
 
     await options.close();
   });
@@ -218,7 +219,7 @@ test.describe('Sync settings UI', () => {
         action: 'setSyncToken',
         token: 'ghp_test123',
         remember: true,
-        authMethod: 'oauth',
+        authMethod: 'pat',
         githubUser: 'octocat',
       });
       await chrome.runtime.sendMessage({ action: 'clearSyncToken' });
@@ -235,7 +236,7 @@ test.describe('Sync settings UI', () => {
     await helper.close();
   });
 
-  test('PAT toggle shows and hides input field', async ({ extContext, extensionId, setupDir }) => {
+  test('PAT input is visible in disconnected state', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { syncEnabled: true, syncMethod: 'github' } },
@@ -245,16 +246,9 @@ test.describe('Sync settings UI', () => {
     await options.click('#settingsBtn');
     await options.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
 
-    // PAT fields initially hidden
-    await expect(options.locator('#syncPatFields')).toBeHidden();
-
-    // Click toggle to show
-    await options.click('#syncPatToggle');
-    await expect(options.locator('#syncPatFields')).toBeVisible();
-
-    // Click again to hide
-    await options.click('#syncPatToggle');
-    await expect(options.locator('#syncPatFields')).toBeHidden();
+    // PAT input should be visible when disconnected
+    await expect(options.locator('#syncPatInput')).toBeVisible();
+    await expect(options.locator('#syncPatSaveBtn')).toBeVisible();
 
     await options.close();
   });
@@ -265,7 +259,7 @@ test.describe('Sync settings UI', () => {
       { path: 'manifest/settings.json', data: {
         syncEnabled: true,
         syncMethod: 'github',
-        syncAuthMethod: 'oauth',
+        syncAuthMethod: 'pat',
         syncGitHubUser: 'octocat',
       }},
     ]);
@@ -275,9 +269,9 @@ test.describe('Sync settings UI', () => {
     await helper.evaluate(async () => {
       await chrome.runtime.sendMessage({
         action: 'setSyncToken',
-        token: 'gho_testtoken',
+        token: 'ghp_testtoken',
         remember: false,
-        authMethod: 'oauth',
+        authMethod: 'pat',
         githubUser: 'octocat',
       });
     });
@@ -317,5 +311,37 @@ test.describe('Sync settings UI', () => {
     expect(result.error).toContain('not connected');
 
     await helper.close();
+  });
+
+  test('Sync Now button does not show Unknown action error', async ({ extContext, extensionId, setupDir }) => {
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: {
+        syncEnabled: true, syncMethod: 'github', syncRepoUrl: 'https://github.com/test/repo',
+        syncGitHubUser: 'testuser',
+      }},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.click('#settingsBtn');
+    await options.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
+
+    // Click Sync Now button
+    await options.click('#syncNowBtn');
+
+    // Wait for sync status to update
+    await options.waitForFunction(
+      () => {
+        const el = document.getElementById('syncStatus');
+        return el && el.textContent && !el.textContent.includes('Syncing...');
+      },
+      { timeout: 10000 }
+    );
+
+    // Verify it does NOT say "Unknown action: undefined"
+    const statusText = await options.$eval('#syncStatus', el => el.textContent);
+    expect(statusText).not.toContain('Unknown action');
+
+    await options.close();
   });
 });

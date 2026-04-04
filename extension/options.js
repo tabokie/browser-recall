@@ -8,7 +8,7 @@ import { attentionStrength, attentionColor, aggregateAttention } from './attenti
 import { initCharts, renderTimeChart, renderTimeChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './time-chart.js';
 import { VirtualScroller } from './virtual-scroller.js';
 import { entityTypeLabel } from './entity-types.js';
-import { requestDeviceCode, pollForToken, fetchGitHubUser, getGitHubRevokeUrl } from './github-oauth.js';
+import { fetchGitHubUser } from './github-oauth.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
 // parseBookmarkHtml imported dynamically inside the block below
@@ -166,6 +166,7 @@ let filterState = {
   firstSeen: { lo: null, hi: null },  // null = unbounded (days ago)
   lastSeen: { lo: null, hi: null },
   lists: {},                      // { listSlug: true } — only stores enabled lists; empty = show all (no filter)
+  devices: {},                    // { deviceId: true } — only stores enabled devices; empty = show all
   hasHighlights: null,            // null=any, true=require
   visitedMultipleTimes: null,
   hasChildren: null,
@@ -184,9 +185,13 @@ function normalizeFieldToArray(field) {
 }
 
 // Range filter field configs: fallback min/max/step, format for labels
+function daysAgoToDate(v) {
+  const d = new Date(Date.now() - v * 86400000);
+  return d.toISOString().slice(0, 10);
+}
 const RANGE_CONFIGS = {
-  lastVisit:  { min: 0, max: 365, step: 1, format: v => v === 0 ? 'today' : v + 'd ago', isDaysAgo: true },
-  firstVisit: { min: 0, max: 365, step: 1, format: v => v === 0 ? 'today' : v + 'd ago', isDaysAgo: true },
+  lastVisit:  { min: 0, max: 365, step: 1, format: daysAgoToDate, isDaysAgo: true },
+  firstVisit: { min: 0, max: 365, step: 1, format: daysAgoToDate, isDaysAgo: true },
   visitCount: { min: 1, max: 100, step: 1, format: v => String(v) },
   timeOnPage: { min: 0, max: 600, step: 5, format: v => v >= 60 ? Math.floor(v/60) + 'm' + (v%60 ? v%60 + 's' : '') : v + 's' },
   scrollDepth:{ min: 0, max: 100, step: 1, format: v => v + '%' },
@@ -235,8 +240,21 @@ function computeFieldRanges(entries) {
 
 function getFieldRanges() {
   if (cachedFieldRanges) return cachedFieldRanges;
-  if (historyByUrl.size === 0) return null;
-  cachedFieldRanges = computeFieldRanges(Array.from(historyByUrl.values()));
+  if (historyByUrl.size === 0 && historyFiles.length === 0) return null;
+  cachedFieldRanges = historyByUrl.size > 0
+    ? computeFieldRanges(Array.from(historyByUrl.values()))
+    : Object.fromEntries(Object.keys(RANGE_CONFIGS).map(k => [k, { min: RANGE_CONFIGS[k].min, max: RANGE_CONFIGS[k].max }]));
+  // Extend date ranges to cover all known files (even unloaded ones)
+  if (historyFiles.length > 0) {
+    const oldestFile = historyFiles[historyFiles.length - 1]; // files are newest-first
+    const oldestDate = oldestFile.replace('.jsonl', '');
+    const oldestDaysAgo = Math.ceil((Date.now() - new Date(oldestDate + 'T00:00:00Z').getTime()) / 86400000);
+    for (const key of ['lastVisit', 'firstVisit']) {
+      if (oldestDaysAgo > cachedFieldRanges[key].max) {
+        cachedFieldRanges[key].max = oldestDaysAgo;
+      }
+    }
+  }
   return cachedFieldRanges;
 }
 
@@ -378,7 +396,7 @@ async function renderProgressiveResults(gen) {
       attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'related',
       childIds: r.childIds, parentIds: r.parentIds, likes: r.likes,
-      matchSources: r.matchSources,
+      matchSources: r.matchSources, hasHighlightNotes: r.hasHighlightNotes,
     })
   );
   relatedContainer.dataset.searchCount = String(searchResults.length);
@@ -687,6 +705,7 @@ async function loadHistoryBatch() {
     }
     logDebug(`[I/O] loadHistoryBatch: ${batch.length} files, ${batchEntries.length} items, ${newItems.length} new in ${(performance.now() - t0).toFixed(1)}ms`);
     historyLoadedCount += batch.length;
+    if (newItems.length > 0) cachedFieldRanges = null;
     // Calibrate avg entry size from loaded file data
     historyBatchRawCount += batchEntries.length;
     const loadedSize = historyFiles.slice(0, historyLoadedCount)
@@ -701,6 +720,18 @@ async function loadHistoryBatch() {
     historyLoading = false;
     return [];
   }
+}
+
+// Load history files until a specific date is covered (single batch).
+async function loadHistoryUntilDate(dateStr) {
+  const targetFile = dateStr + '.jsonl';
+  const targetIdx = historyFiles.indexOf(targetFile);
+  if (targetIdx < 0 || targetIdx < historyLoadedCount) return; // already loaded or not found
+  const needed = targetIdx - historyLoadedCount + 1;
+  const saved = historyFileBatch;
+  historyFileBatch = needed;
+  await loadHistoryBatch();
+  historyFileBatch = saved;
 }
 
 function resetHistory() {
@@ -893,20 +924,39 @@ async function showRecycleBin() {
     const typeLabel = entityTypeLabel(key);
     const typeCls = 'type-' + typeLabel.toLowerCase();
 
-    // Load entity to get display name
+    // Load entity to get human-readable display name
     let displayName = key;
     if (key.startsWith('snapshot:')) {
-      // snapshot:<pageSlug>-<timestamp> — derive display name from key
       const snapStem = key.slice('snapshot:'.length);
       const lastDash = snapStem.lastIndexOf('-');
       const pageSlug = snapStem.slice(0, lastDash);
       const ts = parseInt(snapStem.slice(lastDash + 1), 10);
-      displayName = `${pageSlug} — ${new Date(ts).toLocaleString()}`;
+      // Try to load page entity for a human title
+      try {
+        const pageResp = await sendAction({ action: 'readCacheable', key: 'page:' + pageSlug, includeDeleted: true });
+        displayName = `${pageResp?.value?.title || pageSlug} — ${new Date(ts).toLocaleString()}`;
+      } catch {
+        displayName = `${pageSlug} — ${new Date(ts).toLocaleString()}`;
+      }
     } else {
       try {
-        const entity = await sendAction({ action: 'readCacheable', key, includeDeleted: true });
+        const resp = await sendAction({ action: 'readCacheable', key, includeDeleted: true });
+        const entity = resp?.value;
         if (entity) {
-          displayName = entity.name || entity.excerpt || entity.title || entity.slug || key;
+          if (key.startsWith('note:')) {
+            const raw = entity.excerpt;
+            const excerptText = Array.isArray(raw) ? raw.join(' ') : (raw || '');
+            if (excerptText) displayName = excerptText.substring(0, 80);
+            else if (entity.excerpt === null && entity.note) displayName = `Page note: ${entity.note.substring(0, 60)}`;
+            else if (entity.note) displayName = entity.note.substring(0, 80);
+            else displayName = key;
+          } else if (key.startsWith('list:')) {
+            displayName = entity.name || key;
+          } else if (key.startsWith('page:')) {
+            displayName = entity.title || entity.url || key;
+          } else {
+            displayName = entity.name || entity.title || entity.slug || key;
+          }
         }
       } catch {}
     }
@@ -1033,6 +1083,7 @@ function isDefaultFilterState(state) {
   return state.firstSeen.lo === null && state.firstSeen.hi === null
     && state.lastSeen.lo === null && state.lastSeen.hi === null
     && Object.keys(state.lists || {}).length === 0
+    && Object.keys(state.devices || {}).length === 0
     && state.hasHighlights === null && state.visitedMultipleTimes === null
     && state.hasChildren === null
     && state.attentionRange.lo === null && state.attentionRange.hi === null;
@@ -1052,6 +1103,11 @@ async function applyFilters(results) {
     if (listIndex && enabledLists.length > 0) {
       const memberOf = listIndex.get(item.slug);
       if (!memberOf || !enabledLists.some(ls => memberOf.has(ls))) return false;
+    }
+    // Device filter: when bubbles are active, only show items from at least one enabled device
+    const enabledDevices = Object.entries(filterState.devices || {}).filter(([, v]) => v === true).map(([k]) => k);
+    if (enabledDevices.length > 0 && item.deviceIds) {
+      if (!enabledDevices.some(d => item.deviceIds.has(d))) return false;
     }
     // Time filters (days ago)
     if (filterState.lastSeen.lo !== null || filterState.lastSeen.hi !== null) {
@@ -1097,6 +1153,7 @@ async function loadFilterState() {
     const data = await chrome.storage.session.get(key);
     if (data[key]) {
       filterState = data[key];
+      if (!filterState.devices) filterState.devices = {};
       return;
     }
   } catch { /* session miss */ }
@@ -1104,6 +1161,7 @@ async function loadFilterState() {
     firstSeen: { lo: null, hi: null },
     lastSeen: { lo: null, hi: null },
     lists: {},
+    devices: {},
     hasHighlights: null,
     visitedMultipleTimes: null,
     hasChildren: null,
@@ -1696,16 +1754,13 @@ function renderRulesList(listId, rules) {
   }
   const typeLabel = (t) => t === 'smart' ? 'function' : t;
   container.innerHTML = rules.map(rule => {
-    const fnBlock = rule.type === 'smart' && rule.config?.fnSource
-      ? `<pre class="rule-fn-source">${escapeHtml(rule.config.fnSource)}</pre>` : '';
-    return `<div class="rule-entry${fnBlock ? ' has-fn' : ''}" data-rule-id="${escapeHtml(rule.id)}">
+    return `<div class="rule-entry" data-rule-id="${escapeHtml(rule.id)}">
       <div class="rule-header">
         <span class="rule-type-badge rule-type-${escapeHtml(rule.type)}">${escapeHtml(typeLabel(rule.type))}</span>
         <span class="rule-desc">${escapeHtml(ruleDescription(rule))}</span>
         <button class="rule-action-btn rule-edit" title="Edit">&#x270E;</button>
         <button class="rule-action-btn rule-remove" title="Remove">&times;</button>
       </div>
-      ${fnBlock}
     </div>`;
   }).join('');
 
@@ -1797,6 +1852,31 @@ function cancelRuleEdit() {
   refreshRulesForActiveList();
 }
 
+const JS_KEYWORDS = new Set([
+  'break', 'case', 'catch', 'const', 'continue', 'debugger', 'default', 'delete',
+  'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import',
+  'in', 'instanceof', 'let', 'new', 'of', 'return', 'switch', 'throw', 'try',
+  'typeof', 'var', 'void', 'while', 'with', 'yield', 'await', 'async', 'class',
+]);
+const JS_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity', 'this']);
+const JS_TOKEN_RE = /\/\/.*|\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\/(?:[^/\\]|\\.)+\/[gimsuy]*|\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b|[a-zA-Z_$][\w$]*|[^\s]/g;
+
+function highlightJS(src) {
+  return src.replace(JS_TOKEN_RE, (tok) => {
+    if (tok.startsWith('//') || tok.startsWith('/*')) return `<span class="tok-comment">${escapeHtml(tok)}</span>`;
+    if (tok[0] === '"' || tok[0] === "'" || tok[0] === '`') return `<span class="tok-string">${escapeHtml(tok)}</span>`;
+    if (tok[0] === '/' && tok.length > 1 && tok[1] !== '/') return `<span class="tok-regex">${escapeHtml(tok)}</span>`;
+    if (/^\d/.test(tok)) return `<span class="tok-number">${escapeHtml(tok)}</span>`;
+    if (JS_KEYWORDS.has(tok)) return `<span class="tok-keyword">${escapeHtml(tok)}</span>`;
+    if (JS_LITERALS.has(tok)) return `<span class="tok-literal">${escapeHtml(tok)}</span>`;
+    return escapeHtml(tok);
+  });
+}
+
+function syncHighlight(textarea, pre) {
+  pre.innerHTML = highlightJS(textarea.value) + '\n';
+}
+
 function buildEditRowHTML(type, config) {
   const isKeyword = (type || 'keyword') === 'keyword';
   const inputValue = isKeyword ? (config?.pattern || '') : (config?.description || '');
@@ -1813,7 +1893,10 @@ function buildEditRowHTML(type, config) {
       <button class="rule-cancel-btn" title="Cancel">&times;</button>
       <button class="rule-save-btn" title="Save (Enter)">OK</button>
     </div>
-    <textarea class="rule-smart-fn-input" rows="3" placeholder="// page = { title, url, body }\nreturn page.title.length > 50 ? 1 : 0;" style="${isKeyword ? 'display:none' : ''}">${escapeHtml(fnSource)}</textarea>
+    <div class="rule-fn-editor" style="${isKeyword ? 'display:none' : ''}">
+      <pre class="rule-fn-highlight" aria-hidden="true"></pre>
+      <textarea class="rule-smart-fn-input" rows="20" placeholder="// page = { title, url, body }\nreturn page.title.length > 50 ? 1 : 0;" spellcheck="false">${escapeHtml(fnSource)}</textarea>
+    </div>
   </div>`;
 }
 
@@ -1826,7 +1909,7 @@ function attachEditRowHandlers(editRow, listId, existingRuleId) {
       const type = opt.dataset.type;
       const input = editRow.querySelector('.rule-edit-input');
       input.placeholder = type === 'keyword' ? 'keyword or /regex/' : 'description';
-      editRow.querySelector('.rule-smart-fn-input').style.display = type === 'smart' ? '' : 'none';
+      editRow.querySelector('.rule-fn-editor').style.display = type === 'smart' ? '' : 'none';
     });
   });
 
@@ -1860,12 +1943,22 @@ function attachEditRowHandlers(editRow, listId, existingRuleId) {
   // Preview
   editRow.querySelector('.rule-preview-btn').addEventListener('click', () => runPreview());
 
-  // Enter key saves
+  // Enter key saves (but not inside the function textarea — let Enter create newlines there)
   editRow.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.target.classList.contains('rule-smart-fn-input')) {
       e.preventDefault();
       saveCurrentRule();
     }
+  });
+
+  // Syntax highlight sync
+  const fnTextarea = editRow.querySelector('.rule-smart-fn-input');
+  const fnPre = editRow.querySelector('.rule-fn-highlight');
+  syncHighlight(fnTextarea, fnPre);
+  fnTextarea.addEventListener('input', () => syncHighlight(fnTextarea, fnPre));
+  fnTextarea.addEventListener('scroll', () => {
+    fnPre.scrollTop = fnTextarea.scrollTop;
+    fnPre.scrollLeft = fnTextarea.scrollLeft;
   });
 
   // Focus input
@@ -2137,7 +2230,7 @@ function renderFilteredPins(pins, listId, searchQuery) {
     resultRowHtml(r.user_title || r.title, r.url, {
       pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'related',
-      pinnedAt: r.pinnedAt, pinSource: r.pinSource, childIds: r.childIds, parentIds: r.parentIds, excludeListId: listId, likes: r.likes,
+      pinnedAt: r.pinnedAt, pinSource: r.pinSource, childIds: r.childIds, parentIds: r.parentIds, excludeListId: listId, likes: r.likes, hasHighlightNotes: r.hasHighlightNotes,
     })
   );
   bindPinClicks(relatedContainer, listId);
@@ -2182,7 +2275,9 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
 
     if (globalDedup) {
       if (globalIndex.has(item.url)) {
-        results[globalIndex.get(item.url)].timestamps.push(item.timestamp);
+        const existing = results[globalIndex.get(item.url)];
+        existing.timestamps.push(item.timestamp);
+        if (item.deviceId) existing.deviceIds.add(item.deviceId);
         continue;
       }
       globalIndex.set(item.url, results.length);
@@ -2192,6 +2287,8 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
       if (daySet.has(item.url)) continue;
       daySet.add(item.url);
     }
+    const deviceIds = new Set();
+    if (item.deviceId) deviceIds.add(item.deviceId);
     results.push({
       url: item.url,
       title: item.title || historyByUrl.get(item.url)?.title || '',
@@ -2204,6 +2301,7 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
       notes: [],
       timestamps: [item.timestamp],
       latestTs: item.timestamp,
+      deviceIds,
     });
   }
   return results;
@@ -2218,6 +2316,25 @@ async function enrichFromEntityStorage(entries) {
   for (let i = 0; i < allSlugs.length; i++) {
     if (loaded[i]) pages[allSlugs[i]] = loaded[i];
   }
+  // Collect all unique note refs across all pages for batch loading
+  const allNoteRefs = new Set();
+  for (const slug of allSlugs) {
+    const page = pages[slug];
+    if (!page?.childIds) continue;
+    for (const id of page.childIds) {
+      if (id.startsWith('note:')) allNoteRefs.add(id);
+    }
+  }
+  // Batch-load note entities to determine which pages have highlight notes
+  const noteMap = new Map();
+  if (allNoteRefs.size > 0) {
+    const noteKeys = [...allNoteRefs];
+    const noteEntities = await Promise.all(noteKeys.map(k => readCacheable(k)));
+    for (let i = 0; i < noteKeys.length; i++) {
+      if (noteEntities[i]) noteMap.set(noteKeys[i], noteEntities[i]);
+    }
+  }
+
   for (const entry of entries) {
     const page = pages[entry.slug];
     if (!page) continue;
@@ -2227,6 +2344,12 @@ async function enrichFromEntityStorage(entries) {
     if (page.parentIds) entry.parentIds = page.parentIds;
     if (page.likes) entry.likes = page.likes;
     if (page.createdAt && !entry.createdAt) entry.createdAt = page.createdAt;
+    // Check if any child note is a non-deleted highlight note (excerpt !== null)
+    const noteRefs = (page.childIds || []).filter(id => id.startsWith('note:'));
+    entry.hasHighlightNotes = noteRefs.some(ref => {
+      const note = noteMap.get(ref);
+      return note && note.excerpt !== null && !note.deleted;
+    });
   }
 }
 
@@ -2269,7 +2392,7 @@ async function displayHistoryRows(entries) {
   const vs = getOrCreateGlobalScroller();
   vs._headerHtml = '';
   const renderFn = (e) =>
-    resultRowHtml(e.user_title || e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global', childIds: e.childIds, parentIds: e.parentIds, likes: e.likes });
+    resultRowHtml(e.user_title || e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global', childIds: e.childIds, parentIds: e.parentIds, likes: e.likes, hasHighlightNotes: e.hasHighlightNotes });
   vs.setData(sorted, renderFn);
 
   // Enrich in background — mutates entries in place, then re-render visible rows
@@ -2348,12 +2471,12 @@ async function loadExtraDetail(url) {
     }
   }
 
-  return { notes, snapshots, belongedLists, slug, likes, visitDates: pageEntity?.visitDates || [] };
+  return { notes, snapshots, belongedLists, slug, likes, visitDates: pageEntity?.visitDates || [], pageTimestamps: pageEntity?.timestamps || {} };
 }
 
 const TIMELINE_INITIAL_LIMIT = 30;
 
-function collectTimelineEvents(visitDates, notes, snapshots) {
+function collectTimelineEvents(visitDates, notes, snapshots, pageTimestamps) {
   const events = [];
 
   // Visits from visitDates (YYYYMMDD ints → midnight timestamps)
@@ -2361,7 +2484,16 @@ function collectTimelineEvents(visitDates, notes, snapshots) {
     const y = Math.floor(yyyymmdd / 10000);
     const m = Math.floor((yyyymmdd % 10000) / 100) - 1;
     const d = yyyymmdd % 100;
-    events.push({ type: 'visit', timestamp: new Date(y, m, d).getTime() });
+    events.push({ type: 'visit', timestamp: new Date(y, m, d).getTime(), hasTime: false });
+  }
+
+  // Fallback: if no visitDates, use page entity timestamps (per-device, ms precision)
+  if (visitDates.length === 0 && pageTimestamps) {
+    const tsValues = Object.values(pageTimestamps).filter(t => typeof t === 'number' && t > 0);
+    if (tsValues.length > 0) {
+      const latest = Math.max(...tsValues);
+      events.push({ type: 'visit', timestamp: latest, hasTime: true });
+    }
   }
 
   // Highlight notes (skip global page notes)
@@ -2370,13 +2502,13 @@ function collectTimelineEvents(visitDates, notes, snapshots) {
     const ts = n.timestamps ? Math.min(...Object.values(n.timestamps)) : 0;
     if (!ts) continue;
     const raw = Array.isArray(n.excerpt) ? n.excerpt.join(' ') : (n.excerpt || '');
-    events.push({ type: 'note', timestamp: ts, label: raw.substring(0, 60) + (raw.length > 60 ? '...' : '') });
+    events.push({ type: 'note', timestamp: ts, hasTime: true, label: raw.substring(0, 60) + (raw.length > 60 ? '...' : '') });
   }
 
   // Snapshots
   for (const s of snapshots) {
     const formats = [s.hasHtml && 'html', s.hasMd && 'md'].filter(Boolean).join(', ');
-    events.push({ type: 'snapshot', timestamp: s.timestamp, label: formats });
+    events.push({ type: 'snapshot', timestamp: s.timestamp, hasTime: true, label: formats });
   }
 
   events.sort((a, b) => b.timestamp - a.timestamp);
@@ -2386,33 +2518,52 @@ function collectTimelineEvents(visitDates, notes, snapshots) {
 function renderTimelineHtml(events, limit = TIMELINE_INITIAL_LIMIT) {
   if (events.length === 0) return '';
 
-  const fmtDate = (ts) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const fmtDateTime = (ts, hasTime) => {
+    const d = new Date(ts);
+    const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    if (!hasTime) return date;
+    const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+    return `${date}, ${time}`;
+  };
   const typeLabels = { visit: 'Visited', note: 'Note', snapshot: 'Snapshot' };
   const shown = events.slice(0, limit);
   const remaining = events.length - shown.length;
 
-  // Group by date string
-  const groups = [];
-  let lastDate = null;
-  for (const ev of shown) {
-    const dateStr = fmtDate(ev.timestamp);
-    if (dateStr !== lastDate) {
-      groups.push({ date: dateStr, events: [] });
-      lastDate = dateStr;
-    }
-    groups[groups.length - 1].events.push(ev);
-  }
+  const renderEvent = (ev) => {
+    const label = ev.type === 'visit' ? typeLabels.visit
+      : ev.type === 'note' ? `${typeLabels.note}: "${escapeHtml(ev.label)}"`
+      : `${typeLabels.snapshot} (${escapeHtml(ev.label)})`;
+    const time = fmtDateTime(ev.timestamp, ev.hasTime);
+    return `<div class="timeline-event"><span class="timeline-dot ${ev.type}"></span><span class="timeline-event-label">${label}</span><span class="timeline-event-time">${escapeHtml(time)}</span></div>`;
+  };
 
+  // Detect runs of 3+ consecutive visit events and collapse them
+  const COLLAPSE_THRESHOLD = 3;
   let html = '<div class="detail-timeline"><span class="detail-section-label">Timeline</span>';
-  for (const g of groups) {
-    html += `<div class="timeline-date-group"><div class="timeline-date-label">${escapeHtml(g.date)}</div>`;
-    for (const ev of g.events) {
-      const label = ev.type === 'visit' ? typeLabels.visit
-        : ev.type === 'note' ? `${typeLabels.note}: "${escapeHtml(ev.label)}"`
-        : `${typeLabels.snapshot} (${escapeHtml(ev.label)})`;
-      html += `<div class="timeline-event"><span class="timeline-dot ${ev.type}"></span><span class="timeline-event-label">${label}</span></div>`;
+  let i = 0;
+  while (i < shown.length) {
+    if (shown[i].type === 'visit') {
+      // Count consecutive visits
+      let runEnd = i + 1;
+      while (runEnd < shown.length && shown[runEnd].type === 'visit') runEnd++;
+      const runLen = runEnd - i;
+      if (runLen >= COLLAPSE_THRESHOLD) {
+        // Show first, collapse button, last
+        html += renderEvent(shown[i]);
+        const hiddenEvents = shown.slice(i + 1, runEnd - 1);
+        const hiddenHtml = hiddenEvents.map(renderEvent).join('');
+        // Use base64 to safely embed HTML in attribute
+        html += `<button class="timeline-collapse" data-hidden-b64="${btoa(unescape(encodeURIComponent(hiddenHtml)))}">... ${hiddenEvents.length} more visits</button>`;
+        html += renderEvent(shown[runEnd - 1]);
+        i = runEnd;
+      } else {
+        html += renderEvent(shown[i]);
+        i++;
+      }
+    } else {
+      html += renderEvent(shown[i]);
+      i++;
     }
-    html += '</div>';
   }
 
   if (remaining > 0) {
@@ -2470,20 +2621,32 @@ function renderExtraDetailHtml(extra) {
   }
 
   // Event timeline
-  const timelineEvents = collectTimelineEvents(extra.visitDates, extra.notes, extra.snapshots);
+  const timelineEvents = collectTimelineEvents(extra.visitDates, extra.notes, extra.snapshots, extra.pageTimestamps);
   html += renderTimelineHtml(timelineEvents);
 
   return html;
 }
 
+function bindTimelineCollapse(container) {
+  container.querySelectorAll('.timeline-collapse').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const hiddenHtml = decodeURIComponent(escape(atob(btn.dataset.hiddenB64)));
+      btn.insertAdjacentHTML('afterend', hiddenHtml);
+      btn.remove();
+    });
+  });
+}
+
 function bindTimelineShowMore(container, extra) {
+  bindTimelineCollapse(container);
   const btn = container.querySelector('.timeline-show-more');
   if (!btn) return;
   btn.addEventListener('click', () => {
-    const allEvents = collectTimelineEvents(extra.visitDates, extra.notes, extra.snapshots);
+    const allEvents = collectTimelineEvents(extra.visitDates, extra.notes, extra.snapshots, extra.pageTimestamps);
     const timeline = container.querySelector('.detail-timeline');
     if (timeline) {
       timeline.outerHTML = renderTimelineHtml(allEvents, Infinity);
+      bindTimelineCollapse(container);
     }
   });
 }
@@ -2571,7 +2734,7 @@ function attentionLevel(normalized) {
 
 function resultRowHtml(title, url, opts = {}) {
   const safeUrl = escapeHtml(url || '<unknown>');
-  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, pinSource, cssClass, childIds = [], parentIds = [], excludeListId, likes = 0, matchSources } = opts;
+  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, pinSource, cssClass, childIds = [], parentIds = [], excludeListId, likes = 0, matchSources, hasHighlightNotes } = opts;
 
   const lastVisit = timestamps.length > 0 ? formatTime(Math.max(...timestamps)) : '';
   const normalized = maxAtt > 0 ? attScore / maxAtt : 0;
@@ -2586,7 +2749,7 @@ function resultRowHtml(title, url, opts = {}) {
 
   const dates = [...new Set(timestamps.map(ts => new Date(ts).toISOString().slice(0, 10)))].join(',');
 
-  const hasNotes = childIds.some(id => id.startsWith('note:'));
+  const hasNotes = hasHighlightNotes === true;
   const hasSnaps = childIds.some(id => id.startsWith('snapshot:'));
   const belongedListNames = [];
   for (const pid of parentIds) {
@@ -2667,6 +2830,7 @@ function bindResultDelegation(container) {
       row.classList.add('selected');
       lastClickedRow = row;
     }
+    syncChartHighlights();
   });
 
   container.addEventListener('dblclick', (e) => {
@@ -2716,24 +2880,24 @@ function openPageDetailCard(url, title, attDetail = null, timestamps = []) {
   // Allow one frame for backdrop-filter compositing before fading in
   requestAnimationFrame(() => overlay.classList.add('visible'));
 
-  loadExtraDetail(url).then(extra => {
+  if (!url || url === '<unknown>') {
     const body = card.querySelector('.page-detail-body');
-    let html = buildDetailHtml(url, attDetail, []);
-    if (timestamps.length > 0) {
-      const latest = Math.max(...timestamps);
-      const fmt = new Date(latest).toLocaleString('en-US', {
-        month: 'short', day: 'numeric', year: 'numeric',
-        hour: 'numeric', minute: '2-digit', second: '2-digit',
-      });
-      html += `<div class="detail-visit-time">Last visited: <strong>${fmt}</strong></div>`;
-    }
-    const extraHtml = renderExtraDetailHtml(extra);
-    body.innerHTML = html + (extraHtml ? `<div class="detail-extra">${extraHtml}</div>` : '');
-    bindNoteDeleteButtons(body);
-    bindSnapshotClickHandlers(body);
-    bindPageNoteHandler(body, url);
-    bindTimelineShowMore(body, extra);
-  });
+    body.innerHTML = '<div style="padding:16px;color:var(--text-muted)">Page details unavailable</div>';
+  } else {
+    loadExtraDetail(url).then(extra => {
+      const body = card.querySelector('.page-detail-body');
+      let html = buildDetailHtml(url, attDetail, []);
+      const extraHtml = renderExtraDetailHtml(extra);
+      body.innerHTML = html + (extraHtml ? `<div class="detail-extra">${extraHtml}</div>` : '');
+      bindNoteDeleteButtons(body);
+      bindSnapshotClickHandlers(body);
+      bindPageNoteHandler(body, url);
+      bindTimelineShowMore(body, extra);
+    }).catch(() => {
+      const body = card.querySelector('.page-detail-body');
+      if (body) body.innerHTML = '<div style="padding:16px;color:var(--text-muted)">Failed to load page details</div>';
+    });
+  }
 
   const onEsc = (e) => { if (e.key === 'Escape') closePageDetailCard(); };
   overlay._escHandler = onEsc;
@@ -2994,11 +3158,11 @@ function createSidebarItem(node, depth) {
   const hasChildren = node.children.length > 0;
   const expanded = listFoldState[node.slug] !== false;
 
+  const chevronSvg = '<svg viewBox="0 0 8 8"><path d="M2 1l4 3-4 3z" fill="currentColor"/></svg>';
   item.innerHTML = `
     ${hasChildren
-      ? `<button class="fold-toggle" title="${expanded ? 'Collapse' : 'Expand'}">${expanded ? '\u25BE' : '\u25B8'}</button>`
+      ? `<button class="fold-toggle${expanded ? ' expanded' : ''}" title="${expanded ? 'Collapse' : 'Expand'}">${chevronSvg}</button>`
       : '<span class="fold-spacer"></span>'}
-    <span class="icon"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg></span>
     <span class="label">${escapeHtml(listDisplayName(lst))}</span>
     <button class="remove-list" title="Remove list">&times;</button>
   `;
@@ -3015,7 +3179,7 @@ function createSidebarItem(node, depth) {
         childContainer.style.display = newExpanded ? '' : 'none';
       }
       const btn = item.querySelector('.fold-toggle');
-      btn.textContent = newExpanded ? '\u25BE' : '\u25B8';
+      btn.classList.toggle('expanded', newExpanded);
       btn.title = newExpanded ? 'Collapse' : 'Expand';
     });
   }
@@ -3219,6 +3383,45 @@ document.getElementById('exploreBtn').addEventListener('click', () => {
   showExplore();
 });
 
+// --- Event listeners: Create List button ---
+document.getElementById('createListBtn').addEventListener('click', () => {
+  // Remove any existing inline input
+  const existing = document.querySelector('.inline-list-create');
+  if (existing) { existing.remove(); return; }
+  const listEl = document.getElementById('listsList');
+  const input = document.createElement('input');
+  input.className = 'inline-list-create';
+  input.placeholder = 'List name...';
+  listEl.prepend(input);
+  input.focus();
+
+  async function commitCreate() {
+    const name = input.value.trim();
+    input.remove();
+    if (!name) return;
+    // Create list via saveListMeta (appends to tree end)
+    await sendAction({ action: 'saveListMeta', name });
+    // Move new list to first position in tree
+    const order = await readCacheable('manifest:list-order');
+    const rawTree = order?.tree || [];
+    if (rawTree.length > 1) {
+      const last = rawTree[rawTree.length - 1];
+      const reordered = [last, ...rawTree.slice(0, -1)];
+      await sendAction({ action: 'updateListTree', tree: reordered });
+    }
+    await renderLists();
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') commitCreate();
+    else if (e.key === 'Escape') input.remove();
+  });
+  input.addEventListener('blur', () => {
+    // Small delay to allow Enter keydown to fire before blur removes input
+    setTimeout(() => { if (document.querySelector('.inline-list-create')) input.remove(); }, 150);
+  });
+});
+
 // --- Event listeners: Recycle Bin button ---
 document.getElementById('recycleBinBtn').addEventListener('click', () => {
   showRecycleBin();
@@ -3329,17 +3532,20 @@ document.getElementById('settingsBtn').addEventListener('click', async () => {
 
 document.getElementById('settingsClose').addEventListener('click', () => {
   document.getElementById('settingsModal').classList.remove('open');
+  saveSyncSettings();
 });
 
 document.getElementById('settingsModal').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) {
     e.currentTarget.classList.remove('open');
+    saveSyncSettings();
   }
 });
 
 // --- Settings: Storage ---
 async function updateStorageStatus() {
-  const info = await fsStorage.getDirectoryInfo();
+  const resp = await sendAction({ action: 'getDirectoryInfo' });
+  const info = resp.info;
 
   const locationDiv = document.getElementById('storageLocation');
   const statusSpan = document.getElementById('storageStatus');
@@ -3454,7 +3660,9 @@ document.getElementById('clearCacheBtn').addEventListener('click', async () => {
     // Ask background to re-hydrate from settings.json
     await chrome.runtime.sendMessage({ action: 'hydrateCache' });
 
-    showStatus('Cache cleared and reloaded from storage', 'success');
+    // Reload the page to reflect new data
+    location.reload();
+    return;
   } catch (error) {
     showStatus('Cache clear failed: ' + error.message, 'error');
   }
@@ -3505,10 +3713,15 @@ document.getElementById('changeDirBtn').addEventListener('click', async () => {
       return;
     }
 
-    showStatus(`Storage location changed to: ${result.name}`, 'success');
+    // Re-initialize the offscreen filesystem with the new handle
+    const initResp = await chrome.runtime.sendMessage({ action: 'initializeFilesystem' });
+    if (!initResp?.success) {
+      showStatus(`Directory changed but filesystem init failed: ${initResp?.error || 'unknown error'}. Try reloading the extension.`, 'warning');
+    } else {
+      showStatus(`Storage location changed to: ${result.name}`, 'success');
+    }
     await updateStorageStatus();
     await updateStatistics();
-    chrome.runtime.sendMessage({ action: 'initializeFilesystem' });
     resetHistory();
   } catch (error) {
     showStatus(`Error changing directory: ${error.message}`, 'error');
@@ -3586,7 +3799,8 @@ document.getElementById('selectSyncDirBtn').addEventListener('click', async () =
   }
 });
 
-document.getElementById('syncSaveBtn').addEventListener('click', async () => {
+// Save current sync settings from form fields. Returns false if validation fails.
+async function saveSyncSettings() {
   const enabled = document.getElementById('syncEnabled').checked;
   const method = document.getElementById('syncMethod').value;
   const interval = parseInt(document.getElementById('syncIntervalMinutes').value) || 5;
@@ -3595,16 +3809,16 @@ document.getElementById('syncSaveBtn').addEventListener('click', async () => {
   if (enabled) {
     if (method === 'github') {
       const repoUrl = document.getElementById('syncRepoUrl').value.trim();
-      if (!repoUrl) { showStatus('Repository URL is required', 'error'); return; }
+      if (!repoUrl) { showStatus('Repository URL is required', 'error'); return false; }
       const authState = await sendAction({ action: 'getSyncAuthState' });
-      if (!authState.hasToken) { showStatus('GitHub not connected — click "Connect with GitHub" first', 'error'); return; }
+      if (!authState.hasToken) { showStatus('GitHub not connected — click "Connect with GitHub" first', 'error'); return false; }
       await saveSettingsValue('syncRepoUrl', repoUrl);
     } else if (method === 'filesystem') {
       const folderName = await loadSettingsValue('syncFolderName', '');
-      if (!folderName) { showStatus('Please select a sync folder first', 'error'); return; }
+      if (!folderName) { showStatus('Please select a sync folder first', 'error'); return false; }
     } else if (method === 'webdav') {
       const url = document.getElementById('syncWebdavUrl').value.trim();
-      if (!url) { showStatus('WebDAV URL is required', 'error'); return; }
+      if (!url) { showStatus('WebDAV URL is required', 'error'); return false; }
       await saveSettingsValue('syncWebdavUrl', url);
       await saveSettingsValue('syncWebdavUser', document.getElementById('syncWebdavUser').value.trim());
       await saveSettingsValue('syncWebdavPass', document.getElementById('syncWebdavPass').value.trim());
@@ -3615,121 +3829,177 @@ document.getElementById('syncSaveBtn').addEventListener('click', async () => {
   await saveSettingsValue('syncMethod', method);
   await saveSettingsValue('syncIntervalMinutes', Math.max(1, interval));
   await saveSettingsValue('syncRetentionDays', Math.max(1, retention));
-  await sendAction('updateSyncSettings');
-  showStatus('Sync settings saved', 'success');
-});
+  await sendAction({ action: 'updateSyncSettings' });
+  return true;
+}
 
 document.getElementById('syncNowBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('syncNowBtn');
   const statusEl = document.getElementById('syncStatus');
-  statusEl.innerHTML = '<span class="spinner spinner-sm"></span> Syncing...';
+  btn.disabled = true;
+  btn.textContent = 'Syncing\u2026';
+  statusEl.textContent = '';
   try {
-    const result = await sendAction('syncNow');
+    if (!(await saveSyncSettings())) {
+      statusEl.style.color = '#c62828';
+      statusEl.textContent = 'Fix settings before syncing';
+      return;
+    }
+    // Phase 1: list devices immediately so the section appears
+    try {
+      const devResp = await sendAction({ action: 'syncListDevices' });
+      if (devResp.devices?.length) renderSyncDevices(devResp.devices, devResp.localDeviceId, true);
+    } catch { /* best-effort */ }
+
+    // Phase 2: actual push + pull
+    const result = await sendAction({ action: 'syncNow' });
     if (result.skipped) {
-      statusEl.textContent = result.error || 'Sync skipped (not configured or already running)';
+      statusEl.style.color = '';
+      statusEl.textContent = result.error || 'Sync skipped';
     } else if (result.error) {
       statusEl.style.color = '#c62828';
       if (result.authExpired) {
-        statusEl.textContent = 'GitHub authorization expired — please reconnect in Settings.';
+        statusEl.textContent = 'GitHub authorization expired — please reconnect.';
         syncShowAuthState('disconnected');
       } else if (result.disabled) {
-        statusEl.textContent = `Sync disabled: ${result.error}. Fix settings and save again.`;
+        statusEl.textContent = `Sync disabled: ${result.error}`;
       } else {
         statusEl.textContent = `Error (will retry): ${result.error}`;
       }
     } else {
-      statusEl.style.color = '#2e7d32';
-      const parts = [];
-      if (result.pushed) parts.push('pushed');
-      if (result.pulled) parts.push(`pulled ${result.entriesReplayed} entries`);
-      const time = new Date(result.timestamp).toLocaleTimeString();
-      statusEl.textContent = (parts.length ? parts.join(', ') : 'No changes') + ` at ${time}`;
+      statusEl.style.color = '';
+      statusEl.textContent = '';
     }
+    // Phase 3: refresh with final push/pull timestamps
+    refreshSyncDevices();
   } catch (e) {
+    statusEl.style.color = '#c62828';
     statusEl.textContent = `Error: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sync Now';
   }
 });
 
-// ─── GitHub Auth UI ──────────────────────────────────────────────────
+// ─── Synced Devices List ─────────────────────────────────────────────
 
-let deviceFlowAbort = null; // AbortController for cancelling device flow
+function formatTimeAgo(ms) {
+  const sec = Math.floor((Date.now() - ms) / 1000);
+  if (sec < 60) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.floor(hr / 24);
+  return `${days}d ago`;
+}
+
+function renderSyncDevices(devices, localDeviceId, syncing) {
+  const section = document.getElementById('syncDevicesSection');
+  const list = document.getElementById('syncDevicesList');
+  if (!devices || devices.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+  list.innerHTML = '';
+  for (const d of devices) {
+    const isLocal = d.deviceId === localDeviceId;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px;';
+
+    const id = document.createElement('span');
+    id.style.cssText = 'font-family:monospace;';
+    id.textContent = d.deviceId;
+    row.appendChild(id);
+
+    if (isLocal) {
+      const tag = document.createElement('span');
+      tag.textContent = '(current)';
+      tag.style.color = 'var(--text-muted)';
+      row.appendChild(tag);
+    }
+
+    const status = document.createElement('span');
+    status.style.cssText = 'color:var(--text-muted);margin-left:auto;margin-right:6px;white-space:nowrap;';
+    if (d.paused) {
+      status.textContent = 'paused';
+    } else if (syncing) {
+      status.textContent = isLocal ? 'pushing\u2026' : 'pulling\u2026';
+    } else if (isLocal) {
+      status.textContent = d.lastPushed ? `pushed ${formatTimeAgo(d.lastPushed)}` : '';
+    } else {
+      status.textContent = d.lastPulled ? `pulled ${formatTimeAgo(d.lastPulled)}` : '';
+    }
+    row.appendChild(status);
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.textContent = d.paused ? '\u25b6' : '\u23f8';
+    toggleBtn.title = d.paused ? 'Resume sync' : 'Pause sync';
+    toggleBtn.style.cssText = 'background:none;border:none;cursor:pointer;font-size:12px;color:var(--text-muted);padding:0 2px;line-height:1;';
+    toggleBtn.addEventListener('click', async () => {
+      toggleBtn.disabled = true;
+      try {
+        const resp = await sendAction({ action: 'toggleSyncDevicePaused', deviceId: d.deviceId });
+        d.paused = resp.paused;
+        toggleBtn.textContent = d.paused ? '\u25b6' : '\u23f8';
+        toggleBtn.title = d.paused ? 'Resume sync' : 'Pause sync';
+        status.textContent = d.paused ? 'paused' : '';
+      } catch (e) {
+        showStatus(`Toggle failed: ${e.message}`, 'error');
+      } finally {
+        toggleBtn.disabled = false;
+      }
+    });
+    row.appendChild(toggleBtn);
+
+    list.appendChild(row);
+  }
+}
+
+async function refreshSyncDevices() {
+  try {
+    const resp = await sendAction({ action: 'getSyncDevices' });
+    renderSyncDevices(resp.devices, resp.localDeviceId, false);
+  } catch {
+    document.getElementById('syncDevicesSection').style.display = 'none';
+  }
+}
+
+// ─── GitHub Auth UI ──────────────────────────────────────────────────
 
 function syncShowAuthState(state, detail) {
   document.getElementById('syncAuthDisconnected').style.display = state === 'disconnected' ? '' : 'none';
-  document.getElementById('syncAuthDeviceFlow').style.display = state === 'device-flow' ? '' : 'none';
   document.getElementById('syncAuthConnected').style.display = state === 'connected' ? '' : 'none';
   if (state === 'connected' && detail) {
     document.getElementById('syncAuthDetail').textContent = detail;
   }
 }
 
-document.getElementById('syncGithubConnectBtn').addEventListener('click', async () => {
-  try {
-    const { user_code, device_code, verification_uri, interval, expires_in } = await requestDeviceCode();
-    document.getElementById('syncDeviceCode').textContent = user_code;
-    syncShowAuthState('device-flow');
-
-    deviceFlowAbort = new AbortController();
-
-    document.getElementById('syncOpenGithubBtn').href = verification_uri;
-    document.getElementById('syncOpenGithubBtn').onclick = (e) => {
-      e.preventDefault();
-      window.open(verification_uri, '_blank');
-    };
-
-    const token = await pollForToken(device_code, interval, expires_in, deviceFlowAbort.signal);
-    const { login } = await fetchGitHubUser(token);
-    const remember = document.getElementById('syncRememberToken').checked;
-    await sendAction({ action: 'setSyncToken', token, remember, authMethod: 'oauth', githubUser: login });
-    syncShowAuthState('connected', `as @${login} via GitHub OAuth`);
-    deviceFlowAbort = null;
-  } catch (e) {
-    deviceFlowAbort = null;
-    if (!e.message.includes('cancel')) {
-      showStatus(`GitHub auth failed: ${e.message}`, 'error');
-    }
-    syncShowAuthState('disconnected');
-  }
-});
-
-document.getElementById('syncCopyCodeBtn').addEventListener('click', () => {
-  const code = document.getElementById('syncDeviceCode').textContent;
-  navigator.clipboard.writeText(code).then(() => {
-    document.getElementById('syncCopyCodeBtn').textContent = 'Copied!';
-    setTimeout(() => { document.getElementById('syncCopyCodeBtn').textContent = 'Copy'; }, 1500);
-  });
-});
-
-document.getElementById('syncCancelAuthBtn').addEventListener('click', () => {
-  if (deviceFlowAbort) { deviceFlowAbort.abort(); deviceFlowAbort = null; }
-  syncShowAuthState('disconnected');
-});
-
-document.getElementById('syncPatToggle').addEventListener('click', (e) => {
-  e.preventDefault();
-  const fields = document.getElementById('syncPatFields');
-  fields.style.display = fields.style.display === 'none' ? '' : 'none';
-});
-
 document.getElementById('syncPatSaveBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('syncPatSaveBtn');
   const token = document.getElementById('syncPatInput').value.trim();
   if (!token) { showStatus('Token is required', 'error'); return; }
+  btn.disabled = true;
+  btn.textContent = 'Connecting\u2026';
   try {
     const { login } = await fetchGitHubUser(token);
     const remember = document.getElementById('syncRememberToken').checked;
     await sendAction({ action: 'setSyncToken', token, remember, authMethod: 'pat', githubUser: login });
-    syncShowAuthState('connected', `as @${login} via personal access token`);
+    syncShowAuthState('connected', `as @${login}`);
     document.getElementById('syncPatInput').value = '';
-    document.getElementById('syncPatFields').style.display = 'none';
   } catch (e) {
     showStatus(`Invalid token: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Connect';
   }
 });
 
 document.getElementById('syncDisconnectBtn').addEventListener('click', async () => {
   await sendAction({ action: 'clearSyncToken' });
   syncShowAuthState('disconnected');
-  const revokeUrl = getGitHubRevokeUrl();
-  showStatus(`Disconnected. <a href="${revokeUrl}" target="_blank" style="color:#1a73e8;">Revoke on GitHub</a>`, 'success');
+  showStatus('Disconnected. <a href="https://github.com/settings/tokens" target="_blank" style="color:#1a73e8;">Manage tokens on GitHub</a>', 'success');
 });
 
 document.getElementById('syncRememberToken').addEventListener('change', async () => {
@@ -3751,7 +4021,8 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
   clearBtn.textContent = 'Clearing...';
 
   try {
-    const info = await fsStorage.getDirectoryInfo();
+    const dirResp = await sendAction({ action: 'getDirectoryInfo' });
+    const info = dirResp.info;
     if (!info || !info.hasPermission) {
       showStatus('No storage directory configured', 'error');
       clearBtn.disabled = false;
@@ -3871,7 +4142,7 @@ function showStatus(message, type) {
 
     // Children container
     const childrenContainer = document.createElement('div');
-    childrenContainer.className = 'bookmark-tree-children' + (depth >= 1 ? ' collapsed' : '');
+    childrenContainer.className = 'bookmark-tree-children';
     const childItems = [];
     for (const child of folder.children) {
       const childItem = createTreeItem(child, depth + 1);
@@ -3882,7 +4153,7 @@ function showStatus(message, type) {
 
     // Toggle expand/collapse
     if (folder.children.length > 0) {
-      toggle.classList.toggle('expanded', depth < 1);
+      toggle.classList.add('expanded');
       toggle.addEventListener('click', () => {
         const collapsed = childrenContainer.classList.toggle('collapsed');
         toggle.classList.toggle('expanded', !collapsed);
@@ -3951,18 +4222,29 @@ function showStatus(message, type) {
   function collectCheckedTree(items) {
     const result = [];
     for (const item of items) {
-      if (item.getChecked() || item.getIndeterminate()) {
-        // Include this folder — collect its selected children recursively
-        const childSelected = collectCheckedTree(item.children);
+      if (item.getChecked() && !item.getIndeterminate()) {
+        // Fully checked — include this folder with all descendants
         result.push({
           title: item.folder.title,
-          bookmarks: item.getChecked() ? item.folder.bookmarks : [],
-          skipped: item.getChecked() ? (item.folder.skipped || []) : [],
-          children: childSelected,
+          bookmarks: item.folder.bookmarks,
+          skipped: item.folder.skipped || [],
+          children: collectAllChildren(item.children),
         });
+      } else if (item.getIndeterminate()) {
+        // Partially checked — skip this folder, flatten selected children
+        result.push(...collectCheckedTree(item.children));
       }
     }
     return result;
+  }
+
+  function collectAllChildren(items) {
+    return items.map(item => ({
+      title: item.folder.title,
+      bookmarks: item.folder.bookmarks,
+      skipped: item.folder.skipped || [],
+      children: collectAllChildren(item.children),
+    }));
   }
 
   importBtn.addEventListener('click', async () => {
@@ -4319,6 +4601,18 @@ async function renderFilterPanelHtml() {
     html += '</div></div>';
   }
 
+  // Device bubbles
+  const deviceIds = [...new Set(historyAllEntries.map(e => e.deviceId).filter(Boolean))].sort();
+  if (deviceIds.length > 1) {
+    html += '<div class="filter-section"><div class="filter-section-label">Devices</div>';
+    html += '<div class="filter-bubbles">';
+    for (const did of deviceIds) {
+      const active = filterState.devices?.[did] === true;
+      html += `<button class="filter-bubble${active ? ' active' : ''}" data-device-id="${escapeHtml(did)}">${escapeHtml(did)}</button>`;
+    }
+    html += '</div></div>';
+  }
+
   // Time filters
   html += '<div class="filter-section"><div class="filter-section-label">Time</div>';
   html += renderDualRangeFilter('lastSeen', 'Last seen', filterState.lastSeen);
@@ -4394,16 +4688,23 @@ function renderDualRangeFilter(stateKey, label, state, rangeField) {
   const loPercent = range > 0 ? ((lo - cfg.min) / range) * 100 : 0;
   const hiPercent = range > 0 ? ((cfg.max - hi) / range) * 100 : 0;
 
+  // isDaysAgo: visually invert so left = older date, right = more recent date
+  const inverted = cfg.isDaysAgo;
+  const leftLabel = inverted ? cfg.format(hi) : cfg.format(lo);
+  const rightLabel = inverted ? cfg.format(lo) : cfg.format(hi);
+  const fillLeft = inverted ? hiPercent : loPercent;
+  const fillRight = inverted ? loPercent : hiPercent;
+
   let html = `<div class="filter-range" data-key="${stateKey}">`;
   html += `<span class="filter-range-label">${escapeHtml(label)}</span>`;
   html += `<div class="qb-dual-range">`;
-  html += `<span class="qb-dual-range-label qb-dual-range-lo-label">${cfg.format(lo)}</span>`;
-  html += `<div class="qb-dual-range-track">`;
-  html += `<div class="qb-dual-range-fill" style="left:${loPercent}%;right:${hiPercent}%"></div>`;
+  html += `<span class="qb-dual-range-label qb-dual-range-lo-label">${leftLabel}</span>`;
+  html += `<div class="qb-dual-range-track${inverted ? ' inverted' : ''}">`;
+  html += `<div class="qb-dual-range-fill" style="left:${fillLeft}%;right:${fillRight}%"></div>`;
   html += `<input type="range" class="filter-range-lo" data-key="${stateKey}" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${lo}">`;
   html += `<input type="range" class="filter-range-hi" data-key="${stateKey}" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${hi}">`;
   html += `</div>`;
-  html += `<span class="qb-dual-range-label qb-dual-range-hi-label">${cfg.format(hi)}</span>`;
+  html += `<span class="qb-dual-range-label qb-dual-range-hi-label">${rightLabel}</span>`;
   html += `</div></div>`;
   return html;
 }
@@ -4507,17 +4808,20 @@ function bindFilterEvents(container) {
       }
       const field = key === 'lastSeen' ? 'lastVisit' : key === 'firstSeen' ? 'firstVisit' : 'timeOnPage';
       const cfg = getRangeConfig(field);
+      const inverted = cfg.isDaysAgo;
+      const loPercent = ((lo - cfg.min) / (cfg.max - cfg.min)) * 100;
+      const hiPercent = 100 - ((hi - cfg.min) / (cfg.max - cfg.min)) * 100;
       // Update fill bar
       const fill = rangeDiv.querySelector('.qb-dual-range-fill');
       if (fill) {
-        fill.style.left = ((lo - cfg.min) / (cfg.max - cfg.min)) * 100 + '%';
-        fill.style.right = (100 - ((hi - cfg.min) / (cfg.max - cfg.min)) * 100) + '%';
+        fill.style.left = (inverted ? hiPercent : loPercent) + '%';
+        fill.style.right = (inverted ? loPercent : hiPercent) + '%';
       }
-      // Update labels
+      // Update labels (inverted: left=hi/older, right=lo/recent)
       const loLabel = rangeDiv.querySelector('.qb-dual-range-lo-label');
       const hiLabel = rangeDiv.querySelector('.qb-dual-range-hi-label');
-      if (loLabel) loLabel.textContent = cfg.format(lo);
-      if (hiLabel) hiLabel.textContent = cfg.format(hi);
+      if (loLabel) loLabel.textContent = inverted ? cfg.format(hi) : cfg.format(lo);
+      if (hiLabel) hiLabel.textContent = inverted ? cfg.format(lo) : cfg.format(hi);
       // Update state: null if at boundary (= unbounded)
       filterState[key] = {
         lo: lo > cfg.min ? lo : null,
@@ -4545,13 +4849,25 @@ function bindFilterEvents(container) {
   container.querySelectorAll('.filter-bubble').forEach(btn => {
     btn.addEventListener('click', () => {
       const slug = btn.dataset.listSlug;
-      if (!filterState.lists) filterState.lists = {};
-      if (filterState.lists[slug] === true) {
-        delete filterState.lists[slug]; // deactivate
-        btn.classList.remove('active');
-      } else {
-        filterState.lists[slug] = true; // activate
-        btn.classList.add('active');
+      const deviceId = btn.dataset.deviceId;
+      if (slug) {
+        if (!filterState.lists) filterState.lists = {};
+        if (filterState.lists[slug] === true) {
+          delete filterState.lists[slug];
+          btn.classList.remove('active');
+        } else {
+          filterState.lists[slug] = true;
+          btn.classList.add('active');
+        }
+      } else if (deviceId) {
+        if (!filterState.devices) filterState.devices = {};
+        if (filterState.devices[deviceId] === true) {
+          delete filterState.devices[deviceId];
+          btn.classList.remove('active');
+        } else {
+          filterState.devices[deviceId] = true;
+          btn.classList.add('active');
+        }
       }
       saveFilterState();
       const toggleBtn = container.querySelector('#filterToggleBtn');
@@ -4608,7 +4924,7 @@ async function runSearchFilterPipeline() {
     resultRowHtml(r.user_title || r.title, r.url, {
       attScore: r.attScore, maxAtt, attDetail: r.attDetail,
       notes: r.notes, timestamps: r.timestamps, context: 'related',
-      childIds: r.childIds, parentIds: r.parentIds, likes: r.likes,
+      childIds: r.childIds, parentIds: r.parentIds, likes: r.likes, hasHighlightNotes: r.hasHighlightNotes,
     })
   );
 
@@ -4631,15 +4947,35 @@ async function runSearchFilterPipeline() {
     }
   };
 
-  // Time chart for explore results
+  // Time chart for explore results (with estimated bars for unloaded files)
   const chartData = results.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || Date.now(), attention: '' }));
   renderTimeChartInto(
     document.getElementById('relatedChart'),
     document.getElementById('relatedChartBars'),
     chartData,
-    'Explore results'
+    'Explore results',
+    getEstimatedByDay()
   );
-  bindChartBarClick(document.getElementById('relatedChart'), document.getElementById('relatedResults'));
+  const relatedChart = document.getElementById('relatedChart');
+  bindChartBarClick(relatedChart, document.getElementById('relatedResults'));
+
+  // Demand-load data when an unloaded date bar is clicked
+  relatedChart._onDateSelect = async (activeDates) => {
+    if (activeDates.size === 0) return;
+    const loadedFiles = new Set(historyFiles.slice(0, historyLoadedCount));
+    const unloaded = [...activeDates].filter(d => !loadedFiles.has(d + '.jsonl'));
+    if (unloaded.length === 0) return;
+    // Save active dates — runSearchFilterPipeline re-renders chart, destroying DOM state
+    const savedDates = new Set(activeDates);
+    unloaded.sort();
+    await loadHistoryUntilDate(unloaded[0]);
+    await runSearchFilterPipeline();
+    // Restore active state on re-rendered chart bars
+    relatedChart.querySelectorAll('.chart-bar-group').forEach(g => {
+      if (savedDates.has(g.dataset.date)) g.classList.add('active');
+    });
+    applyDateFilter(relatedChart, document.getElementById('relatedResults'));
+  };
 }
 
 // --- Focus Panel ---
@@ -4988,9 +5324,8 @@ async function initializeMain(currentTheme) {
   try {
     const authState = await sendAction({ action: 'getSyncAuthState' });
     if (authState.hasToken) {
-      const method = authState.authMethod === 'pat' ? 'personal access token' : 'GitHub OAuth';
-      const user = authState.githubUser ? `as @${authState.githubUser} ` : '';
-      syncShowAuthState('connected', `${user}via ${method}`);
+      const user = authState.githubUser ? `as @${authState.githubUser}` : '';
+      syncShowAuthState('connected', user);
     } else {
       syncShowAuthState('disconnected');
     }
@@ -5002,6 +5337,7 @@ async function initializeMain(currentTheme) {
   document.getElementById('syncWebdavPass').value = await loadSettingsValue('syncWebdavPass', '');
   document.getElementById('syncIntervalMinutes').value = await loadSettingsValue('syncIntervalMinutes', 5);
   document.getElementById('syncRetentionDays').value = await loadSettingsValue('syncRetentionDays', 7);
+  if (syncEnabled) refreshSyncDevices();
   _timer('loadSettings');
 
   // Initialize chart tooltips

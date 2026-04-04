@@ -53,6 +53,14 @@ export class SyncManager {
     const pushState = await this.loadPushState();
     const oldHashes = pushState.files || {};
 
+    // First push: check for device ID collision with existing branches
+    if (!oldHashes || Object.keys(oldHashes).length === 0) {
+      const branches = await this.transport.listBranches();
+      if (branches.some(b => b.name === deviceId)) {
+        return { pushed: false, collision: true };
+      }
+    }
+
     // Check if anything changed (new files, changed content, or removed files)
     const changed = Object.keys(newHashes).length !== Object.keys(oldHashes).length
       || Object.entries(newHashes).some(([p, h]) => oldHashes[p] !== h);
@@ -67,16 +75,17 @@ export class SyncManager {
   }
 
   // Pull remote files from peer branches.
-  // Returns { remoteEntries: [{ deviceId, entries }] } for caller to replay.
+  // Returns { remoteEntries, devices, changedPeers }.
   async pull(deviceId) {
     const branches = await this.transport.listBranches();
     const peers = branches.filter(b => b.name !== deviceId);
 
-    if (peers.length === 0) return { remoteEntries: [] };
+    if (peers.length === 0) return { remoteEntries: [], devices: branches, changedPeers: [] };
 
     const cursorData = await this.loadCursors();
     const cursors = cursorData.cursors || {};
     const remoteEntries = [];
+    const changedPeers = [];
 
     for (const peer of peers) {
       const cursor = cursors[peer.name] || { treeSha: null, files: {} };
@@ -128,9 +137,19 @@ export class SyncManager {
       const newFiles = {};
       for (const f of tree) newFiles[f.path] = f.sha;
       cursors[peer.name] = { treeSha: peer.sha, files: newFiles };
+      changedPeers.push(peer.name);
     }
 
     await this.saveCursors({ cursors });
-    return { remoteEntries };
+    return { remoteEntries, devices: branches, changedPeers };
+  }
+
+  // Delete a remote device branch and clean up its cursor.
+  async deleteDevice(deviceId) {
+    await this.transport.deleteBranch(deviceId);
+    const cursorData = await this.loadCursors();
+    const cursors = cursorData.cursors || {};
+    delete cursors[deviceId];
+    await this.saveCursors({ cursors });
   }
 }

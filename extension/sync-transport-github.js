@@ -43,7 +43,7 @@ export class GitHubTransport {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         const resp = await fetch(url, opts);
-        if (resp.ok) return resp.json();
+        if (resp.ok) return resp.status === 204 ? null : resp.json();
         if (resp.status === 403 && resp.headers.get('X-RateLimit-Remaining') === '0') {
           const resetHeader = resp.headers.get('X-RateLimit-Reset');
           const resetEpoch = resetHeader ? parseInt(resetHeader, 10) : null;
@@ -100,16 +100,46 @@ export class GitHubTransport {
     });
   }
 
+  // Delete a branch ref.
+  async deleteBranch(name) {
+    await this._request('DELETE', `${this._repoPath}/git/refs/heads/${name}`);
+  }
+
+  // Initialize an empty repo by creating a .gitkeep via the Contents API.
+  // The Git Data API (blobs/trees/commits) returns 409 on repos with no commits.
+  // Creates on the device branch directly so no orphan main branch is left behind.
+  async _initializeEmptyRepo(branch) {
+    await this._request('PUT', `${this._repoPath}/contents/.gitkeep`, {
+      message: 'initialize repository',
+      content: btoa(''),
+      branch,
+    });
+  }
+
   // Push files as a single orphan commit on the given branch.
   // files: [{ path, content }]. Returns { sha: commitSha }.
   async pushTree(branch, files) {
     // 1. Create blobs
     const blobShas = [];
     for (const file of files) {
-      const blob = await this._request('POST', `${this._repoPath}/git/blobs`, {
-        content: btoa(file.content),
-        encoding: 'base64',
-      });
+      let blob;
+      try {
+        blob = await this._request('POST', `${this._repoPath}/git/blobs`, {
+          content: btoa(file.content),
+          encoding: 'base64',
+        });
+      } catch (e) {
+        // Empty repo: Git Data API returns 409 until at least one commit exists
+        if (blobShas.length === 0 && e.message.includes('409')) {
+          await this._initializeEmptyRepo(branch);
+          blob = await this._request('POST', `${this._repoPath}/git/blobs`, {
+            content: btoa(file.content),
+            encoding: 'base64',
+          });
+        } else {
+          throw e;
+        }
+      }
       blobShas.push(blob.sha);
     }
 
@@ -125,8 +155,9 @@ export class GitHubTransport {
     });
 
     // 3. Create orphan commit (no parents)
+    const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const commit = await this._request('POST', `${this._repoPath}/git/commits`, {
-      message: 'sync',
+      message: `sync ${branch} at ${ts} (${files.length} files)`,
       tree: tree.sha,
       parents: [],
     });

@@ -111,6 +111,13 @@
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    * {
+      scrollbar-color: var(--scrollbar-thumb) transparent;
+      scrollbar-width: thin;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
     :focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; border-radius: 4px; }
     :focus:not(:focus-visible) { outline: none; }
 
@@ -258,16 +265,25 @@
     .sidebar-content {
       flex: 1;
       overflow-y: auto;
-      overflow-x: auto;
+      overflow-x: hidden;
       padding-bottom: 12px;
     }
 
     .sidebar-children { /* container for child list items */ }
-    .fold-toggle { width: 16px; height: 16px; border: none; background: none; cursor: pointer; color: var(--text-secondary); font-size: 12px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+    .fold-toggle { width: 16px; height: 16px; border: none; background: none; cursor: pointer; color: var(--text-secondary); flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+    .fold-toggle svg { width: 10px; height: 10px; transition: transform 0.15s ease; }
+    .fold-toggle.expanded svg { transform: rotate(90deg); }
     .fold-toggle:hover { color: var(--text-primary); background: var(--bg-surface-hover); border-radius: 3px; }
     .fold-spacer { width: 16px; flex-shrink: 0; }
     .sidebar-item.nest-target { background: var(--accent-primary-soft); outline: 2px solid var(--accent-primary); outline-offset: -2px; }
-    .sidebar-item { white-space: nowrap; }
+    .sidebar-item { white-space: nowrap; overflow: hidden; }
+    .sidebar-bottom-item {
+      flex-shrink: 0;
+      border-top: 1px solid var(--border-subtle);
+      border-radius: 0;
+      margin: 0;
+      padding: 10px 10px 10px 20px;
+    }
     .sidebar-resize-handle { width: 4px; cursor: col-resize; background: transparent; flex-shrink: 0; z-index: 10; }
 
     .sidebar-section-label {
@@ -275,8 +291,33 @@
       font-size: 11px;
       font-weight: 700;
       color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.03em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .sidebar-create-list {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--text-muted);
+      padding: 0 2px;
+      line-height: 1;
+    }
+    .sidebar-create-list:hover { color: var(--text-primary); }
+    .inline-list-create {
+      display: block;
+      width: calc(100% - 2 * var(--sidebar-padding-x));
+      margin: 2px var(--sidebar-padding-x);
+      padding: 4px 8px;
+      font-size: 12px;
+      border: 1px solid var(--accent-primary);
+      border-radius: var(--radius-sm);
+      outline: none;
+      background: var(--bg-primary);
+      color: var(--text-primary);
     }
 
     .sidebar-item {
@@ -333,6 +374,7 @@
       text-overflow: ellipsis;
       white-space: nowrap;
       flex: 1;
+      min-width: 0;
     }
 
     .sidebar-item .remove-list {
@@ -516,16 +558,6 @@
     .chart-bar-group.active .chart-bar {
       background: var(--accent-primary);
       box-shadow: 0 0 6px var(--accent-primary-glow);
-    }
-
-    .chart-bar.estimated {
-      background: rgba(142, 125, 109, 0.08);
-      border: 1px dashed rgba(142, 125, 109, 0.15);
-      box-sizing: border-box;
-    }
-
-    .chart-bar-group.estimated .chart-bar {
-      cursor: default;
     }
 
     .chart-tooltip {
@@ -930,8 +962,7 @@
       font-size: 11px;
       font-weight: 600;
       color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.03em;
     }
 
     .detail-list-tag {
@@ -1069,29 +1100,6 @@
       margin-bottom: 6px;
       display: block;
     }
-    .timeline-date-group {
-      position: relative;
-      padding-left: 18px;
-      margin-bottom: 2px;
-    }
-    .timeline-date-group::before {
-      content: '';
-      position: absolute;
-      left: 5px;
-      top: 0;
-      bottom: 0;
-      width: 1px;
-      background: var(--border-subtle);
-    }
-    .timeline-date-group:last-of-type::before {
-      bottom: 50%;
-    }
-    .timeline-date-label {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-muted);
-      padding: 4px 0 2px;
-    }
     .timeline-event {
       display: flex;
       align-items: center;
@@ -1105,7 +1113,6 @@
       height: 7px;
       border-radius: 50%;
       flex-shrink: 0;
-      margin-left: -14px;
     }
     .timeline-dot.visit {
       background: var(--accent-blue);
@@ -1122,9 +1129,31 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .timeline-event-time {
+      margin-left: auto;
+      flex-shrink: 0;
+      color: var(--text-muted);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    .timeline-collapse {
+      display: block;
+      margin: 2px 0;
+      padding: 2px 8px;
+      font-size: 10px;
+      color: var(--text-muted);
+      background: none;
+      border: 1px dashed var(--border-subtle);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+    }
+    .timeline-collapse:hover {
+      color: var(--text-secondary);
+      border-color: var(--text-muted);
+    }
     .timeline-show-more {
       display: inline-block;
-      margin: 4px 0 0 18px;
+      margin: 4px 0 0 0;
       padding: 2px 8px;
       font-size: 11px;
       color: var(--accent-primary);
@@ -1142,8 +1171,7 @@
       font-size: 11px;
       font-weight: 500;
       color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.3px;
       background: var(--bg-surface-hover);
       border-bottom: 1px solid var(--border-subtle);
     }
@@ -1215,8 +1243,6 @@
 
     .modal {
       background: var(--bg-surface-solid);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
       border: 1px solid var(--border-glass-strong);
       border-radius: var(--radius-xl);
       width: 520px;
@@ -1267,13 +1293,7 @@
       padding: 8px 24px 24px;
       overflow-y: auto;
       flex: 1;
-      scrollbar-color: var(--scrollbar-thumb) transparent;
-      scrollbar-width: thin;
     }
-
-    .modal-body::-webkit-scrollbar { width: 6px; }
-    .modal-body::-webkit-scrollbar-track { background: transparent; }
-    .modal-body::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
 
     .modal-section {
       margin-bottom: 20px;
@@ -1612,12 +1632,7 @@
       padding: 8px;
       margin-bottom: 8px;
       background: var(--bg-surface);
-      scrollbar-color: var(--scrollbar-thumb) transparent;
-      scrollbar-width: thin;
     }
-    .bookmark-tree-container::-webkit-scrollbar { width: 6px; }
-    .bookmark-tree-container::-webkit-scrollbar-track { background: transparent; }
-    .bookmark-tree-container::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
     .bookmark-tree-placeholder {
       font-size: 12px;
       color: var(--text-tertiary);
@@ -2048,9 +2063,8 @@
     .filter-section-label {
       font-size: 10px;
       font-weight: 700;
-      text-transform: uppercase;
       color: var(--text-muted);
-      letter-spacing: 0.8px;
+      letter-spacing: 0.4px;
       padding-bottom: 4px;
       border-bottom: 1px solid var(--border-section);
     }
@@ -2189,8 +2203,7 @@
       font-size: 11px;
       font-weight: 500;
       color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.3px;
     }
 
     .qb-body {
@@ -2318,6 +2331,9 @@
       background: rgba(180, 160, 140, 0.15);
       border-radius: 3px;
       box-shadow: inset 0 0.5px 1px rgba(53, 40, 32, 0.08);
+    }
+    .qb-dual-range-track.inverted {
+      direction: rtl;
     }
     .qb-dual-range-fill {
       position: absolute;
@@ -2687,37 +2703,17 @@
       background: rgba(88, 136, 88, 0.08);
       color: var(--accent-green);
     }
-    .rule-entry.has-fn {
-      flex-direction: column;
-      align-items: stretch;
-      border-radius: var(--radius-lg);
-      padding: 6px 14px 8px;
-    }
     .rule-header {
       display: flex;
       align-items: center;
       gap: 8px;
       width: 100%;
     }
-    .rule-entry.has-fn:hover .rule-action-btn { opacity: 1; }
     .rule-desc {
       flex: 1;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-    }
-    .rule-fn-source {
-      margin: 4px 0 0;
-      padding: 6px 10px;
-      background: rgba(53, 40, 32, 0.03);
-      border: 1px solid var(--border-glass);
-      border-radius: var(--radius-md);
-      font-family: var(--font-mono, 'SF Mono', 'Menlo', 'Consolas', monospace);
-      font-size: 11px;
-      line-height: 1.5;
-      color: var(--text-secondary);
-      white-space: pre;
-      overflow-x: auto;
     }
     .rule-action-btn {
       width: 20px;
@@ -2841,24 +2837,55 @@
       letter-spacing: 0.01em;
     }
     .rule-save-btn:hover { background: var(--accent-primary-hover, #c06020); box-shadow: 0 1px 4px rgba(208, 112, 48, 0.2); }
-    .rule-smart-fn-input {
+    .rule-fn-editor {
+      position: relative;
       width: 100%;
-      padding: 5px 10px;
       border: 1px solid rgba(0, 0, 0, 0.06);
       border-radius: var(--radius-md);
-      font-size: 11px;
-      font-family: 'Monaco', 'Menlo', monospace;
       background: rgba(255, 255, 255, 0.4);
-      color: var(--text-primary);
-      resize: vertical;
-      outline: none;
       transition: border-color 0.2s var(--ease-smooth);
-      box-sizing: border-box;
     }
-    .rule-smart-fn-input:focus {
+    .rule-fn-editor:focus-within {
       border-color: var(--accent-primary);
       box-shadow: 0 0 0 2px rgba(208, 112, 48, 0.08);
     }
+    .rule-fn-highlight, .rule-smart-fn-input {
+      margin: 0;
+      padding: 5px 10px;
+      font-size: 11px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      line-height: 1.5;
+      white-space: pre;
+      word-wrap: normal;
+      overflow: auto;
+      box-sizing: border-box;
+      tab-size: 2;
+    }
+    .rule-fn-highlight {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      color: var(--text-primary);
+      overflow: hidden;
+    }
+    .rule-smart-fn-input {
+      position: relative;
+      width: 100%;
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      color: transparent;
+      caret-color: var(--text-primary);
+      resize: vertical;
+      outline: none;
+    }
+    /* Token colors */
+    .tok-keyword { color: #8959a8; }
+    .tok-literal { color: #8959a8; }
+    .tok-string  { color: #718c00; }
+    .tok-regex   { color: #c82829; }
+    .tok-number  { color: #f5871f; }
+    .tok-comment { color: #8e908c; font-style: italic; }
     .rules-form-error {
       font-size: 11px;
       color: var(--accent-red);
@@ -3148,16 +3175,15 @@
     </button>
 
     <div class="sidebar-content">
-      <div class="sidebar-section-label">Lists</div>
+      <div class="sidebar-section-label">Lists<button class="sidebar-create-list" id="createListBtn" title="Create list">+</button></div>
       <div id="listsList">
         <div class="lists-empty" id="listsEmpty">Pin a search to create a list</div>
       </div>
-      <div class="sidebar-section-label" style="margin-top:12px">System</div>
-      <div class="sidebar-item" id="recycleBinBtn" role="button" tabindex="0">
-        <span class="icon"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></span>
-        <span class="label">Recycle Bin</span>
-        <span class="recycle-count" id="recycleBinCount"></span>
-      </div>
+    </div>
+    <div class="sidebar-item sidebar-bottom-item" id="recycleBinBtn" role="button" tabindex="0">
+      <span class="icon"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></span>
+      <span class="label">Recycle Bin</span>
+      <span class="recycle-count" id="recycleBinCount"></span>
     </div>
   </div>
 
@@ -3200,7 +3226,7 @@
     <div class="list-layout" id="listLayout">
       <div class="rules-section" id="rulesSection" style="display:none">
         <div class="rules-header" id="rulesHeader">
-          <span class="filter-section-label" style="border:none;margin:0;padding:0">RULES</span>
+          <span class="filter-section-label" style="border:none;margin:0;padding:0">Rules</span>
           <span class="rules-count" id="rulesCount" style="display:none"></span>
           <button class="rules-header-add" id="rulesAddBtn" title="Add rule">+</button>
           <span style="flex:1"></span>
@@ -3211,14 +3237,14 @@
           <div class="rules-form-error" id="rulesFormError" style="display:none"></div>
           <div class="rules-preview" id="rulesPreview" style="display:none">
             <div class="rules-preview-header">
-              <span class="filter-section-label" style="border:none;margin:0;padding:0">RECENT VISITS</span>
+              <span class="filter-section-label" style="border:none;margin:0;padding:0">Recent Visits</span>
               <span class="rules-preview-count" id="rulesPreviewCount"></span>
             </div>
             <div class="rules-preview-list" id="rulesPreviewList"></div>
           </div>
           <div class="rules-preview" id="rulesPinsPreview" style="display:none">
             <div class="rules-preview-header">
-              <span class="filter-section-label" style="border:none;margin:0;padding:0">PINNED PAGES</span>
+              <span class="filter-section-label" style="border:none;margin:0;padding:0">Pinned Pages</span>
               <span class="rules-preview-count" id="rulesPinsPreviewCount"></span>
             </div>
             <div class="rules-preview-list" id="rulesPinsPreviewList"></div>
@@ -3408,26 +3434,9 @@
                 <label style="font-size:13px;color:var(--text-secondary);">Authentication:</label>
                 <!-- Disconnected state -->
                 <div id="syncAuthDisconnected" style="margin-top:6px;">
-                  <button id="syncGithubConnectBtn" class="btn btn-primary" style="font-size:13px;">Connect with GitHub</button>
-                  <span style="margin:0 8px;color:var(--text-muted);font-size:12px;">or</span>
-                  <a href="#" id="syncPatToggle" style="font-size:12px;color:var(--accent-blue);">Use personal access token</a>
-                  <div id="syncPatFields" style="display:none;margin-top:8px;">
-                    <input type="password" id="syncPatInput" placeholder="ghp_..." style="width:100%;padding:4px 6px;border:1px solid var(--border-subtle);border-radius:4px;font-size:13px;">
-                    <button id="syncPatSaveBtn" class="btn btn-secondary" style="margin-top:6px;font-size:12px;">Save Token</button>
-                  </div>
-                </div>
-                <!-- Device flow in-progress -->
-                <div id="syncAuthDeviceFlow" style="display:none;margin-top:6px;">
-                  <div style="font-size:13px;">Enter this code on GitHub:</div>
-                  <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
-                    <code id="syncDeviceCode" style="font-size:18px;font-weight:bold;letter-spacing:2px;padding:4px 10px;background:var(--bg-surface);border-radius:4px;"></code>
-                    <button id="syncCopyCodeBtn" class="btn btn-secondary" style="font-size:12px;">Copy</button>
-                  </div>
-                  <div style="margin-top:6px;display:flex;align-items:center;gap:12px;">
-                    <a href="#" id="syncOpenGithubBtn" style="font-size:12px;color:var(--accent-blue);">Open GitHub &#8599;</a>
-                    <span style="font-size:12px;color:var(--text-muted);"><span class="spinner spinner-sm"></span> Waiting for authorization...</span>
-                    <button id="syncCancelAuthBtn" class="btn btn-secondary" style="font-size:12px;">Cancel</button>
-                  </div>
+                  <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Enter a <a href="https://github.com/settings/tokens" target="_blank" style="color:var(--accent-blue);">personal access token</a> with <code>repo</code> scope:</div>
+                  <input type="password" id="syncPatInput" placeholder="ghp_..." style="width:100%;padding:4px 6px;border:1px solid var(--border-subtle);border-radius:4px;font-size:13px;">
+                  <button id="syncPatSaveBtn" class="btn btn-primary" style="margin-top:6px;font-size:12px;">Connect</button>
                 </div>
                 <!-- Connected state -->
                 <div id="syncAuthConnected" style="display:none;margin-top:6px;">
@@ -3483,10 +3492,15 @@
               </label>
             </div>
             <div class="modal-btn-group" style="margin-top:10px;">
-              <button id="syncSaveBtn" class="btn btn-primary">Save Sync Settings</button>
-              <button id="syncNowBtn" class="btn btn-secondary">Sync Now</button>
+              <button id="syncNowBtn" class="btn btn-primary">Sync Now</button>
             </div>
             <div id="syncStatus" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></div>
+
+            <!-- Remote Devices -->
+            <div id="syncDevicesSection" style="margin-top:16px;display:none;">
+              <h4 style="margin:0 0 8px;font-size:13px;font-weight:600;">Devices</h4>
+              <div id="syncDevicesList" style="font-size:12px;"></div>
+            </div>
           </div>
         </div>
 

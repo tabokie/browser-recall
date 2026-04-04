@@ -1,0 +1,111 @@
+- manual test
+- Investigate and fix these issues one at a time, TDD with E2E preferred:
+1. function rule hide function body in non-edit mode
+2. when editing function rule, leave at least 20 line height to display the code
+3. function rule code should have proper JS highlight, and user can use "Enter" to create newline
+4. in manual test, the setting says storage "Not configured", but I can still use it, why is that?
+5. When I take a highlight note on page, note disappears when I click on highlight markup again, and popup doesn't show the note either. I can see the note in options page.
+6. When I create a snapshot, the extension icon changes. But when I delete it, the icon is not restored.
+- #1 is describing desired state, not an issue
+- sure
+- run manual test using large data case
+- Anything else missing?
+- Investigate and fix these issues one at a time, TDD with E2E preferred:
+1. reject saving a function rule that failed compilation
+2. https://github.com/page/0 shows no notes in detail but it has a note badge
+3. timeline use one line to show display both event and time, down to seconds. No need to display a "Last visited: .." line, it can be shown in timeline as well (for page with no checkpoint, timeline has one dot only)
+4. when timeline has multiple visits in a row, collapse them and show a "..." to expand
+5. add a create list button on the right side of the "LISTS" section header, the new list is at first level, positioned the first
+6. recycle bin item should be human readable
+7. when I restore a previous deleted list, its pin shows up "<unknown>" with detail page spinning forever
+8. In popup window, the list bubble order should be stable, when I toggle a list, it stays at the old position. Also, when I create a new list, the current page is immediately added to that list, and that list shows up as the last bubble in line
+- Run manual test again with large seed data
+- Investigate and fix these issues one at a time, TDD with E2E preferred:
+1. When I use single click to select search items, the bar chart is not highlighted, when I use range select it works
+2. in search filter, I see a "-1d ago" which doesn't make sense. Regardless of that, we should use absolute time as two ends, and left is the older end.
+3. the time chart still doesn't show the entire range on initial visit
+4. triage all scroll bars, they should all have transparent gutter like in the options setting page
+5. when I am taking notes on a pdf, the hover window shows all the notes, but the popup window shows no note (even though the icon is correct)
+6. show a spinner on extension icon when snapshot is being captured, do not try to draw images, use native css or svg to style the spinner
+7. When I open the Theme/Appearance drop down, the dropdown is unproportionally large and off positioned
+8. When I click "Change Directory", the notification flickers and dies
+9. When I click "Clear Cache & Reload", the extention options page is not refreshed, meaning the extension is not actually reloaded
+10. GitHub sync "Sync Now" says "Error: Unknown action: undefined"
+
+I am not sure whether #7 and #8 is related to the test infra.
+- resume
+- resume
+- Run manual test with large data again
+- There are a few gaps:
+page with no checkpoint should still have one point on its timeline
+when I create new list in popup, that list should immediately pin the current page
+
+Check again if there are other gaps between my issue statement and what's implemented
+- Any gaps between my issue statements and what's done?
+- #3, I meant oldest are not shown, not rightmost
+#7 #8 check again
+- Let's remove the organization GitHub auth entirely, stick to access token. The org auth access is way too wide, I wouldn't trust it at all as a user
+- Anything else missing?
+- Open manual test again with that large data seed
+- The history view has issue. When I open it, the oldest data is 03/26, but when I try to change the time filters, suddenly there're more data (dates back to january). The time filter seems to overflow as well, the fill is not aligned with the right toggle.
+- GitHub sync says:
+Sync disabled: GitHub API error 404: { "message": "Not Found", "documentation_url": "https://docs.github.com/rest/git/blobs#create-a-blob", "status": "404" } . Fix settings and save again.
+- fine-grained, I added the repo, do I have to select something in permissions as well?
+- 1. No need to display exact count of each bar. Do not distinguish between estimated bar and loaded bar. User should be able to select not yet loaded bar to load that date.
+2. When I apply filter e.g. [a,b], the time chart display "1 visits" on b, but b has more than one results displayed.
+- When I click on a not-yet-loaded bar, the pages are not loaded on demand
+- Sync doesn't work with empty repo:
+Error (will retry): GitHub API error 409: { "message": "Git Repository is empty.", "documentation_url": "https://docs.github.com/rest/git/blobs#create-a-blob", "status": "409" }
+- Filter fills are not aligned with toggle again. And the filter range is not the full range.
+- run manual test with large data again, in background
+- I see the data is pushed to a branch dedicated to current device? Will we pull other branches/devices and consolidate?
+- What if the branch has conflict? Do we prompt user to change device name or sth?
+- Do these things:
+1. On the initial push, if the branch already exists, change a random device name
+2. During pulling, maintain the list of remote devices in session storage. And in setting page, display them in "sync" section and their last update time. Show a button to delete from remote.
+- Fix this issue, when nested list goes too deep, its title are truncated. In fact, this would also happen if title is too long, but that can be fixed by user dragging the sidebar width. What I'm concerned is, list card at different depths have different widths, and the deeper list's width is simply unreasonably small
+- I think you can use the style of Chrome native bookmark sidebar. List can indent infinitely, and user can resize the sidebar to see it. However the list card width will stretch dynamically to fit the width, no fixed sizing. And we don't need horizontal scroll bars either.
+- Open manual test again for me to verify
+- A few minor style issues first:
+1. time chart should align to the right, like before
+2. the "pin" icon of list item is redundant and ugly. the dropdown arrow of list item is also fairly crude, can you improve it using pure CSS/svg?
+3. remove the "SYSTEM" header, always put recycle bin at the bottom
+4. Change all capital headers to use "Xxxx" style instead
+- Change the manual test to use random id as well, don't use fixed "manual-test"
+- System list (like Hubs) should use a stable id, so that multiple devices reference the same list?
+- Recycle Bin is too cramed, should have proper bottom padding
+- The Chrome tab says options page use "47MB" memory. Is it expected?
+- When importing bookmarks, there are two issues:
+1. No need to import parent hierarchies if only children are selected. E.g. if I select a/b/c and a/b/e, then only import c and e without importing the hierarchies of a,b.
+2. Deep subfolders are not displayed even when I select the leaves.
+- Do we have E2E for this scenario?
+- go ahead
+- Is it necessary to have a "main" branch on GitHub?
+- Unify the devices display in sync section. All devices including local is displayed in a list like this:
+xxx (current)      pushed 1m ago, .. [x]
+yyy                pulled 5m ago, .. [x]
+- run manual test again
+- The sync setting should save automatically, especially when user enters them and click "Sync Now"
+- 1. Should save when closing the setting page too.
+2. The device list still doesn't show up when there is only local device in the repo. When user click sync now, it should display the list of all devices instead of displaying a headless "pushed ..." log.
+3. commit message should be slightly more meaningful, e.g. include sync start time and whatnot
+- When I click a not-yet-loaded time bar, the page flickers, and nothing gets selected. Only when I click a second time it starts to work
+- open manual test again
+- Why is the "Save Sync settings" still there? And when I click "Sync Now", there is no visual feedback at all
+- go
+- It says error:
+Error: Unknown action: undefined
+- go
+- 1. Connect button should change to "Connecting" before complete
+2. Sync should not block too long. The workflow is clicking Sync, and the list section appears but with a spinner. Then branches are fetched, devices are shown immediately. The last phase is pushing and pulling branches. If not yet push, empty. If pushing, "pushing". If pushed, "pushed xx ago".
+3. When I click Sync, it said pushed xxx. But the device list still shows "not yet pushed". This is a bug.
+- go
+- The time range filter [a,b] still show time chart weird. The last bar at b is only 1 height, when it in fact has many rows.
+Another thing is we should support filtering device.
+- why is it significant?
+- go
+- What is the behavior of the cross button for each sync device?
+- 1. Change the cross to a pause/play button. The device status is saved in storage.local, persistent across restart.
+2. Change the section from "Synced Devices" to simply "Devices"
+3. Bar chart doesn't count multi device file size correctly. It should use sum of device files as the estimates for unloaded bars.
+- /finish

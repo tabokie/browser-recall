@@ -251,6 +251,13 @@ for (let attempt = 0; attempt < 3; attempt++) {
 }
 console.log(`Extension loaded: ${extensionId}`);
 
+// Wait for onInstalled handler to finish (it may auto-open options.html).
+await new Promise(r => setTimeout(r, 1000));
+// Close any auto-opened options pages to avoid navigation races.
+for (const p of ctx.pages()) {
+  if (p.url().includes('options.html')) await p.close();
+}
+
 // Point extension at OPFS test directory.
 const setupPage = await ctx.newPage();
 await setupPage.goto(`chrome-extension://${extensionId}/test-helper.html`);
@@ -275,7 +282,7 @@ if (!resetResult?.success) {
 if (seed) {
   console.log('Seeding sample data...');
   const now = Date.now();
-  const deviceId = 'manual-test';
+  const deviceId = crypto.randomUUID().slice(0, 8);
   const WIKI_URL = 'https://en.wikipedia.org/wiki/Rust_(programming_language)';
 
   const sampleFiles = await buildSeedFiles([

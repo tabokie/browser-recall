@@ -10,6 +10,7 @@ let currentUrl = '';
 let currentTitle = '';
 let currentTab = null;
 let detachedContent = null; // holds dashboardContent when removed in private mode
+let frozenChipOrder = null; // Array of list slugs — frozen on first render to keep order stable
 
 // ─── Error UI ────────────────────────────────────────────────────────
 
@@ -305,9 +306,25 @@ async function renderListChips() {
     return { list, lastActivity };
   });
   ranked.sort((a, b) => b.lastActivity - a.lastActivity);
-  const topLists = ranked.slice(0, 5);
 
-  let html = topLists.map(({ list }) => {
+  let displayLists;
+  if (!frozenChipOrder) {
+    // First render: compute order and freeze it
+    displayLists = ranked.slice(0, 5).map(r => r.list);
+    frozenChipOrder = displayLists.map(l => l.slug);
+  } else {
+    // Subsequent renders: use frozen order, append new lists at the end
+    const bySlug = new Map(lists.map(l => [l.slug, l]));
+    displayLists = frozenChipOrder.filter(slug => bySlug.has(slug)).map(slug => bySlug.get(slug));
+    for (const r of ranked) {
+      if (!frozenChipOrder.includes(r.list.slug)) {
+        displayLists.push(r.list);
+        frozenChipOrder.push(r.list.slug);
+      }
+    }
+  }
+
+  let html = displayLists.map((list) => {
     const pinned = isPagePinned(allPins, list.slug, currentUrl);
     return `<span class="list-chip${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">
       <span class="list-chip-check">${pinned ? '&#10003;' : ''}</span>
@@ -472,13 +489,15 @@ async function createListAndPin(name) {
   const lists = await loadLists();
   if (lists.some(c => c.name === name)) return;
 
-  const listId = generateSlugFromTitle(name);
   // saveListMeta's effectOf adds to tree manifest — no manual append needed.
-  await chrome.runtime.sendMessage({ action: 'saveListMeta', listId, name });
+  // Use the generatedId returned by the handler (replay engine generates its own ID).
+  const resp = await chrome.runtime.sendMessage({ action: 'saveListMeta', name });
+  const listId = resp?.listId;
+  if (!listId) { logError('[popup] saveListMeta did not return listId'); return; }
 
   await toggleListPin(listId);
 
-  logDebug('[popup] Created list and pinned page:', name);
+  logDebug('[popup] Created list and pinned page:', name, listId);
 }
 
 // Workspace mode (session-only, not persisted to disk)
@@ -692,7 +711,10 @@ async function showDashboard(tab) {
     const viewerParams = new URL(tab.url).searchParams;
     currentSlug = viewerParams.get('slug') || '';
   } else {
-    currentSlug = generateSlugFromUrl(effectiveUrl);
+    // Always derive slug from tab.url (not effectiveUrl) to match badge behavior.
+    // effectiveUrl may differ from tab.url when the content script reports a
+    // different location (SPA drift, PDF viewer frame), causing a slug mismatch.
+    currentSlug = generateSlugFromUrl(tab.url);
   }
 
   // Build a fallback entry from tab info
@@ -881,3 +903,13 @@ async function showDashboard(tab) {
 
   await showDashboard(tab);
 })().catch(err => showFatalError(err.message));
+
+// Listen for note mutations from background to keep popup in sync
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.action !== 'mutation' || msg.type !== 'note' || !currentSlug) return false;
+  // Re-fetch notes for current page
+  chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: currentSlug }).then(resp => {
+    if (resp?.success && resp.notes) renderNotes(resp.notes);
+  }).catch(() => {});
+  return false;
+});

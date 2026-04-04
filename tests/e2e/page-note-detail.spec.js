@@ -342,4 +342,74 @@ test.describe('Page note textarea in detail card', () => {
 
     await helper.close();
   });
+
+  test('note badge hidden when page has only a global note', async ({ extContext, extensionId, setupDir }) => {
+    const slug = getSlugForUrl(PAGE_URL);
+    const globalSlug = '260301-badge-global';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: `pages/${slug}.json`, data: {
+        slug, url: PAGE_URL, title: PAGE_TITLE,
+        parentIds: [], childIds: [`note:${globalSlug}`],
+        timestamps: { 'test-device': now },
+      }},
+      { path: `data/notes/${globalSlug}.json`, data: {
+        slug: globalSlug, excerpt: null, note: 'Page note only', cssPath: null,
+        url: PAGE_URL,
+      }},
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'leave_page', url: PAGE_URL, title: PAGE_TITLE, timeOnPage: 5, scrollDepth: 50 },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.waitForSelector('.result-row', { timeout: 5000 });
+
+    // Wait for enrichment to complete (async background task)
+    await options.waitForFunction(() => {
+      const row = document.querySelector('.result-row');
+      return row && row.closest('.result-item')?.querySelector('.card-extras') !== undefined;
+    }, { timeout: 5000 });
+
+    // The note badge should NOT be visible since the only note is global
+    const noteBadge = options.locator('.card-tag-note');
+    await expect(noteBadge).toHaveCount(0);
+
+    await options.close();
+  });
+
+  test('note badge hidden when referenced note entity is missing', async ({ extContext, extensionId, setupDir }) => {
+    const slug = getSlugForUrl(PAGE_URL);
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: `pages/${slug}.json`, data: {
+        slug, url: PAGE_URL, title: PAGE_TITLE,
+        parentIds: [], childIds: ['note:missing-note'],
+        timestamps: { 'test-device': now },
+      }},
+      // Note entity file NOT seeded — simulates deleted/missing note
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'leave_page', url: PAGE_URL, title: PAGE_TITLE, timeOnPage: 5, scrollDepth: 50 },
+      ]},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.waitForSelector('.result-row', { timeout: 5000 });
+
+    await options.waitForFunction(() => {
+      const row = document.querySelector('.result-row');
+      return row && row.closest('.result-item')?.querySelector('.card-extras') !== undefined;
+    }, { timeout: 5000 });
+
+    const noteBadge = options.locator('.card-tag-note');
+    await expect(noteBadge).toHaveCount(0);
+
+    await options.close();
+  });
 });

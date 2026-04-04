@@ -103,6 +103,71 @@ describe('SyncManager.push', () => {
     await mgr.push('dev1', { retentionDays: 7 });
     expect(deps.transport.pushTree).not.toHaveBeenCalled();
   });
+
+  it('returns collision when deviceId matches existing branch on first push', async () => {
+    const deps = makeDeps({
+      collectLocalFiles: vi.fn().mockResolvedValue([
+        { path: 'data/notes/note1.json', content: '{"slug":"note1"}' },
+      ]),
+      loadPushState: vi.fn().mockResolvedValue({}), // empty = first push
+      transport: {
+        ...makeDeps().transport,
+        listBranches: vi.fn().mockResolvedValue([
+          { name: 'dev1', sha: 'abc' },
+          { name: 'dev2', sha: 'def' },
+        ]),
+      },
+    });
+    const mgr = new SyncManager(deps);
+
+    const result = await mgr.push('dev1', { retentionDays: 7 });
+
+    expect(result).toEqual({ pushed: false, collision: true });
+    expect(deps.transport.pushTree).not.toHaveBeenCalled();
+  });
+
+  it('does not check collision on subsequent pushes', async () => {
+    const deps = makeDeps({
+      collectLocalFiles: vi.fn().mockResolvedValue([
+        { path: 'data/notes/note1.json', content: '{"slug":"note1"}' },
+      ]),
+      loadPushState: vi.fn().mockResolvedValue({ files: { 'data/notes/note1.json': 'oldhash' } }),
+      transport: {
+        ...makeDeps().transport,
+        listBranches: vi.fn().mockResolvedValue([
+          { name: 'dev1', sha: 'abc' },
+        ]),
+      },
+    });
+    const mgr = new SyncManager(deps);
+
+    await mgr.push('dev1', { retentionDays: 7 });
+
+    // listBranches should NOT be called — not a first push
+    expect(deps.transport.listBranches).not.toHaveBeenCalled();
+    expect(deps.transport.pushTree).toHaveBeenCalled();
+  });
+
+  it('proceeds with push on first push when no collision', async () => {
+    const deps = makeDeps({
+      collectLocalFiles: vi.fn().mockResolvedValue([
+        { path: 'data/notes/note1.json', content: '{"slug":"note1"}' },
+      ]),
+      loadPushState: vi.fn().mockResolvedValue({}), // empty = first push
+      transport: {
+        ...makeDeps().transport,
+        listBranches: vi.fn().mockResolvedValue([
+          { name: 'dev2', sha: 'def' },
+        ]),
+      },
+    });
+    const mgr = new SyncManager(deps);
+
+    const result = await mgr.push('dev1', { retentionDays: 7 });
+
+    expect(result.pushed).toBe(true);
+    expect(deps.transport.pushTree).toHaveBeenCalled();
+  });
 });
 
 describe('SyncManager.pull', () => {
@@ -242,6 +307,30 @@ describe('SyncManager.pull', () => {
 
     expect(deps.transport.getTree).toHaveBeenCalledTimes(2);
     expect(result.remoteEntries).toHaveLength(2);
+    expect(result.changedPeers).toEqual(['dev2', 'dev3']);
+  });
+
+  it('returns devices list from listBranches', async () => {
+    const deps = makeDeps({
+      transport: {
+        ...makeDeps().transport,
+        listBranches: vi.fn().mockResolvedValue([
+          { name: 'dev1', sha: 'own' },
+          { name: 'dev2', sha: 'sha2' },
+          { name: 'dev3', sha: 'sha3' },
+        ]),
+        getTree: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const mgr = new SyncManager(deps);
+
+    const result = await mgr.pull('dev1');
+
+    expect(result.devices).toEqual([
+      { name: 'dev1', sha: 'own' },
+      { name: 'dev2', sha: 'sha2' },
+      { name: 'dev3', sha: 'sha3' },
+    ]);
   });
 
   it('returns empty when no peers', async () => {
@@ -258,5 +347,27 @@ describe('SyncManager.pull', () => {
     const result = await mgr.pull('dev1');
 
     expect(result.remoteEntries).toEqual([]);
+  });
+});
+
+describe('SyncManager.deleteDevice', () => {
+  it('calls transport.deleteBranch and cleans up cursor', async () => {
+    const deps = makeDeps({
+      transport: {
+        ...makeDeps().transport,
+        deleteBranch: vi.fn().mockResolvedValue(undefined),
+      },
+      loadCursors: vi.fn().mockResolvedValue({
+        cursors: { dev2: { treeSha: 'abc', files: {} }, dev3: { treeSha: 'def', files: {} } },
+      }),
+    });
+    const mgr = new SyncManager(deps);
+
+    await mgr.deleteDevice('dev2');
+
+    expect(deps.transport.deleteBranch).toHaveBeenCalledWith('dev2');
+    expect(deps.saveCursors).toHaveBeenCalledWith({
+      cursors: { dev3: { treeSha: 'def', files: {} } },
+    });
   });
 });

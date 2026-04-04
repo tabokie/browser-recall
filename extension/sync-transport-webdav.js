@@ -170,4 +170,8 @@ export class WebDAVTransport {
       if (!e.message.includes('405')) throw e;
     }
   }
+
+  async deleteBranch(name) {
+    await this._request('DELETE', name + '/');
+  }
 }

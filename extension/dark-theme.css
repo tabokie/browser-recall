@@ -137,3 +137,27 @@ html[data-theme="dark"] {
 
   color-scheme: dark;
 }
+
+/* Syntax highlighting tokens for function rule editor — dark mode */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) .tok-keyword,
+  html:not([data-theme="light"]) .tok-literal { color: #c792ea; }
+  html:not([data-theme="light"]) .tok-string  { color: #c3e88d; }
+  html:not([data-theme="light"]) .tok-regex   { color: #f07178; }
+  html:not([data-theme="light"]) .tok-number  { color: #f78c6c; }
+  html:not([data-theme="light"]) .tok-comment { color: #676e95; }
+  html:not([data-theme="light"]) .rule-fn-editor {
+    background: rgba(30, 26, 22, 0.4);
+    border-color: rgba(80, 68, 58, 0.4);
+  }
+}
+html[data-theme="dark"] .tok-keyword,
+html[data-theme="dark"] .tok-literal { color: #c792ea; }
+html[data-theme="dark"] .tok-string  { color: #c3e88d; }
+html[data-theme="dark"] .tok-regex   { color: #f07178; }
+html[data-theme="dark"] .tok-number  { color: #f78c6c; }
+html[data-theme="dark"] .tok-comment { color: #676e95; }
+html[data-theme="dark"] .rule-fn-editor {
+  background: rgba(30, 26, 22, 0.4);
+  border-color: rgba(80, 68, 58, 0.4);
+}

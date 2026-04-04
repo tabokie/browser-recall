@@ -560,4 +560,131 @@ test.describe('Recycle bin', () => {
 
     await helper.close();
   });
+
+  test('restored list pins show correct titles, not unknown', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const listId = 'restore-pins-list';
+    const slug2 = getSlugForUrl('https://example.com/page-two');
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
+      // Deleted list with 2 pins
+      { path: `lists/${listId}.json`, data: {
+        slug: listId, name: 'Restored List', owner: 'test-device', timestamp: now,
+        pins: [
+          { id: `page:${TEST_SLUG}`, pinnedAt: now },
+          { id: `page:${slug2}`, pinnedAt: now + 1 },
+        ],
+        deleted: true,
+      }},
+      // Page entities on disk with titles
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: `pages/${slug2}.json`, data: {
+        slug: slug2, url: 'https://example.com/page-two', title: 'Page Two Title', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: 'manifest/orphaned.json', data: {
+        timestamp: now, entries: [{ key: `list:${listId}` }],
+      }},
+      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
+        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
+        { timestamp: now + 1, action: 'visit_page', url: 'https://example.com/page-two', title: 'Page Two Title' },
+      ]},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Restore the list
+    const restoreResp = await helper.evaluate((id) =>
+      chrome.runtime.sendMessage({ action: 'restoreList', listId: id })
+    , listId);
+    expect(restoreResp.success).toBe(true);
+    await helper.close();
+
+    // Open options and navigate to the restored list
+    const options = await openOptionsPage(extContext, extensionId);
+    const listItem = options.locator(`.sidebar-item[data-list-id="${listId}"]`);
+    await expect(listItem).toBeVisible({ timeout: 5000 });
+    await listItem.click();
+
+    // Wait for pins to render
+    await options.waitForSelector('.result-row', { timeout: 5000 });
+
+    // Verify no <unknown> text in result rows
+    const rows = options.locator('.result-row');
+    const count = await rows.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      const title = await rows.nth(i).locator('.result-title').textContent();
+      expect(title).not.toContain('<unknown>');
+    }
+
+    // Verify detail card doesn't spin forever
+    await options.click('.att-ctrl-btn', { force: true });
+    await options.waitForSelector('.page-detail-card', { timeout: 3000 });
+    // Detail body should eventually stop showing spinner
+    await options.waitForFunction(() => {
+      const body = document.querySelector('.page-detail-body');
+      return body && !body.querySelector('.page-detail-loading');
+    }, { timeout: 5000 });
+
+    await options.close();
+  });
+
+  test('recycle bin shows human-readable display names for all entity types', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const noteSlug = '260304-readable-note';
+    const listId = 'readable-list';
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      // Note with array excerpt
+      { path: `data/notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: ['Important', 'finding'], note: 'Annotation text', cssPath: 'p',
+        url: TEST_URL, timestamp: now,
+      }},
+      // List with clear name
+      { path: `lists/${listId}.json`, data: {
+        slug: listId, name: 'My Reading List', owner: 'test-device', timestamp: now,
+        pins: [], deleted: true,
+      }},
+      // Page with title
+      { path: `pages/${TEST_SLUG}.json`, data: {
+        slug: TEST_SLUG, url: TEST_URL, title: 'GitHub - My Repo', timestamp: now,
+        parentIds: [], childIds: [],
+      }},
+      { path: 'manifest/orphaned.json', data: {
+        timestamp: now, entries: [
+          { key: `note:${noteSlug}` },
+          { key: `list:${listId}` },
+          { key: `page:${TEST_SLUG}` },
+        ],
+      }},
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+    await options.click('#recycleBinBtn');
+    await expect(options.locator('#recycleBinLayout')).toBeVisible({ timeout: 5000 });
+    await expect(options.locator('.recycle-card')).toHaveCount(3, { timeout: 5000 });
+
+    // Note card: should show joined excerpt text, not raw slug
+    const noteCard = options.locator(`.recycle-card[data-key="note:${noteSlug}"]`);
+    const noteName = await noteCard.locator('.recycle-card-name').textContent();
+    expect(noteName).toContain('Important finding');
+
+    // List card: should show list name
+    const listCard = options.locator(`.recycle-card[data-key="list:${listId}"]`);
+    await expect(listCard.locator('.recycle-card-name')).toContainText('My Reading List');
+
+    // Page card: should show page title
+    const pageCard = options.locator(`.recycle-card[data-key="page:${TEST_SLUG}"]`);
+    await expect(pageCard.locator('.recycle-card-name')).toContainText('GitHub - My Repo');
+
+    await options.close();
+  });
 });
