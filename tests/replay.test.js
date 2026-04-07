@@ -11,6 +11,7 @@ import {
   defaultEntity,
   applyLogToSettings,
   isPageEligible,
+  isStaleByLWW,
 } from '../extension/replay.js';
 import { generateSlugFromUrl } from '../extension/utils.js';
 
@@ -2109,5 +2110,36 @@ describe('effectOf: sync commutativity — §11.8 implementation correctness', (
       });
     expect(state['list:test-id'].deleted).toBe(false);
     expect(state['list:test-id'].rules.length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isStaleByLWW
+// ---------------------------------------------------------------------------
+
+describe('isStaleByLWW', () => {
+  it('returns false when entity has no deletedTs', () => {
+    expect(isStaleByLWW({ slug: 'x' }, 100)).toBe(false);
+  });
+
+  it('returns false when entity is null/undefined', () => {
+    expect(isStaleByLWW(null, 100)).toBe(false);
+    expect(isStaleByLWW(undefined, 100)).toBe(false);
+  });
+
+  it('returns true when deletedTs equals entry timestamp', () => {
+    expect(isStaleByLWW({ deletedTs: 100 }, 100)).toBe(true);
+  });
+
+  it('returns true when deletedTs is greater than entry timestamp', () => {
+    expect(isStaleByLWW({ deletedTs: 200 }, 100)).toBe(true);
+  });
+
+  it('returns false when deletedTs is less than entry timestamp', () => {
+    expect(isStaleByLWW({ deletedTs: 50 }, 100)).toBe(false);
+  });
+
+  it('returns false when deletedTs is 0 (falsy)', () => {
+    expect(isStaleByLWW({ deletedTs: 0 }, 100)).toBe(false);
   });
 });

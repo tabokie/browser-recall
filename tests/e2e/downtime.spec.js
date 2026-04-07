@@ -239,4 +239,75 @@ test.describe('Downtime infrastructure', () => {
 
     await helper.close();
   });
+
+  test('drain failure threshold triggers service pause and recovery resumes', async ({ extContext, extensionId, setupDir }) => {
+    await seed(extContext, extensionId);
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Kill offscreen so drain will fail
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'killOffscreenForTest' })
+    );
+
+    // Set drain failure count to threshold - 1 (11 out of 12)
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'setDrainFailureCountForTest', count: 11 })
+    );
+
+    // Add a log entry — this triggers scheduleDrainNotify
+    // The entry itself goes through addLog (which uses ensureOffscreenPort → reconnects offscreen).
+    // But the drain (drainNow) fires on a 5s timer and will find offscreen reconnected.
+    // To ensure the drain fails, we need offscreen to be dead when drainNow fires.
+
+    // Instead: directly trigger drainNow by calling flushLogBuffer which calls drainNow.
+    // First add an entry so the buffer isn't empty.
+    // We need to inject a buffer entry and then trigger drain manually.
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'setLogBufferForTest',
+        entries: [{ timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/drain-test', title: 'Drain Test' }],
+      })
+    );
+
+    // Kill offscreen again (setLogBufferForTest may have reconnected it)
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'killOffscreenForTest' })
+    );
+
+    // Now trigger drain — it should fail (offscreen dead) and push counter to 12 >= threshold
+    // flushLogBuffer calls drainNow which increments consecutiveDrainFailures
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' }).catch(() => {})
+    );
+
+    // Wait briefly for the drain failure to propagate
+    await helper.evaluate(() => new Promise(r => setTimeout(r, 500)));
+
+    // Service should be paused with fs_permission code
+    const serviceError = await helper.evaluate(() =>
+      chrome.storage.session.get('serviceError').then(r => r.serviceError)
+    );
+    expect(serviceError).toBeTruthy();
+    expect(serviceError.code).toBe('fs_permission');
+
+    // reportPage should fail when service is paused
+    const result = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'reportPage', url: 'https://example.com/blocked', title: 'Blocked', isInitialLoad: true })
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/service paused/i);
+
+    // Resume service
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'resumeService' })
+    );
+
+    // Service should be healthy again
+    const afterResume = await helper.evaluate(() =>
+      chrome.storage.session.get('serviceError').then(r => r.serviceError)
+    );
+    expect(afterResume).toBeFalsy();
+
+    await helper.close();
+  });
 });

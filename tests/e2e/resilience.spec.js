@@ -395,3 +395,216 @@ test.describe('Missing CURRENT file', () => {
     await helper.close();
   });
 });
+
+// Category 5: Log buffer resilience
+test.describe('Log buffer resilience', () => {
+  test('log buffer dedup removes already-flushed entries on rehydrate', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const today = new Date(now).toISOString().slice(0, 10);
+    // T1-T3: entries already on disk
+    const diskEntries = [
+      { timestamp: now - 3000, action: 'visit_page', url: 'https://example.com/d1', title: 'D1' },
+      { timestamp: now - 2000, action: 'visit_page', url: 'https://example.com/d2', title: 'D2' },
+      { timestamp: now - 1000, action: 'visit_page', url: 'https://example.com/d3', title: 'D3' },
+    ];
+    // Buffer: T2, T3 (overlap), T4-T6 (new)
+    const bufferEntries = [
+      { timestamp: now - 2000, action: 'visit_page', url: 'https://example.com/d2', title: 'D2' },
+      { timestamp: now - 1000, action: 'visit_page', url: 'https://example.com/d3', title: 'D3' },
+      { timestamp: now + 1000, action: 'visit_page', url: 'https://example.com/n4', title: 'N4' },
+      { timestamp: now + 2000, action: 'visit_page', url: 'https://example.com/n5', title: 'N5' },
+      { timestamp: now + 3000, action: 'visit_page', url: 'https://example.com/n6', title: 'N6' },
+    ];
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
+      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [] } },
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
+      { path: `data/logs/test-device/${today}.jsonl`, lines: diskEntries },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Inject overlapping logBuffer and rehydrate with keepLogBuffer
+    await helper.evaluate((entries) =>
+      chrome.runtime.sendMessage({ action: 'setLogBufferForTest', entries })
+    , bufferEntries);
+
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest', keepLogBuffer: true })
+    );
+
+    // Check buffer: should have only the 3 new entries (overlap deduped)
+    const buf = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'getLogBufferForTest' })
+    );
+    expect(buf.length).toBe(3);
+
+    // Check history cache: should have all 6 unique entries
+    const hist = await helper.evaluate((k) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: k })
+    , `log:${today}`);
+    expect(hist.value.length).toBe(6);
+
+    await helper.close();
+  });
+
+  test('log buffer cap enforcement keeps buffer within LOG_BUFFER_MAX_SIZE', async ({ extContext, extensionId, setupDir }) => {
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Fill buffer to 1999 entries
+    const baseTs = Date.now() - 10000;
+    const entries = Array.from({ length: 1999 }, (_, i) => ({
+      timestamp: baseTs + i, action: 'visit_page',
+      url: `https://example.com/buf-${i}`, title: `B${i}`,
+    }));
+    await helper.evaluate((e) =>
+      chrome.runtime.sendMessage({ action: 'setLogBufferForTest', entries: e })
+    , entries);
+
+    // Add one entry via reportPage (should make it 2000, at the cap)
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'reportPage', url: 'https://example.com/cap-test-1',
+        title: 'Cap Test 1', isInitialLoad: true,
+      })
+    );
+
+    let buf = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'getLogBufferForTest' })
+    );
+    expect(buf.length).toBeLessThanOrEqual(2000);
+
+    // Add another — should still be capped
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'reportPage', url: 'https://example.com/cap-test-2',
+        title: 'Cap Test 2', isInitialLoad: true,
+      })
+    );
+
+    buf = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'getLogBufferForTest' })
+    );
+    expect(buf.length).toBeLessThanOrEqual(2000);
+
+    // The newest entries should be preserved
+    const hist = await helper.evaluate((k) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: k })
+    , `log:${new Date().toISOString().slice(0, 10)}`);
+    const urls = (hist.value || []).map(e => e.url);
+    expect(urls).toContain('https://example.com/cap-test-2');
+
+    await helper.close();
+  });
+
+  test('concurrent addLog calls are serialized without data loss', async ({ extContext, extensionId, setupDir }) => {
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Fire 5 reportPage calls in parallel
+    const urls = Array.from({ length: 5 }, (_, i) => `https://example.com/concurrent-${i}`);
+    const results = await helper.evaluate((urls) =>
+      Promise.all(urls.map(url =>
+        chrome.runtime.sendMessage({
+          action: 'reportPage', url, title: `C${url.slice(-1)}`, isInitialLoad: true,
+        })
+      ))
+    , urls);
+
+    // All should succeed
+    for (const r of results) {
+      expect(r.success).toBe(true);
+    }
+
+    // All 5 entries should be in today's history
+    const today = new Date().toISOString().slice(0, 10);
+    const hist = await helper.evaluate((k) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: k })
+    , `log:${today}`);
+    const entryUrls = (hist.value || []).filter(e => e.url?.startsWith('https://example.com/concurrent-')).map(e => e.url);
+    expect(entryUrls.length).toBe(5);
+    for (const url of urls) {
+      expect(entryUrls).toContain(url);
+    }
+
+    // No service error
+    const serviceError = await helper.evaluate(() =>
+      chrome.storage.session.get('serviceError').then(r => r.serviceError)
+    );
+    expect(serviceError).toBeFalsy();
+
+    await helper.close();
+  });
+
+  test('GC tombstone cleared during rehydration when entity is restored', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const noteUrl = 'https://example.com/tombstone-page';
+    const noteSlug = getSlugForUrl(noteUrl);
+    const pageSlug = noteSlug;
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'manifest/orphaned.json', data: { entries: [] } },
+      { path: `pages/${pageSlug}.json`, data: {
+        slug: pageSlug, url: noteUrl, title: 'Tombstone Page', timestamp: now,
+        parentIds: [], childIds: [`note:${noteSlug}`],
+      }},
+      { path: `data/notes/${noteSlug}.json`, data: {
+        slug: noteSlug, url: noteUrl, excerpt: 'Test note', note: '',
+        timestamp: now, deleted: false,
+      }},
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+
+    // Inject logBuffer: delete_note (GCs the page) then restore_note (restores it)
+    const deleteTs = now + 1000;
+    const restoreTs = now + 2000;
+    const bufferEntries = [
+      {
+        timestamp: deleteTs, action: 'delete_note',
+        url: noteUrl, path: `notes/${noteSlug}.json`,
+      },
+      {
+        timestamp: restoreTs, action: 'restore_note',
+        url: noteUrl, path: `notes/${noteSlug}.json`,
+      },
+    ];
+    await helper.evaluate((e) =>
+      chrome.runtime.sendMessage({ action: 'setLogBufferForTest', entries: e })
+    , bufferEntries);
+
+    await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest', keepLogBuffer: true })
+    );
+
+    // Page entity should be visible (not null/tombstoned)
+    const page = await helper.evaluate((k) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: k })
+    , `page:${pageSlug}`);
+    expect(page.value).not.toBeNull();
+    expect(page.value?.slug).toBe(pageSlug);
+
+    // Note should be restored (not deleted)
+    const note = await helper.evaluate((k) =>
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: k })
+    , `note:${noteSlug}`);
+    expect(note.value).not.toBeNull();
+    expect(note.value?.deleted).toBe(false);
+
+    await helper.close();
+  });
+});

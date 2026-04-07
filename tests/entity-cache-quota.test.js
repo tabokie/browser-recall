@@ -181,4 +181,25 @@ describe('entity-cache quota handling', () => {
     const result = await cacheGet('page:hopeless');
     expect(result).toBeNull();
   });
+
+  it('cacheSet returns true on successful write', async () => {
+    const ok = await cacheSet('page:test', { slug: 'test' });
+    expect(ok).toBe(true);
+  });
+
+  it('cacheSet returns true when retry after emergency eviction succeeds', async () => {
+    setEntityCacheWatermark(5000);
+    await seedEntries(5, { timestampBase: 1000 });
+    session._failNextSets(1); // first set fails, emergency evict, retry succeeds
+    const ok = await cacheSet('page:retry', { slug: 'retry' });
+    expect(ok).toBe(true);
+  });
+
+  it('cacheSet returns false when quota permanently exhausted', async () => {
+    setEntityCacheWatermark(500);
+    await seedEntries(3, { timestampBase: 1000 });
+    session._failNextSets(100);
+    const ok = await cacheSet('page:hopeless', { slug: 'hopeless' });
+    expect(ok).toBe(false);
+  });
 });

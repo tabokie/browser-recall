@@ -1,0 +1,78 @@
+- run manual test with large data for me, in background
+- The recycle bin button at the bottom still doesn't have bottom padding.
+And the bar chart still doesn't count remote device files when rendering not-yet-loaded dates.
+- resume
+- The phenomenon is this, after I pull from remote repo, the bar chart after 03-28 suddenly increases, but before 03-28 are still small. My hypothesis is data after 03-28 are fully loaded into memory and have accurate count, but what's before 03-28 isn't.
+But then I click on dates before 03-28 and the bar is still small, that means it is not caused by loading.
+You can take a look at the test data running in background to see the state more clearly.
+- No, the manual test doesn't use that data directory
+- This is getting nowhere, let's fix the padding issue, and add more UI element to illustrate device origins:
+1. After syncing, there're many pages whose page details have no timeline, but we should display timeline regardless of whether the page has checkpoint (fixed earlier)
+2. In the page details, we should be able to see on timeline which device the page was visited and modified, if that is a remote device.
+- For page without checkpoint, do not load history just to show accurate timeline. We don't need the full timeline. We just need the time point for that log record.
+- No, when we open the page details, we should have the log record (the page card that the detail button is located on) nearby don't we? We just need to pass that information to the detail render
+- What are you doing? You are not changing the plan. The plan still says to use historyAllEntries to search for timelines. But I explicitly said that when clicking on page detail button, we should have the page card information already at hand. That page card is backed by a physical log record that has timestamp
+- Fix 1 for now. I am still not satisfied with your plan on device tracking
+- Fix the recycle bin button padding. It is too close to the buttom.
+Also, when I delete some items, the recycle bin count is not immediately updated. Only update after refresh
+- Review the codebase file by file, function by function, line by line, flag the implementation that are complex and inter-dependent, that are not well abstracted, that are hard to understand. Do not think about how to improve them yet. Just scan and report
+- Do we track events such as note, snapshot in the timeline of page details?
+- The original idea is to be complete, display the version history of notes. But that is hard to achieve without scanning logs. Am I correct?
+- Let's do this:
+1. Remove timeline, instead, we display only the first visit and last visit (if available). For page that has no checkpoint, we use the timestamp of the page card where the details is opened from. But use "Visited" instead of first or last visit.
+2. Display full notes global or not. Page details should be complete.
+- > If no visitDates but card has timestamps
+timestamps is wrong, it is not visits, it is only the modification time.
+> Pass timestamps (the card-level array)
+I am not sure why that's an array. Each page card is backed by a log record, be it a visit_page or a pin_page. We should pass the timestamp of that log record into detail page. Oh, and since pin log is included, we should display only the time, without "Visited" to be confusing.
+- Let's work on fixing them progressively, you should write plans in ./plans/ starting with number 20, multiple files if necessary. Aim for simplicity when designing the solution.
+- Write to ./plans/nn-*.md
+- Anything from our conversations what's missing from the plan? What are the gaps?
+- Yes, you can write to another plan file if necessary, but don't miss any details
+- That's a lot of plans. Do you need to split plan 20 and add more details to it as well?
+- Work on plan 20~28 progressively, one at a time, ask for confirmation after each one
+- Are there gaps between plan 21 and what's implemented?
+- go
+- Work on ./plans 22
+- don't stash, another session is working in parallel
+- What are the gaps between plan and what's implemented?
+- go
+- Plan 22 is already worked on by another session, what's next?
+- Work on plan 23
+- go 28
+- Are there gaps between plan 28 and what's implemented?
+- Are there gaps between plan and what's implemented?
+- resume
+- Check again
+- fix
+- 21-23, 28 are finished, what plans to work on next?
+- go 24
+- work on ./plans 26
+- continue
+- continue
+- go
+- Any gaps between plan 24 and what's implemented?
+- Can we work on 25 next? 26 is being worked on by another session
+- Don't stash, another session is working too
+- Are there any gaps between the plan and what's implemented?
+- Can we work on ./plans 27 when another session is working on 25?
+- go
+- Are there gaps between plan 25 and what's implemented?
+- I took a peek at unit tests yesterday, it is not looking good. I found tests that are not wired to the actual code at all, they are testing some arbitrary code block that was written at the time of implementation, and might be outdated by now.
+
+I want you to remove unit tests that are not actually wired to production code, and replace them with either (a) unit tests that reference actual production types and functions, or (b) e2e tests that cover the same behavior. While doing so, reduce the amount of impact on code structure and logic of the product.
+- Are there gaps between the plan file and what's implemented?
+- Sounds good, for 2, the plan 20-28 has completed, can improve the tests now?
+- Take a final look over plan 20-28, check if there's anything else missing
+- The value of unit tests are relatively low compared to E2E, let's prioritize E2E tests and drop the unit tests that require non-trivial product code changes
+- go
+- Fix any failures, regardless of their origin. Don't stash in particular, another session is working in parallel
+- Examine the codebase line by line. Remove dead code that are not reachable in UI. Reorganize code paths and simplify them to be concise, focused.
+- Read the code, see if there're any opportunities to simplify and improve the codebase from a high-level, architectural perspective.
+- Go
+- What else is missing?
+- Plan 20-28 should've been implemented already
+- Fix 1 & 2
+- What will the total package size be when this extension is launched to Chrome store?
+- go for 1 & 2
+- /finish

@@ -2,15 +2,16 @@ import { test, expect } from './fixtures.js';
 import { resetAndSeed, openOptionsPage } from './helpers.js';
 
 test.describe('Dark mode', () => {
-  test('theme defaults to system (no data-theme attribute)', async ({ extContext, extensionId, setupDir }) => {
+  test('theme defaults to system (resolves to light or dark)', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
+    // System mode now resolves to explicit data-theme based on OS preference
     const theme = await options.evaluate(() => document.documentElement.getAttribute('data-theme'));
-    expect(theme).toBeNull();
+    expect(['light', 'dark']).toContain(theme);
     await options.close();
   });
 
@@ -119,14 +120,15 @@ test.describe('Dark mode', () => {
 
     const options = await openOptionsPage(extContext, extensionId);
 
-    // No data-theme attribute (system mode)
-    const attr = await options.evaluate(() => document.documentElement.getAttribute('data-theme'));
-    expect(attr).toBeNull();
-
     // Emulate OS dark preference
     await options.emulateMedia({ colorScheme: 'dark' });
 
-    // The @media (prefers-color-scheme: dark) query should activate dark variables
+    // theme.js resolves system mode to data-theme="dark" via matchMedia
+    await options.waitForFunction(
+      () => document.documentElement.getAttribute('data-theme') === 'dark',
+      { timeout: 3000 }
+    );
+
     const bgBase = await options.evaluate(() =>
       getComputedStyle(document.documentElement).getPropertyValue('--bg-base').trim()
     );

@@ -161,7 +161,7 @@ test.describe('Page note textarea in detail card', () => {
     await options.close();
   });
 
-  test('global note appears only in textarea, highlight notes in list', async ({ extContext, extensionId, setupDir }) => {
+  test('global and highlight notes both appear in notes list', async ({ extContext, extensionId, setupDir }) => {
     const slug = getSlugForUrl(PAGE_URL);
     const globalNoteSlug = '260301-global-only';
     const highlightNoteSlug = '260301-highlight-only';
@@ -201,13 +201,17 @@ test.describe('Page note textarea in detail card', () => {
     const textarea = options.locator('.detail-page-note');
     await expect(textarea).toHaveValue('Global note text');
 
-    // The notes list should only contain the highlight note, not the global one
+    // Notes list should contain both global and highlight notes
     const noteEntries = options.locator('.detail-note-entry');
-    await expect(noteEntries).toHaveCount(1);
+    await expect(noteEntries).toHaveCount(2);
 
-    // The single entry should be the highlight (contains "Selected text")
-    const entryText = await noteEntries.first().textContent();
-    expect(entryText).toContain('Selected text');
+    // Global note should show "Page note" label
+    const notesSection = options.locator('.detail-notes-section');
+    await expect(notesSection).toContainText('Page note');
+    await expect(notesSection).toContainText('Global note text');
+
+    // Highlight note should show excerpt
+    await expect(notesSection).toContainText('Selected text');
 
     await options.close();
   });

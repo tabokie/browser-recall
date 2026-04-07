@@ -2,6 +2,7 @@
 import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, readCacheable, sendAction, saveSettingsValue, escapeHtml } from './utils.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
+import { pageKey, listKey, entitySlug } from './entity-types.js';
 
 let currentSlug = '';
 let currentNotes = [];
@@ -268,7 +269,7 @@ async function loadLists() {
     for (const node of nodes) {
       const entity = await readCacheable(node.id);
       if (entity && !entity.deleted) {
-        all.push({ slug: entity.slug || node.id.slice(5), name: entity.name || '' });
+        all.push({ slug: entity.slug || entitySlug(node.id), name: entity.name || '' });
       }
       if (node.children) await walk(node.children);
     }
@@ -281,7 +282,7 @@ async function loadListPins() {
   const lists = await loadLists();
   const allPins = {};
   for (const list of lists) {
-    const entity = await readCacheable('list:' + list.slug);
+    const entity = await readCacheable(listKey(list.slug));
     if (entity?.pins?.length > 0) allPins[list.slug] = entity.pins;
   }
   return allPins;
@@ -290,7 +291,7 @@ async function loadListPins() {
 function isPagePinned(allPins, listId, url) {
   const pins = allPins[listId] || [];
   const slug = generateSlugFromUrl(url);
-  const pageId = `page:${slug}`;
+  const pageId = pageKey(slug);
   return pins.some(p => p.id === pageId || p.url === url);
 }
 
@@ -542,20 +543,20 @@ async function renderWorkspaceBar() {
     listsContainer.innerHTML = '<span class="workspace-empty">No lists yet. Create one in Notes section.</span>';
   } else {
     listsContainer.innerHTML = lists.map(list => {
-      const selected = workspace.listIds.includes('list:' + list.slug);
+      const selected = workspace.listIds.includes(listKey(list.slug));
       return `<span class="ws-list-chip${selected ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
     }).join('');
 
     listsContainer.querySelectorAll('.ws-list-chip').forEach(chip => {
       chip.addEventListener('click', async () => {
         const slug = chip.dataset.listId;
-        const listKey = 'list:' + slug;
+        const lk = listKey(slug);
         const ws = await loadWorkspace();
-        const idx = ws.listIds.indexOf(listKey);
+        const idx = ws.listIds.indexOf(lk);
         if (idx !== -1) {
           ws.listIds.splice(idx, 1);
         } else {
-          ws.listIds.push(listKey);
+          ws.listIds.push(lk);
         }
         await saveWorkspace(ws);
         renderWorkspaceBar();
@@ -690,55 +691,43 @@ document.getElementById('captureBtn').addEventListener('click', async () => {
   btn.textContent = '+ Capture';
 });
 
-// Show dashboard for a tab: set up state, fetch data, render sections
-async function showDashboard(tab) {
-  // Re-attach dashboardContent if it was removed (e.g. exiting private mode)
+// ─── showDashboard phases ────────────────────────────────────────────
+
+function reattachDashboardContent() {
   if (detachedContent && !document.getElementById('dashboardContent')) {
     document.getElementById('dashboard').appendChild(detachedContent);
     detachedContent = null;
   }
+}
 
-  // Use the resolved effective URL (set in init, falls back to tab.url)
+function resolvePageIdentity(tab) {
   const effectiveUrl = tab._effectiveUrl || tab.url;
-  currentUrl = effectiveUrl;
-  currentTitle = tab.title || '<unknown>';
-  document.getElementById('pageTitle').textContent = currentTitle;
-  document.getElementById('pageUrl').textContent = effectiveUrl;
-
-  // For snapshot viewer tabs, extract slug from URL params instead of deriving from URL
+  const title = tab.title || '<unknown>';
   const viewerPrefix = chrome.runtime.getURL('snapshot-viewer.html');
+  let slug;
   if (tab.url.startsWith(viewerPrefix)) {
-    const viewerParams = new URL(tab.url).searchParams;
-    currentSlug = viewerParams.get('slug') || '';
+    slug = new URL(tab.url).searchParams.get('slug') || '';
   } else {
     // Always derive slug from tab.url (not effectiveUrl) to match badge behavior.
-    // effectiveUrl may differ from tab.url when the content script reports a
-    // different location (SPA drift, PDF viewer frame), causing a slug mismatch.
-    currentSlug = generateSlugFromUrl(tab.url);
+    slug = generateSlugFromUrl(tab.url);
   }
+  return { slug, url: effectiveUrl, title };
+}
 
+async function fetchAndRenderPageData(tab, slug) {
   // Build a fallback entry from tab info
-  currentEntry = {
-    timestamp: Date.now(),
-    url: tab.url,
-    title: tab.title || null,
-    intent: '',
-    slug: currentSlug
-  };
+  currentEntry = { timestamp: Date.now(), url: tab.url, title: tab.title || null, intent: '', slug };
 
-  // Fetch page info from background (which queries offscreen)
   try {
-    logDebug(`[popup] Fetching page info for slug=${currentSlug}`);
-    const info = await chrome.runtime.sendMessage({ action: 'getPageInfo', slug: currentSlug });
+    logDebug(`[popup] Fetching page info for slug=${slug}`);
+    const info = await chrome.runtime.sendMessage({ action: 'getPageInfo', slug });
     logDebug('[popup] getPageInfo response:', info);
 
     if (info && info.success) {
       if (info.entry) {
         currentEntry = info.entry;
-        // Use user_title if set, otherwise auto-detected title
         currentTitle = info.entry.user_title || info.entry.title || tab.title || '<unknown>';
         document.getElementById('pageTitle').textContent = currentTitle;
-        // For snapshot viewer tabs, show the original page URL
         if (info.entry.url) {
           currentUrl = info.entry.url;
           document.getElementById('pageUrl').textContent = info.entry.url;
@@ -755,154 +744,156 @@ async function showDashboard(tab) {
   } catch (error) {
     logError('[popup] Could not load page info:', error);
   }
+}
 
-  // Render list chips and workspace bar
-  await Promise.all([renderListChips(), renderWorkspaceBar()]);
-
+function showDashboardUI() {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('blacklisted').style.display = 'none';
   document.getElementById('dashboard').style.display = 'flex';
   document.getElementById('dashboardContent').style.display = 'block';
 
-  // Auto-resize note textareas now that the dashboard is visible
   requestAnimationFrame(() => {
     autoResizeTextarea(document.getElementById('pageNote'));
     document.querySelectorAll('.highlight-note').forEach(ta => autoResizeTextarea(ta));
   });
-
-  // Re-check tab title after 1s — some sites set a generic title initially
-  // Skip if user has set a custom title (user_title takes precedence)
-  const initialTitle = tab.title || '';
-  const hasUserTitle = currentEntry?.user_title;
-  if (!hasUserTitle) {
-    setTimeout(async () => {
-      try {
-        const [freshTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!freshTab || freshTab.id !== tab.id) return;
-
-        const freshTitle = freshTab.title || '';
-        if (freshTitle === initialTitle) return;
-
-        // Only auto-update if the displayed title still matches the initial tab title
-        const titleEl = document.getElementById('pageTitle');
-        if (!titleEl || titleEl.textContent !== initialTitle) return;
-
-        titleEl.textContent = freshTitle;
-
-        await chrome.runtime.sendMessage({
-          action: 'reportPage',
-          url: tab.url,
-          title: freshTitle
-        });
-        if (currentEntry) {
-          currentEntry.title = freshTitle;
-        }
-        logDebug('[popup] Auto-updated title to:', freshTitle);
-      } catch (error) {
-        logDebug('[popup] Title re-check failed:', error);
-      }
-    }, 1000);
-  }
 }
 
-// Initialize dashboard
-(async () => {
-  // Apply theme before any rendering to minimize flash
-  await applyTheme();
+function scheduleDelayedTitleCheck(tab, initialTitle) {
+  if (currentEntry?.user_title) return;
+  setTimeout(async () => {
+    try {
+      const [freshTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!freshTab || freshTab.id !== tab.id) return;
 
-  // Verify device identity — CURRENT file must be readable
+      const freshTitle = freshTab.title || '';
+      if (freshTitle === initialTitle) return;
+
+      const titleEl = document.getElementById('pageTitle');
+      if (!titleEl || titleEl.textContent !== initialTitle) return;
+
+      titleEl.textContent = freshTitle;
+      await chrome.runtime.sendMessage({ action: 'reportPage', url: tab.url, title: freshTitle });
+      if (currentEntry) currentEntry.title = freshTitle;
+      logDebug('[popup] Auto-updated title to:', freshTitle);
+    } catch (error) {
+      logDebug('[popup] Title re-check failed:', error);
+    }
+  }, 1000);
+}
+
+// Show dashboard for a tab: set up state, fetch data, render sections
+async function showDashboard(tab) {
+  reattachDashboardContent();
+
+  const { slug, url, title } = resolvePageIdentity(tab);
+  currentUrl = url;
+  currentTitle = title;
+  currentSlug = slug;
+  document.getElementById('pageTitle').textContent = title;
+  document.getElementById('pageUrl').textContent = url;
+
+  await fetchAndRenderPageData(tab, slug);
+  await Promise.all([renderListChips(), renderWorkspaceBar()]);
+  showDashboardUI();
+  scheduleDelayedTitleCheck(tab, tab.title || '');
+}
+
+// ─── Init phases ─────────────────────────────────────────────────────
+
+async function verifyDeviceIdentity() {
   const deviceResp = await chrome.runtime.sendMessage({ action: 'getDeviceId' });
   if (!deviceResp?.deviceId) {
     throw new Error('Device identity unavailable — the CURRENT file may be missing or corrupted. Try reloading the extension.');
   }
+}
 
+async function resolveActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
   const isSnapshotViewer = tab?.url?.startsWith(chrome.runtime.getURL('snapshot-viewer.html'));
   if (!tab || !tab.url || tab.url.startsWith('chrome://') || (tab.url.startsWith('chrome-extension://') && !isSnapshotViewer)) {
     document.getElementById('loading').textContent = 'Not available for this page';
-    return;
+    return null;
   }
+  return tab;
+}
 
-  currentTab = tab;
-
-  // Resolve the URL the content script originally reported. SPAs may mutate
-  // tab.url via pushState (e.g. YouTube adding &pp=), producing a different
-  // slug than the one under which data was stored.
+async function resolveEffectiveUrl(tab) {
   let effectiveUrl = tab.url;
   try {
     const reported = await chrome.runtime.sendMessage({ action: 'getReportedUrl', tabId: tab.id });
     if (reported?.success && reported.url) effectiveUrl = reported.url;
   } catch {}
   tab._effectiveUrl = effectiveUrl;
+}
 
-  // Private mode: show only the toggle bar, remove page details entirely
+async function handlePrivateMode(tab) {
   const wsCheck = await loadWorkspace();
-  if (wsCheck.mode === 'private') {
-    await renderWorkspaceBar();
-    const content = document.getElementById('dashboardContent');
-    detachedContent = content;
-    content.remove();
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('dashboard').style.display = 'flex';
-    return;
-  }
+  if (wsCheck.mode !== 'private') return false;
+  await renderWorkspaceBar();
+  const content = document.getElementById('dashboardContent');
+  detachedContent = content;
+  content.remove();
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'flex';
+  return true;
+}
 
-  // Skip blacklist if the page has a page entity (previously captured)
+async function handleBlacklist(tab) {
+  const effectiveUrl = tab._effectiveUrl || tab.url;
   const pageSlug = generateSlugFromUrl(effectiveUrl);
-  const hasVisitHistory = !!(await readCacheable('page:' + pageSlug));
+  const hasVisitHistory = !!(await readCacheable(pageKey(pageSlug)));
 
-  // Check blacklist only for pages with no visit history
   const urlBlacklist = (await readCacheable('manifest:settings')).urlBlacklist;
   const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
-  if (!hasVisitHistory && blacklist.some(prefix => tab.url.startsWith(prefix))) {
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('blacklistedUrl').textContent = tab.url;
-    document.getElementById('blacklisted').style.display = 'block';
-    document.getElementById('blacklistSettingsLink').addEventListener('click', () => {
-      chrome.runtime.openOptionsPage();
-    });
+  if (hasVisitHistory || !blacklist.some(prefix => tab.url.startsWith(prefix))) return false;
 
-    // "Capture It" — write history entry + snapshot, then show dashboard (visit history will bypass blacklist next time)
-    document.getElementById('captureOnceBtn').addEventListener('click', async () => {
-      const btn = document.getElementById('captureOnceBtn');
-      btn.disabled = true;
-      btn.textContent = 'Capturing...';
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('blacklistedUrl').textContent = tab.url;
+  document.getElementById('blacklisted').style.display = 'block';
+  document.getElementById('blacklistSettingsLink').addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
+  });
 
-      try {
-        const slug = generateSlugFromUrl(effectiveUrl);
+  document.getElementById('captureOnceBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('captureOnceBtn');
+    btn.disabled = true;
+    btn.textContent = 'Capturing...';
 
-        // Record page visit (bypassBlacklist: explicit user override)
-        await chrome.runtime.sendMessage({
-          action: 'reportPage',
-          url: effectiveUrl,
-          title: tab.title || null,
-          slug,
-          isInitialLoad: true,
-          bypassBlacklist: true,
-        });
-
-        // Capture snapshot (content script extracts page, background forwards to offscreen)
-        const resp = await chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' });
-        if (resp && !resp.success) {
-          chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: resp.error || 'Capture failed' }).catch(() => {});
-        }
-
-        logDebug('[popup] Capture once completed for blacklisted page');
-      } catch (error) {
-        logError('[popup] Capture once failed:', error);
-        chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: error.message || 'Capture failed' }).catch(() => {});
+    try {
+      const slug = generateSlugFromUrl(effectiveUrl);
+      await chrome.runtime.sendMessage({
+        action: 'reportPage', url: effectiveUrl, title: tab.title || null,
+        slug, isInitialLoad: true, bypassBlacklist: true,
+      });
+      const resp = await chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' });
+      if (resp && !resp.success) {
+        chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: resp.error || 'Capture failed' }).catch(() => {});
       }
+      logDebug('[popup] Capture once completed for blacklisted page');
+    } catch (error) {
+      logError('[popup] Capture once failed:', error);
+      chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: error.message || 'Capture failed' }).catch(() => {});
+    }
 
-      // Transition to full dashboard
-      await showDashboard(tab);
-    });
+    await showDashboard(tab);
+  });
 
-    return;
-  }
+  return true;
+}
 
+// Initialize popup
+async function initPopup() {
+  await applyTheme();
+  await verifyDeviceIdentity();
+  const tab = await resolveActiveTab();
+  if (!tab) return;
+  currentTab = tab;
+  await resolveEffectiveUrl(tab);
+  if (await handlePrivateMode(tab)) return;
+  if (await handleBlacklist(tab)) return;
   await showDashboard(tab);
-})().catch(err => showFatalError(err.message));
+}
+initPopup().catch(err => showFatalError(err.message));
 
 // Listen for note mutations from background to keep popup in sync
 chrome.runtime.onMessage.addListener((msg) => {

@@ -1,17 +1,10 @@
 // Time chart — rendering, tooltips, bar click filtering, and highlight sync
-
-function localDateKey(ts) {
-  const d = new Date(ts);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
+import { dateKeyFromTimestamp } from './utils.js';
 
 function aggregateVisitsByDay(entries) {
   const byDay = new Map();
   for (const i of entries) {
-    const dayKey = localDateKey(i.timestamp);
+    const dayKey = dateKeyFromTimestamp(i.timestamp);
     const prev = byDay.get(dayKey) || 0;
     byDay.set(dayKey, prev + 1); // count visits per day
   }
@@ -57,7 +50,7 @@ export function renderTimeChartInto(chartEl, barsEl, entries, label, estimatedBy
   const chartHeight = 44;
 
   // Expand range: 1st of earliest month → today (all local time)
-  const todayKey = localDateKey(Date.now());
+  const todayKey = dateKeyFromTimestamp(Date.now());
   const firstKey = allDataDates[0];
   const lastKey = allDataDates[allDataDates.length - 1] > todayKey ? allDataDates[allDataDates.length - 1] : todayKey;
   const firstParts = firstKey.split('-').map(Number);
@@ -69,7 +62,7 @@ export function renderTimeChartInto(chartEl, barsEl, entries, label, estimatedBy
   const months = []; // { label, dayIndex }
   let prevMonth = null;
   for (let d = new Date(rangeStart); d <= lastDate; d.setDate(d.getDate() + 1)) {
-    const dateStr = localDateKey(d.getTime());
+    const dateStr = dateKeyFromTimestamp(d.getTime());
     const month = dateStr.slice(0, 7);
     if (month !== prevMonth) {
       months.push({ label: month, dayIndex: days.length });

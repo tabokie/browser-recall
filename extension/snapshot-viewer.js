@@ -1,4 +1,5 @@
 import { logDebug } from './logger.js';
+import { findTextRange } from './highlight-helpers.js';
 
 const params = new URLSearchParams(location.search);
 const slug = params.get('slug');
@@ -83,33 +84,8 @@ frame.addEventListener('load', async () => {
 
 // Find text across nodes and wrap in <mark>. Returns the mark element or undefined.
 function highlightInDoc(doc, text, noteSlug) {
-  if (!text) return;
-  const textNodes = [];
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
-  let node;
-  while ((node = walker.nextNode())) textNodes.push(node);
-
-  let concat = '';
-  const offsets = [];
-  for (const tn of textNodes) { offsets.push(concat.length); concat += tn.textContent; }
-
-  const idx = concat.indexOf(text);
-  if (idx === -1) return;
-  const endIdx = idx + text.length;
-
-  let startNode = null, startOffset = 0, endNode = null, endOffset = 0;
-  for (let i = 0; i < textNodes.length; i++) {
-    const nodeStart = offsets[i];
-    const nodeEnd = nodeStart + textNodes[i].textContent.length;
-    if (!startNode && nodeEnd > idx) { startNode = textNodes[i]; startOffset = idx - nodeStart; }
-    if (nodeEnd >= endIdx) { endNode = textNodes[i]; endOffset = endIdx - offsets[i]; break; }
-  }
-  if (!startNode || !endNode) return;
-
-  const range = doc.createRange();
-  range.setStart(startNode, startOffset);
-  range.setEnd(endNode, endOffset);
-
+  const range = findTextRange(doc.body, text, doc);
+  if (!range) return;
   return wrapRangeWithMark(doc, range, text, noteSlug);
 }
 

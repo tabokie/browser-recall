@@ -54,9 +54,9 @@ describe('background.js structural checks', () => {
   });
 
   it('readCacheable handler returns success: true', () => {
-    const match = bgSource.match(/case\s+'readCacheable'\s*:\s*\{([\s\S]*?)break;\s*\}/);
+    const match = bgSource.match(/async function handleReadCacheable\s*\([\s\S]*?\n\}/);
     expect(match).not.toBeNull();
-    expect(match[1]).toMatch(/success:\s*true/);
+    expect(match[0]).toMatch(/success:\s*true/);
   });
 
 });
@@ -332,13 +332,10 @@ describe('background.js toggleListPin resolves pin ID', () => {
   const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
 
   it('toggleListPin uses getListEventFields and addLog for pin toggle', () => {
-    // Extract a larger chunk since case block has nested break statements
-    const startIdx = bgSource.indexOf("case 'toggleListPin'");
-    expect(startIdx).toBeGreaterThan(-1);
-    const handler = bgSource.substring(startIdx, startIdx + 2000);
-    // Should use getListEventFields to resolve list name and addLog to write pin action
-    expect(handler).toMatch(/getListEventFields/);
-    expect(handler).toMatch(/addLog/);
+    const match = bgSource.match(/async function handleToggleListPin\s*\([\s\S]*?\n\}/);
+    expect(match).not.toBeNull();
+    expect(match[0]).toMatch(/getListEventFields/);
+    expect(match[0]).toMatch(/addLog/);
   });
 });
 
@@ -349,16 +346,16 @@ describe('background.js addListPins accepts urls', () => {
   const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
 
   it('addListPins handler accepts request.urls', () => {
-    const caseBlock = bgSource.match(/case\s+'addListPins'\s*:\s*\{([\s\S]*?)break;\s*\}/);
-    expect(caseBlock).not.toBeNull();
-    expect(caseBlock[1]).toMatch(/request\.urls/);
+    const match = bgSource.match(/async function handleAddListPins\s*\([\s\S]*?\n\}/);
+    expect(match).not.toBeNull();
+    expect(match[0]).toMatch(/request\.urls/);
   });
 
   it('addListPins uses getListEventFields and addLog', () => {
-    const caseBlock = bgSource.match(/case\s+'addListPins'\s*:\s*\{([\s\S]*?)break;\s*\}/);
-    expect(caseBlock).not.toBeNull();
-    expect(caseBlock[1]).toMatch(/getListEventFields/);
-    expect(caseBlock[1]).toMatch(/addLog/);
+    const match = bgSource.match(/async function handleAddListPins\s*\([\s\S]*?\n\}/);
+    expect(match).not.toBeNull();
+    expect(match[0]).toMatch(/getListEventFields/);
+    expect(match[0]).toMatch(/addLog/);
   });
 });
 
@@ -381,17 +378,17 @@ describe('background.js getPageRelations reads list entities', () => {
   const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
 
   it('does not use listCache: session keys for list membership check', () => {
-    const caseBlock = bgSource.match(/case\s+'getPageRelations'\s*:\s*\{([\s\S]*?)break;\s*\}/);
-    expect(caseBlock).not.toBeNull();
+    const match = bgSource.match(/async function handleGetPageRelations\s*\([\s\S]*?\n\}/);
+    expect(match).not.toBeNull();
     // Should NOT read from the options-only listCache: session keys
-    expect(caseBlock[1]).not.toMatch(/listCache:/);
+    expect(match[0]).not.toMatch(/listCache:/);
   });
 
   it('reads list entities via readCacheable for list membership', () => {
-    const caseBlock = bgSource.match(/case\s+'getPageRelations'\s*:\s*\{([\s\S]*?)break;\s*\}/);
-    expect(caseBlock).not.toBeNull();
+    const match = bgSource.match(/async function handleGetPageRelations\s*\([\s\S]*?\n\}/);
+    expect(match).not.toBeNull();
     // Should use readCacheable (which has disk fallback) for list entities
-    expect(caseBlock[1]).toMatch(/readCacheable\s*\(\s*listKey\s*\)/);
+    expect(match[0]).toMatch(/readCacheable\s*\(\s*lk\s*\)/);
   });
 });
 

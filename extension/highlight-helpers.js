@@ -53,10 +53,11 @@ function unwrapMark(mark) {
  * Collect all text nodes under a root, traversing into open shadow DOMs.
  * Skips nodes inside overlay or existing highlights.
  */
-function collectTextNodes(root) {
+function collectTextNodes(root, ownerDoc) {
   const textNodes = [];
+  const doc = ownerDoc || document;
   function walk(parent) {
-    const walker = document.createTreeWalker(parent, NodeFilter.SHOW_ALL, {
+    const walker = doc.createTreeWalker(parent, NodeFilter.SHOW_ALL, {
       acceptNode: (node) => {
         if (node.nodeType === Node.TEXT_NODE) {
           if (node.parentElement && node.parentElement.closest('#portal-highlight-overlay')) return NodeFilter.FILTER_REJECT;
@@ -87,10 +88,11 @@ function collectTextNodes(root) {
  * Search the full document text (across node boundaries and shadow DOMs)
  * for a substring. Returns a DOM Range spanning the first match, or null.
  */
-export function findTextRange(root, text) {
+export function findTextRange(root, text, ownerDoc) {
   if (!text) return null;
+  const doc = ownerDoc || document;
 
-  const textNodes = collectTextNodes(root);
+  const textNodes = collectTextNodes(root, doc);
 
   let concat = '';
   const offsets = [];
@@ -119,7 +121,7 @@ export function findTextRange(root, text) {
   }
   if (!startNode || !endNode) return null;
 
-  const range = document.createRange();
+  const range = doc.createRange();
   range.setStart(startNode, startOffset);
   range.setEnd(endNode, endOffset);
   return range;

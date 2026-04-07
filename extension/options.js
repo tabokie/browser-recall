@@ -1,18 +1,20 @@
 // Options page for Portal extension
 // Bookmark-manager style UI with sidebar navigation, search, and settings modal
 import { FileSystemStorage } from './filesystem-storage.js';
+import { FileSystemSyncStorage } from './filesystem-sync-storage.js';
 import init, { HistoryEntry, SearchEngine, searchBatch, searchNotes, searchSnapshots } from './pkg/portal_extension.js';
 import { mergeBufferIntoHistory, getBufferContentMap, buildHistoryForEngine, extractHistoryBuffer } from './search-helpers.js';
 import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, escapeHtml, BODY_WORD_LIMIT } from './utils.js';
-import { attentionStrength, attentionColor, aggregateAttention } from './attention-utils.js';
+import { attentionStrength, aggregateAttention } from './attention-utils.js';
 import { initCharts, renderTimeChart, renderTimeChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './time-chart.js';
 import { VirtualScroller } from './virtual-scroller.js';
-import { entityTypeLabel } from './entity-types.js';
+import { entityTypeLabel, PAGE_PREFIX, NOTE_PREFIX, SNAPSHOT_PREFIX, LIST_PREFIX, entitySlug, isSystemList, pageKey, noteKey, listKey, snapshotKey } from './entity-types.js';
 import { fetchGitHubUser } from './github-oauth.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
 // parseBookmarkHtml imported dynamically inside the block below
 const fsStorage = new FileSystemStorage();
+const fsSyncStorage = new FileSystemSyncStorage(fsStorage);
 
 // ─── Utility ─────────────────────────────────────────────────────────
 
@@ -137,17 +139,19 @@ let pinnedExtraColumns = [];
 let relatedExtraColumns = [];
 let wasmInitialized = false;
 // --- Demand-loaded history ---
-let historyFileBatch = 10;        // files per load (configurable in settings)
 const HISTORY_MAX_FILES = 100;    // cap total loaded files
-let historyFiles = [];             // all JSONL filenames, newest-first
-let historyLoadedCount = 0;        // how many files loaded so far
-let historyByUrl = new Map();      // url → history entry (deduped, newest wins)
-let historyAllEntries = [];        // all loaded entries (not deduped), for date-boundary rendering
-let historyLoading = false;        // guard against concurrent loads
-let historyFileSizes = {};         // filename → total byte size (for chart estimation)
 const DEFAULT_AVG_ENTRY_SIZE = 200;
-let avgEntrySize = DEFAULT_AVG_ENTRY_SIZE; // calibrated from loaded batches
-let historyBatchRawCount = 0;      // total raw entries from loaded JSONL files
+const historyState = {
+  fileBatch: 10,               // files per load (configurable in settings)
+  files: [],                   // all JSONL filenames, newest-first
+  loadedCount: 0,              // how many files loaded so far
+  byUrl: new Map(),            // url → history entry (deduped, newest wins)
+  allEntries: [],              // all loaded entries (not deduped), for date-boundary rendering
+  loading: false,              // guard against concurrent loads
+  fileSizes: {},               // filename → total byte size (for chart estimation)
+  avgEntrySize: DEFAULT_AVG_ENTRY_SIZE, // calibrated from loaded batches
+  batchRawCount: 0,            // total raw entries from loaded JSONL files
+};
 let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'list', query: '...', id: '...' } or { type: 'explore', query: '...', filter: '...' }
 let allListPins = {}; // listId -> [{ url, title, pinnedAt }]
 let lastClickedRow = null; // for shift-click range select
@@ -240,13 +244,13 @@ function computeFieldRanges(entries) {
 
 function getFieldRanges() {
   if (cachedFieldRanges) return cachedFieldRanges;
-  if (historyByUrl.size === 0 && historyFiles.length === 0) return null;
-  cachedFieldRanges = historyByUrl.size > 0
-    ? computeFieldRanges(Array.from(historyByUrl.values()))
+  if (historyState.byUrl.size === 0 && historyState.files.length === 0) return null;
+  cachedFieldRanges = historyState.byUrl.size > 0
+    ? computeFieldRanges(Array.from(historyState.byUrl.values()))
     : Object.fromEntries(Object.keys(RANGE_CONFIGS).map(k => [k, { min: RANGE_CONFIGS[k].min, max: RANGE_CONFIGS[k].max }]));
   // Extend date ranges to cover all known files (even unloaded ones)
-  if (historyFiles.length > 0) {
-    const oldestFile = historyFiles[historyFiles.length - 1]; // files are newest-first
+  if (historyState.files.length > 0) {
+    const oldestFile = historyState.files[historyState.files.length - 1]; // files are newest-first
     const oldestDate = oldestFile.replace('.jsonl', '');
     const oldestDaysAgo = Math.ceil((Date.now() - new Date(oldestDate + 'T00:00:00Z').getTime()) / 86400000);
     for (const key of ['lastVisit', 'firstVisit']) {
@@ -303,9 +307,11 @@ async function initWasm() {
 }
 
 // --- Progressive search ---
-let searchGeneration = 0;      // generation counter — stale phase callbacks are discarded
-let searchResults = [];         // master result array, mutated by mergeSearchResults
-let searchPendingPhases = 0;    // count of in-flight phases — spinner shown while > 0
+const searchState = {
+  generation: 0,         // generation counter — stale phase callbacks are discarded
+  results: [],           // master result array, mutated by mergeSearchResults
+  pendingPhases: 0,      // count of in-flight phases — spinner shown while > 0
+};
 
 // Run a limited-concurrency pool of async tasks, calling onResult after each completes.
 async function runPool(tasks, concurrency, onResult) {
@@ -324,14 +330,14 @@ async function runPool(tasks, concurrency, onResult) {
   await Promise.all(workers);
 }
 
-// Merge new results into searchResults. Dedup by URL, take max score, track sources.
+// Merge new results into searchState.results. Dedup by URL, take max score, track sources.
 function mergeSearchResults(newResults, source, gen) {
-  if (gen !== searchGeneration) return; // stale generation — discard
+  if (gen !== searchState.generation) return; // stale generation — discard
   for (const r of newResults) {
     if (!r.url) continue;
-    const idx = searchResults.findIndex(e => e.url === r.url);
+    const idx = searchState.results.findIndex(e => e.url === r.url);
     if (idx >= 0) {
-      const existing = searchResults[idx];
+      const existing = searchState.results[idx];
       if ((r.score || 0) > (existing.score || 0)) existing.score = r.score;
       if (r.createdAt && (!existing.createdAt || r.createdAt < existing.createdAt)) existing.createdAt = r.createdAt;
       if (!existing.matchSources) existing.matchSources = new Set();
@@ -352,22 +358,22 @@ function mergeSearchResults(newResults, source, gen) {
         latestTs: r.timestamp || Date.now(),
         matchSources: new Set([source]),
       };
-      searchResults.push(entry);
+      searchState.results.push(entry);
     }
   }
 }
 
-// Enrich new entries and render the current searchResults to the virtual scroller.
+// Enrich new entries and render the current searchState.results to the virtual scroller.
 async function renderProgressiveResults(gen) {
-  if (gen !== searchGeneration) return;
+  if (gen !== searchState.generation) return;
   // Enrich all entries that haven't been enriched yet
-  const unenriched = searchResults.filter(r => !r._enriched);
+  const unenriched = searchState.results.filter(r => !r._enriched);
   if (unenriched.length > 0) {
     await enrichFromEntityStorage(unenriched);
     for (const r of unenriched) r._enriched = true;
   }
   // Apply filters
-  let results = searchResults;
+  let results = searchState.results;
   if (!isDefaultFilterState(filterState)) {
     const notFilterEnriched = results.filter(r => !r._filterEnriched);
     if (notFilterEnriched.length > 0) {
@@ -379,7 +385,7 @@ async function renderProgressiveResults(gen) {
 
   const relatedContainer = document.getElementById('relatedResults');
   // Show "No results" when all phases are done and nothing matched
-  if (results.length === 0 && searchPendingPhases <= 0) {
+  if (results.length === 0 && searchState.pendingPhases <= 0) {
     relatedContainer.innerHTML = '<div class="no-results">No results</div>';
     document.getElementById('relatedChart').classList.remove('visible');
     return;
@@ -399,7 +405,7 @@ async function renderProgressiveResults(gen) {
       matchSources: r.matchSources, hasHighlightNotes: r.hasHighlightNotes,
     })
   );
-  relatedContainer.dataset.searchCount = String(searchResults.length);
+  relatedContainer.dataset.searchCount = String(searchState.results.length);
   // Update time chart
   const chartData = sorted.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || Date.now(), attention: '' }));
   renderTimeChartInto(
@@ -420,9 +426,9 @@ function hideSearchSpinner() {
   if (el) el.style.display = 'none';
 }
 function phaseComplete(gen) {
-  if (gen !== searchGeneration) return;
-  searchPendingPhases--;
-  if (searchPendingPhases <= 0) hideSearchSpinner();
+  if (gen !== searchState.generation) return;
+  searchState.pendingPhases--;
+  if (searchState.pendingPhases <= 0) hideSearchSpinner();
 }
 
 // Phase 1: WASM JSONL streaming search with limited concurrency.
@@ -474,7 +480,7 @@ async function runPhase1(query, gen) {
       }
     }
     await runPool(tasks, 3, (results) => {
-      if (gen !== searchGeneration) return;
+      if (gen !== searchState.generation) return;
       const formatted = results.map(r => ({
         url: r.url, title: r.title, slug: generateSlugFromUrl(r.url),
         timestamp: r.timestamp, score: r.score || 0,
@@ -500,7 +506,7 @@ async function runPhase2a(query, gen) {
     if (!rootDir) return;
     const notesDir = await rootDir.getDirectoryHandle('data').then(d => d.getDirectoryHandle('notes'));
     const matches = await searchNotes(notesDir, query);
-    if (gen !== searchGeneration) return;
+    if (gen !== searchState.generation) return;
     // Convert note matches to result entries — need page metadata from slug
     const noteResults = [];
     for (const m of matches) {
@@ -557,10 +563,10 @@ async function runPhase2b(query, gen) {
     }
     const tasks = chunks.map(chunk => () => searchSnapshots(snapshotsDir, query, chunk));
     await runPool(tasks, 2, async (matches) => {
-      if (gen !== searchGeneration) return;
+      if (gen !== searchState.generation) return;
       // Load page entities to get URLs for matched slugs
       const slugs = matches.map(m => m.slug);
-      const pages = await Promise.all(slugs.map(s => readCacheable('page:' + s)));
+      const pages = await Promise.all(slugs.map(s => readCacheable(pageKey(s))));
       const snapshotResults = [];
       for (let i = 0; i < matches.length; i++) {
         const page = pages[i];
@@ -605,8 +611,8 @@ function phase0Score(item, words) {
 // Phase 0: instant in-memory matching. Phase 1: WASM JSONL streaming.
 // Phase 2a: WASM notes. Phase 2b: WASM snapshots streaming.
 async function runProgressiveSearch(allQueries) {
-  const gen = ++searchGeneration;
-  searchResults = [];
+  const gen = ++searchState.generation;
+  searchState.results = [];
   const query = allQueries.join(' ');
 
   // Phase 0: instant in-memory matching with fuzzy support for unquoted words
@@ -614,23 +620,23 @@ async function runProgressiveSearch(allQueries) {
   const words = parseSearchWords(query);
   if (words.length > 0) {
     // Build haystack: one string per entry combining all searchable fields
-    const haystack = historyAllEntries.map(item =>
+    const haystack = historyState.allEntries.map(item =>
       [item.user_title || '', item.title || '', item.url || ''].join(' ')
     );
-    const matchedIndices = fuzzyMatchPhase0(words, haystack, historyAllEntries);
+    const matchedIndices = fuzzyMatchPhase0(words, haystack, historyState.allEntries);
     for (const idx of matchedIndices) {
-      const item = historyAllEntries[idx];
+      const item = historyState.allEntries[idx];
       if (item.url) matchedUrls.add(item.url);
     }
   }
-  const phase0Entries = historyAllEntries.filter(item => item.url && matchedUrls.has(item.url));
+  const phase0Entries = historyState.allEntries.filter(item => item.url && matchedUrls.has(item.url));
   const phase0Results = processHistoryForDisplay(phase0Entries, { globalDedup: true })
     .map(item => ({ ...item, score: phase0Score(item, words), matchSources: new Set(['title']) }));
   mergeSearchResults(phase0Results, 'title', gen);
   await renderProgressiveResults(gen);
 
   // Fire Phase 1, 2a, 2b concurrently (with per-type concurrency limits)
-  searchPendingPhases = 3;
+  searchState.pendingPhases = 3;
   showSearchSpinner();
   runPhase1(query, gen);
   runPhase2a(query, gen);
@@ -641,13 +647,13 @@ async function runProgressiveSearch(allQueries) {
 // --- Demand-loaded history ---
 
 async function initHistoryFiles() {
-  if (historyFiles.length > 0) return;
+  if (historyState.files.length > 0) return;
 
   // Always get file list from offscreen (no session cache for file list)
   try {
     const resp = await sendAction({ action: 'listHistoryFiles', includeSizes: true });
-    historyFiles = resp.files;
-    historyFileSizes = resp.sizes || {};
+    historyState.files = resp.files;
+    historyState.fileSizes = resp.sizes || {};
   } catch (error) {
     logDebug('Filesystem not available:', error.message);
   }
@@ -657,9 +663,9 @@ async function initHistoryFiles() {
   const todayEntries = await readCacheable('log:' + todayStr) || [];
   const historyBuffer = todayEntries.filter(e => (e.action === 'visit_page' || e.action === 'leave_page' || !e.action) && e.url);
   for (const entry of historyBuffer) {
-    const existing = historyByUrl.get(entry.url);
+    const existing = historyState.byUrl.get(entry.url);
     if (!existing || entry.timestamp > existing.timestamp) {
-      historyByUrl.set(entry.url, entry);
+      historyState.byUrl.set(entry.url, entry);
       // Preserve title/user_title from older entry if new one lacks it
       if (existing && existing.title && !entry.title) entry.title = existing.title;
       if (existing && existing.user_title && !entry.user_title) entry.user_title = existing.user_title;
@@ -669,16 +675,16 @@ async function initHistoryFiles() {
     if (entry.user_title && (!existing || !existing.user_title)) {
       if (existing) existing.user_title = entry.user_title;
     }
-    historyAllEntries.push(entry);
+    historyState.allEntries.push(entry);
   }
   bufferContentMap = getBufferContentMap(historyBuffer);
 }
 
 async function loadHistoryBatch() {
-  if (historyLoading || historyLoadedCount >= historyFiles.length
-      || historyLoadedCount >= HISTORY_MAX_FILES) return [];
-  historyLoading = true;
-  const batch = historyFiles.slice(historyLoadedCount, historyLoadedCount + historyFileBatch);
+  if (historyState.loading || historyState.loadedCount >= historyState.files.length
+      || historyState.loadedCount >= HISTORY_MAX_FILES) return [];
+  historyState.loading = true;
+  const batch = historyState.files.slice(historyState.loadedCount, historyState.loadedCount + historyState.fileBatch);
   try {
     const t0 = performance.now();
     const resp = await sendAction({ action: 'loadHistoryBatch', files: batch });
@@ -693,10 +699,10 @@ async function loadHistoryBatch() {
       // Skip non-visit entries (settings, list ops, etc.)
       if (item.action && item.action !== 'visit_page' && item.action !== 'leave_page') continue;
       if (!item.url) continue;
-      historyAllEntries.push(item);
-      const existing = historyByUrl.get(item.url);
+      historyState.allEntries.push(item);
+      const existing = historyState.byUrl.get(item.url);
       if (!existing) {
-        historyByUrl.set(item.url, item);
+        historyState.byUrl.set(item.url, item);
       } else {
         if (item.title) existing.title = item.title;
         if (item.user_title) existing.user_title = item.user_title;
@@ -704,20 +710,20 @@ async function loadHistoryBatch() {
       newItems.push(item);
     }
     logDebug(`[I/O] loadHistoryBatch: ${batch.length} files, ${batchEntries.length} items, ${newItems.length} new in ${(performance.now() - t0).toFixed(1)}ms`);
-    historyLoadedCount += batch.length;
+    historyState.loadedCount += batch.length;
     if (newItems.length > 0) cachedFieldRanges = null;
     // Calibrate avg entry size from loaded file data
-    historyBatchRawCount += batchEntries.length;
-    const loadedSize = historyFiles.slice(0, historyLoadedCount)
-      .reduce((sum, f) => sum + (historyFileSizes[f] || 0), 0);
-    if (loadedSize > 0 && historyBatchRawCount > 0) {
-      avgEntrySize = loadedSize / historyBatchRawCount;
+    historyState.batchRawCount += batchEntries.length;
+    const loadedSize = historyState.files.slice(0, historyState.loadedCount)
+      .reduce((sum, f) => sum + (historyState.fileSizes[f] || 0), 0);
+    if (loadedSize > 0 && historyState.batchRawCount > 0) {
+      historyState.avgEntrySize = loadedSize / historyState.batchRawCount;
     }
-    historyLoading = false;
+    historyState.loading = false;
     return newItems;
   } catch (error) {
     logDebug('Error loading history batch:', error.message);
-    historyLoading = false;
+    historyState.loading = false;
     return [];
   }
 }
@@ -725,31 +731,31 @@ async function loadHistoryBatch() {
 // Load history files until a specific date is covered (single batch).
 async function loadHistoryUntilDate(dateStr) {
   const targetFile = dateStr + '.jsonl';
-  const targetIdx = historyFiles.indexOf(targetFile);
-  if (targetIdx < 0 || targetIdx < historyLoadedCount) return; // already loaded or not found
-  const needed = targetIdx - historyLoadedCount + 1;
-  const saved = historyFileBatch;
-  historyFileBatch = needed;
+  const targetIdx = historyState.files.indexOf(targetFile);
+  if (targetIdx < 0 || targetIdx < historyState.loadedCount) return; // already loaded or not found
+  const needed = targetIdx - historyState.loadedCount + 1;
+  const saved = historyState.fileBatch;
+  historyState.fileBatch = needed;
   await loadHistoryBatch();
-  historyFileBatch = saved;
+  historyState.fileBatch = saved;
 }
 
 function resetHistory() {
-  historyFiles = [];
-  historyLoadedCount = 0;
-  historyByUrl.clear();
-  historyAllEntries = [];
-  historyLoading = false;
-  historyFileSizes = {};
-  avgEntrySize = DEFAULT_AVG_ENTRY_SIZE;
-  historyBatchRawCount = 0;
+  historyState.files = [];
+  historyState.loadedCount = 0;
+  historyState.byUrl.clear();
+  historyState.allEntries = [];
+  historyState.loading = false;
+  historyState.fileSizes = {};
+  historyState.avgEntrySize = DEFAULT_AVG_ENTRY_SIZE;
+  historyState.batchRawCount = 0;
   cachedFieldRanges = null;
   allListPins = {};
 
   bufferContentMap = {};
-  searchGeneration++;    // invalidate any in-flight progressive search
-  searchResults = [];
-  searchPendingPhases = 0;
+  searchState.generation++;    // invalidate any in-flight progressive search
+  searchState.results = [];
+  searchState.pendingPhases = 0;
   hideSearchSpinner();
 }
 
@@ -757,13 +763,13 @@ function resetHistory() {
 // Returns Map<dateStr, estimatedCount> for dates not yet loaded.
 function getEstimatedByDay() {
   const estimated = new Map();
-  const loadedSet = new Set(historyFiles.slice(0, historyLoadedCount));
-  for (const filename of historyFiles) {
+  const loadedSet = new Set(historyState.files.slice(0, historyState.loadedCount));
+  for (const filename of historyState.files) {
     if (loadedSet.has(filename)) continue;
     const dateStr = filename.replace('.jsonl', '');
-    const size = historyFileSizes[filename] || 0;
+    const size = historyState.fileSizes[filename] || 0;
     if (size > 0) {
-      estimated.set(dateStr, Math.max(1, Math.round(size / avgEntrySize)));
+      estimated.set(dateStr, Math.max(1, Math.round(size / historyState.avgEntrySize)));
     }
   }
   return estimated;
@@ -774,19 +780,14 @@ function getActivePinListId() {
   return null;
 }
 
-function pinIdToUrl(id) {
-  // All page pins are page:<slug> — need to resolve via page entity. Return null if can't resolve here.
-  return null;
-}
-
 function slugFromPinId(id) {
-  if (id.startsWith('page:')) return id.slice(5);
-  if (id.startsWith('note:')) return id.slice(5);
+  if (id.startsWith(PAGE_PREFIX)) return entitySlug(id);
+  if (id.startsWith(NOTE_PREFIX)) return entitySlug(id);
 }
 
 // Resolve an array of pins to display-ready objects with title/url populated.
 // Loads entity context, resolves each pin via resolvePageRef, falls back to
-// historyByUrl for pins with null entity title.
+// historyState.byUrl for pins with null entity title.
 // Returns { pinsResolved, pageSnap } — pageSnap is needed by enrichPinResult.
 async function resolvePinsForDisplay(pins) {
   const { pageSnap, noteSnap } = await loadPinContext(pins);
@@ -795,7 +796,7 @@ async function resolvePinsForDisplay(pins) {
     let url = ref?.url || null;
     let title = ref?.title || null;
     if (!title && url) {
-      const hist = historyByUrl.get(url);
+      const hist = historyState.byUrl.get(url);
       if (hist?.title) title = hist.title;
     }
     return { ...p, url, title, user_title: ref?.user_title || null, isNote: ref?.isNote || false, childIds: ref?.childIds || [], parentIds: ref?.parentIds || [] };
@@ -807,11 +808,11 @@ async function resolvePinsForDisplay(pins) {
 // page:<slug> → page entity from pageSnap. note:<slug> → note entity.
 function resolvePageRef(refId, pageSnap, noteSnap) {
   if (!refId) return null;
-  if (refId.startsWith('page:')) {
-    return pageSnap?.get(refId.slice(5)) || null;
+  if (refId.startsWith(PAGE_PREFIX)) {
+    return pageSnap?.get(entitySlug(refId)) || null;
   }
-  if (refId.startsWith('note:')) {
-    const note = noteSnap?.get(refId.slice(5));
+  if (refId.startsWith(NOTE_PREFIX)) {
+    const note = noteSnap?.get(entitySlug(refId));
     if (!note) return null;
     return { url: null, title: note.excerpt || 'Note', user_title: null, isNote: true, note };
   }
@@ -824,20 +825,20 @@ async function loadPinContext(pins) {
   const pagePinSlugs = [];
   const notePinSlugs = [];
   for (const p of pins) {
-    if (p.id?.startsWith('page:')) pagePinSlugs.push(p.id.slice(5));
-    else if (p.id?.startsWith('note:')) notePinSlugs.push(p.id.slice(5));
+    if (p.id?.startsWith(PAGE_PREFIX)) pagePinSlugs.push(entitySlug(p.id));
+    else if (p.id?.startsWith(NOTE_PREFIX)) notePinSlugs.push(entitySlug(p.id));
   }
-  const sessionKeys = [...pagePinSlugs.map(s => 'page:' + s), ...notePinSlugs.map(s => 'note:' + s)];
+  const sessionKeys = [...pagePinSlugs.map(s => pageKey(s)), ...notePinSlugs.map(s => noteKey(s))];
   const sessionBatch = sessionKeys.length > 0 ? await chrome.storage.session.get(sessionKeys) : {};
   const pageSnap = new Map();
   const missingSlugs = [];
   for (const slug of pagePinSlugs) {
-    const page = sessionBatch['page:' + slug];
+    const page = sessionBatch[pageKey(slug)];
     if (page) pageSnap.set(slug, page);
     else missingSlugs.push(slug);
   }
   if (missingSlugs.length > 0) {
-    const pages = await Promise.all(missingSlugs.map(s => readCacheable('page:' + s)));
+    const pages = await Promise.all(missingSlugs.map(s => readCacheable(pageKey(s))));
     for (let i = 0; i < missingSlugs.length; i++) {
       if (pages[i]) pageSnap.set(missingSlugs[i], pages[i]);
     }
@@ -845,23 +846,17 @@ async function loadPinContext(pins) {
   const noteSnap = new Map();
   const missingNoteSlugs = [];
   for (const slug of notePinSlugs) {
-    const note = sessionBatch['note:' + slug];
+    const note = sessionBatch[noteKey(slug)];
     if (note) noteSnap.set(slug, note);
     else missingNoteSlugs.push(slug);
   }
   if (missingNoteSlugs.length > 0) {
-    const notes = await Promise.all(missingNoteSlugs.map(s => readCacheable('note:' + s)));
+    const notes = await Promise.all(missingNoteSlugs.map(s => readCacheable(noteKey(s))));
     for (let i = 0; i < missingNoteSlugs.length; i++) {
       if (notes[i]) noteSnap.set(missingNoteSlugs[i], notes[i]);
     }
   }
   return { pageSnap, noteSnap };
-}
-
-function isResultPinned(listId, url) {
-  const pins = allListPins[listId] || [];
-  const pageId = 'page:' + generateSlugFromUrl(url);
-  return pins.some(p => p.id === pageId);
 }
 
 async function toggleResultPin(listId, url, title) {
@@ -926,14 +921,14 @@ async function showRecycleBin() {
 
     // Load entity to get human-readable display name
     let displayName = key;
-    if (key.startsWith('snapshot:')) {
-      const snapStem = key.slice('snapshot:'.length);
+    if (key.startsWith(SNAPSHOT_PREFIX)) {
+      const snapStem = entitySlug(key);
       const lastDash = snapStem.lastIndexOf('-');
       const pageSlug = snapStem.slice(0, lastDash);
       const ts = parseInt(snapStem.slice(lastDash + 1), 10);
       // Try to load page entity for a human title
       try {
-        const pageResp = await sendAction({ action: 'readCacheable', key: 'page:' + pageSlug, includeDeleted: true });
+        const pageResp = await sendAction({ action: 'readCacheable', key: pageKey(pageSlug), includeDeleted: true });
         displayName = `${pageResp?.value?.title || pageSlug} — ${new Date(ts).toLocaleString()}`;
       } catch {
         displayName = `${pageSlug} — ${new Date(ts).toLocaleString()}`;
@@ -943,16 +938,16 @@ async function showRecycleBin() {
         const resp = await sendAction({ action: 'readCacheable', key, includeDeleted: true });
         const entity = resp?.value;
         if (entity) {
-          if (key.startsWith('note:')) {
+          if (key.startsWith(NOTE_PREFIX)) {
             const raw = entity.excerpt;
             const excerptText = Array.isArray(raw) ? raw.join(' ') : (raw || '');
             if (excerptText) displayName = excerptText.substring(0, 80);
             else if (entity.excerpt === null && entity.note) displayName = `Page note: ${entity.note.substring(0, 60)}`;
             else if (entity.note) displayName = entity.note.substring(0, 80);
             else displayName = key;
-          } else if (key.startsWith('list:')) {
+          } else if (key.startsWith(LIST_PREFIX)) {
             displayName = entity.name || key;
-          } else if (key.startsWith('page:')) {
+          } else if (key.startsWith(PAGE_PREFIX)) {
             displayName = entity.title || entity.url || key;
           } else {
             displayName = entity.name || entity.title || entity.slug || key;
@@ -973,14 +968,14 @@ async function showRecycleBin() {
       <button class="restore-btn">Restore</button>
     `;
     card.querySelector('.restore-btn').addEventListener('click', async () => {
-      if (key.startsWith('snapshot:')) {
-        const snapSlug = key.slice('snapshot:'.length);
+      if (key.startsWith(SNAPSHOT_PREFIX)) {
+        const snapSlug = entitySlug(key);
         await sendAction({ action: 'restoreSnapshot', snapSlug });
-      } else if (key.startsWith('note:')) {
-        const slug = key.slice('note:'.length);
+      } else if (key.startsWith(NOTE_PREFIX)) {
+        const slug = entitySlug(key);
         await sendAction({ action: 'restoreNote', noteSlug: slug });
-      } else if (key.startsWith('list:')) {
-        const id = key.slice('list:'.length);
+      } else if (key.startsWith(LIST_PREFIX)) {
+        const id = entitySlug(key);
         await sendAction({ action: 'restoreList', listId: id });
       }
     });
@@ -1036,7 +1031,7 @@ function wordsMatchItem(words, item) {
 }
 
 // Phase 0 fuzzy matching: uses uFuzzy for unquoted words, exact boundary for quoted.
-// Returns Set of matching indices into historyAllEntries.
+// Returns Set of matching indices into historyState.allEntries.
 // Falls back to substring matching when uFuzzy is not loaded (e.g. in tests).
 function fuzzyMatchPhase0(words, haystack, entries) {
   const hasFuzzy = typeof uFuzzy !== 'undefined';
@@ -1483,7 +1478,7 @@ async function showCategory(category) {
   // Demand-load history
   await initHistoryFiles();
   await loadHistoryBatch();
-  const allEntries = [...historyAllEntries];
+  const allEntries = [...historyState.allEntries];
   allEntries.sort((a, b) => b.timestamp - a.timestamp);
   const filtered = filterByCategory(allEntries, category);
   const estimatedByDay = category === 'all' ? getEstimatedByDay() : undefined;
@@ -1504,7 +1499,7 @@ async function showCategory(category) {
         enrichFromEntityStorage(newEntries).then(() => vs.refreshVisible());
       }
       // Re-render chart with all loaded history + updated estimates
-      const allLoaded = [...historyAllEntries];
+      const allLoaded = [...historyState.allEntries];
       const allFiltered = filterByCategory(allLoaded, activeView.value);
       const updatedEstimates = activeView.value === 'all' ? getEstimatedByDay() : undefined;
       renderTimeChart(allFiltered, updatedEstimates);
@@ -1552,7 +1547,7 @@ function matchKeyword(item, field, value) {
 // Save search queries to session storage (per-view, ephemeral)
 function saveSearchQueries() {
   const viewKey = activeView.type === 'explore' ? 'explore'
-    : activeView.type === 'list' ? `list:${activeView.id}` : null;
+    : activeView.type === 'list' ? listKey(activeView.id) : null;
   if (!viewKey) return;
   chrome.storage.session.set({ [`searchQueries:${viewKey}`]: savedSearches }).catch(() => {});
 }
@@ -1560,7 +1555,7 @@ function saveSearchQueries() {
 // Load search queries from session storage for the current view
 async function loadSearchQueries() {
   const viewKey = activeView.type === 'explore' ? 'explore'
-    : activeView.type === 'list' ? `list:${activeView.id}` : null;
+    : activeView.type === 'list' ? listKey(activeView.id) : null;
   if (!viewKey) return [];
   const data = await chrome.storage.session.get(`searchQueries:${viewKey}`);
   return data[`searchQueries:${viewKey}`] || [];
@@ -1570,7 +1565,7 @@ async function loadSearchQueries() {
 // --- Query builder: Rendering ---
 
 // Shared pin enrichment: merges cached page data, attention scores, and pin timestamps.
-// Uses historyByUrl fallback for attention when page entity lacks it (showList behavior).
+// Uses historyState.byUrl fallback for attention when page entity lacks it (showList behavior).
 function enrichPinResult(r, pins, pageSnap) {
   if (!r.url && !r.slug) return r;
   const slug = r.slug || generateSlugFromUrl(r.url);
@@ -1579,7 +1574,7 @@ function enrichPinResult(r, pins, pageSnap) {
   let attSource = source.attDetail || source;
   // Fallback: use attention from loaded history when page lacks it
   if (attSource.scrollDepth === undefined && attSource.timeOnPage === undefined) {
-    const histEntry = historyByUrl.get(r.url);
+    const histEntry = historyState.byUrl.get(r.url);
     if (histEntry) attSource = histEntry;
   }
   const attScore = attentionStrength(attSource) || (source.attScore || 0);
@@ -1634,7 +1629,7 @@ async function refreshPins() {
   } else if (activeView.type === 'list') {
     const listId = activeView.id;
     if (!allListPins[listId]) {
-      const entity = await readCacheable('list:' + listId);
+      const entity = await readCacheable(listKey(listId));
       allListPins[listId] = entity?.pins || [];
     }
     const pins = allListPins[listId];
@@ -1684,7 +1679,7 @@ async function showList(list) {
     await loadFilterState();
 
     // Always fetch pins from entity storage
-    const listEntity = await readCacheable('list:' + listId);
+    const listEntity = await readCacheable(listKey(listId));
     allListPins[listId] = listEntity?.pins || [];
     const pins = allListPins[listId];
 
@@ -1791,7 +1786,7 @@ function renderRulesList(listId, rules) {
 async function refreshRulesForActiveList() {
   if (activeView.type !== 'list') return;
   const listId = activeView.id;
-  const listEntity = await readCacheable('list:' + listId);
+  const listEntity = await readCacheable(listKey(listId));
   renderRulesSection(listId, listEntity?.rules || []);
 }
 
@@ -1991,11 +1986,99 @@ function startRuleEdit(listId, ruleId, rule) {
   attachEditRowHandlers(editRow, listId, ruleId);
 }
 
-async function runPreview() {
+async function runPreviewAgainstHistory(rule) {
   const MAX_CHECKED = 100;
   const MAX_MATCHES = 20;
   const BATCH_SIZE = 20;
+  const previewListEl = document.getElementById('rulesPreviewList');
+  const previewCountEl = document.getElementById('rulesPreviewCount');
 
+  let matchCount = 0;
+  let checked = 0;
+  const seenUrls = new Set();
+
+  const today = new Date();
+  for (let dayOffset = 0; dayOffset < 30; dayOffset++) {
+    if (checked >= MAX_CHECKED || matchCount >= MAX_MATCHES) break;
+    const d = new Date(today);
+    d.setDate(d.getDate() - dayOffset);
+    const dateKey = d.toISOString().slice(0, 10);
+    const dayEntries = await readCacheable('log:' + dateKey) || [];
+    const visits = dayEntries
+      .filter(e => e.action === 'visit_page' && e.url && e.title && !seenUrls.has(e.url))
+      .reverse();
+    const uniqueVisits = [];
+    for (const v of visits) {
+      if (!seenUrls.has(v.url)) {
+        seenUrls.add(v.url);
+        uniqueVisits.push(v);
+      }
+    }
+    if (uniqueVisits.length === 0) continue;
+
+    for (let i = 0; i < uniqueVisits.length; i += BATCH_SIZE) {
+      if (checked >= MAX_CHECKED || matchCount >= MAX_MATCHES) break;
+      const remaining = Math.min(BATCH_SIZE, MAX_CHECKED - checked);
+      const batch = uniqueVisits.slice(i, i + remaining);
+      const bodies = await Promise.all(batch.map(e =>
+        e.bodyPreview ? Promise.resolve(e.bodyPreview) : fetchPageBody(e.url)
+      ));
+      const entries = [];
+      for (let j = 0; j < batch.length; j++) {
+        if (!bodies[j]) continue;
+        entries.push({
+          timestamp: batch[j].timestamp, action: batch[j].action, url: batch[j].url,
+          title: batch[j].title || '', bodyPreview: bodies[j],
+        });
+      }
+      if (entries.length === 0) continue;
+      const resp = await sendAction({ action: 'previewRule', rule, entries });
+      for (const r of resp.results || []) {
+        previewResults.push(r);
+        checked++;
+        if (r.match) matchCount++;
+      }
+      rerenderPreview();
+    }
+  }
+  if (checked === 0) {
+    previewCountEl.textContent = '';
+    previewListEl.innerHTML = '<div class="rules-preview-empty">No visits found to match against</div>';
+  } else {
+    rerenderPreview();
+  }
+}
+
+async function runPreviewAgainstPins(rule, listId) {
+  const pinsPreviewEl = document.getElementById('rulesPinsPreview');
+  const pinsPreviewListEl = document.getElementById('rulesPinsPreviewList');
+
+  const listEntity = await readCacheable(listKey(listId));
+  const pins = listEntity?.pins || [];
+  if (pins.length === 0) return;
+
+  pinsPreviewEl.style.display = '';
+  const pinEntries = [];
+  for (const pin of pins) {
+    const page = await readCacheable(pin.id);
+    if (!page?.url) continue;
+    const title = page.user_title || page.title || '';
+    if (!title) continue;
+    const body = await fetchPageBody(page.url);
+    if (!body) continue;
+    pinEntries.push({ url: page.url, title, bodyPreview: body });
+  }
+  if (pinEntries.length > 0) {
+    const resp = await sendAction({ action: 'previewRule', rule, entries: pinEntries });
+    previewPinsResults = resp.results || [];
+    rerenderPreview();
+  } else {
+    document.getElementById('rulesPinsPreviewCount').textContent = '';
+    pinsPreviewListEl.innerHTML = '<div class="rules-preview-empty">No pinned pages with fetchable content</div>';
+  }
+}
+
+async function runPreview() {
   const errorEl = document.getElementById('rulesFormError');
   const previewEl = document.getElementById('rulesPreview');
   const previewListEl = document.getElementById('rulesPreviewList');
@@ -2021,88 +2104,13 @@ async function runPreview() {
 
   previewResults = [];
   previewPinsResults = [];
-  let matchCount = 0;
-  let checked = 0;
-  const seenUrls = new Set();
 
   try {
-    const today = new Date();
-    for (let dayOffset = 0; dayOffset < 30; dayOffset++) {
-      if (checked >= MAX_CHECKED || matchCount >= MAX_MATCHES) break;
-      const d = new Date(today);
-      d.setDate(d.getDate() - dayOffset);
-      const dateKey = d.toISOString().slice(0, 10);
-      const dayEntries = await readCacheable('log:' + dateKey) || [];
-      const visits = dayEntries
-        .filter(e => e.action === 'visit_page' && e.url && e.title && !seenUrls.has(e.url))
-        .reverse();
-      const uniqueVisits = [];
-      for (const v of visits) {
-        if (!seenUrls.has(v.url)) {
-          seenUrls.add(v.url);
-          uniqueVisits.push(v);
-        }
-      }
-      if (uniqueVisits.length === 0) continue;
+    await runPreviewAgainstHistory(built.rule);
 
-      for (let i = 0; i < uniqueVisits.length; i += BATCH_SIZE) {
-        if (checked >= MAX_CHECKED || matchCount >= MAX_MATCHES) break;
-        const remaining = Math.min(BATCH_SIZE, MAX_CHECKED - checked);
-        const batch = uniqueVisits.slice(i, i + remaining);
-        const bodies = await Promise.all(batch.map(e =>
-          e.bodyPreview ? Promise.resolve(e.bodyPreview) : fetchPageBody(e.url)
-        ));
-        const entries = [];
-        for (let j = 0; j < batch.length; j++) {
-          if (!bodies[j]) continue;
-          entries.push({
-            timestamp: batch[j].timestamp, action: batch[j].action, url: batch[j].url,
-            title: batch[j].title || '', bodyPreview: bodies[j],
-          });
-        }
-        if (entries.length === 0) continue;
-        const resp = await sendAction({ action: 'previewRule', rule: built.rule, entries });
-        for (const r of resp.results || []) {
-          previewResults.push(r);
-          checked++;
-          if (r.match) matchCount++;
-        }
-        rerenderPreview();
-      }
-    }
-    if (checked === 0) {
-      previewCountEl.textContent = '';
-      previewListEl.innerHTML = '<div class="rules-preview-empty">No visits found to match against</div>';
-    } else {
-      rerenderPreview();
-    }
-
-    // ── Pass 2: Pinned pages ──
     const listId = activeView.id;
     if (listId && activeView.type === 'list') {
-      const listEntity = await readCacheable('list:' + listId);
-      const pins = listEntity?.pins || [];
-      if (pins.length > 0) {
-        pinsPreviewEl.style.display = '';
-        const pinEntries = [];
-        for (const pin of pins) {
-          const page = await readCacheable(pin.id);
-          if (!page?.url) continue;
-          const title = page.user_title || page.title || '';
-          if (!title) continue;
-          const body = await fetchPageBody(page.url);
-          if (!body) continue;
-          pinEntries.push({ url: page.url, title, bodyPreview: body });
-        }
-        if (pinEntries.length > 0) {
-          const resp = await sendAction({ action: 'previewRule', rule: built.rule, entries: pinEntries });
-          previewPinsResults = resp.results || [];
-          rerenderPreview();
-        } else {
-          document.getElementById('rulesPinsPreviewCount').textContent = '';
-          pinsPreviewListEl.innerHTML = '<div class="rules-preview-empty">No pinned pages with fetchable content</div>';
-        }
-      }
+      await runPreviewAgainstPins(built.rule, listId);
     }
   } catch (err) {
     previewEl.style.display = '';
@@ -2291,8 +2299,8 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
     if (item.deviceId) deviceIds.add(item.deviceId);
     results.push({
       url: item.url,
-      title: item.title || historyByUrl.get(item.url)?.title || '',
-      user_title: item.user_title || historyByUrl.get(item.url)?.user_title,
+      title: item.title || historyState.byUrl.get(item.url)?.title || '',
+      user_title: item.user_title || historyState.byUrl.get(item.url)?.user_title,
       slug: item.slug || generateSlugFromUrl(item.url),
       timestamp: item.timestamp,
       day,
@@ -2311,7 +2319,7 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
 async function enrichFromEntityStorage(entries) {
   const allSlugs = [...new Set(entries.map(r => r.slug).filter(Boolean))];
   if (allSlugs.length === 0) return;
-  const loaded = await Promise.all(allSlugs.map(s => readCacheable('page:' + s)));
+  const loaded = await Promise.all(allSlugs.map(s => readCacheable(pageKey(s))));
   const pages = {};
   for (let i = 0; i < allSlugs.length; i++) {
     if (loaded[i]) pages[allSlugs[i]] = loaded[i];
@@ -2322,7 +2330,7 @@ async function enrichFromEntityStorage(entries) {
     const page = pages[slug];
     if (!page?.childIds) continue;
     for (const id of page.childIds) {
-      if (id.startsWith('note:')) allNoteRefs.add(id);
+      if (id.startsWith(NOTE_PREFIX)) allNoteRefs.add(id);
     }
   }
   // Batch-load note entities to determine which pages have highlight notes
@@ -2345,7 +2353,7 @@ async function enrichFromEntityStorage(entries) {
     if (page.likes) entry.likes = page.likes;
     if (page.createdAt && !entry.createdAt) entry.createdAt = page.createdAt;
     // Check if any child note is a non-deleted highlight note (excerpt !== null)
-    const noteRefs = (page.childIds || []).filter(id => id.startsWith('note:'));
+    const noteRefs = (page.childIds || []).filter(id => id.startsWith(NOTE_PREFIX));
     entry.hasHighlightNotes = noteRefs.some(ref => {
       const note = noteMap.get(ref);
       return note && note.excerpt !== null && !note.deleted;
@@ -2358,7 +2366,7 @@ async function enrichFromEntityStorage(entries) {
 async function enrichForFilters(entries) {
   const slugs = [...new Set(entries.map(r => r.slug).filter(Boolean))];
   if (slugs.length === 0) return;
-  const loaded = await Promise.all(slugs.map(s => readCacheable('page:' + s)));
+  const loaded = await Promise.all(slugs.map(s => readCacheable(pageKey(s))));
   const pages = {};
   for (let i = 0; i < slugs.length; i++) {
     if (loaded[i]) pages[slugs[i]] = loaded[i];
@@ -2368,9 +2376,9 @@ async function enrichForFilters(entries) {
     if (!page) continue;
     if (page.notes && page.notes.length > 0) entry.notes = page.notes;
     if (page.childIds) entry.childIds = page.childIds;
-    // visitCount: count from historyAllEntries
+    // visitCount: count from historyState.allEntries
     if (entry.visitCount === undefined) {
-      const count = historyAllEntries.filter(h => h.url === entry.url).length;
+      const count = historyState.allEntries.filter(h => h.url === entry.url).length;
       entry.visitCount = count;
     }
   }
@@ -2402,16 +2410,6 @@ async function displayHistoryRows(entries) {
 const PIN_SVG = '<svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>';
 const DELETE_SVG = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
 
-
-// Group history entries by URL, return Map<url, entry[]>
-function groupHistoryByUrl(entries) {
-  const map = new Map();
-  for (const i of entries) {
-    if (!map.has(i.url)) map.set(i.url, []);
-    map.get(i.url).push(i);
-  }
-  return map;
-}
 
 function buildDetailHtml(url, attDetail, notes) {
   let html = `<div class="detail-url"><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a></div>`;
@@ -2457,7 +2455,7 @@ async function loadExtraDetail(url) {
   const snapshots = snapResp.snapshots || [];
 
   // Load page entity for likes
-  const pageEntity = await readCacheable('page:' + slug);
+  const pageEntity = await readCacheable(pageKey(slug));
   const likes = pageEntity?.likes || 0;
 
   // Find belonged lists (reverse lookup)
@@ -2465,116 +2463,48 @@ async function loadExtraDetail(url) {
   const belongedLists = [];
   for (const lst of lists) {
     const pins = allListPins[lst.slug] || [];
-    const pageId = 'page:' + generateSlugFromUrl(url);
+    const pageId = pageKey(generateSlugFromUrl(url));
     if (pins.some(p => p.id === pageId)) {
       belongedLists.push(listDisplayName(lst));
     }
   }
 
-  return { notes, snapshots, belongedLists, slug, likes, visitDates: pageEntity?.visitDates || [], pageTimestamps: pageEntity?.timestamps || {} };
+  return { notes, snapshots, belongedLists, slug, likes, visitDates: pageEntity?.visitDates || [] };
 }
 
-const TIMELINE_INITIAL_LIMIT = 30;
+function renderVisitDatesHtml(visitDates, cardTimestamp) {
+  const fmtDate = (ts) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-function collectTimelineEvents(visitDates, notes, snapshots, pageTimestamps) {
-  const events = [];
-
-  // Visits from visitDates (YYYYMMDD ints → midnight timestamps)
-  for (const yyyymmdd of visitDates) {
-    const y = Math.floor(yyyymmdd / 10000);
-    const m = Math.floor((yyyymmdd % 10000) / 100) - 1;
-    const d = yyyymmdd % 100;
-    events.push({ type: 'visit', timestamp: new Date(y, m, d).getTime(), hasTime: false });
-  }
-
-  // Fallback: if no visitDates, use page entity timestamps (per-device, ms precision)
-  if (visitDates.length === 0 && pageTimestamps) {
-    const tsValues = Object.values(pageTimestamps).filter(t => typeof t === 'number' && t > 0);
-    if (tsValues.length > 0) {
-      const latest = Math.max(...tsValues);
-      events.push({ type: 'visit', timestamp: latest, hasTime: true });
+  if (visitDates.length > 0) {
+    const parse = (yyyymmdd) => {
+      const y = Math.floor(yyyymmdd / 10000);
+      const m = Math.floor((yyyymmdd % 10000) / 100) - 1;
+      const d = yyyymmdd % 100;
+      return new Date(y, m, d).getTime();
+    };
+    const sorted = [...visitDates].sort((a, b) => a - b);
+    const first = parse(sorted[0]);
+    const last = parse(sorted[sorted.length - 1]);
+    let html = `<div class="detail-section detail-visit-dates"><span class="detail-visit-line"><span class="detail-section-label">First visited:</span> ${escapeHtml(fmtDate(first))}</span>`;
+    if (sorted.length > 1) {
+      html += `<span class="detail-visit-line"><span class="detail-section-label">Last visited:</span> ${escapeHtml(fmtDate(last))}</span>`;
     }
+    html += '</div>';
+    return html;
   }
 
-  // Highlight notes (skip global page notes)
-  for (const n of notes) {
-    if (n.excerpt === null || n.deleted) continue;
-    const ts = n.timestamps ? Math.min(...Object.values(n.timestamps)) : 0;
-    if (!ts) continue;
-    const raw = Array.isArray(n.excerpt) ? n.excerpt.join(' ') : (n.excerpt || '');
-    events.push({ type: 'note', timestamp: ts, hasTime: true, label: raw.substring(0, 60) + (raw.length > 60 ? '...' : '') });
+  if (cardTimestamp) {
+    return `<div class="detail-section detail-visit-dates"><span class="detail-visit-line">${escapeHtml(fmtDate(cardTimestamp))}</span></div>`;
   }
 
-  // Snapshots
-  for (const s of snapshots) {
-    const formats = [s.hasHtml && 'html', s.hasMd && 'md'].filter(Boolean).join(', ');
-    events.push({ type: 'snapshot', timestamp: s.timestamp, hasTime: true, label: formats });
-  }
-
-  events.sort((a, b) => b.timestamp - a.timestamp);
-  return events;
+  return '';
 }
 
-function renderTimelineHtml(events, limit = TIMELINE_INITIAL_LIMIT) {
-  if (events.length === 0) return '';
-
-  const fmtDateTime = (ts, hasTime) => {
-    const d = new Date(ts);
-    const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    if (!hasTime) return date;
-    const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' });
-    return `${date}, ${time}`;
-  };
-  const typeLabels = { visit: 'Visited', note: 'Note', snapshot: 'Snapshot' };
-  const shown = events.slice(0, limit);
-  const remaining = events.length - shown.length;
-
-  const renderEvent = (ev) => {
-    const label = ev.type === 'visit' ? typeLabels.visit
-      : ev.type === 'note' ? `${typeLabels.note}: "${escapeHtml(ev.label)}"`
-      : `${typeLabels.snapshot} (${escapeHtml(ev.label)})`;
-    const time = fmtDateTime(ev.timestamp, ev.hasTime);
-    return `<div class="timeline-event"><span class="timeline-dot ${ev.type}"></span><span class="timeline-event-label">${label}</span><span class="timeline-event-time">${escapeHtml(time)}</span></div>`;
-  };
-
-  // Detect runs of 3+ consecutive visit events and collapse them
-  const COLLAPSE_THRESHOLD = 3;
-  let html = '<div class="detail-timeline"><span class="detail-section-label">Timeline</span>';
-  let i = 0;
-  while (i < shown.length) {
-    if (shown[i].type === 'visit') {
-      // Count consecutive visits
-      let runEnd = i + 1;
-      while (runEnd < shown.length && shown[runEnd].type === 'visit') runEnd++;
-      const runLen = runEnd - i;
-      if (runLen >= COLLAPSE_THRESHOLD) {
-        // Show first, collapse button, last
-        html += renderEvent(shown[i]);
-        const hiddenEvents = shown.slice(i + 1, runEnd - 1);
-        const hiddenHtml = hiddenEvents.map(renderEvent).join('');
-        // Use base64 to safely embed HTML in attribute
-        html += `<button class="timeline-collapse" data-hidden-b64="${btoa(unescape(encodeURIComponent(hiddenHtml)))}">... ${hiddenEvents.length} more visits</button>`;
-        html += renderEvent(shown[runEnd - 1]);
-        i = runEnd;
-      } else {
-        html += renderEvent(shown[i]);
-        i++;
-      }
-    } else {
-      html += renderEvent(shown[i]);
-      i++;
-    }
-  }
-
-  if (remaining > 0) {
-    html += `<button class="timeline-show-more">${remaining} more events</button>`;
-  }
-  html += '</div>';
-  return html;
-}
-
-function renderExtraDetailHtml(extra) {
+function renderExtraDetailHtml(extra, cardTimestamp) {
   let html = '';
+
+  // Visit dates (first/last) or card timestamp fallback
+  html += renderVisitDatesHtml(extra.visitDates, cardTimestamp);
 
   // Page note textarea (global note = excerpt is null)
   const globalNote = extra.notes.find(n => n.excerpt === null);
@@ -2592,17 +2522,25 @@ function renderExtraDetailHtml(extra) {
     html += '</div>';
   }
 
-  const highlightNotes = extra.notes.filter(n => n.excerpt !== null);
-  if (highlightNotes.length > 0) {
+  const allNotes = extra.notes.filter(n => !n.deleted);
+  if (allNotes.length > 0) {
     html += `<div class="detail-section detail-notes-section" data-slug="${escapeHtml(extra.slug)}"><span class="detail-section-label">Notes:</span>`;
-    for (const n of highlightNotes.slice(0, 20)) {
-      const rawQuote = Array.isArray(n.excerpt) ? n.excerpt.join(' ') : (n.excerpt || '');
-      const noteText = n.note || '';
+    for (const n of allNotes.slice(0, 20)) {
       const noteSlug = n.slug || '';
-      const label = escapeHtml(rawQuote.substring(0, 100)) + (rawQuote.length > 100 ? '...' : '');
-      const noteHtml = noteText ? ` <span class="detail-note-text">${escapeHtml(noteText)}</span>` : '';
+      const noteText = n.note || '';
+      let labelHtml;
+      if (n.excerpt === null) {
+        // Global page note
+        labelHtml = `<em>Page note</em>`;
+        if (noteText) labelHtml += ` <span class="detail-note-text">${escapeHtml(noteText)}</span>`;
+      } else {
+        const rawQuote = Array.isArray(n.excerpt) ? n.excerpt.join(' ') : (n.excerpt || '');
+        const label = escapeHtml(rawQuote.substring(0, 100)) + (rawQuote.length > 100 ? '...' : '');
+        labelHtml = `"${label}"`;
+        if (noteText) labelHtml += ` <span class="detail-note-text">${escapeHtml(noteText)}</span>`;
+      }
       html += `<div class="detail-note-entry" data-note-slug="${escapeHtml(noteSlug)}">
-        <span class="detail-note-content">"${label}"${noteHtml}</span>
+        <span class="detail-note-content">${labelHtml}</span>
         <button class="detail-note-delete" title="Delete">&times;</button>
       </div>`;
     }
@@ -2620,36 +2558,9 @@ function renderExtraDetailHtml(extra) {
     html += '</div></div>';
   }
 
-  // Event timeline
-  const timelineEvents = collectTimelineEvents(extra.visitDates, extra.notes, extra.snapshots, extra.pageTimestamps);
-  html += renderTimelineHtml(timelineEvents);
-
   return html;
 }
 
-function bindTimelineCollapse(container) {
-  container.querySelectorAll('.timeline-collapse').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const hiddenHtml = decodeURIComponent(escape(atob(btn.dataset.hiddenB64)));
-      btn.insertAdjacentHTML('afterend', hiddenHtml);
-      btn.remove();
-    });
-  });
-}
-
-function bindTimelineShowMore(container, extra) {
-  bindTimelineCollapse(container);
-  const btn = container.querySelector('.timeline-show-more');
-  if (!btn) return;
-  btn.addEventListener('click', () => {
-    const allEvents = collectTimelineEvents(extra.visitDates, extra.notes, extra.snapshots, extra.pageTimestamps);
-    const timeline = container.querySelector('.detail-timeline');
-    if (timeline) {
-      timeline.outerHTML = renderTimelineHtml(allEvents, Infinity);
-      bindTimelineCollapse(container);
-    }
-  });
-}
 
 function bindNoteDeleteButtons(container) {
   container.querySelectorAll('.detail-note-delete').forEach(btn => {
@@ -2750,11 +2661,11 @@ function resultRowHtml(title, url, opts = {}) {
   const dates = [...new Set(timestamps.map(ts => new Date(ts).toISOString().slice(0, 10)))].join(',');
 
   const hasNotes = hasHighlightNotes === true;
-  const hasSnaps = childIds.some(id => id.startsWith('snapshot:'));
+  const hasSnaps = childIds.some(id => id.startsWith(SNAPSHOT_PREFIX));
   const belongedListNames = [];
   for (const pid of parentIds) {
-    if (!pid.startsWith('list:') || pid.startsWith('list:system/')) continue;
-    const listSlug = pid.slice(5);
+    if (!pid.startsWith(LIST_PREFIX) || isSystemList(pid)) continue;
+    const listSlug = entitySlug(pid);
     if (excludeListId && listSlug === excludeListId) continue;
     const name = listNameById.get(listSlug);
     if (name) belongedListNames.push(name);
@@ -2798,7 +2709,8 @@ function bindResultDelegation(container) {
       const ctrl = e.target.closest('.att-ctrl');
       if (ctrl) {
         const { attDetail = null, timestamps = [] } = cardDataByUrl.get(ctrl.dataset.url) || {};
-        openPageDetailCard(ctrl.dataset.url, ctrl.dataset.title, attDetail, timestamps);
+        const cardTs = timestamps.length > 0 ? Math.max(...timestamps) : null;
+        openPageDetailCard(ctrl.dataset.url, ctrl.dataset.title, attDetail, cardTs);
       }
       return;
     }
@@ -2855,7 +2767,7 @@ function bindResultDelegation(container) {
   });
 }
 
-function openPageDetailCard(url, title, attDetail = null, timestamps = []) {
+function openPageDetailCard(url, title, attDetail = null, cardTimestamp = null) {
   closePageDetailCard();
 
   const overlay = document.createElement('div');
@@ -2887,12 +2799,11 @@ function openPageDetailCard(url, title, attDetail = null, timestamps = []) {
     loadExtraDetail(url).then(extra => {
       const body = card.querySelector('.page-detail-body');
       let html = buildDetailHtml(url, attDetail, []);
-      const extraHtml = renderExtraDetailHtml(extra);
+      const extraHtml = renderExtraDetailHtml(extra, cardTimestamp);
       body.innerHTML = html + (extraHtml ? `<div class="detail-extra">${extraHtml}</div>` : '');
       bindNoteDeleteButtons(body);
       bindSnapshotClickHandlers(body);
       bindPageNoteHandler(body, url);
-      bindTimelineShowMore(body, extra);
     }).catch(() => {
       const body = card.querySelector('.page-detail-body');
       if (body) body.innerHTML = '<div style="padding:16px;color:var(--text-muted)">Failed to load page details</div>';
@@ -3067,7 +2978,7 @@ async function buildTreeFromManifest(treeNodes) {
     const key = treeNode.id;
     const entity = await readCacheable(key);
     if (!entity || entity.deleted) continue;
-    const slug = entity.slug || key.slice(5);
+    const slug = entity.slug || entitySlug(key);
     const children = treeNode.children?.length ? await buildTreeFromManifest(treeNode.children) : [];
     const node = { slug, name: entity.name || slug, children };
     nodes.push(node);
@@ -3146,13 +3057,12 @@ function renderTreeLevel(container, nodes, depth) {
   }
 }
 
-function createSidebarItem(node, depth) {
-  const lst = node;
+function createSidebarItemDOM(node, depth) {
   const item = document.createElement('div');
   item.className = 'sidebar-item';
   item.setAttribute('role', 'button');
   item.tabIndex = 0;
-  item.dataset.listId = lst.slug;
+  item.dataset.listId = node.slug;
   item.style.paddingLeft = (20 + depth * 16) + 'px';
 
   const hasChildren = node.children.length > 0;
@@ -3163,15 +3073,14 @@ function createSidebarItem(node, depth) {
     ${hasChildren
       ? `<button class="fold-toggle${expanded ? ' expanded' : ''}" title="${expanded ? 'Collapse' : 'Expand'}">${chevronSvg}</button>`
       : '<span class="fold-spacer"></span>'}
-    <span class="label">${escapeHtml(listDisplayName(lst))}</span>
+    <span class="label">${escapeHtml(listDisplayName(node))}</span>
     <button class="remove-list" title="Remove list">&times;</button>
   `;
 
-  // Fold/unfold toggle
   if (hasChildren) {
     item.querySelector('.fold-toggle').addEventListener('click', (e) => {
       e.stopPropagation();
-      const newExpanded = listFoldState[node.slug] === false; // toggle
+      const newExpanded = listFoldState[node.slug] === false;
       listFoldState[node.slug] = newExpanded;
       saveFoldState();
       const childContainer = item.nextElementSibling;
@@ -3184,9 +3093,78 @@ function createSidebarItem(node, depth) {
     });
   }
 
+  item.addEventListener('click', (e) => {
+    if (e.target.closest('.remove-list') || e.target.closest('.fold-toggle')) return;
+    showList(node);
+  });
+
+  item.querySelector('.remove-list').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await chrome.runtime.sendMessage({ action: 'deleteList', listId: node.slug });
+    delete allListPins[node.slug];
+    renderLists();
+    if (activeView.type === 'list' && activeView.id === node.slug) {
+      showExplore();
+    }
+  });
+
+  return item;
+}
+
+async function handleSidebarDrop(draggedId, targetSlug, relY, tree) {
+  // Remove dragged node from tree (keeping its subtree)
+  let draggedNode = null;
+  function extractNode(nodes) {
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].id === listKey(draggedId)) {
+        draggedNode = nodes.splice(i, 1)[0];
+        return true;
+      }
+      if (nodes[i].children && extractNode(nodes[i].children)) return true;
+    }
+    return false;
+  }
+  extractNode(tree);
+  if (!draggedNode) draggedNode = { id: listKey(draggedId) };
+
+  if (relY >= 0.25 && relY <= 0.75) {
+    // Nest as child of target
+    function appendToTarget(nodes) {
+      for (const n of nodes) {
+        if (n.id === listKey(targetSlug)) {
+          if (!n.children) n.children = [];
+          n.children.push(draggedNode);
+          return true;
+        }
+        if (n.children && appendToTarget(n.children)) return true;
+      }
+      return false;
+    }
+    if (!appendToTarget(tree)) tree.push(draggedNode);
+  } else {
+    // Reorder above/below sibling
+    function insertNear(nodes) {
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].id === listKey(targetSlug)) {
+          const idx = relY < 0.25 ? i : i + 1;
+          nodes.splice(idx, 0, draggedNode);
+          return true;
+        }
+        if (nodes[i].children && insertNear(nodes[i].children)) return true;
+      }
+      return false;
+    }
+    if (!insertNear(tree)) tree.push(draggedNode);
+  }
+
+  await chrome.runtime.sendMessage({ action: 'updateListTree', tree });
+  await renderLists();
+}
+
+function bindSidebarItemDragDrop(item, node) {
   item.draggable = true;
   item.addEventListener('dragstart', (e) => {
-    e.dataTransfer.setData('application/x-list-reorder', lst.slug);
+    e.dataTransfer.setData('application/x-list-reorder', node.slug);
     e.dataTransfer.effectAllowed = 'move';
     item.classList.add('dragging');
   });
@@ -3197,28 +3175,12 @@ function createSidebarItem(node, depth) {
     });
   });
 
-  item.addEventListener('click', (e) => {
-    if (e.target.closest('.remove-list') || e.target.closest('.fold-toggle')) return;
-    showList(lst);
-  });
-
-  item.querySelector('.remove-list').addEventListener('click', async (e) => {
-    e.stopPropagation();
-    await chrome.runtime.sendMessage({ action: 'deleteList', listId: lst.slug });
-    delete allListPins[lst.slug];
-    renderLists();
-    if (activeView.type === 'list' && activeView.id === lst.slug) {
-      showExplore();
-    }
-  });
-
-  // Three-zone drag-and-drop
   let dragCounter = 0;
   item.addEventListener('dragover', (e) => {
     e.preventDefault();
     if (e.dataTransfer.types.includes('application/x-list-reorder')) {
       const draggedId = e.dataTransfer.getData('application/x-list-reorder');
-      if (draggedId === lst.slug) {
+      if (draggedId === node.slug) {
         e.dataTransfer.dropEffect = 'none';
         return;
       }
@@ -3261,75 +3223,26 @@ function createSidebarItem(node, depth) {
 
     if (e.dataTransfer.types.includes('application/x-list-reorder')) {
       const draggedId = e.dataTransfer.getData('application/x-list-reorder');
-      if (draggedId === lst.slug) return;
+      if (draggedId === node.slug) return;
 
-      // Determine drop zone
       const rect = item.getBoundingClientRect();
       const relY = (e.clientY - rect.top) / rect.height;
 
-      // Read current tree, apply the move, send full tree to background
       const order = await readCacheable('manifest:list-order');
-      let tree = JSON.parse(JSON.stringify(order?.tree || []));
-
-      // Remove dragged node from tree (keeping its subtree)
-      let draggedNode = null;
-      function extractNode(nodes) {
-        for (let i = 0; i < nodes.length; i++) {
-          if (nodes[i].id === 'list:' + draggedId) {
-            draggedNode = nodes.splice(i, 1)[0];
-            return true;
-          }
-          if (nodes[i].children && extractNode(nodes[i].children)) return true;
-        }
-        return false;
-      }
-      extractNode(tree);
-      if (!draggedNode) draggedNode = { id: 'list:' + draggedId };
-
-      if (relY >= 0.25 && relY <= 0.75) {
-        // --- Nest as child of target ---
-        function appendToTarget(nodes) {
-          for (const n of nodes) {
-            if (n.id === 'list:' + lst.slug) {
-              if (!n.children) n.children = [];
-              n.children.push(draggedNode);
-              return true;
-            }
-            if (n.children && appendToTarget(n.children)) return true;
-          }
-          return false;
-        }
-        if (!appendToTarget(tree)) tree.push(draggedNode);
-      } else {
-        // --- Reorder above/below sibling ---
-        function insertNear(nodes) {
-          for (let i = 0; i < nodes.length; i++) {
-            if (nodes[i].id === 'list:' + lst.slug) {
-              const idx = relY < 0.25 ? i : i + 1;
-              nodes.splice(idx, 0, draggedNode);
-              return true;
-            }
-            if (nodes[i].children && insertNear(nodes[i].children)) return true;
-          }
-          return false;
-        }
-        if (!insertNear(tree)) tree.push(draggedNode);
-      }
-
-      await chrome.runtime.sendMessage({ action: 'updateListTree', tree });
-      await renderLists();
+      const tree = JSON.parse(JSON.stringify(order?.tree || []));
+      await handleSidebarDrop(draggedId, node.slug, relY, tree);
     } else {
-      // --- Pin drop (existing logic) ---
+      // Pin drop
       dragCounter = 0;
       try {
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
         const items = data.items || [{ url: data.url, title: data.title }];
-        if (!allListPins[lst.slug]) allListPins[lst.slug] = [];
-        const pins = allListPins[lst.slug];
+        if (!allListPins[node.slug]) allListPins[node.slug] = [];
+        const pins = allListPins[node.slug];
         const newUrls = [];
         const titles = {};
         for (const { url, title } of items) {
-          const pinId = 'page:' + generateSlugFromUrl(url);
+          const pinId = pageKey(generateSlugFromUrl(url));
           if (url && !pins.some(p => p.id === pinId)) {
             pins.push({ id: pinId, pinnedAt: Date.now() });
             newUrls.push(url);
@@ -3337,11 +3250,11 @@ function createSidebarItem(node, depth) {
           }
         }
         if (newUrls.length > 0) {
-          const msg = { action: 'addListPins', listId: lst.slug, urls: newUrls };
+          const msg = { action: 'addListPins', listId: node.slug, urls: newUrls };
           if (Object.keys(titles).length > 0) msg.titles = titles;
           await chrome.runtime.sendMessage(msg);
-          if (activeView.type === 'list' && activeView.id === lst.slug) {
-            showList(lst);
+          if (activeView.type === 'list' && activeView.id === node.slug) {
+            showList(node);
           }
         }
       } catch (err) {
@@ -3349,7 +3262,11 @@ function createSidebarItem(node, depth) {
       }
     }
   });
+}
 
+function createSidebarItem(node, depth) {
+  const item = createSidebarItemDOM(node, depth);
+  bindSidebarItemDragDrop(item, node);
   return item;
 }
 
@@ -3573,7 +3490,7 @@ async function updateStorageStatus() {
 }
 
 async function updateStatistics() {
-  const allPages = Array.from(historyByUrl.values());
+  const allPages = Array.from(historyState.byUrl.values());
   document.getElementById('totalHistory').textContent = allPages.length;
 
   const today = new Date().setHours(0, 0, 0, 0);
@@ -3747,9 +3664,9 @@ document.getElementById('relatedPagesLimit').addEventListener('change', async ()
 
 document.getElementById('historyFileBatch').addEventListener('change', async () => {
   const val = parseInt(document.getElementById('historyFileBatch').value) || 10;
-  historyFileBatch = Math.max(1, val);
-  document.getElementById('historyFileBatch').value = historyFileBatch;
-  await saveSettingsValue('historyFileBatch', historyFileBatch);
+  historyState.fileBatch = Math.max(1, val);
+  document.getElementById('historyFileBatch').value = historyState.fileBatch;
+  await saveSettingsValue('historyFileBatch', historyState.fileBatch);
   showStatus('Settings saved', 'success');
 });
 
@@ -3782,18 +3699,11 @@ document.getElementById('syncMethod').addEventListener('change', () => {
 
 document.getElementById('selectSyncDirBtn').addEventListener('click', async () => {
   try {
-    const handle = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'documents' });
-    // Store handle in IndexedDB (same DB as main data directory).
-    const dbReq = indexedDB.open('PortalFS', 1);
-    dbReq.onsuccess = () => {
-      const db = dbReq.result;
-      const tx = db.transaction(['handles'], 'readwrite');
-      tx.objectStore('handles').put(handle, 'syncDirectory');
-      tx.oncomplete = async () => {
-        document.getElementById('syncFolderLabel').textContent = handle.name;
-        await saveSettingsValue('syncFolderName', handle.name);
-      };
-    };
+    const result = await fsSyncStorage.selectSyncDirectory();
+    if (result.success) {
+      document.getElementById('syncFolderLabel').textContent = result.name;
+      await saveSettingsValue('syncFolderName', result.name);
+    }
   } catch (e) {
     if (e.name !== 'AbortError') showStatus('Failed to select folder: ' + e.message, 'error');
   }
@@ -4310,29 +4220,42 @@ async function saveBlacklist(list) {
   await saveSettingsValue('urlBlacklist', list);
 }
 
-async function renderBlacklist() {
-  const list = await loadBlacklist();
-  const container = document.getElementById('blacklistEntries');
+function renderSettingsList({ containerId, loadFn, saveFn, renderItemHtml, emptyMessage, rerender }) {
+  return (async () => {
+    const items = await loadFn();
+    const container = document.getElementById(containerId);
 
-  if (list.length === 0) {
-    container.innerHTML = '<div class="blacklist-empty">No blocked URL prefixes</div>';
-    return;
-  }
+    if (items.length === 0) {
+      container.innerHTML = `<div class="blacklist-empty">${escapeHtml(emptyMessage)}</div>`;
+      return;
+    }
 
-  container.innerHTML = list.map((prefix, idx) =>
-    `<div class="blacklist-entry">
-      <span>${escapeHtml(prefix)}</span>
-      <button class="blacklist-remove" data-index="${idx}" title="Remove">&times;</button>
-    </div>`
-  ).join('');
+    container.innerHTML = items.map((item, idx) =>
+      `<div class="blacklist-entry">
+        ${renderItemHtml(item)}
+        <button class="blacklist-remove" data-index="${idx}" title="Remove">&times;</button>
+      </div>`
+    ).join('');
 
-  container.querySelectorAll('.blacklist-remove').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const current = await loadBlacklist();
-      current.splice(parseInt(btn.dataset.index), 1);
-      await saveBlacklist(current);
-      renderBlacklist();
+    container.querySelectorAll('.blacklist-remove').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const current = await loadFn();
+        current.splice(parseInt(btn.dataset.index), 1);
+        await saveFn(current);
+        rerender();
+      });
     });
+  })();
+}
+
+async function renderBlacklist() {
+  return renderSettingsList({
+    containerId: 'blacklistEntries',
+    loadFn: loadBlacklist,
+    saveFn: saveBlacklist,
+    renderItemHtml: (prefix) => `<span>${escapeHtml(prefix)}</span>`,
+    emptyMessage: 'No blocked URL prefixes',
+    rerender: renderBlacklist,
   });
 }
 
@@ -4373,29 +4296,15 @@ async function saveTrimRules(rules) {
 }
 
 async function renderTrimRules() {
-  const rules = await loadTrimRules();
-  const container = document.getElementById('trimEntries');
-
-  if (rules.length === 0) {
-    container.innerHTML = '<div class="blacklist-empty">No trimming rules</div>';
-    return;
-  }
-
-  container.innerHTML = rules.map((rule, idx) =>
-    `<div class="blacklist-entry">
-      <span>${escapeHtml(rule.urlPrefix)}</span>
-      <span class="trim-action-label">${escapeHtml(TRIM_ACTION_LABELS[rule.action] || rule.action)}</span>
-      <button class="blacklist-remove" data-index="${idx}" title="Remove">&times;</button>
-    </div>`
-  ).join('');
-
-  container.querySelectorAll('.blacklist-remove').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const current = await loadTrimRules();
-      current.splice(parseInt(btn.dataset.index), 1);
-      await saveTrimRules(current);
-      renderTrimRules();
-    });
+  return renderSettingsList({
+    containerId: 'trimEntries',
+    loadFn: loadTrimRules,
+    saveFn: saveTrimRules,
+    renderItemHtml: (rule) =>
+      `<span>${escapeHtml(rule.urlPrefix)}</span>` +
+      `<span class="trim-action-label">${escapeHtml(TRIM_ACTION_LABELS[rule.action] || rule.action)}</span>`,
+    emptyMessage: 'No trimming rules',
+    rerender: renderTrimRules,
   });
 }
 
@@ -4423,6 +4332,20 @@ document.getElementById('trimUrlInput').addEventListener('keypress', (e) => {
 });
 
 // --- Mutation notifications from background ---
+
+function mergeHistoryEntry(entry, existing) {
+  if (!existing || entry.timestamp > existing.timestamp) {
+    // New entry wins — back-fill missing title/user_title from existing
+    if (existing?.title && !entry.title) entry.title = existing.title;
+    if (existing?.user_title && !entry.user_title) entry.user_title = existing.user_title;
+    return { entry, updated: true };
+  }
+  // Existing wins — patch missing title onto existing from new entry
+  if (entry.title && !existing.title) existing.title = entry.title;
+  if (entry.user_title && !existing.user_title) existing.user_title = entry.user_title;
+  return { entry: existing, updated: false };
+}
+
 let mutationRefreshTimer = null;
 
 chrome.runtime.onMessage.addListener((request) => {
@@ -4431,27 +4354,21 @@ chrome.runtime.onMessage.addListener((request) => {
   const { type } = request;
 
   if (type === 'history') {
-    // New page visit — merge into historyByUrl and historyAllEntries
+    // New page visit — merge into historyState.byUrl and historyState.allEntries
     clearTimeout(mutationRefreshTimer);
     mutationRefreshTimer = setTimeout(async () => {
       const todayEntries = await readCacheable('log:' + new Date().toISOString().slice(0, 10)) || [];
       const historyBuffer = todayEntries.filter(e => (e.action === 'visit_page' || e.action === 'leave_page' || !e.action) && e.url);
       let changed = false;
       for (const entry of historyBuffer) {
-        const existing = historyByUrl.get(entry.url);
-        if (!existing || entry.timestamp > existing.timestamp) {
-          historyByUrl.set(entry.url, entry);
-          if (existing && existing.title && !entry.title) entry.title = existing.title;
-          if (existing && existing.user_title && !entry.user_title) entry.user_title = existing.user_title;
+        const existing = historyState.byUrl.get(entry.url);
+        const { entry: merged, updated } = mergeHistoryEntry(entry, existing);
+        if (updated) {
+          historyState.byUrl.set(entry.url, merged);
           changed = true;
-        } else if (entry.title && !existing.title) {
-          existing.title = entry.title;
-        }
-        if (entry.user_title && (!existing || !existing.user_title)) {
-          if (existing) existing.user_title = entry.user_title;
         }
         // Always push to allEntries for date-boundary rendering
-        historyAllEntries.push(entry);
+        historyState.allEntries.push(entry);
       }
       if (changed) {
         if (activeView.type === 'explore' || activeView.type === 'list') {
@@ -4507,14 +4424,14 @@ document.addEventListener('visibilitychange', async () => {
   try {
     const filesResp = await sendAction({ action: 'listHistoryFiles' });
     const allFiles = filesResp.files;
-    const newFiles = allFiles.filter(f => !historyFiles.includes(f));
+    const newFiles = allFiles.filter(f => !historyState.files.includes(f));
     if (newFiles.length > 0) {
-      historyFiles = allFiles;
+      historyState.files = allFiles;
       const batchResp = await sendAction({ action: 'loadHistoryBatch', files: newFiles });
       const newEntries = batchResp.entries;
       for (const item of newEntries) {
-        if (!historyByUrl.has(item.url) || item.timestamp > historyByUrl.get(item.url).timestamp) {
-          historyByUrl.set(item.url, item);
+        if (!historyState.byUrl.has(item.url) || item.timestamp > historyState.byUrl.get(item.url).timestamp) {
+          historyState.byUrl.set(item.url, item);
           historyChanged = true;
         }
       }
@@ -4602,7 +4519,7 @@ async function renderFilterPanelHtml() {
   }
 
   // Device bubbles
-  const deviceIds = [...new Set(historyAllEntries.map(e => e.deviceId).filter(Boolean))].sort();
+  const deviceIds = [...new Set(historyState.allEntries.map(e => e.deviceId).filter(Boolean))].sort();
   if (deviceIds.length > 1) {
     html += '<div class="filter-section"><div class="filter-section-label">Devices</div>';
     html += '<div class="filter-bubbles">';
@@ -4662,7 +4579,7 @@ async function buildListMembershipIndex() {
   // Load entities for any lists not already in allListPins
   const toLoad = lists.filter(l => !allListPins[l.slug]);
   if (toLoad.length > 0) {
-    const loaded = await Promise.all(toLoad.map(l => readCacheable('list:' + l.slug)));
+    const loaded = await Promise.all(toLoad.map(l => readCacheable(listKey(l.slug))));
     for (let i = 0; i < toLoad.length; i++) {
       if (loaded[i]?.pins) allListPins[toLoad[i].slug] = loaded[i].pins;
     }
@@ -4896,7 +4813,7 @@ async function runSearchFilterPipeline() {
 
   // No search queries → show all history (demand-loaded)
   let results = processHistoryForDisplay(
-    historyAllEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
+    historyState.allEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
   ).map(item => ({ ...item, relevance: 0 }));
 
   const hasActiveFilters = !isDefaultFilterState(filterState);
@@ -4962,7 +4879,7 @@ async function runSearchFilterPipeline() {
   // Demand-load data when an unloaded date bar is clicked
   relatedChart._onDateSelect = async (activeDates) => {
     if (activeDates.size === 0) return;
-    const loadedFiles = new Set(historyFiles.slice(0, historyLoadedCount));
+    const loadedFiles = new Set(historyState.files.slice(0, historyState.loadedCount));
     const unloaded = [...activeDates].filter(d => !loadedFiles.has(d + '.jsonl'));
     if (unloaded.length === 0) return;
     // Save active dates — runSearchFilterPipeline re-renders chart, destroying DOM state
@@ -4995,11 +4912,11 @@ async function openFocusPanel(url, title) {
     }
 
     // Compute similar pages from loaded history
-    const seedEntry = historyByUrl.get(url);
+    const seedEntry = historyState.byUrl.get(url);
     let similar = [];
     if (seedEntry) {
       const seed = { ...seedEntry, timestamps: [seedEntry.timestamp || Date.now()], attScore: 0, attDetail: null, notes: [] };
-      const candidates = Array.from(historyByUrl.values())
+      const candidates = Array.from(historyState.byUrl.values())
         .filter(i => i.url !== url)
         .map(i => ({ ...i, timestamps: [i.timestamp || Date.now()], attScore: 0, attDetail: null, notes: [] }));
       similar = findRelatedPages([seed], candidates, 20);
@@ -5021,7 +4938,7 @@ async function openListFocusPanel(listId, listName) {
   try {
     let pins = allListPins[listId];
     if (!pins) {
-      const fpEntity = await readCacheable('list:' + listId);
+      const fpEntity = await readCacheable(listKey(listId));
       pins = fpEntity?.pins || [];
       allListPins[listId] = pins;
     }
@@ -5058,7 +4975,7 @@ function renderFocusWaterfall(content, url, title, parents, children, similar) {
   const focusOpts = { deletable: false, maxAtt, context: 'global', deletable: false };
 
   function makeCard(cardUrl, cardTitle, opts = {}) {
-    const hist = historyByUrl.get(cardUrl);
+    const hist = historyState.byUrl.get(cardUrl);
     let resolvedTitle = cardTitle || (hist ? (hist.user_title || hist.title) : null);
     if (!resolvedTitle) {
       try { resolvedTitle = new URL(cardUrl).hostname + new URL(cardUrl).pathname; } catch { resolvedTitle = cardUrl; }
@@ -5105,10 +5022,6 @@ function renderFocusWaterfall(content, url, title, parents, children, similar) {
 
   // Bind delegation for focus content
   bindFocusContentDelegation(content);
-}
-
-function closeFocusPanel() {
-  document.getElementById('focusOverlay').classList.remove('visible');
 }
 
 function bindFocusContentDelegation(content) {
@@ -5309,8 +5222,8 @@ async function initializeMain(currentTheme) {
   // Load settings from filesystem
   relatedPagesLimit = await loadSettingsValue('relatedPagesLimit', 50);
   document.getElementById('relatedPagesLimit').value = relatedPagesLimit;
-  historyFileBatch = await loadSettingsValue('historyFileBatch', 10);
-  document.getElementById('historyFileBatch').value = historyFileBatch;
+  historyState.fileBatch = await loadSettingsValue('historyFileBatch', 10);
+  document.getElementById('historyFileBatch').value = historyState.fileBatch;
   document.getElementById('captureSnapshotVideo').checked = await loadSettingsValue('captureSnapshotVideo', false);
   // Sync settings
   const syncEnabled = await loadSettingsValue('syncEnabled', false);
@@ -5366,6 +5279,13 @@ async function initializeMain(currentTheme) {
 }
 
 initialize().catch(err => showFatalError(err.message));
+
+function getActiveContainer() {
+  return activeView.type === 'category'
+    ? document.getElementById('results')
+    : document.getElementById('relatedResults');
+}
+
 // --- Keyboard delete for selected result rows ---
 document.addEventListener('keydown', async (e) => {
   if (e.key !== 'Delete' && e.key !== 'Backspace') return;
@@ -5375,9 +5295,7 @@ document.addEventListener('keydown', async (e) => {
 
   // Determine which container has selected rows
   const isListView = activeView.type === 'list';
-  const container = activeView.type === 'category'
-    ? document.getElementById('results')
-    : document.getElementById('relatedResults');
+  const container = getActiveContainer();
   const selected = container?.querySelectorAll('.result-row.selected');
   if (!selected || selected.length === 0) return;
 
@@ -5406,9 +5324,7 @@ document.addEventListener('keydown', async (e) => {
 
   if (e.key === 'c') {
     // Copy selected rows as readable text with angle-bracket URLs
-    const container = activeView.type === 'category'
-      ? document.getElementById('results')
-      : document.getElementById('relatedResults');
+    const container = getActiveContainer();
     const selected = container?.querySelectorAll('.result-row.selected');
     if (!selected || selected.length === 0) return;
 
@@ -5448,8 +5364,8 @@ document.addEventListener('keydown', async (e) => {
     e.preventDefault();
     if (activeView.type === 'list') {
       relatedVirtualScroller?.selectAll();
-    } else if (activeView.type === 'explore' && searchResults.length > 0) {
-      if (searchResults.length > 100) {
+    } else if (activeView.type === 'explore' && searchState.results.length > 0) {
+      if (searchState.results.length > 100) {
         showErrorBubble('Too many results to select (limit: 100)', { suffix: '' });
       } else {
         relatedVirtualScroller?.selectAll();

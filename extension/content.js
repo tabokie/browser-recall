@@ -218,14 +218,14 @@ function getCssPath(el) {
   return 'body > ' + parts.join(' > ');
 }
 
-// Show overlay for global page note (no text selection required)
-function showGlobalNoteOverlay(existingNote, existingNoteSlug, pageSlug) {
-  const existing = document.getElementById('portal-highlight-overlay');
-  if (existing) existing.remove();
+// ─── Note overlay factory ────────────────────────────────────────────
+function createNoteOverlay({ positionStyle, extraCss, beforeTextareaHtml, placeholder, existingNote, onClose }) {
+  const prev = document.getElementById('portal-highlight-overlay');
+  if (prev) prev.remove();
 
   const host = document.createElement('div');
   host.id = 'portal-highlight-overlay';
-  host.style.cssText = 'position: fixed; z-index: 2147483647; top: 50%; left: 50%; transform: translate(-50%, -50%);';
+  host.style.cssText = positionStyle + ' z-index: 2147483647;';
 
   const shadow = host.attachShadow({ mode: 'closed' });
   shadow.innerHTML = `
@@ -254,9 +254,11 @@ function showGlobalNoteOverlay(existingNote, existingNoteSlug, pageSlug) {
         overflow: hidden;
       }
       textarea:focus { outline: none; border-color: #D07030; }
+      ${extraCss || ''}
     </style>
     <div class="overlay">
-      <textarea placeholder="Add a page note... Esc to save."></textarea>
+      ${beforeTextareaHtml || ''}
+      <textarea placeholder="${placeholder}"></textarea>
     </div>
   `;
 
@@ -265,7 +267,6 @@ function showGlobalNoteOverlay(existingNote, existingNoteSlug, pageSlug) {
   const textarea = shadow.querySelector('textarea');
   textarea.value = existingNote || '';
 
-  // Auto-resize textarea based on content
   function autoResize() {
     textarea.style.height = '0';
     textarea.style.height = Math.max(28, textarea.scrollHeight) + 'px';
@@ -273,49 +274,53 @@ function showGlobalNoteOverlay(existingNote, existingNoteSlug, pageSlug) {
   if (existingNote) autoResize();
 
   textarea.focus();
+  textarea.addEventListener('input', autoResize);
 
-  textarea.addEventListener('input', () => { autoResize(); });
-
-  function close() {
-    const note = textarea.value;
-    if (note !== (existingNote || '')) {
-      if (existingNoteSlug) {
-        // Update existing note (creates new immutable note entity)
-        chrome.runtime.sendMessage({
-          action: 'updateNote',
-          noteSlug: existingNoteSlug,
-          note
-        }).then(resp => {
-          if (resp?.noteSlug) existingNoteSlug = resp.noteSlug;
-        }).catch(() => {});
-      } else {
-        // Create new global note (excerpt: null)
-        chrome.runtime.sendMessage({
-          action: 'createNote',
-          pageSlug,
-          url: window.location.href,
-          excerpt: null,
-          note,
-          cssPath: null
-        }).catch(() => {});
-      }
-    }
+  let closed = false;
+  async function close() {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener('mousedown', handleOutsideClick);
+    await onClose(textarea.value);
+    host.remove();
+  }
+  function dismiss() {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener('mousedown', handleOutsideClick);
     host.remove();
   }
 
   textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      close();
-    }
+    if (e.key === 'Escape') close();
   });
-
   const handleOutsideClick = (e) => {
-    if (!host.contains(e.target)) {
-      close();
-      document.removeEventListener('mousedown', handleOutsideClick);
-    }
+    if (!host.contains(e.target)) close();
   };
   setTimeout(() => document.addEventListener('mousedown', handleOutsideClick), 100);
+
+  return { host, shadow, textarea, close, dismiss };
+}
+
+// Show overlay for global page note (no text selection required)
+function showGlobalNoteOverlay(existingNote, existingNoteSlug, pageSlug) {
+  createNoteOverlay({
+    positionStyle: 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);',
+    placeholder: 'Add a page note... Esc to save.',
+    existingNote,
+    onClose(note) {
+      if (note !== (existingNote || '')) {
+        if (existingNoteSlug) {
+          chrome.runtime.sendMessage({ action: 'updateNote', noteSlug: existingNoteSlug, note })
+            .then(resp => { if (resp?.noteSlug) existingNoteSlug = resp.noteSlug; })
+            .catch(() => {});
+        } else {
+          chrome.runtime.sendMessage({ action: 'createNote', pageSlug, url: window.location.href, excerpt: null, note, cssPath: null })
+            .catch(() => {});
+        }
+      }
+    },
+  });
 }
 
 // Find text in the page and wrap the first match in a <mark> element.
@@ -586,146 +591,33 @@ async function reapplyHighlights() {
 }
 
 function showHighlightEditOverlay(mark, text, noteSlug, existingNote, pageSlug) {
-  const existing = document.getElementById('portal-highlight-overlay');
-  if (existing) existing.remove();
-
   const rect = mark.getBoundingClientRect();
-
-  const host = document.createElement('div');
-  host.id = 'portal-highlight-overlay';
-  host.style.cssText = 'position: absolute; z-index: 2147483647;';
-  host.style.left = (rect.left + window.scrollX) + 'px';
-  host.style.top = (rect.bottom + window.scrollY + 4) + 'px';
-
-  const shadow = host.attachShadow({ mode: 'closed' });
-  shadow.innerHTML = `
-    <style>
-      .overlay {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        width: 280px;
-        background: #FFF8F0;
-        border: 1px solid rgba(180, 160, 140, 0.15);
-        border-radius: 10px;
-        box-shadow: 0 1px 2px rgba(53,40,32,0.04), 0 4px 12px rgba(53,40,32,0.08);
-        font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        padding: 8px;
+  const { shadow, dismiss } = createNoteOverlay({
+    positionStyle: `position: absolute; left: ${rect.left + window.scrollX}px; top: ${rect.bottom + window.scrollY + 4}px;`,
+    extraCss: `.overlay { display: flex; align-items: flex-start; gap: 8px; }
+      .delete-btn { flex-shrink:0; width:28px; height:28px; display:flex; align-items:center; justify-content:center; background:none; border:1px solid rgba(180,160,140,0.15); border-radius:6px; cursor:pointer; color:#8E7D6D; padding:0; }
+      .delete-btn:hover { background:rgba(184,80,64,0.1); border-color:#B85040; color:#B85040; }
+      .delete-btn svg { width:16px; height:16px; fill:currentColor; }
+      textarea { width:auto; flex:1; min-width:0; }`,
+    beforeTextareaHtml: `<button class="delete-btn" title="Delete note"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>`,
+    placeholder: 'Add a note... Esc to save.',
+    existingNote,
+    async onClose(note) {
+      if (note !== existingNote && noteSlug) {
+        try {
+          const resp = await chrome.runtime.sendMessage({ action: 'updateNote', noteSlug, note });
+          if (resp?.noteSlug) mark.dataset.noteSlug = resp.noteSlug;
+        } catch {}
       }
-      .delete-btn {
-        flex-shrink: 0;
-        width: 28px;
-        height: 28px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: none;
-        border: 1px solid rgba(180, 160, 140, 0.15);
-        border-radius: 6px;
-        cursor: pointer;
-        color: #8E7D6D;
-        padding: 0;
-      }
-      .delete-btn:hover {
-        background: rgba(184, 80, 64, 0.1);
-        border-color: #B85040;
-        color: #B85040;
-      }
-      .delete-btn svg {
-        width: 16px;
-        height: 16px;
-        fill: currentColor;
-      }
-      textarea {
-        width: 100%;
-        min-height: 28px;
-        height: 28px;
-        border: 1px solid rgba(180, 160, 140, 0.15);
-        border-radius: 6px;
-        padding: 4px 8px;
-        font-family: inherit;
-        font-size: 12px;
-        resize: none;
-        box-sizing: border-box;
-        line-height: 18px;
-        overflow: hidden;
-      }
-      textarea:focus { outline: none; border-color: #D07030; }
-    </style>
-    <div class="overlay">
-      <button class="delete-btn" title="Delete note">
-        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-      </button>
-      <div style="flex:1;min-width:0">
-        <textarea placeholder="Add a note... Esc to save."></textarea>
-      </div>
-    </div>
-  `;
+    },
+  });
 
-  document.body.appendChild(host);
-
-  const textarea = shadow.querySelector('textarea');
-  const deleteBtn = shadow.querySelector('.delete-btn');
-
-  textarea.value = existingNote;
-
-  // Auto-resize textarea based on content
-  function autoResize() {
-    textarea.style.height = '28px';
-    if (textarea.scrollHeight > 28) {
-      textarea.style.height = textarea.scrollHeight + 'px';
-    }
-  }
-  if (existingNote) autoResize();
-
-  textarea.focus();
-
-  textarea.addEventListener('input', () => { autoResize(); });
-
-  let saved = false;
-  async function saveAndClose() {
-    if (saved) return;
-    saved = true;
-    const note = textarea.value;
-    if (note !== existingNote && noteSlug) {
-      try {
-        const resp = await chrome.runtime.sendMessage({
-          action: 'updateNote',
-          noteSlug,
-          note
-        });
-        if (resp?.noteSlug) mark.dataset.noteSlug = resp.noteSlug;
-      } catch {}
-    }
-    host.remove();
-  }
-
-  // Delete note
-  deleteBtn.addEventListener('click', (ev) => {
+  shadow.querySelector('.delete-btn').addEventListener('click', (ev) => {
     ev.stopPropagation();
-    // Unwrap mark from DOM
     unwrapHighlightMark(mark);
-    if (noteSlug) {
-      chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug });
-    }
-    host.remove();
+    if (noteSlug) chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug });
+    dismiss();
   });
-
-  // Close on Escape — save and close
-  textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      saveAndClose();
-    }
-  });
-
-  // Close on click outside — save and close
-  const handleOutsideClick = (e) => {
-    if (!host.contains(e.target)) {
-      saveAndClose();
-      document.removeEventListener('mousedown', handleOutsideClick);
-    }
-  };
-  setTimeout(() => document.addEventListener('mousedown', handleOutsideClick), 100);
 }
 
 // Unwrap a <mark> element, restoring the original text node
@@ -820,8 +712,8 @@ document.addEventListener('resume', () => {
   lastActiveTime = Date.now(); // reset foreground timer after unfreeze
 });
 
-// ─── Capture notification bubble ──────────────────────────────────────
-function showCaptureNotification() {
+// ─── Notification bubble factory ─────────────────────────────────────
+function showNotificationBubble({ message, background, duration, fadeIn, fadeHold }) {
   const host = document.createElement('div');
   const shadow = host.attachShadow({ mode: 'closed' });
   shadow.innerHTML = `
@@ -832,94 +724,38 @@ function showCaptureNotification() {
         left: 50%;
         transform: translate(-50%, -50%) scale(0.92);
         z-index: 2147483647;
-        background: rgba(0, 0, 0, 0.78);
+        background: ${background};
         color: #fff;
         font: 14px/1.4 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         padding: 10px 20px;
         border-radius: 8px;
         pointer-events: none;
         opacity: 0;
-        animation: fadeInOut 1.6s ease forwards;
+        animation: fadeInOut ${duration}s ease forwards;
       }
       @keyframes fadeInOut {
         0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
-        12%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        75%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
-      }
-    </style>
-    <div class="bubble">Snapshot captured</div>
-  `;
-  document.documentElement.appendChild(host);
-  setTimeout(() => host.remove(), 1700);
-}
-
-// ─── Like notification bubble ─────────────────────────────────────────
-function showLikeNotification(delta = 1) {
-  const host = document.createElement('div');
-  const shadow = host.attachShadow({ mode: 'closed' });
-  shadow.innerHTML = `
-    <style>
-      .bubble {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%) scale(0.92);
-        z-index: 2147483647;
-        background: rgba(0, 0, 0, 0.78);
-        color: #fff;
-        font: 14px/1.4 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        padding: 10px 20px;
-        border-radius: 8px;
-        pointer-events: none;
-        opacity: 0;
-        animation: fadeInOut 1.6s ease forwards;
-      }
-      @keyframes fadeInOut {
-        0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
-        12%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        75%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
-      }
-    </style>
-    <div class="bubble">${delta >= 0 ? '\uD83D\uDC4D Liked' : '\uD83D\uDC4E Disliked'}</div>
-  `;
-  document.documentElement.appendChild(host);
-  setTimeout(() => host.remove(), 1700);
-}
-
-// ─── Error notification bubble ───────────────────────────────────────
-function showErrorNotification(message) {
-  const host = document.createElement('div');
-  const shadow = host.attachShadow({ mode: 'closed' });
-  shadow.innerHTML = `
-    <style>
-      .bubble {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%) scale(0.92);
-        z-index: 2147483647;
-        background: rgba(180, 30, 30, 0.88);
-        color: #fff;
-        font: 14px/1.4 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        padding: 10px 20px;
-        border-radius: 8px;
-        pointer-events: none;
-        opacity: 0;
-        animation: fadeInOut 2.4s ease forwards;
-      }
-      @keyframes fadeInOut {
-        0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
-        10%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        80%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        ${fadeIn}%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        ${fadeHold}%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
         100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
       }
     </style>
     <div class="bubble">${message}</div>
   `;
   document.documentElement.appendChild(host);
-  setTimeout(() => host.remove(), 2500);
+  setTimeout(() => host.remove(), duration * 1000 + 100);
+}
+
+function showCaptureNotification() {
+  showNotificationBubble({ message: 'Snapshot captured', background: 'rgba(0, 0, 0, 0.78)', duration: 1.6, fadeIn: 12, fadeHold: 75 });
+}
+
+function showLikeNotification(delta = 1) {
+  showNotificationBubble({ message: delta >= 0 ? '\uD83D\uDC4D Liked' : '\uD83D\uDC4E Disliked', background: 'rgba(0, 0, 0, 0.78)', duration: 1.6, fadeIn: 12, fadeHold: 75 });
+}
+
+function showErrorNotification(message) {
+  showNotificationBubble({ message, background: 'rgba(180, 30, 30, 0.88)', duration: 2.4, fadeIn: 10, fadeHold: 80 });
 }
 
 // ─── Highlights Panel (for pages where visual marks can't render) ─────

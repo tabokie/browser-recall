@@ -1,11 +1,17 @@
 // Unified session cache — manages chrome.storage.session with LRU eviction + pin/unpin.
 //
 // All session reads/writes in background.js go through this layer.
-// Pinned keys are never evicted. Unpinned keys are evicted LRU-first
-// when count exceeds EVICTION_LIMIT, but only if timestamp <= persistWatermark
-// (i.e., already flushed to disk).
+// Pinned keys are never evicted under normal conditions. Unpinned keys are
+// evicted LRU-first when count exceeds EVICTION_LIMIT, but only if
+// timestamp <= persistWatermark (i.e., already flushed to disk).
+//
+// Exception: emergencyEvict() (quota recovery) removes ALL keys with
+// timestamp <= persistWatermark, including pinned keys. This intentionally
+// violates the pin contract as a last-resort measure to recover from
+// quota exhaustion. Only dirty/unflushed entries are protected.
 
 import { logError } from './logger.js';
+import { LIST_PREFIX, MANIFEST_PREFIX } from './entity-types.js';
 
 let lruKeys = []; // LRU order: oldest at index 0, newest at end
 const keyTimestamps = new Map(); // key → timestamp for watermark guard
@@ -26,8 +32,8 @@ export function setQuotaExhaustedCallback(cb) {
 
 function defaultPinned(key) {
   if (key === 'workspace') return true;
-  if (key.startsWith('manifest:')) return true; // settings, orphaned, name-to-id — small metadata, always needed
-  if (key.startsWith('list:')) return true; // user lists + system lists — small metadata
+  if (key.startsWith(MANIFEST_PREFIX)) return true; // settings, orphaned, name-to-id — small metadata, always needed
+  if (key.startsWith(LIST_PREFIX)) return true; // user lists + system lists — small metadata
   // page:*, note:*, log:* → not pinned by default
   return false;
 }
@@ -71,7 +77,7 @@ export async function cacheSet(key, value, { timestamp } = {}) {
         if (retryErr.name === 'QuotaExceededError') {
           logError('Session quota still exceeded after emergency eviction');
           onQuotaExhausted?.();
-          return; // Don't update LRU tracking for failed write
+          return false;
         }
         throw retryErr;
       }
@@ -97,6 +103,7 @@ export async function cacheSet(key, value, { timestamp } = {}) {
   if (defaultPinned(key)) pinnedKeys.add(key);
   // Evict if needed
   await evict();
+  return true;
 }
 
 export async function cacheClear() {
