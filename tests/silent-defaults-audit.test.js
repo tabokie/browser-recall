@@ -163,8 +163,7 @@ describe('content.js — response error checks', () => {
 // ---------------------------------------------------------------------------
 
 describe('filesystem-storage.js — no bare catch on non-parse errors', () => {
-  it('softDelete fallback catch uses isNotFound', () => {
-    // The inner catch on removeEntry should not be bare catch {}
+  it('removeFile does not use bare catch', () => {
     expect(fsStorageSource).not.toMatch(/removeEntry\(name,?\s*opts?\);\s*\}\s*catch\s*\{\s*\}/);
   });
 });

@@ -78,7 +78,8 @@ export function renderTimeChartInto(chartEl, barsEl, entries, label, estimatedBy
     const estScore = hasEstimates ? estimatedByDay.get(dateStr) : undefined;
     const effectiveScore = score ?? estScore;
     if (effectiveScore != null) {
-      const barH = Math.max(2, Math.round((effectiveScore / maxScore) * chartHeight));
+      // sqrt scaling + 5px floor: low-count bars stay clickable while preserving relative proportions
+      const barH = Math.round(Math.sqrt(effectiveScore / maxScore) * chartHeight) + 5;
       return `<div class="chart-bar-group has-data" data-date="${dateStr}"><div class="chart-bar" style="height:${barH}px"></div></div>`;
     }
     return `<div class="chart-bar-group" data-date="${dateStr}"></div>`;

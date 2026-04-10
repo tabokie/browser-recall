@@ -10,7 +10,7 @@ Final step before Chrome Web Store submission. Needs: updated manifest (name, ve
 
 ```json
 {
-  "name": "Browser Recall",
+  "name": "browser-recall",
   "version": "1.0",
   "description": "Save your browsing history, notes, and highlights to a local folder you control."
 }
@@ -37,7 +37,7 @@ Draft covering: local-first storage, browsing history tracking, full-text search
 ### Icons
 
 Current icons are already 16/48/128. They need to:
-1. Be visually appropriate for "Browser Recall" branding
+1. Be visually appropriate for "browser-recall" branding
 2. Have the downtime variants (from plan 12)
 3. Look good on Chrome Web Store (128x128 with transparent/white background)
 

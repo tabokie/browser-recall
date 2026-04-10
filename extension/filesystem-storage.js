@@ -161,6 +161,10 @@ class FileSystemStorage {
     try {
       const opts = create ? { create: true } : undefined;
       const fileHandle = await dirHandle.getFileHandle(fileName, opts);
+      if (this.#fileCache.size >= 2000) {
+        const firstKey = this.#fileCache.keys().next().value;
+        this.#fileCache.delete(firstKey);
+      }
       this.#fileCache.set(path, fileHandle);
       return fileHandle;
     } catch (e) {
@@ -195,40 +199,8 @@ class FileSystemStorage {
     this.#fileCache.clear();
   }
 
-  // Move a file to deleted/{subpath}/ instead of deleting it.
-  // For directories, uses { recursive: true } on the copy target.
-  async softDelete(parentDir, name, opts) {
-    const deletedDir = await this.directoryHandle.getDirectoryHandle('deleted', { create: true });
-    try {
-      if (opts && opts.recursive) {
-        // Directory: copy recursively into deleted/{name}/, then remove original
-        const srcDir = await parentDir.getDirectoryHandle(name);
-        const destDir = await deletedDir.getDirectoryHandle(name, { create: true });
-        for await (const entry of srcDir.values()) {
-          if (entry.kind === 'file') {
-            const file = await entry.getFile();
-            const fh = await destDir.getFileHandle(entry.name, { create: true });
-            const w = await fh.createWritable();
-            await w.write(await file.text());
-            await w.close();
-          }
-        }
-        await parentDir.removeEntry(name, { recursive: true });
-      } else {
-        // File: read content, write to deleted/, then remove original
-        const fh = await parentDir.getFileHandle(name);
-        const file = await fh.getFile();
-        const content = await file.text();
-        const destFh = await deletedDir.getFileHandle(name, { create: true });
-        const w = await destFh.createWritable();
-        await w.write(content);
-        await w.close();
-        await parentDir.removeEntry(name);
-      }
-    } catch (e) {
-      // If move fails, fall through to hard delete as last resort
-      try { await parentDir.removeEntry(name, opts); } catch (e2) { if (!isNotFound(e2)) throw e2; }
-    }
+  async removeFile(parentDir, name, opts) {
+    await parentDir.removeEntry(name, opts);
     this.clearCache();
   }
 
@@ -284,6 +256,23 @@ class FileSystemStorage {
       name: this.directoryHandle.name,
       hasPermission
     };
+  }
+
+  async getDirectorySize() {
+    if (!this.directoryHandle || !(await this.verifyPermission())) return 0;
+    let total = 0;
+    async function walk(dir) {
+      for await (const entry of dir.values()) {
+        if (entry.kind === 'file') {
+          const file = await entry.getFile();
+          total += file.size;
+        } else if (entry.kind === 'directory') {
+          await walk(await dir.getDirectoryHandle(entry.name));
+        }
+      }
+    }
+    await walk(this.directoryHandle);
+    return total;
   }
 
   // Scan data/logs/<device>/ subdirectories for .jsonl files.
@@ -506,15 +495,15 @@ class FileSystemStorage {
     }
 
     const snapshotsDir = await this.resolveDir('data/snapshots');
-    try { await this.softDelete(snapshotsDir, `${slug}-${timestamp}.md`); } catch (e) { if (!isNotFound(e)) throw e; }
-    try { await this.softDelete(snapshotsDir, `${slug}-${timestamp}.html`); } catch (e) { if (!isNotFound(e)) throw e; }
+    try { await this.removeFile(snapshotsDir, `${slug}-${timestamp}.md`); } catch (e) { if (!isNotFound(e)) throw e; }
+    try { await this.removeFile(snapshotsDir, `${slug}-${timestamp}.html`); } catch (e) { if (!isNotFound(e)) throw e; }
   }
 
   // Delete a page entity file from pages/{slug}.json
   async deletePage(slug) {
     const pagesDir = await this.resolveDir('pages');
     try {
-      await this.softDelete(pagesDir, `${slug}.json`);
+      await this.removeFile(pagesDir, `${slug}.json`);
     } catch (e) {
       if (!isNotFound(e)) throw e;
     }
@@ -618,6 +607,23 @@ class FileSystemStorage {
     return result;
   }
 
+  // Load all page entities by scanning the pages/ directory
+  async loadAllPages() {
+    const result = {};
+    try {
+      const pagesDir = await this.resolveDir('pages');
+      for await (const entry of pagesDir.values()) {
+        if (entry.kind === 'file' && entry.name.endsWith('.json')) {
+          const slug = entry.name.slice(0, -5);
+          try {
+            result[slug] = await this.readJson(entry);
+          } catch { /* skip corrupted files */ }
+        }
+      }
+    } catch { /* pages dir may not exist yet */ }
+    return result;
+  }
+
   // Save page metadata to pages/{slug}.json
   async savePage(slug, data) {
     const fileHandle = await this.resolveFile(`pages/${slug}.json`, { create: true });
@@ -641,10 +647,9 @@ class FileSystemStorage {
     await this.writeJson(fileHandle, data);
   }
 
-  // Delete note by moving to deleted/ directory
   async deleteNote(slug) {
     const notesDir = await this.resolveDir('data/notes');
-    await this.softDelete(notesDir, `${slug}.json`);
+    await this.removeFile(notesDir, `${slug}.json`);
   }
 
   // Read-merge-write a list entity file: reads existing JSON, shallow-merges updates, writes back.
@@ -755,7 +760,7 @@ class FileSystemStorage {
     const path = this.#resolveListPath(listId);
     try {
       const listsDir = await this.resolveDir('lists');
-      await this.softDelete(listsDir, `${listId}.json`);
+      await this.removeFile(listsDir, `${listId}.json`);
       this.#fileCache.delete(path);
     } catch (error) { if (!isNotFound(error)) throw error; }
   }
@@ -824,7 +829,7 @@ class FileSystemStorage {
       if (entry.kind === 'file' && entry.name.endsWith('.json')) {
         const filename = entry.name.replace('.json', '');
         if (!filename.startsWith('system') && !filename.startsWith('index') && !activeFilenames.has(filename)) {
-          await this.softDelete(listsDir, entry.name);
+          await this.removeFile(listsDir, entry.name);
         }
       }
     }

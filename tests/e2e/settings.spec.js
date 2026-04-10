@@ -6,7 +6,7 @@ test.describe('Settings persistence', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], relatedPagesLimit: 25, historyFileBatch: 5,
+        trimRules: [], historyFileBatch: 5,
       }},
     ]);
 
@@ -15,8 +15,6 @@ test.describe('Settings persistence', () => {
     await options.click('#settingsBtn');
     await options.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
 
-    const relatedLimit = await options.inputValue('#relatedPagesLimit');
-    expect(relatedLimit).toBe('25');
     const historyBatch = await options.inputValue('#historyFileBatch');
     expect(historyBatch).toBe('5');
     await options.close();
@@ -26,7 +24,7 @@ test.describe('Settings persistence', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], relatedPagesLimit: 50, historyFileBatch: 10,
+        trimRules: [], historyFileBatch: 10,
       }},
     ]);
 
@@ -35,8 +33,8 @@ test.describe('Settings persistence', () => {
     await options.click('#settingsBtn');
     await options.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
 
-    const input = options.locator('#relatedPagesLimit');
-    await input.fill('30');
+    const input = options.locator('#historyFileBatch');
+    await input.fill('15');
     await input.dispatchEvent('change');
     // Poll until the status message confirms save
     await options.waitForFunction(
@@ -50,8 +48,8 @@ test.describe('Settings persistence', () => {
     await options2.click('#settingsBtn');
     await options2.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
 
-    const savedValue = await options2.inputValue('#relatedPagesLimit');
-    expect(savedValue).toBe('30');
+    const savedValue = await options2.inputValue('#historyFileBatch');
+    expect(savedValue).toBe('15');
     await options2.close();
   });
 
@@ -106,7 +104,7 @@ test.describe('Settings persistence', () => {
     expect(isCheckedBefore).toBe(false);
 
     // Enable debug logging
-    await options.check('#debugLoggingToggle');
+    await options.click('#debugLoggingToggle + .toggle-track');
 
     // Verify session storage was updated
     const afterEnable = await options.evaluate(() =>
@@ -115,7 +113,7 @@ test.describe('Settings persistence', () => {
     expect(afterEnable.debugLogging).toBe(true);
 
     // Disable debug logging
-    await options.uncheck('#debugLoggingToggle');
+    await options.click('#debugLoggingToggle + .toggle-track');
     const afterDisable = await options.evaluate(() =>
       chrome.storage.session.get(['debugLogging'])
     );
@@ -134,7 +132,7 @@ test.describe('Settings persistence', () => {
     // Enable debug logging
     await options.click('#settingsBtn');
     await options.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
-    await options.check('#debugLoggingToggle');
+    await options.click('#debugLoggingToggle + .toggle-track');
 
     // Close and reopen settings modal
     await options.click('#settingsClose');
@@ -148,7 +146,7 @@ test.describe('Settings persistence', () => {
     await options.close();
   });
 
-  test('storage status shows Connected when directory is configured', async ({ extContext, extensionId, setupDir }) => {
+  test('storage status shows path when directory is configured', async ({ extContext, extensionId, setupDir }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
@@ -158,8 +156,12 @@ test.describe('Settings persistence', () => {
     await options.click('#settingsBtn');
     await options.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
 
-    const storageStatus = options.locator('#storageStatus');
-    await expect(storageStatus).toHaveText('Connected', { timeout: 5000 });
+    const storagePath = options.locator('#storagePath');
+    await expect(storagePath).not.toHaveText('Not configured', { timeout: 5000 });
+
+    const storageRow = options.locator('#storageLocation');
+    const hasNotConfigured = await storageRow.evaluate(el => el.classList.contains('not-configured'));
+    expect(hasNotConfigured).toBe(false);
 
     await options.close();
   });

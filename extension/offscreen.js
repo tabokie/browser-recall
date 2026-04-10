@@ -144,6 +144,13 @@ async function handleLoadAllNotes() {
   return { success: true, notesMap };
 }
 
+async function handleLoadAllPages() {
+  const t0 = performance.now();
+  const pages = await fsStorage.loadAllPages();
+  logDebug(`[I/O] loadAllPages: ${Object.keys(pages).length} pages in ${(performance.now() - t0).toFixed(1)}ms`);
+  return { success: true, pages };
+}
+
 async function handleLoadListPins(request) {
   const t0 = performance.now();
   if (request.listId) {
@@ -256,6 +263,11 @@ async function handleLoadHistoryRange(request) {
 async function handleGetDirectoryInfo() {
   const info = await fsStorage.getDirectoryInfo();
   return { success: true, info };
+}
+
+async function handleGetDirectorySize() {
+  const size = await fsStorage.getDirectorySize();
+  return { success: true, size };
 }
 
 async function handleLoadOrphaned() {
@@ -391,6 +403,19 @@ async function handleSyncFsRemoveFile(request) {
   return { success: true };
 }
 
+async function handleClearSyncDirectory() {
+  fsSyncStorage.syncDirectoryHandle = null;
+  const db = await fsSyncStorage.mainStorage.initDB();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([fsSyncStorage.storeName], 'readwrite');
+    const store = tx.objectStore(fsSyncStorage.storeName);
+    const req = store.delete('syncDirectory');
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+  return { success: true };
+}
+
 // ─── Request Handlers: Test ──────────────────────────────────────────
 
 async function handleSetTestDirectory() {
@@ -477,6 +502,7 @@ async function handleRequest(request) {
       case 'deleteListFile':              return await handleDeleteListFile(request);
       case 'loadPageNotes':               return await handleLoadPageNotes(request);
       case 'loadAllNotes':                return await handleLoadAllNotes();
+      case 'loadAllPages':                return await handleLoadAllPages();
       case 'loadListPins':                return await handleLoadListPins(request);
       case 'loadListPinsById':            return await handleLoadListPinsById(request);
       case 'loadListEntity':              return await handleLoadListEntity(request);
@@ -494,6 +520,7 @@ async function handleRequest(request) {
       case 'loadHistoryRange':            return await handleLoadHistoryRange(request);
       // Manifest/directory
       case 'getDirectoryInfo':            return await handleGetDirectoryInfo();
+      case 'getDirectorySize':            return await handleGetDirectorySize();
       case 'loadOrphaned':                return await handleLoadOrphaned();
       case 'loadCurrent':                 return await handleLoadCurrent();
       case 'initDevice':                  return await handleInitDevice(request);
@@ -516,6 +543,7 @@ async function handleRequest(request) {
       case 'syncFsWriteFile':             return await handleSyncFsWriteFile(request);
       case 'syncFsEnsureDir':             return await handleSyncFsEnsureDir(request);
       case 'syncFsRemoveFile':            return await handleSyncFsRemoveFile(request);
+      case 'clearSyncDirectory':           return await handleClearSyncDirectory();
       // Test
       case 'setTestDirectory':            return await handleSetTestDirectory();
       case 'resetDirectory':              return await handleResetDirectory();
@@ -539,6 +567,7 @@ async function handleRequest(request) {
 //   3. Send watermark back to background for pruning
 
 let drainTimer = null;
+let drainRetryTimer = null;
 let draining = false;
 let pendingDrainEntries = null; // Set by port 'drainEntries' message
 let pendingDeviceId = null;   // Device name from drain message
@@ -549,6 +578,11 @@ function scheduleDrain() {
   drainTimer = setTimeout(() => { drainTimer = null; drainQueue(); }, 100);
 }
 
+function scheduleDrainRetry() {
+  if (drainRetryTimer) return;
+  drainRetryTimer = setTimeout(() => { drainRetryTimer = null; scheduleDrain(); }, 30000);
+}
+
 
 async function drainQueue() {
   if (draining) return;
@@ -557,7 +591,7 @@ async function drainQueue() {
   try {
     if (!(await fsStorage.verifyPermission())) {
       logDebug('Drain: no filesystem permission, retrying in 30s');
-      setTimeout(scheduleDrain, 30000);
+      scheduleDrainRetry();
       draining = false;
       return;
     }
@@ -681,7 +715,7 @@ async function drainQueue() {
         await writable.close();
       } catch (e) {
         logError('JSONL append failed:', e);
-        setTimeout(scheduleDrain, 30000);
+        scheduleDrainRetry();
         draining = false;
         return;
       }
@@ -759,7 +793,7 @@ async function drainQueue() {
     }
   } catch (e) {
     logError('drainQueue error:', e);
-    setTimeout(scheduleDrain, 30000);
+    scheduleDrainRetry();
   }
 
   draining = false;

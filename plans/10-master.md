@@ -1,8 +1,8 @@
-# 10 — Master Plan: Browser Recall v1.0 Release
+# 10 — Master Plan: browser-recall v1.0 Release
 
 ## Context
 
-Preparing the extension (currently "Portal - Knowledge Management") for public Chrome Web Store launch as "Browser Recall" v1.0. The core architecture is solid — event-sourced replay, entity storage, WASM search, sync, 697 tests. The gaps are in the product wrapper: error resilience, debug logging, dark mode, onboarding, and store materials.
+Preparing the extension (currently "Portal - Knowledge Management") for public Chrome Web Store launch as "browser-recall" v1.0. The core architecture is solid — event-sourced replay, entity storage, WASM search, sync, 697 tests. The gaps are in the product wrapper: error resilience, debug logging, dark mode, onboarding, and store materials.
 
 All design decisions were resolved through a grilling session (Q1-Q22 in this conversation).
 
@@ -18,7 +18,7 @@ All design decisions were resolved through a grilling session (Q1-Q22 in this co
 | 16 | [FS Permission Drain Failure](16-fs-permission-drain-failure.md) | 12 | Drain failure counter, pause after 60s stuck, auto-resume on re-grant |
 | 17 | [Dark Mode](17-dark-mode.md) | — | Three-way toggle (Light/Dark/System), CSS variable overrides, session-stored |
 | 18 | [Onboarding](18-onboarding.md) | 11-17 | Single screen replacing options page on first run |
-| 19 | [Store Assets](19-store-assets.md) | 18 | Manifest update (name→Browser Recall, version→1.0), privacy policy, store listing |
+| 19 | [Store Assets](19-store-assets.md) | 18 | Manifest update (name→browser-recall, version→1.0), privacy policy, store listing |
 
 ## Key Design Decisions
 

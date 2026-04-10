@@ -33,9 +33,9 @@ Replace the page content (hide sidebar + main) with a centered onboarding card:
 ```html
 <div id="onboarding" style="display:none;">
   <div class="onboarding-card">
-    <h1>Browser Recall</h1>
+    <h1>browser-recall</h1>
     <p class="onboarding-desc">
-      Browser Recall saves your browsing history, notes, and highlights to a local folder you control.
+      browser-recall saves your browsing history, notes, and highlights to a local folder you control.
       Your data never leaves your device unless you choose to sync it.
     </p>
     

@@ -8,6 +8,7 @@ import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWa
 import { GitHubTransport, parseRepoUrl } from './sync-transport-github.js';
 import { FilesystemTransport } from './sync-transport-filesystem.js';
 import { WebDAVTransport } from './sync-transport-webdav.js';
+import { SCHEME_HEX } from './color-scheme-map.js';
 import { SyncManager } from './sync-manager.js';
 import { logDebug, logError } from './logger.js';
 import { PAGE_PREFIX, NOTE_PREFIX, SNAPSHOT_PREFIX, LIST_PREFIX, entitySlug, isSystemList, pageKey, noteKey, listKey, snapshotKey } from './entity-types.js';
@@ -160,10 +161,20 @@ async function handleOffscreenResponse(msg) {
   }
 }
 
+// Deduplicated: concurrent callers share one in-flight setup to prevent races.
+let _ensurePortPromise = null;
 async function ensureOffscreenPort() {
   if (offscreenPort) return;
-  await setupOffscreenDocument();
-  connectToOffscreen();
+  if (_ensurePortPromise) return _ensurePortPromise;
+  _ensurePortPromise = (async () => {
+    try {
+      await setupOffscreenDocument();
+      if (!offscreenPort) connectToOffscreen();
+    } finally {
+      _ensurePortPromise = null;
+    }
+  })();
+  return _ensurePortPromise;
 }
 
 async function requestOffscreen(params) {
@@ -697,13 +708,19 @@ async function appendBufferToHistoryKeys() {
   // After this, history keys have disk + undrained entries. Their timestamps
   // reflect undrained data, so watermark-gated eviction protects them until drain.
   // Today's key is also pinned (hydrateHistoryCache + addLog) as an extra safeguard.
+  // Group entries by date key to do one read-merge-write per key instead of per entry
+  const byDateKey = new Map();
   for (const entry of logBuffer) {
-    const dk = dateKeyFromTimestamp(entry.timestamp);
-    const hk = 'log:' + dk;
+    const hk = 'log:' + dateKeyFromTimestamp(entry.timestamp);
+    if (!byDateKey.has(hk)) byDateKey.set(hk, []);
+    byDateKey.get(hk).push(entry);
+  }
+  for (const [hk, batch] of byDateKey) {
     let entries = await cacheGet(hk);
     if (entries == null) entries = [];
-    entries.push(entry);
-    await cacheSet(hk, entries, { timestamp: entry.timestamp });
+    entries.push(...batch);
+    const maxTs = batch.reduce((m, e) => Math.max(m, e.timestamp), 0);
+    await cacheSet(hk, entries, { timestamp: maxTs });
   }
 }
 
@@ -859,7 +876,9 @@ async function evaluateSmartRulesForVisit(url, title) {
 
 async function trimTitle(rawTitle, url) {
   let title = rawTitle;
-  const titleTrimRules = (await readCacheable('manifest:settings') || {}).titleTrimRules || [];
+  const settings = await readCacheable('manifest:settings') || {};
+  if (settings.titleCleanupEnabled === false) return title.trim();
+  const titleTrimRules = settings.titleTrimRules || [];
   for (const rule of titleTrimRules) {
     if (url.startsWith(rule.urlPrefix)) {
       if (rule.action === 'remove_after_pipe') {
@@ -985,6 +1004,7 @@ const RATE_LIMIT_FALLBACK_MS = 15 * 60 * 1000; // 15 minutes
 const SYNC_SESSION_TOKEN_KEY = '__syncToken';
 const SYNC_DEVICES_KEY = '__syncRemoteDevices';
 let syncInProgress = false;
+let syncAborted = false;
 let lastSyncResult = null; // { timestamp, pushed, pulled, error?, rateLimitedUntil? }
 let rateLimitedUntil = 0; // epoch ms; 0 = not rate-limited
 
@@ -1112,6 +1132,7 @@ async function performSync() {
     return { skipped: true, error: `Rate limited, will retry at ${retryTime}` };
   }
   syncInProgress = true;
+  syncAborted = false;
   let method = 'github';
   try {
     await hydrationDone;
@@ -1132,6 +1153,8 @@ async function performSync() {
     let deviceId = await getDeviceId();
     const mgr = buildSyncManager(settings, { githubToken });
     const pausedDevices = await _loadPausedDevices();
+
+    if (syncAborted) return { skipped: true, error: 'Cancelled' };
 
     // Push local changes — skip if local device is paused
     let pushResult = { pushed: false, fileCount: 0 };
@@ -1156,6 +1179,8 @@ async function performSync() {
         await chrome.storage.session.set({ [SYNC_DEVICES_KEY]: updated });
       }
     }
+
+    if (syncAborted) return { skipped: true, error: 'Cancelled' };
 
     // Pull remote changes — skip replay for paused devices
     const pullResult = await mgr.pull(deviceId);
@@ -1272,7 +1297,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 // ─── Initialization ───────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener(async () => {
-  logDebug('Browser Recall extension installed');
+  logDebug('browser-recall extension installed');
 
   chrome.contextMenus.create({
     id: 'portal-highlight',
@@ -1295,6 +1320,10 @@ chrome.runtime.onInstalled.addListener(async () => {
     await ensureDefaultLists();
     await loadSyncTokenFromDisk();
     updateSyncAlarm();
+    const settings = await readCacheable('manifest:settings') || {};
+    if (settings.colorScheme) {
+      await chrome.storage.session.set({ colorScheme: settings.colorScheme });
+    }
   }
 });
 
@@ -1311,6 +1340,10 @@ chrome.runtime.onStartup.addListener(async () => {
       await ensureDefaultLists();
       await loadSyncTokenFromDisk();
       updateSyncAlarm();
+      const settings = await readCacheable('manifest:settings') || {};
+      if (settings.colorScheme) {
+        await chrome.storage.session.set({ colorScheme: settings.colorScheme });
+      }
     }
   } catch (error) {
     logDebug('Startup hydration failed:', error.message);
@@ -1350,12 +1383,18 @@ async function getListEventFields(listId) {
 
 // ─── Snapshot Capture ─────────────────────────────────────────────────
 
+async function getBadgeAccentColor() {
+  const { colorScheme } = await chrome.storage.session.get(['colorScheme']);
+  return SCHEME_HEX[colorScheme] || SCHEME_HEX.amber;
+}
+
 // Spinner badge for snapshot capture — animated dot sequence on extension icon
 let spinnerInterval = null;
-function startSpinnerBadge(tabId) {
+async function startSpinnerBadge(tabId) {
+  if (spinnerInterval) { clearInterval(spinnerInterval); spinnerInterval = null; }
   const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let i = 0;
-  chrome.action.setBadgeBackgroundColor({ color: '#D07030', tabId });
+  chrome.action.setBadgeBackgroundColor({ color: await getBadgeAccentColor(), tabId });
   chrome.action.setBadgeText({ text: frames[0], tabId });
   spinnerInterval = setInterval(() => {
     i = (i + 1) % frames.length;
@@ -1502,13 +1541,16 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 
   if (command === 'capture-snapshot') {
+    chrome.tabs.sendMessage(tab.id, { action: 'showCaptureSpinner' }).catch(() => {});
     try {
       const slug = generateSlugFromUrl(tab.url);
       const timestamp = Date.now();
       await captureAndLog(tab.id, slug, timestamp, tab.url, tab.title);
+      chrome.tabs.sendMessage(tab.id, { action: 'hideCaptureSpinner' }).catch(() => {});
       chrome.tabs.sendMessage(tab.id, { action: 'showCaptureNotification' }).catch(() => {});
     } catch (error) {
       logDebug('[capture] ERROR:', error.message, error);
+      chrome.tabs.sendMessage(tab.id, { action: 'hideCaptureSpinner' }).catch(() => {});
       chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: error.message }).catch(() => {});
     }
   } else if (command === 'highlight-selection') {
@@ -1561,7 +1603,7 @@ async function handleGetPageInfo(request) {
     success: true, slug,
     entry: page ? { url: page.url, title: page.title, user_title: page.user_title,
       scrollDepth: page.scrollDepth, timeOnPage: page.timeOnPage, likes: page.likes,
-      timestamps: page.timestamps, slug } : null,
+      visitDates: page.visitDates || [], timestamps: page.timestamps, slug } : null,
     snapshots,
     notes
   };
@@ -1602,10 +1644,12 @@ async function handleReportPage(request, sender) {
       return { success: true };
     }
 
-    // Check blacklist
+    // Check blacklist (skip when feature is toggled off, but always block chrome:// and edge://)
     const rpSettings = await readCacheable('manifest:settings') || {};
+    const blacklistEnabled = rpSettings.blacklistEnabled !== false;
     const urlBlacklist = rpSettings.urlBlacklist;
-    const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
+    const builtinBlacklist = ['chrome://', 'edge://'];
+    const blacklist = blacklistEnabled ? (urlBlacklist ?? builtinBlacklist) : builtinBlacklist;
     if (!request.bypassBlacklist && blacklist.some(prefix => url.startsWith(prefix))) {
       if (request.isInitialLoad) {
         const todayKey = 'log:' + dateKeyFromTimestamp(Date.now());
@@ -1787,6 +1831,10 @@ async function handleGetDirectoryInfo() {
   return await requestOffscreen({ action: 'getDirectoryInfo' });
 }
 
+async function handleGetDirectorySize() {
+  return await requestOffscreen({ action: 'getDirectorySize' });
+}
+
 async function handleListHistoryFiles(request) {
   return await requestOffscreen({ action: 'listHistoryFiles', includeSizes: request.includeSizes });
 }
@@ -1795,6 +1843,30 @@ async function handleLoadHistoryBatch(request) {
   const t0 = performance.now();
   const resp = await requestOffscreen({ action: 'loadHistoryBatch', files: request.files });
   logDebug(`[I/O] loadHistoryBatch: ${request.files.length} files in ${(performance.now() - t0).toFixed(1)}ms`);
+  return resp;
+}
+
+async function handleLoadAllPages() {
+  await hydrationDone;
+  const t0 = performance.now();
+  const resp = await requestOffscreen({ action: 'loadAllPages' });
+  if (!resp?.success) return resp;
+  // Batch-overlay session cache for freshness (undrained entities may be newer)
+  const pages = resp.pages;
+  const slugs = Object.keys(pages);
+  if (slugs.length > 0) {
+    try {
+      const cacheKeys = slugs.map(s => pageKey(s));
+      const cached = await chrome.storage.session.get(cacheKeys);
+      for (const slug of slugs) {
+        const pk = pageKey(slug);
+        if (pk in cached && cached[pk] && !cached[pk].__gc) {
+          pages[slug] = cached[pk];
+        }
+      }
+    } catch { /* session overlay is best-effort */ }
+  }
+  logDebug(`[I/O] loadAllPages: ${slugs.length} pages in ${(performance.now() - t0).toFixed(1)}ms`);
   return resp;
 }
 
@@ -1860,6 +1932,9 @@ async function handleSaveSettingsKey(request) {
   if (!settings || JSON.stringify(settings[request.key]) !== JSON.stringify(request.value)) {
     await addLog({ timestamp: Date.now(), action: 'update_setting', key: request.key, value: request.value });
     notifyMutation('settings', { key: request.key });
+  }
+  if (request.key === 'colorScheme') {
+    await chrome.storage.session.set({ colorScheme: request.value });
   }
   return { success: true };
 }
@@ -2322,27 +2397,28 @@ async function handleRunRuleBatch(request) {
       return resp.score;
     };
 
+    const listInfo = await getListEventFields(listId);
+    if (!listInfo) continue;
+    const pinnedIds = new Set((listEntity.pins || []).map(p => p.id));
+
     for (const entry of entries) {
       const pageData = buildPageDataFromEntry(entry);
       const matches = await matchRules(listEntity.rules, pageData, { sandbox });
       if (matches.length > 0) {
-        const listInfo = await getListEventFields(listId);
-        if (listInfo) {
-          const slug = generateSlugFromUrl(entry.url);
-          const alreadyPinned = (listEntity.pins || []).some(p => p.id === pageKey(slug));
-          if (!alreadyPinned) {
-            const sfPinEntry = {
-              timestamp: Date.now(),
-              action: 'pin_to_list',
-              name: listInfo.name,
-              listOwner: listInfo.listOwner,
-              items: [entry.url],
-              source: 'auto',
-            };
-            if (entry.title) sfPinEntry.titles = { [entry.url]: entry.title };
-            await addLog(sfPinEntry);
-            results.push({ listId, url: entry.url, matches });
-          }
+        const slug = generateSlugFromUrl(entry.url);
+        if (!pinnedIds.has(pageKey(slug))) {
+          const sfPinEntry = {
+            timestamp: Date.now(),
+            action: 'pin_to_list',
+            name: listInfo.name,
+            listOwner: listInfo.listOwner,
+            items: [entry.url],
+            source: 'auto',
+          };
+          if (entry.title) sfPinEntry.titles = { [entry.url]: entry.title };
+          await addLog(sfPinEntry);
+          pinnedIds.add(pageKey(slug));
+          results.push({ listId, url: entry.url, matches });
         }
       }
     }
@@ -2461,6 +2537,21 @@ async function handleClearSyncToken() {
   return { success: true };
 }
 
+async function handleClearSyncFolder() {
+  await addLog({ timestamp: Date.now(), action: 'update_setting', key: 'syncFolderName', value: null });
+  await requestOffscreen({ action: 'clearSyncDirectory' });
+  await updateSyncAlarm();
+  return { success: true };
+}
+
+function handleCancelSync() {
+  if (syncInProgress) {
+    syncInProgress = false;
+    syncAborted = true;
+  }
+  return { success: true };
+}
+
 async function handleToggleSyncRemember(request) {
   const token = await getSyncSessionToken();
   if (request.remember && token) {
@@ -2480,7 +2571,7 @@ async function handleGetSyncAuthState() {
     hasToken: !!token,
     authMethod: settings.syncAuthMethod || null,
     githubUser: settings.syncGitHubUser || null,
-    rememberToken: !!settings.syncRememberToken,
+    rememberToken: settings.syncRememberToken !== false,
   };
 }
 
@@ -2639,6 +2730,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Tab/popup queries
         case 'getReportedUrl':              sendResponse(handleGetReportedUrl(request)); break;
         case 'getPageInfo':                 sendResponse(await handleGetPageInfo(request)); break;
+        case 'trimTitle':                   sendResponse({ title: await trimTitle(request.title || '', request.url || '') }); break;
         case 'captureCurrentPageFromPopup': sendResponse(await handleCaptureCurrentPageFromPopup()); break;
         case 'hydrateCache':                sendResponse(await handleHydrateCacheMsg()); break;
         // Page lifecycle
@@ -2655,8 +2747,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'getSnapshotHtml':             sendResponse(await handleGetSnapshotHtml(request)); break;
         case 'openSnapshot':                sendResponse(await handleOpenSnapshot(request)); break;
         case 'getDirectoryInfo':            sendResponse(await handleGetDirectoryInfo()); break;
+        case 'getDirectorySize':            sendResponse(await handleGetDirectorySize()); break;
         case 'listHistoryFiles':            sendResponse(await handleListHistoryFiles(request)); break;
         case 'loadHistoryBatch':            sendResponse(await handleLoadHistoryBatch(request)); break;
+        case 'loadAllPages':                sendResponse(await handleLoadAllPages()); break;
         // Page relations
         case 'getPageRelations':            sendResponse(await handleGetPageRelations(request)); break;
         // Context menu / settings
@@ -2696,6 +2790,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'updateSyncSettings':          sendResponse(await handleUpdateSyncSettings()); break;
         case 'setSyncToken':                sendResponse(await handleSetSyncToken(request)); break;
         case 'clearSyncToken':              sendResponse(await handleClearSyncToken()); break;
+        case 'clearSyncFolder':             sendResponse(await handleClearSyncFolder()); break;
+        case 'cancelSync':                  sendResponse(handleCancelSync()); break;
         case 'toggleSyncRemember':          sendResponse(await handleToggleSyncRemember(request)); break;
         case 'getSyncAuthState':            sendResponse(await handleGetSyncAuthState()); break;
         case 'getSyncDevices':              sendResponse(await handleGetSyncDevices()); break;
@@ -2731,6 +2827,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'import-bookmarks') return;
 
+  let aborted = false;
+  port.onDisconnect.addListener(() => { aborted = true; });
+
   port.onMessage.addListener(async (msg) => {
     if (msg.action !== 'importBookmarks') return;
     const { tree } = msg;
@@ -2739,7 +2838,6 @@ chrome.runtime.onConnect.addListener((port) => {
     let listCount = 0;
     let bookmarkCount = 0;
     const FAIL_LIMIT = 20;
-    let aborted = false;
 
     function extractListId(effects) {
       const key = Object.keys(effects).find(k => k.startsWith(LIST_PREFIX) && k !== 'manifest:list-order' && k !== 'manifest:name-to-id');

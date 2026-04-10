@@ -44,6 +44,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const extPath = path.join(__dirname, '../extension');
 const seedsDir = path.join(__dirname, '../seeds');
 const seed = process.argv.includes('--seed');
+const onboarding = process.argv.includes('--onboarding');
 // --case <name> loads seeds/<name>.mjs
 const caseIdx = process.argv.indexOf('--case');
 const seedCase = caseIdx >= 0 ? process.argv[caseIdx + 1] : null;
@@ -277,6 +278,13 @@ const resetResult = await setupPage.evaluate(() =>
 if (!resetResult?.success) {
   console.error('resetForTest failed:', resetResult);
   process.exit(1);
+}
+
+if (onboarding) {
+  await setupPage.evaluate(() =>
+    chrome.runtime.sendMessage({ action: 'clearDirectoryHandleForTest' })
+  );
+  console.log('Directory handle cleared — onboarding will appear.');
 }
 
 if (seed) {

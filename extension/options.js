@@ -157,6 +157,7 @@ let allListPins = {}; // listId -> [{ url, title, pinnedAt }]
 let lastClickedRow = null; // for shift-click range select
 const cardDataByUrl = new Map(); // url → { attDetail, timestamps } for detail overlay
 const listNameById = new Map(); // listId → display name, populated by renderLists()
+let listsReadyPromise = Promise.resolve();
 let marqueeActive = false; // suppress click during marquee drag
 let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
 // pinnedFilterCtx removed — pinned section no longer has related pages
@@ -169,12 +170,12 @@ let currentSearchInput = '';      // unsaved draft (also participates in live se
 let filterState = {
   firstSeen: { lo: null, hi: null },  // null = unbounded (days ago)
   lastSeen: { lo: null, hi: null },
-  lists: {},                      // { listSlug: true } — only stores enabled lists; empty = show all (no filter)
   devices: {},                    // { deviceId: true } — only stores enabled devices; empty = show all
+  lists: {},                      // { listSlug: true } — only stores enabled lists; empty = show all
   hasHighlights: null,            // null=any, true=require
+  hasSnapshots: null,
+  liked: null,
   visitedMultipleTimes: null,
-  hasChildren: null,
-  attentionRange: { lo: null, hi: null },
 };
 let filterVisible = false;
 let exploreDebounceTimer = null;
@@ -196,15 +197,10 @@ function daysAgoToDate(v) {
 const RANGE_CONFIGS = {
   lastVisit:  { min: 0, max: 365, step: 1, format: daysAgoToDate, isDaysAgo: true },
   firstVisit: { min: 0, max: 365, step: 1, format: daysAgoToDate, isDaysAgo: true },
-  visitCount: { min: 1, max: 100, step: 1, format: v => String(v) },
-  timeOnPage: { min: 0, max: 600, step: 5, format: v => v >= 60 ? Math.floor(v/60) + 'm' + (v%60 ? v%60 + 's' : '') : v + 's' },
-  scrollDepth:{ min: 0, max: 100, step: 1, format: v => v + '%' },
-  clicks:     { min: 0, max: 100, step: 1, format: v => String(v) },
 };
 let cachedFieldRanges = null; // { field: { min, max } } — computed from data
-let relatedPagesLimit = 50; // configurable in settings
 
-// Compute actual data ranges for each range field (lightweight scan)
+// Compute actual data ranges for date range fields (lightweight scan)
 function computeFieldRanges(entries) {
   const byUrl = new Map();
   for (const i of entries) {
@@ -219,20 +215,12 @@ function computeFieldRanges(entries) {
     const timestamps = group.map(i => i.timestamp);
     const lastVisit = (Date.now() - Math.max(...timestamps)) / 86400000;
     const firstVisit = (Date.now() - Math.min(...timestamps)) / 86400000;
-    const visitCount = group.length;
-    const latest = group.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
-    const vals = {
-      lastVisit, firstVisit, visitCount,
-      timeOnPage: latest.timeOnPage || 0,
-      scrollDepth: latest.scrollDepth || 0,
-      clicks: latest.clicks || 0,
-    };
+    const vals = { lastVisit, firstVisit };
     for (const [key, v] of Object.entries(vals)) {
       if (v < ranges[key].min) ranges[key].min = v;
       if (v > ranges[key].max) ranges[key].max = v;
     }
   }
-  // Round and ensure min < max
   for (const [field, r] of Object.entries(ranges)) {
     const step = RANGE_CONFIGS[field].step;
     r.min = Math.floor(r.min / step) * step;
@@ -310,6 +298,7 @@ async function initWasm() {
 const searchState = {
   generation: 0,         // generation counter — stale phase callbacks are discarded
   results: [],           // master result array, mutated by mergeSearchResults
+  resultIndex: new Map(), // url → index into results[] for O(1) dedup in mergeSearchResults
   pendingPhases: 0,      // count of in-flight phases — spinner shown while > 0
 };
 
@@ -335,8 +324,8 @@ function mergeSearchResults(newResults, source, gen) {
   if (gen !== searchState.generation) return; // stale generation — discard
   for (const r of newResults) {
     if (!r.url) continue;
-    const idx = searchState.results.findIndex(e => e.url === r.url);
-    if (idx >= 0) {
+    const idx = searchState.resultIndex.get(r.url);
+    if (idx !== undefined) {
       const existing = searchState.results[idx];
       if ((r.score || 0) > (existing.score || 0)) existing.score = r.score;
       if (r.createdAt && (!existing.createdAt || r.createdAt < existing.createdAt)) existing.createdAt = r.createdAt;
@@ -358,6 +347,7 @@ function mergeSearchResults(newResults, source, gen) {
         latestTs: r.timestamp || Date.now(),
         matchSources: new Set([source]),
       };
+      searchState.resultIndex.set(r.url, searchState.results.length);
       searchState.results.push(entry);
     }
   }
@@ -613,6 +603,7 @@ function phase0Score(item, words) {
 async function runProgressiveSearch(allQueries) {
   const gen = ++searchState.generation;
   searchState.results = [];
+  searchState.resultIndex.clear();
   const query = allQueries.join(' ');
 
   // Phase 0: instant in-memory matching with fuzzy support for unquoted words
@@ -940,11 +931,11 @@ async function showRecycleBin() {
         if (entity) {
           if (key.startsWith(NOTE_PREFIX)) {
             const raw = entity.excerpt;
-            const excerptText = Array.isArray(raw) ? raw.join(' ') : (raw || '');
+            const excerptText = Array.isArray(raw) ? raw.join(' ') : (typeof raw === 'string' ? raw : '');
             if (excerptText) displayName = excerptText.substring(0, 80);
-            else if (entity.excerpt === null && entity.note) displayName = `Page note: ${entity.note.substring(0, 60)}`;
-            else if (entity.note) displayName = entity.note.substring(0, 80);
-            else displayName = key;
+            else if (entity.note) displayName = (entity.excerpt === null ? 'Page note: ' : '') + entity.note.substring(0, 60);
+            else if (entity.url) displayName = `Note on ${entity.url}`;
+            else displayName = `Note (${entitySlug(key)})`;
           } else if (key.startsWith(LIST_PREFIX)) {
             displayName = entity.name || key;
           } else if (key.startsWith(PAGE_PREFIX)) {
@@ -995,8 +986,10 @@ async function showRecycleBin() {
 async function updateRecycleBinBadge() {
   const orphaned = await readCacheable('manifest:orphaned');
   const count = orphaned?.entries?.length || 0;
+  const btn = document.getElementById('recycleBinBtn');
   const badge = document.getElementById('recycleBinCount');
   badge.textContent = count > 0 ? String(count) : '';
+  btn.style.display = count > 0 ? 'flex' : 'none';
 }
 
 // Search parsing and matching functions
@@ -1077,32 +1070,27 @@ function fuzzyMatchPhase0(words, haystack, entries) {
 function isDefaultFilterState(state) {
   return state.firstSeen.lo === null && state.firstSeen.hi === null
     && state.lastSeen.lo === null && state.lastSeen.hi === null
-    && Object.keys(state.lists || {}).length === 0
     && Object.keys(state.devices || {}).length === 0
-    && state.hasHighlights === null && state.visitedMultipleTimes === null
-    && state.hasChildren === null
-    && state.attentionRange.lo === null && state.attentionRange.hi === null;
+    && Object.keys(state.lists || {}).length === 0
+    && state.hasHighlights === null && state.hasSnapshots === null && state.liked === null && state.visitedMultipleTimes === null;
 }
 
 async function applyFilters(results) {
   if (isDefaultFilterState(filterState)) return results;
   const now = Date.now();
-  // Build list membership index if any list bubbles are enabled
+  const enabledDevices = Object.entries(filterState.devices || {}).filter(([, v]) => v === true).map(([k]) => k);
   const enabledLists = Object.entries(filterState.lists || {}).filter(([, v]) => v === true).map(([k]) => k);
-  let listIndex = null;
-  if (enabledLists.length > 0) {
-    listIndex = await buildListMembershipIndex();
-  }
   return results.filter(item => {
-    // List membership filter: when bubbles are active, only show items in at least one enabled list
-    if (listIndex && enabledLists.length > 0) {
-      const memberOf = listIndex.get(item.slug);
-      if (!memberOf || !enabledLists.some(ls => memberOf.has(ls))) return false;
-    }
     // Device filter: when bubbles are active, only show items from at least one enabled device
-    const enabledDevices = Object.entries(filterState.devices || {}).filter(([, v]) => v === true).map(([k]) => k);
     if (enabledDevices.length > 0 && item.deviceIds) {
       if (!enabledDevices.some(d => item.deviceIds.has(d))) return false;
+    }
+    // List filter: when list bubbles active, only show items belonging to at least one enabled list
+    if (enabledLists.length > 0) {
+      const itemListSlugs = (item.parentIds || [])
+        .filter(pid => pid.startsWith(LIST_PREFIX) && !isSystemList(pid))
+        .map(pid => entitySlug(pid));
+      if (!enabledLists.some(ls => itemListSlugs.includes(ls))) return false;
     }
     // Time filters (days ago)
     if (filterState.lastSeen.lo !== null || filterState.lastSeen.hi !== null) {
@@ -1121,17 +1109,14 @@ async function applyFilters(results) {
     if (filterState.hasHighlights === true) {
       if (!item.notes || !item.notes.some(n => n.excerpt !== null)) return false;
     }
+    if (filterState.hasSnapshots === true) {
+      if (!item.childIds || !item.childIds.some(id => id.startsWith(SNAPSHOT_PREFIX))) return false;
+    }
+    if (filterState.liked === true) {
+      if (!item.likes || item.likes <= 0) return false;
+    }
     if (filterState.visitedMultipleTimes === true) {
       if (!item.visitCount || item.visitCount <= 1) return false;
-    }
-    if (filterState.hasChildren === true) {
-      if (!item.childIds || item.childIds.length === 0) return false;
-    }
-    // Attention range (timeOnPage in seconds)
-    if (filterState.attentionRange.lo !== null || filterState.attentionRange.hi !== null) {
-      const tp = item.attDetail?.timeOnPage || item.timeOnPage || 0;
-      if (filterState.attentionRange.lo !== null && tp < filterState.attentionRange.lo) return false;
-      if (filterState.attentionRange.hi !== null && tp > filterState.attentionRange.hi) return false;
     }
     return true;
   });
@@ -1149,18 +1134,19 @@ async function loadFilterState() {
     if (data[key]) {
       filterState = data[key];
       if (!filterState.devices) filterState.devices = {};
+      if (!filterState.lists) filterState.lists = {};
       return;
     }
   } catch { /* session miss */ }
   filterState = {
     firstSeen: { lo: null, hi: null },
     lastSeen: { lo: null, hi: null },
-    lists: {},
     devices: {},
+    lists: {},
     hasHighlights: null,
+    hasSnapshots: null,
+    liked: null,
     visitedMultipleTimes: null,
-    hasChildren: null,
-    attentionRange: { lo: null, hi: null },
   };
 }
 
@@ -1208,6 +1194,28 @@ function applySortOrder(items, sortState) {
   const { column, direction } = sortState;
   const dir = direction === 'asc' ? 1 : -1;
 
+  // Precompute timestamp extremes once instead of per-comparison O(T) scans
+  const needsTs = column === 'lastVisit' || column === 'firstVisit' || column === 'relevance';
+  if (needsTs) {
+    for (const item of items) {
+      if (item._maxTs === undefined) {
+        const ts = item.timestamps;
+        if (ts && ts.length > 0) {
+          let lo = ts[0], hi = ts[0];
+          for (let i = 1; i < ts.length; i++) {
+            if (ts[i] < lo) lo = ts[i];
+            if (ts[i] > hi) hi = ts[i];
+          }
+          item._maxTs = hi;
+          item._minTs = lo;
+        } else {
+          item._maxTs = item.latestTs || 0;
+          item._minTs = item.latestTs || 0;
+        }
+      }
+    }
+  }
+
   return [...items].sort((a, b) => {
     let av, bv;
     switch (column) {
@@ -1216,13 +1224,9 @@ function applySortOrder(items, sortState) {
         bv = (b.user_title || b.title || '').toLowerCase();
         return dir * av.localeCompare(bv);
       case 'lastVisit':
-        av = Math.max(...(a.timestamps || [a.latestTs || 0]));
-        bv = Math.max(...(b.timestamps || [b.latestTs || 0]));
-        return dir * (av - bv);
+        return dir * ((a._maxTs || 0) - (b._maxTs || 0));
       case 'firstVisit':
-        av = Math.min(...(a.timestamps || [a.latestTs || 0]));
-        bv = Math.min(...(b.timestamps || [b.latestTs || 0]));
-        return dir * (av - bv);
+        return dir * ((a._minTs || 0) - (b._minTs || 0));
       case 'attention':
         av = a.attScore || 0;
         bv = b.attScore || 0;
@@ -1239,10 +1243,8 @@ function applySortOrder(items, sortState) {
         av = a.score || 0;
         bv = b.score || 0;
         if (av !== bv) return dir * (av - bv);
-        // Tiebreaker: createdAt ascending (older first) for stable ordering.
-        // Fall back to earliest timestamp when createdAt is missing (passive visits without entities).
-        av = a.createdAt || Math.min(...(a.timestamps || [Infinity]));
-        bv = b.createdAt || Math.min(...(b.timestamps || [Infinity]));
+        av = a.createdAt || a._minTs || Infinity;
+        bv = b.createdAt || b._minTs || Infinity;
         return av - bv;
       default:
         return 0;
@@ -2371,15 +2373,43 @@ async function enrichForFilters(entries) {
   for (let i = 0; i < slugs.length; i++) {
     if (loaded[i]) pages[slugs[i]] = loaded[i];
   }
+  // Batch-load all note entities referenced by childIds
+  const allNoteRefs = new Set();
+  for (const slug of slugs) {
+    const page = pages[slug];
+    if (!page?.childIds) continue;
+    for (const id of page.childIds) {
+      if (id.startsWith(NOTE_PREFIX)) allNoteRefs.add(id);
+    }
+  }
+  const noteMap = new Map();
+  if (allNoteRefs.size > 0) {
+    const noteKeys = [...allNoteRefs];
+    const noteEntities = await Promise.all(noteKeys.map(k => readCacheable(k)));
+    for (let i = 0; i < noteKeys.length; i++) {
+      if (noteEntities[i]) noteMap.set(noteKeys[i], noteEntities[i]);
+    }
+  }
+  // Pre-compute URL→visit-count map once (O(N)) instead of per-entry scan (O(N²))
+  let visitCountMap = null;
   for (const entry of entries) {
     const page = pages[entry.slug];
     if (!page) continue;
-    if (page.notes && page.notes.length > 0) entry.notes = page.notes;
-    if (page.childIds) entry.childIds = page.childIds;
-    // visitCount: count from historyState.allEntries
+    if (page.childIds) {
+      entry.childIds = page.childIds;
+      const noteRefs = page.childIds.filter(id => id.startsWith(NOTE_PREFIX));
+      const notes = noteRefs.map(ref => noteMap.get(ref)).filter(n => n && !n.deleted);
+      if (notes.length > 0) entry.notes = notes;
+    }
+    if (page.parentIds) entry.parentIds = page.parentIds;
     if (entry.visitCount === undefined) {
-      const count = historyState.allEntries.filter(h => h.url === entry.url).length;
-      entry.visitCount = count;
+      if (!visitCountMap) {
+        visitCountMap = new Map();
+        for (const h of historyState.allEntries) {
+          if (h.url) visitCountMap.set(h.url, (visitCountMap.get(h.url) || 0) + 1);
+        }
+      }
+      entry.visitCount = visitCountMap.get(entry.url) || 0;
     }
   }
 }
@@ -2411,20 +2441,24 @@ const PIN_SVG = '<svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c
 const DELETE_SVG = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
 
 
-function buildDetailHtml(url, attDetail, notes) {
+function buildDetailHtml(url, attDetail, notes, likes = 0) {
   let html = `<div class="detail-url"><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a></div>`;
 
-  if (attDetail) {
+  const hasMetrics = attDetail || likes > 0;
+  if (hasMetrics) {
     html += '<div class="detail-metrics">';
-    if (attDetail.timeOnPage) {
+    if (attDetail?.timeOnPage) {
       const mins = Math.round(attDetail.timeOnPage / 60000);
-      html += `<span class="detail-metric"><strong>${mins}m</strong> on page</span>`;
+      if (mins > 0) html += `<span class="detail-metric"><strong>${mins}m</strong> on page</span>`;
     }
-    if (attDetail.scrollDepth) {
+    if (attDetail?.scrollDepth) {
       html += `<span class="detail-metric"><strong>${Math.round(attDetail.scrollDepth)}%</strong> scrolled</span>`;
     }
-    if (attDetail.clicks) {
+    if (attDetail?.clicks) {
       html += `<span class="detail-metric"><strong>${attDetail.clicks}</strong> clicks</span>`;
+    }
+    if (likes > 0) {
+      html += `<span class="detail-metric"><strong>${likes}</strong> ${likes === 1 ? 'like' : 'likes'}</span>`;
     }
     html += '</div>';
   }
@@ -2508,13 +2542,9 @@ function renderExtraDetailHtml(extra, cardTimestamp) {
 
   // Page note textarea (global note = excerpt is null)
   const globalNote = extra.notes.find(n => n.excerpt === null);
-  html += `<div class="detail-section"><span class="detail-section-label">Page Note:</span>
+  html += `<div class="detail-section">
     <textarea class="detail-page-note" data-note-slug="${escapeHtml(globalNote?.slug || '')}" data-page-slug="${escapeHtml(extra.slug)}" placeholder="Add a page note...">${escapeHtml(globalNote?.note || '')}</textarea>
   </div>`;
-
-  if (extra.likes > 0) {
-    html += `<div class="detail-section"><span class="detail-section-label">Liked:</span> <strong>${extra.likes}</strong></div>`;
-  }
 
   if (extra.belongedLists.length > 0) {
     html += '<div class="detail-section"><span class="detail-section-label">Lists:</span> ';
@@ -2551,9 +2581,15 @@ function renderExtraDetailHtml(extra, cardTimestamp) {
     html += '<div class="detail-section"><span class="detail-section-label">Snapshots:</span>';
     html += `<div class="detail-snapshots" data-slug="${escapeHtml(extra.slug)}">`;
     for (const s of extra.snapshots) {
-      const date = new Date(s.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-      if (s.hasHtml) html += `<span class="detail-snapshot-item html" data-ts="${s.timestamp}">${escapeHtml(date)} (html)</span>`;
-      if (s.hasMd) html += `<span class="detail-snapshot-item md" data-ts="${s.timestamp}">${escapeHtml(date)} (md)</span>`;
+      const date = new Date(s.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      html += `<div class="detail-snapshot-row" data-ts="${s.timestamp}">`;
+      html += `<span class="detail-snapshot-time">${escapeHtml(date)}</span>`;
+      html += '<span class="detail-snapshot-badges">';
+      if (s.hasMd) html += `<span class="detail-snapshot-badge md" data-ts="${s.timestamp}">MD</span>`;
+      if (s.hasHtml) html += `<span class="detail-snapshot-badge html" data-ts="${s.timestamp}">HTML</span>`;
+      html += `<button class="detail-snapshot-delete" data-ts="${s.timestamp}" title="Delete snapshot">&times;</button>`;
+      html += '</span>';
+      html += '</div>';
     }
     html += '</div></div>';
   }
@@ -2592,13 +2628,33 @@ function bindNoteDeleteButtons(container) {
 }
 
 function bindSnapshotClickHandlers(container) {
-  container.querySelectorAll('.detail-snapshot-item').forEach(item => {
-    item.addEventListener('dblclick', async (e) => {
+  container.querySelectorAll('.detail-snapshot-row').forEach(row => {
+    row.addEventListener('dblclick', async (e) => {
       e.stopPropagation();
-      const slug = item.closest('.detail-snapshots')?.dataset.slug;
-      const ts = parseInt(item.dataset.ts, 10);
+      const slug = row.closest('.detail-snapshots')?.dataset.slug;
+      const ts = parseInt(row.dataset.ts, 10);
       if (!slug || !ts) return;
       await chrome.runtime.sendMessage({ action: 'openSnapshot', slug, timestamp: ts });
+    });
+  });
+  container.querySelectorAll('.detail-snapshot-delete').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const row = btn.closest('.detail-snapshot-row');
+      const section = btn.closest('.detail-snapshots');
+      const slug = section?.dataset.slug;
+      const ts = parseInt(btn.dataset.ts, 10);
+      if (!slug || !ts) return;
+      try {
+        await chrome.runtime.sendMessage({ action: 'deleteSnapshot', slug, timestamp: ts });
+      } catch (err) {
+        logError('Delete snapshot error:', err);
+        return;
+      }
+      row.remove();
+      if (section && section.querySelectorAll('.detail-snapshot-row').length === 0) {
+        section.closest('.detail-section')?.remove();
+      }
     });
   });
 }
@@ -2787,6 +2843,9 @@ function openPageDetailCard(url, title, attDetail = null, cardTimestamp = null) 
     <div class="page-detail-body"><div class="page-detail-loading"><span class="spinner"></span></div></div>
   `;
   card.querySelector('.page-detail-close').addEventListener('click', closePageDetailCard);
+  card.querySelector('.page-detail-title').addEventListener('click', () => {
+    startEditingDetailTitle(card, url);
+  });
   overlay.appendChild(card);
   document.body.appendChild(overlay);
   // Allow one frame for backdrop-filter compositing before fading in
@@ -2798,7 +2857,7 @@ function openPageDetailCard(url, title, attDetail = null, cardTimestamp = null) 
   } else {
     loadExtraDetail(url).then(extra => {
       const body = card.querySelector('.page-detail-body');
-      let html = buildDetailHtml(url, attDetail, []);
+      let html = buildDetailHtml(url, attDetail, [], extra.likes || 0);
       const extraHtml = renderExtraDetailHtml(extra, cardTimestamp);
       body.innerHTML = html + (extraHtml ? `<div class="detail-extra">${extraHtml}</div>` : '');
       bindNoteDeleteButtons(body);
@@ -2813,6 +2872,47 @@ function openPageDetailCard(url, title, attDetail = null, cardTimestamp = null) 
   const onEsc = (e) => { if (e.key === 'Escape') closePageDetailCard(); };
   overlay._escHandler = onEsc;
   document.addEventListener('keydown', onEsc);
+}
+
+function startEditingDetailTitle(card, url) {
+  const titleEl = card.querySelector('.page-detail-title');
+  if (!titleEl || titleEl.tagName === 'INPUT') return;
+  const currentTitle = titleEl.textContent;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'page-detail-title-input';
+  input.value = currentTitle;
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  async function saveTitle() {
+    const newTitle = input.value.trim() || currentTitle;
+    const newTitleEl = document.createElement('div');
+    newTitleEl.className = 'page-detail-title';
+    newTitleEl.textContent = newTitle;
+    newTitleEl.addEventListener('click', () => startEditingDetailTitle(card, url));
+    input.replaceWith(newTitleEl);
+
+    if (newTitle !== currentTitle) {
+      try {
+        await sendAction({ action: 'reportPage', url, user_title: newTitle });
+      } catch (err) {
+        logError('[options] Failed to save user title:', err);
+      }
+    }
+  }
+
+  input.addEventListener('blur', saveTitle);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      input.blur();
+    } else if (e.key === 'Escape') {
+      input.value = currentTitle;
+      input.blur();
+    }
+  });
 }
 
 function closePageDetailCard() {
@@ -2953,6 +3053,7 @@ function enterTitleEditMode(prefill, onConfirm, onCancel) {
 function updateSidebarActive() {
   document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
   document.getElementById('exploreBtn').classList.remove('active');
+  document.getElementById('recycleBinBtn').classList.remove('active');
 
   if (activeView.type === 'category') {
     const el = document.querySelector(`.sidebar-item[data-category="${activeView.value}"]`);
@@ -3063,7 +3164,8 @@ function createSidebarItemDOM(node, depth) {
   item.setAttribute('role', 'button');
   item.tabIndex = 0;
   item.dataset.listId = node.slug;
-  item.style.paddingLeft = (20 + depth * 16) + 'px';
+  const inset = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-item-inset')) || 10;
+  item.style.paddingLeft = (inset + depth * 16) + 'px';
 
   const hasChildren = node.children.length > 0;
   const expanded = listFoldState[node.slug] !== false;
@@ -3459,48 +3561,41 @@ document.getElementById('settingsModal').addEventListener('click', (e) => {
   }
 });
 
+
 // --- Settings: Storage ---
 async function updateStorageStatus() {
   const resp = await sendAction({ action: 'getDirectoryInfo' });
   const info = resp.info;
 
-  const locationDiv = document.getElementById('storageLocation');
-  const statusSpan = document.getElementById('storageStatus');
-  const pathContainer = document.getElementById('storagePathContainer');
-  const pathSpan = document.getElementById('storagePath');
+  const row = document.getElementById('storageLocation');
+  const pathEl = document.getElementById('storagePath');
+  const sizeEl = document.getElementById('storageSize');
   const selectBtn = document.getElementById('selectDirBtn');
   const changeBtn = document.getElementById('changeDirBtn');
 
   if (info && info.hasPermission) {
-    locationDiv.className = 'storage-location';
-    statusSpan.textContent = 'Connected';
-    statusSpan.style.color = '#137333';
-    pathContainer.style.display = 'block';
-    pathSpan.textContent = info.name + '/';
+    row.classList.remove('not-configured');
+    pathEl.textContent = info.name + '/';
+    sizeEl.textContent = '...';
     selectBtn.style.display = 'none';
     changeBtn.style.display = 'inline-block';
+    sendAction({ action: 'getDirectorySize' }).then(r => {
+      if (r?.success) sizeEl.textContent = formatBytes(r.size);
+    });
   } else {
-    locationDiv.className = 'storage-location not-configured';
-    statusSpan.textContent = 'Not configured - please select a directory';
-    statusSpan.style.color = '#c5221f';
-    pathContainer.style.display = 'none';
+    row.classList.add('not-configured');
+    pathEl.textContent = 'Not configured';
+    sizeEl.textContent = '';
     selectBtn.style.display = 'inline-block';
     changeBtn.style.display = 'none';
   }
 }
 
 async function updateStatistics() {
-  const allPages = Array.from(historyState.byUrl.values());
-  document.getElementById('totalHistory').textContent = allPages.length;
-
-  const today = new Date().setHours(0, 0, 0, 0);
-  const todayCount = allPages.filter(i => i.timestamp >= today).length;
-  document.getElementById('todayHistory').textContent = todayCount;
-
   const result = await chrome.storage.local.get(['logBuffer']);
   document.getElementById('bufferSize').textContent = (result.logBuffer || []).length;
 
-  updateCacheTable();
+  updateCacheSize();
 }
 
 function formatBytes(bytes) {
@@ -3520,26 +3615,20 @@ const LOCAL_CACHE_KEYS = [
 ];
 const CACHE_KEYS = [...SESSION_CACHE_KEYS, ...LOCAL_CACHE_KEYS];
 
-async function updateCacheTable() {
+async function updateCacheSize() {
   const [sessionData, localData] = await Promise.all([
     chrome.storage.session.get(SESSION_CACHE_KEYS.map(c => c.key)),
     chrome.storage.local.get(LOCAL_CACHE_KEYS.map(c => c.key)),
   ]);
   const data = { ...sessionData, ...localData };
-  const tbody = document.getElementById('cacheTableBody');
 
   let totalBytes = 0;
-  let rows = '';
-
-  for (const { key, label } of CACHE_KEYS) {
+  for (const { key } of CACHE_KEYS) {
     const val = data[key];
-    const size = val !== undefined ? new Blob([JSON.stringify(val)]).size : 0;
-    totalBytes += size;
-    rows += `<tr><td>${label}</td><td class="cache-size">${formatBytes(size)}</td></tr>`;
+    if (val !== undefined) totalBytes += new Blob([JSON.stringify(val)]).size;
   }
 
-  rows += `<tr class="cache-total"><td>Total</td><td class="cache-size">${formatBytes(totalBytes)}</td></tr>`;
-  tbody.innerHTML = rows;
+  document.getElementById('cacheSize').textContent = formatBytes(totalBytes);
 }
 
 document.getElementById('flushBufferBtn').addEventListener('click', async () => {
@@ -3586,7 +3675,7 @@ document.getElementById('clearCacheBtn').addEventListener('click', async () => {
 
   btn.disabled = false;
   btn.textContent = 'Clear Cache & Reload';
-  updateCacheTable();
+  updateCacheSize();
 });
 
 // Select directory
@@ -3654,12 +3743,25 @@ document.getElementById('themeSelect').addEventListener('change', async () => {
   await applyTheme();
 });
 
-document.getElementById('relatedPagesLimit').addEventListener('change', async () => {
-  const val = parseInt(document.getElementById('relatedPagesLimit').value) || 50;
-  relatedPagesLimit = Math.max(1, val);
-  document.getElementById('relatedPagesLimit').value = relatedPagesLimit;
-  await saveSettingsValue('relatedPagesLimit', relatedPagesLimit);
-  showStatus('Settings saved', 'success');
+// Color scheme picker
+function applyColorScheme(scheme) {
+  if (scheme && scheme !== 'amber') {
+    document.documentElement.setAttribute('data-color-scheme', scheme);
+  } else {
+    document.documentElement.removeAttribute('data-color-scheme');
+  }
+  document.querySelectorAll('.color-dot').forEach(d => {
+    d.classList.toggle('active', d.dataset.scheme === scheme);
+  });
+}
+
+document.getElementById('colorSchemePicker').addEventListener('click', async (e) => {
+  const dot = e.target.closest('.color-dot');
+  if (!dot) return;
+  const scheme = dot.dataset.scheme;
+  applyColorScheme(scheme);
+  await chrome.storage.session.set({ colorScheme: scheme });
+  await saveSettingsValue('colorScheme', scheme);
 });
 
 document.getElementById('historyFileBatch').addEventListener('change', async () => {
@@ -3681,10 +3783,30 @@ document.getElementById('debugLoggingToggle').addEventListener('change', async (
   await chrome.storage.session.set({ debugLogging: enabled });
 });
 
+// Addon toggle helpers
+function setAddonOpen(bodyEl, open) {
+  if (open) bodyEl.classList.add('open');
+  else bodyEl.classList.remove('open');
+}
+
 // Sync settings
 document.getElementById('syncEnabled').addEventListener('change', () => {
-  document.getElementById('syncConfigFields').style.display =
-    document.getElementById('syncEnabled').checked ? 'block' : 'none';
+  setAddonOpen(document.getElementById('syncConfigFields'),
+    document.getElementById('syncEnabled').checked);
+});
+
+// Excluded Sites toggle
+document.getElementById('blacklistEnabled').addEventListener('change', async () => {
+  const enabled = document.getElementById('blacklistEnabled').checked;
+  setAddonOpen(document.getElementById('blacklistBody'), enabled);
+  await saveSettingsValue('blacklistEnabled', enabled);
+});
+
+// Title Cleanup toggle
+document.getElementById('titleCleanupEnabled').addEventListener('change', async () => {
+  const enabled = document.getElementById('titleCleanupEnabled').checked;
+  setAddonOpen(document.getElementById('titleCleanupBody'), enabled);
+  await saveSettingsValue('titleCleanupEnabled', enabled);
 });
 
 function syncShowMethodFields(method) {
@@ -3702,11 +3824,24 @@ document.getElementById('selectSyncDirBtn').addEventListener('click', async () =
     const result = await fsSyncStorage.selectSyncDirectory();
     if (result.success) {
       document.getElementById('syncFolderLabel').textContent = result.name;
+      document.getElementById('clearSyncDirBtn').style.display = '';
       await saveSettingsValue('syncFolderName', result.name);
     }
   } catch (e) {
     if (e.name !== 'AbortError') showStatus('Failed to select folder: ' + e.message, 'error');
   }
+});
+
+document.getElementById('clearSyncDirBtn').addEventListener('click', async () => {
+  await sendAction({ action: 'clearSyncFolder' });
+  await saveSettingsValue('syncFolderName', '');
+  await saveSettingsValue('syncEnabled', false);
+  document.getElementById('syncEnabled').checked = false;
+  setAddonOpen(document.getElementById('syncConfigFields'), false);
+  document.getElementById('syncFolderLabel').textContent = '';
+  document.getElementById('clearSyncDirBtn').style.display = 'none';
+  document.getElementById('syncDevicesSection').style.display = 'none';
+  document.getElementById('syncStatus').textContent = '';
 });
 
 // Save current sync settings from form fields. Returns false if validation fails.
@@ -3745,9 +3880,11 @@ async function saveSyncSettings() {
 
 document.getElementById('syncNowBtn').addEventListener('click', async () => {
   const btn = document.getElementById('syncNowBtn');
+  const cancelBtn = document.getElementById('syncCancelBtn');
   const statusEl = document.getElementById('syncStatus');
   btn.disabled = true;
   btn.textContent = 'Syncing\u2026';
+  cancelBtn.style.display = '';
   statusEl.textContent = '';
   try {
     if (!(await saveSyncSettings())) {
@@ -3788,7 +3925,17 @@ document.getElementById('syncNowBtn').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
     btn.textContent = 'Sync Now';
+    cancelBtn.style.display = 'none';
   }
+});
+
+document.getElementById('syncCancelBtn').addEventListener('click', async () => {
+  const cancelBtn = document.getElementById('syncCancelBtn');
+  cancelBtn.disabled = true;
+  cancelBtn.textContent = 'Cancelling\u2026';
+  try {
+    await sendAction({ action: 'cancelSync' });
+  } catch { /* best-effort */ }
 });
 
 // ─── Synced Devices List ─────────────────────────────────────────────
@@ -3909,12 +4056,23 @@ document.getElementById('syncPatSaveBtn').addEventListener('click', async () => 
 document.getElementById('syncDisconnectBtn').addEventListener('click', async () => {
   await sendAction({ action: 'clearSyncToken' });
   syncShowAuthState('disconnected');
+  document.getElementById('syncDevicesSection').style.display = 'none';
+  document.getElementById('syncDevicesList').innerHTML = '';
   showStatus('Disconnected. <a href="https://github.com/settings/tokens" target="_blank" style="color:#1a73e8;">Manage tokens on GitHub</a>', 'success');
 });
 
 document.getElementById('syncRememberToken').addEventListener('change', async () => {
   const remember = document.getElementById('syncRememberToken').checked;
   await sendAction({ action: 'toggleSyncRemember', remember });
+});
+
+document.getElementById('syncCheckDevicesBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('syncCheckDevicesBtn');
+  btn.disabled = true;
+  btn.textContent = 'Checking...';
+  await refreshSyncDevices();
+  btn.textContent = 'Check Devices';
+  btn.disabled = false;
 });
 
 // Clear all data
@@ -3945,13 +4103,13 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
 
     for await (const entry of fsStorage.directoryHandle.values()) {
       if (entry.kind === 'file' && (entry.name.endsWith('.jsonl') || entry.name === 'README.md')) {
-        await fsStorage.softDelete(fsStorage.directoryHandle, entry.name);
+        await fsStorage.removeFile(fsStorage.directoryHandle, entry.name);
         deletedCount++;
       }
     }
 
     try {
-      await fsStorage.softDelete(fsStorage.directoryHandle, 'pages', { recursive: true });
+      await fsStorage.removeFile(fsStorage.directoryHandle, 'pages', { recursive: true });
       deletedCount++;
     } catch (error) {}
 
@@ -3975,7 +4133,40 @@ function showStatus(message, type) {
   setTimeout(() => { status.className = 'status'; }, 5000);
 }
 
+// --- Hint tooltips ---
+{
+  const float = document.getElementById('hintTipFloat');
+  document.addEventListener('mouseenter', (e) => {
+    const hint = e.target.closest('.hint-icon');
+    if (!hint) return;
+    const tip = hint.querySelector('.hint-tip');
+    if (!tip) return;
+    float.textContent = tip.textContent;
+    float.style.display = 'block';
+    float.style.visibility = 'hidden';
+    const r = hint.getBoundingClientRect();
+    let left = r.right + 6;
+    let top = r.top + r.height / 2 - float.offsetHeight / 2;
+    if (left + float.offsetWidth > window.innerWidth - 8) {
+      left = r.left - float.offsetWidth - 6;
+    }
+    top = Math.max(4, Math.min(top, window.innerHeight - float.offsetHeight - 4));
+    float.style.left = left + 'px';
+    float.style.top = top + 'px';
+    float.style.visibility = 'visible';
+  }, true);
+  document.addEventListener('mouseleave', (e) => {
+    if (e.target.closest('.hint-icon')) float.style.display = 'none';
+  }, true);
+}
+
 // --- Import Bookmarks ---
+document.getElementById('bookmarkImportBtn').addEventListener('click', () => {
+  document.getElementById('bookmarkImportPanel').style.display = 'block';
+});
+document.getElementById('bookmarkImportCancelBtn').addEventListener('click', () => {
+  document.getElementById('bookmarkImportPanel').style.display = 'none';
+});
 {
   const fileInput = document.getElementById('bookmarkFileInput');
   const treeContainer = document.getElementById('bookmarkTreeContainer');
@@ -4359,17 +4550,22 @@ chrome.runtime.onMessage.addListener((request) => {
     mutationRefreshTimer = setTimeout(async () => {
       const todayEntries = await readCacheable('log:' + new Date().toISOString().slice(0, 10)) || [];
       const historyBuffer = todayEntries.filter(e => (e.action === 'visit_page' || e.action === 'leave_page' || !e.action) && e.url);
+      // Only process entries newer than what we've already ingested
+      const watermark = historyState._mutationWatermark || 0;
+      let maxTs = watermark;
       let changed = false;
       for (const entry of historyBuffer) {
+        if (entry.timestamp <= watermark) continue;
+        if (entry.timestamp > maxTs) maxTs = entry.timestamp;
         const existing = historyState.byUrl.get(entry.url);
         const { entry: merged, updated } = mergeHistoryEntry(entry, existing);
         if (updated) {
           historyState.byUrl.set(entry.url, merged);
           changed = true;
         }
-        // Always push to allEntries for date-boundary rendering
         historyState.allEntries.push(entry);
       }
+      historyState._mutationWatermark = maxTs;
       if (changed) {
         if (activeView.type === 'explore' || activeView.type === 'list') {
           runSearchFilterPipeline();
@@ -4424,7 +4620,8 @@ document.addEventListener('visibilitychange', async () => {
   try {
     const filesResp = await sendAction({ action: 'listHistoryFiles' });
     const allFiles = filesResp.files;
-    const newFiles = allFiles.filter(f => !historyState.files.includes(f));
+    const existingFiles = new Set(historyState.files);
+    const newFiles = allFiles.filter(f => !existingFiles.has(f));
     if (newFiles.length > 0) {
       historyState.files = allFiles;
       const batchResp = await sendAction({ action: 'loadHistoryBatch', files: newFiles });
@@ -4462,14 +4659,14 @@ async function renderSearchPanel() {
     html += '<div class="search-rows" id="searchRows">';
     for (let i = 0; i < savedSearches.length; i++) {
       html += `<div class="search-row" data-index="${i}">`;
-      html += `<input type="text" class="search-row-input" value="${escapeHtml(savedSearches[i])}" data-index="${i}">`;
+      html += `<input type="text" class="search-row-input" data-index="${i}">`;
       html += `<button class="search-row-remove" data-index="${i}" title="Remove">${removeSvg}</button>`;
       html += `</div>`;
     }
     html += '</div>';
   }
   html += '<div class="search-draft">';
-  html += `<input type="text" class="search-draft-input" id="searchDraftInput" placeholder="${placeholder}" value="${escapeHtml(currentSearchInput)}">`;
+  html += `<input type="text" class="search-draft-input" id="searchDraftInput" placeholder="${placeholder}">`;
   html += `<button class="filter-toggle-btn${filterVisible ? ' active' : ''}${!isDefaultFilterState(filterState) ? ' has-filters' : ''}" id="filterToggleBtn" title="Filters">${filterSvg}</button>`;
   html += '</div>';
 
@@ -4480,11 +4677,20 @@ async function renderSearchPanel() {
   html += '</div>';
 
   container.innerHTML = html;
+  // Set input values via DOM property (not HTML attribute) to avoid
+  // escaping issues with quotes and Chrome backdrop-filter paint bugs.
+  container.querySelectorAll('.search-row-input').forEach(input => {
+    const idx = parseInt(input.dataset.index);
+    if (savedSearches[idx] != null) input.value = savedSearches[idx];
+  });
+  const draftEl = container.querySelector('#searchDraftInput');
+  if (draftEl && currentSearchInput) draftEl.value = currentSearchInput;
   bindSearchEvents(container);
   if (filterVisible) bindFilterEvents(container);
 }
 
 async function renderFilterPanelHtml() {
+  await listsReadyPromise;
   let html = '';
   const isListView = activeView.type === 'list';
 
@@ -4506,18 +4712,6 @@ async function renderFilterPanelHtml() {
     html += '</div></div>';
   }
 
-  // List membership bubbles
-  const lists = await collectFilterLists();
-  if (lists.length > 0) {
-    html += '<div class="filter-section"><div class="filter-section-label">Lists</div>';
-    html += '<div class="filter-bubbles">';
-    for (const { slug, name } of lists) {
-      const active = filterState.lists?.[slug] === true;
-      html += `<button class="filter-bubble${active ? ' active' : ''}" data-list-slug="${escapeHtml(slug)}">${escapeHtml(name)}</button>`;
-    }
-    html += '</div></div>';
-  }
-
   // Device bubbles
   const deviceIds = [...new Set(historyState.allEntries.map(e => e.deviceId).filter(Boolean))].sort();
   if (deviceIds.length > 1) {
@@ -4526,6 +4720,17 @@ async function renderFilterPanelHtml() {
     for (const did of deviceIds) {
       const active = filterState.devices?.[did] === true;
       html += `<button class="filter-bubble${active ? ' active' : ''}" data-device-id="${escapeHtml(did)}">${escapeHtml(did)}</button>`;
+    }
+    html += '</div></div>';
+  }
+
+  // List bubbles (explore view only, when lists exist)
+  if (!isListView && listNameById.size > 0) {
+    html += '<div class="filter-section"><div class="filter-section-label">Lists</div>';
+    html += '<div class="filter-bubbles">';
+    for (const [slug, name] of listNameById) {
+      const active = filterState.lists?.[slug] === true;
+      html += `<button class="filter-bubble${active ? ' active' : ''}" data-list-slug="${escapeHtml(slug)}">${escapeHtml(name)}</button>`;
     }
     html += '</div></div>';
   }
@@ -4540,60 +4745,14 @@ async function renderFilterPanelHtml() {
   html += '<div class="filter-section"><div class="filter-section-label">Page properties</div>';
   html += '<div class="filter-checkboxes">';
   html += renderCheckboxFilter('hasHighlights', 'Has highlights', filterState.hasHighlights);
+  html += renderCheckboxFilter('hasSnapshots', 'Has snapshots', filterState.hasSnapshots);
+  html += renderCheckboxFilter('liked', 'Liked', filterState.liked);
   html += renderCheckboxFilter('visitedMultipleTimes', 'Visited multiple times', filterState.visitedMultipleTimes);
-  html += renderCheckboxFilter('hasChildren', 'Has child pages', filterState.hasChildren);
   html += '</div>';
   html += '</div>';
 
-  // Attention range
-  html += '<div class="filter-section"><div class="filter-section-label">Attention</div>';
-  html += renderDualRangeFilter('attentionRange', 'Time on page', filterState.attentionRange, 'timeOnPage');
-  html += '</div>';
 
   return html;
-}
-
-// Collect list names for filter bubbles. In list context, exclude the current list.
-async function collectFilterLists() {
-  const tree = await loadListTree();
-  const lists = [];
-  function walk(nodes) {
-    for (const node of nodes) {
-      lists.push({ slug: node.slug, name: node.name });
-      if (node.children) walk(node.children);
-    }
-  }
-  walk(tree);
-  // In list view, exclude the active list
-  if (activeView.type === 'list') {
-    return lists.filter(l => l.slug !== activeView.id);
-  }
-  return lists;
-}
-
-// Build reverse index: slug → Set of list slugs.
-// Loads all list entities to get pins (allListPins may not have them all).
-async function buildListMembershipIndex() {
-  const index = new Map(); // slug → Set<listSlug>
-  const lists = await collectFilterLists();
-  // Load entities for any lists not already in allListPins
-  const toLoad = lists.filter(l => !allListPins[l.slug]);
-  if (toLoad.length > 0) {
-    const loaded = await Promise.all(toLoad.map(l => readCacheable(listKey(l.slug))));
-    for (let i = 0; i < toLoad.length; i++) {
-      if (loaded[i]?.pins) allListPins[toLoad[i].slug] = loaded[i].pins;
-    }
-  }
-  for (const { slug: listSlug } of lists) {
-    const pins = allListPins[listSlug] || [];
-    for (const pin of pins) {
-      const slug = slugFromPinId(pin.id);
-      if (!slug) continue;
-      if (!index.has(slug)) index.set(slug, new Set());
-      index.get(slug).add(listSlug);
-    }
-  }
-  return index;
 }
 
 function renderDualRangeFilter(stateKey, label, state, rangeField) {
@@ -4762,27 +4921,27 @@ function bindFilterEvents(container) {
     });
   });
 
-  // List bubble toggles — default off (show all); click to enable (restrict to enabled lists)
+  // Filter bubble toggles
   container.querySelectorAll('.filter-bubble').forEach(btn => {
     btn.addEventListener('click', () => {
-      const slug = btn.dataset.listSlug;
       const deviceId = btn.dataset.deviceId;
-      if (slug) {
-        if (!filterState.lists) filterState.lists = {};
-        if (filterState.lists[slug] === true) {
-          delete filterState.lists[slug];
-          btn.classList.remove('active');
-        } else {
-          filterState.lists[slug] = true;
-          btn.classList.add('active');
-        }
-      } else if (deviceId) {
+      const listSlug = btn.dataset.listSlug;
+      if (deviceId) {
         if (!filterState.devices) filterState.devices = {};
         if (filterState.devices[deviceId] === true) {
           delete filterState.devices[deviceId];
           btn.classList.remove('active');
         } else {
           filterState.devices[deviceId] = true;
+          btn.classList.add('active');
+        }
+      } else if (listSlug) {
+        if (!filterState.lists) filterState.lists = {};
+        if (filterState.lists[listSlug] === true) {
+          delete filterState.lists[listSlug];
+          btn.classList.remove('active');
+        } else {
+          filterState.lists[listSlug] = true;
           btn.classList.add('active');
         }
       }
@@ -4795,8 +4954,119 @@ function bindFilterEvents(container) {
 }
 
 
+// Entity-scan filter: scan page checkpoints instead of all history JSONL files.
+// Page entities contain materialized state (childIds, visitDates, timestamps, etc.)
+// sufficient to answer all filters without loading raw event logs.
+async function runEntityScanFilter(pinnedSlugs) {
+  showSearchSpinner();
+  const resp = await chrome.runtime.sendMessage({ action: 'loadAllPages' });
+  if (!resp?.success || !resp.pages) {
+    hideSearchSpinner();
+    return null;
+  }
+
+  const pages = resp.pages;
+  const slugs = Object.keys(pages);
+
+  // Batch-load note entities for hasHighlights check
+  const allNoteRefs = new Set();
+  for (const slug of slugs) {
+    const page = pages[slug];
+    if (!page?.childIds) continue;
+    for (const id of page.childIds) {
+      if (id.startsWith(NOTE_PREFIX)) allNoteRefs.add(id);
+    }
+  }
+  const noteMap = new Map();
+  if (allNoteRefs.size > 0) {
+    const noteKeys = [...allNoteRefs];
+    const noteEntities = await Promise.all(noteKeys.map(k => readCacheable(k)));
+    for (let i = 0; i < noteKeys.length; i++) {
+      if (noteEntities[i]) noteMap.set(noteKeys[i], noteEntities[i]);
+    }
+  }
+
+  // Build display rows from page entities
+  const now = Date.now();
+  const seenUrls = new Set();
+  const results = [];
+
+  for (const slug of slugs) {
+    const page = pages[slug];
+    if (!page?.url || pinnedSlugs.has(slug)) continue;
+    if (seenUrls.has(page.url)) continue;
+    seenUrls.add(page.url);
+
+    const timestamps = page.timestamps || {};
+    const deviceTimestamps = Object.values(timestamps);
+    const latestTs = deviceTimestamps.length > 0 ? Math.max(...deviceTimestamps) : (page.createdAt || now);
+
+    const d = new Date(latestTs);
+    const day = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+
+    const noteRefs = (page.childIds || []).filter(id => id.startsWith(NOTE_PREFIX));
+    const notes = noteRefs.map(ref => noteMap.get(ref)).filter(n => n && !n.deleted);
+
+    results.push({
+      url: page.url,
+      title: page.title || '',
+      user_title: page.user_title,
+      slug,
+      timestamp: latestTs,
+      day,
+      attScore: attentionStrength(page),
+      attDetail: page,
+      notes,
+      timestamps: deviceTimestamps.length > 0 ? deviceTimestamps.sort((a, b) => b - a) : [latestTs],
+      latestTs,
+      deviceIds: new Set(Object.keys(timestamps)),
+      childIds: page.childIds,
+      parentIds: page.parentIds,
+      likes: page.likes,
+      createdAt: page.createdAt,
+      hasHighlightNotes: noteRefs.some(ref => {
+        const note = noteMap.get(ref);
+        return note && note.excerpt !== null && !note.deleted;
+      }),
+      visitCount: page.visitDates?.length || 1,
+      firstTimestamp: page.createdAt || latestTs,
+      timeOnPage: page.timeOnPage || 0,
+      relevance: 0,
+    });
+  }
+
+  // Merge pages from logBuffer / already-loaded history that may not be on disk yet
+  for (const item of historyState.allEntries) {
+    if (!item.url) continue;
+    const slug = item.slug || generateSlugFromUrl(item.url);
+    if (pinnedSlugs.has(slug) || seenUrls.has(item.url)) continue;
+    seenUrls.add(item.url);
+    const deviceIds = new Set();
+    if (item.deviceId) deviceIds.add(item.deviceId);
+    results.push({
+      url: item.url,
+      title: item.title || '',
+      user_title: item.user_title,
+      slug,
+      timestamp: item.timestamp,
+      day: (() => { const d = new Date(item.timestamp); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); })(),
+      attScore: attentionStrength(item),
+      attDetail: item,
+      notes: [],
+      timestamps: [item.timestamp],
+      latestTs: item.timestamp,
+      deviceIds,
+      relevance: 0,
+    });
+  }
+
+  hideSearchSpinner();
+  return results;
+}
+
 async function runSearchFilterPipeline() {
   if (activeView.type !== 'explore') return;
+  cardDataByUrl.clear();
 
   const pinnedSlugs = new Set();
 
@@ -4812,17 +5082,35 @@ async function runSearchFilterPipeline() {
   }
 
   // No search queries → show all history (demand-loaded)
-  let results = processHistoryForDisplay(
-    historyState.allEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
-  ).map(item => ({ ...item, relevance: 0 }));
-
   const hasActiveFilters = !isDefaultFilterState(filterState);
+
+  let results;
+  let entityScanUsed = false;
   if (hasActiveFilters) {
-    // Filters depend on enriched data — must await
-    await enrichFromEntityStorage(results);
-    await enrichForFilters(results);
+    // Entity-scan shortcut: scan page checkpoints instead of loading all JSONL files.
+    results = await runEntityScanFilter(pinnedSlugs);
+    if (results !== null) {
+      entityScanUsed = true;
+    } else {
+      // Fallback: load all JSONL batches (e.g. filesystem not available)
+      showSearchSpinner();
+      while (historyState.loadedCount < historyState.files.length) {
+        await loadHistoryBatch();
+        await new Promise(r => setTimeout(r, 0));
+      }
+      results = processHistoryForDisplay(
+        historyState.allEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
+      ).map(item => ({ ...item, relevance: 0 }));
+      await enrichFromEntityStorage(results);
+      await enrichForFilters(results);
+    }
+    results = await applyFilters(results);
+    hideSearchSpinner();
+  } else {
+    results = processHistoryForDisplay(
+      historyState.allEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
+    ).map(item => ({ ...item, relevance: 0 }));
   }
-  results = await applyFilters(results);
 
   const relatedContainer = document.getElementById('relatedResults');
   if (results.length === 0) {
@@ -4850,18 +5138,36 @@ async function runSearchFilterPipeline() {
     enrichFromEntityStorage(results).then(() => vs.refreshVisible());
   }
 
-  // Demand-load more history when scrolling (for all-history mode)
-  vs.onLoadMore = async () => {
-    const newItems = await loadHistoryBatch();
-    if (newItems.length > 0) {
+  // Demand-load more history when scrolling (for all-history mode).
+  // Skip when entity scan was used — all matching pages are already loaded.
+  vs.onLoadMore = entityScanUsed ? null : async () => {
+    const hasActiveFilters = !isDefaultFilterState(filterState);
+    if (hasActiveFilters) showSearchSpinner();
+    let loaded = false;
+    do {
+      const newItems = await loadHistoryBatch();
+      if (newItems.length === 0) break;
+      loaded = true;
+      if (hasActiveFilters) await new Promise(r => setTimeout(r, 0));
       const filtered = newItems.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)));
-      const newResults = processHistoryForDisplay(filtered).map(item => ({ ...item, relevance: 0 }));
+      let newResults = processHistoryForDisplay(filtered).map(item => ({ ...item, relevance: 0 }));
       if (newResults.length > 0) {
-        const sort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
-        vs.appendData(applySortOrder(newResults, sort));
-        enrichFromEntityStorage(newResults).then(() => vs.refreshVisible());
+        if (hasActiveFilters) {
+          await enrichFromEntityStorage(newResults);
+          await enrichForFilters(newResults);
+          newResults = await applyFilters(newResults);
+        }
+        if (newResults.length > 0) {
+          const sort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
+          vs.appendData(applySortOrder(newResults, sort));
+          if (!hasActiveFilters) {
+            enrichFromEntityStorage(newResults).then(() => vs.refreshVisible());
+          }
+          loaded = false;
+        }
       }
-    }
+    } while (hasActiveFilters && loaded && historyState.loadedCount < historyState.files.length);
+    if (hasActiveFilters) hideSearchSpinner();
   };
 
   // Time chart for explore results (with estimated bars for unloaded files)
@@ -5136,45 +5442,46 @@ function showOnboarding() {
 
   const dirBtn = document.getElementById('onboardingDirBtn');
   const dirStatus = document.getElementById('onboardingDirStatus');
-  const optionalSection = document.getElementById('onboardingOptional');
+  const colorsSection = document.getElementById('onboardingColors');
   const startBtn = document.getElementById('onboardingStartBtn');
+  let selectedScheme = 'amber';
 
   dirBtn.addEventListener('click', async () => {
     const result = await fsStorage.selectDirectory();
     if (result.success) {
       dirStatus.textContent = result.name;
-      optionalSection.style.display = 'block';
+      colorsSection.style.display = 'block';
       startBtn.disabled = false;
     }
-    // On cancel (AbortError): stay on same screen, button available
+  });
+
+  document.getElementById('onboardingColorPicker').addEventListener('click', (e) => {
+    const dot = e.target.closest('.color-dot');
+    if (!dot) return;
+    selectedScheme = dot.dataset.scheme;
+    applyColorScheme(selectedScheme);
+    el.querySelectorAll('.color-dot').forEach(d => {
+      d.classList.toggle('active', d.dataset.scheme === selectedScheme);
+    });
   });
 
   startBtn.addEventListener('click', async () => {
     startBtn.disabled = true;
     startBtn.textContent = 'Setting up...';
 
-    // Initialize filesystem + optional device name (writes CURRENT, re-hydrates)
-    const deviceName = document.getElementById('onboardingDeviceName').value.trim();
-    const initMsg = { action: 'initializeFilesystem' };
-    if (deviceName) initMsg.deviceName = deviceName;
-    await sendAction(initMsg);
+    await sendAction({ action: 'initializeFilesystem' });
 
-    // Save optional sync settings (after init so settings.json exists)
-    const syncRepo = document.getElementById('onboardingSyncRepo').value.trim();
-    const syncToken = document.getElementById('onboardingSyncToken').value.trim();
-    if (syncRepo) {
-      await saveSettingsValue('syncEnabled', true);
-      await saveSettingsValue('syncRepoUrl', syncRepo);
-      if (syncToken) {
-        await sendAction({ action: 'setSyncToken', token: syncToken, method: 'pat' });
-      }
-    }
+    // Persist chosen color scheme
+    await chrome.storage.session.set({ colorScheme: selectedScheme });
+    await saveSettingsValue('colorScheme', selectedScheme);
 
-    // Hide onboarding, show normal UI, run full init
-    el.style.display = 'none';
-    document.querySelector('.sidebar').style.display = '';
-
-    await initializeMain();
+    // Fade out onboarding, then show main UI
+    el.classList.add('fade-out');
+    el.addEventListener('transitionend', async () => {
+      el.style.display = 'none';
+      document.querySelector('.sidebar').style.display = '';
+      await initializeMain();
+    }, { once: true });
   });
 }
 
@@ -5219,16 +5526,36 @@ async function initializeMain(currentTheme) {
   // Theme select — reflects current value from applyTheme()
   document.getElementById('themeSelect').value = currentTheme;
 
+  // Color scheme
+  const savedScheme = await loadSettingsValue('colorScheme', 'amber');
+  applyColorScheme(savedScheme);
+  await chrome.storage.session.set({ colorScheme: savedScheme });
+
   // Load settings from filesystem
-  relatedPagesLimit = await loadSettingsValue('relatedPagesLimit', 50);
-  document.getElementById('relatedPagesLimit').value = relatedPagesLimit;
   historyState.fileBatch = await loadSettingsValue('historyFileBatch', 10);
   document.getElementById('historyFileBatch').value = historyState.fileBatch;
   document.getElementById('captureSnapshotVideo').checked = await loadSettingsValue('captureSnapshotVideo', false);
+
+  // Addon toggles — infer enabled state from existing data when the toggle key is new
+  const blacklistEnabledRaw = await loadSettingsValue('blacklistEnabled', null);
+  const blacklistEnabled = blacklistEnabledRaw !== null
+    ? blacklistEnabledRaw
+    : (await loadSettingsValue('urlBlacklist', null)) !== null || true;
+  document.getElementById('blacklistEnabled').checked = blacklistEnabled;
+  setAddonOpen(document.getElementById('blacklistBody'), blacklistEnabled);
+
+  const titleCleanupEnabledRaw = await loadSettingsValue('titleCleanupEnabled', null);
+  const titleTrimRules = await loadSettingsValue('titleTrimRules', null);
+  const titleCleanupEnabled = titleCleanupEnabledRaw !== null
+    ? titleCleanupEnabledRaw
+    : (titleTrimRules !== null && titleTrimRules.length > 0);
+  document.getElementById('titleCleanupEnabled').checked = titleCleanupEnabled;
+  setAddonOpen(document.getElementById('titleCleanupBody'), titleCleanupEnabled);
+
   // Sync settings
   const syncEnabled = await loadSettingsValue('syncEnabled', false);
   document.getElementById('syncEnabled').checked = syncEnabled;
-  document.getElementById('syncConfigFields').style.display = syncEnabled ? 'block' : 'none';
+  setAddonOpen(document.getElementById('syncConfigFields'), syncEnabled);
   const syncMethod = await loadSettingsValue('syncMethod', 'github');
   document.getElementById('syncMethod').value = syncMethod;
   syncShowMethodFields(syncMethod);
@@ -5244,7 +5571,9 @@ async function initializeMain(currentTheme) {
     }
     document.getElementById('syncRememberToken').checked = authState.rememberToken;
   } catch { syncShowAuthState('disconnected'); }
-  document.getElementById('syncFolderLabel').textContent = await loadSettingsValue('syncFolderName', '');
+  const syncFolderName = await loadSettingsValue('syncFolderName', '');
+  document.getElementById('syncFolderLabel').textContent = syncFolderName;
+  document.getElementById('clearSyncDirBtn').style.display = syncFolderName ? '' : 'none';
   document.getElementById('syncWebdavUrl').value = await loadSettingsValue('syncWebdavUrl', '');
   document.getElementById('syncWebdavUser').value = await loadSettingsValue('syncWebdavUser', '');
   document.getElementById('syncWebdavPass').value = await loadSettingsValue('syncWebdavPass', '');
@@ -5265,7 +5594,7 @@ async function initializeMain(currentTheme) {
   _timer('sidebarInit');
 
   // Render sidebar concurrently with heavy data (don't block on sidebar)
-  renderLists().catch(err => showFatalError(err.message));
+  listsReadyPromise = renderLists().catch(err => showFatalError(err.message));
   renderBlacklist();
   renderTrimRules();
   initRulesPanel();

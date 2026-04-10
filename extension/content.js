@@ -1,9 +1,17 @@
 // Content script for capturing user intent and attention (scroll depth, time on page)
 console.log('Portal content script loaded on:', window.location.href);
 
+const SCHEME_PALETTES = {
+  amber: { accent:'#D07030', bgBase:'#FFF8F0', borderSubtle:'rgba(180,160,140,0.15)', borderSection:'rgba(180,160,140,0.1)', shadowColor:'53,40,32', textPrimary:'#352820', textSecondary:'#5E4D3E', textMuted:'#8E7D6D', excerptBg:'#fff8dc', excerptBorder:'#f0c040' },
+  mono:  { accent:'#1A1A1A', bgBase:'#FFFFFF', borderSubtle:'rgba(0,0,0,0.08)', borderSection:'rgba(0,0,0,0.06)', shadowColor:'0,0,0', textPrimary:'#1A1A1A', textSecondary:'#555555', textMuted:'#999999', excerptBg:'#F8F8F8', excerptBorder:'#1A1A1A' },
+  rose:  { accent:'#D84070', bgBase:'#FFECE8', borderSubtle:'rgba(180,138,140,0.18)', borderSection:'rgba(180,138,140,0.12)', shadowColor:'58,30,34', textPrimary:'#3C1C20', textSecondary:'#64303A', textMuted:'#905862', excerptBg:'#FAE0DC', excerptBorder:'#E86898' },
+};
+let palette = SCHEME_PALETTES.amber;
+
 // Private mode: skip all content script functionality
-chrome.storage.session.get(['workspace'], (result) => {
+chrome.storage.session.get(['workspace', 'colorScheme'], (result) => {
   const workspace = result.workspace;
+  if (result.colorScheme && SCHEME_PALETTES[result.colorScheme]) palette = SCHEME_PALETTES[result.colorScheme];
   if (workspace && workspace.mode === 'private') {
     console.log('[content] Private mode — all tracking disabled');
     return;
@@ -15,14 +23,21 @@ function initContentScript() {
 let currentHistoryId = null;
 let maxScrollDepth = 0;
 let lastActiveTime = Date.now(); // reset on visibility→visible; null after leave report
+let _panelDismissed = false;
 
-// Track scroll depth
+// Track scroll depth (throttled via rAF to avoid layout thrash on every scroll event)
+let _scrollRafPending = false;
 window.addEventListener('scroll', () => {
-  const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
-  const currentScroll = window.scrollY;
-  const depth = scrollHeight > 0 ? (currentScroll / scrollHeight) * 100 : 0;
-  maxScrollDepth = Math.max(maxScrollDepth, depth);
-});
+  if (_scrollRafPending) return;
+  _scrollRafPending = true;
+  requestAnimationFrame(() => {
+    _scrollRafPending = false;
+    const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+    const currentScroll = window.scrollY;
+    const depth = scrollHeight > 0 ? (currentScroll / scrollHeight) * 100 : 0;
+    maxScrollDepth = Math.max(maxScrollDepth, depth);
+  });
+}, { passive: true });
 
 // Extract page content as Markdown
 function extractMarkdown() {
@@ -232,10 +247,10 @@ function createNoteOverlay({ positionStyle, extraCss, beforeTextareaHtml, placeh
     <style>
       .overlay {
         width: 280px;
-        background: #FFF8F0;
-        border: 1px solid rgba(180, 160, 140, 0.15);
+        background: ${palette.bgBase};
+        border: 1px solid ${palette.borderSubtle};
         border-radius: 10px;
-        box-shadow: 0 1px 2px rgba(53,40,32,0.04), 0 4px 12px rgba(53,40,32,0.08);
+        box-shadow: 0 1px 2px rgba(${palette.shadowColor},0.04), 0 4px 12px rgba(${palette.shadowColor},0.08);
         font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         padding: 8px;
       }
@@ -243,7 +258,7 @@ function createNoteOverlay({ positionStyle, extraCss, beforeTextareaHtml, placeh
         width: 100%;
         min-height: 28px;
         height: 28px;
-        border: 1px solid rgba(180, 160, 140, 0.15);
+        border: 1px solid ${palette.borderSubtle};
         border-radius: 6px;
         padding: 4px 8px;
         font-family: inherit;
@@ -253,7 +268,7 @@ function createNoteOverlay({ positionStyle, extraCss, beforeTextareaHtml, placeh
         line-height: 18px;
         overflow: hidden;
       }
-      textarea:focus { outline: none; border-color: #D07030; }
+      textarea:focus { outline: none; border-color: ${palette.accent}; }
       ${extraCss || ''}
     </style>
     <div class="overlay">
@@ -595,7 +610,7 @@ function showHighlightEditOverlay(mark, text, noteSlug, existingNote, pageSlug) 
   const { shadow, dismiss } = createNoteOverlay({
     positionStyle: `position: absolute; left: ${rect.left + window.scrollX}px; top: ${rect.bottom + window.scrollY + 4}px;`,
     extraCss: `.overlay { display: flex; align-items: flex-start; gap: 8px; }
-      .delete-btn { flex-shrink:0; width:28px; height:28px; display:flex; align-items:center; justify-content:center; background:none; border:1px solid rgba(180,160,140,0.15); border-radius:6px; cursor:pointer; color:#8E7D6D; padding:0; }
+      .delete-btn { flex-shrink:0; width:28px; height:28px; display:flex; align-items:center; justify-content:center; background:none; border:1px solid ${palette.borderSubtle}; border-radius:6px; cursor:pointer; color:${palette.textMuted}; padding:0; }
       .delete-btn:hover { background:rgba(184,80,64,0.1); border-color:#B85040; color:#B85040; }
       .delete-btn svg { width:16px; height:16px; fill:currentColor; }
       textarea { width:auto; flex:1; min-width:0; }`,
@@ -746,6 +761,60 @@ function showNotificationBubble({ message, background, duration, fadeIn, fadeHol
   setTimeout(() => host.remove(), duration * 1000 + 100);
 }
 
+let _captureSpinnerHost = null;
+
+function showCaptureSpinner() {
+  hideCaptureSpinner();
+  const host = document.createElement('div');
+  const shadow = host.attachShadow({ mode: 'closed' });
+  shadow.innerHTML = `
+    <style>
+      .bubble {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0.92);
+        z-index: 2147483647;
+        background: rgba(0, 0, 0, 0.78);
+        color: #fff;
+        font: 14px/1.4 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        padding: 10px 20px;
+        border-radius: 8px;
+        pointer-events: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        opacity: 0;
+        animation: fadeIn 0.18s ease forwards;
+      }
+      @keyframes fadeIn {
+        to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      .spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid rgba(255,255,255,0.3);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+      }
+    </style>
+    <div class="bubble"><span class="spinner"></span>Capturing…</div>
+  `;
+  document.documentElement.appendChild(host);
+  _captureSpinnerHost = host;
+}
+
+function hideCaptureSpinner() {
+  if (_captureSpinnerHost) {
+    _captureSpinnerHost.remove();
+    _captureSpinnerHost = null;
+  }
+}
+
 function showCaptureNotification() {
   showNotificationBubble({ message: 'Snapshot captured', background: 'rgba(0, 0, 0, 0.78)', duration: 1.6, fadeIn: 12, fadeHold: 75 });
 }
@@ -776,20 +845,20 @@ function showHighlightsPanel(notes, pageSlug, { hint } = {}) {
   const shadow = host.attachShadow({ mode: 'open' });
   shadow.innerHTML = `
     <style>
-      .panel { width: 300px; max-height: 400px; overflow-y: auto; background: #FFF8F0; border: 1px solid rgba(180, 160, 140, 0.15); border-radius: 10px; box-shadow: 0 1px 2px rgba(53,40,32,0.04), 0 4px 16px rgba(53,40,32,0.1); font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; }
-      .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid rgba(180, 160, 140, 0.15); font-weight: 600; font-size: 12px; color: #5E4D3E; cursor: move; user-select: none; }
-      .close-btn { background: none; border: none; cursor: pointer; color: #8E7D6D; font-size: 16px; padding: 0 4px; line-height: 1; }
-      .close-btn:hover { color: #352820; }
-      .highlight-item { padding: 8px 12px; border-bottom: 1px solid rgba(180, 160, 140, 0.1); }
+      .panel { width: 300px; max-height: 400px; overflow-y: auto; background: ${palette.bgBase}; border: 1px solid ${palette.borderSubtle}; border-radius: 10px; box-shadow: 0 1px 2px rgba(${palette.shadowColor},0.04), 0 4px 16px rgba(${palette.shadowColor},0.1); font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; }
+      .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid ${palette.borderSubtle}; font-weight: 600; font-size: 12px; color: ${palette.textSecondary}; cursor: move; user-select: none; }
+      .close-btn { background: none; border: none; cursor: pointer; color: ${palette.textMuted}; font-size: 16px; padding: 0 4px; line-height: 1; }
+      .close-btn:hover { color: ${palette.textPrimary}; }
+      .highlight-item { padding: 8px 12px; border-bottom: 1px solid ${palette.borderSection}; }
       .highlight-item:last-child { border-bottom: none; }
-      .excerpt { font-size: 12px; color: #352820; background: #fff8dc; padding: 4px 6px; border-radius: 6px; border-left: 3px solid #f0c040; margin-bottom: 4px; line-height: 1.4; word-break: break-word; }
+      .excerpt { font-size: 12px; color: ${palette.textPrimary}; background: ${palette.excerptBg}; padding: 4px 6px; border-radius: 6px; border-left: 3px solid ${palette.excerptBorder}; margin-bottom: 4px; line-height: 1.4; word-break: break-word; }
       .note-row { display: flex; align-items: flex-start; gap: 4px; }
-      textarea { flex: 1; min-height: 24px; height: 24px; border: 1px solid rgba(180, 160, 140, 0.15); border-radius: 6px; padding: 3px 6px; font-family: inherit; font-size: 11px; resize: none; box-sizing: border-box; line-height: 16px; overflow: hidden; }
-      textarea:focus { outline: none; border-color: #D07030; }
-      .delete-btn { flex-shrink: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: none; border: 1px solid transparent; border-radius: 6px; cursor: pointer; color: #8E7D6D; padding: 0; }
+      textarea { flex: 1; min-height: 24px; height: 24px; border: 1px solid ${palette.borderSubtle}; border-radius: 6px; padding: 3px 6px; font-family: inherit; font-size: 11px; resize: none; box-sizing: border-box; line-height: 16px; overflow: hidden; }
+      textarea:focus { outline: none; border-color: ${palette.accent}; }
+      .delete-btn { flex-shrink: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: none; border: 1px solid transparent; border-radius: 6px; cursor: pointer; color: ${palette.textMuted}; padding: 0; }
       .delete-btn:hover { background: rgba(184, 80, 64, 0.1); color: #B85040; border-color: #B85040; }
       .delete-btn svg { width: 14px; height: 14px; fill: currentColor; }
-      .hint { padding: 8px 12px; font-size: 11px; color: #8E7D6D; line-height: 1.4; }
+      .hint { padding: 8px 12px; font-size: 11px; color: ${palette.textMuted}; line-height: 1.4; }
     </style>
     <div class="panel">
       <div class="panel-header">
@@ -813,8 +882,8 @@ function showHighlightsPanel(notes, pageSlug, { hint } = {}) {
   document.body.appendChild(host);
 
   shadow.querySelector('.close-btn').addEventListener('click', () => {
-    window.__portalPanelDismissed = true;
-    host.remove();
+    _panelDismissed = true;
+    teardownPanel();
   });
 
   shadow.querySelectorAll('textarea').forEach(ta => {
@@ -848,7 +917,7 @@ function showHighlightsPanel(notes, pageSlug, { hint } = {}) {
       item.remove();
       const remaining = shadow.querySelectorAll('.highlight-item').length;
       shadow.querySelector('.panel-header span').textContent = `Highlights (${remaining})`;
-      if (remaining === 0) host.remove();
+      if (remaining === 0) teardownPanel();
     });
   });
 
@@ -856,8 +925,16 @@ function showHighlightsPanel(notes, pageSlug, { hint } = {}) {
   let isDragging = false, dragX = 0, dragY = 0;
   const header = shadow.querySelector('.panel-header');
   header.addEventListener('mousedown', (e) => { isDragging = true; dragX = e.clientX - host.getBoundingClientRect().left; dragY = e.clientY - host.getBoundingClientRect().top; e.preventDefault(); });
-  document.addEventListener('mousemove', (e) => { if (!isDragging) return; host.style.left = (e.clientX - dragX) + 'px'; host.style.top = (e.clientY - dragY) + 'px'; host.style.right = 'auto'; });
-  document.addEventListener('mouseup', () => { isDragging = false; });
+  const onMouseMove = (e) => { if (!isDragging) return; host.style.left = (e.clientX - dragX) + 'px'; host.style.top = (e.clientY - dragY) + 'px'; host.style.right = 'auto'; };
+  const onMouseUp = () => { isDragging = false; };
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+
+  function teardownPanel() {
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+    host.remove();
+  }
 }
 
 // Listen for messages from background script
@@ -973,11 +1050,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     sendResponse({ success: true });
   } else if (request.action === 'showHighlightsPanel') {
-    window.__portalPanelDismissed = false; // Reset so new highlight shows panel
+    _panelDismissed = false; // Reset so new highlight shows panel
     showHighlightsPanel(request.notes || [], request.pageSlug);
     sendResponse({ success: true });
   } else if (request.action === 'isPdfPage') {
     sendResponse({ isPdf: !!document.querySelector('embed[type="application/pdf"]') });
+  } else if (request.action === 'showCaptureSpinner') {
+    showCaptureSpinner();
+    sendResponse({ success: true });
+  } else if (request.action === 'hideCaptureSpinner') {
+    hideCaptureSpinner();
+    sendResponse({ success: true });
   } else if (request.action === 'showCaptureNotification') {
     showCaptureNotification();
     sendResponse({ success: true });
@@ -1004,6 +1087,7 @@ try {
                   !!document.querySelector('embed[type="application/pdf"]');
     if (!isPdf) return;
     const pdfSlug = getSlugForCurrentPage();
+    let pdfRetryTimer = null;
     function showPdfPanel() {
       chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: pdfSlug }).then(resp => {
         if (resp?.success === false) { showHighlightsPanel([], pdfSlug, { hint: 'Select text and right-click to highlight' }); return; }
@@ -1014,12 +1098,18 @@ try {
       });
     }
     showPdfPanel();
-    // Re-show if PDF viewer destroys the panel (but not if user dismissed it)
-    new MutationObserver(() => {
-      if (!document.getElementById('portal-highlights-panel') && !window.__portalPanelDismissed) {
-        setTimeout(showPdfPanel, 500);
+    // Re-show if PDF viewer destroys the panel (but not if user dismissed it).
+    // Debounce to avoid pile-up from rapid mutations.
+    const pdfObserver = new MutationObserver(() => {
+      if (!document.getElementById('portal-highlights-panel') && !_panelDismissed) {
+        if (pdfRetryTimer) return;
+        pdfRetryTimer = setTimeout(() => { pdfRetryTimer = null; showPdfPanel(); }, 500);
       }
-    }).observe(document.body, { childList: true });
+    });
+    if (document.body) {
+      pdfObserver.observe(document.body, { childList: true });
+      window.addEventListener('pagehide', () => pdfObserver.disconnect(), { once: true });
+    }
   }, 1500);
 } catch {}
 

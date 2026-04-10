@@ -1,10 +1,10 @@
-# Browser Recall — Privacy Policy
+# browser-recall — Privacy Policy
 
 **Last updated:** April 2026
 
-## What data Browser Recall collects
+## What data browser-recall collects
 
-Browser Recall records the following data as you browse:
+browser-recall records the following data as you browse:
 
 - **Page URLs and titles** from your browsing history
 - **Page visit timestamps** and visit duration
@@ -17,21 +17,21 @@ Browser Recall records the following data as you browse:
 
 ## Where your data is stored
 
-All data is stored in a **local folder on your device** that you choose during setup. Browser Recall uses the File System Access API to read and write files directly to this folder. No data is sent to any server by default.
+All data is stored in a **local folder on your device** that you choose during setup. browser-recall uses the File System Access API to read and write files directly to this folder. No data is sent to any server by default.
 
 A small amount of session state (UI preferences, in-flight log entries) is kept in Chrome's built-in extension storage (`chrome.storage.session` and `chrome.storage.local`). This data never leaves your browser.
 
 ## Optional sync
 
-Browser Recall offers optional multi-device sync through transports you configure yourself:
+browser-recall offers optional multi-device sync through transports you configure yourself:
 
 - **GitHub** — syncs to a repository you own, using a personal access token you provide
 - **Filesystem** — syncs to a shared folder (e.g., cloud drive) you designate
 - **WebDAV** — syncs to a WebDAV server you control
 
-When sync is enabled, your browsing data is transmitted only to the service you configure. Browser Recall never sends data to Anthropic, the extension developer, or any third party.
+When sync is enabled, your browsing data is transmitted only to the service you configure. browser-recall never sends data to Anthropic, the extension developer, or any third party.
 
-## What Browser Recall does NOT do
+## What browser-recall does NOT do
 
 - No analytics or telemetry
 - No tracking pixels or fingerprinting
@@ -42,7 +42,7 @@ When sync is enabled, your browsing data is transmitted only to the service you 
 
 ## Permissions
 
-Browser Recall requests the following Chrome permissions:
+browser-recall requests the following Chrome permissions:
 
 | Permission | Purpose |
 |---|---|
@@ -63,7 +63,7 @@ Your data folder IS your export. All data is stored as plain JSON and JSONL file
 
 ## Data deletion
 
-To delete all Browser Recall data:
+To delete all browser-recall data:
 
 1. Remove the extension from Chrome
 2. Delete the data folder you selected during setup

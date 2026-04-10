@@ -19,6 +19,10 @@ export const PORT_CONTRACT = {
     request: [],
     response: ['info'],
   },
+  getDirectorySize: {
+    request: [],
+    response: ['size'],
+  },
 
   // ── Snapshots ──
   listSnapshots: {

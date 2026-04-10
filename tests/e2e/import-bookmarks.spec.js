@@ -19,11 +19,9 @@ async function openSettingsAndLoadFile(options) {
   await options.click('#settingsBtn');
   await options.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
 
-  // Scroll to the import section
-  await options.evaluate(() => {
-    const section = document.getElementById('bookmarkFileInput');
-    section?.scrollIntoView({ behavior: 'instant' });
-  });
+  // Open the import panel
+  await options.click('#bookmarkImportBtn');
+  await options.waitForSelector('#bookmarkImportPanel', { state: 'visible', timeout: 3000 });
 
   // Load fixture file
   const fileInput = options.locator('#bookmarkFileInput');

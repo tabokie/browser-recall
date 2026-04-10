@@ -1,5 +1,9 @@
 import { logDebug } from './logger.js';
 import { findTextRange } from './highlight-helpers.js';
+import { getSchemePalette } from './color-scheme-map.js';
+
+const { colorScheme: _cs } = await chrome.storage.session.get(['colorScheme']);
+const palette = getSchemePalette(_cs);
 
 const params = new URLSearchParams(location.search);
 const slug = params.get('slug');
@@ -146,26 +150,26 @@ function attachMarkClickHandler(doc, mark) {
 const OVERLAY_STYLE = `
   .overlay {
     display: flex; align-items: flex-start; gap: 8px; width: 280px;
-    background: #FFF8F0; border: 1px solid rgba(180, 160, 140, 0.15);
-    border-radius: 10px; box-shadow: 0 1px 2px rgba(53,40,32,0.04), 0 4px 12px rgba(53,40,32,0.08);
+    background: ${palette.bgBase}; border: 1px solid ${palette.borderSubtle};
+    border-radius: 10px; box-shadow: 0 1px 2px rgba(${palette.shadowColor},0.04), 0 4px 12px rgba(${palette.shadowColor},0.08);
     font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     padding: 8px;
   }
   .delete-btn {
     flex-shrink: 0; width: 28px; height: 28px; display: flex;
     align-items: center; justify-content: center; background: none;
-    border: 1px solid rgba(180, 160, 140, 0.15); border-radius: 6px;
-    cursor: pointer; color: #8E7D6D; padding: 0;
+    border: 1px solid ${palette.borderSubtle}; border-radius: 6px;
+    cursor: pointer; color: ${palette.textMuted}; padding: 0;
   }
   .delete-btn:hover { background: rgba(184, 80, 64, 0.1); border-color: #B85040; color: #B85040; }
   .delete-btn svg { width: 16px; height: 16px; fill: currentColor; }
   textarea {
     width: 100%; min-height: 28px; height: 28px;
-    border: 1px solid rgba(180, 160, 140, 0.15); border-radius: 6px;
+    border: 1px solid ${palette.borderSubtle}; border-radius: 6px;
     padding: 4px 8px; font-family: inherit; font-size: 12px;
     resize: none; box-sizing: border-box; line-height: 18px; overflow: hidden;
   }
-  textarea:focus { outline: none; border-color: #D07030; }
+  textarea:focus { outline: none; border-color: ${palette.accent}; }
 `;
 
 const OVERLAY_HTML = `

@@ -18,12 +18,12 @@ test.describe('Sync settings UI', () => {
     await expect(toggle).not.toBeChecked();
     await expect(configFields).toBeHidden();
 
-    // Check toggle — config fields shown
-    await toggle.check();
+    // Check toggle — click the visible track since input is hidden inside toggle-switch
+    await options.click('#syncEnabled + .toggle-track');
     await expect(configFields).toBeVisible();
 
-    // Uncheck toggle — config fields hidden again
-    await toggle.uncheck();
+    // Uncheck toggle
+    await options.click('#syncEnabled + .toggle-track');
     await expect(configFields).toBeHidden();
 
     await options.close();
@@ -40,7 +40,7 @@ test.describe('Sync settings UI', () => {
     await options.waitForSelector('#settingsModal', { state: 'visible', timeout: 5000 });
 
     // Enable sync but leave repo URL empty and no token connected
-    await options.locator('#syncEnabled').check();
+    await options.click('#syncEnabled + .toggle-track');
     await options.click('#syncNowBtn');
 
     // Should show validation error in sync status area or toast
@@ -231,7 +231,7 @@ test.describe('Sync settings UI', () => {
     expect(state.hasToken).toBe(false);
     expect(state.authMethod).toBeNull();
     expect(state.githubUser).toBeNull();
-    expect(state.rememberToken).toBe(false);
+    expect(state.rememberToken).toBe(true);
 
     await helper.close();
   });

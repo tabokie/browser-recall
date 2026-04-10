@@ -13,7 +13,8 @@
     "test:e2e": "playwright test",
     "manual": "node scripts/manual-test-browser.mjs",
     "manual:seed": "node scripts/manual-test-browser.mjs --seed",
-    "manual:case": "node scripts/manual-test-browser.mjs --case"
+    "manual:case": "node scripts/manual-test-browser.mjs --case",
+    "manual:onboarding": "node scripts/manual-test-browser.mjs --onboarding"
   },
   "keywords": [
     "chrome-extension",

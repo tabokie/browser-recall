@@ -7,7 +7,7 @@ test.describe('Blacklist write-on-read bug', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], relatedPagesLimit: 50,
+        trimRules: [],
       }},
     ]);
 
@@ -42,7 +42,7 @@ test.describe('Blacklist write-on-read bug', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: {
-        trimRules: [], relatedPagesLimit: 50,
+        trimRules: [],
         urlBlacklist: ['https://private.corp.example.com/', 'edge://'],
       }},
     ]);

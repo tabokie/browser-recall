@@ -1,118 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html style="opacity:0">
 <head>
   <meta charset="UTF-8">
-  <title>Browser Recall</title>
+  <title>browser-recall</title>
+  <link rel="stylesheet" href="shared.css">
   <style>
-    @font-face {
-      font-family: 'Instrument Serif';
-      font-style: normal;
-      font-weight: 400;
-      font-display: swap;
-      src: url(fonts/instrument-serif-regular.woff2) format('woff2');
-    }
-    @font-face {
-      font-family: 'Instrument Serif';
-      font-style: italic;
-      font-weight: 400;
-      font-display: swap;
-      src: url(fonts/instrument-serif-italic.woff2) format('woff2');
-    }
-    @font-face {
-      font-family: 'Nunito';
-      font-style: normal;
-      font-weight: 400 700;
-      font-display: swap;
-      src: url(fonts/nunito.woff2) format('woff2');
-    }
-
-    :root {
-      /* Warm palette */
-      --bg-base: #F8F0E6;
-      --bg-ambient: radial-gradient(ellipse at 20% 20%, rgba(255, 200, 140, 0.25) 0%, transparent 50%),
-                    radial-gradient(ellipse at 80% 60%, rgba(180, 160, 220, 0.12) 0%, transparent 50%),
-                    linear-gradient(160deg, #FFF6EE 0%, #F5E8D8 40%, #EDE4DA 100%);
-      --bg-surface: rgba(255, 255, 255, 0.45);
-      --bg-surface-solid: rgba(255, 255, 255, 0.75);
-      --bg-surface-hover: rgba(255, 248, 240, 0.7);
-      --bg-surface-active: rgba(255, 238, 218, 0.8);
-      --bg-sidebar: rgba(255, 252, 248, 0.55);
-
-      --border-glass: rgba(255, 255, 255, 0.55);
-      --border-glass-strong: rgba(255, 255, 255, 0.7);
-      --border-subtle: rgba(180, 160, 140, 0.15);
-      --border-hover: rgba(212, 128, 58, 0.35);
-
-      --text-primary: #352820;
-      --text-secondary: #5E4D3E;
-      --text-muted: #8E7D6D;
-
-      --accent-primary: #D07030;
-      --accent-primary-hover: #B86028;
-      --accent-primary-glow: rgba(208, 112, 48, 0.2);
-      --accent-primary-soft: rgba(208, 112, 48, 0.1);
-      --accent-blue: #5080B0;
-      --accent-blue-soft: rgba(80, 128, 176, 0.1);
-      --accent-green: #588858;
-      --accent-green-soft: rgba(88, 136, 88, 0.1);
-      --accent-red: #B85040;
-      --accent-red-soft: rgba(184, 80, 64, 0.1);
-
-      --shadow-float:
-        0 0.5px 0.5px rgba(53, 40, 32, 0.03),
-        0 1px 2px rgba(53, 40, 32, 0.04),
-        0 3px 6px rgba(53, 40, 32, 0.05),
-        0 8px 16px rgba(53, 40, 32, 0.04);
-      --shadow-float-hover:
-        0 0.5px 1px rgba(53, 40, 32, 0.04),
-        0 2px 4px rgba(53, 40, 32, 0.06),
-        0 6px 12px rgba(53, 40, 32, 0.06),
-        0 14px 28px rgba(53, 40, 32, 0.05);
-      --shadow-elevated:
-        0 1px 2px rgba(53, 40, 32, 0.04),
-        0 4px 8px rgba(53, 40, 32, 0.06),
-        0 12px 24px rgba(53, 40, 32, 0.06),
-        0 24px 48px rgba(53, 40, 32, 0.05);
-
-      --highlight-top: inset 0 1px 0 rgba(255, 255, 255, 0.6);
-      --highlight-top-strong: inset 0 1.5px 0 rgba(255, 255, 255, 0.75);
-      --highlight-edge: inset 0 0 0 0.5px rgba(255, 255, 255, 0.3);
-
-      --radius-pill: 9999px;
-      --radius-xl: 14px;
-      --radius-lg: 10px;
-      --radius-md: 8px;
-      --radius-sm: 6px;
-
-      --font-display: 'Instrument Serif', Georgia, serif;
-      --font-body: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-
-      --ease-smooth: cubic-bezier(0.25, 0.1, 0.25, 1);
-
-      /* Component-level (overridden by dark-theme.css) */
-      --bg-frosted: rgba(255, 255, 255, 0.5);
-      --bg-frosted-strong: rgba(255, 255, 255, 0.65);
-      --bg-input: rgba(255, 255, 255, 0.4);
-      --bg-warm-tint: rgba(245, 237, 228, 0.6);
-      --bg-warm-hover: rgba(255, 248, 240, 0.7);
-      --bg-tab-active: rgba(255, 255, 255, 0.8);
-      --border-section: rgba(180, 160, 140, 0.1);
-      --scrollbar-thumb: rgba(180, 160, 140, 0.35);
-      --glass-shine: linear-gradient(170deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.08) 40%, transparent 100%);
-      --btn-glow: var(--btn-glow);
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    * {
-      scrollbar-color: var(--scrollbar-thumb) transparent;
-      scrollbar-width: thin;
-    }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
-    :focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; border-radius: 4px; }
-    :focus:not(:focus-visible) { outline: none; }
-
     body {
       width: 400px;
       font-family: var(--font-body);
@@ -146,12 +38,13 @@
       border-bottom: 1px solid var(--border-section);
       background: var(--bg-sidebar);
       position: relative;
+      border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     }
 
     .page-title {
       font-family: var(--font-display);
       font-size: 15px;
-      font-weight: 400;
+      font-weight: var(--font-display-weight);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -166,7 +59,7 @@
     .page-title-input {
       font-family: var(--font-display);
       font-size: 17px;
-      font-weight: 400;
+      font-weight: var(--font-display-weight);
       width: 100%;
       border: 1px solid var(--accent-primary);
       border-radius: var(--radius-sm);
@@ -181,12 +74,6 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-    }
-
-    .page-likes {
-      font-size: 11px;
-      color: var(--accent-red, #B85040);
-      margin-top: 2px;
     }
 
     .section {
@@ -275,12 +162,12 @@
     .badge.html {
       background: var(--accent-primary-soft);
       color: var(--accent-primary);
-      border-color: rgba(208, 112, 48, 0.12);
+      border-color: var(--accent-primary-soft);
     }
 
     .badge.html:hover {
       border-color: var(--accent-primary);
-      background: rgba(208, 112, 48, 0.15);
+      background: var(--accent-primary-glow);
     }
 
     .badge.md {
@@ -400,7 +287,7 @@
     .highlight-note:focus {
       outline: none;
       border-color: var(--accent-primary);
-      box-shadow: 0 0 0 3px rgba(208, 112, 48, 0.08), var(--highlight-top);
+      box-shadow: 0 0 0 3px var(--accent-primary-soft), var(--highlight-top);
     }
 
     .page-note {
@@ -424,7 +311,7 @@
     .page-note:focus {
       outline: none;
       border-color: var(--accent-primary);
-      box-shadow: 0 0 0 3px rgba(208, 112, 48, 0.08), 0 0 10px rgba(208, 112, 48, 0.04), var(--highlight-top);
+      box-shadow: 0 0 0 3px var(--accent-primary-soft), 0 0 10px var(--accent-primary-soft), var(--highlight-top);
     }
 
     .highlight-label {
@@ -475,13 +362,8 @@
     .list-chip.selected {
       background: var(--accent-primary-soft);
       color: var(--accent-primary);
-      border-color: rgba(208, 112, 48, 0.2);
-      font-weight: 600;
-      box-shadow: 0 1px 4px rgba(208, 112, 48, 0.1), var(--highlight-top);
-    }
-
-    .list-chip-check {
-      font-size: 10px;
+      border-color: var(--accent-primary-glow);
+      box-shadow: 0 1px 4px var(--accent-primary-soft), var(--highlight-top);
     }
 
     .list-add-btn {
@@ -616,6 +498,23 @@
       gap: 4px;
     }
 
+    .open-settings-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-muted);
+      padding: 2px;
+      display: flex;
+      align-items: center;
+      border-radius: 50%;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .open-settings-btn:hover {
+      color: var(--accent-primary);
+      background: var(--accent-primary-soft);
+    }
+
     .workspace-bar {
       display: flex;
       flex-direction: column;
@@ -748,7 +647,7 @@
       background: var(--accent-primary);
       border-color: var(--accent-primary);
       color: #fff;
-      box-shadow: 0 1px 4px rgba(208, 112, 48, 0.2);
+      box-shadow: 0 1px 4px var(--accent-primary-glow);
     }
 
     .workspace-auto-snapshot {
@@ -777,24 +676,7 @@
     }
 
     .loading {
-      text-align: center;
       padding: 32px;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-    }
-
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .spinner {
-      display: inline-block;
-      width: 16px;
-      height: 16px;
-      border: 2px solid var(--border-subtle);
-      border-top-color: var(--text-secondary);
-      border-radius: 50%;
-      animation: spin 0.6s linear infinite;
     }
 
     .blacklisted {
@@ -827,20 +709,21 @@
       padding: 6px 16px;
       border: none;
       border-radius: var(--radius-pill);
-      background: linear-gradient(145deg, #D88040, #B86028);
+      background: linear-gradient(145deg, var(--accent-primary), var(--accent-primary-hover));
       color: #fff;
       font-size: 12px;
       font-weight: 600;
       cursor: pointer;
       margin-bottom: 12px;
       box-shadow:
-        0 1px 2px rgba(208, 112, 48, 0.25),
-        0 3px 8px rgba(208, 112, 48, 0.2),
+        0 1px 2px var(--accent-primary-glow),
+        0 3px 8px var(--accent-primary-glow),
         var(--btn-glow);
     }
 
     .capture-once-btn:hover {
-      background: linear-gradient(145deg, #E08848, #C87030);
+      background: linear-gradient(145deg, var(--accent-primary), var(--accent-primary-hover));
+      filter: brightness(1.08);
     }
 
     .capture-once-btn:disabled {
@@ -865,6 +748,7 @@
     }
   </style>
   <link rel="stylesheet" href="dark-theme.css">
+  <link rel="stylesheet" href="color-schemes.css">
 </head>
 <body>
   <div id="loading" class="popup-shell loading"><span class="spinner"></span></div>
@@ -901,19 +785,22 @@
       <div class="header">
         <div class="page-title" id="pageTitle">—</div>
         <div class="page-url" id="pageUrl">—</div>
-        <div class="page-likes" id="pageLikes" style="display:none"></div>
+      </div>
+
+      <div class="section" id="visitsLikesSection" style="display:none">
+        <div class="attention-grid" id="attentionGrid"></div>
+      </div>
+
+      <div class="section">
+        <div class="list-chips-wrap">
+          <div class="list-chips" id="listChips"></div>
+        </div>
       </div>
 
       <div class="section">
         <div class="notes-scroll">
           <textarea class="page-note" id="pageNote" placeholder="Add a page note..."></textarea>
           <div class="highlight-list" id="highlightList"></div>
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="list-chips-wrap">
-          <div class="list-chips" id="listChips"></div>
         </div>
       </div>
 
@@ -928,6 +815,9 @@
     <div class="shortcut-bar">
       <div class="shortcut-bar-item"><span class="shortcut-hint">Alt+H</span> Highlight</div>
       <div class="shortcut-bar-item"><span class="shortcut-hint">Alt+S</span> Snapshot</div>
+      <button class="open-settings-btn" id="openSettingsBtn" title="Open main page">
+        <svg viewBox="0 0 16 16" width="12" height="12"><path fill="currentColor" d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06z"/></svg>
+      </button>
     </div>
   </div>
 

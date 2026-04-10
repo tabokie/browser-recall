@@ -12,6 +12,7 @@ let currentTitle = '';
 let currentTab = null;
 let detachedContent = null; // holds dashboardContent when removed in private mode
 let frozenChipOrder = null; // Array of list slugs — frozen on first render to keep order stable
+let _noteSaveTimeout = null;
 
 // ─── Error UI ────────────────────────────────────────────────────────
 
@@ -103,40 +104,47 @@ function renderSnapshots(snapshots) {
 }
 
 // Render attention section (flat fields on history entry)
-function renderAttention(entry) {
+function renderVisitsAndLikes(entry) {
+  const section = document.getElementById('visitsLikesSection');
   const container = document.getElementById('attentionGrid');
-
-  if (!entry || (entry.scrollDepth === undefined && entry.timeOnPage === undefined)) {
-    container.innerHTML = '<div class="empty-state">No data</div>';
-    return;
-  }
+  if (!section || !container) return;
 
   const items = [];
-  if (entry.scrollDepth !== undefined) {
-    items.push(`<span class="attention-item"><strong>Scroll:</strong> ${Math.round(entry.scrollDepth)}%</span>`);
-  }
-  if (entry.timeOnPage !== undefined) {
-    items.push(`<span class="attention-item"><strong>Time:</strong> ${formatDuration(entry.timeOnPage)}</span>`);
+
+  const visitDates = entry?.visitDates || [];
+  if (visitDates.length > 0) {
+    const parse = (yyyymmdd) => {
+      const y = Math.floor(yyyymmdd / 10000);
+      const m = Math.floor((yyyymmdd % 10000) / 100) - 1;
+      const d = yyyymmdd % 100;
+      return new Date(y, m, d);
+    };
+    const fmtDate = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const sorted = [...visitDates].sort((a, b) => a - b);
+    const first = parse(sorted[0]);
+    items.push(`<span class="attention-item"><strong>First:</strong> ${fmtDate(first)}</span>`);
+    if (sorted.length > 1) {
+      const last = parse(sorted[sorted.length - 1]);
+      items.push(`<span class="attention-item"><strong>Last:</strong> ${fmtDate(last)}</span>`);
+    }
   }
 
-  container.innerHTML = items.length > 0
-    ? items.join('')
-    : '<div class="empty-state">No data</div>';
-}
-
-function renderLikes(entry) {
-  const el = document.getElementById('pageLikes');
   const likes = entry?.likes || 0;
   if (likes > 0) {
-    el.textContent = `Liked (${likes})`;
-    el.style.display = '';
+    items.push(`<span class="attention-item"><strong>Liked:</strong> ${likes}</span>`);
+  }
+
+  if (items.length > 0) {
+    container.innerHTML = items.join('');
+    section.style.display = '';
   } else {
-    el.style.display = 'none';
+    section.style.display = 'none';
   }
 }
 
 // Render notes section
 function renderNotes(notes) {
+  if (_noteSaveTimeout) { clearTimeout(_noteSaveTimeout); _noteSaveTimeout = null; }
   const container = document.getElementById('highlightList');
   currentNotes = notes || [];
 
@@ -192,7 +200,6 @@ function renderNotes(notes) {
   });
 
   // Save notes on change (debounced)
-  let saveTimeout = null;
   container.querySelectorAll('.highlight-note').forEach(textarea => {
     textarea.addEventListener('input', () => {
       autoResizeTextarea(textarea);
@@ -200,8 +207,8 @@ function renderNotes(notes) {
       const note = currentNotes.find(n => n.slug === noteSlug);
       if (note) note.note = textarea.value;
 
-      clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(async () => {
+      clearTimeout(_noteSaveTimeout);
+      _noteSaveTimeout = setTimeout(async () => {
         const currentSlugForSave = textarea.dataset.noteSlug;
         logDebug(`[popup] Saving note for slug=${currentSlugForSave}`);
         try {
@@ -246,7 +253,7 @@ document.getElementById('pageNote').addEventListener('input', (e) => {
         const resp = await chrome.runtime.sendMessage({
           action: 'createNote',
           pageSlug: currentSlug,
-          url: tab.url,
+          url: currentUrl,
           excerpt: null,
           note,
           cssPath: null
@@ -299,38 +306,46 @@ async function renderListChips() {
   const container = document.getElementById('listChips');
   const [lists, allPins] = await Promise.all([loadLists(), loadListPins()]);
 
-  // Compute lastActivity for each list and sort by most recent
-  const ranked = lists.map(list => {
+  // Partition into lists containing this page vs. others
+  const containsPage = [];
+  const others = [];
+  for (const list of lists) {
+    if (isPagePinned(allPins, list.slug, currentUrl)) {
+      containsPage.push(list);
+    } else {
+      others.push(list);
+    }
+  }
+
+  // Sort others by most recent activity
+  const othersRanked = others.map(list => {
     const pins = allPins[list.slug] || [];
     const maxPinnedAt = pins.reduce((max, p) => Math.max(max, p.pinnedAt || 0), 0);
-    const lastActivity = maxPinnedAt || 0;
-    return { list, lastActivity };
+    return { list, lastActivity: maxPinnedAt || 0 };
   });
-  ranked.sort((a, b) => b.lastActivity - a.lastActivity);
+  othersRanked.sort((a, b) => b.lastActivity - a.lastActivity);
 
   let displayLists;
   if (!frozenChipOrder) {
-    // First render: compute order and freeze it
-    displayLists = ranked.slice(0, 5).map(r => r.list);
+    // First render: pinned lists first, then fill remaining slots with active lists
+    const remaining = Math.max(0, 15 - containsPage.length);
+    displayLists = [...containsPage, ...othersRanked.slice(0, remaining).map(r => r.list)];
     frozenChipOrder = displayLists.map(l => l.slug);
   } else {
-    // Subsequent renders: use frozen order, append new lists at the end
+    // Subsequent renders: use frozen order, but ensure newly-pinned lists are visible
     const bySlug = new Map(lists.map(l => [l.slug, l]));
     displayLists = frozenChipOrder.filter(slug => bySlug.has(slug)).map(slug => bySlug.get(slug));
-    for (const r of ranked) {
-      if (!frozenChipOrder.includes(r.list.slug)) {
-        displayLists.push(r.list);
-        frozenChipOrder.push(r.list.slug);
+    for (const list of containsPage) {
+      if (!frozenChipOrder.includes(list.slug)) {
+        displayLists.push(list);
+        frozenChipOrder.push(list.slug);
       }
     }
   }
 
   let html = displayLists.map((list) => {
     const pinned = isPagePinned(allPins, list.slug, currentUrl);
-    return `<span class="list-chip${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">
-      <span class="list-chip-check">${pinned ? '&#10003;' : ''}</span>
-      ${escapeHtml(list.name)}
-    </span>`;
+    return `<span class="list-chip${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
   }).join('');
 
   html += `<span class="list-add-btn" id="listAddBtn" title="Add to list">+</span>`;
@@ -434,6 +449,7 @@ function openListPicker(lists, allPins) {
           const freshPins = await loadListPins();
           Object.assign(allPins, freshPins);
           renderPickerRows();
+          renderListChips();
         } catch (err) { showErrorBubble(err.message); }
       });
     });
@@ -663,6 +679,11 @@ function startEditingTitle() {
 
 document.getElementById('pageTitle').addEventListener('click', startEditingTitle);
 
+// Open settings page
+document.getElementById('openSettingsBtn').addEventListener('click', () => {
+  chrome.runtime.openOptionsPage();
+});
+
 // Capture button handler
 document.getElementById('captureBtn').addEventListener('click', async () => {
   const btn = document.getElementById('captureBtn');
@@ -700,15 +721,18 @@ function reattachDashboardContent() {
   }
 }
 
-function resolvePageIdentity(tab) {
+async function resolvePageIdentity(tab) {
   const effectiveUrl = tab._effectiveUrl || tab.url;
-  const title = tab.title || '<unknown>';
+  let title = tab.title || '<unknown>';
+  try {
+    const resp = await chrome.runtime.sendMessage({ action: 'trimTitle', title, url: effectiveUrl });
+    if (resp?.title) title = resp.title;
+  } catch {}
   const viewerPrefix = chrome.runtime.getURL('snapshot-viewer.html');
   let slug;
   if (tab.url.startsWith(viewerPrefix)) {
     slug = new URL(tab.url).searchParams.get('slug') || '';
   } else {
-    // Always derive slug from tab.url (not effectiveUrl) to match badge behavior.
     slug = generateSlugFromUrl(tab.url);
   }
   return { slug, url: effectiveUrl, title };
@@ -733,9 +757,8 @@ async function fetchAndRenderPageData(tab, slug) {
           document.getElementById('pageUrl').textContent = info.entry.url;
         }
       }
+      renderVisitsAndLikes(info.entry);
       renderSnapshots(info.snapshots);
-      renderAttention(info.entry);
-      renderLikes(info.entry);
       renderNotes(info.notes);
       logDebug(`[popup] Loaded ${info.notes?.length || 0} notes, ${info.snapshots?.length || 0} snapshots`);
     } else {
@@ -785,7 +808,7 @@ function scheduleDelayedTitleCheck(tab, initialTitle) {
 async function showDashboard(tab) {
   reattachDashboardContent();
 
-  const { slug, url, title } = resolvePageIdentity(tab);
+  const { slug, url, title } = await resolvePageIdentity(tab);
   currentUrl = url;
   currentTitle = title;
   currentSlug = slug;

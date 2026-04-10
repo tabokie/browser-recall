@@ -10,15 +10,14 @@ test.describe('Loading states', () => {
 
     const page = await openOptionsPage(extContext, extensionId);
 
-    // The cache table should use a spinner, not "Loading..." text
+    // The cache size should show a value, not "Loading..." text
     // Open settings modal
     await page.click('#settingsBtn');
     await page.waitForSelector('.modal-overlay.open', { timeout: 3000 });
 
-    // Cache table should not contain plain "Loading..." text.
-    // It should either have loaded data or have a spinner element.
-    const cacheBody = page.locator('#cacheTableBody');
-    await expect(cacheBody).not.toHaveText(/^Loading\.\.\.$/);
+    // Cache size element should not contain "Loading..." text.
+    const cacheSize = page.locator('#cacheSize');
+    await expect(cacheSize).not.toHaveText(/^Loading\.\.\.$/);
 
     await page.close();
   });

@@ -2,7 +2,7 @@
 
 ## Context
 
-No ingestion path for existing browser bookmarks. Users switching to Browser Recall must manually recreate their bookmark organization. This plan adds a one-time import: the user exports bookmarks from their browser as an HTML file, picks it in the settings modal, selects folders via a tree picker, and imports them as nested lists with pinned pages.
+No ingestion path for existing browser bookmarks. Users switching to browser-recall must manually recreate their bookmark organization. This plan adds a one-time import: the user exports bookmarks from their browser as an HTML file, picks it in the settings modal, selects folders via a tree picker, and imports them as nested lists with pinned pages.
 
 All design decisions resolved through grilling session (Q1-Q22).
 

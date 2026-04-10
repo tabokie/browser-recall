@@ -1,4 +1,4 @@
-# Browser Recall — Chrome Web Store Listing
+# browser-recall — Chrome Web Store Listing
 
 ## Short description (132 chars max)
 
@@ -6,7 +6,7 @@ Save your browsing history, notes, and highlights to a local folder you control.
 
 ## Detailed description
 
-Browser Recall saves your browsing history, notes, and highlights to a local folder you choose — not to the cloud, not to a database, just plain files on your computer.
+browser-recall saves your browsing history, notes, and highlights to a local folder you choose — not to the cloud, not to a database, just plain files on your computer.
 
 **Local-first storage**
 Pick any folder on your device. All data is stored as readable JSON and JSONL files. Your data folder is your backup — copy it, version it, or read it with any text editor.
@@ -30,7 +30,7 @@ Create custom lists to organize pages. Pin important pages. Like or dislike page
 Set up automatic rules to categorize pages based on URL patterns or keywords. Pages matching your rules are tagged and organized without manual effort.
 
 **Multi-device sync**
-Optionally sync your data across devices using GitHub, a shared filesystem, or WebDAV. You control where your data goes — Browser Recall never sends it anywhere on its own.
+Optionally sync your data across devices using GitHub, a shared filesystem, or WebDAV. You control where your data goes — browser-recall never sends it anywhere on its own.
 
 **Keyboard shortcuts**
 - Alt+S — Capture snapshot

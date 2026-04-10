@@ -1,4 +1,4 @@
-// GitHub API helpers for Browser Recall.
+// GitHub API helpers for browser-recall.
 // Loaded by options.html via <script>.
 
 // Fetch the authenticated user's login name.

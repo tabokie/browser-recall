@@ -1088,14 +1088,17 @@ test.describe('List operations', () => {
     const plainUrl = 'https://plain.com/';
     const highlightSlug = getSlugForUrl(highlightUrl);
 
+    const noteSlug = `${highlightSlug}-${now}`;
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
       { path: `pages/${highlightSlug}.json`, data: {
         slug: highlightSlug, url: highlightUrl, title: 'Highlighted Page', timestamp: now,
-        parentIds: [], childIds: [],
-        notes: [{ excerpt: 'some highlight text', note: '', createdAt: now }],
+        parentIds: [], childIds: [`note:${noteSlug}`],
+      }},
+      { path: `data/notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: 'some highlight text', note: '', createdAt: now,
       }},
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
         { timestamp: now - 1000, action: 'visit_page', url: plainUrl, title: 'Plain Page' },
@@ -1159,6 +1162,77 @@ test.describe('List operations', () => {
     await options.close();
   });
 
+  test('has-highlights filter loads all batches to find matches in older files', async ({ extContext, extensionId, setupDir }) => {
+    const now = Date.now();
+    const DAY = 86400000;
+
+    // A highlighted page only in an older day file (day 3)
+    const hlUrl = 'https://deep-highlight.com/';
+    const hlSlug = getSlugForUrl(hlUrl);
+    const noteSlug = `${hlSlug}-${now}`;
+
+    // Many plain pages in recent day files to fill the first batch
+    const plainPages = [];
+    for (let d = 0; d < 2; d++) {
+      const dayLines = [];
+      for (let i = 0; i < 5; i++) {
+        const url = `https://plain-${d}-${i}.example.com/`;
+        dayLines.push({ timestamp: now - d * DAY - i * 1000, action: 'visit_page', url, title: `Plain ${d}-${i}` });
+      }
+      const dateStr = new Date(now - d * DAY).toISOString().slice(0, 10);
+      plainPages.push({ path: `data/logs/test-device/${dateStr}.jsonl`, lines: dayLines });
+    }
+
+    // The highlighted page's visit is in an older day file
+    const oldDate = new Date(now - 2 * DAY).toISOString().slice(0, 10);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'CURRENT', content: 'test-device' },
+      { path: 'manifest/settings.json', data: { trimRules: [], historyFileBatch: 1 } },
+      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
+      { path: `pages/${hlSlug}.json`, data: {
+        slug: hlSlug, url: hlUrl, title: 'Deep Highlight', timestamp: now - 2 * DAY,
+        parentIds: [], childIds: [`note:${noteSlug}`],
+      }},
+      { path: `data/notes/${noteSlug}.json`, data: {
+        slug: noteSlug, excerpt: 'important text', note: 'my note', createdAt: now - 2 * DAY,
+      }},
+      ...plainPages,
+      { path: `data/logs/test-device/${oldDate}.jsonl`, lines: [
+        { timestamp: now - 2 * DAY, action: 'visit_page', url: hlUrl, title: 'Deep Highlight' },
+      ]},
+      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
+    ]);
+
+    const options = await openOptionsPage(extContext, extensionId);
+
+    // Open filter panel and enable "Has highlights"
+    const filterBtn = options.locator('#filterToggleBtn');
+    await filterBtn.click();
+    await expect(options.locator('#filterPanel')).toBeVisible();
+    const checkbox = options.locator('.filter-checkbox input[data-key="hasHighlights"]');
+    await checkbox.check();
+
+    // The highlighted page is in an older file (batch 3 with fileBatch=1).
+    // The filter should eventually surface it even though the first batches have no matches.
+    await options.waitForFunction(
+      () => {
+        const rows = document.querySelectorAll('#relatedResults .result-row');
+        const titles = [...rows].map(r => r.querySelector('.result-title')?.textContent?.trim());
+        return titles.includes('Deep Highlight') && titles.every(t => !t.startsWith('Plain'));
+      },
+      { timeout: 15000 }
+    );
+
+    const titles = await options.$$eval('#relatedResults .result-title', els =>
+      els.map(el => el.textContent.trim())
+    );
+    expect(titles).toContain('Deep Highlight');
+    expect(titles.every(t => !t.startsWith('Plain'))).toBe(true);
+
+    await options.close();
+  });
+
   test('list bubble filter restricts results to enabled lists', async ({ extContext, extensionId, setupDir }) => {
     const now = Date.now();
     const rustUrl = 'https://rust-lang.org/';
@@ -1180,11 +1254,11 @@ test.describe('List operations', () => {
       }},
       { path: `pages/${rustSlug}.json`, data: {
         slug: rustSlug, url: rustUrl, title: 'Rust Lang', timestamp: now,
-        parentIds: [], childIds: [],
+        parentIds: ['list:rust'], childIds: [],
       }},
       { path: `pages/${goSlug}.json`, data: {
         slug: goSlug, url: goUrl, title: 'Go Dev', timestamp: now,
-        parentIds: [], childIds: [],
+        parentIds: ['list:golang'], childIds: [],
       }},
 
       { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [

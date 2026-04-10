@@ -19,6 +19,20 @@ export function parseRepoUrl(url) {
   return { owner: parts[0], repo };
 }
 
+function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToUtf8(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
 export class GitHubTransport {
   constructor({ owner, repo, token }) {
     this.owner = owner;
@@ -89,7 +103,7 @@ export class GitHubTransport {
   // Get blob content (base64-decoded to string).
   async getBlob(sha) {
     const data = await this._request('GET', `${this._repoPath}/git/blobs/${sha}`);
-    return atob(data.content);
+    return base64ToUtf8(data.content);
   }
 
   // Create a new branch ref pointing at the given SHA.
@@ -111,7 +125,7 @@ export class GitHubTransport {
   async _initializeEmptyRepo(branch) {
     await this._request('PUT', `${this._repoPath}/contents/.gitkeep`, {
       message: 'initialize repository',
-      content: btoa(''),
+      content: utf8ToBase64(''),
       branch,
     });
   }
@@ -125,7 +139,7 @@ export class GitHubTransport {
       let blob;
       try {
         blob = await this._request('POST', `${this._repoPath}/git/blobs`, {
-          content: btoa(file.content),
+          content: utf8ToBase64(file.content),
           encoding: 'base64',
         });
       } catch (e) {
@@ -133,7 +147,7 @@ export class GitHubTransport {
         if (blobShas.length === 0 && e.message.includes('409')) {
           await this._initializeEmptyRepo(branch);
           blob = await this._request('POST', `${this._repoPath}/git/blobs`, {
-            content: btoa(file.content),
+            content: utf8ToBase64(file.content),
             encoding: 'base64',
           });
         } else {

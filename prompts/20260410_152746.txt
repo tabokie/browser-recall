@@ -1,0 +1,19 @@
+- Run manual test for me in the background
+- Run it again
+- Run it again
+- Run it again
+- Run it again
+- Run it again
+- Use log2(count) to display the bar chart height
+- Oh, it seems a little too flat. Smaller base maybe?
+- 1. Have a smallest height limit so that the bars are not too difficult to click
+2. Use rounded corner on the bar's bottom as well
+3. Add slightly more distance between the x-axis label and the bars
+4. The right side of the bars should align to the right size of the widget/page
+- Still a little hard to click, use this as bar height:
+if count > 0 {
+  f(count) + 10
+} else {
+  0
+}
+- + 5 instead

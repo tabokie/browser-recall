@@ -32,21 +32,24 @@ html[data-theme="dark"] {
   --accent-red: #d06050;
   --accent-red-soft: rgba(208, 96, 80, 0.12);
 
+  --shadow-color: 0, 0, 0;
+  --overlay-backdrop: rgba(0, 0, 0, 0.5);
+
   --shadow-float:
-    0 0.5px 0.5px rgba(0, 0, 0, 0.1),
-    0 1px 2px rgba(0, 0, 0, 0.12),
-    0 3px 6px rgba(0, 0, 0, 0.12),
-    0 8px 16px rgba(0, 0, 0, 0.1);
+    0 0.5px 0.5px rgba(var(--shadow-color), 0.1),
+    0 1px 2px rgba(var(--shadow-color), 0.12),
+    0 3px 6px rgba(var(--shadow-color), 0.12),
+    0 8px 16px rgba(var(--shadow-color), 0.1);
   --shadow-float-hover:
-    0 0.5px 1px rgba(0, 0, 0, 0.12),
-    0 2px 4px rgba(0, 0, 0, 0.15),
-    0 6px 12px rgba(0, 0, 0, 0.14),
-    0 14px 28px rgba(0, 0, 0, 0.12);
+    0 0.5px 1px rgba(var(--shadow-color), 0.12),
+    0 2px 4px rgba(var(--shadow-color), 0.15),
+    0 6px 12px rgba(var(--shadow-color), 0.14),
+    0 14px 28px rgba(var(--shadow-color), 0.12);
   --shadow-elevated:
-    0 1px 2px rgba(0, 0, 0, 0.12),
-    0 4px 8px rgba(0, 0, 0, 0.15),
-    0 12px 24px rgba(0, 0, 0, 0.14),
-    0 24px 48px rgba(0, 0, 0, 0.12);
+    0 1px 2px rgba(var(--shadow-color), 0.12),
+    0 4px 8px rgba(var(--shadow-color), 0.15),
+    0 12px 24px rgba(var(--shadow-color), 0.14),
+    0 24px 48px rgba(var(--shadow-color), 0.12);
 
   --highlight-top: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --highlight-top-strong: inset 0 1.5px 0 rgba(255, 255, 255, 0.08);
@@ -70,11 +73,11 @@ html[data-theme="dark"] {
 
 /* Syntax highlighting tokens for function rule editor — dark mode */
 html[data-theme="dark"] .tok-keyword,
-html[data-theme="dark"] .tok-literal { color: #c792ea; }
-html[data-theme="dark"] .tok-string  { color: #c3e88d; }
-html[data-theme="dark"] .tok-regex   { color: #f07178; }
-html[data-theme="dark"] .tok-number  { color: #f78c6c; }
-html[data-theme="dark"] .tok-comment { color: #676e95; }
+html[data-theme="dark"] .tok-literal { color: var(--tok-keyword, #c792ea); }
+html[data-theme="dark"] .tok-string  { color: var(--tok-string, #c3e88d); }
+html[data-theme="dark"] .tok-regex   { color: var(--tok-regex, #f07178); }
+html[data-theme="dark"] .tok-number  { color: var(--tok-number, #f78c6c); }
+html[data-theme="dark"] .tok-comment { color: var(--tok-comment, #676e95); }
 html[data-theme="dark"] .rule-fn-editor {
   background: rgba(30, 26, 22, 0.4);
   border-color: rgba(80, 68, 58, 0.4);
