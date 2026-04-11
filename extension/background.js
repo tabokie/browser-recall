@@ -1,17 +1,47 @@
 // Background service worker for Portal extension
 // Central authority for reads and mutations. Offscreen is a pure filesystem I/O worker.
-import { generateSlugFromUrl, generateNoteSlug, dateKeyFromTimestamp } from './utils.js';
+import {
+  generateSlugFromUrl,
+  generateNoteSlug,
+  dateKeyFromTimestamp,
+} from './utils.js';
 import { effectOf } from './replay.js';
-import { validateRuleConfig, validateSmartRuleFn, matchRules, matchKeywordRule, buildPageDataFromEntry } from './rule-engine.js';
+import {
+  validateRuleConfig,
+  validateFnRuleSource,
+  matchRules,
+  matchKeywordRule,
+  buildPageDataFromEntry,
+} from './rule-engine.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
-import { cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin, setEntityCacheWatermark, cacheClear, setQuotaExhaustedCallback } from './entity-cache.js';
+import {
+  cacheGet,
+  cacheSet,
+  cacheRemove,
+  cachePin,
+  cacheUnpin,
+  setEntityCacheWatermark,
+  cacheClear,
+  setQuotaExhaustedCallback,
+} from './entity-cache.js';
 import { GitHubTransport, parseRepoUrl } from './sync-transport-github.js';
 import { FilesystemTransport } from './sync-transport-filesystem.js';
 import { WebDAVTransport } from './sync-transport-webdav.js';
 import { SCHEME_HEX } from './color-scheme-map.js';
 import { SyncManager } from './sync-manager.js';
 import { logDebug, logError } from './logger.js';
-import { PAGE_PREFIX, NOTE_PREFIX, SNAPSHOT_PREFIX, LIST_PREFIX, entitySlug, isSystemList, pageKey, noteKey, listKey, snapshotKey } from './entity-types.js';
+import {
+  PAGE_PREFIX,
+  NOTE_PREFIX,
+  SNAPSHOT_PREFIX,
+  LIST_PREFIX,
+  entitySlug,
+  isSystemList,
+  pageKey,
+  noteKey,
+  listKey,
+  snapshotKey,
+} from './entity-types.js';
 
 logDebug('Background script loading...');
 
@@ -50,14 +80,26 @@ async function getDeviceId() {
 
 function pauseService(code, message) {
   serviceError = { code, message, timestamp: Date.now() };
-  chrome.action.setIcon({ path: { 16: 'icons/icon16-down.png', 48: 'icons/icon48-down.png', 128: 'icons/icon128-down.png' } });
+  chrome.action.setIcon({
+    path: {
+      16: 'icons/icon16-down.png',
+      48: 'icons/icon48-down.png',
+      128: 'icons/icon128-down.png',
+    },
+  });
   chrome.storage.session.set({ serviceError }).catch(() => {});
   logError(`Service paused: [${code}] ${message}`);
 }
 
 function resumeService() {
   serviceError = null;
-  chrome.action.setIcon({ path: { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' } });
+  chrome.action.setIcon({
+    path: {
+      16: 'icons/icon16.png',
+      48: 'icons/icon48.png',
+      128: 'icons/icon128.png',
+    },
+  });
   chrome.storage.session.remove(['serviceError']).catch(() => {});
   logDebug('Service resumed');
 }
@@ -68,22 +110,26 @@ function isServicePaused() {
 
 // Register quota exhausted callback — bridges entity-cache to downtime infrastructure.
 setQuotaExhaustedCallback(() => {
-  pauseService('session_quota', 'Session storage full — all cached entities are dirty (unflushed). This usually means drain is stuck.');
+  pauseService(
+    'session_quota',
+    'Session storage full — all cached entities are dirty (unflushed). This usually means drain is stuck.',
+  );
 });
 
 // Session storage: in-memory IPC, survives SW termination, cleared on browser restart.
 // hydrateCache() re-populates from filesystem on every startup.
-chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
+chrome.storage.session.setAccessLevel({
+  accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS',
+});
 
 // Resolves when hydrateCache() completes (or immediately if no hydration needed).
 let hydrationDone = Promise.resolve();
-
 
 // ─── Offscreen Document ───────────────────────────────────────────────
 
 async function setupOffscreenDocument() {
   const existingContexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT']
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
   });
   if (existingContexts.length > 0) return;
 
@@ -91,7 +137,7 @@ async function setupOffscreenDocument() {
     await chrome.offscreen.createDocument({
       url: 'offscreen.html',
       reasons: ['LOCAL_STORAGE'],
-      justification: 'Manage filesystem operations for browsing history'
+      justification: 'Manage filesystem operations for browsing history',
     });
     logDebug('Offscreen document created');
   } catch (e) {
@@ -115,11 +161,17 @@ const CRASH_LOOP_WINDOW_MS = 60_000;
 function trackOffscreenDisconnect() {
   const now = Date.now();
   offscreenDisconnects.push(now);
-  while (offscreenDisconnects.length && offscreenDisconnects[0] < now - CRASH_LOOP_WINDOW_MS) {
+  while (
+    offscreenDisconnects.length &&
+    offscreenDisconnects[0] < now - CRASH_LOOP_WINDOW_MS
+  ) {
     offscreenDisconnects.shift();
   }
   if (offscreenDisconnects.length >= CRASH_LOOP_THRESHOLD) {
-    pauseService('offscreen_crash', `Storage worker crashed ${CRASH_LOOP_THRESHOLD} times in ${CRASH_LOOP_WINDOW_MS / 1000}s`);
+    pauseService(
+      'offscreen_crash',
+      `Storage worker crashed ${CRASH_LOOP_THRESHOLD} times in ${CRASH_LOOP_WINDOW_MS / 1000}s`,
+    );
   }
 }
 
@@ -144,7 +196,7 @@ async function handleOffscreenResponse(msg) {
   if (msg.action === 'persisted') {
     // Watermark from offscreen flush — prune entries at or before watermark timestamp
     await ensureLogBuffer();
-    logBuffer = logBuffer.filter(e => e.timestamp > msg.watermark);
+    logBuffer = logBuffer.filter((e) => e.timestamp > msg.watermark);
     logBufferWatermark = msg.watermark;
     await persistLogBuffer();
     setEntityCacheWatermark(msg.watermark);
@@ -196,30 +248,45 @@ const LOCK_TIMEOUT_MS = 30000;
 
 function withLock(key, fn) {
   const prev = rwLocks.get(key) || Promise.resolve();
-  const next = prev.catch(() => {}).then(() => {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error(`withLock('${key}') timed out after ${LOCK_TIMEOUT_MS}ms`));
-      }, LOCK_TIMEOUT_MS);
-      fn().then(
-        (result) => { clearTimeout(timer); resolve(result); },
-        (error) => { clearTimeout(timer); reject(error); },
-      );
+  const next = prev
+    .catch(() => {})
+    .then(() => {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(
+            new Error(
+              `withLock('${key}') timed out after ${LOCK_TIMEOUT_MS}ms`,
+            ),
+          );
+        }, LOCK_TIMEOUT_MS);
+        fn().then(
+          (result) => {
+            clearTimeout(timer);
+            resolve(result);
+          },
+          (error) => {
+            clearTimeout(timer);
+            reject(error);
+          },
+        );
+      });
     });
-  });
   rwLocks.set(key, next);
-  next.catch(() => {}).then(() => {
-    if (rwLocks.get(key) === next) rwLocks.delete(key);
-  });
+  next
+    .catch(() => {})
+    .then(() => {
+      if (rwLocks.get(key) === next) rwLocks.delete(key);
+    });
   return next;
 }
-
 
 // ─── Mutation Notifications ───────────────────────────────────────────
 // Notify extension pages (options, popup) after data mutations so they can refresh.
 
 function notifyMutation(type, detail) {
-  chrome.runtime.sendMessage({ action: 'mutation', type, ...detail }).catch(() => {});
+  chrome.runtime
+    .sendMessage({ action: 'mutation', type, ...detail })
+    .catch(() => {});
 }
 
 // ─── Log Buffer ──────────────────────────────────────────────────────
@@ -234,10 +301,14 @@ let logBufferWatermark = 0; // last drain watermark — entries ≤ this are saf
 
 async function ensureLogBuffer() {
   if (logBuffer !== null) return;
-  const { logBuffer: stored = [] } = await chrome.storage.local.get(['logBuffer']);
+  const { logBuffer: stored = [] } = await chrome.storage.local.get([
+    'logBuffer',
+  ]);
   logBuffer = stored;
   if (logBuffer.length > 0) {
-    logDebug(`Restored ${logBuffer.length} pending log entries from storage.local`);
+    logDebug(
+      `Restored ${logBuffer.length} pending log entries from storage.local`,
+    );
   }
 }
 
@@ -246,7 +317,10 @@ async function persistLogBuffer() {
     await chrome.storage.local.set({ logBuffer });
   } catch (e) {
     if (e.message?.includes('QUOTA_BYTES') || e.message?.includes('quota')) {
-      pauseService('local_quota', `Local storage full — logBuffer has ${logBuffer.length} undrained entries. Drain may be stuck.`);
+      pauseService(
+        'local_quota',
+        `Local storage full — logBuffer has ${logBuffer.length} undrained entries. Drain may be stuck.`,
+      );
     }
     throw e;
   }
@@ -265,15 +339,25 @@ function scheduleDrainNotify() {
 }
 
 async function drainNow() {
-  if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
+  if (drainNotifyTimer) {
+    clearTimeout(drainNotifyTimer);
+    drainNotifyTimer = null;
+  }
   if (!offscreenPort) return; // Port not ready; connectToOffscreen will retry
   try {
     await ensureLogBuffer();
     if (logBuffer.length > 0) {
-      offscreenPort.postMessage({ action: 'drainEntries', entries: logBuffer, deviceId: await getDeviceId() });
+      offscreenPort.postMessage({
+        action: 'drainEntries',
+        entries: logBuffer,
+        deviceId: await getDeviceId(),
+      });
       consecutiveDrainFailures++;
       if (consecutiveDrainFailures >= DRAIN_FAILURE_THRESHOLD) {
-        pauseService('fs_permission', 'Storage drain has failed for 60+ seconds. File system permission may have been revoked.');
+        pauseService(
+          'fs_permission',
+          'Storage drain has failed for 60+ seconds. File system permission may have been revoked.',
+        );
       }
     }
   } catch (e) {
@@ -334,13 +418,15 @@ async function addLog(entry) {
     await ensureLogBuffer();
     logBuffer.push(entry);
     if (logBuffer.length > LOG_BUFFER_MAX_SIZE) {
-      logBuffer = logBuffer.filter(e => e.timestamp > logBufferWatermark);
+      logBuffer = logBuffer.filter((e) => e.timestamp > logBufferWatermark);
       if (logBuffer.length > LOG_BUFFER_MAX_SIZE) {
         logBuffer = logBuffer.slice(-LOG_BUFFER_MAX_SIZE);
       }
     }
     await persistLogBuffer();
-    effects = await effectOf(entry, sessionLoad, { deviceId: await getDeviceId() });
+    effects = await effectOf(entry, sessionLoad, {
+      deviceId: await getDeviceId(),
+    });
     await sessionWrite(effects);
   });
   // Append to today's history date key in session (fire-and-forget).
@@ -348,23 +434,35 @@ async function addLog(entry) {
   // are newer than the on-disk JSONL file, so evicting it would lose data.
   // Also covers date rollover (new date key created mid-session).
   const todayKey = 'log:' + dateKeyFromTimestamp(entry.timestamp);
-  cacheGet(todayKey).then(async today => {
-    if (today == null) {
-      // Cache miss — load from disk. Should not happen after hydration.
-      logDebug(`[addLog] history cache miss for ${todayKey}, loading from disk`);
-      const dateStr = dateKeyFromTimestamp(entry.timestamp);
-      const resp = await requestOffscreen({ action: 'loadHistoryRange', from: dateStr, to: dateStr });
-      assertOffscreenSuccess(resp, todayKey);
-      today = resp.entries || [];
-    }
-    today.push(entry);
-    cacheSet(todayKey, today, { timestamp: entry.timestamp });
-    cachePin(todayKey);
-  }).catch(e => logDebug('[addLog] history cache update failed:', e.message));
-  ensureOffscreenPort().catch(e => logDebug('[addLog] offscreen port failed:', e.message));
+  cacheGet(todayKey)
+    .then(async (today) => {
+      if (today == null) {
+        // Cache miss — load from disk. Should not happen after hydration.
+        logDebug(
+          `[addLog] history cache miss for ${todayKey}, loading from disk`,
+        );
+        const dateStr = dateKeyFromTimestamp(entry.timestamp);
+        const resp = await requestOffscreen({
+          action: 'loadHistoryRange',
+          from: dateStr,
+          to: dateStr,
+        });
+        assertOffscreenSuccess(resp, todayKey);
+        today = resp.entries || [];
+      }
+      today.push(entry);
+      cacheSet(todayKey, today, { timestamp: entry.timestamp });
+      cachePin(todayKey);
+    })
+    .catch((e) => logDebug('[addLog] history cache update failed:', e.message));
+  ensureOffscreenPort().catch((e) =>
+    logDebug('[addLog] offscreen port failed:', e.message),
+  );
   scheduleDrainNotify();
   // Refresh badge for all tabs whose page entity was affected.
-  const affectedPageKeys = Object.keys(effects).filter(k => k.startsWith(PAGE_PREFIX));
+  const affectedPageKeys = Object.keys(effects).filter((k) =>
+    k.startsWith(PAGE_PREFIX),
+  );
   if (affectedPageKeys.length > 0) {
     // Collect URLs for affected pages (from effects or entry)
     const urls = new Set();
@@ -375,13 +473,19 @@ async function addLog(entry) {
     }
     // Update all tabs matching affected URLs, plus active tab as fallback
     if (urls.size > 0) {
-      chrome.tabs.query({ url: [...urls] }).then(tabs => {
-        for (const tab of tabs) updateBadgeForTab(tab.id, tab.url);
-      }).catch(e => logDebug('[addLog] badge query failed:', e.message));
+      chrome.tabs
+        .query({ url: [...urls] })
+        .then((tabs) => {
+          for (const tab of tabs) updateBadgeForTab(tab.id, tab.url);
+        })
+        .catch((e) => logDebug('[addLog] badge query failed:', e.message));
     }
-    chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([tab]) => {
-      if (tab) updateBadgeForTab(tab.id, tab.url);
-    }).catch(e => logDebug('[addLog] badge update failed:', e.message));
+    chrome.tabs
+      .query({ active: true, lastFocusedWindow: true })
+      .then(([tab]) => {
+        if (tab) updateBadgeForTab(tab.id, tab.url);
+      })
+      .catch((e) => logDebug('[addLog] badge update failed:', e.message));
   }
   return effects;
 }
@@ -400,7 +504,8 @@ function buildVisitPageEntry(url, title, referrerUrl, { checkpoint } = {}) {
 function buildLeavePageEntry(url, title, scrollDepth, timeOnPage) {
   const entry = { timestamp: Date.now(), action: 'leave_page', url };
   if (title) entry.title = title;
-  if (scrollDepth !== undefined && scrollDepth !== null) entry.scrollDepth = scrollDepth;
+  if (scrollDepth !== undefined && scrollDepth !== null)
+    entry.scrollDepth = scrollDepth;
   if (timeOnPage !== undefined && timeOnPage > 0) entry.timeOnPage = timeOnPage;
   return entry;
 }
@@ -480,21 +585,31 @@ async function readFs(key) {
         //   so watermark-gated eviction won't evict them until drain completes
         // - Past keys fully drained: disk is complete, no replay needed
         const dateStr = key.slice('log:'.length);
-        const r = await requestOffscreen({ action: 'loadHistoryRange', from: dateStr, to: dateStr });
+        const r = await requestOffscreen({
+          action: 'loadHistoryRange',
+          from: dateStr,
+          to: dateStr,
+        });
         assertOffscreenSuccess(r, key);
         value = r.entries || [];
         break;
       }
       if (key.startsWith(PAGE_PREFIX)) {
         const slug = entitySlug(key);
-        const r = await requestOffscreen({ action: 'loadPageBatch', slugs: [slug] });
+        const r = await requestOffscreen({
+          action: 'loadPageBatch',
+          slugs: [slug],
+        });
         assertOffscreenSuccess(r, key);
         value = r.pages?.[slug] ?? null;
         break;
       }
       if (key.startsWith(NOTE_PREFIX)) {
         const slug = entitySlug(key);
-        const r = await requestOffscreen({ action: 'loadNote', noteSlug: slug });
+        const r = await requestOffscreen({
+          action: 'loadNote',
+          noteSlug: slug,
+        });
         assertOffscreenSuccess(r, key);
         value = r.note ?? null;
         break;
@@ -528,7 +643,9 @@ async function hydrateBaseEntities() {
     if (resp?.success && resp.settings) {
       await cacheSet('manifest:settings', resp.settings);
     }
-  } catch (e) { logDebug('Settings load failed:', e.message); }
+  } catch (e) {
+    logDebug('Settings load failed:', e.message);
+  }
 
   try {
     const metaResp = await requestOffscreen({ action: 'loadAllListMetadata' });
@@ -537,19 +654,26 @@ async function hydrateBaseEntities() {
         await cacheSet(listKey(list.slug), list);
       }
     }
-  } catch (e) { logDebug('List metadata load failed:', e.message); }
+  } catch (e) {
+    logDebug('List metadata load failed:', e.message);
+  }
 
   try {
     const orderResp = await requestOffscreen({ action: 'loadListOrder' });
-    if (orderResp?.success && orderResp.entity) await cacheSet('manifest:list-order', orderResp.entity);
-  } catch (e) { logDebug('List order load failed:', e.message); }
+    if (orderResp?.success && orderResp.entity)
+      await cacheSet('manifest:list-order', orderResp.entity);
+  } catch (e) {
+    logDebug('List order load failed:', e.message);
+  }
 
   try {
     const nmResp = await requestOffscreen({ action: 'loadNameMap' });
     if (nmResp?.success && nmResp.entity) {
       await cacheSet('manifest:name-to-id', nmResp.entity);
     }
-  } catch (e) { logDebug('Name-map load failed:', e.message); }
+  } catch (e) {
+    logDebug('Name-map load failed:', e.message);
+  }
 }
 
 async function hydrateHistoryCache() {
@@ -557,11 +681,17 @@ async function hydrateHistoryCache() {
 
   // Load today's history — pinned because addLog appends entries here that are
   // newer than the on-disk JSONL file; evicting would lose unflushed data.
-  const todayResp = await requestOffscreen({ action: 'loadHistoryRange', from: todayStr, to: todayStr });
+  const todayResp = await requestOffscreen({
+    action: 'loadHistoryRange',
+    from: todayStr,
+    to: todayStr,
+  });
   assertOffscreenSuccess(todayResp, 'log:' + todayStr);
   const todayEntries = todayResp.entries || [];
   const todayKey = 'log:' + todayStr;
-  const todayMaxTs = todayEntries.length ? todayEntries[todayEntries.length - 1].timestamp : 0;
+  const todayMaxTs = todayEntries.length
+    ? todayEntries[todayEntries.length - 1].timestamp
+    : 0;
   await cacheSet(todayKey, todayEntries, { timestamp: todayMaxTs });
   cachePin(todayKey);
 
@@ -577,7 +707,11 @@ async function hydrateHistoryCache() {
   recentUrls = new Map();
   if (fromStr <= toStr) {
     // Load the full range, then split into per-date keys
-    const recentResp = await requestOffscreen({ action: 'loadHistoryRange', from: fromStr, to: toStr });
+    const recentResp = await requestOffscreen({
+      action: 'loadHistoryRange',
+      from: fromStr,
+      to: toStr,
+    });
     assertOffscreenSuccess(recentResp, `log:${fromStr}..${toStr}`);
     const recentEntries = recentResp.entries || [];
     const recentFiles = recentResp.files || [];
@@ -607,7 +741,8 @@ async function hydrateHistoryCache() {
     for (const entry of recentEntries) {
       if ((entry.action === 'visit_page' || !entry.action) && entry.url) {
         const d = new Date(entry.timestamp);
-        const yyyymmdd = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+        const yyyymmdd =
+          d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
         const dates = recentUrls.get(entry.url);
         if (dates) {
           if (!dates.includes(yyyymmdd)) dates.push(yyyymmdd);
@@ -620,7 +755,7 @@ async function hydrateHistoryCache() {
     // Unpin any older history keys still in session from prior SW lifetime
     // (session survives SW termination; these are stale cache from before the 7-day window)
     const fromMs = fromDate.getTime();
-    for (const file of (recentResp?.files || [])) {
+    for (const file of recentResp?.files || []) {
       // files returned by loadHistoryRange are within range, skip
     }
     // We can't enumerate session keys, but we can check known old dates
@@ -636,7 +771,9 @@ async function hydrateHistoryCache() {
     }
   }
 
-  logDebug(`History cache: ${todayEntries.length} today, ${recentUrls.size} recent URLs`);
+  logDebug(
+    `History cache: ${todayEntries.length} today, ${recentUrls.size} recent URLs`,
+  );
 }
 
 async function hydrateBufferPages() {
@@ -649,16 +786,22 @@ async function hydrateBufferPages() {
     if (todayForDedup == null) {
       logDebug(`[dedup] history cache miss for ${todayKey}, loading from disk`);
       const dateStr = dateKeyFromTimestamp(Date.now());
-      const resp = await requestOffscreen({ action: 'loadHistoryRange', from: dateStr, to: dateStr });
+      const resp = await requestOffscreen({
+        action: 'loadHistoryRange',
+        from: dateStr,
+        to: dateStr,
+      });
       assertOffscreenSuccess(resp, todayKey);
       todayForDedup = resp.entries || [];
     }
     if (todayForDedup.length > 0 && logBuffer.length > 0) {
-      const flushedTimestamps = new Set(todayForDedup.map(e => e.timestamp));
+      const flushedTimestamps = new Set(todayForDedup.map((e) => e.timestamp));
       const before = logBuffer.length;
-      logBuffer = logBuffer.filter(e => !flushedTimestamps.has(e.timestamp));
+      logBuffer = logBuffer.filter((e) => !flushedTimestamps.has(e.timestamp));
       if (logBuffer.length < before) {
-        logDebug(`logBuffer dedup: ${before} → ${logBuffer.length} (${before - logBuffer.length} already flushed)`);
+        logDebug(
+          `logBuffer dedup: ${before} → ${logBuffer.length} (${before - logBuffer.length} already flushed)`,
+        );
         await persistLogBuffer();
       }
     }
@@ -669,7 +812,9 @@ async function hydrateBufferPages() {
   for (const entry of logBuffer) {
     if (entry.url) bufferPageSlugs.add(generateSlugFromUrl(entry.url));
     if (entry.referrerId) {
-      const refSlug = entry.referrerId.startsWith(PAGE_PREFIX) ? entitySlug(entry.referrerId) : entry.referrerId;
+      const refSlug = entry.referrerId.startsWith(PAGE_PREFIX)
+        ? entitySlug(entry.referrerId)
+        : entry.referrerId;
       bufferPageSlugs.add(refSlug);
     }
   }
@@ -680,13 +825,18 @@ async function hydrateBufferPages() {
     }
     if (slugsToLoad.length > 0) {
       try {
-        const resp = await requestOffscreen({ action: 'loadPageBatch', slugs: slugsToLoad });
+        const resp = await requestOffscreen({
+          action: 'loadPageBatch',
+          slugs: slugsToLoad,
+        });
         if (resp?.success && resp.pages) {
           for (const [slug, page] of Object.entries(resp.pages)) {
             await cacheSet(pageKey(slug), page);
           }
         }
-      } catch (e) { logDebug('Page pre-load failed:', e.message); }
+      } catch (e) {
+        logDebug('Page pre-load failed:', e.message);
+      }
     }
   }
 }
@@ -696,9 +846,13 @@ async function replayBufferEntries() {
   // sessionLoad → readCacheable → await hydrationDone → waiting for us.
   for (const entry of logBuffer) {
     try {
-      const effects = await effectOf(entry, sessionLoadDuringHydration, { deviceId: localDeviceId });
+      const effects = await effectOf(entry, sessionLoadDuringHydration, {
+        deviceId: localDeviceId,
+      });
       await sessionWrite(effects);
-    } catch (e) { logDebug('Hydration replay failed for entry:', e.message); }
+    } catch (e) {
+      logDebug('Hydration replay failed for entry:', e.message);
+    }
   }
 }
 
@@ -730,19 +884,33 @@ async function replayRemoteLogs() {
   // already-checkpointed entries is a safe no-op.
   const settings = await cacheGet('manifest:settings');
   if (settings?.syncEnabled && localDeviceId) {
-    const resp = await requestOffscreen({ action: 'loadRemoteLogEntries', localDeviceId });
+    const resp = await requestOffscreen({
+      action: 'loadRemoteLogEntries',
+      localDeviceId,
+    });
     if (resp?.success && resp.remotes?.length > 0) {
       let totalEntries = 0;
       for (const { deviceId: peerId, entries } of resp.remotes) {
         for (const entry of entries) {
           try {
-            const effects = await effectOf(entry, sessionLoadDuringHydration, { deviceId: peerId });
+            const effects = await effectOf(entry, sessionLoadDuringHydration, {
+              deviceId: peerId,
+            });
             await sessionWrite(effects);
-          } catch (e) { logDebug('[hydrateCache] Remote entry replay error:', e.message, 'entry:', entry.action); }
+          } catch (e) {
+            logDebug(
+              '[hydrateCache] Remote entry replay error:',
+              e.message,
+              'entry:',
+              entry.action,
+            );
+          }
         }
         totalEntries += entries.length;
       }
-      logDebug(`Remote log replay: ${resp.remotes.length} peers, ${totalEntries} entries`);
+      logDebug(
+        `Remote log replay: ${resp.remotes.length} peers, ${totalEntries} entries`,
+      );
     }
   }
 }
@@ -760,7 +928,9 @@ async function hydrateCache() {
   // Phase 1.5: History cache — per-date keys history:YYYY-MM-DD
   try {
     await hydrateHistoryCache();
-  } catch (e) { logDebug('History cache load failed:', e.message); }
+  } catch (e) {
+    logDebug('History cache load failed:', e.message);
+  }
 
   // Phase 1.6: Pre-load page entities referenced by logBuffer from filesystem
   await hydrateBufferPages();
@@ -774,7 +944,9 @@ async function hydrateCache() {
   // Phase 3: Replay remote device log files (multi-device sync)
   try {
     await replayRemoteLogs();
-  } catch (e) { logDebug('Remote log replay failed:', e.message); }
+  } catch (e) {
+    logDebug('Remote log replay failed:', e.message);
+  }
 
   logDebug('Cache hydrated');
 }
@@ -792,8 +964,12 @@ async function ensureDeviceId() {
 async function ensureDefaultLists() {
   await ensureDeviceId();
   try {
-    const metaRespCheck = await requestOffscreen({ action: 'loadAllListMetadata' });
-    const userLists = (metaRespCheck?.lists || []).filter(l => !l.slug.startsWith('system/'));
+    const metaRespCheck = await requestOffscreen({
+      action: 'loadAllListMetadata',
+    });
+    const userLists = (metaRespCheck?.lists || []).filter(
+      (l) => !l.slug.startsWith('system/'),
+    );
     if (userLists.length === 0) {
       await addLog({
         timestamp: Date.now(),
@@ -808,27 +984,29 @@ async function ensureDefaultLists() {
         listOwner: 'system',
         name: 'Hubs',
         rule: {
-          type: 'smart',
+          type: 'function',
           config: {
             description: 'Hub and landing pages',
             fnSource: [
-              "const u = new URL(page.url);",
-              "const p = u.pathname.toLowerCase();",
+              'const u = new URL(page.url);',
+              'const p = u.pathname.toLowerCase();',
               "const skip = ['s', 'search', 'query', 'q', 'target'];",
-              "if (skip.some(k => u.searchParams.has(k))) return false;",
+              'if (skip.some(k => u.searchParams.has(k))) return false;',
               "if (p === '/' || p === '') return u.search.length <= 100;",
               "const parts = p.split('/').filter(Boolean);",
               "if (parts.length === 1 && p.endsWith('/')) return true;",
               "const last = parts[parts.length - 1] || '';",
               "const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover', 'index'];",
-              "if (hub.some(k => last.includes(k))) return !u.hash;",
-              "return false;",
+              'if (hub.some(k => last.includes(k))) return !u.hash;',
+              'return false;',
             ].join('\n'),
           },
         },
       });
     }
-  } catch (e) { logDebug('First-run default list creation failed:', e.message); }
+  } catch (e) {
+    logDebug('First-run default list creation failed:', e.message);
+  }
 }
 
 // ─── Smart-Rule Auto-Pin on Visit ────────────────────────────────────
@@ -838,9 +1016,13 @@ async function evaluateSmartRulesForVisit(url, title) {
   const listKeys = await getAllListKeys();
   const pageData = buildPageDataFromEntry({ url, title });
   const sandbox = async (fnSource, pd) => {
-    const resp = await requestOffscreen({ action: 'executeSandboxFn', fnSource, pageData: pd });
+    const resp = await requestOffscreen({
+      action: 'executeSandboxFn',
+      fnSource,
+      pageData: pd,
+    });
     if (!resp?.success) throw new Error('Sandbox execution failed');
-    return resp.score;
+    return resp.match;
   };
   const pk = pageKey(generateSlugFromUrl(url));
 
@@ -852,7 +1034,7 @@ async function evaluateSmartRulesForVisit(url, title) {
     const matches = await matchRules(listEntity.rules, pageData, { sandbox });
     if (matches.length === 0) continue;
 
-    const alreadyPinned = (listEntity.pins || []).some(p => p.id === pk);
+    const alreadyPinned = (listEntity.pins || []).some((p) => p.id === pk);
     if (alreadyPinned) continue;
 
     const listInfo = await getListEventFields(listId);
@@ -876,7 +1058,7 @@ async function evaluateSmartRulesForVisit(url, title) {
 
 async function trimTitle(rawTitle, url) {
   let title = rawTitle;
-  const settings = await readCacheable('manifest:settings') || {};
+  const settings = (await readCacheable('manifest:settings')) || {};
   if (settings.titleCleanupEnabled === false) return title.trim();
   const titleTrimRules = settings.titleTrimRules || [];
   for (const rule of titleTrimRules) {
@@ -910,13 +1092,16 @@ async function updateBadgeForTab(tabId, url) {
       chrome.action.setBadgeText({ text: '', tabId });
       return;
     }
-    const hasNotes = page.childIds?.some(c => c.startsWith(NOTE_PREFIX) || c.startsWith(SNAPSHOT_PREFIX));
-    const hasLists = page.parentIds?.some(id => id.startsWith(LIST_PREFIX));
+    const hasNotes = page.childIds?.some(
+      (c) => c.startsWith(NOTE_PREFIX) || c.startsWith(SNAPSHOT_PREFIX),
+    );
+    const hasLists = page.parentIds?.some((id) => id.startsWith(LIST_PREFIX));
     if (!hasNotes && !hasLists) {
       chrome.action.setBadgeText({ text: '', tabId });
       return;
     }
-    const color = hasNotes && hasLists ? '#9C27B0' : hasNotes ? '#4A90D9' : '#4CAF50';
+    const color =
+      hasNotes && hasLists ? '#9C27B0' : hasNotes ? '#4A90D9' : '#4CAF50';
     chrome.action.setBadgeBackgroundColor({ color, tabId });
     chrome.action.setBadgeText({ text: ' ', tabId });
   } catch (e) {
@@ -928,7 +1113,9 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   try {
     const tab = await chrome.tabs.get(tabId);
     updateBadgeForTab(tabId, tab.url);
-  } catch (e) { /* tab may have been closed */ }
+  } catch (e) {
+    /* tab may have been closed */
+  }
 });
 
 // ─── Supplementary referrer detection ─────────────────────────────────
@@ -944,7 +1131,8 @@ const getReferrer = (() => {
   chrome.webNavigation.onCommitted.addListener((details) => {
     if (details.frameId !== 0) return;
     const previousUrl = tabUrls.get(details.tabId);
-    const referrer = (details.transitionType === 'link' && previousUrl) ? previousUrl : null;
+    const referrer =
+      details.transitionType === 'link' && previousUrl ? previousUrl : null;
     tabUrls.set(details.tabId, details.url);
     committed.set(details.tabId, referrer);
     updateBadgeForTab(details.tabId, details.url);
@@ -982,7 +1170,7 @@ const getReferrer = (() => {
       return ref;
     }
     // onCommitted hasn't fired yet — wait briefly
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       const timer = setTimeout(() => {
         waiters.delete(tabId);
         resolve(null);
@@ -1013,7 +1201,9 @@ async function getSyncSessionToken() {
   try {
     const data = await chrome.storage.session.get([SYNC_SESSION_TOKEN_KEY]);
     return data[SYNC_SESSION_TOKEN_KEY] || null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 // Store the sync token in chrome.storage.session.
@@ -1030,7 +1220,9 @@ async function _loadSyncDevices() {
   try {
     const data = await chrome.storage.session.get([SYNC_DEVICES_KEY]);
     return data[SYNC_DEVICES_KEY] || [];
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 // Paused devices — persisted in chrome.storage.local.
@@ -1039,7 +1231,9 @@ async function _loadPausedDevices() {
   try {
     const data = await chrome.storage.local.get([PAUSED_DEVICES_KEY]);
     return data[PAUSED_DEVICES_KEY] || {};
-  } catch { return {}; }
+  } catch {
+    return {};
+  }
 }
 async function _savePausedDevices(paused) {
   await chrome.storage.local.set({ [PAUSED_DEVICES_KEY]: paused });
@@ -1047,7 +1241,7 @@ async function _savePausedDevices(paused) {
 
 // On startup, load token from disk → session if "Remember on disk" is enabled.
 async function loadSyncTokenFromDisk() {
-  const settings = await readCacheable('manifest:settings') || {};
+  const settings = (await readCacheable('manifest:settings')) || {};
   if (settings.syncRememberToken && settings.syncToken) {
     const existing = await getSyncSessionToken();
     if (!existing) {
@@ -1061,7 +1255,9 @@ async function loadSyncTokenFromDisk() {
 // already persisted in their own device-specific log files on disk.
 async function replayRemoteEntries(entries, peerDeviceId) {
   for (const entry of entries) {
-    const effects = await effectOf(entry, sessionLoad, { deviceId: peerDeviceId });
+    const effects = await effectOf(entry, sessionLoad, {
+      deviceId: peerDeviceId,
+    });
     await sessionWrite(effects);
   }
   scheduleDrainNotify();
@@ -1080,11 +1276,17 @@ function buildSyncManager(settings, { githubToken } = {}) {
     case 'filesystem': {
       transport = new FilesystemTransport({
         listDeviceDirs: () =>
-          requestOffscreen({ action: 'syncFsListDeviceDirs' }).then(r => r.dirs),
+          requestOffscreen({ action: 'syncFsListDeviceDirs' }).then(
+            (r) => r.dirs,
+          ),
         listFiles: (deviceDir) =>
-          requestOffscreen({ action: 'syncFsListFiles', deviceDir }).then(r => r.files),
+          requestOffscreen({ action: 'syncFsListFiles', deviceDir }).then(
+            (r) => r.files,
+          ),
         readFile: (path) =>
-          requestOffscreen({ action: 'syncFsReadFile', path }).then(r => r.content),
+          requestOffscreen({ action: 'syncFsReadFile', path }).then(
+            (r) => r.content,
+          ),
         writeFile: (path, content) =>
           requestOffscreen({ action: 'syncFsWriteFile', path, content }),
         ensureDir: (path) =>
@@ -1108,20 +1310,35 @@ function buildSyncManager(settings, { githubToken } = {}) {
   return new SyncManager({
     transport,
     collectLocalFiles: (deviceId, retentionDays) =>
-      requestOffscreen({ action: 'collectSyncFiles', deviceId, retentionDays })
-        .then(r => r.files),
+      requestOffscreen({
+        action: 'collectSyncFiles',
+        deviceId,
+        retentionDays,
+      }).then((r) => r.files),
     writeRemoteFiles: (files) =>
       requestOffscreen({ action: 'writeSyncFiles', files }),
     loadCursors: () =>
-      requestOffscreen({ action: 'loadSyncManifest', key: 'sync-cursors' })
-        .then(r => r.data || { cursors: {} }),
+      requestOffscreen({
+        action: 'loadSyncManifest',
+        key: 'sync-cursors',
+      }).then((r) => r.data || { cursors: {} }),
     saveCursors: (data) =>
-      requestOffscreen({ action: 'saveJson', path: 'manifest/sync-cursors.json', data }),
+      requestOffscreen({
+        action: 'saveJson',
+        path: 'manifest/sync-cursors.json',
+        data,
+      }),
     loadPushState: () =>
-      requestOffscreen({ action: 'loadSyncManifest', key: 'sync-push-state' })
-        .then(r => r.data || { files: {} }),
+      requestOffscreen({
+        action: 'loadSyncManifest',
+        key: 'sync-push-state',
+      }).then((r) => r.data || { files: {} }),
     savePushState: (data) =>
-      requestOffscreen({ action: 'saveJson', path: 'manifest/sync-push-state.json', data }),
+      requestOffscreen({
+        action: 'saveJson',
+        path: 'manifest/sync-push-state.json',
+        data,
+      }),
   });
 }
 
@@ -1136,14 +1353,19 @@ async function performSync() {
   let method = 'github';
   try {
     await hydrationDone;
-    const settings = await readCacheable('manifest:settings') || {};
+    const settings = (await readCacheable('manifest:settings')) || {};
     if (!settings.syncEnabled) return { skipped: true };
     method = settings.syncMethod || 'github';
     let githubToken = null;
     if (method === 'github') {
       githubToken = await getSyncSessionToken();
       if (!settings.syncRepoUrl || !githubToken)
-        return { skipped: true, error: !githubToken ? 'GitHub not connected — authorize in Settings' : 'Missing repo URL' };
+        return {
+          skipped: true,
+          error: !githubToken
+            ? 'GitHub not connected — authorize in Settings'
+            : 'Missing repo URL',
+        };
     }
     if (method === 'filesystem' && !settings.syncFolderName)
       return { skipped: true, error: 'No sync folder selected' };
@@ -1159,21 +1381,28 @@ async function performSync() {
     // Push local changes — skip if local device is paused
     let pushResult = { pushed: false, fileCount: 0 };
     if (!pausedDevices[deviceId]) {
-      pushResult = await mgr.push(deviceId, { retentionDays: settings.syncRetentionDays || 7 });
+      pushResult = await mgr.push(deviceId, {
+        retentionDays: settings.syncRetentionDays || 7,
+      });
       if (pushResult.collision) {
         localDeviceId = crypto.randomUUID().slice(0, 8);
-        await requestOffscreen({ action: 'initDevice', deviceId: localDeviceId });
+        await requestOffscreen({
+          action: 'initDevice',
+          deviceId: localDeviceId,
+        });
         deviceId = localDeviceId;
         logDebug(`[sync] device ID collision, regenerated: ${deviceId}`);
-        pushResult = await mgr.push(deviceId, { retentionDays: settings.syncRetentionDays || 7 });
+        pushResult = await mgr.push(deviceId, {
+          retentionDays: settings.syncRetentionDays || 7,
+        });
       }
       // Update local device push status immediately (before pull)
       if (pushResult.pushed) {
         const oldDevices = await _loadSyncDevices();
-        const updated = oldDevices.map(d =>
-          d.deviceId === deviceId ? { ...d, lastPushed: Date.now() } : d
+        const updated = oldDevices.map((d) =>
+          d.deviceId === deviceId ? { ...d, lastPushed: Date.now() } : d,
         );
-        if (!updated.some(d => d.deviceId === deviceId)) {
+        if (!updated.some((d) => d.deviceId === deviceId)) {
           updated.unshift({ deviceId, lastPushed: Date.now() });
         }
         await chrome.storage.session.set({ [SYNC_DEVICES_KEY]: updated });
@@ -1198,15 +1427,18 @@ async function performSync() {
       const oldMap = {};
       for (const d of oldDevices) oldMap[d.deviceId] = d;
       const changedSet = new Set(pullResult.changedPeers || []);
-      const devices = pullResult.devices.map(b => {
+      const devices = pullResult.devices.map((b) => {
         const old = oldMap[b.name];
         if (b.name === deviceId) {
           // Preserve lastPushed written above
           return { deviceId: b.name, lastPushed: old?.lastPushed || null };
         }
-        return { deviceId: b.name, lastPulled: changedSet.has(b.name) ? now : (old?.lastPulled || null) };
+        return {
+          deviceId: b.name,
+          lastPulled: changedSet.has(b.name) ? now : old?.lastPulled || null,
+        };
       });
-      if (!devices.some(d => d.deviceId === deviceId)) {
+      if (!devices.some((d) => d.deviceId === deviceId)) {
         const old = oldMap[deviceId];
         devices.unshift({ deviceId, lastPushed: old?.lastPushed || null });
       }
@@ -1215,16 +1447,29 @@ async function performSync() {
 
     // Successful sync — clear any lingering rate limit state
     rateLimitedUntil = 0;
-    lastSyncResult = { timestamp: Date.now(), pushed: pushResult.pushed, pulled: entriesReplayed > 0, entriesReplayed };
-    logDebug(`[sync] push=${pushResult.pushed} (${pushResult.fileCount} files), pull=${pullResult.remoteEntries.length} peers, ${entriesReplayed} entries`);
+    lastSyncResult = {
+      timestamp: Date.now(),
+      pushed: pushResult.pushed,
+      pulled: entriesReplayed > 0,
+      entriesReplayed,
+    };
+    logDebug(
+      `[sync] push=${pushResult.pushed} (${pushResult.fileCount} files), pull=${pullResult.remoteEntries.length} peers, ${entriesReplayed} entries`,
+    );
     return lastSyncResult;
   } catch (error) {
     const msg = error.message;
-    lastSyncResult = { timestamp: Date.now(), pushed: false, pulled: false, error: msg };
+    lastSyncResult = {
+      timestamp: Date.now(),
+      pushed: false,
+      pulled: false,
+      error: msg,
+    };
     // GitHub-specific rate limit and auth error handling.
     if (method === 'github') {
       const isRateLimit = msg.includes('rate limit');
-      const isAuthError = msg.includes('401') || (msg.includes('403') && !isRateLimit);
+      const isAuthError =
+        msg.includes('401') || (msg.includes('403') && !isRateLimit);
       const isNotFound = msg.includes('404');
       if (isAuthError) {
         await setSyncSessionToken(null);
@@ -1262,13 +1507,17 @@ async function performSync() {
 
 // Start or stop the sync alarm based on settings.
 async function updateSyncAlarm() {
-  const settings = await readCacheable('manifest:settings') || {};
+  const settings = (await readCacheable('manifest:settings')) || {};
   const method = settings.syncMethod || 'github';
   const githubToken = method === 'github' ? await getSyncSessionToken() : null;
-  const configured = method === 'github' ? (settings.syncRepoUrl && githubToken)
-    : method === 'filesystem' ? settings.syncFolderName
-    : method === 'webdav' ? settings.syncWebdavUrl
-    : false;
+  const configured =
+    method === 'github'
+      ? settings.syncRepoUrl && githubToken
+      : method === 'filesystem'
+        ? settings.syncFolderName
+        : method === 'webdav'
+          ? settings.syncWebdavUrl
+          : false;
   if (settings.syncEnabled && configured) {
     rateLimitedUntil = 0;
     chrome.alarms.clear(SYNC_RATE_LIMIT_ALARM);
@@ -1320,7 +1569,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     await ensureDefaultLists();
     await loadSyncTokenFromDisk();
     updateSyncAlarm();
-    const settings = await readCacheable('manifest:settings') || {};
+    const settings = (await readCacheable('manifest:settings')) || {};
     if (settings.colorScheme) {
       await chrome.storage.session.set({ colorScheme: settings.colorScheme });
     }
@@ -1340,7 +1589,7 @@ chrome.runtime.onStartup.addListener(async () => {
       await ensureDefaultLists();
       await loadSyncTokenFromDisk();
       updateSyncAlarm();
-      const settings = await readCacheable('manifest:settings') || {};
+      const settings = (await readCacheable('manifest:settings')) || {};
       if (settings.colorScheme) {
         await chrome.storage.session.set({ colorScheme: settings.colorScheme });
       }
@@ -1377,7 +1626,7 @@ async function getListEventFields(listId) {
   }
   if (!listName) return null;
   const entity = await readCacheable(listKey(listId));
-  const owner = entity?.owner || await getDeviceId();
+  const owner = entity?.owner || (await getDeviceId());
   return { name: listName, listOwner: owner };
 }
 
@@ -1391,59 +1640,81 @@ async function getBadgeAccentColor() {
 // Spinner badge for snapshot capture — animated dot sequence on extension icon
 let spinnerInterval = null;
 async function startSpinnerBadge(tabId) {
-  if (spinnerInterval) { clearInterval(spinnerInterval); spinnerInterval = null; }
+  if (spinnerInterval) {
+    clearInterval(spinnerInterval);
+    spinnerInterval = null;
+  }
   const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let i = 0;
-  chrome.action.setBadgeBackgroundColor({ color: await getBadgeAccentColor(), tabId });
+  chrome.action.setBadgeBackgroundColor({
+    color: await getBadgeAccentColor(),
+    tabId,
+  });
   chrome.action.setBadgeText({ text: frames[0], tabId });
   spinnerInterval = setInterval(() => {
     i = (i + 1) % frames.length;
-    chrome.action.setBadgeText({ text: frames[i], tabId }).catch(e => logDebug('[spinner] badge update failed:', e.message));
+    chrome.action
+      .setBadgeText({ text: frames[i], tabId })
+      .catch((e) => logDebug('[spinner] badge update failed:', e.message));
   }, 100);
 }
 async function stopSpinnerBadge(tabId) {
-  if (spinnerInterval) { clearInterval(spinnerInterval); spinnerInterval = null; }
+  if (spinnerInterval) {
+    clearInterval(spinnerInterval);
+    spinnerInterval = null;
+  }
   try {
     const tab = await chrome.tabs.get(tabId);
     await updateBadgeForTab(tabId, tab.url);
   } catch {
-    chrome.action.setBadgeText({ text: '', tabId }).catch(e => logDebug('[spinner] badge clear failed:', e.message));
+    chrome.action
+      .setBadgeText({ text: '', tabId })
+      .catch((e) => logDebug('[spinner] badge clear failed:', e.message));
   }
 }
 
 async function captureAndLog(tabId, slug, timestamp, url, title) {
   startSpinnerBadge(tabId);
   try {
-  // PDF pages render via a native plugin — no extractable content
-  if (url && /\.pdf(\?|#|$)/i.test(new URL(url).pathname)) {
-    throw new Error('Cannot capture PDF pages');
-  }
-  // Fallback: ask content script to check for Chrome's PDF viewer embed
-  try {
-    const pdfCheck = await chrome.tabs.sendMessage(tabId, { action: 'isPdfPage' });
-    if (pdfCheck?.isPdf) throw new Error('Cannot capture PDF pages');
-  } catch (e) {
-    if (e.message === 'Cannot capture PDF pages') throw e;
-    // Content script might not be loaded — proceed with capture
-  }
-  const mdResp = await chrome.tabs.sendMessage(tabId, { action: 'extractMarkdown' });
-  const html = await captureSavePage(tabId);
-  const markdown = mdResp?.markdown || '';
-  if (!markdown && !html) {
-    throw new Error('Capture failed: page returned no content');
-  }
-  await requestOffscreen({
-    action: 'captureSnapshot', slug, timestamp,
-    markdown, html: html || ''
-  });
-  // Single create_snapshot event — entity creation + child linking handled by effectOf
-  const snapEntry = {
-    timestamp, action: 'create_snapshot', url,
-    path: `snapshots/${slug}-${timestamp}`
-  };
-  if (title) snapEntry.title = title;
-  await addLog(snapEntry);
-  notifyMutation('snapshot', { slug });
+    // PDF pages render via a native plugin — no extractable content
+    if (url && /\.pdf(\?|#|$)/i.test(new URL(url).pathname)) {
+      throw new Error('Cannot capture PDF pages');
+    }
+    // Fallback: ask content script to check for Chrome's PDF viewer embed
+    try {
+      const pdfCheck = await chrome.tabs.sendMessage(tabId, {
+        action: 'isPdfPage',
+      });
+      if (pdfCheck?.isPdf) throw new Error('Cannot capture PDF pages');
+    } catch (e) {
+      if (e.message === 'Cannot capture PDF pages') throw e;
+      // Content script might not be loaded — proceed with capture
+    }
+    const mdResp = await chrome.tabs.sendMessage(tabId, {
+      action: 'extractMarkdown',
+    });
+    const html = await captureSavePage(tabId);
+    const markdown = mdResp?.markdown || '';
+    if (!markdown && !html) {
+      throw new Error('Capture failed: page returned no content');
+    }
+    await requestOffscreen({
+      action: 'captureSnapshot',
+      slug,
+      timestamp,
+      markdown,
+      html: html || '',
+    });
+    // Single create_snapshot event — entity creation + child linking handled by effectOf
+    const snapEntry = {
+      timestamp,
+      action: 'create_snapshot',
+      url,
+      path: `snapshots/${slug}-${timestamp}`,
+    };
+    if (title) snapEntry.title = title;
+    await addLog(snapEntry);
+    notifyMutation('snapshot', { slug });
   } finally {
     stopSpinnerBadge(tabId);
   }
@@ -1466,7 +1737,7 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
       note: '',
       cssPath: null,
       url,
-    }
+    },
   });
 
   // create_note — effectOf ensures page entity exists
@@ -1474,7 +1745,7 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
     timestamp,
     action: 'create_note',
     url,
-    path: `notes/${noteSlug}.json`
+    path: `notes/${noteSlug}.json`,
   };
   if (title) noteEntry.title = title;
   await addLog(noteEntry);
@@ -1484,17 +1755,21 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
   // Show highlights panel in the tab's content script
   if (tabId > 0) {
     const page = await readCacheable(pageKey(slug));
-    const noteRefs = (page?.childIds || []).filter(c => c.startsWith(NOTE_PREFIX));
+    const noteRefs = (page?.childIds || []).filter((c) =>
+      c.startsWith(NOTE_PREFIX),
+    );
     const notes = [];
     for (const ref of noteRefs) {
       const note = await readCacheable(ref);
       if (note) notes.push(note);
     }
-    chrome.tabs.sendMessage(tabId, {
-      action: 'showHighlightsPanel',
-      notes,
-      pageSlug: slug,
-    }).catch(() => {});
+    chrome.tabs
+      .sendMessage(tabId, {
+        action: 'showHighlightsPanel',
+        notes,
+        pageSlug: slug,
+      })
+      .catch(() => {});
   }
 
   return { success: true, noteSlug };
@@ -1506,7 +1781,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
   // The callback's tab object has wrong URL/id for PDF viewer tabs.
   // Query the real active tab instead; guard with title match.
-  const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const [activeTab] = await chrome.tabs.query({
+    active: true,
+    lastFocusedWindow: true,
+  });
   if (!activeTab?.url) return;
   if (tab?.title && activeTab.title !== tab.title) {
     logDebug('[context-menu] Active tab title mismatch, skipping');
@@ -1514,14 +1792,21 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 
   try {
-    await handleContextMenuHighlight(activeTab.url, activeTab.title, info.selectionText.trim(), activeTab.id);
+    await handleContextMenuHighlight(
+      activeTab.url,
+      activeTab.title,
+      info.selectionText.trim(),
+      activeTab.id,
+    );
   } catch (error) {
     logDebug('[context-menu] Highlight error:', error.message);
     if (activeTab.id > 0) {
-      chrome.tabs.sendMessage(activeTab.id, {
-        action: 'showErrorNotification',
-        message: error.message
-      }).catch(() => {});
+      chrome.tabs
+        .sendMessage(activeTab.id, {
+          action: 'showErrorNotification',
+          message: error.message,
+        })
+        .catch(() => {});
     }
   }
 });
@@ -1535,28 +1820,47 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (workspace && workspace.mode === 'private') return;
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+  if (
+    !tab ||
+    tab.url.startsWith('chrome://') ||
+    tab.url.startsWith('chrome-extension://')
+  ) {
     logDebug('[background] Command ignored: no suitable tab');
     return;
   }
 
   if (command === 'capture-snapshot') {
-    chrome.tabs.sendMessage(tab.id, { action: 'showCaptureSpinner' }).catch(() => {});
+    chrome.tabs
+      .sendMessage(tab.id, { action: 'showCaptureSpinner' })
+      .catch(() => {});
     try {
       const slug = generateSlugFromUrl(tab.url);
       const timestamp = Date.now();
       await captureAndLog(tab.id, slug, timestamp, tab.url, tab.title);
-      chrome.tabs.sendMessage(tab.id, { action: 'hideCaptureSpinner' }).catch(() => {});
-      chrome.tabs.sendMessage(tab.id, { action: 'showCaptureNotification' }).catch(() => {});
+      chrome.tabs
+        .sendMessage(tab.id, { action: 'hideCaptureSpinner' })
+        .catch(() => {});
+      chrome.tabs
+        .sendMessage(tab.id, { action: 'showCaptureNotification' })
+        .catch(() => {});
     } catch (error) {
       logDebug('[capture] ERROR:', error.message, error);
-      chrome.tabs.sendMessage(tab.id, { action: 'hideCaptureSpinner' }).catch(() => {});
-      chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: error.message }).catch(() => {});
+      chrome.tabs
+        .sendMessage(tab.id, { action: 'hideCaptureSpinner' })
+        .catch(() => {});
+      chrome.tabs
+        .sendMessage(tab.id, {
+          action: 'showErrorNotification',
+          message: error.message,
+        })
+        .catch(() => {});
     }
   } else if (command === 'highlight-selection') {
     try {
       logDebug(`[background] Sending highlightSelection to tab ${tab.id}`);
-      const resp = await chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
+      const resp = await chrome.tabs.sendMessage(tab.id, {
+        action: 'highlightSelection',
+      });
       logDebug('[background] highlightSelection response:', resp);
     } catch (error) {
       logDebug('[background] Could not highlight selection:', error.message);
@@ -1564,11 +1868,18 @@ chrome.commands.onCommand.addListener(async (command) => {
   } else if (command === 'like-page' || command === 'dislike-page') {
     const delta = command === 'like-page' ? 1 : -1;
     try {
-      const rateEntry = { timestamp: Date.now(), action: 'rate_page', url: tab.url, likes: delta };
+      const rateEntry = {
+        timestamp: Date.now(),
+        action: 'rate_page',
+        url: tab.url,
+        likes: delta,
+      };
       if (tab.title) rateEntry.title = tab.title;
       await addLog(rateEntry);
       notifyMutation('history', { url: tab.url });
-      chrome.tabs.sendMessage(tab.id, { action: 'showLikeNotification', delta }).catch(() => {});
+      chrome.tabs
+        .sendMessage(tab.id, { action: 'showLikeNotification', delta })
+        .catch(() => {});
     } catch (error) {
       logDebug(`[${command}] ERROR:`, error.message, error);
     }
@@ -1586,13 +1897,19 @@ async function handleGetPageInfo(request) {
   const key = pageKey(slug);
   let page = await readCacheable(key);
 
-  const snapRefs = (page?.childIds || []).filter(c => c.startsWith(SNAPSHOT_PREFIX));
-  const snapshots = snapRefs.map(ref => {
-    const ts = parseInt(ref.slice(ref.lastIndexOf('-') + 1), 10);
-    return { timestamp: ts, hasMd: true, hasHtml: true };
-  }).sort((a, b) => b.timestamp - a.timestamp);
+  const snapRefs = (page?.childIds || []).filter((c) =>
+    c.startsWith(SNAPSHOT_PREFIX),
+  );
+  const snapshots = snapRefs
+    .map((ref) => {
+      const ts = parseInt(ref.slice(ref.lastIndexOf('-') + 1), 10);
+      return { timestamp: ts, hasMd: true, hasHtml: true };
+    })
+    .sort((a, b) => b.timestamp - a.timestamp);
 
-  const noteRefs = (page?.childIds || []).filter(c => c.startsWith(NOTE_PREFIX));
+  const noteRefs = (page?.childIds || []).filter((c) =>
+    c.startsWith(NOTE_PREFIX),
+  );
   const notes = [];
   for (const ref of noteRefs) {
     const note = await readCacheable(ref);
@@ -1600,18 +1917,32 @@ async function handleGetPageInfo(request) {
   }
 
   return {
-    success: true, slug,
-    entry: page ? { url: page.url, title: page.title, user_title: page.user_title,
-      scrollDepth: page.scrollDepth, timeOnPage: page.timeOnPage, likes: page.likes,
-      visitDates: page.visitDates || [], timestamps: page.timestamps, slug } : null,
+    success: true,
+    slug,
+    entry: page
+      ? {
+          url: page.url,
+          title: page.title,
+          user_title: page.user_title,
+          scrollDepth: page.scrollDepth,
+          timeOnPage: page.timeOnPage,
+          likes: page.likes,
+          visitDates: page.visitDates || [],
+          timestamps: page.timestamps,
+          slug,
+        }
+      : null,
     snapshots,
-    notes
+    notes,
   };
 }
 
 async function handleCaptureCurrentPageFromPopup() {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
     if (!tab) return { success: false, error: 'No active tab' };
     const slug = generateSlugFromUrl(tab.url);
     const timestamp = Date.now();
@@ -1635,7 +1966,11 @@ async function handleHydrateCacheMsg() {
 async function handleReportPage(request, sender) {
   try {
     if (isServicePaused()) {
-      return { success: false, error: 'Service paused', code: serviceError.code };
+      return {
+        success: false,
+        error: 'Service paused',
+        code: serviceError.code,
+      };
     }
     const url = request.url;
 
@@ -1645,16 +1980,21 @@ async function handleReportPage(request, sender) {
     }
 
     // Check blacklist (skip when feature is toggled off, but always block chrome:// and edge://)
-    const rpSettings = await readCacheable('manifest:settings') || {};
+    const rpSettings = (await readCacheable('manifest:settings')) || {};
     const blacklistEnabled = rpSettings.blacklistEnabled !== false;
     const urlBlacklist = rpSettings.urlBlacklist;
     const builtinBlacklist = ['chrome://', 'edge://'];
-    const blacklist = blacklistEnabled ? (urlBlacklist ?? builtinBlacklist) : builtinBlacklist;
-    if (!request.bypassBlacklist && blacklist.some(prefix => url.startsWith(prefix))) {
+    const blacklist = blacklistEnabled
+      ? (urlBlacklist ?? builtinBlacklist)
+      : builtinBlacklist;
+    if (
+      !request.bypassBlacklist &&
+      blacklist.some((prefix) => url.startsWith(prefix))
+    ) {
       if (request.isInitialLoad) {
         const todayKey = 'log:' + dateKeyFromTimestamp(Date.now());
-        const todayEntries = await readCacheable(todayKey) || [];
-        const inSession = todayEntries.some(e => e.url === url);
+        const todayEntries = (await readCacheable(todayKey)) || [];
+        const inSession = todayEntries.some((e) => e.url === url);
         if (!inSession) {
           const pageSlug = generateSlugFromUrl(url);
           const existing = await readCacheable(pageKey(pageSlug));
@@ -1686,27 +2026,34 @@ async function handleReportPage(request, sender) {
       }
 
       const title = request.title ? await trimTitle(request.title, url) : '';
-      const entry = buildVisitPageEntry(url, title, referrerUrl, { checkpoint: request.bypassBlacklist });
+      const entry = buildVisitPageEntry(url, title, referrerUrl, {
+        checkpoint: request.bypassBlacklist,
+      });
       await addLog(entry);
 
       const slug = request.slug || generateSlugFromUrl(url);
 
       const wsListIds = rpWorkspace?.listIds || [];
-      if (rpWorkspace && rpWorkspace.mode === 'workspace' && wsListIds.length > 0) {
+      if (
+        rpWorkspace &&
+        rpWorkspace.mode === 'workspace' &&
+        wsListIds.length > 0
+      ) {
         try {
           for (const lk of wsListIds) {
             const listSlug = entitySlug(lk);
             const listEntry = await readCacheable(listKey(listSlug));
             const listPins = listEntry?.pins || [];
             const pk = pageKey(generateSlugFromUrl(url));
-            const already = listPins.some(p => p.id === pk);
+            const already = listPins.some((p) => p.id === pk);
             if (!already) {
               const pn = await getListEventFields(listSlug);
               if (pn) {
                 const pinEntry = {
                   timestamp: Date.now(),
                   action: 'pin_to_list',
-                  name: pn.name, listOwner: pn.listOwner,
+                  name: pn.name,
+                  listOwner: pn.listOwner,
                   items: [url],
                   source: 'auto',
                 };
@@ -1718,7 +2065,13 @@ async function handleReportPage(request, sender) {
           }
 
           if (rpWorkspace.autoSnapshot && sender.tab) {
-            captureAndLog(sender.tab.id, slug, entry.timestamp, url, title).catch(err => {
+            captureAndLog(
+              sender.tab.id,
+              slug,
+              entry.timestamp,
+              url,
+              title,
+            ).catch((err) => {
               logDebug('[auto-snapshot] ERROR:', err.message, err);
             });
           }
@@ -1727,14 +2080,19 @@ async function handleReportPage(request, sender) {
         }
       }
 
-      evaluateSmartRulesForVisit(url, title).catch(err => {
+      evaluateSmartRulesForVisit(url, title).catch((err) => {
         logDebug('Smart-rule auto-pin error:', err.message);
       });
 
       notifyMutation('history', { url });
     } else if (request.isLeaving) {
       const title = request.title ? await trimTitle(request.title, url) : null;
-      const entry = buildLeavePageEntry(url, title, request.scrollDepth, request.timeOnPage);
+      const entry = buildLeavePageEntry(
+        url,
+        title,
+        request.scrollDepth,
+        request.timeOnPage,
+      );
       await addLog(entry);
       drainNow();
     } else if (request.user_title !== undefined) {
@@ -1742,11 +2100,13 @@ async function handleReportPage(request, sender) {
         timestamp: Date.now(),
         action: 'rename_page',
         url,
-        user_title: request.user_title
+        user_title: request.user_title,
       });
     }
 
-    logDebug(`Processed page report: ${url} (initial=${!!request.isInitialLoad}, leaving=${!!request.isLeaving})`);
+    logDebug(
+      `Processed page report: ${url} (initial=${!!request.isInitialLoad}, leaving=${!!request.isLeaving})`,
+    );
     return { success: true };
   } catch (error) {
     logError('Error processing reportPage:', error);
@@ -1766,7 +2126,7 @@ async function handleFlushLogBuffer() {
   await ensureOffscreenPort();
   await drainNow();
   await requestOffscreen({ action: 'flushLogBuffer', entries: logBuffer });
-  await new Promise(r => setTimeout(r, 100));
+  await new Promise((r) => setTimeout(r, 100));
   return { success: true, remaining: logBuffer.length };
 }
 
@@ -1788,13 +2148,17 @@ async function handleReadCacheable(request) {
 async function handleLoadPageNotes(request) {
   const t0 = performance.now();
   const page = await readCacheable(pageKey(request.slug));
-  const noteRefs = (page?.childIds || []).filter(c => c.startsWith(NOTE_PREFIX));
+  const noteRefs = (page?.childIds || []).filter((c) =>
+    c.startsWith(NOTE_PREFIX),
+  );
   const notes = [];
   for (const ref of noteRefs) {
     const note = await readCacheable(ref);
     if (note) notes.push(note);
   }
-  logDebug(`[I/O] loadPageNotes(${request.slug}): ${notes.length} notes in ${(performance.now() - t0).toFixed(1)}ms`);
+  logDebug(
+    `[I/O] loadPageNotes(${request.slug}): ${notes.length} notes in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, notes };
 }
 
@@ -1802,26 +2166,40 @@ async function handleListSnapshots(request) {
   const t0 = performance.now();
   const slug = request.slug;
   const page = await readCacheable(pageKey(slug));
-  const snapRefs = (page?.childIds || []).filter(c => c.startsWith(SNAPSHOT_PREFIX));
-  const snapshots = snapRefs.map(ref => {
-    const ts = parseInt(ref.slice(ref.lastIndexOf('-') + 1), 10);
-    return { timestamp: ts, hasMd: true, hasHtml: true };
-  }).sort((a, b) => b.timestamp - a.timestamp);
-  logDebug(`[I/O] listSnapshots(${slug}): ${snapshots.length} from entity in ${(performance.now() - t0).toFixed(1)}ms`);
+  const snapRefs = (page?.childIds || []).filter((c) =>
+    c.startsWith(SNAPSHOT_PREFIX),
+  );
+  const snapshots = snapRefs
+    .map((ref) => {
+      const ts = parseInt(ref.slice(ref.lastIndexOf('-') + 1), 10);
+      return { timestamp: ts, hasMd: true, hasHtml: true };
+    })
+    .sort((a, b) => b.timestamp - a.timestamp);
+  logDebug(
+    `[I/O] listSnapshots(${slug}): ${snapshots.length} from entity in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, snapshots };
 }
 
 async function handleGetSnapshotUrl(request) {
-  return await requestOffscreen({ action: 'getSnapshotUrl', slug: request.slug, timestamp: request.timestamp });
+  return await requestOffscreen({
+    action: 'getSnapshotUrl',
+    slug: request.slug,
+    timestamp: request.timestamp,
+  });
 }
 
 async function handleGetSnapshotHtml(request) {
-  return await requestOffscreen({ action: 'getSnapshotHtml', slug: request.slug, timestamp: request.timestamp });
+  return await requestOffscreen({
+    action: 'getSnapshotHtml',
+    slug: request.slug,
+    timestamp: request.timestamp,
+  });
 }
 
 async function handleOpenSnapshot(request) {
   const viewerUrl = chrome.runtime.getURL(
-    `snapshot-viewer.html?slug=${encodeURIComponent(request.slug)}&ts=${request.timestamp}`
+    `snapshot-viewer.html?slug=${encodeURIComponent(request.slug)}&ts=${request.timestamp}`,
   );
   const tab = await chrome.tabs.create({ url: viewerUrl });
   return { success: true, tabId: tab.id };
@@ -1836,13 +2214,21 @@ async function handleGetDirectorySize() {
 }
 
 async function handleListHistoryFiles(request) {
-  return await requestOffscreen({ action: 'listHistoryFiles', includeSizes: request.includeSizes });
+  return await requestOffscreen({
+    action: 'listHistoryFiles',
+    includeSizes: request.includeSizes,
+  });
 }
 
 async function handleLoadHistoryBatch(request) {
   const t0 = performance.now();
-  const resp = await requestOffscreen({ action: 'loadHistoryBatch', files: request.files });
-  logDebug(`[I/O] loadHistoryBatch: ${request.files.length} files in ${(performance.now() - t0).toFixed(1)}ms`);
+  const resp = await requestOffscreen({
+    action: 'loadHistoryBatch',
+    files: request.files,
+  });
+  logDebug(
+    `[I/O] loadHistoryBatch: ${request.files.length} files in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return resp;
 }
 
@@ -1856,7 +2242,7 @@ async function handleLoadAllPages() {
   const slugs = Object.keys(pages);
   if (slugs.length > 0) {
     try {
-      const cacheKeys = slugs.map(s => pageKey(s));
+      const cacheKeys = slugs.map((s) => pageKey(s));
       const cached = await chrome.storage.session.get(cacheKeys);
       for (const slug of slugs) {
         const pk = pageKey(slug);
@@ -1864,9 +2250,13 @@ async function handleLoadAllPages() {
           pages[slug] = cached[pk];
         }
       }
-    } catch { /* session overlay is best-effort */ }
+    } catch {
+      /* session overlay is best-effort */
+    }
   }
-  logDebug(`[I/O] loadAllPages: ${slugs.length} pages in ${(performance.now() - t0).toFixed(1)}ms`);
+  logDebug(
+    `[I/O] loadAllPages: ${slugs.length} pages in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return resp;
 }
 
@@ -1876,7 +2266,7 @@ async function handleGetPageRelations(request) {
   try {
     const url = request.url;
     const slug = generateSlugFromUrl(url);
-    const page = await readCacheable(pageKey(slug)) || {};
+    const page = (await readCacheable(pageKey(slug))) || {};
 
     async function resolveRefs(refs) {
       const urls = [];
@@ -1889,26 +2279,36 @@ async function handleGetPageRelations(request) {
       return urls;
     }
 
-    const pageParentRefs = (page.parentIds || []).filter(p => p.startsWith(PAGE_PREFIX));
+    const pageParentRefs = (page.parentIds || []).filter((p) =>
+      p.startsWith(PAGE_PREFIX),
+    );
     const parentReferrers = await resolveRefs(pageParentRefs);
 
     const parentLists = [];
-    const listParentRefs = (page.parentIds || []).filter(p => p.startsWith(LIST_PREFIX) && !isSystemList(p));
+    const listParentRefs = (page.parentIds || []).filter(
+      (p) => p.startsWith(LIST_PREFIX) && !isSystemList(p),
+    );
     for (const lk of listParentRefs) {
       const listEntity = await readCacheable(lk);
       if (listEntity) {
         const listSlug = entitySlug(lk);
-        parentLists.push({ slug: listSlug, name: listEntity.name, type: 'pin' });
+        parentLists.push({
+          slug: listSlug,
+          name: listEntity.name,
+          type: 'pin',
+        });
       }
     }
 
-    const childRefs = (page.childIds || []).filter(c => c.startsWith(PAGE_PREFIX));
+    const childRefs = (page.childIds || []).filter((c) =>
+      c.startsWith(PAGE_PREFIX),
+    );
     const children = await resolveRefs(childRefs);
 
     return {
       success: true,
       parents: { referrers: parentReferrers, lists: parentLists },
-      children
+      children,
     };
   } catch (error) {
     return { success: false, error: error.message };
@@ -1921,7 +2321,12 @@ async function handleContextMenuHighlightMsg(request) {
   try {
     const tabs = await chrome.tabs.query({ url: request.url });
     const tabId = tabs?.[0]?.id || null;
-    return await handleContextMenuHighlight(request.url, request.title, request.selectionText, tabId);
+    return await handleContextMenuHighlight(
+      request.url,
+      request.title,
+      request.selectionText,
+      tabId,
+    );
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -1929,8 +2334,16 @@ async function handleContextMenuHighlightMsg(request) {
 
 async function handleSaveSettingsKey(request) {
   const settings = await readCacheable('manifest:settings');
-  if (!settings || JSON.stringify(settings[request.key]) !== JSON.stringify(request.value)) {
-    await addLog({ timestamp: Date.now(), action: 'update_setting', key: request.key, value: request.value });
+  if (
+    !settings ||
+    JSON.stringify(settings[request.key]) !== JSON.stringify(request.value)
+  ) {
+    await addLog({
+      timestamp: Date.now(),
+      action: 'update_setting',
+      key: request.key,
+      value: request.value,
+    });
     notifyMutation('settings', { key: request.key });
   }
   if (request.key === 'colorScheme') {
@@ -1961,20 +2374,23 @@ async function handleCreateNote(request, sender) {
       note: request.note || '',
       cssPath: request.cssPath || null,
       url: pageUrl,
-    }
+    },
   });
 
   const cnNoteEntry = {
     timestamp,
     action: 'create_note',
     url: pageUrl,
-    path: `notes/${noteSlug}.json`
+    path: `notes/${noteSlug}.json`,
   };
   const cnTitle = cnPageEntity?.title || sender?.tab?.title;
   if (cnTitle) cnNoteEntry.title = cnTitle;
   await addLog(cnNoteEntry);
 
-  const notes = await requestOffscreen({ action: 'loadPageNotes', slug: pageSlug });
+  const notes = await requestOffscreen({
+    action: 'loadPageNotes',
+    slug: pageSlug,
+  });
   notifyMutation('note', { pageSlug, noteSlug });
   return { success: true, notes: notes.notes || [], noteSlug };
 }
@@ -1983,7 +2399,11 @@ async function handleDeleteNote(request) {
   const noteSlug = request.noteSlug;
   const noteEntity = await readCacheable(noteKey(noteSlug), true);
   const dnPageUrl = noteEntity?.url || null;
-  const dnEntry = { timestamp: Date.now(), action: 'delete_note', path: `notes/${noteSlug}.json` };
+  const dnEntry = {
+    timestamp: Date.now(),
+    action: 'delete_note',
+    path: `notes/${noteSlug}.json`,
+  };
   if (dnPageUrl) dnEntry.url = dnPageUrl;
   await addLog(dnEntry);
   notifyMutation('note', { noteSlug });
@@ -1995,7 +2415,10 @@ async function handleUpdateNote(request) {
   const oldNoteSlug = request.noteSlug;
   const unTimestamp = Date.now();
 
-  const unCurrentNote = await requestOffscreen({ action: 'loadNote', noteSlug: oldNoteSlug });
+  const unCurrentNote = await requestOffscreen({
+    action: 'loadNote',
+    noteSlug: oldNoteSlug,
+  });
   const oldNoteData = unCurrentNote.note || {};
 
   if (request.note === (oldNoteData.note ?? '')) {
@@ -2014,7 +2437,11 @@ async function handleUpdateNote(request) {
     url: unNoteUrl,
   };
 
-  await requestOffscreen({ action: 'saveNote', slug: newNoteSlug, data: newNoteData });
+  await requestOffscreen({
+    action: 'saveNote',
+    slug: newNoteSlug,
+    data: newNoteData,
+  });
 
   const replaceEntry = {
     timestamp: unTimestamp,
@@ -2053,17 +2480,19 @@ async function handleToggleListPin(request) {
     } else {
       pinKey = pageKey(generateSlugFromUrl(pinItem));
     }
-    const isPinned = pins.some(p => p.id === pinKey);
+    const isPinned = pins.some((p) => p.id === pinKey);
 
     const pinLogEntry = {
       timestamp: Date.now(),
       action: isPinned ? 'unpin_from_list' : 'pin_to_list',
-      name: pn.name, listOwner: pn.listOwner,
-      items: [pinItem]
+      name: pn.name,
+      listOwner: pn.listOwner,
+      items: [pinItem],
     };
     if (!isPinned && !requestId?.startsWith(NOTE_PREFIX)) {
       const pageEntity = await readCacheable(pinKey);
-      if (pageEntity?.title) pinLogEntry.titles = { [pinItem]: pageEntity.title };
+      if (pageEntity?.title)
+        pinLogEntry.titles = { [pinItem]: pageEntity.title };
     }
     await addLog(pinLogEntry);
     notifyMutation('pins', { listId });
@@ -2087,8 +2516,9 @@ async function handleAddListPins(request) {
     const pinEntry = {
       timestamp: Date.now(),
       action: 'pin_to_list',
-      name: pn.name, listOwner: pn.listOwner,
-      items: request.urls
+      name: pn.name,
+      listOwner: pn.listOwner,
+      items: request.urls,
     };
     if (Object.keys(titles).length > 0) pinEntry.titles = titles;
     await addLog(pinEntry);
@@ -2098,7 +2528,9 @@ async function handleAddListPins(request) {
 }
 
 async function handleSaveListMeta(request) {
-  const cached = request.listId ? await readCacheable(listKey(request.listId)) : null;
+  const cached = request.listId
+    ? await readCacheable(listKey(request.listId))
+    : null;
   const pn = request.listId ? await getListEventFields(request.listId) : null;
 
   if (!cached) {
@@ -2124,7 +2556,12 @@ async function handleSaveListMeta(request) {
       return { success: true, listId: generatedId };
     }
   } else if (pn) {
-    const entry = { timestamp: Date.now(), action: 'update_list', name: pn.name, listOwner: pn.listOwner };
+    const entry = {
+      timestamp: Date.now(),
+      action: 'update_list',
+      name: pn.name,
+      listOwner: pn.listOwner,
+    };
     let hasChange = false;
     if (request.name !== undefined && cached.name !== request.name) {
       entry.newName = request.name;
@@ -2141,7 +2578,12 @@ async function handleSaveListMeta(request) {
 async function handleDeleteList(request) {
   const pnDel = await getListEventFields(request.listId);
   if (!pnDel) return { success: false, error: 'List not found in name-to-id' };
-  await addLog({ timestamp: Date.now(), action: 'delete_list', name: pnDel.name, listOwner: pnDel.listOwner });
+  await addLog({
+    timestamp: Date.now(),
+    action: 'delete_list',
+    name: pnDel.name,
+    listOwner: pnDel.listOwner,
+  });
   notifyMutation('lists');
   notifyMutation('orphaned');
   return { success: true };
@@ -2162,10 +2604,16 @@ async function handleUpdateListTree(request) {
 async function handleRestoreNote(request) {
   const noteSlug = request.noteSlug;
   const orphanedForRestore = await readCacheable('manifest:orphaned');
-  const noteOrphanEntry = (orphanedForRestore?.entries || []).find(e => e.key === noteKey(noteSlug));
+  const noteOrphanEntry = (orphanedForRestore?.entries || []).find(
+    (e) => e.key === noteKey(noteSlug),
+  );
   const rnNoteData = await readCacheable(noteKey(noteSlug), true);
   const rnPageUrl = noteOrphanEntry?.url || rnNoteData?.url || null;
-  const rnEntry = { timestamp: Date.now(), action: 'restore_note', path: `notes/${noteSlug}.json` };
+  const rnEntry = {
+    timestamp: Date.now(),
+    action: 'restore_note',
+    path: `notes/${noteSlug}.json`,
+  };
   if (rnPageUrl) rnEntry.url = rnPageUrl;
   await addLog(rnEntry);
   notifyMutation('orphaned');
@@ -2176,7 +2624,9 @@ async function handleRestoreNote(request) {
 async function handleRestoreSnapshot(request) {
   const snapStem = request.snapSlug;
   const rsOrphaned = await readCacheable('manifest:orphaned');
-  const snapOrphanEntry = (rsOrphaned?.entries || []).find(e => e.key === snapshotKey(snapStem));
+  const snapOrphanEntry = (rsOrphaned?.entries || []).find(
+    (e) => e.key === snapshotKey(snapStem),
+  );
   let rsPageUrl = snapOrphanEntry?.url || null;
   let pageSlug;
   if (!rsPageUrl) {
@@ -2203,11 +2653,12 @@ async function handleRestoreList(request) {
   const listId = request.listId;
   const entity = await readCacheable(listKey(listId), true);
   const name = entity?.name || listId;
-  const owner = entity?.owner || await getDeviceId();
+  const owner = entity?.owner || (await getDeviceId());
   await addLog({
     timestamp: Date.now(),
     action: 'restore_list',
-    name, listOwner: owner,
+    name,
+    listOwner: owner,
   });
   notifyMutation('orphaned');
   notifyMutation('lists');
@@ -2215,12 +2666,13 @@ async function handleRestoreList(request) {
 }
 
 async function handlePermanentDelete(request) {
-  if (isServicePaused()) return { success: false, error: 'Service paused', code: serviceError.code };
+  if (isServicePaused())
+    return { success: false, error: 'Service paused', code: serviceError.code };
   const key = request.key;
   await ensureOffscreenPort();
   await drainNow();
   await requestOffscreen({ action: 'flushLogBuffer', entries: logBuffer });
-  await new Promise(r => setTimeout(r, 100));
+  await new Promise((r) => setTimeout(r, 100));
   if (key.startsWith(NOTE_PREFIX)) {
     const slug = entitySlug(key);
     await requestOffscreen({ action: 'deleteNote', noteSlug: slug });
@@ -2232,15 +2684,26 @@ async function handlePermanentDelete(request) {
     const lastDash = snapStem.lastIndexOf('-');
     const pageSlug = snapStem.slice(0, lastDash);
     const timestamp = parseInt(snapStem.slice(lastDash + 1), 10);
-    await requestOffscreen({ action: 'deleteSnapshot', slug: pageSlug, timestamp });
+    await requestOffscreen({
+      action: 'deleteSnapshot',
+      slug: pageSlug,
+      timestamp,
+    });
   }
-  const orphaned = await readCacheable('manifest:orphaned') || { timestamp: 0, entries: [] };
+  const orphaned = (await readCacheable('manifest:orphaned')) || {
+    timestamp: 0,
+    entries: [],
+  };
   const updatedOrphaned = {
     ...orphaned,
     timestamp: Date.now(),
-    entries: (orphaned.entries || []).filter(e => e.key !== key),
+    entries: (orphaned.entries || []).filter((e) => e.key !== key),
   };
-  await requestOffscreen({ action: 'saveJson', path: 'manifest/orphaned.json', data: updatedOrphaned });
+  await requestOffscreen({
+    action: 'saveJson',
+    path: 'manifest/orphaned.json',
+    data: updatedOrphaned,
+  });
   await cacheSet('manifest:orphaned', updatedOrphaned);
   await cacheRemove(key);
   notifyMutation('orphaned');
@@ -2248,13 +2711,17 @@ async function handlePermanentDelete(request) {
 }
 
 async function handlePermanentDeleteAll() {
-  if (isServicePaused()) return { success: false, error: 'Service paused', code: serviceError.code };
+  if (isServicePaused())
+    return { success: false, error: 'Service paused', code: serviceError.code };
   await ensureOffscreenPort();
   await drainNow();
   await requestOffscreen({ action: 'flushLogBuffer', entries: logBuffer });
-  await new Promise(r => setTimeout(r, 100));
-  const orphaned = await readCacheable('manifest:orphaned') || { timestamp: 0, entries: [] };
-  for (const { key } of (orphaned.entries || [])) {
+  await new Promise((r) => setTimeout(r, 100));
+  const orphaned = (await readCacheable('manifest:orphaned')) || {
+    timestamp: 0,
+    entries: [],
+  };
+  for (const { key } of orphaned.entries || []) {
     if (key.startsWith(NOTE_PREFIX)) {
       const slug = entitySlug(key);
       await requestOffscreen({ action: 'deleteNote', noteSlug: slug });
@@ -2266,12 +2733,20 @@ async function handlePermanentDeleteAll() {
       const lastDash = snapStem.lastIndexOf('-');
       const pageSlug = snapStem.slice(0, lastDash);
       const timestamp = parseInt(snapStem.slice(lastDash + 1), 10);
-      await requestOffscreen({ action: 'deleteSnapshot', slug: pageSlug, timestamp });
+      await requestOffscreen({
+        action: 'deleteSnapshot',
+        slug: pageSlug,
+        timestamp,
+      });
     }
     await cacheRemove(key);
   }
   const emptyOrphaned = { timestamp: Date.now(), entries: [] };
-  await requestOffscreen({ action: 'saveJson', path: 'manifest/orphaned.json', data: emptyOrphaned });
+  await requestOffscreen({
+    action: 'saveJson',
+    path: 'manifest/orphaned.json',
+    data: emptyOrphaned,
+  });
   await cacheSet('manifest:orphaned', emptyOrphaned);
   notifyMutation('orphaned');
   return { success: true };
@@ -2284,7 +2759,10 @@ async function handleInitializeFilesystem(request) {
   if (!resp?.success) return resp;
   if (request.deviceName) {
     localDeviceId = request.deviceName;
-    await requestOffscreen({ action: 'initDevice', deviceId: request.deviceName });
+    await requestOffscreen({
+      action: 'initDevice',
+      deviceId: request.deviceName,
+    });
   }
   hydrationDone = hydrateCache();
   await hydrationDone;
@@ -2300,7 +2778,8 @@ async function handleDeleteSnapshot(request) {
   const slug = request.slug;
   const snapTimestamp = request.timestamp;
   const page = await readCacheable(pageKey(slug));
-  if (!page?.url) return { success: false, error: 'Page entity not found for snapshot' };
+  if (!page?.url)
+    return { success: false, error: 'Page entity not found for snapshot' };
   await addLog({
     timestamp: Date.now(),
     action: 'delete_snapshot',
@@ -2330,13 +2809,23 @@ async function handleAddRule(request) {
   if (!listInfo) return { success: false, error: 'List not found' };
 
   const validation = validateRuleConfig(rule);
-  if (!validation.valid) return { success: false, error: validation.errors.join('; ') };
+  if (!validation.valid)
+    return { success: false, error: validation.errors.join('; ') };
 
-  if (rule.type === 'smart') {
-    const fnValidation = validateSmartRuleFn(rule.config.fnSource);
-    if (!fnValidation.valid) return { success: false, error: fnValidation.errors.join('; ') };
-    const compileResp = await requestOffscreen({ action: 'executeSandboxFn', fnSource: rule.config.fnSource, pageData: { title: '', url: '', body: '' } });
-    if (!compileResp?.success) return { success: false, error: `Function failed to compile: ${compileResp?.error || 'unknown error'}` };
+  if (rule.type === 'function') {
+    const fnValidation = validateFnRuleSource(rule.config.fnSource);
+    if (!fnValidation.valid)
+      return { success: false, error: fnValidation.errors.join('; ') };
+    const compileResp = await requestOffscreen({
+      action: 'executeSandboxFn',
+      fnSource: rule.config.fnSource,
+      pageData: { title: '', url: '', body: '' },
+    });
+    if (!compileResp?.success)
+      return {
+        success: false,
+        error: `Function failed to compile: ${compileResp?.error || 'unknown error'}`,
+      };
   }
 
   await addLog({
@@ -2392,14 +2881,18 @@ async function handleRunRuleBatch(request) {
     if (!listEntity?.rules?.length) continue;
 
     const sandbox = async (fnSource, pageData) => {
-      const resp = await requestOffscreen({ action: 'executeSandboxFn', fnSource, pageData });
+      const resp = await requestOffscreen({
+        action: 'executeSandboxFn',
+        fnSource,
+        pageData,
+      });
       if (!resp?.success) throw new Error('Sandbox execution failed');
-      return resp.score;
+      return resp.match;
     };
 
     const listInfo = await getListEventFields(listId);
     if (!listInfo) continue;
-    const pinnedIds = new Set((listEntity.pins || []).map(p => p.id));
+    const pinnedIds = new Set((listEntity.pins || []).map((p) => p.id));
 
     for (const entry of entries) {
       const pageData = buildPageDataFromEntry(entry);
@@ -2430,17 +2923,24 @@ async function handleRunRuleBatch(request) {
 async function handlePreviewRule(request) {
   const { rule, entries } = request;
   const validation = validateRuleConfig(rule);
-  if (!validation.valid) return { success: false, error: validation.errors.join('; ') };
-  if (rule.type === 'smart') {
-    const fnValidation = validateSmartRuleFn(rule.config.fnSource);
-    if (!fnValidation.valid) return { success: false, error: fnValidation.errors.join('; ') };
+  if (!validation.valid)
+    return { success: false, error: validation.errors.join('; ') };
+  if (rule.type === 'function') {
+    const fnValidation = validateFnRuleSource(rule.config.fnSource);
+    if (!fnValidation.valid)
+      return { success: false, error: fnValidation.errors.join('; ') };
   }
   const tempRule = { id: 'preview', type: rule.type, config: rule.config };
 
   const sandbox = async (fnSource, pageData) => {
-    const resp = await requestOffscreen({ action: 'executeSandboxFn', fnSource, pageData });
-    if (!resp?.success) throw new Error(resp?.error || 'Sandbox execution failed');
-    return resp.score;
+    const resp = await requestOffscreen({
+      action: 'executeSandboxFn',
+      fnSource,
+      pageData,
+    });
+    if (!resp?.success)
+      throw new Error(resp?.error || 'Sandbox execution failed');
+    return resp.match;
   };
   const results = [];
   let execError = null;
@@ -2448,11 +2948,15 @@ async function handlePreviewRule(request) {
     const title = entry.title || '';
     const pageData = buildPageDataFromEntry({ ...entry, title });
     try {
-      const scored = await matchRules([tempRule], pageData, { sandbox, allScores: true });
-      const { score = 0, match = false } = scored[0] || {};
-      results.push({ url: entry.url, title, score, match });
+      const scored = await matchRules([tempRule], pageData, {
+        sandbox,
+        allResults: true,
+      });
+      const { match = false } = scored[0] || {};
+      results.push({ url: entry.url, title, match });
     } catch (err) {
-      execError = err.message; break;
+      execError = err.message;
+      break;
     }
   }
   if (execError) return { success: false, error: execError };
@@ -2462,7 +2966,8 @@ async function handlePreviewRule(request) {
 // ─── Message Handlers: Sync ──────────────────────────────────────────
 
 async function handleSyncNow() {
-  if (isServicePaused()) return { success: false, error: 'Service paused', code: serviceError.code };
+  if (isServicePaused())
+    return { success: false, error: 'Service paused', code: serviceError.code };
   const result = await performSync();
   return { success: true, ...result };
 }
@@ -2474,12 +2979,13 @@ function handleGetSyncStatus() {
 async function handleSyncListDevices() {
   try {
     await hydrationDone;
-    const settings = await readCacheable('manifest:settings') || {};
+    const settings = (await readCacheable('manifest:settings')) || {};
     if (!settings.syncEnabled) return { success: true, devices: [] };
     let githubToken = null;
     if ((settings.syncMethod || 'github') === 'github') {
       githubToken = await getSyncSessionToken();
-      if (!settings.syncRepoUrl || !githubToken) return { success: true, devices: [] };
+      if (!settings.syncRepoUrl || !githubToken)
+        return { success: true, devices: [] };
     }
     const mgr = buildSyncManager(settings, { githubToken });
     const branches = await mgr.transport.listBranches();
@@ -2487,12 +2993,12 @@ async function handleSyncListDevices() {
     const oldDevices = await _loadSyncDevices();
     const oldMap = {};
     for (const d of oldDevices) oldMap[d.deviceId] = d;
-    const devices = branches.map(b => ({
+    const devices = branches.map((b) => ({
       deviceId: b.name,
       lastPushed: oldMap[b.name]?.lastPushed || null,
       lastPulled: oldMap[b.name]?.lastPulled || null,
     }));
-    if (ownId && !devices.some(d => d.deviceId === ownId)) {
+    if (ownId && !devices.some((d) => d.deviceId === ownId)) {
       devices.unshift({ deviceId: ownId, lastPushed: null });
     }
     await chrome.storage.session.set({ [SYNC_DEVICES_KEY]: devices });
@@ -2519,10 +3025,17 @@ async function handleSetSyncToken(request) {
     stEntries.push({ key: 'syncToken', value: null });
     stEntries.push({ key: 'syncRememberToken', value: false });
   }
-  if (request.authMethod) stEntries.push({ key: 'syncAuthMethod', value: request.authMethod });
-  if (request.githubUser) stEntries.push({ key: 'syncGitHubUser', value: request.githubUser });
+  if (request.authMethod)
+    stEntries.push({ key: 'syncAuthMethod', value: request.authMethod });
+  if (request.githubUser)
+    stEntries.push({ key: 'syncGitHubUser', value: request.githubUser });
   for (const { key, value } of stEntries) {
-    await addLog({ timestamp: Date.now(), action: 'update_setting', key, value });
+    await addLog({
+      timestamp: Date.now(),
+      action: 'update_setting',
+      key,
+      value,
+    });
   }
   await updateSyncAlarm();
   return { success: true };
@@ -2530,15 +3043,30 @@ async function handleSetSyncToken(request) {
 
 async function handleClearSyncToken() {
   await setSyncSessionToken(null);
-  for (const key of ['syncToken', 'syncRememberToken', 'syncAuthMethod', 'syncGitHubUser']) {
-    await addLog({ timestamp: Date.now(), action: 'update_setting', key, value: null });
+  for (const key of [
+    'syncToken',
+    'syncRememberToken',
+    'syncAuthMethod',
+    'syncGitHubUser',
+  ]) {
+    await addLog({
+      timestamp: Date.now(),
+      action: 'update_setting',
+      key,
+      value: null,
+    });
   }
   await updateSyncAlarm();
   return { success: true };
 }
 
 async function handleClearSyncFolder() {
-  await addLog({ timestamp: Date.now(), action: 'update_setting', key: 'syncFolderName', value: null });
+  await addLog({
+    timestamp: Date.now(),
+    action: 'update_setting',
+    key: 'syncFolderName',
+    value: null,
+  });
   await requestOffscreen({ action: 'clearSyncDirectory' });
   await updateSyncAlarm();
   return { success: true };
@@ -2555,17 +3083,32 @@ function handleCancelSync() {
 async function handleToggleSyncRemember(request) {
   const token = await getSyncSessionToken();
   if (request.remember && token) {
-    await addLog({ timestamp: Date.now(), action: 'update_setting', key: 'syncToken', value: token });
+    await addLog({
+      timestamp: Date.now(),
+      action: 'update_setting',
+      key: 'syncToken',
+      value: token,
+    });
   } else if (!request.remember) {
-    await addLog({ timestamp: Date.now(), action: 'update_setting', key: 'syncToken', value: null });
+    await addLog({
+      timestamp: Date.now(),
+      action: 'update_setting',
+      key: 'syncToken',
+      value: null,
+    });
   }
-  await addLog({ timestamp: Date.now(), action: 'update_setting', key: 'syncRememberToken', value: !!request.remember });
+  await addLog({
+    timestamp: Date.now(),
+    action: 'update_setting',
+    key: 'syncRememberToken',
+    value: !!request.remember,
+  });
   return { success: true };
 }
 
 async function handleGetSyncAuthState() {
   const token = await getSyncSessionToken();
-  const settings = await readCacheable('manifest:settings') || {};
+  const settings = (await readCacheable('manifest:settings')) || {};
   return {
     success: true,
     hasToken: !!token,
@@ -2578,7 +3121,7 @@ async function handleGetSyncAuthState() {
 async function handleGetSyncDevices() {
   const devices = await _loadSyncDevices();
   const ownId = await getDeviceId();
-  if (ownId && !devices.some(d => d.deviceId === ownId)) {
+  if (ownId && !devices.some((d) => d.deviceId === ownId)) {
     devices.unshift({ deviceId: ownId, lastPushed: null });
   }
   const paused = await _loadPausedDevices();
@@ -2598,8 +3141,9 @@ async function handleToggleSyncDevicePaused(request) {
 }
 
 async function handleDeleteSyncDevice(request) {
-  if (isServicePaused()) return { success: false, error: 'Service paused', code: serviceError.code };
-  const settings = await readCacheable('manifest:settings') || {};
+  if (isServicePaused())
+    return { success: false, error: 'Service paused', code: serviceError.code };
+  const settings = (await readCacheable('manifest:settings')) || {};
   let githubToken = null;
   if ((settings.syncMethod || 'github') === 'github') {
     githubToken = await getSyncSessionToken();
@@ -2607,7 +3151,9 @@ async function handleDeleteSyncDevice(request) {
   const mgr = buildSyncManager(settings, { githubToken });
   await mgr.deleteDevice(request.deviceId);
   const currentDevices = await _loadSyncDevices();
-  const filtered = currentDevices.filter(d => d.deviceId !== request.deviceId);
+  const filtered = currentDevices.filter(
+    (d) => d.deviceId !== request.deviceId,
+  );
   await chrome.storage.session.set({ [SYNC_DEVICES_KEY]: filtered });
   return { success: true };
 }
@@ -2627,7 +3173,10 @@ async function handleResetForTest() {
   serviceError = null;
   consecutiveDrainFailures = 0;
   chrome.alarms.clear(SYNC_RATE_LIMIT_ALARM);
-  if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
+  if (drainNotifyTimer) {
+    clearTimeout(drainNotifyTimer);
+    drainNotifyTimer = null;
+  }
   await requestOffscreen({ action: 'setTestDirectory' });
   await requestOffscreen({ action: 'resetDirectory' });
   hydrationDone = hydrateCache();
@@ -2637,7 +3186,10 @@ async function handleResetForTest() {
 }
 
 function handlePauseServiceForTest(request) {
-  pauseService(request.code || 'session_quota', request.message || 'Test pause');
+  pauseService(
+    request.code || 'session_quota',
+    request.message || 'Test pause',
+  );
   return { success: true };
 }
 
@@ -2651,22 +3203,32 @@ async function handleResumeService() {
 }
 
 async function handleClearDirectoryHandleForTest() {
-  const resp = await requestOffscreen({ action: 'clearDirectoryHandleForTest' });
+  const resp = await requestOffscreen({
+    action: 'clearDirectoryHandleForTest',
+  });
   localDeviceId = null;
   return resp;
 }
 
 async function handleKillOffscreenForTest() {
-  try { await chrome.offscreen.closeDocument(); } catch (_) { /* already closed */ }
+  try {
+    await chrome.offscreen.closeDocument();
+  } catch (_) {
+    /* already closed */
+  }
   return { success: true };
 }
 
 function handleSetRateLimitForTest(request) {
   rateLimitedUntil = request.until || 0;
   lastSyncResult = request.until
-    ? { timestamp: Date.now(), pushed: false, pulled: false,
+    ? {
+        timestamp: Date.now(),
+        pushed: false,
+        pulled: false,
         error: `Rate limited, will retry at ${new Date(request.until).toLocaleTimeString()}`,
-        rateLimitedUntil: request.until }
+        rateLimitedUntil: request.until,
+      }
     : null;
   return { success: true };
 }
@@ -2685,7 +3247,10 @@ async function handleRehydrateForTest(request) {
   await cacheClear();
   localDeviceId = null;
   recentUrls = new Map();
-  if (drainNotifyTimer) { clearTimeout(drainNotifyTimer); drainNotifyTimer = null; }
+  if (drainNotifyTimer) {
+    clearTimeout(drainNotifyTimer);
+    drainNotifyTimer = null;
+  }
   hydrationDone = hydrateCache();
   await hydrationDone;
   await ensureDefaultLists();
@@ -2694,7 +3259,10 @@ async function handleRehydrateForTest(request) {
 }
 
 async function handleSeedTestData(request) {
-  return await requestOffscreen({ action: 'seedTestData', files: request.files });
+  return await requestOffscreen({
+    action: 'seedTestData',
+    files: request.files,
+  });
 }
 
 function handleSimulatePreHydrationForTest() {
@@ -2709,12 +3277,18 @@ function handleSetDrainFailureCountForTest(request) {
 
 async function handleGetLogBufferForTest() {
   await ensureLogBuffer();
-  return { success: true, length: logBuffer.length, watermark: logBufferWatermark };
+  return {
+    success: true,
+    length: logBuffer.length,
+    watermark: logBufferWatermark,
+  };
 }
 
 async function handleClearDeviceIdForTest() {
   localDeviceId = null;
-  try { await requestOffscreen({ action: 'deleteCurrent' }); } catch {}
+  try {
+    await requestOffscreen({ action: 'deleteCurrent' });
+  } catch {}
   return { success: true };
 }
 
@@ -2728,91 +3302,238 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     try {
       switch (request.action) {
         // Tab/popup queries
-        case 'getReportedUrl':              sendResponse(handleGetReportedUrl(request)); break;
-        case 'getPageInfo':                 sendResponse(await handleGetPageInfo(request)); break;
-        case 'trimTitle':                   sendResponse({ title: await trimTitle(request.title || '', request.url || '') }); break;
-        case 'captureCurrentPageFromPopup': sendResponse(await handleCaptureCurrentPageFromPopup()); break;
-        case 'hydrateCache':                sendResponse(await handleHydrateCacheMsg()); break;
+        case 'getReportedUrl':
+          sendResponse(handleGetReportedUrl(request));
+          break;
+        case 'getPageInfo':
+          sendResponse(await handleGetPageInfo(request));
+          break;
+        case 'trimTitle':
+          sendResponse({
+            title: await trimTitle(request.title || '', request.url || ''),
+          });
+          break;
+        case 'captureCurrentPageFromPopup':
+          sendResponse(await handleCaptureCurrentPageFromPopup());
+          break;
+        case 'hydrateCache':
+          sendResponse(await handleHydrateCacheMsg());
+          break;
         // Page lifecycle
-        case 'reportPage':                  sendResponse(await handleReportPage(request, sender)); break;
+        case 'reportPage':
+          sendResponse(await handleReportPage(request, sender));
+          break;
         // Cache/queue
-        case 'clearWriteQueue':             sendResponse(await handleClearWriteQueue()); break;
-        case 'flushLogBuffer':              sendResponse(await handleFlushLogBuffer()); break;
-        case 'getDeviceId':                 sendResponse(await handleGetDeviceId()); break;
-        case 'readCacheable':               sendResponse(await handleReadCacheable(request)); break;
+        case 'clearWriteQueue':
+          sendResponse(await handleClearWriteQueue());
+          break;
+        case 'flushLogBuffer':
+          sendResponse(await handleFlushLogBuffer());
+          break;
+        case 'getDeviceId':
+          sendResponse(await handleGetDeviceId());
+          break;
+        case 'readCacheable':
+          sendResponse(await handleReadCacheable(request));
+          break;
         // Entity reads
-        case 'loadPageNotes':               sendResponse(await handleLoadPageNotes(request)); break;
-        case 'listSnapshots':               sendResponse(await handleListSnapshots(request)); break;
-        case 'getSnapshotUrl':              sendResponse(await handleGetSnapshotUrl(request)); break;
-        case 'getSnapshotHtml':             sendResponse(await handleGetSnapshotHtml(request)); break;
-        case 'openSnapshot':                sendResponse(await handleOpenSnapshot(request)); break;
-        case 'getDirectoryInfo':            sendResponse(await handleGetDirectoryInfo()); break;
-        case 'getDirectorySize':            sendResponse(await handleGetDirectorySize()); break;
-        case 'listHistoryFiles':            sendResponse(await handleListHistoryFiles(request)); break;
-        case 'loadHistoryBatch':            sendResponse(await handleLoadHistoryBatch(request)); break;
-        case 'loadAllPages':                sendResponse(await handleLoadAllPages()); break;
+        case 'loadPageNotes':
+          sendResponse(await handleLoadPageNotes(request));
+          break;
+        case 'listSnapshots':
+          sendResponse(await handleListSnapshots(request));
+          break;
+        case 'getSnapshotUrl':
+          sendResponse(await handleGetSnapshotUrl(request));
+          break;
+        case 'getSnapshotHtml':
+          sendResponse(await handleGetSnapshotHtml(request));
+          break;
+        case 'openSnapshot':
+          sendResponse(await handleOpenSnapshot(request));
+          break;
+        case 'getDirectoryInfo':
+          sendResponse(await handleGetDirectoryInfo());
+          break;
+        case 'getDirectorySize':
+          sendResponse(await handleGetDirectorySize());
+          break;
+        case 'listHistoryFiles':
+          sendResponse(await handleListHistoryFiles(request));
+          break;
+        case 'loadHistoryBatch':
+          sendResponse(await handleLoadHistoryBatch(request));
+          break;
+        case 'loadAllPages':
+          sendResponse(await handleLoadAllPages());
+          break;
         // Page relations
-        case 'getPageRelations':            sendResponse(await handleGetPageRelations(request)); break;
+        case 'getPageRelations':
+          sendResponse(await handleGetPageRelations(request));
+          break;
         // Context menu / settings
-        case 'contextMenuHighlight':        sendResponse(await handleContextMenuHighlightMsg(request)); break;
-        case 'saveSettingsKey':             sendResponse(await handleSaveSettingsKey(request)); break;
+        case 'contextMenuHighlight':
+          sendResponse(await handleContextMenuHighlightMsg(request));
+          break;
+        case 'saveSettingsKey':
+          sendResponse(await handleSaveSettingsKey(request));
+          break;
         // Note mutations
-        case 'createNote':                  sendResponse(await handleCreateNote(request, sender)); break;
-        case 'deleteNote':                  sendResponse(await handleDeleteNote(request)); break;
-        case 'updateNote':                  sendResponse(await handleUpdateNote(request)); break;
+        case 'createNote':
+          sendResponse(await handleCreateNote(request, sender));
+          break;
+        case 'deleteNote':
+          sendResponse(await handleDeleteNote(request));
+          break;
+        case 'updateNote':
+          sendResponse(await handleUpdateNote(request));
+          break;
         // List mutations
-        case 'toggleListPin':               sendResponse(await handleToggleListPin(request)); break;
-        case 'addListPins':                 sendResponse(await handleAddListPins(request)); break;
-        case 'saveListMeta':                sendResponse(await handleSaveListMeta(request)); break;
-        case 'deleteList':                  sendResponse(await handleDeleteList(request)); break;
-        case 'updateListTree':              sendResponse(await handleUpdateListTree(request)); break;
+        case 'toggleListPin':
+          sendResponse(await handleToggleListPin(request));
+          break;
+        case 'addListPins':
+          sendResponse(await handleAddListPins(request));
+          break;
+        case 'saveListMeta':
+          sendResponse(await handleSaveListMeta(request));
+          break;
+        case 'deleteList':
+          sendResponse(await handleDeleteList(request));
+          break;
+        case 'updateListTree':
+          sendResponse(await handleUpdateListTree(request));
+          break;
         // Recycle bin
-        case 'restoreNote':                 sendResponse(await handleRestoreNote(request)); break;
-        case 'restoreSnapshot':             sendResponse(await handleRestoreSnapshot(request)); break;
-        case 'restoreList':                 sendResponse(await handleRestoreList(request)); break;
-        case 'permanentDelete':             sendResponse(await handlePermanentDelete(request)); break;
-        case 'permanentDeleteAll':          sendResponse(await handlePermanentDeleteAll()); break;
+        case 'restoreNote':
+          sendResponse(await handleRestoreNote(request));
+          break;
+        case 'restoreSnapshot':
+          sendResponse(await handleRestoreSnapshot(request));
+          break;
+        case 'restoreList':
+          sendResponse(await handleRestoreList(request));
+          break;
+        case 'permanentDelete':
+          sendResponse(await handlePermanentDelete(request));
+          break;
+        case 'permanentDeleteAll':
+          sendResponse(await handlePermanentDeleteAll());
+          break;
         // Filesystem
-        case 'initializeFilesystem':        sendResponse(await handleInitializeFilesystem(request)); break;
-        case 'hasDirectoryHandle':          sendResponse(await handleHasDirectoryHandle()); break;
-        case 'deleteSnapshot':              sendResponse(await handleDeleteSnapshot(request)); break;
-        case 'setTestDirectory':            sendResponse(await handleSetTestDirectory()); break;
+        case 'initializeFilesystem':
+          sendResponse(await handleInitializeFilesystem(request));
+          break;
+        case 'hasDirectoryHandle':
+          sendResponse(await handleHasDirectoryHandle());
+          break;
+        case 'deleteSnapshot':
+          sendResponse(await handleDeleteSnapshot(request));
+          break;
+        case 'setTestDirectory':
+          sendResponse(await handleSetTestDirectory());
+          break;
         // Rules
-        case 'addRule':                     sendResponse(await handleAddRule(request)); break;
-        case 'removeRule':                  sendResponse(await handleRemoveRule(request)); break;
-        case 'updateRule':                  sendResponse(await handleUpdateRule(request)); break;
-        case 'runRuleBatch':                sendResponse(await handleRunRuleBatch(request)); break;
-        case 'previewRule':                 sendResponse(await handlePreviewRule(request)); break;
+        case 'addRule':
+          sendResponse(await handleAddRule(request));
+          break;
+        case 'removeRule':
+          sendResponse(await handleRemoveRule(request));
+          break;
+        case 'updateRule':
+          sendResponse(await handleUpdateRule(request));
+          break;
+        case 'runRuleBatch':
+          sendResponse(await handleRunRuleBatch(request));
+          break;
+        case 'previewRule':
+          sendResponse(await handlePreviewRule(request));
+          break;
         // Sync
-        case 'syncNow':                     sendResponse(await handleSyncNow()); break;
-        case 'getSyncStatus':               sendResponse(handleGetSyncStatus()); break;
-        case 'syncListDevices':             sendResponse(await handleSyncListDevices()); break;
-        case 'updateSyncSettings':          sendResponse(await handleUpdateSyncSettings()); break;
-        case 'setSyncToken':                sendResponse(await handleSetSyncToken(request)); break;
-        case 'clearSyncToken':              sendResponse(await handleClearSyncToken()); break;
-        case 'clearSyncFolder':             sendResponse(await handleClearSyncFolder()); break;
-        case 'cancelSync':                  sendResponse(handleCancelSync()); break;
-        case 'toggleSyncRemember':          sendResponse(await handleToggleSyncRemember(request)); break;
-        case 'getSyncAuthState':            sendResponse(await handleGetSyncAuthState()); break;
-        case 'getSyncDevices':              sendResponse(await handleGetSyncDevices()); break;
-        case 'toggleSyncDevicePaused':      sendResponse(await handleToggleSyncDevicePaused(request)); break;
-        case 'deleteSyncDevice':            sendResponse(await handleDeleteSyncDevice(request)); break;
+        case 'syncNow':
+          sendResponse(await handleSyncNow());
+          break;
+        case 'getSyncStatus':
+          sendResponse(handleGetSyncStatus());
+          break;
+        case 'syncListDevices':
+          sendResponse(await handleSyncListDevices());
+          break;
+        case 'updateSyncSettings':
+          sendResponse(await handleUpdateSyncSettings());
+          break;
+        case 'setSyncToken':
+          sendResponse(await handleSetSyncToken(request));
+          break;
+        case 'clearSyncToken':
+          sendResponse(await handleClearSyncToken());
+          break;
+        case 'clearSyncFolder':
+          sendResponse(await handleClearSyncFolder());
+          break;
+        case 'cancelSync':
+          sendResponse(handleCancelSync());
+          break;
+        case 'toggleSyncRemember':
+          sendResponse(await handleToggleSyncRemember(request));
+          break;
+        case 'getSyncAuthState':
+          sendResponse(await handleGetSyncAuthState());
+          break;
+        case 'getSyncDevices':
+          sendResponse(await handleGetSyncDevices());
+          break;
+        case 'toggleSyncDevicePaused':
+          sendResponse(await handleToggleSyncDevicePaused(request));
+          break;
+        case 'deleteSyncDevice':
+          sendResponse(await handleDeleteSyncDevice(request));
+          break;
         // Test helpers
-        case 'resetForTest':                sendResponse(await handleResetForTest()); break;
-        case 'pauseServiceForTest':         sendResponse(handlePauseServiceForTest(request)); break;
-        case 'resumeService':               sendResponse(await handleResumeService()); break;
-        case 'clearDirectoryHandleForTest': sendResponse(await handleClearDirectoryHandleForTest()); break;
-        case 'killOffscreenForTest':        sendResponse(await handleKillOffscreenForTest()); break;
-        case 'setRateLimitForTest':         sendResponse(handleSetRateLimitForTest(request)); break;
-        case 'setLogBufferForTest':         sendResponse(await handleSetLogBufferForTest(request)); break;
-        case 'rehydrateForTest':            sendResponse(await handleRehydrateForTest(request)); break;
-        case 'seedTestData':                sendResponse(await handleSeedTestData(request)); break;
-        case 'simulatePreHydrationForTest': sendResponse(handleSimulatePreHydrationForTest()); break;
-        case 'setDrainFailureCountForTest': sendResponse(handleSetDrainFailureCountForTest(request)); break;
-        case 'getLogBufferForTest':         sendResponse(await handleGetLogBufferForTest()); break;
-        case 'clearDeviceIdForTest':        sendResponse(await handleClearDeviceIdForTest()); break;
+        case 'resetForTest':
+          sendResponse(await handleResetForTest());
+          break;
+        case 'pauseServiceForTest':
+          sendResponse(handlePauseServiceForTest(request));
+          break;
+        case 'resumeService':
+          sendResponse(await handleResumeService());
+          break;
+        case 'clearDirectoryHandleForTest':
+          sendResponse(await handleClearDirectoryHandleForTest());
+          break;
+        case 'killOffscreenForTest':
+          sendResponse(await handleKillOffscreenForTest());
+          break;
+        case 'setRateLimitForTest':
+          sendResponse(handleSetRateLimitForTest(request));
+          break;
+        case 'setLogBufferForTest':
+          sendResponse(await handleSetLogBufferForTest(request));
+          break;
+        case 'rehydrateForTest':
+          sendResponse(await handleRehydrateForTest(request));
+          break;
+        case 'seedTestData':
+          sendResponse(await handleSeedTestData(request));
+          break;
+        case 'simulatePreHydrationForTest':
+          sendResponse(handleSimulatePreHydrationForTest());
+          break;
+        case 'setDrainFailureCountForTest':
+          sendResponse(handleSetDrainFailureCountForTest(request));
+          break;
+        case 'getLogBufferForTest':
+          sendResponse(await handleGetLogBufferForTest());
+          break;
+        case 'clearDeviceIdForTest':
+          sendResponse(await handleClearDeviceIdForTest());
+          break;
         default:
-          sendResponse({ success: false, error: `Unknown action: ${request.action}` });
+          sendResponse({
+            success: false,
+            error: `Unknown action: ${request.action}`,
+          });
       }
     } catch (error) {
       logError('Error handling message:', error);
@@ -2828,7 +3549,9 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'import-bookmarks') return;
 
   let aborted = false;
-  port.onDisconnect.addListener(() => { aborted = true; });
+  port.onDisconnect.addListener(() => {
+    aborted = true;
+  });
 
   port.onMessage.addListener(async (msg) => {
     if (msg.action !== 'importBookmarks') return;
@@ -2840,7 +3563,12 @@ chrome.runtime.onConnect.addListener((port) => {
     const FAIL_LIMIT = 20;
 
     function extractListId(effects) {
-      const key = Object.keys(effects).find(k => k.startsWith(LIST_PREFIX) && k !== 'manifest:list-order' && k !== 'manifest:name-to-id');
+      const key = Object.keys(effects).find(
+        (k) =>
+          k.startsWith(LIST_PREFIX) &&
+          k !== 'manifest:list-order' &&
+          k !== 'manifest:name-to-id',
+      );
       return key ? entitySlug(key) : null;
     }
 
@@ -2849,11 +3577,16 @@ chrome.runtime.onConnect.addListener((port) => {
     let parentEffects;
     try {
       parentEffects = await addLog({
-        timestamp: Date.now(), action: 'create_list',
-        listOwner: deviceId, name: parentName,
+        timestamp: Date.now(),
+        action: 'create_list',
+        listOwner: deviceId,
+        name: parentName,
       });
     } catch (e) {
-      port.postMessage({ type: 'error', message: 'Failed to create parent list: ' + e.message });
+      port.postMessage({
+        type: 'error',
+        message: 'Failed to create parent list: ' + e.message,
+      });
       return;
     }
     const parentListId = extractListId(parentEffects);
@@ -2865,18 +3598,26 @@ chrome.runtime.onConnect.addListener((port) => {
       let effects;
       try {
         effects = await addLog({
-          timestamp: Date.now(), action: 'create_list',
-          listOwner: deviceId, name: node.title || 'Untitled',
+          timestamp: Date.now(),
+          action: 'create_list',
+          listOwner: deviceId,
+          name: node.title || 'Untitled',
           ...(parentId ? { parentListId: parentId } : {}),
         });
       } catch (e) {
-        port.postMessage({ type: 'error', message: 'Failed to create list "' + node.title + '": ' + e.message });
+        port.postMessage({
+          type: 'error',
+          message: 'Failed to create list "' + node.title + '": ' + e.message,
+        });
         aborted = true;
         return;
       }
       listCount++;
       const listId = extractListId(effects);
-      port.postMessage({ type: 'progress', text: `Creating list ${listCount}...` });
+      port.postMessage({
+        type: 'progress',
+        text: `Creating list ${listCount}...`,
+      });
 
       // Pin bookmarks
       if (node.bookmarks && node.bookmarks.length > 0 && listId) {
@@ -2890,8 +3631,11 @@ chrome.runtime.onConnect.addListener((port) => {
           }
           try {
             const pinEntry = {
-              timestamp: Date.now(), action: 'pin_to_list',
-              name: pn.name, listOwner: pn.listOwner, items: urls,
+              timestamp: Date.now(),
+              action: 'pin_to_list',
+              name: pn.name,
+              listOwner: pn.listOwner,
+              items: urls,
             };
             if (Object.keys(titles).length > 0) pinEntry.titles = titles;
             await addLog(pinEntry);
@@ -2903,20 +3647,26 @@ chrome.runtime.onConnect.addListener((port) => {
       }
 
       // Record skipped URLs as failures
-      for (const s of (node.skipped || [])) {
+      for (const s of node.skipped || []) {
         failures.push({ url: s.url, title: s.title, reason: s.reason });
       }
 
       if (failures.length >= FAIL_LIMIT) {
-        port.postMessage({ type: 'error', message: `Too many failures (${failures.length}), aborting.` });
+        port.postMessage({
+          type: 'error',
+          message: `Too many failures (${failures.length}), aborting.`,
+        });
         aborted = true;
         return;
       }
 
-      port.postMessage({ type: 'progress', text: `Pinning bookmarks ${bookmarkCount}...` });
+      port.postMessage({
+        type: 'progress',
+        text: `Pinning bookmarks ${bookmarkCount}...`,
+      });
 
       // Recurse into children
-      for (const child of (node.children || [])) {
+      for (const child of node.children || []) {
         await processFolder(child, listId);
         if (aborted) return;
       }

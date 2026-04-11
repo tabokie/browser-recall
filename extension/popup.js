@@ -1,5 +1,13 @@
 // Popup — current-page dashboard
-import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, readCacheable, sendAction, saveSettingsValue, escapeHtml } from './utils.js';
+import {
+  generateSlugFromUrl,
+  generateSlugFromTitle,
+  loadSettingsValue,
+  readCacheable,
+  sendAction,
+  saveSettingsValue,
+  escapeHtml,
+} from './utils.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
 import { pageKey, listKey, entitySlug } from './entity-types.js';
@@ -18,14 +26,17 @@ let _noteSaveTimeout = null;
 
 function showFatalError(message) {
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:999999;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+  overlay.style.cssText =
+    'position:fixed;inset:0;z-index:999999;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
   overlay.innerHTML = `
     <div style="color:#b41e1e;font-size:14px;font-weight:600;">Storage Unavailable</div>
     <div style="color:#555;font-size:12px;max-width:360px;text-align:center;">${escapeHtml(message)}</div>
     <button id="fatalReloadBtn" style="margin-top:6px;padding:4px 12px;border:1px solid #ccc;border-radius:4px;background:#f5f5f5;cursor:pointer;font-size:12px;">Reload Extension</button>
   `;
   document.body.appendChild(overlay);
-  overlay.querySelector('#fatalReloadBtn').addEventListener('click', () => chrome.runtime.reload());
+  overlay
+    .querySelector('#fatalReloadBtn')
+    .addEventListener('click', () => chrome.runtime.reload());
 }
 
 let _errorBubbleTimer = null;
@@ -34,13 +45,16 @@ function showErrorBubble(message) {
   if (!bubble) {
     bubble = document.createElement('div');
     bubble.id = 'errorBubble';
-    bubble.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(180,30,30,0.92);color:#fff;font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:6px 14px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:360px;text-align:center;';
+    bubble.style.cssText =
+      'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(180,30,30,0.92);color:#fff;font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:6px 14px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:360px;text-align:center;';
     document.body.appendChild(bubble);
   }
   bubble.textContent = message + ' — please reload the extension.';
   bubble.style.opacity = '1';
   clearTimeout(_errorBubbleTimer);
-  _errorBubbleTimer = setTimeout(() => { bubble.style.opacity = '0'; }, 4000);
+  _errorBubbleTimer = setTimeout(() => {
+    bubble.style.opacity = '0';
+  }, 4000);
 }
 
 function autoResizeTextarea(textarea) {
@@ -51,8 +65,10 @@ function autoResizeTextarea(textarea) {
 function formatTimestamp(ts) {
   const d = new Date(ts);
   return d.toLocaleString(undefined, {
-    month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit'
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
@@ -71,7 +87,9 @@ function renderSnapshots(snapshots) {
     return;
   }
 
-  container.innerHTML = snapshots.map(snap => `
+  container.innerHTML = snapshots
+    .map(
+      (snap) => `
     <div class="snapshot-row" role="button" tabindex="0" data-ts="${snap.timestamp}">
       <span class="snapshot-time">${escapeHtml(formatTimestamp(snap.timestamp))}</span>
       <span class="snapshot-badges">
@@ -80,25 +98,38 @@ function renderSnapshots(snapshots) {
         <button class="delete-btn" data-ts="${snap.timestamp}" title="Delete snapshot">&times;</button>
       </span>
     </div>
-  `).join('');
+  `,
+    )
+    .join('');
 
   // Attach delete handlers
-  container.querySelectorAll('.delete-btn').forEach(btn => {
+  container.querySelectorAll('.delete-btn').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const ts = parseInt(btn.dataset.ts, 10);
-      await chrome.runtime.sendMessage({ action: 'deleteSnapshot', slug: currentSlug, timestamp: ts });
+      await chrome.runtime.sendMessage({
+        action: 'deleteSnapshot',
+        slug: currentSlug,
+        timestamp: ts,
+      });
       // Re-fetch and re-render
-      const resp = await sendAction({ action: 'listSnapshots', slug: currentSlug });
+      const resp = await sendAction({
+        action: 'listSnapshots',
+        slug: currentSlug,
+      });
       renderSnapshots(resp.snapshots || []);
     });
   });
 
   // Double-click to open snapshot in new tab
-  container.querySelectorAll('.snapshot-row').forEach(row => {
+  container.querySelectorAll('.snapshot-row').forEach((row) => {
     row.addEventListener('dblclick', async () => {
       const ts = parseInt(row.dataset.ts, 10);
-      await chrome.runtime.sendMessage({ action: 'openSnapshot', slug: currentSlug, timestamp: ts });
+      await chrome.runtime.sendMessage({
+        action: 'openSnapshot',
+        slug: currentSlug,
+        timestamp: ts,
+      });
     });
   });
 }
@@ -119,19 +150,30 @@ function renderVisitsAndLikes(entry) {
       const d = yyyymmdd % 100;
       return new Date(y, m, d);
     };
-    const fmtDate = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const fmtDate = (d) =>
+      d.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      });
     const sorted = [...visitDates].sort((a, b) => a - b);
     const first = parse(sorted[0]);
-    items.push(`<span class="attention-item"><strong>First:</strong> ${fmtDate(first)}</span>`);
+    items.push(
+      `<span class="attention-item"><strong>First:</strong> ${fmtDate(first)}</span>`,
+    );
     if (sorted.length > 1) {
       const last = parse(sorted[sorted.length - 1]);
-      items.push(`<span class="attention-item"><strong>Last:</strong> ${fmtDate(last)}</span>`);
+      items.push(
+        `<span class="attention-item"><strong>Last:</strong> ${fmtDate(last)}</span>`,
+      );
     }
   }
 
   const likes = entry?.likes || 0;
   if (likes > 0) {
-    items.push(`<span class="attention-item"><strong>Liked:</strong> ${likes}</span>`);
+    items.push(
+      `<span class="attention-item"><strong>Liked:</strong> ${likes}</span>`,
+    );
   }
 
   if (items.length > 0) {
@@ -142,131 +184,216 @@ function renderVisitsAndLikes(entry) {
   }
 }
 
-// Render notes section
-function renderNotes(notes) {
-  if (_noteSaveTimeout) { clearTimeout(_noteSaveTimeout); _noteSaveTimeout = null; }
-  const container = document.getElementById('highlightList');
-  currentNotes = notes || [];
+const ICON_EDIT =
+  '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>';
+const ICON_DELETE =
+  '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>';
 
-  // Populate the dedicated page-note input from global note entry (excerpt: null)
-  const pageNoteEl = document.getElementById('pageNote');
-  const globalNote = currentNotes.find(n => n.excerpt === null);
-  pageNoteEl.value = globalNote?.note || '';
-  pageNoteEl.dataset.noteSlug = globalNote?.slug || '';
+function renderPageNoteWrap(globalNote) {
+  const wrap = document.getElementById('pageNoteWrap');
+  const noteText = globalNote?.note || '';
+  const noteSlug = globalNote?.slug || '';
 
-  // Only show non-global notes in the list
-  const textNotes = currentNotes.filter(n => n.excerpt !== null);
-
-  if (textNotes.length === 0) {
-    container.innerHTML = '<div class="empty-state">No notes</div>';
-    return;
-  }
-
-  container.innerHTML = textNotes.map((n, i) => {
-    const displayText = Array.isArray(n.excerpt) ? n.excerpt.join(' ') : n.excerpt;
-    return `
-      <div class="highlight-item" data-note-slug="${escapeHtml(n.slug)}">
-        <div class="highlight-header">
-          <div class="highlight-text">"${escapeHtml(displayText)}"</div>
-          <button class="highlight-delete" data-note-slug="${escapeHtml(n.slug)}" title="Delete">&times;</button>
-        </div>
-        <textarea class="highlight-note" placeholder="Add a note..." data-note-slug="${escapeHtml(n.slug)}">${escapeHtml(n.note || '')}</textarea>
-      </div>`;
-  }).join('');
-
-  // Delete note
-  container.querySelectorAll('.highlight-delete').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const noteSlug = btn.dataset.noteSlug;
-      if (!noteSlug) return;
-
-      try {
-        await chrome.runtime.sendMessage({
-          action: 'deleteNote',
-          noteSlug
-        });
-        // Tell content script to remove the visual mark(s)
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tab?.id) {
-          chrome.tabs.sendMessage(tab.id, { action: 'removeHighlightMark', noteSlug }).catch(() => {});
-        }
-      } catch (e) {
-        logError('[popup] Delete note error:', e);
-      }
-
-      currentNotes = currentNotes.filter(n => n.slug !== noteSlug);
-      renderNotes(currentNotes);
+  if (!noteText && !noteSlug) {
+    wrap.innerHTML = `<button class="page-note-add" id="pageNoteAddBtn">+ Page note</button>`;
+    wrap.querySelector('#pageNoteAddBtn').addEventListener('click', () => {
+      openPageNoteEditor(wrap, '', '');
     });
+  } else {
+    wrap.innerHTML = `<div class="page-note-display">
+      <span class="note-body">${escapeHtml(noteText)}</span>
+      <button class="note-action-btn edit" title="Edit">${ICON_EDIT}</button>
+    </div>`;
+    wrap
+      .querySelector('.note-action-btn.edit')
+      .addEventListener('click', () => {
+        openPageNoteEditor(wrap, noteText, noteSlug);
+      });
+  }
+  wrap.dataset.noteSlug = noteSlug;
+}
+
+function openPageNoteEditor(wrap, text, slug) {
+  wrap.innerHTML = `<textarea class="page-note-edit-textarea" placeholder="Add a page note...">${escapeHtml(text)}</textarea>`;
+  const ta = wrap.querySelector('textarea');
+  ta.dataset.noteSlug = slug;
+  autoResizeTextarea(ta);
+  ta.focus();
+
+  let saveTimeout = null;
+  ta.addEventListener('input', () => {
+    autoResizeTextarea(ta);
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => savePageNote(ta), 500);
   });
-
-  // Save notes on change (debounced)
-  container.querySelectorAll('.highlight-note').forEach(textarea => {
-    textarea.addEventListener('input', () => {
-      autoResizeTextarea(textarea);
-      const noteSlug = textarea.dataset.noteSlug;
-      const note = currentNotes.find(n => n.slug === noteSlug);
-      if (note) note.note = textarea.value;
-
-      clearTimeout(_noteSaveTimeout);
-      _noteSaveTimeout = setTimeout(async () => {
-        const currentSlugForSave = textarea.dataset.noteSlug;
-        logDebug(`[popup] Saving note for slug=${currentSlugForSave}`);
-        try {
-          const resp = await chrome.runtime.sendMessage({
-            action: 'updateNote',
-            noteSlug: currentSlugForSave,
-            note: textarea.value
-          });
-          if (resp?.noteSlug && resp.noteSlug !== currentSlugForSave) {
-            textarea.dataset.noteSlug = resp.noteSlug;
-          }
-        } catch (error) {
-          logError('[popup] Note save error:', error);
-        }
-      }, 500);
+  ta.addEventListener('blur', () => {
+    clearTimeout(saveTimeout);
+    savePageNote(ta).then(() => {
+      const note = currentNotes.find((n) => n.excerpt === null);
+      if (note) {
+        note.note = ta.value;
+        note.slug = ta.dataset.noteSlug;
+      } else if (ta.value && ta.dataset.noteSlug) {
+        currentNotes.push({
+          excerpt: null,
+          note: ta.value,
+          slug: ta.dataset.noteSlug,
+        });
+      }
+      const globalNote = currentNotes.find((n) => n.excerpt === null);
+      if (!ta.value) {
+        currentNotes = currentNotes.filter((n) => n.excerpt !== null);
+      }
+      renderPageNoteWrap(currentNotes.find((n) => n.excerpt === null));
     });
   });
 }
 
-// Page-note auto-save (debounced)
-let pageNoteSaveTimeout = null;
-let currentGlobalNoteSlug = null;
-document.getElementById('pageNote').addEventListener('input', (e) => {
-  autoResizeTextarea(e.target);
-  clearTimeout(pageNoteSaveTimeout);
-  pageNoteSaveTimeout = setTimeout(async () => {
-    const note = document.getElementById('pageNote').value;
-    const noteSlug = document.getElementById('pageNote').dataset.noteSlug;
-    try {
-      if (noteSlug) {
-        // Update existing global note (creates new immutable note entity)
+async function savePageNote(ta) {
+  const note = ta.value;
+  const noteSlug = ta.dataset.noteSlug;
+  try {
+    if (noteSlug) {
+      const resp = await chrome.runtime.sendMessage({
+        action: 'updateNote',
+        noteSlug,
+        note,
+      });
+      if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
+        ta.dataset.noteSlug = resp.noteSlug;
+      }
+    } else if (note) {
+      const resp = await chrome.runtime.sendMessage({
+        action: 'createNote',
+        pageSlug: currentSlug,
+        url: currentUrl,
+        excerpt: null,
+        note,
+        cssPath: null,
+      });
+      if (resp?.noteSlug) {
+        ta.dataset.noteSlug = resp.noteSlug;
+      }
+    }
+  } catch (error) {
+    logError('[popup] Page note save error:', error);
+  }
+}
+
+function renderNotes(notes) {
+  if (_noteSaveTimeout) {
+    clearTimeout(_noteSaveTimeout);
+    _noteSaveTimeout = null;
+  }
+  const container = document.getElementById('highlightList');
+  currentNotes = notes || [];
+
+  const globalNote = currentNotes.find((n) => n.excerpt === null);
+  renderPageNoteWrap(globalNote);
+
+  const textNotes = currentNotes.filter((n) => n.excerpt !== null);
+
+  if (textNotes.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = textNotes
+    .map((n) => {
+      const displayText = Array.isArray(n.excerpt)
+        ? n.excerpt.join(' ')
+        : n.excerpt;
+      const noteText = n.note || '';
+      const noteDisplay = noteText
+        ? `<span class="highlight-note-text">${escapeHtml(noteText)}</span>`
+        : `<span class="highlight-note-placeholder">No annotation</span>`;
+      return `
+      <div class="highlight-item" data-note-slug="${escapeHtml(n.slug)}">
+        <div class="highlight-header">
+          <div class="highlight-excerpt">${escapeHtml(displayText)}</div>
+          <button class="note-action-btn delete" data-note-slug="${escapeHtml(n.slug)}" title="Delete highlight">${ICON_DELETE}</button>
+        </div>
+        <div class="highlight-body">
+          <div class="highlight-note-row">
+            ${noteDisplay}
+            <button class="note-action-btn edit" title="Edit note">${ICON_EDIT}</button>
+          </div>
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  bindHighlightActions(container);
+}
+
+function bindHighlightActions(container) {
+  container.querySelectorAll('.note-action-btn.delete').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const noteSlug = btn.dataset.noteSlug;
+      if (!noteSlug) return;
+      try {
+        await chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug });
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+        if (tab?.id)
+          chrome.tabs
+            .sendMessage(tab.id, { action: 'removeHighlightMark', noteSlug })
+            .catch(() => {});
+      } catch (e) {
+        logError('[popup] Delete note error:', e);
+      }
+      currentNotes = currentNotes.filter((n) => n.slug !== noteSlug);
+      renderNotes(currentNotes);
+    });
+  });
+
+  container.querySelectorAll('.note-action-btn.edit').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const item = btn.closest('.highlight-item');
+      const noteSlug = item?.dataset.noteSlug;
+      const note = currentNotes.find((n) => n.slug === noteSlug);
+      if (!note) return;
+      openHighlightNoteEditor(item, note);
+    });
+  });
+}
+
+function openHighlightNoteEditor(item, note) {
+  const body = item.querySelector('.highlight-body');
+  body.innerHTML = `<textarea class="highlight-note-edit-textarea" placeholder="Add a note...">${escapeHtml(note.note || '')}</textarea>`;
+  const ta = body.querySelector('textarea');
+  autoResizeTextarea(ta);
+  ta.focus();
+
+  ta.addEventListener('input', () => {
+    autoResizeTextarea(ta);
+    note.note = ta.value;
+    clearTimeout(_noteSaveTimeout);
+    _noteSaveTimeout = setTimeout(async () => {
+      const slug = item.dataset.noteSlug;
+      logDebug(`[popup] Saving note for slug=${slug}`);
+      try {
         const resp = await chrome.runtime.sendMessage({
           action: 'updateNote',
-          noteSlug,
-          note
+          noteSlug: slug,
+          note: ta.value,
         });
-        if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
-          document.getElementById('pageNote').dataset.noteSlug = resp.noteSlug;
+        if (resp?.noteSlug && resp.noteSlug !== slug) {
+          item.dataset.noteSlug = resp.noteSlug;
+          note.slug = resp.noteSlug;
         }
-      } else if (note) {
-        // Create new global note
-        const resp = await chrome.runtime.sendMessage({
-          action: 'createNote',
-          pageSlug: currentSlug,
-          url: currentUrl,
-          excerpt: null,
-          note,
-          cssPath: null
-        });
-        if (resp?.noteSlug) {
-          document.getElementById('pageNote').dataset.noteSlug = resp.noteSlug;
-        }
+      } catch (error) {
+        logError('[popup] Note save error:', error);
       }
-    } catch (error) {
-      logError('[popup] Page note save error:', error);
-    }
-  }, 500);
-});
+    }, 500);
+  });
+
+  ta.addEventListener('blur', () => {
+    renderNotes(currentNotes);
+  });
+}
 
 // Lists — pin current page to lists
 async function loadLists() {
@@ -276,7 +403,10 @@ async function loadLists() {
     for (const node of nodes) {
       const entity = await readCacheable(node.id);
       if (entity && !entity.deleted) {
-        all.push({ slug: entity.slug || entitySlug(node.id), name: entity.name || '' });
+        all.push({
+          slug: entity.slug || entitySlug(node.id),
+          name: entity.name || '',
+        });
       }
       if (node.children) await walk(node.children);
     }
@@ -299,7 +429,7 @@ function isPagePinned(allPins, listId, url) {
   const pins = allPins[listId] || [];
   const slug = generateSlugFromUrl(url);
   const pageId = pageKey(slug);
-  return pins.some(p => p.id === pageId || p.url === url);
+  return pins.some((p) => p.id === pageId || p.url === url);
 }
 
 async function renderListChips() {
@@ -318,9 +448,12 @@ async function renderListChips() {
   }
 
   // Sort others by most recent activity
-  const othersRanked = others.map(list => {
+  const othersRanked = others.map((list) => {
     const pins = allPins[list.slug] || [];
-    const maxPinnedAt = pins.reduce((max, p) => Math.max(max, p.pinnedAt || 0), 0);
+    const maxPinnedAt = pins.reduce(
+      (max, p) => Math.max(max, p.pinnedAt || 0),
+      0,
+    );
     return { list, lastActivity: maxPinnedAt || 0 };
   });
   othersRanked.sort((a, b) => b.lastActivity - a.lastActivity);
@@ -329,12 +462,17 @@ async function renderListChips() {
   if (!frozenChipOrder) {
     // First render: pinned lists first, then fill remaining slots with active lists
     const remaining = Math.max(0, 10 - containsPage.length);
-    displayLists = [...containsPage, ...othersRanked.slice(0, remaining).map(r => r.list)];
-    frozenChipOrder = displayLists.map(l => l.slug);
+    displayLists = [
+      ...containsPage,
+      ...othersRanked.slice(0, remaining).map((r) => r.list),
+    ];
+    frozenChipOrder = displayLists.map((l) => l.slug);
   } else {
     // Subsequent renders: use frozen order, but ensure newly-pinned lists are visible
-    const bySlug = new Map(lists.map(l => [l.slug, l]));
-    displayLists = frozenChipOrder.filter(slug => bySlug.has(slug)).map(slug => bySlug.get(slug));
+    const bySlug = new Map(lists.map((l) => [l.slug, l]));
+    displayLists = frozenChipOrder
+      .filter((slug) => bySlug.has(slug))
+      .map((slug) => bySlug.get(slug));
     for (const list of containsPage) {
       if (!frozenChipOrder.includes(list.slug)) {
         displayLists.push(list);
@@ -343,23 +481,27 @@ async function renderListChips() {
     }
   }
 
-  let html = displayLists.map((list) => {
-    const pinned = isPagePinned(allPins, list.slug, currentUrl);
-    return `<span class="list-chip${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
-  }).join('');
+  let html = displayLists
+    .map((list) => {
+      const pinned = isPagePinned(allPins, list.slug, currentUrl);
+      return `<span class="list-chip${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
+    })
+    .join('');
 
   html += `<span class="list-add-btn" id="listAddBtn" title="Add to list">+</span>`;
 
   container.innerHTML = html;
 
   // Toggle existing chips
-  container.querySelectorAll('.list-chip').forEach(chip => {
+  container.querySelectorAll('.list-chip').forEach((chip) => {
     chip.addEventListener('click', async () => {
       try {
         const listId = chip.dataset.listId;
         await toggleListPin(listId);
         renderListChips();
-      } catch (err) { showErrorBubble(err.message); }
+      } catch (err) {
+        showErrorBubble(err.message);
+      }
     });
   });
 
@@ -371,7 +513,11 @@ async function renderListChips() {
 }
 
 async function toggleListPin(listId) {
-  await chrome.runtime.sendMessage({ action: 'toggleListPin', listId, url: currentUrl });
+  await chrome.runtime.sendMessage({
+    action: 'toggleListPin',
+    listId,
+    url: currentUrl,
+  });
 }
 
 function closeListPicker() {
@@ -410,22 +556,24 @@ function openListPicker(lists, allPins) {
   function renderPickerRows() {
     const query = input.value.trim().toLowerCase();
     const filtered = query
-      ? lists.filter(c => (c.name).toLowerCase().includes(query))
+      ? lists.filter((c) => c.name.toLowerCase().includes(query))
       : lists;
 
-    let rowsHtml = filtered.map(c => {
-      const pinned = isPagePinned(allPins, c.slug, currentUrl);
-      return `<div class="list-picker-row${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${c.slug}">
+    let rowsHtml = filtered
+      .map((c) => {
+        const pinned = isPagePinned(allPins, c.slug, currentUrl);
+        return `<div class="list-picker-row${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${c.slug}">
         <span class="list-picker-row-check">${pinned ? '&#10003;' : ''}</span>
         <span>${escapeHtml(c.name)}</span>
       </div>`;
-    }).join('');
+      })
+      .join('');
 
     // Show create option if input doesn't exactly match any existing list
     const inputVal = input.value.trim();
     if (inputVal) {
-      const exactMatch = lists.some(c =>
-        (c.name).toLowerCase() === inputVal.toLowerCase()
+      const exactMatch = lists.some(
+        (c) => c.name.toLowerCase() === inputVal.toLowerCase(),
       );
       if (!exactMatch) {
         rowsHtml += `<div class="list-picker-create" id="listPickerCreate" role="button" tabindex="0">Create "${escapeHtml(inputVal)}"</div>`;
@@ -439,7 +587,7 @@ function openListPicker(lists, allPins) {
     listEl.innerHTML = rowsHtml;
 
     // Attach click handlers to rows
-    listEl.querySelectorAll('.list-picker-row').forEach(row => {
+    listEl.querySelectorAll('.list-picker-row').forEach((row) => {
       row.addEventListener('click', async (e) => {
         e.stopPropagation();
         try {
@@ -450,7 +598,9 @@ function openListPicker(lists, allPins) {
           Object.assign(allPins, freshPins);
           renderPickerRows();
           renderListChips();
-        } catch (err) { showErrorBubble(err.message); }
+        } catch (err) {
+          showErrorBubble(err.message);
+        }
       });
     });
 
@@ -462,7 +612,9 @@ function openListPicker(lists, allPins) {
           await createListAndPin(inputVal);
           closeListPicker();
           renderListChips();
-        } catch (err) { showErrorBubble(err.message); }
+        } catch (err) {
+          showErrorBubble(err.message);
+        }
       });
     }
   }
@@ -478,8 +630,8 @@ function openListPicker(lists, allPins) {
       const inputVal = input.value.trim();
       if (!inputVal) return;
       try {
-        const exactMatch = lists.find(c =>
-          (c.name).toLowerCase() === inputVal.toLowerCase()
+        const exactMatch = lists.find(
+          (c) => c.name.toLowerCase() === inputVal.toLowerCase(),
         );
         if (exactMatch) {
           await toggleListPin(exactMatch.slug);
@@ -490,7 +642,9 @@ function openListPicker(lists, allPins) {
           closeListPicker();
           renderListChips();
         }
-      } catch (err) { showErrorBubble(err.message); }
+      } catch (err) {
+        showErrorBubble(err.message);
+      }
     } else if (e.key === 'Escape') {
       closeListPicker();
     }
@@ -504,13 +658,19 @@ function openListPicker(lists, allPins) {
 
 async function createListAndPin(name) {
   const lists = await loadLists();
-  if (lists.some(c => c.name === name)) return;
+  if (lists.some((c) => c.name === name)) return;
 
   // saveListMeta's effectOf adds to tree manifest — no manual append needed.
   // Use the generatedId returned by the handler (replay engine generates its own ID).
-  const resp = await chrome.runtime.sendMessage({ action: 'saveListMeta', name });
+  const resp = await chrome.runtime.sendMessage({
+    action: 'saveListMeta',
+    name,
+  });
   const listId = resp?.listId;
-  if (!listId) { logError('[popup] saveListMeta did not return listId'); return; }
+  if (!listId) {
+    logError('[popup] saveListMeta did not return listId');
+    return;
+  }
 
   await toggleListPin(listId);
 
@@ -556,14 +716,17 @@ async function renderWorkspaceBar() {
 
   // Render list selection chips
   if (lists.length === 0) {
-    listsContainer.innerHTML = '<span class="workspace-empty">No lists yet. Create one in Notes section.</span>';
+    listsContainer.innerHTML =
+      '<span class="workspace-empty">No lists yet. Create one in Notes section.</span>';
   } else {
-    listsContainer.innerHTML = lists.map(list => {
-      const selected = workspace.listIds.includes(listKey(list.slug));
-      return `<span class="ws-list-chip${selected ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
-    }).join('');
+    listsContainer.innerHTML = lists
+      .map((list) => {
+        const selected = workspace.listIds.includes(listKey(list.slug));
+        return `<span class="ws-list-chip${selected ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
+      })
+      .join('');
 
-    listsContainer.querySelectorAll('.ws-list-chip').forEach(chip => {
+    listsContainer.querySelectorAll('.ws-list-chip').forEach((chip) => {
       chip.addEventListener('click', async () => {
         const slug = chip.dataset.listId;
         const lk = listKey(slug);
@@ -606,7 +769,7 @@ document.getElementById('triToggle').addEventListener('click', async (e) => {
       url,
       title: currentTab.title || null,
       slug: generateSlugFromUrl(url),
-      isInitialLoad: true
+      isInitialLoad: true,
     });
     await showDashboard(currentTab);
   }
@@ -622,11 +785,13 @@ document.getElementById('triToggle').addEventListener('click', async (e) => {
 });
 
 // Auto-snapshot toggle handler
-document.getElementById('workspaceAutoSnapshot').addEventListener('change', async (e) => {
-  const ws = await loadWorkspace();
-  ws.autoSnapshot = e.target.checked;
-  await saveWorkspace(ws);
-});
+document
+  .getElementById('workspaceAutoSnapshot')
+  .addEventListener('change', async (e) => {
+    const ws = await loadWorkspace();
+    ws.autoSnapshot = e.target.checked;
+    await saveWorkspace(ws);
+  });
 
 // Title editing
 function startEditingTitle() {
@@ -657,7 +822,7 @@ function startEditingTitle() {
         await chrome.runtime.sendMessage({
           action: 'reportPage',
           url: currentEntry.url,
-          user_title: newTitle
+          user_title: newTitle,
         });
         logDebug('[popup] User title updated to:', newTitle);
       } catch (error) {
@@ -677,7 +842,9 @@ function startEditingTitle() {
   });
 }
 
-document.getElementById('pageTitle').addEventListener('click', startEditingTitle);
+document
+  .getElementById('pageTitle')
+  .addEventListener('click', startEditingTitle);
 
 // Open settings page
 document.getElementById('openSettingsBtn').addEventListener('click', () => {
@@ -692,20 +859,42 @@ document.getElementById('captureBtn').addEventListener('click', async () => {
 
   try {
     logDebug('[popup] Capturing snapshot...');
-    const resp = await chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' });
+    const resp = await chrome.runtime.sendMessage({
+      action: 'captureCurrentPageFromPopup',
+    });
     logDebug('[popup] Capture response:', resp);
     if (resp && resp.success) {
-      const snapshotsResp = await sendAction({ action: 'listSnapshots', slug: currentSlug });
+      const snapshotsResp = await sendAction({
+        action: 'listSnapshots',
+        slug: currentSlug,
+      });
       renderSnapshots(snapshotsResp.snapshots || []);
     } else {
       logDebug('[popup] Capture failed:', resp);
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab) chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: resp?.error || 'Capture failed' }).catch(() => {});
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      if (tab)
+        chrome.tabs
+          .sendMessage(tab.id, {
+            action: 'showErrorNotification',
+            message: resp?.error || 'Capture failed',
+          })
+          .catch(() => {});
     }
   } catch (error) {
     logError('[popup] Capture error:', error);
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
-    if (tab) chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: error.message || 'Capture failed' }).catch(() => {});
+    const [tab] = await chrome.tabs
+      .query({ active: true, currentWindow: true })
+      .catch(() => []);
+    if (tab)
+      chrome.tabs
+        .sendMessage(tab.id, {
+          action: 'showErrorNotification',
+          message: error.message || 'Capture failed',
+        })
+        .catch(() => {});
   }
 
   btn.disabled = false;
@@ -725,7 +914,11 @@ async function resolvePageIdentity(tab) {
   const effectiveUrl = tab._effectiveUrl || tab.url;
   let title = tab.title || '<unknown>';
   try {
-    const resp = await chrome.runtime.sendMessage({ action: 'trimTitle', title, url: effectiveUrl });
+    const resp = await chrome.runtime.sendMessage({
+      action: 'trimTitle',
+      title,
+      url: effectiveUrl,
+    });
     if (resp?.title) title = resp.title;
   } catch {}
   const viewerPrefix = chrome.runtime.getURL('snapshot-viewer.html');
@@ -740,17 +933,26 @@ async function resolvePageIdentity(tab) {
 
 async function fetchAndRenderPageData(tab, slug) {
   // Build a fallback entry from tab info
-  currentEntry = { timestamp: Date.now(), url: tab.url, title: tab.title || null, intent: '', slug };
+  currentEntry = {
+    timestamp: Date.now(),
+    url: tab.url,
+    title: tab.title || null,
+    slug,
+  };
 
   try {
     logDebug(`[popup] Fetching page info for slug=${slug}`);
-    const info = await chrome.runtime.sendMessage({ action: 'getPageInfo', slug });
+    const info = await chrome.runtime.sendMessage({
+      action: 'getPageInfo',
+      slug,
+    });
     logDebug('[popup] getPageInfo response:', info);
 
     if (info && info.success) {
       if (info.entry) {
         currentEntry = info.entry;
-        currentTitle = info.entry.user_title || info.entry.title || tab.title || '<unknown>';
+        currentTitle =
+          info.entry.user_title || info.entry.title || tab.title || '<unknown>';
         document.getElementById('pageTitle').textContent = currentTitle;
         if (info.entry.url) {
           currentUrl = info.entry.url;
@@ -760,7 +962,9 @@ async function fetchAndRenderPageData(tab, slug) {
       renderVisitsAndLikes(info.entry);
       renderSnapshots(info.snapshots);
       renderNotes(info.notes);
-      logDebug(`[popup] Loaded ${info.notes?.length || 0} notes, ${info.snapshots?.length || 0} snapshots`);
+      logDebug(
+        `[popup] Loaded ${info.notes?.length || 0} notes, ${info.snapshots?.length || 0} snapshots`,
+      );
     } else {
       logDebug('[popup] getPageInfo returned failure:', info);
     }
@@ -776,8 +980,11 @@ function showDashboardUI() {
   document.getElementById('dashboardContent').style.display = 'block';
 
   requestAnimationFrame(() => {
-    autoResizeTextarea(document.getElementById('pageNote'));
-    document.querySelectorAll('.highlight-note').forEach(ta => autoResizeTextarea(ta));
+    document
+      .querySelectorAll(
+        '.page-note-edit-textarea, .highlight-note-edit-textarea',
+      )
+      .forEach((ta) => autoResizeTextarea(ta));
   });
 }
 
@@ -785,7 +992,10 @@ function scheduleDelayedTitleCheck(tab, initialTitle) {
   if (currentEntry?.user_title) return;
   setTimeout(async () => {
     try {
-      const [freshTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [freshTab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
       if (!freshTab || freshTab.id !== tab.id) return;
 
       const freshTitle = freshTab.title || '';
@@ -795,7 +1005,11 @@ function scheduleDelayedTitleCheck(tab, initialTitle) {
       if (!titleEl || titleEl.textContent !== initialTitle) return;
 
       titleEl.textContent = freshTitle;
-      await chrome.runtime.sendMessage({ action: 'reportPage', url: tab.url, title: freshTitle });
+      await chrome.runtime.sendMessage({
+        action: 'reportPage',
+        url: tab.url,
+        title: freshTitle,
+      });
       if (currentEntry) currentEntry.title = freshTitle;
       logDebug('[popup] Auto-updated title to:', freshTitle);
     } catch (error) {
@@ -824,17 +1038,29 @@ async function showDashboard(tab) {
 // ─── Init phases ─────────────────────────────────────────────────────
 
 async function verifyDeviceIdentity() {
-  const deviceResp = await chrome.runtime.sendMessage({ action: 'getDeviceId' });
+  const deviceResp = await chrome.runtime.sendMessage({
+    action: 'getDeviceId',
+  });
   if (!deviceResp?.deviceId) {
-    throw new Error('Device identity unavailable — the CURRENT file may be missing or corrupted. Try reloading the extension.');
+    throw new Error(
+      'Device identity unavailable — the CURRENT file may be missing or corrupted. Try reloading the extension.',
+    );
   }
 }
 
 async function resolveActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const isSnapshotViewer = tab?.url?.startsWith(chrome.runtime.getURL('snapshot-viewer.html'));
-  if (!tab || !tab.url || tab.url.startsWith('chrome://') || (tab.url.startsWith('chrome-extension://') && !isSnapshotViewer)) {
-    document.getElementById('loading').textContent = 'Not available for this page';
+  const isSnapshotViewer = tab?.url?.startsWith(
+    chrome.runtime.getURL('snapshot-viewer.html'),
+  );
+  if (
+    !tab ||
+    !tab.url ||
+    tab.url.startsWith('chrome://') ||
+    (tab.url.startsWith('chrome-extension://') && !isSnapshotViewer)
+  ) {
+    document.getElementById('loading').textContent =
+      'Not available for this page';
     return null;
   }
   return tab;
@@ -843,7 +1069,10 @@ async function resolveActiveTab() {
 async function resolveEffectiveUrl(tab) {
   let effectiveUrl = tab.url;
   try {
-    const reported = await chrome.runtime.sendMessage({ action: 'getReportedUrl', tabId: tab.id });
+    const reported = await chrome.runtime.sendMessage({
+      action: 'getReportedUrl',
+      tabId: tab.id,
+    });
     if (reported?.success && reported.url) effectiveUrl = reported.url;
   } catch {}
   tab._effectiveUrl = effectiveUrl;
@@ -868,38 +1097,62 @@ async function handleBlacklist(tab) {
 
   const urlBlacklist = (await readCacheable('manifest:settings')).urlBlacklist;
   const blacklist = urlBlacklist ?? ['chrome://', 'edge://'];
-  if (hasVisitHistory || !blacklist.some(prefix => tab.url.startsWith(prefix))) return false;
+  if (
+    hasVisitHistory ||
+    !blacklist.some((prefix) => tab.url.startsWith(prefix))
+  )
+    return false;
 
   document.getElementById('loading').style.display = 'none';
   document.getElementById('blacklistedUrl').textContent = tab.url;
   document.getElementById('blacklisted').style.display = 'block';
-  document.getElementById('blacklistSettingsLink').addEventListener('click', () => {
-    chrome.runtime.openOptionsPage();
-  });
+  document
+    .getElementById('blacklistSettingsLink')
+    .addEventListener('click', () => {
+      chrome.runtime.openOptionsPage();
+    });
 
-  document.getElementById('captureOnceBtn').addEventListener('click', async () => {
-    const btn = document.getElementById('captureOnceBtn');
-    btn.disabled = true;
-    btn.textContent = 'Capturing...';
+  document
+    .getElementById('captureOnceBtn')
+    .addEventListener('click', async () => {
+      const btn = document.getElementById('captureOnceBtn');
+      btn.disabled = true;
+      btn.textContent = 'Capturing...';
 
-    try {
-      const slug = generateSlugFromUrl(effectiveUrl);
-      await chrome.runtime.sendMessage({
-        action: 'reportPage', url: effectiveUrl, title: tab.title || null,
-        slug, isInitialLoad: true, bypassBlacklist: true,
-      });
-      const resp = await chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' });
-      if (resp && !resp.success) {
-        chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: resp.error || 'Capture failed' }).catch(() => {});
+      try {
+        const slug = generateSlugFromUrl(effectiveUrl);
+        await chrome.runtime.sendMessage({
+          action: 'reportPage',
+          url: effectiveUrl,
+          title: tab.title || null,
+          slug,
+          isInitialLoad: true,
+          bypassBlacklist: true,
+        });
+        const resp = await chrome.runtime.sendMessage({
+          action: 'captureCurrentPageFromPopup',
+        });
+        if (resp && !resp.success) {
+          chrome.tabs
+            .sendMessage(tab.id, {
+              action: 'showErrorNotification',
+              message: resp.error || 'Capture failed',
+            })
+            .catch(() => {});
+        }
+        logDebug('[popup] Capture once completed for blacklisted page');
+      } catch (error) {
+        logError('[popup] Capture once failed:', error);
+        chrome.tabs
+          .sendMessage(tab.id, {
+            action: 'showErrorNotification',
+            message: error.message || 'Capture failed',
+          })
+          .catch(() => {});
       }
-      logDebug('[popup] Capture once completed for blacklisted page');
-    } catch (error) {
-      logError('[popup] Capture once failed:', error);
-      chrome.tabs.sendMessage(tab.id, { action: 'showErrorNotification', message: error.message || 'Capture failed' }).catch(() => {});
-    }
 
-    await showDashboard(tab);
-  });
+      await showDashboard(tab);
+    });
 
   return true;
 }
@@ -916,14 +1169,18 @@ async function initPopup() {
   if (await handleBlacklist(tab)) return;
   await showDashboard(tab);
 }
-initPopup().catch(err => showFatalError(err.message));
+initPopup().catch((err) => showFatalError(err.message));
 
 // Listen for note mutations from background to keep popup in sync
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.action !== 'mutation' || msg.type !== 'note' || !currentSlug) return false;
+  if (msg.action !== 'mutation' || msg.type !== 'note' || !currentSlug)
+    return false;
   // Re-fetch notes for current page
-  chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: currentSlug }).then(resp => {
-    if (resp?.success && resp.notes) renderNotes(resp.notes);
-  }).catch(() => {});
+  chrome.runtime
+    .sendMessage({ action: 'loadPageNotes', slug: currentSlug })
+    .then((resp) => {
+      if (resp?.success && resp.notes) renderNotes(resp.notes);
+    })
+    .catch(() => {});
   return false;
 });

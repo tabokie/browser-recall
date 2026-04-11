@@ -14,9 +14,7 @@
     "contextMenus",
     "alarms"
   ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
+  "host_permissions": ["<all_urls>"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
@@ -58,13 +56,13 @@
     "128": "icons/icon128.png"
   },
   "commands": {
+    "highlight-selection": {
+      "suggested_key": { "default": "Alt+H" },
+      "description": "Highlight selected text or add a page note"
+    },
     "capture-snapshot": {
       "suggested_key": { "default": "Alt+S" },
       "description": "Capture snapshot of current page"
-    },
-    "highlight-selection": {
-      "suggested_key": { "default": "Alt+H" },
-      "description": "Highlight selected text"
     },
     "like-page": {
       "suggested_key": { "default": "Alt+L" },
@@ -76,6 +74,6 @@
     }
   },
   "sandbox": {
-    "pages": ["smart-rule-sandbox.html"]
+    "pages": ["fn-rule-sandbox.html"]
   }
 }

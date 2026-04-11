@@ -17,7 +17,7 @@ import { generateSlugFromUrl } from '../extension/utils.js';
 // Helpers
 // ---------------------------------------------------------------------------
 function tick(ms = 0) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ---------------------------------------------------------------------------
@@ -40,14 +40,36 @@ const base = new Date(`${FILE1_DATE}T12:00:00Z`).getTime();
 
 // Checkpointed page entries — NO title in any entry (simulates revisit on a new day)
 const CHECKPOINT_ENTRIES = [
-  { url: CHECKPOINTED_URL, timestamp: base, action: 'visit_page', scrollDepth: 0, timeOnPage: 1078 },
-  { url: CHECKPOINTED_URL, timestamp: base + 60000, action: 'visit_page', timeOnPage: 287 },
+  {
+    url: CHECKPOINTED_URL,
+    timestamp: base,
+    action: 'visit_page',
+    scrollDepth: 0,
+    timeOnPage: 1078,
+  },
+  {
+    url: CHECKPOINTED_URL,
+    timestamp: base + 60000,
+    action: 'visit_page',
+    timeOnPage: 287,
+  },
 ];
 
 // Second page entries — NO title in any entry
 const SECOND_ENTRIES = [
-  { url: SECOND_URL, timestamp: base + 200000, action: 'visit_page', scrollDepth: 0, timeOnPage: 500 },
-  { url: SECOND_URL, timestamp: base + 260000, action: 'visit_page', timeOnPage: 100 },
+  {
+    url: SECOND_URL,
+    timestamp: base + 200000,
+    action: 'visit_page',
+    scrollDepth: 0,
+    timeOnPage: 500,
+  },
+  {
+    url: SECOND_URL,
+    timestamp: base + 260000,
+    action: 'visit_page',
+    timeOnPage: 100,
+  },
 ];
 
 // Normal entries with titles (filler)
@@ -61,7 +83,11 @@ for (let i = 0; i < 5; i++) {
   });
 }
 
-const ALL_ENTRIES = [...CHECKPOINT_ENTRIES, ...SECOND_ENTRIES, ...NORMAL_ENTRIES];
+const ALL_ENTRIES = [
+  ...CHECKPOINT_ENTRIES,
+  ...SECOND_ENTRIES,
+  ...NORMAL_ENTRIES,
+];
 
 const FILES_NEWEST_FIRST = [`${FILE1_DATE}.jsonl`];
 const FILE_MAP = {
@@ -111,39 +137,86 @@ function mockDirectoryHandle() {
 
 vi.mock('../extension/filesystem-storage.js', () => ({
   FileSystemStorage: class {
-    constructor() { this.directoryHandle = mockDirectoryHandle(); }
-    async getDirectoryInfo() { return { name: 'test-portal-data', hasPermission: true }; }
-    async verifyPermission() { return true; }
-    async loadDirectoryHandle() { return this.directoryHandle; }
-    async selectDirectory() { return { success: true, name: 'test' }; }
-    async loadAllContent() { return {}; }
-    async loadSettings() { return (await mockFsHandler.fn('loadSettings', {})).settings || {}; }
-    async listHistoryFiles() { return (await mockFsHandler.fn('listHistoryFiles', {})).files || []; }
-    async loadHistoryFiles(files) { return (await mockFsHandler.fn('loadHistoryBatch', { files })).entries || []; }
-    async loadListPins() { return (await mockFsHandler.fn('loadListPins', {})).pins || {}; }
-    async loadListPinsById(id) { return (await mockFsHandler.fn('loadListPinsById', { listId: id })).pins || []; }
-    async loadPermanentDeletes() { return (await mockFsHandler.fn('loadPermanentDeletes', {})).urls || []; }
-    async loadHighlights() { return []; }
-    async loadAllHighlights() { return {}; }
-    async loadPageBatch(slugs) { return (await mockFsHandler.fn('loadPageBatch', { slugs })).pages || {}; }
-    async listSnapshots() { return []; }
+    constructor() {
+      this.directoryHandle = mockDirectoryHandle();
+    }
+    async getDirectoryInfo() {
+      return { name: 'test-portal-data', hasPermission: true };
+    }
+    async verifyPermission() {
+      return true;
+    }
+    async loadDirectoryHandle() {
+      return this.directoryHandle;
+    }
+    async selectDirectory() {
+      return { success: true, name: 'test' };
+    }
+    async loadAllContent() {
+      return {};
+    }
+    async loadSettings() {
+      return (await mockFsHandler.fn('loadSettings', {})).settings || {};
+    }
+    async listHistoryFiles() {
+      return (await mockFsHandler.fn('listHistoryFiles', {})).files || [];
+    }
+    async loadHistoryFiles(files) {
+      return (
+        (await mockFsHandler.fn('loadHistoryBatch', { files })).entries || []
+      );
+    }
+    async loadListPins() {
+      return (await mockFsHandler.fn('loadListPins', {})).pins || {};
+    }
+    async loadListPinsById(id) {
+      return (
+        (await mockFsHandler.fn('loadListPinsById', { listId: id })).pins || []
+      );
+    }
+    async loadPermanentDeletes() {
+      return (await mockFsHandler.fn('loadPermanentDeletes', {})).urls || [];
+    }
+    async loadHighlights() {
+      return [];
+    }
+    async loadAllHighlights() {
+      return {};
+    }
+    async loadPageBatch(slugs) {
+      return (await mockFsHandler.fn('loadPageBatch', { slugs })).pages || {};
+    }
+    async listSnapshots() {
+      return [];
+    }
   },
 }));
 
 vi.mock('../extension/pkg/portal_extension.js', () => {
   class MockHistoryEntry {
-    constructor(url, title) { this.url = url; this.title = title; }
-    set id(v) { this._id = v; }
-    set timestamp(v) { this._timestamp = v; }
-    setIntent() {}
+    constructor(url, title) {
+      this.url = url;
+      this.title = title;
+    }
+    set id(v) {
+      this._id = v;
+    }
+    set timestamp(v) {
+      this._timestamp = v;
+    }
     setContent() {}
-    setAttention() {}
   }
 
   class MockSearchEngine {
-    constructor() { this._items = []; }
-    addEntry(item) { this._items.push(item); }
-    async search(query) { return []; }
+    constructor() {
+      this._items = [];
+    }
+    addEntry(item) {
+      this._items.push(item);
+    }
+    async search(query) {
+      return [];
+    }
   }
 
   return {
@@ -185,9 +258,17 @@ describe('History title enrichment', () => {
         }
         return result;
       }),
-      set: vi.fn(async (obj) => { Object.assign(dataRef(), obj); }),
-      remove: vi.fn(async (keys) => { const d = dataRef(); for (const k of keys) delete d[k]; }),
-      clear: vi.fn(async () => { const d = dataRef(); for (const k of Object.keys(d)) delete d[k]; }),
+      set: vi.fn(async (obj) => {
+        Object.assign(dataRef(), obj);
+      }),
+      remove: vi.fn(async (keys) => {
+        const d = dataRef();
+        for (const k of keys) delete d[k];
+      }),
+      clear: vi.fn(async () => {
+        const d = dataRef();
+        for (const k of Object.keys(d)) delete d[k];
+      }),
     };
   }
 
@@ -224,9 +305,12 @@ describe('History title enrichment', () => {
 
       case 'readCacheable':
         switch (msg.key) {
-          case 'manifest:settings': return { success: true, value: TEST_SETTINGS };
-          case 'manifest:name-to-id': return { success: true, value: { timestamp: 0, paths: {} } };
-          case 'manifest:orphaned': return { success: true, value: { timestamp: 0, entries: [] } };
+          case 'manifest:settings':
+            return { success: true, value: TEST_SETTINGS };
+          case 'manifest:name-to-id':
+            return { success: true, value: { timestamp: 0, paths: {} } };
+          case 'manifest:orphaned':
+            return { success: true, value: { timestamp: 0, entries: [] } };
           default: {
             if (msg.key.startsWith('page:')) {
               const slug = msg.key.slice('page:'.length);
@@ -298,7 +382,7 @@ describe('History title enrichment', () => {
   // ---------------------------------------------------------------------------
   function findRowTitle(url) {
     const rows = [...document.querySelectorAll('.result-item')];
-    const row = rows.find(el => {
+    const row = rows.find((el) => {
       const resultRow = el.querySelector('.result-row');
       return resultRow && resultRow.dataset.url === url;
     });
@@ -321,7 +405,9 @@ describe('History title enrichment', () => {
     await importDone;
     await tick(200);
 
-    expect(document.getElementById('mainTitle').textContent.trim()).toBe('Explore');
+    expect(document.getElementById('mainTitle').textContent.trim()).toBe(
+      'Explore',
+    );
 
     const title = findRowTitle(CHECKPOINTED_URL);
     expect(title).toBe(CHECKPOINTED_TITLE);

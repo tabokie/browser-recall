@@ -25,9 +25,15 @@ function mockElement(tag, opts = {}) {
       if (!el._listeners[evt]) el._listeners[evt] = [];
       el._listeners[evt].push(fn);
     },
-    getBoundingClientRect() { return { top: el._top }; },
-    querySelector() { return null; },
-    querySelectorAll() { return []; },
+    getBoundingClientRect() {
+      return { top: el._top };
+    },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    },
   };
   return el;
 }
@@ -40,17 +46,26 @@ function mockElement(tag, opts = {}) {
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-const src = readFileSync(resolve(__dirname, '../extension/virtual-scroller.js'), 'utf-8');
+const src = readFileSync(
+  resolve(__dirname, '../extension/virtual-scroller.js'),
+  'utf-8',
+);
 const classMatch = src.match(/^export class VirtualScroller \{[\s\S]*?^}/m);
-if (!classMatch) throw new Error('Could not extract VirtualScroller class from virtual-scroller.js');
+if (!classMatch)
+  throw new Error(
+    'Could not extract VirtualScroller class from virtual-scroller.js',
+  );
 
 // Strip 'export' and wrap in a function so `requestAnimationFrame` and `getComputedStyle` are available
 const classSource = classMatch[0].replace(/^export /, '');
 const VirtualScroller = new Function(
   'requestAnimationFrame',
   'getComputedStyle',
-  `${classSource}\nreturn VirtualScroller;`
-)(fn => fn(), () => ({ paddingBottom: '0px' })); // execute rAF callbacks synchronously; stub getComputedStyle
+  `${classSource}\nreturn VirtualScroller;`,
+)(
+  (fn) => fn(),
+  () => ({ paddingBottom: '0px' }),
+); // execute rAF callbacks synchronously; stub getComputedStyle
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -95,7 +110,7 @@ describe('VirtualScroller', () => {
       // First, populate with real data
       vs.setData(
         [{ url: 'https://a.com' }, { url: 'https://b.com' }],
-        (item) => `<div>${item.url}</div>`
+        (item) => `<div>${item.url}</div>`,
       );
       expect(containerEl.innerHTML).toContain('https://a.com');
 
@@ -118,8 +133,15 @@ describe('VirtualScroller', () => {
   describe('expanded detail survives scroll', () => {
     it('scroll-triggered re-render does not destroy expanded detail in rendered range', () => {
       // 100 items, rowHeight=48, viewport=600 → ~13 visible + 20 buffer each side
-      const items = Array.from({ length: 100 }, (_, i) => ({ id: i, url: `https://example.com/${i}` }));
-      vs.setData(items, (item) => `<div class="result-item"><div class="result-row" data-url="${item.url}">${item.id}</div><div class="result-detail"></div></div>`);
+      const items = Array.from({ length: 100 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
+      vs.setData(
+        items,
+        (item) =>
+          `<div class="result-item"><div class="result-row" data-url="${item.url}">${item.id}</div><div class="result-detail"></div></div>`,
+      );
 
       const rangeAfterInit = { ...vs.renderedRange };
 
@@ -139,7 +161,10 @@ describe('VirtualScroller', () => {
     });
 
     it('re-render is allowed once expanded item scrolls out of new range', () => {
-      const items = Array.from({ length: 200 }, (_, i) => ({ id: i, url: `https://example.com/${i}` }));
+      const items = Array.from({ length: 200 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
       vs.setData(items, (item) => `<div>${item.id}</div>`);
 
       // Expand item 5
@@ -162,7 +187,10 @@ describe('VirtualScroller', () => {
   describe('bottom padding', () => {
     it('no extra padding when all items are rendered (end === data.length)', () => {
       // 10 items all fit in viewport+buffer → end = data.length
-      const items = Array.from({ length: 10 }, (_, i) => ({ id: i, url: `https://example.com/${i}` }));
+      const items = Array.from({ length: 10 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
       vs.setData(items, (item) => `<div>${item.id}</div>`);
 
       expect(vs.renderedRange.end).toBe(10);
@@ -171,7 +199,10 @@ describe('VirtualScroller', () => {
     });
 
     it('onExpandToggle on last item does not shrink padding', () => {
-      const items = Array.from({ length: 10 }, (_, i) => ({ id: i, url: `https://example.com/${i}` }));
+      const items = Array.from({ length: 10 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
       vs.setData(items, (item) => `<div>${item.id}</div>`);
 
       const paddingBefore = containerEl.style.paddingBottom;
@@ -182,12 +213,16 @@ describe('VirtualScroller', () => {
       vs.onExpandToggle();
 
       // Padding should not decrease
-      expect(parseInt(containerEl.style.paddingBottom))
-        .toBeGreaterThanOrEqual(parseInt(paddingBefore));
+      expect(parseInt(containerEl.style.paddingBottom)).toBeGreaterThanOrEqual(
+        parseInt(paddingBefore),
+      );
     });
 
     it('onExpandToggle restores padding after collapse', () => {
-      const items = Array.from({ length: 10 }, (_, i) => ({ id: i, url: `https://example.com/${i}` }));
+      const items = Array.from({ length: 10 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
       vs.setData(items, (item) => `<div>${item.id}</div>`);
 
       const paddingBefore = containerEl.style.paddingBottom;

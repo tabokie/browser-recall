@@ -12,9 +12,14 @@ function isTransient(status) {
 
 export function parseRepoUrl(url) {
   let parsed;
-  try { parsed = new URL(url); } catch { throw new Error(`Invalid repo URL: ${url}`); }
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid repo URL: ${url}`);
+  }
   const parts = parsed.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
-  if (parts.length < 2) throw new Error(`Invalid repo URL (need owner/repo): ${url}`);
+  if (parts.length < 2)
+    throw new Error(`Invalid repo URL (need owner/repo): ${url}`);
   const repo = parts[1].replace(/\.git$/, '');
   return { owner: parts[0], repo };
 }
@@ -45,8 +50,8 @@ export class GitHubTransport {
     const opts = {
       method,
       headers: {
-        'Authorization': `token ${this.token}`,
-        'Accept': 'application/vnd.github+json',
+        Authorization: `token ${this.token}`,
+        Accept: 'application/vnd.github+json',
       },
     };
     if (body !== undefined) {
@@ -58,11 +63,15 @@ export class GitHubTransport {
       try {
         const resp = await fetch(url, opts);
         if (resp.ok) return resp.status === 204 ? null : resp.json();
-        if (resp.status === 403 && resp.headers.get('X-RateLimit-Remaining') === '0') {
+        if (
+          resp.status === 403 &&
+          resp.headers.get('X-RateLimit-Remaining') === '0'
+        ) {
           const resetHeader = resp.headers.get('X-RateLimit-Reset');
           const resetEpoch = resetHeader ? parseInt(resetHeader, 10) : null;
           const err = new Error(`GitHub API rate limit exceeded (403)`);
-          err.rateLimitReset = (resetEpoch && !isNaN(resetEpoch)) ? resetEpoch : null;
+          err.rateLimitReset =
+            resetEpoch && !isNaN(resetEpoch) ? resetEpoch : null;
           throw err;
         }
         const text = await resp.text().catch(() => '');
@@ -72,11 +81,15 @@ export class GitHubTransport {
       } catch (e) {
         lastError = e;
         // Don't retry non-transient GitHub API errors
-        if (e.message.startsWith('GitHub API error') && !e.message.includes(' 5')) throw e;
+        if (
+          e.message.startsWith('GitHub API error') &&
+          !e.message.includes(' 5')
+        )
+          throw e;
         if (e.message.includes('rate limit')) throw e;
       }
       if (attempt < MAX_RETRIES) {
-        await new Promise(r => setTimeout(r, RETRY_BASE_MS * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, RETRY_BASE_MS * (attempt + 1)));
       }
     }
     throw lastError;
@@ -89,20 +102,26 @@ export class GitHubTransport {
   // List all branches. Returns [{ name, sha }].
   async listBranches() {
     const data = await this._request('GET', `${this._repoPath}/branches`);
-    return data.map(b => ({ name: b.name, sha: b.commit.sha }));
+    return data.map((b) => ({ name: b.name, sha: b.commit.sha }));
   }
 
   // Get recursive tree for a commit/tree SHA. Returns [{ path, sha }] (blobs only).
   async getTree(sha) {
-    const data = await this._request('GET', `${this._repoPath}/git/trees/${sha}?recursive=1`);
+    const data = await this._request(
+      'GET',
+      `${this._repoPath}/git/trees/${sha}?recursive=1`,
+    );
     return data.tree
-      .filter(entry => entry.type === 'blob')
-      .map(entry => ({ path: entry.path, sha: entry.sha }));
+      .filter((entry) => entry.type === 'blob')
+      .map((entry) => ({ path: entry.path, sha: entry.sha }));
   }
 
   // Get blob content (base64-decoded to string).
   async getBlob(sha) {
-    const data = await this._request('GET', `${this._repoPath}/git/blobs/${sha}`);
+    const data = await this._request(
+      'GET',
+      `${this._repoPath}/git/blobs/${sha}`,
+    );
     return base64ToUtf8(data.content);
   }
 
@@ -170,18 +189,26 @@ export class GitHubTransport {
 
     // 3. Create orphan commit (no parents)
     const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    const commit = await this._request('POST', `${this._repoPath}/git/commits`, {
-      message: `sync ${branch} at ${ts} (${files.length} files)`,
-      tree: tree.sha,
-      parents: [],
-    });
+    const commit = await this._request(
+      'POST',
+      `${this._repoPath}/git/commits`,
+      {
+        message: `sync ${branch} at ${ts} (${files.length} files)`,
+        tree: tree.sha,
+        parents: [],
+      },
+    );
 
     // 4. Update branch ref (force). If branch doesn't exist, create it.
     try {
-      await this._request('PATCH', `${this._repoPath}/git/refs/heads/${branch}`, {
-        sha: commit.sha,
-        force: true,
-      });
+      await this._request(
+        'PATCH',
+        `${this._repoPath}/git/refs/heads/${branch}`,
+        {
+          sha: commit.sha,
+          force: true,
+        },
+      );
     } catch (e) {
       if (e.message.includes('422')) {
         await this.createBranch(branch, commit.sha);

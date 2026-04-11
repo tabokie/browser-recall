@@ -10,22 +10,30 @@ export function captureSavePage(tabId) {
     logDebug('[savepage] injecting scripts into tab', tabId);
 
     // Inject content-frame.js into all frames, then content.js into main frame
-    chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      files: ['savepage/content-frame.js']
-    }).then(() => {
-      logDebug('[savepage] content-frame.js injected, now injecting content.js');
-      return chrome.scripting.executeScript({
-        target: { tabId },
-        files: ['savepage/content.js']
+    chrome.scripting
+      .executeScript({
+        target: { tabId, allFrames: true },
+        files: ['savepage/content-frame.js'],
+      })
+      .then(() => {
+        logDebug(
+          '[savepage] content-frame.js injected, now injecting content.js',
+        );
+        return chrome.scripting.executeScript({
+          target: { tabId },
+          files: ['savepage/content.js'],
+        });
+      })
+      .then(() => {
+        logDebug(
+          '[savepage] content.js injected, waiting for scriptLoaded message',
+        );
+      })
+      .catch((err) => {
+        logDebug('[savepage] injection error:', err.message);
+        savepageResolvers.delete(tabId);
+        reject(err);
       });
-    }).then(() => {
-      logDebug('[savepage] content.js injected, waiting for scriptLoaded message');
-    }).catch(err => {
-      logDebug('[savepage] injection error:', err.message);
-      savepageResolvers.delete(tabId);
-      reject(err);
-    });
 
     // Timeout after 60s
     setTimeout(() => {
@@ -37,24 +45,39 @@ export function captureSavePage(tabId) {
   });
 }
 
-async function loadSavepageResource(tabId, index, location, referrer, referrerPolicy) {
+async function loadSavepageResource(
+  tabId,
+  index,
+  location,
+  referrer,
+  referrerPolicy,
+) {
   // Skip video URLs before fetching (SPWE treats loadFailure as "skip resource")
   if (/\.(mp4|webm|ogg|mov|avi|m4v)(\?|#|$)/i.test(location)) {
     const s = await chrome.storage.session.get('manifest:settings');
     if (s['manifest:settings']?.captureSnapshotVideo !== true) {
-      chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'blocked*' });
+      chrome.tabs.sendMessage(tabId, {
+        type: 'loadFailure',
+        index,
+        reason: 'blocked*',
+      });
       return;
     }
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => { controller.abort(); }, 10 * 1000); // maxResourceTime
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 10 * 1000); // maxResourceTime
 
   try {
     const response = await fetch(location, {
-      method: 'GET', mode: 'cors', cache: 'no-cache',
-      referrer: referrer, referrerPolicy: referrerPolicy,
-      signal: controller.signal
+      method: 'GET',
+      mode: 'cors',
+      cache: 'no-cache',
+      referrer: referrer,
+      referrerPolicy: referrerPolicy,
+      signal: controller.signal,
     });
     clearTimeout(timeout);
 
@@ -62,8 +85,13 @@ async function loadSavepageResource(tabId, index, location, referrer, referrerPo
       const contentType = response.headers.get('Content-Type') || '';
       const contentLength = +(response.headers.get('Content-Length') || 0);
 
-      if (contentLength > 50 * 1024 * 1024) { // maxResourceSize
-        chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'maxsize*' });
+      if (contentLength > 50 * 1024 * 1024) {
+        // maxResourceSize
+        chrome.tabs.sendMessage(tabId, {
+          type: 'loadFailure',
+          index,
+          reason: 'maxsize*',
+        });
         return;
       }
 
@@ -72,11 +100,21 @@ async function loadSavepageResource(tabId, index, location, referrer, referrerPo
       const charsetMatch = contentType.match(/;charset=([^;]+)/i);
       const charset = charsetMatch ? charsetMatch[1].toLowerCase() : '';
 
-      if (mimetype !== 'text/css' && mimetype !== 'image/vnd.microsoft.icon' &&
-          !mimetype.startsWith('image/') && !mimetype.startsWith('audio/') && !mimetype.startsWith('video/') &&
-          !mimetype.startsWith('font/') && !mimetype.startsWith('application/font') &&
-          mimetype !== 'application/octet-stream') {
-        chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'blocked*' });
+      if (
+        mimetype !== 'text/css' &&
+        mimetype !== 'image/vnd.microsoft.icon' &&
+        !mimetype.startsWith('image/') &&
+        !mimetype.startsWith('audio/') &&
+        !mimetype.startsWith('video/') &&
+        !mimetype.startsWith('font/') &&
+        !mimetype.startsWith('application/font') &&
+        mimetype !== 'application/octet-stream'
+      ) {
+        chrome.tabs.sendMessage(tabId, {
+          type: 'loadFailure',
+          index,
+          reason: 'blocked*',
+        });
         return;
       }
 
@@ -84,7 +122,11 @@ async function loadSavepageResource(tabId, index, location, referrer, referrerPo
       if (mimetype.startsWith('video/')) {
         const s = await chrome.storage.session.get('manifest:settings');
         if (s['manifest:settings']?.captureSnapshotVideo !== true) {
-          chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'blocked*' });
+          chrome.tabs.sendMessage(tabId, {
+            type: 'loadFailure',
+            index,
+            reason: 'blocked*',
+          });
           return;
         }
       }
@@ -92,18 +134,38 @@ async function loadSavepageResource(tabId, index, location, referrer, referrerPo
       const buffer = await response.arrayBuffer();
       const byteArray = new Uint8Array(buffer);
       let binaryString = '';
-      for (let i = 0; i < byteArray.byteLength; i++) binaryString += String.fromCharCode(byteArray[i]);
+      for (let i = 0; i < byteArray.byteLength; i++)
+        binaryString += String.fromCharCode(byteArray[i]);
 
-      chrome.tabs.sendMessage(tabId, { type: 'loadSuccess', index, reason: '*', content: binaryString, mimetype, charset });
+      chrome.tabs.sendMessage(tabId, {
+        type: 'loadSuccess',
+        index,
+        reason: '*',
+        content: binaryString,
+        mimetype,
+        charset,
+      });
     } else {
-      chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'load:' + response.status + '*' });
+      chrome.tabs.sendMessage(tabId, {
+        type: 'loadFailure',
+        index,
+        reason: 'load:' + response.status + '*',
+      });
     }
   } catch (e) {
     clearTimeout(timeout);
     if (e.name === 'AbortError') {
-      chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'maxtime*' });
+      chrome.tabs.sendMessage(tabId, {
+        type: 'loadFailure',
+        index,
+        reason: 'maxtime*',
+      });
     } else {
-      chrome.tabs.sendMessage(tabId, { type: 'loadFailure', index, reason: 'fetcherr*' });
+      chrome.tabs.sendMessage(tabId, {
+        type: 'loadFailure',
+        index,
+        reason: 'fetcherr*',
+      });
     }
   }
 }
@@ -129,13 +191,15 @@ export function initSavepageBridge() {
             externalsave: false,
             swapdevices: false,
             multiplesaves: false,
-            csprestriction: false
+            csprestriction: false,
           });
         }
         break;
 
       case 'setDelay':
-        setTimeout(() => { sendResponse({}); }, message.milliseconds);
+        setTimeout(() => {
+          sendResponse({});
+        }, message.milliseconds);
         return true; // async response
 
       case 'requestFrames':
@@ -151,14 +215,20 @@ export function initSavepageBridge() {
             key: message.key,
             url: message.url,
             html: message.html,
-            fonts: message.fonts
+            fonts: message.fonts,
           });
         }
         break;
 
       case 'loadResource':
         if (tabId != null) {
-          loadSavepageResource(tabId, message.index, message.location, message.referrer, message.referrerPolicy);
+          loadSavepageResource(
+            tabId,
+            message.index,
+            message.location,
+            message.referrer,
+            message.referrerPolicy,
+          );
         }
         break;
 
@@ -166,7 +236,12 @@ export function initSavepageBridge() {
         break;
 
       case 'savepageDone': {
-        logDebug('[savepage] savepageDone from tab', tabId, 'html length:', message.html?.length);
+        logDebug(
+          '[savepage] savepageDone from tab',
+          tabId,
+          'html length:',
+          message.html?.length,
+        );
         const resolver = savepageResolvers.get(tabId);
         if (resolver) {
           savepageResolvers.delete(tabId);
@@ -182,7 +257,9 @@ export function initSavepageBridge() {
         const resolver = savepageResolvers.get(tabId);
         if (resolver) {
           savepageResolvers.delete(tabId);
-          resolver.reject(new Error('Save Page WE exited without producing HTML'));
+          resolver.reject(
+            new Error('Save Page WE exited without producing HTML'),
+          );
         }
         break;
       }

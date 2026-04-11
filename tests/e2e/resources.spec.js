@@ -1,5 +1,10 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, openHelperPage, openOptionsPage, getSlugForUrl } from './helpers.js';
+import {
+  resetAndSeed,
+  openHelperPage,
+  openOptionsPage,
+  getSlugForUrl,
+} from './helpers.js';
 
 // ─── CDP Helpers ──────────────────────────────────────────────────────
 
@@ -28,7 +33,7 @@ async function getJSHeapUsedSize(page) {
   const cdp = await page.context().newCDPSession(page);
   try {
     const { metrics } = await cdp.send('Performance.getMetrics');
-    const heap = metrics.find(m => m.name === 'JSHeapUsedSize');
+    const heap = metrics.find((m) => m.name === 'JSHeapUsedSize');
     return heap?.value || 0;
   } finally {
     await cdp.detach();
@@ -38,8 +43,12 @@ async function getJSHeapUsedSize(page) {
 // ─── Tests ────────────────────────────────────────────────────────────
 
 test.describe('Resource monitoring', () => {
-
-  test('content script does not pollute DOM on regular pages', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('content script does not pollute DOM on regular pages', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     const now = Date.now();
     localServer.addPage('/clean', {
       title: 'Clean Page',
@@ -59,7 +68,7 @@ test.describe('Resource monitoring', () => {
     // No extension-injected visible elements in the page
     const injectedElements = await page.evaluate(() => {
       const markers = document.querySelectorAll(
-        'mark.portal-highlight, [id*="portal"], [data-savepage-fontface]'
+        'mark.portal-highlight, [id*="portal"], [data-savepage-fontface]',
       );
       return markers.length;
     });
@@ -74,7 +83,12 @@ test.describe('Resource monitoring', () => {
     await page.close();
   });
 
-  test('highlights panel cleans up document listeners on close', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('highlights panel cleans up document listeners on close', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     const now = Date.now();
     const url = 'http://127.0.0.1/highlight-test';
     const slug = getSlugForUrl(url);
@@ -89,14 +103,27 @@ test.describe('Resource monitoring', () => {
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
-      { path: `pages/${slug}.json`, data: {
-        slug, url: localServer.url('/highlight-test'), title: 'Highlight Test',
-        timestamp: now, parentIds: [], childIds: [`note:${noteSlug}`],
-      }},
-      { path: `data/notes/${noteSlug}.json`, data: {
-        slug: noteSlug, excerpt: 'Some text', note: '', createdAt: now,
-        url: localServer.url('/highlight-test'),
-      }},
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url: localServer.url('/highlight-test'),
+          title: 'Highlight Test',
+          timestamp: now,
+          parentIds: [],
+          childIds: [`note:${noteSlug}`],
+        },
+      },
+      {
+        path: `data/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: 'Some text',
+          note: '',
+          createdAt: now,
+          url: localServer.url('/highlight-test'),
+        },
+      },
     ]);
 
     const page = await extContext.newPage();
@@ -108,19 +135,21 @@ test.describe('Resource monitoring', () => {
 
     // Open highlights panel via message
     const helper = await openHelperPage(extContext, extensionId);
-    await helper.evaluate(({ url, slug }) =>
-      chrome.runtime.sendMessage({
-        action: 'showHighlightsPanel',
-        tabUrl: url,
-        pageSlug: slug,
-      })
-    , { url: localServer.url('/highlight-test'), slug });
+    await helper.evaluate(
+      ({ url, slug }) =>
+        chrome.runtime.sendMessage({
+          action: 'showHighlightsPanel',
+          tabUrl: url,
+          pageSlug: slug,
+        }),
+      { url: localServer.url('/highlight-test'), slug },
+    );
     // Wait a bit for panel to render
     await page.waitForTimeout(500);
 
     // Panel should be present
-    const panelExists = await page.evaluate(() =>
-      !!document.getElementById('portal-highlights-panel')
+    const panelExists = await page.evaluate(
+      () => !!document.getElementById('portal-highlights-panel'),
     );
     // Panel may or may not appear depending on how showHighlightsPanel routes —
     // some flows send the message to the content script of the target tab.
@@ -148,17 +177,34 @@ test.describe('Resource monitoring', () => {
     await page.close();
   });
 
-  test('options page allEntries does not grow unboundedly on repeated mutations', async ({ extContext, extensionId, setupDir }) => {
+  test('options page allEntries does not grow unboundedly on repeated mutations', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const DAY = 86400000;
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
-      { path: `data/logs/test-device/${new Date(now).toISOString().slice(0, 10)}.jsonl`, lines: [
-        { timestamp: now - 1000, action: 'visit_page', url: 'https://example.com/', title: 'Example' },
-        { timestamp: now - 500, action: 'visit_page', url: 'https://test.com/', title: 'Test' },
-      ]},
+      {
+        path: `data/logs/test-device/${new Date(now).toISOString().slice(0, 10)}.jsonl`,
+        lines: [
+          {
+            timestamp: now - 1000,
+            action: 'visit_page',
+            url: 'https://example.com/',
+            title: 'Example',
+          },
+          {
+            timestamp: now - 500,
+            action: 'visit_page',
+            url: 'https://test.com/',
+            title: 'Test',
+          },
+        ],
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -175,7 +221,10 @@ test.describe('Resource monitoring', () => {
     const helper = await openHelperPage(extContext, extensionId);
     for (let i = 0; i < 5; i++) {
       await helper.evaluate(() =>
-        chrome.runtime.sendMessage({ action: 'notifyMutation', type: 'history' })
+        chrome.runtime.sendMessage({
+          action: 'notifyMutation',
+          type: 'history',
+        }),
       );
       await options.waitForTimeout(700);
     }
@@ -193,7 +242,11 @@ test.describe('Resource monitoring', () => {
     await options.close();
   });
 
-  test('options page heap does not grow excessively across search cycles', async ({ extContext, extensionId, setupDir }) => {
+  test('options page heap does not grow excessively across search cycles', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const entries = [];
     for (let i = 0; i < 50; i++) {
@@ -208,7 +261,10 @@ test.describe('Resource monitoring', () => {
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
-      { path: `data/logs/test-device/${new Date(now).toISOString().slice(0, 10)}.jsonl`, lines: entries },
+      {
+        path: `data/logs/test-device/${new Date(now).toISOString().slice(0, 10)}.jsonl`,
+        lines: entries,
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -219,7 +275,9 @@ test.describe('Resource monitoring', () => {
     await cdp.send('Performance.enable');
     await cdp.send('HeapProfiler.collectGarbage');
     await options.waitForTimeout(500);
-    const baseline = (await cdp.send('Performance.getMetrics')).metrics.find(m => m.name === 'JSHeapUsedSize').value;
+    const baseline = (await cdp.send('Performance.getMetrics')).metrics.find(
+      (m) => m.name === 'JSHeapUsedSize',
+    ).value;
 
     // Run 10 search/clear cycles
     for (let i = 0; i < 10; i++) {
@@ -232,7 +290,9 @@ test.describe('Resource monitoring', () => {
     // Force GC and measure final heap
     await cdp.send('HeapProfiler.collectGarbage');
     await options.waitForTimeout(500);
-    const final = (await cdp.send('Performance.getMetrics')).metrics.find(m => m.name === 'JSHeapUsedSize').value;
+    const final = (await cdp.send('Performance.getMetrics')).metrics.find(
+      (m) => m.name === 'JSHeapUsedSize',
+    ).value;
     await cdp.detach();
 
     // Heap should not grow more than 5MB across 10 search cycles
@@ -243,7 +303,11 @@ test.describe('Resource monitoring', () => {
     await options.close();
   });
 
-  test('cardDataByUrl is cleared between search pipeline runs', async ({ extContext, extensionId, setupDir }) => {
+  test('cardDataByUrl is cleared between search pipeline runs', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const entries = [];
     for (let i = 0; i < 20; i++) {
@@ -258,7 +322,10 @@ test.describe('Resource monitoring', () => {
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       { path: 'manifest/list-order.json', data: { timestamp: now, tree: [] } },
-      { path: `data/logs/test-device/${new Date(now).toISOString().slice(0, 10)}.jsonl`, lines: entries },
+      {
+        path: `data/logs/test-device/${new Date(now).toISOString().slice(0, 10)}.jsonl`,
+        lines: entries,
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -266,7 +333,7 @@ test.describe('Resource monitoring', () => {
     // Wait for explore view to populate with results
     await options.waitForFunction(
       () => document.querySelectorAll('#relatedResults .result-row').length > 0,
-      { timeout: 10000 }
+      { timeout: 10000 },
     );
 
     // Type a search query — this triggers runSearchFilterPipeline which clears cardDataByUrl
@@ -280,7 +347,7 @@ test.describe('Resource monitoring', () => {
     // Results should still render properly (no stale data)
     await options.waitForFunction(
       () => document.querySelectorAll('#relatedResults .result-row').length > 0,
-      { timeout: 10000 }
+      { timeout: 10000 },
     );
 
     await options.close();

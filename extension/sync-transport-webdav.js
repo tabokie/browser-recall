@@ -22,7 +22,7 @@ export class WebDAVTransport {
     const url = new URL(path, this._url).href;
     const opts = {
       method,
-      headers: { 'Authorization': this._auth, ...headers },
+      headers: { Authorization: this._auth, ...headers },
     };
     if (depth !== undefined) opts.headers['Depth'] = String(depth);
     if (body !== undefined) {
@@ -41,10 +41,11 @@ export class WebDAVTransport {
         if (resp.status < 500) throw lastError;
       } catch (e) {
         lastError = e;
-        if (e.message.startsWith('WebDAV ') && !e.message.includes(' 5')) throw e;
+        if (e.message.startsWith('WebDAV ') && !e.message.includes(' 5'))
+          throw e;
       }
       if (attempt < MAX_RETRIES) {
-        await new Promise(r => setTimeout(r, RETRY_BASE_MS * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, RETRY_BASE_MS * (attempt + 1)));
       }
     }
     throw lastError;
@@ -88,7 +89,7 @@ export class WebDAVTransport {
     this._treeCache.clear();
     this._etagToPath.clear();
     const entries = await this._propfind('', 1);
-    const dirs = entries.filter(e => e.isCollection && e.href);
+    const dirs = entries.filter((e) => e.isCollection && e.href);
     const branches = [];
     for (const dir of dirs) {
       const deviceName = dir.href;
@@ -100,8 +101,11 @@ export class WebDAVTransport {
         if (e.message.includes('403') || e.message.includes('501')) continue;
         throw e;
       }
-      const blobs = files.filter(f => !f.isCollection && f.href);
-      const meta = blobs.map(f => `${f.href}:${f.etag}`).sort().join('\n');
+      const blobs = files.filter((f) => !f.isCollection && f.href);
+      const meta = blobs
+        .map((f) => `${f.href}:${f.etag}`)
+        .sort()
+        .join('\n');
       const sha = hashContent(meta);
       this._shaToDevice.set(sha, { name: deviceName, files: blobs });
       branches.push({ name: deviceName, sha });
@@ -113,7 +117,7 @@ export class WebDAVTransport {
     if (this._treeCache.has(sha)) return this._treeCache.get(sha);
     const entry = this._shaToDevice.get(sha);
     if (!entry) throw new Error(`Unknown tree sha: ${sha}`);
-    const tree = entry.files.map(f => {
+    const tree = entry.files.map((f) => {
       // Use etag as per-file sha (changes when content changes).
       this._etagToPath.set(f.etag, `${entry.name}/${f.href}`);
       return { path: f.href, sha: f.etag };
@@ -159,7 +163,10 @@ export class WebDAVTransport {
         headers: { 'Content-Type': 'application/octet-stream' },
       });
     }
-    const combined = files.map(f => `${f.path}:${f.content.length}`).sort().join('\n');
+    const combined = files
+      .map((f) => `${f.path}:${f.content.length}`)
+      .sort()
+      .join('\n');
     return { sha: hashContent(combined) };
   }
 

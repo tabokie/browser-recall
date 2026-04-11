@@ -7,13 +7,22 @@ describe('FileSystemSyncStorage', () => {
 
   beforeEach(() => {
     mainStorage = {
-      collectSyncFiles: vi.fn().mockResolvedValue([{ path: 'data/logs/dev/2026-01-01.jsonl', content: '{}' }]),
+      collectSyncFiles: vi
+        .fn()
+        .mockResolvedValue([
+          { path: 'data/logs/dev/2026-01-01.jsonl', content: '{}' },
+        ]),
       writeSyncFiles: vi.fn().mockResolvedValue(undefined),
-      loadRemoteLogEntries: vi.fn().mockResolvedValue([{ deviceId: 'remote', entries: [] }]),
+      loadRemoteLogEntries: vi
+        .fn()
+        .mockResolvedValue([{ deviceId: 'remote', entries: [] }]),
       initDB: vi.fn().mockResolvedValue({
         transaction: vi.fn().mockReturnValue({
           objectStore: vi.fn().mockReturnValue({
-            put: (() => { const r = { onsuccess: null, onerror: null }; return r; })(),
+            put: (() => {
+              const r = { onsuccess: null, onerror: null };
+              return r;
+            })(),
           }),
         }),
       }),
@@ -37,7 +46,9 @@ describe('FileSystemSyncStorage', () => {
     it('delegates to mainStorage', async () => {
       const result = await syncStorage.collectSyncFiles('dev1', 7);
       expect(mainStorage.collectSyncFiles).toHaveBeenCalledWith('dev1', 7);
-      expect(result).toEqual([{ path: 'data/logs/dev/2026-01-01.jsonl', content: '{}' }]);
+      expect(result).toEqual([
+        { path: 'data/logs/dev/2026-01-01.jsonl', content: '{}' },
+      ]);
     });
   });
 
@@ -52,7 +63,9 @@ describe('FileSystemSyncStorage', () => {
   describe('loadRemoteLogEntries', () => {
     it('delegates to mainStorage', async () => {
       const result = await syncStorage.loadRemoteLogEntries('local-dev');
-      expect(mainStorage.loadRemoteLogEntries).toHaveBeenCalledWith('local-dev');
+      expect(mainStorage.loadRemoteLogEntries).toHaveBeenCalledWith(
+        'local-dev',
+      );
       expect(result).toEqual([{ deviceId: 'remote', entries: [] }]);
     });
   });
@@ -75,7 +88,9 @@ describe('FileSystemSyncStorage', () => {
           }),
         }),
       });
-      await expect(syncStorage._getSyncDir()).rejects.toThrow('No sync directory configured');
+      await expect(syncStorage._getSyncDir()).rejects.toThrow(
+        'No sync directory configured',
+      );
     });
 
     it('returns cached handle on second call', async () => {
@@ -106,7 +121,9 @@ describe('FileSystemSyncStorage', () => {
         requestPermission: vi.fn().mockResolvedValue('denied'),
       };
       syncStorage.syncDirectoryHandle = mockHandle;
-      await expect(syncStorage._getSyncDir()).rejects.toThrow('Sync directory permission denied');
+      await expect(syncStorage._getSyncDir()).rejects.toThrow(
+        'Sync directory permission denied',
+      );
     });
   });
 
@@ -114,11 +131,13 @@ describe('FileSystemSyncStorage', () => {
     it('lists directory entries from sync root', async () => {
       const mockHandle = {
         queryPermission: vi.fn().mockResolvedValue('granted'),
-        values: vi.fn().mockReturnValue([
-          { kind: 'directory', name: 'deviceA' },
-          { kind: 'directory', name: 'deviceB' },
-          { kind: 'file', name: 'readme.txt' },
-        ][Symbol.iterator]()),
+        values: vi.fn().mockReturnValue(
+          [
+            { kind: 'directory', name: 'deviceA' },
+            { kind: 'directory', name: 'deviceB' },
+            { kind: 'file', name: 'readme.txt' },
+          ][Symbol.iterator](),
+        ),
       };
       syncStorage.syncDirectoryHandle = mockHandle;
       const dirs = await syncStorage.syncFsListDeviceDirs();
@@ -130,7 +149,9 @@ describe('FileSystemSyncStorage', () => {
     it('returns empty array when device dir not found', async () => {
       const mockHandle = {
         queryPermission: vi.fn().mockResolvedValue('granted'),
-        getDirectoryHandle: vi.fn().mockRejectedValue(new DOMException('Not found', 'NotFoundError')),
+        getDirectoryHandle: vi
+          .fn()
+          .mockRejectedValue(new DOMException('Not found', 'NotFoundError')),
       };
       syncStorage.syncDirectoryHandle = mockHandle;
       const files = await syncStorage.syncFsListFiles('nonexistent');
@@ -138,7 +159,11 @@ describe('FileSystemSyncStorage', () => {
     });
 
     it('walks directory tree recursively', async () => {
-      const innerFile = { kind: 'file', name: 'log.jsonl', getFile: () => ({ text: () => 'content', size: 7 }) };
+      const innerFile = {
+        kind: 'file',
+        name: 'log.jsonl',
+        getFile: () => ({ text: () => 'content', size: 7 }),
+      };
       const subDir = {
         kind: 'directory',
         name: 'data',
@@ -153,14 +178,20 @@ describe('FileSystemSyncStorage', () => {
       };
       syncStorage.syncDirectoryHandle = mockHandle;
       const files = await syncStorage.syncFsListFiles('deviceA');
-      expect(files).toEqual([{ path: 'data/log.jsonl', content: 'content', size: 7 }]);
+      expect(files).toEqual([
+        { path: 'data/log.jsonl', content: 'content', size: 7 },
+      ]);
     });
   });
 
   describe('syncFsReadFile', () => {
     it('reads a file at a nested path', async () => {
-      const mockFileHandle = { getFile: () => ({ text: () => 'file-content' }) };
-      const subDir = { getFileHandle: vi.fn().mockResolvedValue(mockFileHandle) };
+      const mockFileHandle = {
+        getFile: () => ({ text: () => 'file-content' }),
+      };
+      const subDir = {
+        getFileHandle: vi.fn().mockResolvedValue(mockFileHandle),
+      };
       const mockHandle = {
         queryPermission: vi.fn().mockResolvedValue('granted'),
         getDirectoryHandle: vi.fn().mockResolvedValue(subDir),
@@ -176,16 +207,24 @@ describe('FileSystemSyncStorage', () => {
   describe('syncFsWriteFile', () => {
     it('creates dirs and writes content', async () => {
       const mockWritable = { write: vi.fn(), close: vi.fn() };
-      const mockFileHandle = { createWritable: vi.fn().mockResolvedValue(mockWritable) };
-      const subDir = { getFileHandle: vi.fn().mockResolvedValue(mockFileHandle) };
+      const mockFileHandle = {
+        createWritable: vi.fn().mockResolvedValue(mockWritable),
+      };
+      const subDir = {
+        getFileHandle: vi.fn().mockResolvedValue(mockFileHandle),
+      };
       const mockHandle = {
         queryPermission: vi.fn().mockResolvedValue('granted'),
         getDirectoryHandle: vi.fn().mockResolvedValue(subDir),
       };
       syncStorage.syncDirectoryHandle = mockHandle;
       await syncStorage.syncFsWriteFile('data/log.jsonl', 'hello');
-      expect(mockHandle.getDirectoryHandle).toHaveBeenCalledWith('data', { create: true });
-      expect(subDir.getFileHandle).toHaveBeenCalledWith('log.jsonl', { create: true });
+      expect(mockHandle.getDirectoryHandle).toHaveBeenCalledWith('data', {
+        create: true,
+      });
+      expect(subDir.getFileHandle).toHaveBeenCalledWith('log.jsonl', {
+        create: true,
+      });
       expect(mockWritable.write).toHaveBeenCalledWith('hello');
       expect(mockWritable.close).toHaveBeenCalled();
     });
@@ -200,8 +239,12 @@ describe('FileSystemSyncStorage', () => {
       };
       syncStorage.syncDirectoryHandle = mockHandle;
       await syncStorage.syncFsEnsureDir('data/logs');
-      expect(mockHandle.getDirectoryHandle).toHaveBeenCalledWith('data', { create: true });
-      expect(innerDir.getDirectoryHandle).toHaveBeenCalledWith('logs', { create: true });
+      expect(mockHandle.getDirectoryHandle).toHaveBeenCalledWith('data', {
+        create: true,
+      });
+      expect(innerDir.getDirectoryHandle).toHaveBeenCalledWith('logs', {
+        create: true,
+      });
     });
   });
 

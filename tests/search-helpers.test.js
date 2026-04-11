@@ -8,9 +8,7 @@ import {
 
 describe('mergeBufferIntoHistory', () => {
   it('appends new buffer entries', () => {
-    const entries = [
-      { url: 'https://a.com', timestamp: 1, slug: 'a' },
-    ];
+    const entries = [{ url: 'https://a.com', timestamp: 1, slug: 'a' }];
     const buffer = [
       { url: 'https://b.com', title: 'B', timestamp: 2, slug: 'b' },
     ];
@@ -36,9 +34,7 @@ describe('mergeBufferIntoHistory', () => {
   });
 
   it('sorts merged result by timestamp', () => {
-    const entries = [
-      { url: 'https://c.com', timestamp: 10, slug: 'c' },
-    ];
+    const entries = [{ url: 'https://c.com', timestamp: 10, slug: 'c' }];
     const buffer = [
       { url: 'https://a.com', timestamp: 1, slug: 'a' },
       { url: 'https://b.com', timestamp: 5, slug: 'b' },
@@ -46,7 +42,7 @@ describe('mergeBufferIntoHistory', () => {
 
     mergeBufferIntoHistory(entries, buffer);
 
-    expect(entries.map(i => i.url)).toEqual([
+    expect(entries.map((i) => i.url)).toEqual([
       'https://a.com',
       'https://b.com',
       'https://c.com',
@@ -60,7 +56,12 @@ describe('extractHistoryBuffer (logBuffer format)', () => {
       { timestamp: 1, url: 'https://a.com', title: 'A', slug: 'a' },
       { timestamp: 2, action: 'list_meta', id: 'test', name: 'Test' },
       { timestamp: 3, url: 'https://b.com', title: 'B', slug: 'b' },
-      { timestamp: 4, action: 'highlight', slug: 'a', highlight: { text: 'hi' } },
+      {
+        timestamp: 4,
+        action: 'highlight',
+        slug: 'a',
+        highlight: { text: 'hi' },
+      },
     ];
 
     const result = extractHistoryBuffer(logBuffer);
@@ -81,9 +82,7 @@ describe('extractHistoryBuffer (logBuffer format)', () => {
   });
 
   it('works with mergeBufferIntoHistory after extraction', () => {
-    const entries = [
-      { url: 'https://old.com', timestamp: 1, slug: 'old' },
-    ];
+    const entries = [{ url: 'https://old.com', timestamp: 1, slug: 'old' }];
     const logBuffer = [
       { timestamp: 2, url: 'https://new.com', title: 'New', slug: 'new' },
       { timestamp: 3, action: 'list_meta', id: 'test', name: 'Test' },
@@ -93,7 +92,7 @@ describe('extractHistoryBuffer (logBuffer format)', () => {
     mergeBufferIntoHistory(entries, extracted);
 
     expect(entries).toHaveLength(2);
-    expect(entries.map(i => i.url)).toContain('https://new.com');
+    expect(entries.map((i) => i.url)).toContain('https://new.com');
   });
 
   it('returns empty array for empty buffer', () => {
@@ -119,7 +118,6 @@ describe('buildHistoryForEngine', () => {
       title,
       timestamp: undefined,
       setContent: vi.fn(),
-      setAttention: vi.fn(),
     }));
   }
 
@@ -127,7 +125,7 @@ describe('buildHistoryForEngine', () => {
     const MockHistoryEntry = makeMockHistoryEntryClass();
     const engine = { addEntry: vi.fn() };
     const dataList = [
-      { url: 'https://a.com', title: 'A', timestamp: 100,  slug: 'a' },
+      { url: 'https://a.com', title: 'A', timestamp: 100, slug: 'a' },
     ];
     const contentMap = { a: '# A content' };
 
@@ -139,7 +137,6 @@ describe('buildHistoryForEngine', () => {
     const obj = engine.addEntry.mock.calls[0][0];
     expect(obj.timestamp).toBe(BigInt(100));
     expect(obj.setContent).toHaveBeenCalledWith('# A content');
-    expect(obj.setAttention).toHaveBeenCalledWith('');
   });
 
   it('converts timestamp to BigInt', () => {
@@ -171,33 +168,11 @@ describe('buildHistoryForEngine', () => {
   it('defaults missing optional fields to empty strings', () => {
     const MockHistoryEntry = makeMockHistoryEntryClass();
     const engine = { addEntry: vi.fn() };
-    const dataList = [
-      { url: 'https://d.com', title: 'D', timestamp: 1 },
-    ];
+    const dataList = [{ url: 'https://d.com', title: 'D', timestamp: 1 }];
 
     buildHistoryForEngine(MockHistoryEntry, engine, dataList, {});
 
     const obj = engine.addEntry.mock.calls[0][0];
     expect(obj.setContent).toHaveBeenCalledWith('');
-    expect(obj.setAttention).toHaveBeenCalledWith('');
-  });
-
-  it('builds attention string from flat entity fields', () => {
-    const MockHistoryEntry = makeMockHistoryEntryClass();
-    const engine = { addEntry: vi.fn() };
-    const dataList = [
-      {
-        url: 'https://e.com', title: 'E', timestamp: 1, slug: 'e',
-        scrollDepth: 42, timeOnPage: 5000
-      },
-    ];
-
-    buildHistoryForEngine(MockHistoryEntry, engine, dataList, {});
-
-    const obj = engine.addEntry.mock.calls[0][0];
-    // Must be a string — WASM passStringToWasm0 rejects objects
-    expect(typeof obj.setAttention.mock.calls[0][0]).toBe('string');
-    const parsed = JSON.parse(obj.setAttention.mock.calls[0][0]);
-    expect(parsed.scrollDepth).toBe(42);
   });
 });

@@ -2,8 +2,12 @@ import { test, expect } from './fixtures.js';
 import { resetAndSeed, getSlugForUrl, openHelperPage } from './helpers.js';
 
 test.describe('Highlight note edit', () => {
-
-  test('note text persists after edit without page reload', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('note text persists after edit without page reload', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     // Page with a highlight-able excerpt
     localServer.addPage('/note-edit', {
       title: 'Note Edit Test',
@@ -18,14 +22,27 @@ test.describe('Highlight note edit', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: `pages/${slug}.json`, data: {
-        slug, url: pageUrl, title: 'Note Edit Test', timestamp: now,
-        parentIds: [], childIds: [`note:${noteSlug}`],
-      }},
-      { path: `data/notes/${noteSlug}.json`, data: {
-        slug: noteSlug, excerpt: 'quick brown fox', note: '',
-        cssPath: null, url: pageUrl,
-      }},
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Note Edit Test',
+          timestamp: now,
+          parentIds: [],
+          childIds: [`note:${noteSlug}`],
+        },
+      },
+      {
+        path: `data/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: 'quick brown fox',
+          note: '',
+          cssPath: null,
+          url: pageUrl,
+        },
+      },
     ]);
 
     const page = await extContext.newPage();
@@ -36,8 +53,8 @@ test.describe('Highlight note edit', () => {
     await page.waitForSelector('mark.portal-highlight', { timeout: 5000 });
 
     // Verify initial noteSlug is set on the mark
-    const initialNoteSlug = await page.evaluate(() =>
-      document.querySelector('mark.portal-highlight')?.dataset.noteSlug
+    const initialNoteSlug = await page.evaluate(
+      () => document.querySelector('mark.portal-highlight')?.dataset.noteSlug,
     );
     expect(initialNoteSlug).toBe(noteSlug);
 
@@ -50,7 +67,10 @@ test.describe('Highlight note edit', () => {
 
     // Press Escape to save and close
     await page.keyboard.press('Escape');
-    await page.waitForSelector('#portal-highlight-overlay', { state: 'detached', timeout: 3000 });
+    await page.waitForSelector('#portal-highlight-overlay', {
+      state: 'detached',
+      timeout: 3000,
+    });
 
     // Wait for updateNote to complete (async message to background)
     await page.waitForTimeout(500);
@@ -61,8 +81,8 @@ test.describe('Highlight note edit', () => {
 
     // The note text should be visible — verify via the mark's noteSlug
     // has been updated to the new slug (updateNote creates a replacement note)
-    const updatedNoteSlug = await page.evaluate(() =>
-      document.querySelector('mark.portal-highlight')?.dataset.noteSlug
+    const updatedNoteSlug = await page.evaluate(
+      () => document.querySelector('mark.portal-highlight')?.dataset.noteSlug,
     );
     // The noteSlug should have CHANGED (replace_note creates a new slug)
     expect(updatedNoteSlug).toBeTruthy();
@@ -70,9 +90,10 @@ test.describe('Highlight note edit', () => {
 
     // Verify the new note has the text via background
     const helper = await openHelperPage(extContext, extensionId);
-    const notesResp = await helper.evaluate((s) =>
-      chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: s })
-    , slug);
+    const notesResp = await helper.evaluate(
+      (s) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: s }),
+      slug,
+    );
     expect(notesResp.success).toBe(true);
     expect(notesResp.notes).toHaveLength(1);
     expect(notesResp.notes[0].note).toBe('my important note');
@@ -83,7 +104,12 @@ test.describe('Highlight note edit', () => {
     await page.close();
   });
 
-  test('seeded highlight note shows text in overlay on mark click', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('seeded highlight note shows text in overlay on mark click', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     localServer.addPage('/hl-show', {
       title: 'Highlight Show Test',
       body: '<p>The quick brown fox jumps over the lazy dog.</p>',
@@ -97,14 +123,27 @@ test.describe('Highlight note edit', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: `pages/${slug}.json`, data: {
-        slug, url: pageUrl, title: 'Highlight Show Test', timestamp: now,
-        parentIds: [], childIds: [`note:${noteSlug}`],
-      }},
-      { path: `data/notes/${noteSlug}.json`, data: {
-        slug: noteSlug, excerpt: 'quick brown fox', note: 'my saved note',
-        cssPath: null, url: pageUrl,
-      }},
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Highlight Show Test',
+          timestamp: now,
+          parentIds: [],
+          childIds: [`note:${noteSlug}`],
+        },
+      },
+      {
+        path: `data/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: 'quick brown fox',
+          note: 'my saved note',
+          cssPath: null,
+          url: pageUrl,
+        },
+      },
     ]);
 
     const page = await extContext.newPage();
@@ -122,15 +161,16 @@ test.describe('Highlight note edit', () => {
     // The overlay uses closed shadow DOM — we can't directly read the textarea.
     // But we can verify via background that the note data is accessible
     const helper = await openHelperPage(extContext, extensionId);
-    const notesResp = await helper.evaluate((s) =>
-      chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: s })
-    , slug);
+    const notesResp = await helper.evaluate(
+      (s) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: s }),
+      slug,
+    );
     expect(notesResp.notes).toHaveLength(1);
     expect(notesResp.notes[0].note).toBe('my saved note');
 
     // Verify noteSlug on mark matches the note slug
-    const markSlug = await page.evaluate(() =>
-      document.querySelector('mark.portal-highlight')?.dataset.noteSlug
+    const markSlug = await page.evaluate(
+      () => document.querySelector('mark.portal-highlight')?.dataset.noteSlug,
     );
     expect(markSlug).toBe(noteSlug);
 
@@ -138,7 +178,12 @@ test.describe('Highlight note edit', () => {
     await page.close();
   });
 
-  test('highlight created via Alt+H retains note on re-click', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('highlight created via Alt+H retains note on re-click', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     localServer.addPage('/hl-reclick', {
       title: 'Highlight Reclick Test',
       body: '<p>The quick brown fox jumps over the lazy dog.</p>',
@@ -150,10 +195,17 @@ test.describe('Highlight note edit', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: `pages/${slug}.json`, data: {
-        slug, url: pageUrl, title: 'Highlight Reclick Test', timestamp: now,
-        parentIds: [], childIds: [],
-      }},
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Highlight Reclick Test',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
     ]);
 
     const page = await extContext.newPage();
@@ -188,21 +240,25 @@ test.describe('Highlight note edit', () => {
     await page.keyboard.type('important insight');
     // Close with Escape — saveAndClose now awaits updateNote before removing overlay
     await page.keyboard.press('Escape');
-    await page.waitForSelector('#portal-highlight-overlay', { state: 'detached', timeout: 5000 });
+    await page.waitForSelector('#portal-highlight-overlay', {
+      state: 'detached',
+      timeout: 5000,
+    });
 
     // No artificial delay needed — overlay removal means save completed
 
     // Verify the note was saved via background
-    const notesResp = await helper.evaluate((s) =>
-      chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: s })
-    , slug);
+    const notesResp = await helper.evaluate(
+      (s) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: s }),
+      slug,
+    );
     expect(notesResp.success).toBe(true);
     expect(notesResp.notes).toHaveLength(1);
     expect(notesResp.notes[0].note).toBe('important insight');
 
     // Get the current noteSlug on the mark
-    const markNoteSlug = await page.evaluate(() =>
-      document.querySelector('mark.portal-highlight')?.dataset.noteSlug
+    const markNoteSlug = await page.evaluate(
+      () => document.querySelector('mark.portal-highlight')?.dataset.noteSlug,
     );
     // It should match the note we just verified
     expect(markNoteSlug).toBe(notesResp.notes[0].slug);
@@ -218,14 +274,14 @@ test.describe('Highlight note edit', () => {
     await page.waitForTimeout(300);
 
     // Verify from background that note data is intact after re-click
-    const notesAfterClick = await helper.evaluate((s) =>
-      chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: s })
-    , slug);
+    const notesAfterClick = await helper.evaluate(
+      (s) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: s }),
+      slug,
+    );
     expect(notesAfterClick.notes).toHaveLength(1);
     expect(notesAfterClick.notes[0].note).toBe('important insight');
 
     await helper.close();
     await page.close();
   });
-
 });

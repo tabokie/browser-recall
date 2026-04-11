@@ -10,7 +10,7 @@ const SLUG_A = generateSlugFromUrl(URL_A);
 const SLUG_B = generateSlugFromUrl(URL_B);
 
 function findFile(files, pathPattern) {
-  return files.find(f => f.path.includes(pathPattern));
+  return files.find((f) => f.path.includes(pathPattern));
 }
 
 describe('buildSeedFiles', () => {
@@ -20,9 +20,13 @@ describe('buildSeedFiles', () => {
 
   it('produces CURRENT and settings for empty events', async () => {
     const files = await buildSeedFiles([], { deviceId: DEVICE });
-    expect(findFile(files, 'CURRENT')).toEqual({ path: 'CURRENT', content: DEVICE });
+    expect(findFile(files, 'CURRENT')).toEqual({
+      path: 'CURRENT',
+      content: DEVICE,
+    });
     expect(findFile(files, 'manifest/settings.json')).toEqual({
-      path: 'manifest/settings.json', data: {},
+      path: 'manifest/settings.json',
+      data: {},
     });
   });
 
@@ -30,8 +34,21 @@ describe('buildSeedFiles', () => {
   // visit_page only enriches existing pages — it does NOT create them.
   it('checkpoints page entity from rate_page event', async () => {
     const events = [
-      { action: 'rate_page', url: URL_A, title: 'Page A', timestamp: NOW, likes: 1 },
-      { action: 'leave_page', url: URL_A, title: 'Page A', timestamp: NOW + 1000, timeOnPage: 5000, scrollDepth: 50 },
+      {
+        action: 'rate_page',
+        url: URL_A,
+        title: 'Page A',
+        timestamp: NOW,
+        likes: 1,
+      },
+      {
+        action: 'leave_page',
+        url: URL_A,
+        title: 'Page A',
+        timestamp: NOW + 1000,
+        timeOnPage: 5000,
+        scrollDepth: 50,
+      },
     ];
     const files = await buildSeedFiles(events, { deviceId: DEVICE });
 
@@ -44,7 +61,7 @@ describe('buildSeedFiles', () => {
     expect(pageFile.data.scrollDepth).toBe(50);
 
     // All events always go to JSONL (history for display).
-    const logFile = files.find(f => f.path.endsWith('.jsonl'));
+    const logFile = files.find((f) => f.path.endsWith('.jsonl'));
     expect(logFile).toBeDefined();
     expect(logFile.lines).toHaveLength(2);
   });
@@ -59,12 +76,23 @@ describe('buildSeedFiles', () => {
 
   it('visit_page enriches pre-existing page entity', async () => {
     const events = [
-      { action: 'visit_page', url: URL_A, title: 'Updated Title', timestamp: NOW },
+      {
+        action: 'visit_page',
+        url: URL_A,
+        title: 'Updated Title',
+        timestamp: NOW,
+      },
     ];
     const files = await buildSeedFiles(events, {
       deviceId: DEVICE,
       entities: {
-        [`page:${SLUG_A}`]: { slug: SLUG_A, url: URL_A, title: 'Old', parentIds: [], childIds: [] },
+        [`page:${SLUG_A}`]: {
+          slug: SLUG_A,
+          url: URL_A,
+          title: 'Old',
+          parentIds: [],
+          childIds: [],
+        },
       },
     });
     const pageFile = findFile(files, `pages/${SLUG_A}.json`);
@@ -75,13 +103,22 @@ describe('buildSeedFiles', () => {
 
   it('checkpointProgress=0 puts all events in log, no entity files', async () => {
     const events = [
-      { action: 'rate_page', url: URL_A, title: 'Page A', timestamp: NOW, likes: 1 },
+      {
+        action: 'rate_page',
+        url: URL_A,
+        title: 'Page A',
+        timestamp: NOW,
+        likes: 1,
+      },
     ];
-    const files = await buildSeedFiles(events, { deviceId: DEVICE, checkpointProgress: 0 });
+    const files = await buildSeedFiles(events, {
+      deviceId: DEVICE,
+      checkpointProgress: 0,
+    });
 
     expect(findFile(files, `pages/`)).toBeUndefined();
 
-    const logFile = files.find(f => f.path.endsWith('.jsonl'));
+    const logFile = files.find((f) => f.path.endsWith('.jsonl'));
     expect(logFile).toBeDefined();
     expect(logFile.lines).toHaveLength(1);
     expect(logFile.lines[0].action).toBe('rate_page');
@@ -89,10 +126,25 @@ describe('buildSeedFiles', () => {
 
   it('partial checkpoint: entities only for checkpointed events, JSONL for all', async () => {
     const events = [
-      { action: 'rate_page', url: URL_A, title: 'Page A', timestamp: NOW, likes: 1 },
-      { action: 'rate_page', url: URL_B, title: 'Page B', timestamp: NOW + 1000, likes: 1 },
+      {
+        action: 'rate_page',
+        url: URL_A,
+        title: 'Page A',
+        timestamp: NOW,
+        likes: 1,
+      },
+      {
+        action: 'rate_page',
+        url: URL_B,
+        title: 'Page B',
+        timestamp: NOW + 1000,
+        likes: 1,
+      },
     ];
-    const files = await buildSeedFiles(events, { deviceId: DEVICE, checkpointProgress: 1 });
+    const files = await buildSeedFiles(events, {
+      deviceId: DEVICE,
+      checkpointProgress: 1,
+    });
 
     // First event checkpointed → page A entity on disk.
     expect(findFile(files, `pages/${SLUG_A}.json`)).toBeDefined();
@@ -100,7 +152,7 @@ describe('buildSeedFiles', () => {
     expect(findFile(files, `pages/${SLUG_B}.json`)).toBeUndefined();
 
     // ALL events go to JSONL regardless of checkpoint progress.
-    const logFile = files.find(f => f.path.endsWith('.jsonl'));
+    const logFile = files.find((f) => f.path.endsWith('.jsonl'));
     expect(logFile).toBeDefined();
     expect(logFile.lines).toHaveLength(2);
   });
@@ -109,15 +161,34 @@ describe('buildSeedFiles', () => {
     const day1 = new Date('2025-03-01T12:00:00Z').getTime();
     const day2 = new Date('2025-03-02T12:00:00Z').getTime();
     const events = [
-      { action: 'visit_page', url: URL_A, title: 'A', timestamp: day1, deviceId: 'dev-a' },
-      { action: 'visit_page', url: URL_B, title: 'B', timestamp: day2, deviceId: 'dev-b' },
+      {
+        action: 'visit_page',
+        url: URL_A,
+        title: 'A',
+        timestamp: day1,
+        deviceId: 'dev-a',
+      },
+      {
+        action: 'visit_page',
+        url: URL_B,
+        title: 'B',
+        timestamp: day2,
+        deviceId: 'dev-b',
+      },
     ];
-    const files = await buildSeedFiles(events, { deviceId: DEVICE, checkpointProgress: 0 });
+    const files = await buildSeedFiles(events, {
+      deviceId: DEVICE,
+      checkpointProgress: 0,
+    });
 
-    const logFiles = files.filter(f => f.path.endsWith('.jsonl'));
+    const logFiles = files.filter((f) => f.path.endsWith('.jsonl'));
     expect(logFiles).toHaveLength(2);
-    expect(logFiles.find(f => f.path.includes('dev-a/2025-03-01'))).toBeDefined();
-    expect(logFiles.find(f => f.path.includes('dev-b/2025-03-02'))).toBeDefined();
+    expect(
+      logFiles.find((f) => f.path.includes('dev-a/2025-03-01')),
+    ).toBeDefined();
+    expect(
+      logFiles.find((f) => f.path.includes('dev-b/2025-03-02')),
+    ).toBeDefined();
   });
 
   it('merges user-provided settings', async () => {
@@ -125,19 +196,31 @@ describe('buildSeedFiles', () => {
       deviceId: DEVICE,
       settings: { trimRules: ['foo'] },
     });
-    expect(findFile(files, 'manifest/settings.json').data).toEqual({ trimRules: ['foo'] });
+    expect(findFile(files, 'manifest/settings.json').data).toEqual({
+      trimRules: ['foo'],
+    });
   });
 
   it('create_note links note to page; note content from entities', async () => {
     const noteSlug = 'test-note';
     const events = [
-      { action: 'create_note', url: URL_A, title: 'Page A', timestamp: NOW, path: `notes/${noteSlug}.json` },
+      {
+        action: 'create_note',
+        url: URL_A,
+        title: 'Page A',
+        timestamp: NOW,
+        path: `notes/${noteSlug}.json`,
+      },
     ];
     const files = await buildSeedFiles(events, {
       deviceId: DEVICE,
       entities: {
         [`note:${noteSlug}`]: {
-          slug: noteSlug, excerpt: 'hello', note: 'hello world', cssPath: 'p', url: URL_A,
+          slug: noteSlug,
+          excerpt: 'hello',
+          note: 'hello world',
+          cssPath: 'p',
+          url: URL_A,
         },
       },
     });
@@ -158,7 +241,13 @@ describe('buildSeedFiles', () => {
     const files = await buildSeedFiles([], {
       deviceId: DEVICE,
       entities: {
-        [`page:${SLUG_A}`]: { slug: SLUG_A, url: URL_A, title: 'Pre-made', parentIds: [], childIds: [] },
+        [`page:${SLUG_A}`]: {
+          slug: SLUG_A,
+          url: URL_A,
+          title: 'Pre-made',
+          parentIds: [],
+          childIds: [],
+        },
       },
     });
     const pageFile = findFile(files, `pages/${SLUG_A}.json`);
@@ -169,13 +258,29 @@ describe('buildSeedFiles', () => {
   it('deleted entities are orphaned and page is GCed if ineligible', async () => {
     const noteSlug = 'doomed';
     const events = [
-      { action: 'create_note', url: URL_A, timestamp: NOW, path: `notes/${noteSlug}.json` },
-      { action: 'delete_note', url: URL_A, timestamp: NOW + 1000, path: `notes/${noteSlug}.json` },
+      {
+        action: 'create_note',
+        url: URL_A,
+        timestamp: NOW,
+        path: `notes/${noteSlug}.json`,
+      },
+      {
+        action: 'delete_note',
+        url: URL_A,
+        timestamp: NOW + 1000,
+        path: `notes/${noteSlug}.json`,
+      },
     ];
     const files = await buildSeedFiles(events, {
       deviceId: DEVICE,
       entities: {
-        [`note:${noteSlug}`]: { slug: noteSlug, excerpt: 'bye', note: 'bye', cssPath: '', url: URL_A },
+        [`note:${noteSlug}`]: {
+          slug: noteSlug,
+          excerpt: 'bye',
+          note: 'bye',
+          cssPath: '',
+          url: URL_A,
+        },
       },
     });
 
@@ -186,6 +291,8 @@ describe('buildSeedFiles', () => {
     // Orphaned manifest should track the deleted note.
     const orphanedFile = findFile(files, 'manifest/orphaned.json');
     expect(orphanedFile).toBeDefined();
-    expect(orphanedFile.data.entries.some(e => e.key === `note:${noteSlug}`)).toBe(true);
+    expect(
+      orphanedFile.data.entries.some((e) => e.key === `note:${noteSlug}`),
+    ).toBe(true);
   });
 });

@@ -43,25 +43,43 @@ function makeSessionMock() {
       store = {};
       return Promise.resolve();
     },
-    setAccessLevel() { return Promise.resolve(); },
+    setAccessLevel() {
+      return Promise.resolve();
+    },
     // Test helpers
-    _raw() { return store; },
-    _seed(obj) { store = JSON.parse(JSON.stringify(obj)); },
-    _failNextSets(n) { failNext = n; },
+    _raw() {
+      return store;
+    },
+    _seed(obj) {
+      store = JSON.parse(JSON.stringify(obj));
+    },
+    _failNextSets(n) {
+      failNext = n;
+    },
   };
 }
 
 describe('entity-cache quota handling', () => {
   let session;
-  let cacheGet, cacheSet, cacheRemove, cachePin, cacheUnpin,
-      setEntityCacheWatermark, cacheClear, setQuotaExhaustedCallback;
+  let cacheGet,
+    cacheSet,
+    cacheRemove,
+    cachePin,
+    cacheUnpin,
+    setEntityCacheWatermark,
+    cacheClear,
+    setQuotaExhaustedCallback;
 
   beforeEach(async () => {
     session = makeSessionMock();
     globalThis.chrome = {
       storage: {
         session,
-        local: { get: vi.fn(), set: vi.fn(), onChanged: { addListener: vi.fn() } },
+        local: {
+          get: vi.fn(),
+          set: vi.fn(),
+          onChanged: { addListener: vi.fn() },
+        },
         onChanged: { addListener: vi.fn() },
       },
       runtime: {
@@ -87,10 +105,17 @@ describe('entity-cache quota handling', () => {
   });
 
   // Helper: populate cache with entries
-  async function seedEntries(count, { timestampBase = 1000, pinned = false } = {}) {
+  async function seedEntries(
+    count,
+    { timestampBase = 1000, pinned = false } = {},
+  ) {
     for (let i = 0; i < count; i++) {
       const key = `page:seed-${i}`;
-      await cacheSet(key, { slug: `seed-${i}`, timestamps: { dev: timestampBase + i } }, { timestamp: timestampBase + i });
+      await cacheSet(
+        key,
+        { slug: `seed-${i}`, timestamps: { dev: timestampBase + i } },
+        { timestamp: timestampBase + i },
+      );
       if (pinned) cachePin(key);
     }
   }
@@ -108,7 +133,9 @@ describe('entity-cache quota handling', () => {
     expect(result.slug).toBe('new-big');
 
     const store = session._raw();
-    const seedKeys = Object.keys(store).filter(k => k.startsWith('page:seed-'));
+    const seedKeys = Object.keys(store).filter((k) =>
+      k.startsWith('page:seed-'),
+    );
     expect(seedKeys.length).toBeLessThan(10);
   });
 
@@ -122,7 +149,9 @@ describe('entity-cache quota handling', () => {
 
     // Pinned-but-clean entries should have been evicted
     const store = session._raw();
-    const seedKeys = Object.keys(store).filter(k => k.startsWith('page:seed-'));
+    const seedKeys = Object.keys(store).filter((k) =>
+      k.startsWith('page:seed-'),
+    );
     expect(seedKeys.length).toBe(0);
 
     // New entry should exist

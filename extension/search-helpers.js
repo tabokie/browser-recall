@@ -6,7 +6,9 @@
  * and mutations (other action values). This returns only visit entries.
  */
 export function extractHistoryBuffer(logBuffer) {
-  return logBuffer.filter(e => !e.action || e.action === 'visit_page' || e.action === 'leave_page');
+  return logBuffer.filter(
+    (e) => !e.action || e.action === 'visit_page' || e.action === 'leave_page',
+  );
 }
 
 /**
@@ -53,17 +55,16 @@ export function getBufferContentMap(buffer) {
  * @param {Array}    dataList          – raw history entry objects
  * @param {object}   contentMap        – slug → markdown content
  */
-export function buildHistoryForEngine(HistoryEntryClass, engine, dataList, contentMap) {
+export function buildHistoryForEngine(
+  HistoryEntryClass,
+  engine,
+  dataList,
+  contentMap,
+) {
   for (const data of dataList) {
     const entry = new HistoryEntryClass(data.url, data.title);
     entry.timestamp = BigInt(data.timestamp);
-    // intent removed: not very useful
-
     entry.setContent((data.slug && contentMap[data.slug]) || '');
-
-    // Build attention string for WASM engine from flat fields
-    const hasAtt = data.scrollDepth !== undefined || data.timeOnPage !== undefined || data.likes !== undefined;
-    entry.setAttention(hasAtt ? JSON.stringify({ scrollDepth: data.scrollDepth, timeOnPage: data.timeOnPage, likes: data.likes }) : '');
     engine.addEntry(entry);
   }
 }

@@ -13,7 +13,14 @@ import { FileSystemSyncStorage } from './filesystem-sync-storage.js';
 import { effectOf, defaultEntity } from './replay.js';
 import { generateNoteSlug, dateKeyFromTimestamp } from './utils.js';
 import { logDebug, logError } from './logger.js';
-import { PAGE_PREFIX, NOTE_PREFIX, LIST_PREFIX, entitySlug, isSystemList, snapshotKey } from './entity-types.js';
+import {
+  PAGE_PREFIX,
+  NOTE_PREFIX,
+  LIST_PREFIX,
+  entitySlug,
+  isSystemList,
+  snapshotKey,
+} from './entity-types.js';
 
 logDebug('Offscreen document loaded');
 
@@ -62,21 +69,35 @@ const LOCK_TIMEOUT_MS = 30000;
 
 function withLock(key, fn) {
   const prev = fileLocks.get(key) || Promise.resolve();
-  const next = prev.catch(() => {}).then(() => {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error(`withLock('${key}') timed out after ${LOCK_TIMEOUT_MS}ms`));
-      }, LOCK_TIMEOUT_MS);
-      fn().then(
-        (result) => { clearTimeout(timer); resolve(result); },
-        (error) => { clearTimeout(timer); reject(error); },
-      );
+  const next = prev
+    .catch(() => {})
+    .then(() => {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(
+            new Error(
+              `withLock('${key}') timed out after ${LOCK_TIMEOUT_MS}ms`,
+            ),
+          );
+        }, LOCK_TIMEOUT_MS);
+        fn().then(
+          (result) => {
+            clearTimeout(timer);
+            resolve(result);
+          },
+          (error) => {
+            clearTimeout(timer);
+            reject(error);
+          },
+        );
+      });
     });
-  });
   fileLocks.set(key, next);
-  next.catch(() => {}).then(() => {
-    if (fileLocks.get(key) === next) fileLocks.delete(key);
-  });
+  next
+    .catch(() => {})
+    .then(() => {
+      if (fileLocks.get(key) === next) fileLocks.delete(key);
+    });
   return next;
 }
 
@@ -101,7 +122,9 @@ function handleClearDirectoryHandleForTest() {
 async function handleLoadPageBatch(request) {
   const t0 = performance.now();
   const pages = await fsStorage.loadPageBatch(request.slugs);
-  logDebug(`[I/O] loadPageBatch: ${request.slugs.length} slugs in ${(performance.now() - t0).toFixed(1)}ms`);
+  logDebug(
+    `[I/O] loadPageBatch: ${request.slugs.length} slugs in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, pages };
 }
 
@@ -133,21 +156,27 @@ async function handleDeleteListFile(request) {
 async function handleLoadPageNotes(request) {
   const t0 = performance.now();
   const notes = await fsStorage.loadPageNotes(request.slug);
-  logDebug(`[I/O] loadPageNotes(${request.slug}): ${notes.length} notes in ${(performance.now() - t0).toFixed(1)}ms`);
+  logDebug(
+    `[I/O] loadPageNotes(${request.slug}): ${notes.length} notes in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, notes };
 }
 
 async function handleLoadAllNotes() {
   const t0 = performance.now();
   const notesMap = await fsStorage.loadAllNotes();
-  logDebug(`[I/O] loadAllNotes: ${Object.keys(notesMap).length} pages in ${(performance.now() - t0).toFixed(1)}ms`);
+  logDebug(
+    `[I/O] loadAllNotes: ${Object.keys(notesMap).length} pages in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, notesMap };
 }
 
 async function handleLoadAllPages() {
   const t0 = performance.now();
   const pages = await fsStorage.loadAllPages();
-  logDebug(`[I/O] loadAllPages: ${Object.keys(pages).length} pages in ${(performance.now() - t0).toFixed(1)}ms`);
+  logDebug(
+    `[I/O] loadAllPages: ${Object.keys(pages).length} pages in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, pages };
 }
 
@@ -155,11 +184,15 @@ async function handleLoadListPins(request) {
   const t0 = performance.now();
   if (request.listId) {
     const pins = await fsStorage.loadListPinsById(request.listId);
-    logDebug(`[I/O] loadListPins(${request.listId}): ${pins.length} pins in ${(performance.now() - t0).toFixed(1)}ms`);
+    logDebug(
+      `[I/O] loadListPins(${request.listId}): ${pins.length} pins in ${(performance.now() - t0).toFixed(1)}ms`,
+    );
     return { success: true, pins };
   } else {
     const allPins = await fsStorage.loadListPins();
-    logDebug(`[I/O] loadListPins: ${Object.keys(allPins).length} lists in ${(performance.now() - t0).toFixed(1)}ms`);
+    logDebug(
+      `[I/O] loadListPins: ${Object.keys(allPins).length} lists in ${(performance.now() - t0).toFixed(1)}ms`,
+    );
     return { success: true, pins: allPins };
   }
 }
@@ -167,14 +200,18 @@ async function handleLoadListPins(request) {
 async function handleLoadListPinsById(request) {
   const t0 = performance.now();
   const pins = await fsStorage.loadListPinsById(request.listId);
-  logDebug(`[I/O] loadListPinsById(${request.listId}): ${pins.length} pins in ${(performance.now() - t0).toFixed(1)}ms`);
+  logDebug(
+    `[I/O] loadListPinsById(${request.listId}): ${pins.length} pins in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, pins };
 }
 
 async function handleLoadListEntity(request) {
   const t0 = performance.now();
   const entity = await fsStorage.loadListPinsEntity(request.listId);
-  logDebug(`[I/O] loadListEntity(${request.listId}): ${(performance.now() - t0).toFixed(1)}ms`);
+  logDebug(
+    `[I/O] loadListEntity(${request.listId}): ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, entity };
 }
 
@@ -191,14 +228,18 @@ async function handleListListFiles() {
         }
       }
     }
-  } catch { /* lists/ may not exist */ }
+  } catch {
+    /* lists/ may not exist */
+  }
   return { success: true, files };
 }
 
 async function handleLoadAllListMetadata() {
   const t0 = performance.now();
   const lists = await fsStorage.loadAllListMetadata();
-  logDebug(`[I/O] loadAllListMetadata: ${lists.length} lists in ${(performance.now() - t0).toFixed(1)}ms`);
+  logDebug(
+    `[I/O] loadAllListMetadata: ${lists.length} lists in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, lists };
 }
 
@@ -207,25 +248,37 @@ async function handleLoadAllListMetadata() {
 async function handleListSnapshots(request) {
   const t0 = performance.now();
   const snapshots = await fsStorage.listSnapshots(request.slug);
-  logDebug(`[I/O] listSnapshots(${request.slug}): ${snapshots.length} snapshots in ${(performance.now() - t0).toFixed(1)}ms`);
+  logDebug(
+    `[I/O] listSnapshots(${request.slug}): ${snapshots.length} snapshots in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, snapshots };
 }
 
 async function handleCaptureSnapshot(request) {
   await withLock(snapshotKey(request.slug), () =>
-    fsStorage.captureSnapshot(request.slug, request.timestamp, request.markdown || '', request.html || '')
+    fsStorage.captureSnapshot(
+      request.slug,
+      request.timestamp,
+      request.markdown || '',
+      request.html || '',
+    ),
   );
   return { success: true };
 }
 
 async function handleGetSnapshotUrl(request) {
-  const url = await fsStorage.getSnapshotBlobUrl(request.slug, request.timestamp);
+  const url = await fsStorage.getSnapshotBlobUrl(
+    request.slug,
+    request.timestamp,
+  );
   return url ? { success: true, url } : { success: false, error: 'Not found' };
 }
 
 async function handleGetSnapshotHtml(request) {
   const html = await fsStorage.getSnapshotHtml(request.slug, request.timestamp);
-  return html ? { success: true, html } : { success: false, error: 'Not found' };
+  return html
+    ? { success: true, html }
+    : { success: false, error: 'Not found' };
 }
 
 async function handleDeleteSnapshot(request) {
@@ -247,14 +300,21 @@ async function handleListHistoryFiles(request) {
 async function handleLoadHistoryBatch(request) {
   const t0 = performance.now();
   const entries = await fsStorage.loadHistoryFiles(request.files);
-  logDebug(`[I/O] loadHistoryBatch: ${request.files.length} files, ${entries.length} items in ${(performance.now() - t0).toFixed(1)}ms`);
+  logDebug(
+    `[I/O] loadHistoryBatch: ${request.files.length} files, ${entries.length} items in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, entries };
 }
 
 async function handleLoadHistoryRange(request) {
   const t0 = performance.now();
-  const { entries, files } = await fsStorage.loadHistoryFileRange(request.from, request.to);
-  logDebug(`[I/O] loadHistoryRange(${request.from}..${request.to}): ${files.length} files, ${entries.length} entries in ${(performance.now() - t0).toFixed(1)}ms`);
+  const { entries, files } = await fsStorage.loadHistoryFileRange(
+    request.from,
+    request.to,
+  );
+  logDebug(
+    `[I/O] loadHistoryRange(${request.from}..${request.to}): ${files.length} files, ${entries.length} entries in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, entries, files };
 }
 
@@ -292,14 +352,18 @@ async function handleInitDevice(request) {
 
 async function handleDeleteCurrent() {
   const root = fsStorage.directoryHandle;
-  try { await root.removeEntry('CURRENT'); } catch {}
+  try {
+    await root.removeEntry('CURRENT');
+  } catch {}
   return { success: true };
 }
 
 async function handleLoadSettings() {
   const t0 = performance.now();
   const settings = await fsStorage.loadSettings();
-  logDebug(`[I/O] loadSettings: ${Object.keys(settings).length} keys in ${(performance.now() - t0).toFixed(1)}ms`);
+  logDebug(
+    `[I/O] loadSettings: ${Object.keys(settings).length} keys in ${(performance.now() - t0).toFixed(1)}ms`,
+  );
   return { success: true, settings };
 }
 
@@ -328,8 +392,11 @@ async function handleLoadListOrder() {
 // ─── Request Handlers: Log Drain ─────────────────────────────────────
 
 async function handleFlushLogBuffer(request) {
-  if (drainTimer) { clearTimeout(drainTimer); drainTimer = null; }
-  while (draining) await new Promise(r => setTimeout(r, 50));
+  if (drainTimer) {
+    clearTimeout(drainTimer);
+    drainTimer = null;
+  }
+  while (draining) await new Promise((r) => setTimeout(r, 50));
   if (request.entries) pendingDrainEntries = request.entries;
   await drainQueue();
   return { success: true };
@@ -359,12 +426,17 @@ async function handleLoadSyncManifest(request) {
 }
 
 async function handleLoadRemoteLogEntries(request) {
-  const remotes = await fsSyncStorage.loadRemoteLogEntries(request.localDeviceId);
+  const remotes = await fsSyncStorage.loadRemoteLogEntries(
+    request.localDeviceId,
+  );
   return { success: true, remotes };
 }
 
 async function handleCollectSyncFiles(request) {
-  const files = await fsSyncStorage.collectSyncFiles(request.deviceId, request.retentionDays);
+  const files = await fsSyncStorage.collectSyncFiles(
+    request.deviceId,
+    request.retentionDays,
+  );
   return { success: true, files };
 }
 
@@ -422,8 +494,12 @@ async function handleSetTestDirectory() {
   // Use OPFS (Origin Private File System) as a no-user-gesture directory handle.
   // Creates a subdirectory inside OPFS so each reset can wipe cleanly.
   const opfsRoot = await navigator.storage.getDirectory();
-  try { await opfsRoot.removeEntry('portal-test', { recursive: true }); } catch {}
-  const testDir = await opfsRoot.getDirectoryHandle('portal-test', { create: true });
+  try {
+    await opfsRoot.removeEntry('portal-test', { recursive: true });
+  } catch {}
+  const testDir = await opfsRoot.getDirectoryHandle('portal-test', {
+    create: true,
+  });
   fsStorage.directoryHandle = testDir;
   fsStorage.clearCache();
   // OPFS handles don't support queryPermission/requestPermission,
@@ -434,9 +510,12 @@ async function handleSetTestDirectory() {
 
 async function handleResetDirectory() {
   if (!fsStorage.directoryHandle) return { success: true };
-  if (drainTimer) { clearTimeout(drainTimer); drainTimer = null; }
+  if (drainTimer) {
+    clearTimeout(drainTimer);
+    drainTimer = null;
+  }
   // Wait for in-flight drain to finish before wiping
-  while (draining) await new Promise(r => setTimeout(r, 50));
+  while (draining) await new Promise((r) => setTimeout(r, 50));
   pendingDrainEntries = null;
   lastDrainedTimestamp = 0;
   pendingWatermark = 0;
@@ -477,79 +556,133 @@ async function handleSeedTestData(request) {
 // ─── Request Handlers: Sandbox ───────────────────────────────────────
 
 async function handleExecuteSandboxFn(request) {
-  const score = await executeSandbox(request.fnSource, request.pageData);
-  return { success: true, score };
+  const match = await executeSandbox(request.fnSource, request.pageData);
+  return { success: true, match };
 }
 
 // ─── Request Dispatch ────────────────────────────────────────────────
 
 async function handleRequest(request) {
-  if (request.action !== 'initializeFilesystem' && request.action !== 'setTestDirectory') {
+  if (
+    request.action !== 'initializeFilesystem' &&
+    request.action !== 'setTestDirectory'
+  ) {
     await initDone;
   }
   try {
     switch (request.action) {
       // Filesystem lifecycle
-      case 'initializeFilesystem':        return await handleInitializeFilesystem();
-      case 'hasDirectoryHandle':          return handleHasDirectoryHandle();
-      case 'clearDirectoryHandleForTest': return handleClearDirectoryHandleForTest();
+      case 'initializeFilesystem':
+        return await handleInitializeFilesystem();
+      case 'hasDirectoryHandle':
+        return handleHasDirectoryHandle();
+      case 'clearDirectoryHandleForTest':
+        return handleClearDirectoryHandleForTest();
       // Entity reads
-      case 'loadPageBatch':               return await handleLoadPageBatch(request);
-      case 'pageExists':                  return await handlePageExists(request);
-      case 'loadNote':                    return await handleLoadNote(request);
-      case 'saveNote':                    return await handleSaveNote(request);
-      case 'deleteNote':                  return await handleDeleteNote(request);
-      case 'deleteListFile':              return await handleDeleteListFile(request);
-      case 'loadPageNotes':               return await handleLoadPageNotes(request);
-      case 'loadAllNotes':                return await handleLoadAllNotes();
-      case 'loadAllPages':                return await handleLoadAllPages();
-      case 'loadListPins':                return await handleLoadListPins(request);
-      case 'loadListPinsById':            return await handleLoadListPinsById(request);
-      case 'loadListEntity':              return await handleLoadListEntity(request);
-      case 'listListFiles':               return await handleListListFiles();
-      case 'loadAllListMetadata':         return await handleLoadAllListMetadata();
+      case 'loadPageBatch':
+        return await handleLoadPageBatch(request);
+      case 'pageExists':
+        return await handlePageExists(request);
+      case 'loadNote':
+        return await handleLoadNote(request);
+      case 'saveNote':
+        return await handleSaveNote(request);
+      case 'deleteNote':
+        return await handleDeleteNote(request);
+      case 'deleteListFile':
+        return await handleDeleteListFile(request);
+      case 'loadPageNotes':
+        return await handleLoadPageNotes(request);
+      case 'loadAllNotes':
+        return await handleLoadAllNotes();
+      case 'loadAllPages':
+        return await handleLoadAllPages();
+      case 'loadListPins':
+        return await handleLoadListPins(request);
+      case 'loadListPinsById':
+        return await handleLoadListPinsById(request);
+      case 'loadListEntity':
+        return await handleLoadListEntity(request);
+      case 'listListFiles':
+        return await handleListListFiles();
+      case 'loadAllListMetadata':
+        return await handleLoadAllListMetadata();
       // Snapshot ops
-      case 'listSnapshots':               return await handleListSnapshots(request);
-      case 'captureSnapshot':             return await handleCaptureSnapshot(request);
-      case 'getSnapshotUrl':              return await handleGetSnapshotUrl(request);
-      case 'getSnapshotHtml':             return await handleGetSnapshotHtml(request);
-      case 'deleteSnapshot':              return await handleDeleteSnapshot(request);
+      case 'listSnapshots':
+        return await handleListSnapshots(request);
+      case 'captureSnapshot':
+        return await handleCaptureSnapshot(request);
+      case 'getSnapshotUrl':
+        return await handleGetSnapshotUrl(request);
+      case 'getSnapshotHtml':
+        return await handleGetSnapshotHtml(request);
+      case 'deleteSnapshot':
+        return await handleDeleteSnapshot(request);
       // History
-      case 'listHistoryFiles':            return await handleListHistoryFiles(request);
-      case 'loadHistoryBatch':            return await handleLoadHistoryBatch(request);
-      case 'loadHistoryRange':            return await handleLoadHistoryRange(request);
+      case 'listHistoryFiles':
+        return await handleListHistoryFiles(request);
+      case 'loadHistoryBatch':
+        return await handleLoadHistoryBatch(request);
+      case 'loadHistoryRange':
+        return await handleLoadHistoryRange(request);
       // Manifest/directory
-      case 'getDirectoryInfo':            return await handleGetDirectoryInfo();
-      case 'getDirectorySize':            return await handleGetDirectorySize();
-      case 'loadOrphaned':                return await handleLoadOrphaned();
-      case 'loadCurrent':                 return await handleLoadCurrent();
-      case 'initDevice':                  return await handleInitDevice(request);
-      case 'deleteCurrent':               return await handleDeleteCurrent();
-      case 'loadSettings':                return await handleLoadSettings();
-      case 'loadNameMap':                 return await handleLoadNameMap();
-      case 'loadListOrder':               return await handleLoadListOrder();
+      case 'getDirectoryInfo':
+        return await handleGetDirectoryInfo();
+      case 'getDirectorySize':
+        return await handleGetDirectorySize();
+      case 'loadOrphaned':
+        return await handleLoadOrphaned();
+      case 'loadCurrent':
+        return await handleLoadCurrent();
+      case 'initDevice':
+        return await handleInitDevice(request);
+      case 'deleteCurrent':
+        return await handleDeleteCurrent();
+      case 'loadSettings':
+        return await handleLoadSettings();
+      case 'loadNameMap':
+        return await handleLoadNameMap();
+      case 'loadListOrder':
+        return await handleLoadListOrder();
       // Log drain
-      case 'flushLogBuffer':              return await handleFlushLogBuffer(request);
+      case 'flushLogBuffer':
+        return await handleFlushLogBuffer(request);
       // JSON I/O
-      case 'saveJson':                    return await handleSaveJson(request);
+      case 'saveJson':
+        return await handleSaveJson(request);
       // Sync
-      case 'loadSyncManifest':            return await handleLoadSyncManifest(request);
-      case 'loadRemoteLogEntries':        return await handleLoadRemoteLogEntries(request);
-      case 'collectSyncFiles':            return await handleCollectSyncFiles(request);
-      case 'writeSyncFiles':              return await handleWriteSyncFiles(request);
-      case 'syncFsListDeviceDirs':        return await handleSyncFsListDeviceDirs();
-      case 'syncFsListFiles':             return await handleSyncFsListFiles(request);
-      case 'syncFsReadFile':              return await handleSyncFsReadFile(request);
-      case 'syncFsWriteFile':             return await handleSyncFsWriteFile(request);
-      case 'syncFsEnsureDir':             return await handleSyncFsEnsureDir(request);
-      case 'syncFsRemoveFile':            return await handleSyncFsRemoveFile(request);
-      case 'clearSyncDirectory':           return await handleClearSyncDirectory();
+      case 'loadSyncManifest':
+        return await handleLoadSyncManifest(request);
+      case 'loadRemoteLogEntries':
+        return await handleLoadRemoteLogEntries(request);
+      case 'collectSyncFiles':
+        return await handleCollectSyncFiles(request);
+      case 'writeSyncFiles':
+        return await handleWriteSyncFiles(request);
+      case 'syncFsListDeviceDirs':
+        return await handleSyncFsListDeviceDirs();
+      case 'syncFsListFiles':
+        return await handleSyncFsListFiles(request);
+      case 'syncFsReadFile':
+        return await handleSyncFsReadFile(request);
+      case 'syncFsWriteFile':
+        return await handleSyncFsWriteFile(request);
+      case 'syncFsEnsureDir':
+        return await handleSyncFsEnsureDir(request);
+      case 'syncFsRemoveFile':
+        return await handleSyncFsRemoveFile(request);
+      case 'clearSyncDirectory':
+        return await handleClearSyncDirectory();
       // Test
-      case 'setTestDirectory':            return await handleSetTestDirectory();
-      case 'resetDirectory':              return await handleResetDirectory();
-      case 'seedTestData':                return await handleSeedTestData(request);
+      case 'setTestDirectory':
+        return await handleSetTestDirectory();
+      case 'resetDirectory':
+        return await handleResetDirectory();
+      case 'seedTestData':
+        return await handleSeedTestData(request);
       // Sandbox
-      case 'executeSandboxFn':            return await handleExecuteSandboxFn(request);
+      case 'executeSandboxFn':
+        return await handleExecuteSandboxFn(request);
       default:
         return { success: false, error: `Unknown action: ${request.action}` };
     }
@@ -570,19 +703,24 @@ let drainTimer = null;
 let drainRetryTimer = null;
 let draining = false;
 let pendingDrainEntries = null; // Set by port 'drainEntries' message
-let pendingDeviceId = null;   // Device name from drain message
-let lastDrainedTimestamp = 0;   // Local watermark — skip entries already written to JSONL
+let pendingDeviceId = null; // Device name from drain message
+let lastDrainedTimestamp = 0; // Local watermark — skip entries already written to JSONL
 
 function scheduleDrain() {
   if (drainTimer) return;
-  drainTimer = setTimeout(() => { drainTimer = null; drainQueue(); }, 100);
+  drainTimer = setTimeout(() => {
+    drainTimer = null;
+    drainQueue();
+  }, 100);
 }
 
 function scheduleDrainRetry() {
   if (drainRetryTimer) return;
-  drainRetryTimer = setTimeout(() => { drainRetryTimer = null; scheduleDrain(); }, 30000);
+  drainRetryTimer = setTimeout(() => {
+    drainRetryTimer = null;
+    scheduleDrain();
+  }, 30000);
 }
-
 
 async function drainQueue() {
   if (draining) return;
@@ -604,7 +742,7 @@ async function drainQueue() {
     let logBuffer = pendingDrainEntries;
     // Don't clear pendingDrainEntries yet — clear only after successful JSONL write
     // Skip entries already drained (prevents duplicates across drain cycles)
-    logBuffer = logBuffer.filter(e => e.timestamp > lastDrainedTimestamp);
+    logBuffer = logBuffer.filter((e) => e.timestamp > lastDrainedTimestamp);
     if (logBuffer.length === 0) {
       draining = false;
       return;
@@ -617,7 +755,7 @@ async function drainQueue() {
     // ── Round cache: entity key → entity (or null for non-existent pages/notes) ──
     // Populated lazily from filesystem on first access per key.
     // After processing all entries, dirty keys are flushed back to disk.
-    const roundCache = new Map();   // key → entity | null
+    const roundCache = new Map(); // key → entity | null
     const dirtyKeys = new Set();
 
     // Load an entity into roundCache if not already present
@@ -636,7 +774,10 @@ async function drainQueue() {
       } else if (key === 'manifest:settings') {
         let s = await fsStorage.loadSettings();
         roundCache.set(key, s);
-      } else if (key.startsWith(LIST_PREFIX) && !key.startsWith('list:index/')) {
+      } else if (
+        key.startsWith(LIST_PREFIX) &&
+        !key.startsWith('list:index/')
+      ) {
         const listId = entitySlug(key);
         roundCache.set(key, await fsStorage.loadListPinsEntity(listId));
       } else if (key === 'manifest:orphaned') {
@@ -652,7 +793,9 @@ async function drainQueue() {
         roundCache.set(key, note || null);
       } else if (key === 'manifest:name-to-id') {
         try {
-          const fh = await fsStorage.resolveFile('manifest/list-name-to-id.json');
+          const fh = await fsStorage.resolveFile(
+            'manifest/list-name-to-id.json',
+          );
           roundCache.set(key, await fsStorage.readJson(fh));
         } catch {
           roundCache.set(key, defaultEntity(key));
@@ -685,7 +828,9 @@ async function drainQueue() {
       entriesByDate.get(dateKey).push(entry);
 
       // Apply entry via unified effectOf
-      const updated = await effectOf(entry, load, { deviceId: pendingDeviceId });
+      const updated = await effectOf(entry, load, {
+        deviceId: pendingDeviceId,
+      });
 
       // Write updated entities back to round cache
       for (const [key, entity] of Object.entries(updated)) {
@@ -702,10 +847,14 @@ async function drainQueue() {
     // 1. Batch append to JSONL history files in device subdirectory
     const logsDir = await fsStorage.resolveDir('data/logs');
     // Ensure device subdirectory exists
-    const historyDir = await logsDir.getDirectoryHandle(pendingDeviceId, { create: true });
+    const historyDir = await logsDir.getDirectoryHandle(pendingDeviceId, {
+      create: true,
+    });
     for (const [dateKey, entries] of entriesByDate) {
       try {
-        const fh = await historyDir.getFileHandle(`${dateKey}.jsonl`, { create: true });
+        const fh = await historyDir.getFileHandle(`${dateKey}.jsonl`, {
+          create: true,
+        });
         const file = await fh.getFile();
         const writable = await fh.createWritable({ keepExistingData: true });
         await writable.seek(file.size);
@@ -733,41 +882,60 @@ async function drainQueue() {
           // GC'd page entity — delete its checkpoint file
           if (key.startsWith(PAGE_PREFIX)) {
             const slug = entitySlug(key);
-            await withLock('pages/' + slug + '.json', () => fsStorage.deletePage(slug));
+            await withLock('pages/' + slug + '.json', () =>
+              fsStorage.deletePage(slug),
+            );
           }
           continue;
         }
 
         if (key.startsWith(PAGE_PREFIX)) {
           const slug = entitySlug(key);
-          await withLock('pages/' + slug + '.json', () => fsStorage.savePage(slug, entity));
+          await withLock('pages/' + slug + '.json', () =>
+            fsStorage.savePage(slug, entity),
+          );
         } else if (key.startsWith(NOTE_PREFIX)) {
           const slug = entitySlug(key);
           // Strip entity-only fields — note files are immutable primary data.
           // Mutable state (deleted, replacedBy, etc.) lives in session cache only.
           const { slug: s, excerpt, note, cssPath, url } = entity;
           const fileData = { slug: s, excerpt, note, cssPath, url };
-          await withLock('data/notes/' + slug + '.json', () => fsStorage.saveNote(slug, fileData));
+          await withLock('data/notes/' + slug + '.json', () =>
+            fsStorage.saveNote(slug, fileData),
+          );
         } else if (key === 'manifest:settings') {
-          await withLock('manifest/settings.json', () => fsStorage.saveSettings(entity));
-        } else if (key.startsWith(LIST_PREFIX) && !isSystemList(key) && !key.startsWith('list:index/')) {
+          await withLock('manifest/settings.json', () =>
+            fsStorage.saveSettings(entity),
+          );
+        } else if (
+          key.startsWith(LIST_PREFIX) &&
+          !isSystemList(key) &&
+          !key.startsWith('list:index/')
+        ) {
           const listId = entitySlug(key);
           await withLock('lists/' + listId + '.json', async () => {
             await fsStorage.saveListMeta(listId, entity);
           });
         } else if (key === 'manifest:orphaned') {
           await withLock('manifest/orphaned.json', async () => {
-            const fh = await fsStorage.resolveFile('manifest/orphaned.json', { create: true });
+            const fh = await fsStorage.resolveFile('manifest/orphaned.json', {
+              create: true,
+            });
             await fsStorage.writeJson(fh, entity);
           });
         } else if (key === 'manifest:name-to-id') {
           await withLock('manifest/list-name-to-id.json', async () => {
-            const fh = await fsStorage.resolveFile('manifest/list-name-to-id.json', { create: true });
+            const fh = await fsStorage.resolveFile(
+              'manifest/list-name-to-id.json',
+              { create: true },
+            );
             await fsStorage.writeJson(fh, entity);
           });
         } else if (key === 'manifest:list-order') {
           await withLock('manifest/list-order.json', async () => {
-            const fh = await fsStorage.resolveFile('manifest/list-order.json', { create: true });
+            const fh = await fsStorage.resolveFile('manifest/list-order.json', {
+              create: true,
+            });
             await fsStorage.writeJson(fh, entity);
           });
         }
@@ -775,7 +943,6 @@ async function drainQueue() {
         logError(`Entity flush failed for ${key}:`, e);
       }
     }
-
 
     // Advance local watermark so next drain skips these entries
     if (lastTimestamp > 0) {
@@ -831,7 +998,7 @@ function ensureSandboxFrame() {
   if (sandboxReady) return sandboxReady;
   sandboxReady = new Promise((resolve) => {
     sandboxFrame = document.createElement('iframe');
-    sandboxFrame.src = 'smart-rule-sandbox.html';
+    sandboxFrame.src = 'fn-rule-sandbox.html';
     sandboxFrame.style.display = 'none';
     sandboxFrame.onload = () => resolve();
     document.body.appendChild(sandboxFrame);
@@ -845,7 +1012,7 @@ function ensureSandboxFrame() {
     if (event.data.error) {
       cb.reject(new Error(event.data.error));
     } else {
-      cb.resolve(event.data.score);
+      cb.resolve(event.data.match);
     }
   });
 
@@ -862,13 +1029,19 @@ async function executeSandbox(fnSource, pageData) {
     }, 5000);
 
     sandboxCallbacks.set(id, {
-      resolve: (score) => { clearTimeout(timeout); resolve(score); },
-      reject: (err) => { clearTimeout(timeout); reject(err); },
+      resolve: (match) => {
+        clearTimeout(timeout);
+        resolve(match);
+      },
+      reject: (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      },
     });
 
     sandboxFrame.contentWindow.postMessage(
       { id, action: 'execute', fnSource, pageData },
-      '*'
+      '*',
     );
   });
 }

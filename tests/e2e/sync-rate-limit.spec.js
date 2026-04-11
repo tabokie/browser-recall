@@ -2,14 +2,21 @@ import { test, expect } from './fixtures.js';
 import { resetAndSeed, openHelperPage } from './helpers.js';
 
 test.describe('Sync rate limit backoff', () => {
-  test('syncNow skips when rate-limited', async ({ extContext, extensionId, setupDir }) => {
+  test('syncNow skips when rate-limited', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: {
-        syncEnabled: true,
-        syncRepoUrl: 'https://github.com/user/repo',
-        syncToken: 'ghp_test',
-      }},
+      {
+        path: 'manifest/settings.json',
+        data: {
+          syncEnabled: true,
+          syncRepoUrl: 'https://github.com/user/repo',
+          syncToken: 'ghp_test',
+        },
+      },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -17,7 +24,10 @@ test.describe('Sync rate limit backoff', () => {
     // Simulate rate limit until 1 hour from now
     const until = Date.now() + 60 * 60 * 1000;
     await helper.evaluate(async (ms) => {
-      return chrome.runtime.sendMessage({ action: 'setRateLimitForTest', until: ms });
+      return chrome.runtime.sendMessage({
+        action: 'setRateLimitForTest',
+        until: ms,
+      });
     }, until);
 
     // syncNow should skip and report rate-limited
@@ -32,21 +42,31 @@ test.describe('Sync rate limit backoff', () => {
     await helper.close();
   });
 
-  test('getSyncStatus reports rateLimitedUntil', async ({ extContext, extensionId, setupDir }) => {
+  test('getSyncStatus reports rateLimitedUntil', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: {
-        syncEnabled: true,
-        syncRepoUrl: 'https://github.com/user/repo',
-        syncToken: 'ghp_test',
-      }},
+      {
+        path: 'manifest/settings.json',
+        data: {
+          syncEnabled: true,
+          syncRepoUrl: 'https://github.com/user/repo',
+          syncToken: 'ghp_test',
+        },
+      },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
 
     const until = Date.now() + 60 * 60 * 1000;
     await helper.evaluate(async (ms) => {
-      return chrome.runtime.sendMessage({ action: 'setRateLimitForTest', until: ms });
+      return chrome.runtime.sendMessage({
+        action: 'setRateLimitForTest',
+        until: ms,
+      });
     }, until);
 
     const status = await helper.evaluate(async () => {
@@ -61,15 +81,22 @@ test.describe('Sync rate limit backoff', () => {
     await helper.close();
   });
 
-  test('syncNow proceeds after rate limit expires', async ({ extContext, extensionId, setupDir }) => {
+  test('syncNow proceeds after rate limit expires', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: {
-        syncEnabled: true,
-        syncRepoUrl: 'https://github.com/user/repo',
-        syncToken: 'ghp_test',
-        syncRememberToken: true,
-      }},
+      {
+        path: 'manifest/settings.json',
+        data: {
+          syncEnabled: true,
+          syncRepoUrl: 'https://github.com/user/repo',
+          syncToken: 'ghp_test',
+          syncRememberToken: true,
+        },
+      },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
@@ -77,7 +104,10 @@ test.describe('Sync rate limit backoff', () => {
     // Set rate limit to the past — should be expired
     const pastTime = Date.now() - 1000;
     await helper.evaluate(async (ms) => {
-      return chrome.runtime.sendMessage({ action: 'setRateLimitForTest', until: ms });
+      return chrome.runtime.sendMessage({
+        action: 'setRateLimitForTest',
+        until: ms,
+      });
     }, pastTime);
 
     // syncNow should NOT skip (rate limit expired). It will fail because

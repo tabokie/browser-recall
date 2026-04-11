@@ -15,24 +15,37 @@ import { generateSlugFromUrl } from '../extension/utils.js';
 // ---------------------------------------------------------------------------
 
 class MockWritable {
-  constructor(fileNode) { this._file = fileNode; this._chunks = []; }
-  async write(data) { this._chunks.push(typeof data === 'string' ? data : String(data)); }
-  async close() { this._file.content = this._chunks.join(''); }
+  constructor(fileNode) {
+    this._file = fileNode;
+    this._chunks = [];
+  }
+  async write(data) {
+    this._chunks.push(typeof data === 'string' ? data : String(data));
+  }
+  async close() {
+    this._file.content = this._chunks.join('');
+  }
 }
 
 class MockFileHandle {
-  constructor(node) { this._node = node; this.kind = 'file'; this.name = node.name; }
+  constructor(node) {
+    this._node = node;
+    this.kind = 'file';
+    this.name = node.name;
+  }
   async getFile() {
     return { text: async () => this._node.content, name: this._node.name };
   }
-  async createWritable() { return new MockWritable(this._node); }
+  async createWritable() {
+    return new MockWritable(this._node);
+  }
 }
 
 class MockDirectoryHandle {
   constructor(name, children) {
     this.kind = 'directory';
     this.name = name;
-    this._children = children || new Map();          // name → { type, ... }
+    this._children = children || new Map(); // name → { type, ... }
   }
 
   async getFileHandle(name, opts) {
@@ -52,7 +65,11 @@ class MockDirectoryHandle {
     let node = this._children.get(name);
     if (!node || node.type !== 'directory') {
       if (opts && opts.create) {
-        node = { type: 'directory', name, handle: new MockDirectoryHandle(name) };
+        node = {
+          type: 'directory',
+          name,
+          handle: new MockDirectoryHandle(name),
+        };
         this._children.set(name, node);
       } else {
         throw new DOMException('Directory not found', 'NotFoundError');
@@ -62,7 +79,8 @@ class MockDirectoryHandle {
   }
 
   async removeEntry(name) {
-    if (!this._children.has(name)) throw new DOMException('Entry not found', 'NotFoundError');
+    if (!this._children.has(name))
+      throw new DOMException('Entry not found', 'NotFoundError');
     this._children.delete(name);
   }
 
@@ -85,15 +103,21 @@ vi.mock('../extension/utils.js', () => ({
     try {
       const parsed = new URL(url);
       const base = (parsed.hostname + parsed.pathname)
-        .toLowerCase().replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '');
+        .toLowerCase()
+        .replace(/[^\w]+/g, '-')
+        .replace(/^-+|-+$/g, '');
       let hash = 0;
-      for (let i = 0; i < url.length; i++) hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0;
+      for (let i = 0; i < url.length; i++)
+        hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0;
       return `${base}-${Math.abs(hash).toString(36)}`.substring(0, 80);
-    } catch { throw new Error('generateSlugFromUrl: invalid URL'); }
+    } catch {
+      throw new Error('generateSlugFromUrl: invalid URL');
+    }
   },
 }));
 
-const { FileSystemStorage } = await import('../extension/filesystem-storage.js');
+const { FileSystemStorage } =
+  await import('../extension/filesystem-storage.js');
 
 function makeFsStorage(dirHandle) {
   const fs = new FileSystemStorage();
@@ -129,7 +153,9 @@ function makeChromeStorageMock() {
       store = {};
       return Promise.resolve();
     },
-    _raw() { return store; },
+    _raw() {
+      return store;
+    },
   };
 }
 
@@ -144,14 +170,14 @@ function pinFromUrl(url, pinnedAt) {
 async function hydrateCache(fsStorage, chromeStorage) {
   const settings = await fsStorage.loadSettings();
   const cacheUpdate = {};
-  if (Object.keys(settings).length > 0) cacheUpdate['manifest:settings'] = settings;
+  if (Object.keys(settings).length > 0)
+    cacheUpdate['manifest:settings'] = settings;
 
   // Load lists from self-describing files
   const lists = await fsStorage.loadAllListMetadata();
   cacheUpdate.lists = lists;
 
   if (Object.keys(cacheUpdate).length > 0) await chromeStorage.set(cacheUpdate);
-
 }
 
 // ---------------------------------------------------------------------------
@@ -173,11 +199,21 @@ describe('Persistence round-trip', () => {
 
   it('saveSettings → loadSettings round-trips correctly', async () => {
     const data = {
-      workspace: { mode: 'workspace', listIds: ['list:c1'], autoSnapshot: true },
+      workspace: {
+        mode: 'workspace',
+        listIds: ['list:c1'],
+        autoSnapshot: true,
+      },
       urlBlacklist: ['chrome://', 'edge://'],
-      titleTrimRules: [{ urlPrefix: 'https://github.com', action: 'remove_after_pipe' }],
+      titleTrimRules: [
+        { urlPrefix: 'https://github.com', action: 'remove_after_pipe' },
+      ],
       permanentDeletes: ['https://gone.com'],
-      settings: { captureContent: true, captureAttention: false, archiveQuality: 'high' },
+      settings: {
+        captureContent: true,
+        captureAttention: false,
+        archiveQuality: 'high',
+      },
     };
 
     await fs.saveSettings(data);
@@ -220,14 +256,22 @@ describe('Persistence round-trip', () => {
 
   describe('simulated extension reload', () => {
     const initialSettings = {
-      workspace: { mode: 'workspace', listIds: ['list:c1', 'list:c2'], autoSnapshot: true },
+      workspace: {
+        mode: 'workspace',
+        listIds: ['list:c1', 'list:c2'],
+        autoSnapshot: true,
+      },
       urlBlacklist: ['chrome://', 'edge://', 'https://private.example.com/'],
       titleTrimRules: [
         { urlPrefix: 'https://github.com', action: 'remove_after_pipe' },
         { urlPrefix: 'https://zhihu.com', action: 'remove_parens' },
       ],
       permanentDeletes: ['https://gone.com', 'https://alsoGone.com'],
-      settings: { captureContent: true, captureAttention: true, archiveQuality: 'medium' },
+      settings: {
+        captureContent: true,
+        captureAttention: true,
+        archiveQuality: 'medium',
+      },
     };
 
     // List metadata in self-describing files
@@ -273,9 +317,7 @@ describe('Persistence round-trip', () => {
       await chromeStorage.clear();
       await hydrateCache(fs, chromeStorage);
 
-      const cached = await chromeStorage.get([
-        'manifest:settings', 'lists',
-      ]);
+      const cached = await chromeStorage.get(['manifest:settings', 'lists']);
 
       expect(cached['manifest:settings']).toEqual(initialSettings);
       expect(cached.lists).toEqual(listMeta);
@@ -307,7 +349,14 @@ describe('Persistence round-trip', () => {
 
     expect(loadedPins).toEqual([pinFromUrl('https://a.com', 100)]);
     expect(loadedSettings.trimRules).toEqual(['rule1']);
-    expect(meta).toEqual([{ slug: 'c1', name: 'Test', pins: [pinFromUrl('https://a.com', 100)], rules: [] }]);
+    expect(meta).toEqual([
+      {
+        slug: 'c1',
+        name: 'Test',
+        pins: [pinFromUrl('https://a.com', 100)],
+        rules: [],
+      },
+    ]);
   });
 
   // ---- Per-list pin isolation (regression: lazy pins + bulk save deleted other files) ----
@@ -317,9 +366,7 @@ describe('Persistence round-trip', () => {
       pinFromUrl('https://a.com', 100),
       pinFromUrl('https://b.com', 200),
     ];
-    const PINS_C2 = [
-      pinFromUrl('https://x.com', 300),
-    ];
+    const PINS_C2 = [pinFromUrl('https://x.com', 300)];
     const PINS_C3 = [
       pinFromUrl('https://y.com', 400),
       pinFromUrl('https://z.com', 500),

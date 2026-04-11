@@ -1,9 +1,20 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, getSlugForUrl, openHelperPage, openOptionsPage, waitForListView, waitForVisitRecorded } from './helpers.js';
+import {
+  resetAndSeed,
+  getSlugForUrl,
+  openHelperPage,
+  openOptionsPage,
+  waitForListView,
+  waitForVisitRecorded,
+} from './helpers.js';
 
 // Category 4: Full user journeys — multi-step flows combining several actions
 test.describe('User journeys', () => {
-  test('create list → pin page → rename list → verify in options sidebar and list view', async ({ extContext, extensionId, setupDir }) => {
+  test('create list → pin page → rename list → verify in options sidebar and list view', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const url = 'https://example.com/journey-page';
     const slug = getSlugForUrl(url);
@@ -11,33 +22,59 @@ test.describe('User journeys', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: `pages/${slug}.json`, data: {
-        slug, url, title: 'Journey Page', timestamp: now, parentIds: [], childIds: [],
-      }},
-      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'visit_page', url, title: 'Journey Page' },
-      ]},
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url,
+          title: 'Journey Page',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+      {
+        path: 'data/logs/test-device/2026-03-01.jsonl',
+        lines: [
+          { timestamp: now, action: 'visit_page', url, title: 'Journey Page' },
+        ],
+      },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
 
     // Step 1: Create a new list (returns generated listId)
     const createResult = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'saveListMeta', name: 'My Journey' })
+      chrome.runtime.sendMessage({
+        action: 'saveListMeta',
+        name: 'My Journey',
+      }),
     );
     const listId = createResult.listId;
     expect(listId).toBeTruthy();
 
     // Step 2: Pin the page to it
-    const pinResult = await helper.evaluate(({ lid, u }) =>
-      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: lid, url: u })
-    , { lid: listId, u: url });
+    const pinResult = await helper.evaluate(
+      ({ lid, u }) =>
+        chrome.runtime.sendMessage({
+          action: 'toggleListPin',
+          listId: lid,
+          url: u,
+        }),
+      { lid: listId, u: url },
+    );
     expect(pinResult.pinned).toBe(true);
 
     // Step 3: Rename the list
-    await helper.evaluate((lid) =>
-      chrome.runtime.sendMessage({ action: 'saveListMeta', listId: lid, name: 'Renamed Journey' })
-    , listId);
+    await helper.evaluate(
+      (lid) =>
+        chrome.runtime.sendMessage({
+          action: 'saveListMeta',
+          listId: lid,
+          name: 'Renamed Journey',
+        }),
+      listId,
+    );
     await helper.close();
 
     // Step 4: Verify in options page
@@ -56,7 +93,12 @@ test.describe('User journeys', () => {
     await options.close();
   });
 
-  test('navigate parent → child → pin child → bidirectional relations', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('navigate parent → child → pin child → bidirectional relations', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     localServer.addPage('/j-parent', {
       title: 'Journey Parent',
       body: '<a href="/j-child">Go to child</a>',
@@ -75,15 +117,32 @@ test.describe('User journeys', () => {
     // Seed page entities so visit_page can enrich them with referrer relations
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
-      { path: `pages/${parentSlug}.json`, data: {
-        slug: parentSlug, url: parentUrl, title: 'Journey Parent', timestamp: now,
-        parentIds: [], childIds: [],
-      }},
-      { path: `pages/${childSlug}.json`, data: {
-        slug: childSlug, url: childUrl, title: 'Journey Child', timestamp: now,
-        parentIds: [], childIds: [],
-      }},
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
+      {
+        path: `pages/${parentSlug}.json`,
+        data: {
+          slug: parentSlug,
+          url: parentUrl,
+          title: 'Journey Parent',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+      {
+        path: `pages/${childSlug}.json`,
+        data: {
+          slug: childSlug,
+          url: childUrl,
+          title: 'Journey Child',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
     ]);
 
     // Navigate parent → child via link click
@@ -96,13 +155,15 @@ test.describe('User journeys', () => {
     const helper = await openHelperPage(extContext, extensionId);
     await waitForVisitRecorded(helper, page, childUrl, parentUrl);
 
-    const childRels = await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
-    , childUrl);
+    const childRels = await helper.evaluate(
+      (u) => chrome.runtime.sendMessage({ action: 'getPageRelations', url: u }),
+      childUrl,
+    );
 
-    const parentRels = await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
-    , parentUrl);
+    const parentRels = await helper.evaluate(
+      (u) => chrome.runtime.sendMessage({ action: 'getPageRelations', url: u }),
+      parentUrl,
+    );
     await helper.close();
     await page.close();
 
@@ -113,7 +174,11 @@ test.describe('User journeys', () => {
 
 // Category 5: Empty/edge state resilience
 test.describe('Empty and edge states', () => {
-  test('fresh state — options explore renders without error', async ({ extContext, extensionId, setupDir }) => {
+  test('fresh state — options explore renders without error', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
@@ -132,7 +197,11 @@ test.describe('Empty and edge states', () => {
     await options.close();
   });
 
-  test('pin a never-visited URL — creates page entity without crash', async ({ extContext, extensionId, setupDir }) => {
+  test('pin a never-visited URL — creates page entity without crash', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const url = 'https://example.com/never-visited';
     const slug = getSlugForUrl(url);
@@ -140,29 +209,54 @@ test.describe('Empty and edge states', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [] } },
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } },
+      },
       // No history, no page checkpoint — the URL has never been seen
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
 
     // Pin should succeed even with no prior data
-    const r = await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'reading', url: u })
-    , url);
+    const r = await helper.evaluate(
+      (u) =>
+        chrome.runtime.sendMessage({
+          action: 'toggleListPin',
+          listId: 'reading',
+          url: u,
+        }),
+      url,
+    );
     expect(r.success).toBe(true);
     expect(r.pinned).toBe(true);
 
     // Page entity should have been created by pin_to_list effectOf
-    const pageResult = await helper.evaluate((key) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key })
-    , `page:${slug}`);
+    const pageResult = await helper.evaluate(
+      (key) => chrome.runtime.sendMessage({ action: 'readCacheable', key }),
+      `page:${slug}`,
+    );
 
     // Pin should be retrievable
     const listResult = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     await helper.close();
 
@@ -171,17 +265,32 @@ test.describe('Empty and edge states', () => {
     expect((listResult.value?.pins || []).length).toBe(1);
   });
 
-  test('empty list renders list view without error', async ({ extContext, extensionId, setupDir }) => {
+  test('empty list renders list view without error', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: {
-        timestamp: now, tree: [{ id: 'list:empty' }],
-      }},
-      { path: 'lists/empty.json', data: {
-        slug: 'empty', name: 'Empty List', owner: 'test-device', timestamp: now, pins: [],
-      }},
+      {
+        path: 'manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:empty' }],
+        },
+      },
+      {
+        path: 'lists/empty.json',
+        data: {
+          slug: 'empty',
+          name: 'Empty List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -198,7 +307,11 @@ test.describe('Empty and edge states', () => {
     await options.close();
   });
 
-  test('URL with query params and fragment — pin and unpin round-trip', async ({ extContext, extensionId, setupDir }) => {
+  test('URL with query params and fragment — pin and unpin round-trip', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const url = 'https://example.com/page?id=123&lang=en#section-2';
     const slug = getSlugForUrl(url);
@@ -206,37 +319,78 @@ test.describe('Empty and edge states', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [] } },
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
-      { path: `pages/${slug}.json`, data: {
-        slug, url, title: 'Complex URL Page', timestamp: now, parentIds: [], childIds: [],
-      }},
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } },
+      },
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url,
+          title: 'Complex URL Page',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
 
     // Pin
-    const pin = await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'reading', url: u })
-    , url);
+    const pin = await helper.evaluate(
+      (u) =>
+        chrome.runtime.sendMessage({
+          action: 'toggleListPin',
+          listId: 'reading',
+          url: u,
+        }),
+      url,
+    );
     expect(pin.pinned).toBe(true);
 
     // Verify pinned
     let listResult = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     expect((listResult.value?.pins || []).length).toBe(1);
 
     // Unpin
-    const unpin = await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'reading', url: u })
-    , url);
+    const unpin = await helper.evaluate(
+      (u) =>
+        chrome.runtime.sendMessage({
+          action: 'toggleListPin',
+          listId: 'reading',
+          url: u,
+        }),
+      url,
+    );
     expect(unpin.pinned).toBe(false);
 
     // Verify unpinned
     listResult = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     await helper.close();
     expect((listResult.value?.pins || []).length).toBe(0);
@@ -245,7 +399,11 @@ test.describe('Empty and edge states', () => {
 
 // Category 6: Unicode and special characters
 test.describe('Unicode and special characters', () => {
-  test('CJK title in history shows correctly in explore', async ({ extContext, extensionId, setupDir }) => {
+  test('CJK title in history shows correctly in explore', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const url = 'https://example.com/cjk-page';
     const title = '这是一个中文标题 — テスト';
@@ -254,41 +412,66 @@ test.describe('Unicode and special characters', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: `data/logs/test-device/${today}.jsonl`, lines: [
-        { timestamp: now, action: 'visit_page', url, title },
-      ]},
+      {
+        path: `data/logs/test-device/${today}.jsonl`,
+        lines: [{ timestamp: now, action: 'visit_page', url, title }],
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
     await options.waitForSelector('.result-row', { timeout: 10000 });
-    const displayedTitle = await options.$eval('.result-title', el => el.textContent.trim());
+    const displayedTitle = await options.$eval('.result-title', (el) =>
+      el.textContent.trim(),
+    );
     expect(displayedTitle).toBe(title);
     await options.close();
   });
 
-  test('list with unicode name renders in sidebar', async ({ extContext, extensionId, setupDir }) => {
+  test('list with unicode name renders in sidebar', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const name = '阅读清单 📚';
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: {
-        timestamp: now, tree: [{ id: 'list:unicode-list' }],
-      }},
-      { path: 'lists/unicode-list.json', data: {
-        slug: 'unicode-list', name, owner: 'test-device', timestamp: now, pins: [],
-      }},
+      {
+        path: 'manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:unicode-list' }],
+        },
+      },
+      {
+        path: 'lists/unicode-list.json',
+        data: {
+          slug: 'unicode-list',
+          name,
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
-    const listItem = options.locator('.sidebar-item[data-list-id="unicode-list"]');
+    const listItem = options.locator(
+      '.sidebar-item[data-list-id="unicode-list"]',
+    );
     await expect(listItem).toBeVisible({ timeout: 5000 });
     await expect(listItem.locator('.label')).toHaveText(name);
     await options.close();
   });
 
-  test('page visit via content script with CJK title is recorded correctly', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('page visit via content script with CJK title is recorded correctly', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     localServer.addPage('/cjk-live', {
       title: '知乎专栏 — 深度好文',
       body: '<p>Content</p>',
@@ -296,7 +479,10 @@ test.describe('Unicode and special characters', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
     ]);
 
     const page = await extContext.newPage();
@@ -307,18 +493,27 @@ test.describe('Unicode and special characters', () => {
     const today = new Date().toISOString().slice(0, 10);
 
     // Wait for the visit to be recorded
-    await helper.waitForFunction(({ u, dateKey }) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dateKey })
-        .then(r => r.value && r.value.some(e => e.url === u && e.title))
-    , { u: url, dateKey: today }, { timeout: 5000 });
+    await helper.waitForFunction(
+      ({ u, dateKey }) =>
+        chrome.runtime
+          .sendMessage({ action: 'readCacheable', key: 'log:' + dateKey })
+          .then((r) => r.value && r.value.some((e) => e.url === u && e.title)),
+      { u: url, dateKey: today },
+      { timeout: 5000 },
+    );
 
-    const hist = await helper.evaluate(({ dateKey }) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dateKey })
-    , { dateKey: today });
+    const hist = await helper.evaluate(
+      ({ dateKey }) =>
+        chrome.runtime.sendMessage({
+          action: 'readCacheable',
+          key: 'log:' + dateKey,
+        }),
+      { dateKey: today },
+    );
     await helper.close();
     await page.close();
 
-    const entry = hist.value.find(e => e.url === url && e.title);
+    const entry = hist.value.find((e) => e.url === url && e.title);
     expect(entry.title).toBe('知乎专栏 — 深度好文');
   });
 });

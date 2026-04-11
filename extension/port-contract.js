@@ -36,11 +36,11 @@ export const PORT_CONTRACT = {
   },
   getSnapshotUrl: {
     request: ['slug', 'timestamp'],
-    response: ['url'],  // absent on success:false
+    response: ['url'], // absent on success:false
   },
   getSnapshotHtml: {
     request: ['slug', 'timestamp'],
-    response: ['html'],  // absent on success:false
+    response: ['html'], // absent on success:false
   },
   deleteSnapshot: {
     request: ['slug', 'timestamp'],
@@ -180,7 +180,7 @@ export const PORT_CONTRACT = {
   // ── Sync ──
   loadSyncManifest: {
     request: ['key'],
-    response: ['data'],  // null when file not found
+    response: ['data'], // null when file not found
   },
   loadRemoteLogEntries: {
     request: ['localDeviceId'],
@@ -224,7 +224,7 @@ export const PORT_CONTRACT = {
   // ── Sandbox ──
   executeSandboxFn: {
     request: ['fnSource', 'pageData'],
-    response: ['score'],
+    response: ['match'],
   },
 
   // ── Test Helpers ──

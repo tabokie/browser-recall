@@ -28,18 +28,25 @@ function bookmark(title, url) {
 describe('parseBookmarkHtml', () => {
   it('parses a basic tree with one folder and bookmarks', () => {
     const html = bookmarkFile(
-      folder('Dev',
+      folder(
+        'Dev',
         bookmark('GitHub', 'https://github.com'),
         bookmark('MDN', 'https://developer.mozilla.org'),
-      )
+      ),
     );
     const result = parseBookmarkHtml(html);
     expect(result.children).toHaveLength(1);
     const dev = result.children[0];
     expect(dev.title).toBe('Dev');
     expect(dev.bookmarks).toHaveLength(2);
-    expect(dev.bookmarks[0]).toEqual({ url: 'https://github.com', title: 'GitHub' });
-    expect(dev.bookmarks[1]).toEqual({ url: 'https://developer.mozilla.org', title: 'MDN' });
+    expect(dev.bookmarks[0]).toEqual({
+      url: 'https://github.com',
+      title: 'GitHub',
+    });
+    expect(dev.bookmarks[1]).toEqual({
+      url: 'https://developer.mozilla.org',
+      title: 'MDN',
+    });
     expect(dev.bookmarkCount).toBe(2);
     expect(dev.subfolderCount).toBe(0);
     expect(dev.children).toHaveLength(0);
@@ -48,15 +55,15 @@ describe('parseBookmarkHtml', () => {
 
   it('parses nested folders (3 levels deep)', () => {
     const html = bookmarkFile(
-      folder('Top',
-        folder('Middle',
-          folder('Bottom',
-            bookmark('Deep Link', 'https://example.com/deep'),
-          ),
+      folder(
+        'Top',
+        folder(
+          'Middle',
+          folder('Bottom', bookmark('Deep Link', 'https://example.com/deep')),
           bookmark('Mid Link', 'https://example.com/mid'),
         ),
         bookmark('Top Link', 'https://example.com/top'),
-      )
+      ),
     );
     const result = parseBookmarkHtml(html);
     const top = result.children[0];
@@ -82,7 +89,7 @@ describe('parseBookmarkHtml', () => {
   it('handles empty folders', () => {
     const html = bookmarkFile(
       folder('Empty Folder') +
-      folder('Has Links', bookmark('A', 'https://a.com'))
+        folder('Has Links', bookmark('A', 'https://a.com')),
     );
     const result = parseBookmarkHtml(html);
     expect(result.children).toHaveLength(2);
@@ -95,7 +102,8 @@ describe('parseBookmarkHtml', () => {
 
   it('filters non-web URLs and puts them in skipped', () => {
     const html = bookmarkFile(
-      folder('Mixed',
+      folder(
+        'Mixed',
         bookmark('Good', 'https://example.com'),
         bookmark('JS Bookmarklet', 'javascript:void(0)'),
         bookmark('Chrome Internal', 'chrome://settings'),
@@ -103,7 +111,7 @@ describe('parseBookmarkHtml', () => {
         bookmark('Data URI', 'data:text/html,hello'),
         bookmark('File', 'file:///home/user/doc.pdf'),
         bookmark('HTTP', 'http://insecure.com'),
-      )
+      ),
     );
     const result = parseBookmarkHtml(html);
     const mixed = result.children[0];
@@ -113,7 +121,7 @@ describe('parseBookmarkHtml', () => {
     expect(mixed.bookmarks[1].url).toBe('http://insecure.com');
     // The rest are skipped
     expect(mixed.skipped).toHaveLength(5);
-    expect(mixed.skipped.map(s => s.url)).toEqual([
+    expect(mixed.skipped.map((s) => s.url)).toEqual([
       'javascript:void(0)',
       'chrome://settings',
       'chrome-extension://abc123/page.html',
@@ -130,10 +138,11 @@ describe('parseBookmarkHtml', () => {
 
   it('handles missing href attribute', () => {
     const html = bookmarkFile(
-      folder('Bad',
+      folder(
+        'Bad',
         '<DT><A>No Href</A>',
         bookmark('Good', 'https://example.com'),
-      )
+      ),
     );
     const result = parseBookmarkHtml(html);
     const bad = result.children[0];
@@ -145,10 +154,11 @@ describe('parseBookmarkHtml', () => {
 
   it('handles empty href attribute', () => {
     const html = bookmarkFile(
-      folder('Bad',
+      folder(
+        'Bad',
         '<DT><A HREF="">Empty</A>',
         bookmark('Good', 'https://example.com'),
-      )
+      ),
     );
     const result = parseBookmarkHtml(html);
     const bad = result.children[0];
@@ -160,9 +170,10 @@ describe('parseBookmarkHtml', () => {
   it('preserves special characters in titles', () => {
     // Real exports entity-encode angle brackets, so use &lt; &gt;
     const html = bookmarkFile(
-      folder('Café &amp; "Quotes" &lt;Tags&gt;',
+      folder(
+        'Café &amp; "Quotes" &lt;Tags&gt;',
         bookmark('Über &amp; Größe', 'https://example.com'),
-      )
+      ),
     );
     const result = parseBookmarkHtml(html);
     const folder_ = result.children[0];
@@ -172,9 +183,7 @@ describe('parseBookmarkHtml', () => {
 
   it('handles minimal file with a single bookmark in root', () => {
     // Some exports put bookmarks directly at root level (no folder)
-    const html = bookmarkFile(
-      bookmark('Lone Bookmark', 'https://lone.com')
-    );
+    const html = bookmarkFile(bookmark('Lone Bookmark', 'https://lone.com'));
     const result = parseBookmarkHtml(html);
     // Root-level bookmarks go into result.bookmarks
     expect(result.bookmarks).toHaveLength(1);
@@ -183,13 +192,9 @@ describe('parseBookmarkHtml', () => {
 
   it('handles multiple top-level folders (Chrome structure)', () => {
     const html = bookmarkFile(
-      folder('Bookmarks Bar',
-        bookmark('A', 'https://a.com'),
-      ) +
-      folder('Other Bookmarks',
-        bookmark('B', 'https://b.com'),
-      ) +
-      folder('Mobile Bookmarks')
+      folder('Bookmarks Bar', bookmark('A', 'https://a.com')) +
+        folder('Other Bookmarks', bookmark('B', 'https://b.com')) +
+        folder('Mobile Bookmarks'),
     );
     const result = parseBookmarkHtml(html);
     expect(result.children).toHaveLength(3);
@@ -215,20 +220,21 @@ describe('parseBookmarkHtml', () => {
 
   it('computes recursive bookmarkCount across nested folders', () => {
     const html = bookmarkFile(
-      folder('Root',
+      folder(
+        'Root',
         bookmark('R1', 'https://r1.com'),
         bookmark('R2', 'https://r2.com'),
-        folder('Child A',
+        folder(
+          'Child A',
           bookmark('A1', 'https://a1.com'),
-          folder('Grandchild',
+          folder(
+            'Grandchild',
             bookmark('G1', 'https://g1.com'),
             bookmark('G2', 'https://g2.com'),
           ),
         ),
-        folder('Child B',
-          bookmark('B1', 'https://b1.com'),
-        ),
-      )
+        folder('Child B', bookmark('B1', 'https://b1.com')),
+      ),
     );
     const result = parseBookmarkHtml(html);
     const root = result.children[0];
@@ -242,10 +248,11 @@ describe('parseBookmarkHtml', () => {
 
   it('handles Firefox place: URLs as skipped', () => {
     const html = bookmarkFile(
-      folder('Firefox',
+      folder(
+        'Firefox',
         bookmark('Recent Tags', 'place:type=6&sort=14&maxResults=10'),
         bookmark('Good', 'https://example.com'),
-      )
+      ),
     );
     const result = parseBookmarkHtml(html);
     const ff = result.children[0];
@@ -255,9 +262,7 @@ describe('parseBookmarkHtml', () => {
   });
 
   it('returns root-level title from the file', () => {
-    const html = bookmarkFile(
-      folder('A', bookmark('X', 'https://x.com'))
-    );
+    const html = bookmarkFile(folder('A', bookmark('X', 'https://x.com')));
     const result = parseBookmarkHtml(html);
     expect(result.title).toBe('Bookmarks');
   });

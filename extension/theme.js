@@ -13,7 +13,10 @@ function resolveTheme(pref) {
 }
 
 export async function applyTheme() {
-  const { theme, colorScheme } = await chrome.storage.session.get(['theme', 'colorScheme']);
+  const { theme, colorScheme } = await chrome.storage.session.get([
+    'theme',
+    'colorScheme',
+  ]);
   const effective = theme || 'system';
   document.documentElement.setAttribute('data-theme', resolveTheme(effective));
   if (colorScheme && colorScheme !== 'amber') {

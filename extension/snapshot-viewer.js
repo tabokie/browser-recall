@@ -16,7 +16,9 @@ if (!slug || !ts) {
 
 // Fetch snapshot HTML content from background → offscreen
 const htmlResp = await chrome.runtime.sendMessage({
-  action: 'getSnapshotHtml', slug, timestamp: parseInt(ts)
+  action: 'getSnapshotHtml',
+  slug,
+  timestamp: parseInt(ts),
 });
 if (!htmlResp?.success) {
   document.body.textContent = 'Snapshot not found.';
@@ -37,13 +39,18 @@ if (title) document.title = title;
 // After iframe loads, apply highlights and wire up interactivity
 frame.addEventListener('load', async () => {
   try {
-    const resp = await chrome.runtime.sendMessage({ action: 'loadPageNotes', slug });
+    const resp = await chrome.runtime.sendMessage({
+      action: 'loadPageNotes',
+      slug,
+    });
     if (!resp?.success || !resp?.notes) return;
 
     const doc = frame.contentDocument;
     for (const note of resp.notes) {
       if (note.excerpt === null) continue;
-      const quotes = Array.isArray(note.excerpt) ? note.excerpt : [note.excerpt];
+      const quotes = Array.isArray(note.excerpt)
+        ? note.excerpt
+        : [note.excerpt];
       for (const text of quotes) {
         const mark = highlightInDoc(doc, text, note.slug);
         if (mark) attachMarkClickHandler(doc, mark);
@@ -54,30 +61,43 @@ frame.addEventListener('load', async () => {
     doc.addEventListener('mouseup', () => {
       const selection = doc.getSelection();
       const selectedText = selection?.toString().trim();
-      if (!selectedText || selectedText.length === 0 || selection.rangeCount === 0) return;
+      if (
+        !selectedText ||
+        selectedText.length === 0 ||
+        selection.rangeCount === 0
+      )
+        return;
       // Ignore if selection is inside an existing highlight
       const anchor = selection.anchorNode;
-      if (anchor && (anchor.nodeType === 3 ? anchor.parentElement : anchor)?.closest?.('mark')) return;
+      if (
+        anchor &&
+        (anchor.nodeType === 3 ? anchor.parentElement : anchor)?.closest?.(
+          'mark',
+        )
+      )
+        return;
 
       const range = selection.getRangeAt(0);
-      chrome.runtime.sendMessage({
-        action: 'createNote',
-        pageSlug: slug,
-        url: '', // resolved from page entity by background
-        excerpt: selectedText,
-        note: '',
-        cssPath: null,
-      }).then(resp => {
-        if (!resp?.success) return;
-        const noteSlug = resp.noteSlug;
-        const mark = wrapRangeWithMark(doc, range, selectedText);
-        if (mark && noteSlug) {
-          mark.dataset.noteSlug = noteSlug;
-          attachMarkClickHandler(doc, mark);
-          showHighlightEditOverlay(doc, mark, selectedText, noteSlug, '');
-        }
-        selection.removeAllRanges();
-      });
+      chrome.runtime
+        .sendMessage({
+          action: 'createNote',
+          pageSlug: slug,
+          url: '', // resolved from page entity by background
+          excerpt: selectedText,
+          note: '',
+          cssPath: null,
+        })
+        .then((resp) => {
+          if (!resp?.success) return;
+          const noteSlug = resp.noteSlug;
+          const mark = wrapRangeWithMark(doc, range, selectedText);
+          if (mark && noteSlug) {
+            mark.dataset.noteSlug = noteSlug;
+            attachMarkClickHandler(doc, mark);
+            showHighlightEditOverlay(doc, mark, selectedText, noteSlug, '');
+          }
+          selection.removeAllRanges();
+        });
     });
   } catch (e) {
     logDebug('[snapshot-viewer] highlight injection failed:', e);
@@ -95,12 +115,16 @@ function highlightInDoc(doc, text, noteSlug) {
 
 function wrapRangeWithMark(doc, range, text, noteSlug) {
   const mark = doc.createElement('mark');
-  mark.style.cssText = 'background: #fff3b0; border-bottom: 2px solid #f0c000; cursor: pointer;';
+  mark.style.cssText =
+    'background: #fff3b0; border-bottom: 2px solid #f0c000; cursor: pointer;';
   mark.dataset.highlightText = text;
   if (noteSlug) mark.dataset.noteSlug = noteSlug;
 
   if (range.startContainer === range.endContainer) {
-    try { range.surroundContents(mark); return mark; } catch {}
+    try {
+      range.surroundContents(mark);
+      return mark;
+    } catch {}
   }
   try {
     const fragment = range.extractContents();
@@ -134,15 +158,28 @@ function attachMarkClickHandler(doc, mark) {
       return;
     }
 
-    chrome.runtime.sendMessage({ action: 'loadPageNotes', slug }).then(resp => {
-      if (resp?.success === false) return;
-      const notes = resp?.notes || [];
-      const match = notes.find(n => n.slug === noteSlug);
-      const displayText = match ? (Array.isArray(match.excerpt) ? match.excerpt.join(' ') : match.excerpt) : text;
-      showHighlightEditOverlay(doc, mark, displayText, noteSlug, match?.note || '');
-    }).catch(() => {
-      showHighlightEditOverlay(doc, mark, text, noteSlug, '');
-    });
+    chrome.runtime
+      .sendMessage({ action: 'loadPageNotes', slug })
+      .then((resp) => {
+        if (resp?.success === false) return;
+        const notes = resp?.notes || [];
+        const match = notes.find((n) => n.slug === noteSlug);
+        const displayText = match
+          ? Array.isArray(match.excerpt)
+            ? match.excerpt.join(' ')
+            : match.excerpt
+          : text;
+        showHighlightEditOverlay(
+          doc,
+          mark,
+          displayText,
+          noteSlug,
+          match?.note || '',
+        );
+      })
+      .catch(() => {
+        showHighlightEditOverlay(doc, mark, text, noteSlug, '');
+      });
   });
 }
 
@@ -193,8 +230,8 @@ function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
   const host = doc.createElement('div');
   host.id = 'portal-highlight-overlay';
   host.style.cssText = 'position: absolute; z-index: 2147483647;';
-  host.style.left = (rect.left + win.scrollX) + 'px';
-  host.style.top = (rect.bottom + win.scrollY + 4) + 'px';
+  host.style.left = rect.left + win.scrollX + 'px';
+  host.style.top = rect.bottom + win.scrollY + 4 + 'px';
 
   const shadow = host.attachShadow({ mode: 'closed' });
   shadow.innerHTML = `<style>${OVERLAY_STYLE}</style>${OVERLAY_HTML}`;
@@ -208,12 +245,15 @@ function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
 
   function autoResize() {
     textarea.style.height = '28px';
-    if (textarea.scrollHeight > 28) textarea.style.height = textarea.scrollHeight + 'px';
+    if (textarea.scrollHeight > 28)
+      textarea.style.height = textarea.scrollHeight + 'px';
   }
   if (existingNote) autoResize();
 
   textarea.focus();
-  textarea.addEventListener('input', () => { autoResize(); });
+  textarea.addEventListener('input', () => {
+    autoResize();
+  });
 
   let saved = false;
   function saveAndClose() {
@@ -221,11 +261,16 @@ function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
     saved = true;
     const note = textarea.value;
     if (note !== existingNote && noteSlug) {
-      chrome.runtime.sendMessage({
-        action: 'updateNote', noteSlug, note
-      }).then(resp => {
-        if (resp?.noteSlug) mark.dataset.noteSlug = resp.noteSlug;
-      }).catch(() => {});
+      chrome.runtime
+        .sendMessage({
+          action: 'updateNote',
+          noteSlug,
+          note,
+        })
+        .then((resp) => {
+          if (resp?.noteSlug) mark.dataset.noteSlug = resp.noteSlug;
+        })
+        .catch(() => {});
     }
     host.remove();
   }
@@ -233,7 +278,8 @@ function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
   deleteBtn.addEventListener('click', (ev) => {
     ev.stopPropagation();
     unwrapHighlightMark(mark);
-    if (noteSlug) chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug });
+    if (noteSlug)
+      chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug });
     host.remove();
   });
 

@@ -55,28 +55,42 @@ async function dumpState(ctx, extensionId) {
   const page = await ctx.newPage();
   try {
     await page.goto(`chrome-extension://${extensionId}/test-helper.html`);
-    await page.waitForFunction(() => typeof chrome !== 'undefined' && chrome.runtime);
+    await page.waitForFunction(
+      () => typeof chrome !== 'undefined' && chrome.runtime,
+    );
     return await page.evaluate(async () => {
-      const { generateSlugFromUrl } = await import(chrome.runtime.getURL('utils.js'));
+      const { generateSlugFromUrl } = await import(
+        chrome.runtime.getURL('utils.js')
+      );
       const send = (obj) => chrome.runtime.sendMessage(obj);
-      const read = async (key) => (await send({ action: 'readCacheable', key }))?.value;
+      const read = async (key) =>
+        (await send({ action: 'readCacheable', key }))?.value;
 
-      const listOrderEntity = (await read('manifest:list-order')) || { tree: [] };
+      const listOrderEntity = (await read('manifest:list-order')) || {
+        tree: [],
+      };
       const settings = await read('manifest:settings');
       const orphaned = (await read('manifest:orphaned')) || [];
 
       // Read recent logs (today + yesterday) to discover page slugs.
       // Pages have no "list all" API — slugs come from log entries.
       const today = new Date().toISOString().slice(0, 10);
-      const yesterday = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+      const yesterday = new Date(Date.now() - 86400_000)
+        .toISOString()
+        .slice(0, 10);
       const log = (await read(`log:${today}`)) || [];
-      const yesterdayLog = today !== yesterday ? ((await read(`log:${yesterday}`)) || []) : [];
+      const yesterdayLog =
+        today !== yesterday ? (await read(`log:${yesterday}`)) || [] : [];
       const allLogEntries = [...yesterdayLog, ...log];
 
       const pageSlugs = new Set();
       for (const entry of allLogEntries) {
         if (entry.url) {
-          try { pageSlugs.add(generateSlugFromUrl(entry.url)); } catch { /* skip bad URLs */ }
+          try {
+            pageSlugs.add(generateSlugFromUrl(entry.url));
+          } catch {
+            /* skip bad URLs */
+          }
         }
       }
 
@@ -90,10 +104,13 @@ async function dumpState(ctx, extensionId) {
       // Notes (from page childIds)
       const notes = {};
       for (const pg of Object.values(pages)) {
-        for (const cid of (pg.childIds || [])) {
+        for (const cid of pg.childIds || []) {
           if (cid.startsWith('note:')) {
             const ns = cid.slice(5);
-            if (!notes[ns]) { const v = await read(`note:${ns}`); if (v) notes[ns] = v; }
+            if (!notes[ns]) {
+              const v = await read(`note:${ns}`);
+              if (v) notes[ns] = v;
+            }
           }
         }
       }
@@ -115,7 +132,15 @@ async function dumpState(ctx, extensionId) {
         if (v) lists[lid] = v;
       }
 
-      return { pages, notes, lists, settings, orphaned, listOrder: tree, log: allLogEntries };
+      return {
+        pages,
+        notes,
+        lists,
+        settings,
+        orphaned,
+        listOrder: tree,
+        log: allLogEntries,
+      };
     });
   } finally {
     await page.close();
@@ -127,10 +152,13 @@ async function dumpState(ctx, extensionId) {
 function diffObjects(label, before, after) {
   const lines = [];
   const allKeys = new Set([...Object.keys(before), ...Object.keys(after)]);
-  const added = [], removed = [], modified = [];
+  const added = [],
+    removed = [],
+    modified = [];
 
   for (const key of allKeys) {
-    const inBefore = key in before, inAfter = key in after;
+    const inBefore = key in before,
+      inAfter = key in after;
     if (!inBefore) {
       added.push({ key, value: after[key] });
     } else if (!inAfter) {
@@ -156,7 +184,8 @@ function diffObjects(label, before, after) {
     lines.push(`  ~ [modified] ${title}`);
     const fields = new Set([...Object.keys(b || {}), ...Object.keys(a || {})]);
     for (const f of fields) {
-      const bv = JSON.stringify(b?.[f]), av = JSON.stringify(a?.[f]);
+      const bv = JSON.stringify(b?.[f]),
+        av = JSON.stringify(a?.[f]);
       if (bv !== av) lines.push(`      ${f}: ${bv} → ${av}`);
     }
   }
@@ -179,7 +208,9 @@ function printDiff(before, after) {
 
   // New log entries
   const beforeLogJson = new Set((before.log || []).map(JSON.stringify));
-  const newEntries = (after.log || []).filter(e => !beforeLogJson.has(JSON.stringify(e)));
+  const newEntries = (after.log || []).filter(
+    (e) => !beforeLogJson.has(JSON.stringify(e)),
+  );
   if (newEntries.length) {
     lines.push(`\n--- New log entries (${newEntries.length}) ---`);
     for (const e of newEntries) {
@@ -196,15 +227,16 @@ function printDiff(before, after) {
 
   // Also print raw JSON of changes for detailed analysis
   const rawDiff = {};
-  if (Object.keys(after.pages).length !== Object.keys(before.pages).length ||
-      JSON.stringify(after.pages) !== JSON.stringify(before.pages))
+  if (
+    Object.keys(after.pages).length !== Object.keys(before.pages).length ||
+    JSON.stringify(after.pages) !== JSON.stringify(before.pages)
+  )
     rawDiff.pages = { before: before.pages, after: after.pages };
   if (JSON.stringify(after.notes) !== JSON.stringify(before.notes))
     rawDiff.notes = { before: before.notes, after: after.notes };
   if (JSON.stringify(after.lists) !== JSON.stringify(before.lists))
     rawDiff.lists = { before: before.lists, after: after.lists };
-  if (newEntries.length)
-    rawDiff.newLogEntries = newEntries;
+  if (newEntries.length) rawDiff.newLogEntries = newEntries;
 
   if (Object.keys(rawDiff).length) {
     console.log('RAW_DIFF_JSON_START');
@@ -236,10 +268,12 @@ for (let attempt = 0; attempt < 3; attempt++) {
 
     // Health check: load a page and confirm chrome.runtime works (same as E2E fixtures).
     const probe = await ctx.newPage();
-    await probe.goto(`chrome-extension://${extensionId}/test-helper.html`, { timeout: 5000 });
+    await probe.goto(`chrome-extension://${extensionId}/test-helper.html`, {
+      timeout: 5000,
+    });
     await probe.waitForFunction(
       () => typeof chrome !== 'undefined' && chrome.runtime,
-      { timeout: 5000 }
+      { timeout: 5000 },
     );
     await probe.close();
     break;
@@ -247,13 +281,13 @@ for (let attempt = 0; attempt < 3; attempt++) {
     console.warn(`Launch attempt ${attempt + 1} failed: ${e.message}`);
     await ctx?.close().catch(() => {});
     if (attempt >= 2) throw e;
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 500));
   }
 }
 console.log(`Extension loaded: ${extensionId}`);
 
 // Wait for onInstalled handler to finish (it may auto-open options.html).
-await new Promise(r => setTimeout(r, 1000));
+await new Promise((r) => setTimeout(r, 1000));
 // Close any auto-opened options pages to avoid navigation races.
 for (const p of ctx.pages()) {
   if (p.url().includes('options.html')) await p.close();
@@ -262,10 +296,12 @@ for (const p of ctx.pages()) {
 // Point extension at OPFS test directory.
 const setupPage = await ctx.newPage();
 await setupPage.goto(`chrome-extension://${extensionId}/test-helper.html`);
-await setupPage.waitForFunction(() => typeof chrome !== 'undefined' && chrome.runtime);
+await setupPage.waitForFunction(
+  () => typeof chrome !== 'undefined' && chrome.runtime,
+);
 
 const dirResult = await setupPage.evaluate(() =>
-  chrome.runtime.sendMessage({ action: 'setTestDirectory' })
+  chrome.runtime.sendMessage({ action: 'setTestDirectory' }),
 );
 if (!dirResult?.success) {
   console.error('setTestDirectory failed:', dirResult);
@@ -273,7 +309,7 @@ if (!dirResult?.success) {
 }
 
 const resetResult = await setupPage.evaluate(() =>
-  chrome.runtime.sendMessage({ action: 'resetForTest' })
+  chrome.runtime.sendMessage({ action: 'resetForTest' }),
 );
 if (!resetResult?.success) {
   console.error('resetForTest failed:', resetResult);
@@ -282,7 +318,7 @@ if (!resetResult?.success) {
 
 if (onboarding) {
   await setupPage.evaluate(() =>
-    chrome.runtime.sendMessage({ action: 'clearDirectoryHandleForTest' })
+    chrome.runtime.sendMessage({ action: 'clearDirectoryHandleForTest' }),
   );
   console.log('Directory handle cleared — onboarding will appear.');
 }
@@ -293,41 +329,84 @@ if (seed) {
   const deviceId = crypto.randomUUID().slice(0, 8);
   const WIKI_URL = 'https://en.wikipedia.org/wiki/Rust_(programming_language)';
 
-  const sampleFiles = await buildSeedFiles([
-    // rate_page creates page entities (visit_page alone doesn't)
-    { action: 'rate_page', url: 'https://github.com/', title: 'GitHub', timestamp: now - 3600_000, likes: 1 },
-    { action: 'rate_page', url: WIKI_URL, title: 'Rust (programming language) - Wikipedia', timestamp: now - 1800_000, likes: 1 },
-    { action: 'rate_page', url: 'https://news.ycombinator.com/', title: 'Hacker News', timestamp: now - 600_000, likes: 1 },
-    // create_note links note to wiki page
-    { action: 'create_note', url: WIKI_URL, timestamp: now - 1700_000, path: 'notes/rust-note.json' },
-    // visit_page entries enrich pages with visit dates
-    { action: 'visit_page', url: 'https://github.com/', title: 'GitHub', timestamp: now - 3600_000 },
-    { action: 'visit_page', url: WIKI_URL, title: 'Rust (programming language) - Wikipedia', timestamp: now - 1800_000 },
-    { action: 'visit_page', url: 'https://news.ycombinator.com/', title: 'Hacker News', timestamp: now - 600_000 },
-  ], {
-    deviceId,
-    // Default checkpointProgress = events.length: all events produce entity checkpoints AND JSONL.
-    settings: { trimRules: [] },
-    entities: {
-      'note:rust-note': {
-        slug: 'rust-note',
-        excerpt: 'Memory safety without garbage collection',
-        note: 'Key insight: ownership + borrowing = memory safety without GC.',
-        cssPath: '', url: WIKI_URL,
+  const sampleFiles = await buildSeedFiles(
+    [
+      // rate_page creates page entities (visit_page alone doesn't)
+      {
+        action: 'rate_page',
+        url: 'https://github.com/',
+        title: 'GitHub',
+        timestamp: now - 3600_000,
+        likes: 1,
+      },
+      {
+        action: 'rate_page',
+        url: WIKI_URL,
+        title: 'Rust (programming language) - Wikipedia',
+        timestamp: now - 1800_000,
+        likes: 1,
+      },
+      {
+        action: 'rate_page',
+        url: 'https://news.ycombinator.com/',
+        title: 'Hacker News',
+        timestamp: now - 600_000,
+        likes: 1,
+      },
+      // create_note links note to wiki page
+      {
+        action: 'create_note',
+        url: WIKI_URL,
+        timestamp: now - 1700_000,
+        path: 'notes/rust-note.json',
+      },
+      // visit_page entries enrich pages with visit dates
+      {
+        action: 'visit_page',
+        url: 'https://github.com/',
+        title: 'GitHub',
+        timestamp: now - 3600_000,
+      },
+      {
+        action: 'visit_page',
+        url: WIKI_URL,
+        title: 'Rust (programming language) - Wikipedia',
+        timestamp: now - 1800_000,
+      },
+      {
+        action: 'visit_page',
+        url: 'https://news.ycombinator.com/',
+        title: 'Hacker News',
+        timestamp: now - 600_000,
+      },
+    ],
+    {
+      deviceId,
+      // Default checkpointProgress = events.length: all events produce entity checkpoints AND JSONL.
+      settings: { trimRules: [] },
+      entities: {
+        'note:rust-note': {
+          slug: 'rust-note',
+          excerpt: 'Memory safety without garbage collection',
+          note: 'Key insight: ownership + borrowing = memory safety without GC.',
+          cssPath: '',
+          url: WIKI_URL,
+        },
       },
     },
-  });
+  );
 
-  const seedResult = await setupPage.evaluate((files) =>
-    chrome.runtime.sendMessage({ action: 'seedTestData', files })
-  , sampleFiles);
+  const seedResult = await setupPage.evaluate(
+    (files) => chrome.runtime.sendMessage({ action: 'seedTestData', files }),
+    sampleFiles,
+  );
   if (!seedResult?.success) {
     console.error('seedTestData failed:', seedResult);
     process.exit(1);
   }
 
   const rehydrateResult = await setupPage.evaluate(() =>
-    chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+    chrome.runtime.sendMessage({ action: 'rehydrateForTest' }),
   );
   if (!rehydrateResult?.success) {
     console.error('rehydrateForTest failed:', rehydrateResult);
@@ -346,7 +425,9 @@ if (seedCase) {
   const { default: generateSeed } = await import(casePath);
   const { events, entities, deviceId, settings } = generateSeed();
 
-  console.log(`  ${events.length} events, ${Object.keys(entities || {}).length} entity overrides`);
+  console.log(
+    `  ${events.length} events, ${Object.keys(entities || {}).length} entity overrides`,
+  );
 
   const sampleFiles = await buildSeedFiles(events, {
     deviceId,
@@ -356,16 +437,17 @@ if (seedCase) {
 
   console.log(`  ${sampleFiles.length} seed files generated. Uploading...`);
 
-  const seedResult = await setupPage.evaluate((files) =>
-    chrome.runtime.sendMessage({ action: 'seedTestData', files })
-  , sampleFiles);
+  const seedResult = await setupPage.evaluate(
+    (files) => chrome.runtime.sendMessage({ action: 'seedTestData', files }),
+    sampleFiles,
+  );
   if (!seedResult?.success) {
     console.error('seedTestData failed:', seedResult);
     process.exit(1);
   }
 
   const rehydrateResult = await setupPage.evaluate(() =>
-    chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+    chrome.runtime.sendMessage({ action: 'rehydrateForTest' }),
   );
   if (!rehydrateResult?.success) {
     console.error('rehydrateForTest failed:', rehydrateResult);
@@ -379,7 +461,9 @@ await setupPage.close();
 // Capture initial state for diffing.
 console.log('Capturing initial state...');
 const initialState = await dumpState(ctx, extensionId);
-console.log(`  ${Object.keys(initialState.pages).length} pages, ${Object.keys(initialState.notes).length} notes, ${Object.keys(initialState.lists).length} lists, ${initialState.log.length} log entries`);
+console.log(
+  `  ${Object.keys(initialState.pages).length} pages, ${Object.keys(initialState.notes).length} notes, ${Object.keys(initialState.lists).length} lists, ${initialState.log.length} log entries`,
+);
 
 // Close the default about:blank page so only the options page shows.
 for (const p of ctx.pages()) {
@@ -398,16 +482,21 @@ console.log('Close the browser window when done.\n');
 // Wait for exit: user closes the browser window, or presses Ctrl+C.
 // On macOS, closing the Chrome window doesn't quit the process — we detect
 // all pages closing and use that as the trigger.
-let exitReason = await new Promise(resolve => {
+let exitReason = await new Promise((resolve) => {
   let resolved = false;
-  const once = (reason) => { if (!resolved) { resolved = true; resolve(reason); } };
+  const once = (reason) => {
+    if (!resolved) {
+      resolved = true;
+      resolve(reason);
+    }
+  };
 
   // Track page closes — when all pages are gone, the user closed the window.
   const checkEmpty = () => {
     if (ctx.pages().length === 0) once('window-closed');
   };
   for (const p of ctx.pages()) p.on('close', () => setTimeout(checkEmpty, 300));
-  ctx.on('page', p => p.on('close', () => setTimeout(checkEmpty, 300)));
+  ctx.on('page', (p) => p.on('close', () => setTimeout(checkEmpty, 300)));
 
   ctx.on('close', () => once('browser-quit'));
   process.on('SIGINT', () => once('sigint'));
@@ -421,7 +510,9 @@ if (exitReason !== 'browser-quit') {
   // Context is still alive — we can open a page and read data.
   try {
     finalState = await dumpState(ctx, extensionId);
-    console.log(`  ${Object.keys(finalState.pages).length} pages, ${Object.keys(finalState.notes).length} notes, ${Object.keys(finalState.lists).length} lists, ${finalState.log.length} log entries`);
+    console.log(
+      `  ${Object.keys(finalState.pages).length} pages, ${Object.keys(finalState.notes).length} notes, ${Object.keys(finalState.lists).length} lists, ${finalState.log.length} log entries`,
+    );
   } catch (e) {
     console.error(`  Failed to capture final state: ${e.message}`);
   }
@@ -431,7 +522,9 @@ if (finalState) {
   printDiff(initialState, finalState);
 } else {
   console.log('\n  Could not capture final state (browser already exited).');
-  console.log('  Tip: close the browser window instead of force-quitting for data diff.\n');
+  console.log(
+    '  Tip: close the browser window instead of force-quitting for data diff.\n',
+  );
 }
 
 // Cleanup
@@ -441,6 +534,8 @@ try {
   fs.rmSync(userDataDir, { recursive: true, force: true });
 } catch (e) {
   // Node 24 rmSync can race with Chrome lock files; ignore.
-  console.warn(`  Warning: temp dir cleanup incomplete (${e.code}). Dir: ${userDataDir}`);
+  console.warn(
+    `  Warning: temp dir cleanup incomplete (${e.code}). Dir: ${userDataDir}`,
+  );
 }
 console.log('Done.');

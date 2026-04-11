@@ -17,7 +17,8 @@ describe('logger', () => {
           get: vi.fn(async (keys) => {
             const arr = Array.isArray(keys) ? keys : [keys];
             const result = {};
-            for (const k of arr) if (k in sessionStore) result[k] = sessionStore[k];
+            for (const k of arr)
+              if (k in sessionStore) result[k] = sessionStore[k];
             return result;
           }),
           set: vi.fn(async (obj) => {
@@ -41,7 +42,7 @@ describe('logger', () => {
   async function loadLogger() {
     const mod = await import('../extension/logger.js');
     // Allow the async init to complete
-    await new Promise(r => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
     return mod;
   }
 

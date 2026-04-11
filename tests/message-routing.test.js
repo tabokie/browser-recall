@@ -36,14 +36,20 @@ describe('background.js message routing', () => {
   it('handles every action sent by options.js', () => {
     const optionsSource = readFileSync(resolve(extDir, 'options.js'), 'utf-8');
     const sentActions = extractSentActions(optionsSource);
-    const missing = [...sentActions].filter(a => !bgCases.has(a));
-    expect(missing, `Actions sent by options.js but not handled in background.js`).toEqual([]);
+    const missing = [...sentActions].filter((a) => !bgCases.has(a));
+    expect(
+      missing,
+      `Actions sent by options.js but not handled in background.js`,
+    ).toEqual([]);
   });
 
   it('handles every action sent by popup.js', () => {
     const popupSource = readFileSync(resolve(extDir, 'popup.js'), 'utf-8');
     const sentActions = extractSentActions(popupSource);
-    const missing = [...sentActions].filter(a => !bgCases.has(a));
-    expect(missing, `Actions sent by popup.js but not handled in background.js`).toEqual([]);
+    const missing = [...sentActions].filter((a) => !bgCases.has(a));
+    expect(
+      missing,
+      `Actions sent by popup.js but not handled in background.js`,
+    ).toEqual([]);
   });
 });

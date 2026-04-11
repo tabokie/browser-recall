@@ -1,20 +1,47 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, getSlugForUrl, openHelperPage, openOptionsPage, waitForListView } from './helpers.js';
+import {
+  resetAndSeed,
+  getSlugForUrl,
+  openHelperPage,
+  openOptionsPage,
+  waitForListView,
+} from './helpers.js';
 
 const TEST_URL = 'https://example.com/';
 const TEST_SLUG = getSlugForUrl(TEST_URL);
 
 test.describe('Rule operations', () => {
-  test('addRule adds keyword rule to list entity', async ({ extContext, extensionId, setupDir }) => {
+  test('addRule adds keyword rule to list entity', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -22,14 +49,20 @@ test.describe('Rule operations', () => {
       chrome.runtime.sendMessage({
         action: 'addRule',
         listId: 'reading',
-        rule: { type: 'keyword', config: { pattern: 'github', fields: ['url'] } },
-      })
+        rule: {
+          type: 'keyword',
+          config: { pattern: 'github', fields: ['url'] },
+        },
+      }),
     );
     expect(result.success).toBe(true);
 
     // Verify entity updated via readCacheable
     const entity = await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     expect(entity.value.rules).toHaveLength(1);
     expect(entity.value.rules[0].type).toBe('keyword');
@@ -38,44 +71,100 @@ test.describe('Rule operations', () => {
     await page.close();
   });
 
-  test('removeRule removes rule from list entity', async ({ extContext, extensionId, setupDir }) => {
+  test('removeRule removes rule from list entity', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const ruleId = 'rule-k-test-1234';
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
-        rules: [{ id: ruleId, type: 'keyword', config: { pattern: 'test' }, createdAt: now }],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [
+            {
+              id: ruleId,
+              type: 'keyword',
+              config: { pattern: 'test' },
+              createdAt: now,
+            },
+          ],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
-    const result = await page.evaluate((rid) =>
-      chrome.runtime.sendMessage({ action: 'removeRule', listId: 'reading', ruleId: rid }),
-      ruleId
+    const result = await page.evaluate(
+      (rid) =>
+        chrome.runtime.sendMessage({
+          action: 'removeRule',
+          listId: 'reading',
+          ruleId: rid,
+        }),
+      ruleId,
     );
     expect(result.success).toBe(true);
 
     const entity = await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     expect(entity.value.rules).toHaveLength(0);
     await page.close();
   });
 
-  test('rules survive flush + rehydrate round-trip', async ({ extContext, extensionId, setupDir }) => {
+  test('rules survive flush + rehydrate round-trip', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -85,40 +174,73 @@ test.describe('Rule operations', () => {
       chrome.runtime.sendMessage({
         action: 'addRule',
         listId: 'reading',
-        rule: { type: 'keyword', config: { pattern: 'test', fields: ['title'] } },
-      })
+        rule: {
+          type: 'keyword',
+          config: { pattern: 'test', fields: ['title'] },
+        },
+      }),
     );
 
     // Flush to disk
     await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' }),
     );
 
     // Rehydrate from disk
     await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest' }),
     );
 
     // Verify rule survived
     const entity = await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     expect(entity.value.rules).toHaveLength(1);
     expect(entity.value.rules[0].config.pattern).toBe('test');
     await page.close();
   });
 
-  test('runRuleBatch with keyword rule auto-pins matching pages', async ({ extContext, extensionId, setupDir }) => {
+  test('runRuleBatch with keyword rule auto-pins matching pages', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
-        rules: [{ id: 'rule-k-test-0001', type: 'keyword', config: { pattern: 'github', fields: ['url'], threshold: 0.5 }, createdAt: now }],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [
+            {
+              id: 'rule-k-test-0001',
+              type: 'keyword',
+              config: { pattern: 'github', fields: ['url'] },
+              createdAt: now,
+            },
+          ],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -129,10 +251,20 @@ test.describe('Rule operations', () => {
         action: 'runRuleBatch',
         listIds: ['reading'],
         entries: [
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://github.com/foo', title: 'Foo Repo' },
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/', title: 'Example' },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://github.com/foo',
+            title: 'Foo Repo',
+          },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/',
+            title: 'Example',
+          },
         ],
-      })
+      }),
     );
     expect(result.success).toBe(true);
     expect(result.results).toHaveLength(1);
@@ -140,23 +272,47 @@ test.describe('Rule operations', () => {
 
     // Verify auto-pin
     const entity = await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     expect(entity.value.pins).toHaveLength(1);
     expect(entity.value.pins[0].id).toContain('page:');
     await page.close();
   });
 
-  test('addRule rejects smart rule with syntax error in fnSource', async ({ extContext, extensionId, setupDir }) => {
+  test('addRule rejects function rule with syntax error in fnSource', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -165,35 +321,59 @@ test.describe('Rule operations', () => {
         action: 'addRule',
         listId: 'reading',
         rule: {
-          type: 'smart',
+          type: 'function',
           config: {
             description: 'broken syntax',
             fnSource: 'return page.title.length >>',
           },
         },
-      })
+      }),
     );
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/compile|SyntaxError|Unexpected/i);
 
     // Verify rule was NOT saved
     const entity = await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     expect(entity.value.rules).toHaveLength(0);
     await page.close();
   });
 
-  test('addRule rejects smart rule with banned globals in fnSource', async ({ extContext, extensionId, setupDir }) => {
+  test('addRule rejects function rule with banned globals in fnSource', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -202,29 +382,50 @@ test.describe('Rule operations', () => {
         action: 'addRule',
         listId: 'reading',
         rule: {
-          type: 'smart',
+          type: 'function',
           config: {
             description: 'evil rule',
             fnSource: 'fetch("http://evil.com"); return 1;',
           },
         },
-      })
+      }),
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain('fetch');
     await page.close();
   });
 
-  test('addRule stores smart rule with valid fnSource', async ({ extContext, extensionId, setupDir }) => {
+  test('addRule stores function rule with valid fnSource', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -233,45 +434,72 @@ test.describe('Rule operations', () => {
         action: 'addRule',
         listId: 'reading',
         rule: {
-          type: 'smart',
+          type: 'function',
           config: {
             description: 'pages with long titles',
             fnSource: 'return page.title.length > 10 ? 1 : 0;',
           },
         },
-      })
+      }),
     );
     expect(result.success).toBe(true);
 
     const entity = await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     expect(entity.value.rules).toHaveLength(1);
-    expect(entity.value.rules[0].type).toBe('smart');
-    expect(entity.value.rules[0].config.fnSource).toBe('return page.title.length > 10 ? 1 : 0;');
+    expect(entity.value.rules[0].type).toBe('function');
+    expect(entity.value.rules[0].config.fnSource).toBe(
+      'return page.title.length > 10 ? 1 : 0;',
+    );
     expect(entity.value.rules[0].id).toMatch(/^rule-s-/);
     await page.close();
   });
 
-  test('runRuleBatch with smart rule executes sandbox and auto-pins', async ({ extContext, extensionId, setupDir }) => {
+  test('runRuleBatch with function rule executes sandbox and auto-pins', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
-        rules: [{
-          id: 'rule-s-test-0001', type: 'smart',
-          config: {
-            description: 'pages with long titles',
-            fnSource: 'return page.title.length > 15 ? 1 : 0;',
-            threshold: 0.5,
-          },
-          createdAt: now,
-        }],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [
+            {
+              id: 'rule-s-test-0001',
+              type: 'function',
+              config: {
+                description: 'pages with long titles',
+                fnSource: 'return page.title.length > 15;',
+              },
+              createdAt: now,
+            },
+          ],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -281,10 +509,20 @@ test.describe('Rule operations', () => {
         action: 'runRuleBatch',
         listIds: ['reading'],
         entries: [
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/long', title: 'This Is A Very Long Title For Testing' },
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/short', title: 'Short' },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/long',
+            title: 'This Is A Very Long Title For Testing',
+          },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/short',
+            title: 'Short',
+          },
         ],
-      })
+      }),
     );
     expect(result.success).toBe(true);
     // Only the long-titled page should match (title.length > 15)
@@ -293,28 +531,55 @@ test.describe('Rule operations', () => {
 
     // Verify auto-pin
     const entity = await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     expect(entity.value.pins).toHaveLength(1);
     await page.close();
   });
 
-  test('runRuleBatch with Hubs function rule matches hub-like URLs', async ({ extContext, extensionId, setupDir }) => {
+  test('runRuleBatch with Hubs function rule matches hub-like URLs', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
-    const hubsFnSource = "const u = new URL(page.url); const p = u.pathname.toLowerCase(); const skip = ['s', 'search', 'query', 'q', 'target']; if (skip.some(k => u.searchParams.has(k))) return false; if (p === '/' || p === '') return u.search.length <= 100; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return true; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover', 'index']; if (hub.some(k => last.includes(k))) return !u.hash; return false;";
+    const hubsFnSource =
+      "const u = new URL(page.url); const p = u.pathname.toLowerCase(); const skip = ['s', 'search', 'query', 'q', 'target']; if (skip.some(k => u.searchParams.has(k))) return false; if (p === '/' || p === '') return u.search.length <= 100; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return true; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover', 'index']; if (hub.some(k => last.includes(k))) return !u.hash; return false;";
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:hubs' }] } },
-      { path: 'lists/hubs.json', data: {
-        slug: 'hubs', name: 'Hubs', owner: 'test-device', timestamp: now, pins: [],
-        rules: [{
-          id: 'rule-s-hubs-0001', type: 'smart',
-          config: { description: 'Hub and landing pages', fnSource: hubsFnSource },
-          createdAt: now,
-        }],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Hubs': 'hubs' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:hubs' }] },
+      },
+      {
+        path: 'lists/hubs.json',
+        data: {
+          slug: 'hubs',
+          name: 'Hubs',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [
+            {
+              id: 'rule-s-hubs-0001',
+              type: 'function',
+              config: {
+                description: 'Hub and landing pages',
+                fnSource: hubsFnSource,
+              },
+              createdAt: now,
+            },
+          ],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: { timestamp: now, paths: { 'test-device/Hubs': 'hubs' } },
+      },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -323,58 +588,136 @@ test.describe('Rule operations', () => {
         action: 'runRuleBatch',
         listIds: ['hubs'],
         entries: [
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/', title: 'Root' },
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/index.html', title: 'Index' },
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/docs/', title: 'Docs' },
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/about', title: 'About' },
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/blog', title: 'Posts' },
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/research/paper', title: 'Paper' },
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/?' + 'x'.repeat(200), title: 'Long QS' },
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/app/discover#/view/123', title: 'Hash route' },
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/index/article-slug', title: 'Mid-path index' },
-          { timestamp: Date.now(), action: 'visit_page', url: 'https://example.com/?q=test', title: 'Search query' },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/',
+            title: 'Root',
+          },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/index.html',
+            title: 'Index',
+          },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/docs/',
+            title: 'Docs',
+          },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/about',
+            title: 'About',
+          },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/blog',
+            title: 'Posts',
+          },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/research/paper',
+            title: 'Paper',
+          },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/?' + 'x'.repeat(200),
+            title: 'Long QS',
+          },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/app/discover#/view/123',
+            title: 'Hash route',
+          },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/index/article-slug',
+            title: 'Mid-path index',
+          },
+          {
+            timestamp: Date.now(),
+            action: 'visit_page',
+            url: 'https://example.com/?q=test',
+            title: 'Search query',
+          },
         ],
-      })
+      }),
     );
     expect(result.success).toBe(true);
-    const matchedUrls = result.results.map(r => r.url);
+    const matchedUrls = result.results.map((r) => r.url);
     // Root, index (last segment), depth-1 trailing slash, last-segment keyword
     expect(matchedUrls).toContain('https://example.com/');
     expect(matchedUrls).toContain('https://example.com/index.html');
-    expect(matchedUrls).toContain('https://example.com/docs/');       // depth-1 trailing slash
-    expect(matchedUrls).toContain('https://example.com/blog');        // last segment = 'blog'
-    expect(matchedUrls).not.toContain('https://example.com/about');   // no hub signal
+    expect(matchedUrls).toContain('https://example.com/docs/'); // depth-1 trailing slash
+    expect(matchedUrls).toContain('https://example.com/blog'); // last segment = 'blog'
+    expect(matchedUrls).not.toContain('https://example.com/about'); // no hub signal
     expect(matchedUrls).not.toContain('https://example.com/research/paper'); // 'research' != keyword
     // New rejection cases
-    expect(matchedUrls).not.toContain('https://example.com/?' + 'x'.repeat(200)); // long query string
-    expect(matchedUrls).not.toContain('https://example.com/app/discover#/view/123'); // hash fragment
+    expect(matchedUrls).not.toContain(
+      'https://example.com/?' + 'x'.repeat(200),
+    ); // long query string
+    expect(matchedUrls).not.toContain(
+      'https://example.com/app/discover#/view/123',
+    ); // hash fragment
     expect(matchedUrls).not.toContain('https://example.com/index/article-slug'); // index in mid-path only
     expect(matchedUrls).not.toContain('https://example.com/?q=test'); // search/redirect query param
 
     // Verify auto-pin: 4 pages pinned
     const entity = await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:hubs' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:hubs' }),
     );
     expect(entity.value.pins).toHaveLength(4);
     await page.close();
   });
 
-  test('visit_page auto-pins to lists with matching smart rules', async ({ extContext, extensionId, setupDir }) => {
+  test('visit_page auto-pins to lists with matching function rules', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
-    const hubsFnSource = "const u = new URL(page.url); const p = u.pathname.toLowerCase(); const skip = ['s', 'search', 'query', 'q', 'target']; if (skip.some(k => u.searchParams.has(k))) return false; if (p === '/' || p === '') return u.search.length <= 100; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return true; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover', 'index']; if (hub.some(k => last.includes(k))) return !u.hash; return false;";
+    const hubsFnSource =
+      "const u = new URL(page.url); const p = u.pathname.toLowerCase(); const skip = ['s', 'search', 'query', 'q', 'target']; if (skip.some(k => u.searchParams.has(k))) return false; if (p === '/' || p === '') return u.search.length <= 100; const parts = p.split('/').filter(Boolean); if (parts.length === 1 && p.endsWith('/')) return true; const last = parts[parts.length - 1] || ''; const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover', 'index']; if (hub.some(k => last.includes(k))) return !u.hash; return false;";
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:hubs' }] } },
-      { path: 'lists/hubs.json', data: {
-        slug: 'hubs', name: 'Hubs', owner: 'test-device', timestamp: now, pins: [],
-        rules: [{
-          id: 'rule-s-hubs-0001', type: 'smart',
-          config: { description: 'Hub and landing pages', fnSource: hubsFnSource },
-          createdAt: now,
-        }],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Hubs': 'hubs' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:hubs' }] },
+      },
+      {
+        path: 'lists/hubs.json',
+        data: {
+          slug: 'hubs',
+          name: 'Hubs',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [
+            {
+              id: 'rule-s-hubs-0001',
+              type: 'function',
+              config: {
+                description: 'Hub and landing pages',
+                fnSource: hubsFnSource,
+              },
+              createdAt: now,
+            },
+          ],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: { timestamp: now, paths: { 'test-device/Hubs': 'hubs' } },
+      },
     ]);
 
     const page = await openHelperPage(extContext, extensionId);
@@ -382,32 +725,46 @@ test.describe('Rule operations', () => {
     // Visit a hub-like URL (root path) — should auto-pin to Hubs list
     await page.evaluate(() =>
       chrome.runtime.sendMessage({
-        action: 'reportPage', url: 'https://linux.do/', isInitialLoad: true, title: 'LINUX DO',
-      })
+        action: 'reportPage',
+        url: 'https://linux.do/',
+        isInitialLoad: true,
+        title: 'LINUX DO',
+      }),
     );
 
-    // Wait for smart rule evaluation to complete and pin to appear
+    // Wait for function rule evaluation to complete and pin to appear
     const hubs = await page.evaluate(async () => {
       for (let i = 0; i < 30; i++) {
-        const r = await chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:hubs' });
+        const r = await chrome.runtime.sendMessage({
+          action: 'readCacheable',
+          key: 'list:hubs',
+        });
         if (r?.value?.pins?.length > 0) return r;
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      return chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:hubs' });
+      return chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:hubs',
+      });
     });
     expect(hubs.value.pins).toHaveLength(1);
-    expect(hubs.value.pins[0].id).toBe('page:' + getSlugForUrl('https://linux.do/'));
+    expect(hubs.value.pins[0].id).toBe(
+      'page:' + getSlugForUrl('https://linux.do/'),
+    );
 
     // Visit a non-hub URL — should NOT auto-pin
     await page.evaluate(() =>
       chrome.runtime.sendMessage({
-        action: 'reportPage', url: 'https://linux.do/t/some-topic/12345', isInitialLoad: true, title: 'Some Topic',
-      })
+        action: 'reportPage',
+        url: 'https://linux.do/t/some-topic/12345',
+        isInitialLoad: true,
+        title: 'Some Topic',
+      }),
     );
-    await page.evaluate(() => new Promise(r => setTimeout(r, 500)));
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 500)));
 
     const hubsAfter = await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:hubs' })
+      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:hubs' }),
     );
     // Still only 1 pin — the non-hub URL was not matched
     expect(hubsAfter.value.pins).toHaveLength(1);
@@ -417,17 +774,44 @@ test.describe('Rule operations', () => {
 });
 
 test.describe('Rules UI', () => {
-  test('rules section visible when viewing a list with rules', async ({ extContext, extensionId, setupDir }) => {
+  test('rules section visible when viewing a list with rules', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
-        rules: [{ id: 'rule-k-test-0001', type: 'keyword', config: { pattern: 'github', fields: ['url'] }, createdAt: now }],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [
+            {
+              id: 'rule-k-test-0001',
+              type: 'keyword',
+              config: { pattern: 'github', fields: ['url'] },
+              createdAt: now,
+            },
+          ],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -436,12 +820,10 @@ test.describe('Rules UI', () => {
     await listItem.click();
     await waitForListView(options);
 
-    // Rules section should be visible with count badge
-    const rulesSection = options.locator('#rulesSection');
-    await expect(rulesSection).toBeVisible({ timeout: 5000 });
-    const countBadge = options.locator('#rulesCount');
-    await expect(countBadge).toBeVisible();
-    await expect(countBadge).toHaveText('1');
+    // Inbox button should be visible with has-rules indicator
+    const inboxBtn = options.locator('#inboxToggleBtn');
+    await expect(inboxBtn).toBeVisible({ timeout: 5000 });
+    await expect(inboxBtn).toHaveClass(/has-rules/);
 
     // Rule entry should be visible
     const ruleEntry = options.locator('.rule-entry');
@@ -450,16 +832,37 @@ test.describe('Rules UI', () => {
     await options.close();
   });
 
-  test('add keyword rule via UI form', async ({ extContext, extensionId, setupDir }) => {
+  test('add keyword rule via UI form', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -479,7 +882,9 @@ test.describe('Rules UI', () => {
     await options.locator('.rule-save-btn').click();
 
     // Edit row should disappear, display row should appear
-    await expect(options.locator('.rule-entry.rule-editing')).toHaveCount(0, { timeout: 5000 });
+    await expect(options.locator('.rule-entry.rule-editing')).toHaveCount(0, {
+      timeout: 5000,
+    });
     const ruleEntry = options.locator('.rule-entry');
     await expect(ruleEntry).toBeVisible({ timeout: 5000 });
     await expect(ruleEntry.locator('.rule-type-badge')).toHaveText('keyword');
@@ -487,7 +892,10 @@ test.describe('Rules UI', () => {
     // Verify via background
     const helperPage = await openHelperPage(extContext, extensionId);
     const entity = await helperPage.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     expect(entity.value.rules).toHaveLength(1);
     expect(entity.value.rules[0].type).toBe('keyword');
@@ -495,16 +903,37 @@ test.describe('Rules UI', () => {
     await options.close();
   });
 
-  test('cancel button in edit row discards new rule', async ({ extContext, extensionId, setupDir }) => {
+  test('cancel button in edit row discards new rule', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -520,26 +949,52 @@ test.describe('Rules UI', () => {
     await options.locator('.rule-cancel-btn').click();
 
     // Edit row should disappear, no rules saved
-    await expect(options.locator('.rule-entry.rule-editing')).toHaveCount(0, { timeout: 5000 });
+    await expect(options.locator('.rule-entry.rule-editing')).toHaveCount(0, {
+      timeout: 5000,
+    });
     const helperPage = await openHelperPage(extContext, extensionId);
     const entity = await helperPage.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     expect(entity.value.rules).toHaveLength(0);
     await helperPage.close();
     await options.close();
   });
 
-  test('Enter key saves new rule', async ({ extContext, extensionId, setupDir }) => {
+  test('Enter key saves new rule', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -552,12 +1007,19 @@ test.describe('Rules UI', () => {
     await options.locator('.rule-edit-input').press('Enter');
 
     // Rule should be saved
-    await expect(options.locator('.rule-entry.rule-editing')).toHaveCount(0, { timeout: 5000 });
-    await expect(options.locator('.rule-entry .rule-type-badge')).toHaveText('keyword');
+    await expect(options.locator('.rule-entry.rule-editing')).toHaveCount(0, {
+      timeout: 5000,
+    });
+    await expect(options.locator('.rule-entry .rule-type-badge')).toHaveText(
+      'keyword',
+    );
 
     const helperPage = await openHelperPage(extContext, extensionId);
     const entity = await helperPage.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     expect(entity.value.rules).toHaveLength(1);
     expect(entity.value.rules[0].config.pattern).toBe('github');
@@ -565,18 +1027,45 @@ test.describe('Rules UI', () => {
     await options.close();
   });
 
-  test('remove rule via UI click', async ({ extContext, extensionId, setupDir }) => {
+  test('remove rule via UI click', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const ruleId = 'rule-k-test-0001';
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
-        rules: [{ id: ruleId, type: 'keyword', config: { pattern: 'test' }, createdAt: now }],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [
+            {
+              id: ruleId,
+              type: 'keyword',
+              config: { pattern: 'test' },
+              createdAt: now,
+            },
+          ],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -593,80 +1082,152 @@ test.describe('Rules UI', () => {
     await options.locator('.rule-remove').click();
 
     // Rule entry should disappear
-    await expect(options.locator('.rule-entry')).toHaveCount(0, { timeout: 5000 });
+    await expect(options.locator('.rule-entry')).toHaveCount(0, {
+      timeout: 5000,
+    });
 
     // Verify via background
     const helperPage = await openHelperPage(extContext, extensionId);
     const entity = await helperPage.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:reading' })
+      chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key: 'list:reading',
+      }),
     );
     expect(entity.value.rules).toHaveLength(0);
     await helperPage.close();
     await options.close();
   });
 
-  test('rules section hidden when switching to explore view', async ({ extContext, extensionId, setupDir }) => {
+  test('rules section hidden when switching to explore view', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
-        rules: [{ id: 'rule-k-test-0001', type: 'keyword', config: { pattern: 'test' }, createdAt: now }],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [
+            {
+              id: 'rule-k-test-0001',
+              type: 'keyword',
+              config: { pattern: 'test' },
+              createdAt: now,
+            },
+          ],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
-    // Navigate to list — rules section should be visible
+    // Navigate to list — inbox button should be visible
     await options.locator('.sidebar-item[data-list-id="reading"]').click();
     await waitForListView(options);
-    await expect(options.locator('#rulesSection')).toBeVisible();
+    await expect(options.locator('#inboxToggleBtn')).toBeVisible();
 
-    // Switch to explore — rules section should be hidden
+    // Switch to explore — inbox button should be hidden
     await options.locator('#exploreBtn').click();
     await waitForListView(options);
-    await expect(options.locator('#rulesSection')).toBeHidden();
+    await expect(options.locator('#inboxToggleBtn')).toBeHidden();
 
     await options.close();
   });
 
-  test('rules section hidden for system lists', async ({ extContext, extensionId, setupDir }) => {
+  test('rules section hidden for system lists', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:system/archive' }] } },
-      { path: 'lists/system/archive.json', data: {
-        slug: 'system/archive', name: 'Archive', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: {} } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:system/archive' }] },
+      },
+      {
+        path: 'lists/system/archive.json',
+        data: {
+          slug: 'system/archive',
+          name: 'Archive',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: { timestamp: now, paths: {} },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
     // Navigate to system list via sidebar
-    const sysItem = options.locator('.sidebar-item[data-list-id="system/archive"]');
+    const sysItem = options.locator(
+      '.sidebar-item[data-list-id="system/archive"]',
+    );
     await expect(sysItem).toBeVisible({ timeout: 5000 });
     await sysItem.click();
     await waitForListView(options);
 
-    // Rules section should be hidden for system lists
-    const rulesSection = options.locator('#rulesSection');
-    await expect(rulesSection).toBeHidden();
+    // Inbox button should be hidden for system lists
+    const inboxBtn = options.locator('#inboxToggleBtn');
+    await expect(inboxBtn).toBeHidden();
     await options.close();
   });
 
-  test('type toggle switches form panels', async ({ extContext, extensionId, setupDir }) => {
+  test('type toggle switches form panels', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -680,36 +1241,85 @@ test.describe('Rules UI', () => {
 
     // Default: keyword — fn textarea hidden
     await expect(options.locator('.rule-edit-input')).toBeVisible();
-    await expect(options.locator('.rule-smart-fn-input')).toBeHidden();
+    await expect(options.locator('.rule-fn-input')).toBeHidden();
 
     // Switch to function
-    await options.locator('.rule-type-option[data-type="smart"]').click();
-    await expect(options.locator('.rule-smart-fn-input')).toBeVisible();
+    await options.locator('.rule-type-option[data-type="function"]').click();
+    await expect(options.locator('.rule-fn-input')).toBeVisible();
 
     await options.close();
   });
 
-  test('preview shows matching pages for keyword rule', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('preview shows matching pages for keyword rule', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     // Use localServer so fetchPageBody can reach these URLs
-    localServer.addPage('/foo', { title: 'Foo Repo', body: 'GitHub is where people build software foo repo readme' });
-    localServer.addPage('/example', { title: 'Example', body: 'This domain is for use in illustrative examples' });
-    localServer.addPage('/bar', { title: 'Bar Repo', body: 'GitHub is where people build software bar repo readme' });
+    localServer.addPage('/foo', {
+      title: 'Foo Repo',
+      body: 'GitHub is where people build software foo repo readme',
+    });
+    localServer.addPage('/example', {
+      title: 'Example',
+      body: 'This domain is for use in illustrative examples',
+    });
+    localServer.addPage('/bar', {
+      title: 'Bar Repo',
+      body: 'GitHub is where people build software bar repo readme',
+    });
 
     const now = Date.now();
     const todayKey = new Date().toISOString().slice(0, 10);
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
-      { path: `data/logs/test-device/${todayKey}.jsonl`, lines: [
-        { timestamp: now - 3000, action: 'visit_page', url: localServer.url('/foo'), title: 'Foo Repo' },
-        { timestamp: now - 2000, action: 'visit_page', url: localServer.url('/example'), title: 'Example' },
-        { timestamp: now - 1000, action: 'visit_page', url: localServer.url('/bar'), title: 'Bar Repo' },
-      ]},
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
+      {
+        path: `data/logs/test-device/${todayKey}.jsonl`,
+        lines: [
+          {
+            timestamp: now - 3000,
+            action: 'visit_page',
+            url: localServer.url('/foo'),
+            title: 'Foo Repo',
+          },
+          {
+            timestamp: now - 2000,
+            action: 'visit_page',
+            url: localServer.url('/example'),
+            title: 'Example',
+          },
+          {
+            timestamp: now - 1000,
+            action: 'visit_page',
+            url: localServer.url('/bar'),
+            title: 'Bar Repo',
+          },
+        ],
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -723,32 +1333,68 @@ test.describe('Rules UI', () => {
     await options.locator('.rule-edit-input').fill('github');
     await options.locator('.rule-preview-btn').click();
 
-    // Preview should appear with only the 2 matching pages (no non-matches, no scores)
-    await expect(options.locator('#rulesPreview')).toBeVisible({ timeout: 10000 });
-    await expect(options.locator('#rulesPreviewCount')).toContainText('2 matches');
+    // Preview should appear with only the 2 matching pages
+    await expect(options.locator('#rulesPreview')).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(options.locator('#rulesPreviewCount')).toContainText(
+      '2 matches',
+    );
     await expect(options.locator('.rules-preview-item')).toHaveCount(2);
-    // No score elements shown
     await expect(options.locator('.rules-preview-score')).toHaveCount(0);
 
     await options.close();
   });
 
-  test('preview shows error for smart rule with syntax error', async ({ extContext, extensionId, setupDir, localServer }) => {
-    localServer.addPage('/example', { title: 'Example', body: 'This domain is for use in illustrative examples' });
+  test('preview shows error for function rule with syntax error', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/example', {
+      title: 'Example',
+      body: 'This domain is for use in illustrative examples',
+    });
 
     const now = Date.now();
     const todayKey = new Date().toISOString().slice(0, 10);
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
-      { path: `data/logs/test-device/${todayKey}.jsonl`, lines: [
-        { timestamp: now - 1000, action: 'visit_page', url: localServer.url('/example'), title: 'Example' },
-      ]},
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
+      {
+        path: `data/logs/test-device/${todayKey}.jsonl`,
+        lines: [
+          {
+            timestamp: now - 1000,
+            action: 'visit_page',
+            url: localServer.url('/example'),
+            title: 'Example',
+          },
+        ],
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -758,24 +1404,39 @@ test.describe('Rules UI', () => {
     // Open form, switch to function
     await options.locator('#rulesHeader').click();
     await options.locator('#rulesAddBtn').click();
-    await options.locator('.rule-type-option[data-type="smart"]').click();
+    await options.locator('.rule-type-option[data-type="function"]').click();
 
     // Enter invalid JS
     await options.locator('.rule-edit-input').fill('bad rule');
-    await options.locator('.rule-smart-fn-input').fill('return {{{;');
+    await options.locator('.rule-fn-input').fill('return {{{;');
     await options.locator('.rule-preview-btn').click();
 
     // Error should appear in the preview section
-    await expect(options.locator('#rulesPreview')).toBeVisible({ timeout: 5000 });
-    await expect(options.locator('#rulesPreviewList .rules-preview-error')).toBeVisible();
+    await expect(options.locator('#rulesPreview')).toBeVisible({
+      timeout: 5000,
+    });
+    await expect(
+      options.locator('#rulesPreviewList .rules-preview-error'),
+    ).toBeVisible();
 
     await options.close();
   });
 
-  test('preview shows pinned pages section', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('preview shows pinned pages section', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     // Set up local pages that fetchPageBody can reach
-    localServer.addPage('/pinned1', { title: 'Pinned GitHub Page', body: 'GitHub is where people build software repositories and collaborate' });
-    localServer.addPage('/pinned2', { title: 'Pinned Example Page', body: 'This is an example domain for documentation purposes' });
+    localServer.addPage('/pinned1', {
+      title: 'Pinned GitHub Page',
+      body: 'GitHub is where people build software repositories and collaborate',
+    });
+    localServer.addPage('/pinned2', {
+      title: 'Pinned Example Page',
+      body: 'This is an example domain for documentation purposes',
+    });
     const url1 = localServer.url('/pinned1');
     const url2 = localServer.url('/pinned2');
     const slug1 = getSlugForUrl(url1);
@@ -786,27 +1447,64 @@ test.describe('Rules UI', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now,
-        pins: [
-          { id: `page:${slug1}`, pinnedAt: now - 2000 },
-          { id: `page:${slug2}`, pinnedAt: now - 1000 },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [
+            { id: `page:${slug1}`, pinnedAt: now - 2000 },
+            { id: `page:${slug2}`, pinnedAt: now - 1000 },
+          ],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
+      {
+        path: `pages/${slug1}.json`,
+        data: {
+          slug: slug1,
+          url: url1,
+          title: 'Pinned GitHub Page',
+          timestamp: now,
+          parentIds: ['list:reading'],
+          childIds: [],
+        },
+      },
+      {
+        path: `pages/${slug2}.json`,
+        data: {
+          slug: slug2,
+          url: url2,
+          title: 'Pinned Example Page',
+          timestamp: now,
+          parentIds: ['list:reading'],
+          childIds: [],
+        },
+      },
+      {
+        path: `data/logs/test-device/${todayKey}.jsonl`,
+        lines: [
+          {
+            timestamp: now - 1000,
+            action: 'visit_page',
+            url: 'https://other.com/',
+            title: 'Other Page',
+          },
         ],
-        rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
-      { path: `pages/${slug1}.json`, data: {
-        slug: slug1, url: url1, title: 'Pinned GitHub Page',
-        timestamp: now, parentIds: ['list:reading'], childIds: [],
-      }},
-      { path: `pages/${slug2}.json`, data: {
-        slug: slug2, url: url2, title: 'Pinned Example Page',
-        timestamp: now, parentIds: ['list:reading'], childIds: [],
-      }},
-      { path: `data/logs/test-device/${todayKey}.jsonl`, lines: [
-        { timestamp: now - 1000, action: 'visit_page', url: 'https://other.com/', title: 'Other Page' },
-      ]},
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -821,24 +1519,56 @@ test.describe('Rules UI', () => {
     await options.locator('.rule-preview-btn').click();
 
     // Pinned pages section should appear with both pages checked, 1 match
-    await expect(options.locator('#rulesPinsPreview')).toBeVisible({ timeout: 10000 });
-    await expect(options.locator('#rulesPinsPreviewCount')).toContainText('1 matches (2 checked)', { timeout: 10000 });
+    await expect(options.locator('#rulesPinsPreview')).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(options.locator('#rulesPinsPreviewCount')).toContainText(
+      '1 matches (2 checked)',
+      { timeout: 10000 },
+    );
 
     await options.close();
   });
 
-  test('function rule hides body in display mode, shows when editing', async ({ extContext, extensionId, setupDir }) => {
+  test('function rule hides body in display mode, shows when editing', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const fnSource = 'return page.title.length > 10 ? 1 : 0;';
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
-        rules: [{ id: 'rule-s-test-0001', type: 'smart', config: { description: 'Long titles', fnSource }, createdAt: now }],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [
+            {
+              id: 'rule-s-test-0001',
+              type: 'function',
+              config: { description: 'Long titles', fnSource },
+              createdAt: now,
+            },
+          ],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -856,22 +1586,43 @@ test.describe('Rules UI', () => {
     await ruleEntry.locator('.rule-edit').click();
     const editRow = options.locator('.rule-entry.rule-editing');
     await expect(editRow).toBeVisible();
-    await expect(editRow.locator('.rule-smart-fn-input')).toBeVisible();
-    await expect(editRow.locator('.rule-smart-fn-input')).toHaveValue(fnSource);
+    await expect(editRow.locator('.rule-fn-input')).toBeVisible();
+    await expect(editRow.locator('.rule-fn-input')).toHaveValue(fnSource);
 
     await options.close();
   });
 
-  test('function rule textarea has at least 20 rows in edit mode', async ({ extContext, extensionId, setupDir }) => {
+  test('function rule textarea has at least 20 rows in edit mode', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -880,25 +1631,46 @@ test.describe('Rules UI', () => {
 
     // Open add form and switch to function type
     await options.locator('#rulesAddBtn').click();
-    await options.locator('.rule-type-option[data-type="smart"]').click();
+    await options.locator('.rule-type-option[data-type="function"]').click();
 
-    const textarea = options.locator('.rule-smart-fn-input');
+    const textarea = options.locator('.rule-fn-input');
     await expect(textarea).toBeVisible();
     await expect(textarea).toHaveAttribute('rows', '20');
 
     await options.close();
   });
 
-  test('Enter in function textarea creates newline instead of saving', async ({ extContext, extensionId, setupDir }) => {
+  test('Enter in function textarea creates newline instead of saving', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -907,9 +1679,9 @@ test.describe('Rules UI', () => {
 
     // Open add form and switch to function type
     await options.locator('#rulesAddBtn').click();
-    await options.locator('.rule-type-option[data-type="smart"]').click();
+    await options.locator('.rule-type-option[data-type="function"]').click();
 
-    const textarea = options.locator('.rule-smart-fn-input');
+    const textarea = options.locator('.rule-fn-input');
     await textarea.click();
     await textarea.fill('const x = 1;');
     await textarea.press('Enter');
@@ -924,16 +1696,37 @@ test.describe('Rules UI', () => {
     await options.close();
   });
 
-  test('function rule textarea has JS syntax highlighting', async ({ extContext, extensionId, setupDir }) => {
+  test('function rule textarea has JS syntax highlighting', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [], rules: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+          rules: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -942,9 +1735,9 @@ test.describe('Rules UI', () => {
 
     // Open add form and switch to function type
     await options.locator('#rulesAddBtn').click();
-    await options.locator('.rule-type-option[data-type="smart"]').click();
+    await options.locator('.rule-type-option[data-type="function"]').click();
 
-    const textarea = options.locator('.rule-smart-fn-input');
+    const textarea = options.locator('.rule-fn-input');
     await textarea.fill('const x = "hello";\nreturn x;');
 
     // Highlight overlay should exist and contain highlighted tokens

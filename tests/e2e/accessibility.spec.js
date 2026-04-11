@@ -9,7 +9,10 @@ test.describe('Accessibility', () => {
     ]);
   });
 
-  test('focus-visible outline exists for interactive elements', async ({ extContext, extensionId }) => {
+  test('focus-visible outline exists for interactive elements', async ({
+    extContext,
+    extensionId,
+  }) => {
     const page = await openOptionsPage(extContext, extensionId);
 
     // Verify that :focus-visible styles produce a visible outline on buttons
@@ -25,7 +28,10 @@ test.describe('Accessibility', () => {
     await page.close();
   });
 
-  test('settings modal has role="dialog"', async ({ extContext, extensionId }) => {
+  test('settings modal has role="dialog"', async ({
+    extContext,
+    extensionId,
+  }) => {
     const page = await openOptionsPage(extContext, extensionId);
 
     const role = await page.evaluate(() => {
@@ -37,27 +43,37 @@ test.describe('Accessibility', () => {
     await page.close();
   });
 
-  test('icon-only buttons have accessible labels', async ({ extContext, extensionId }) => {
+  test('icon-only buttons have accessible labels', async ({
+    extContext,
+    extensionId,
+  }) => {
     const page = await openOptionsPage(extContext, extensionId);
 
     // confirmTitleBtn (checkmark icon) should have a title or aria-label
     const confirmLabel = await page.evaluate(() => {
       const btn = document.getElementById('confirmTitleBtn');
-      return btn?.getAttribute('title') || btn?.getAttribute('aria-label') || '';
+      return (
+        btn?.getAttribute('title') || btn?.getAttribute('aria-label') || ''
+      );
     });
     expect(confirmLabel).toBeTruthy();
 
     // modal close button should have a title or aria-label
     const closeLabel = await page.evaluate(() => {
       const btn = document.getElementById('settingsClose');
-      return btn?.getAttribute('title') || btn?.getAttribute('aria-label') || '';
+      return (
+        btn?.getAttribute('title') || btn?.getAttribute('aria-label') || ''
+      );
     });
     expect(closeLabel).toBeTruthy();
 
     await page.close();
   });
 
-  test('clickable sidebar items have button role', async ({ extContext, extensionId }) => {
+  test('clickable sidebar items have button role', async ({
+    extContext,
+    extensionId,
+  }) => {
     const page = await openOptionsPage(extContext, extensionId);
 
     // Recycle bin (static HTML clickable div) should have role=button

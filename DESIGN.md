@@ -34,7 +34,7 @@ The system intentionally avoids displaying information as a graph. Graphs carry 
 
 Instead, the system displays sorted lists — like a search engine, but private. With private data, we have multiple ranking algorithms to choose from: content relevance, temporal context, lineage distance, and attention weight. The user can mix all of them.
 
-Each search query can be **pinned** to become a **materialized view** (a "list"). Users can selectively save results and subscribe to changes when new information matches the original query. Rules automate this: keyword rules match by pattern, smart rules by user-defined JS functions.
+Each search query can be **pinned** to become a **materialized view** (a "list"). Users can selectively save results and subscribe to changes when new information matches the original query. Rules automate this: keyword rules match by pattern, function rules by user-defined JS predicates.
 
 ## File-System-First Architecture
 

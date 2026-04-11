@@ -1,17 +1,29 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { GitHubTransport, parseRepoUrl } from '../extension/sync-transport-github.js';
+import {
+  GitHubTransport,
+  parseRepoUrl,
+} from '../extension/sync-transport-github.js';
 
 describe('parseRepoUrl', () => {
   it('parses standard GitHub URL', () => {
-    expect(parseRepoUrl('https://github.com/user/repo')).toEqual({ owner: 'user', repo: 'repo' });
+    expect(parseRepoUrl('https://github.com/user/repo')).toEqual({
+      owner: 'user',
+      repo: 'repo',
+    });
   });
 
   it('parses URL with .git suffix', () => {
-    expect(parseRepoUrl('https://github.com/user/repo.git')).toEqual({ owner: 'user', repo: 'repo' });
+    expect(parseRepoUrl('https://github.com/user/repo.git')).toEqual({
+      owner: 'user',
+      repo: 'repo',
+    });
   });
 
   it('parses URL with trailing slash', () => {
-    expect(parseRepoUrl('https://github.com/user/repo/')).toEqual({ owner: 'user', repo: 'repo' });
+    expect(parseRepoUrl('https://github.com/user/repo/')).toEqual({
+      owner: 'user',
+      repo: 'repo',
+    });
   });
 
   it('throws on invalid URL', () => {
@@ -30,7 +42,11 @@ describe('GitHubTransport', () => {
   beforeEach(() => {
     mockFetch = vi.fn();
     global.fetch = mockFetch;
-    transport = new GitHubTransport({ owner: 'testuser', repo: 'testrepo', token: 'ghp_testtoken' });
+    transport = new GitHubTransport({
+      owner: 'testuser',
+      repo: 'testrepo',
+      token: 'ghp_testtoken',
+    });
   });
 
   afterEach(() => {
@@ -49,10 +65,12 @@ describe('GitHubTransport', () => {
 
   describe('listBranches', () => {
     it('calls correct endpoint and returns mapped branches', async () => {
-      mockFetch.mockResolvedValueOnce(mockResponse([
-        { name: 'device-a', commit: { sha: 'abc123' } },
-        { name: 'device-b', commit: { sha: 'def456' } },
-      ]));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse([
+          { name: 'device-a', commit: { sha: 'abc123' } },
+          { name: 'device-b', commit: { sha: 'def456' } },
+        ]),
+      );
 
       const branches = await transport.listBranches();
 
@@ -61,7 +79,7 @@ describe('GitHubTransport', () => {
         expect.objectContaining({
           method: 'GET',
           headers: expect.objectContaining({
-            'Authorization': 'token ghp_testtoken',
+            Authorization: 'token ghp_testtoken',
           }),
         }),
       );
@@ -74,14 +92,20 @@ describe('GitHubTransport', () => {
 
   describe('getTree', () => {
     it('calls recursive tree endpoint and returns file entries', async () => {
-      mockFetch.mockResolvedValueOnce(mockResponse({
-        sha: 'tree123',
-        tree: [
-          { path: 'data/logs/dev1/2026-03-20.jsonl', sha: 'blob1', type: 'blob' },
-          { path: 'data/notes/note1.json', sha: 'blob2', type: 'blob' },
-          { path: 'data/logs', sha: 'tree1', type: 'tree' },
-        ],
-      }));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse({
+          sha: 'tree123',
+          tree: [
+            {
+              path: 'data/logs/dev1/2026-03-20.jsonl',
+              sha: 'blob1',
+              type: 'blob',
+            },
+            { path: 'data/notes/note1.json', sha: 'blob2', type: 'blob' },
+            { path: 'data/logs', sha: 'tree1', type: 'tree' },
+          ],
+        }),
+      );
 
       const tree = await transport.getTree('tree123');
 
@@ -101,11 +125,13 @@ describe('GitHubTransport', () => {
     it('fetches blob and decodes base64 content', async () => {
       const content = '{"slug":"test","excerpt":"hello"}';
       const encoded = btoa(content);
-      mockFetch.mockResolvedValueOnce(mockResponse({
-        sha: 'blob1',
-        content: encoded,
-        encoding: 'base64',
-      }));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse({
+          sha: 'blob1',
+          content: encoded,
+          encoding: 'base64',
+        }),
+      );
 
       const result = await transport.getBlob('blob1');
 
@@ -119,10 +145,15 @@ describe('GitHubTransport', () => {
 
   describe('createBranch', () => {
     it('creates a ref for the new branch', async () => {
-      mockFetch.mockResolvedValueOnce(mockResponse({
-        ref: 'refs/heads/new-device',
-        object: { sha: 'abc123' },
-      }, 201));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse(
+          {
+            ref: 'refs/heads/new-device',
+            object: { sha: 'abc123' },
+          },
+          201,
+        ),
+      );
 
       await transport.createBranch('new-device', 'abc123');
 
@@ -139,7 +170,10 @@ describe('GitHubTransport', () => {
   describe('pushTree', () => {
     it('creates blobs, tree, orphan commit, and updates ref', async () => {
       const files = [
-        { path: 'data/logs/dev1/2026-03-20.jsonl', content: '{"action":"visit_page"}\n' },
+        {
+          path: 'data/logs/dev1/2026-03-20.jsonl',
+          content: '{"action":"visit_page"}\n',
+        },
         { path: 'data/notes/note1.json', content: '{"slug":"note1"}' },
       ];
 
@@ -151,42 +185,62 @@ describe('GitHubTransport', () => {
       // Mock orphan commit creation
       mockFetch.mockResolvedValueOnce(mockResponse({ sha: 'commit-sha' }, 201));
       // Mock ref update
-      mockFetch.mockResolvedValueOnce(mockResponse({ object: { sha: 'commit-sha' } }));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse({ object: { sha: 'commit-sha' } }),
+      );
 
       const result = await transport.pushTree('dev1', files);
 
       // Verify blob creation calls
-      expect(mockFetch).toHaveBeenNthCalledWith(1,
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
         'https://api.github.com/repos/testuser/testrepo/git/blobs',
         expect.objectContaining({
           method: 'POST',
           body: expect.stringContaining('"encoding":"base64"'),
         }),
       );
-      expect(mockFetch).toHaveBeenNthCalledWith(2,
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
         'https://api.github.com/repos/testuser/testrepo/git/blobs',
         expect.any(Object),
       );
 
       // Verify tree creation
       const treeCall = mockFetch.mock.calls[2];
-      expect(treeCall[0]).toBe('https://api.github.com/repos/testuser/testrepo/git/trees');
+      expect(treeCall[0]).toBe(
+        'https://api.github.com/repos/testuser/testrepo/git/trees',
+      );
       const treeBody = JSON.parse(treeCall[1].body);
       expect(treeBody.tree).toEqual([
-        { path: 'data/logs/dev1/2026-03-20.jsonl', mode: '100644', type: 'blob', sha: 'blob-sha-1' },
-        { path: 'data/notes/note1.json', mode: '100644', type: 'blob', sha: 'blob-sha-2' },
+        {
+          path: 'data/logs/dev1/2026-03-20.jsonl',
+          mode: '100644',
+          type: 'blob',
+          sha: 'blob-sha-1',
+        },
+        {
+          path: 'data/notes/note1.json',
+          mode: '100644',
+          type: 'blob',
+          sha: 'blob-sha-2',
+        },
       ]);
 
       // Verify orphan commit (no parents)
       const commitCall = mockFetch.mock.calls[3];
-      expect(commitCall[0]).toBe('https://api.github.com/repos/testuser/testrepo/git/commits');
+      expect(commitCall[0]).toBe(
+        'https://api.github.com/repos/testuser/testrepo/git/commits',
+      );
       const commitBody = JSON.parse(commitCall[1].body);
       expect(commitBody.parents).toEqual([]);
       expect(commitBody.tree).toBe('tree-sha');
 
       // Verify ref update (force)
       const refCall = mockFetch.mock.calls[4];
-      expect(refCall[0]).toBe('https://api.github.com/repos/testuser/testrepo/git/refs/heads/dev1');
+      expect(refCall[0]).toBe(
+        'https://api.github.com/repos/testuser/testrepo/git/refs/heads/dev1',
+      );
       const refBody = JSON.parse(refCall[1].body);
       expect(refBody.sha).toBe('commit-sha');
       expect(refBody.force).toBe(true);
@@ -204,16 +258,22 @@ describe('GitHubTransport', () => {
       // commit
       mockFetch.mockResolvedValueOnce(mockResponse({ sha: 'c1' }, 201));
       // ref update fails (branch doesn't exist)
-      mockFetch.mockResolvedValueOnce(mockResponse({ message: 'Reference does not exist' }, 422));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse({ message: 'Reference does not exist' }, 422),
+      );
       // create ref fallback
-      mockFetch.mockResolvedValueOnce(mockResponse({ ref: 'refs/heads/dev1', object: { sha: 'c1' } }, 201));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse({ ref: 'refs/heads/dev1', object: { sha: 'c1' } }, 201),
+      );
 
       const result = await transport.pushTree('dev1', files);
       expect(result).toEqual({ sha: 'c1' });
 
       // Last call should be POST to create ref
       const lastCall = mockFetch.mock.calls[4];
-      expect(lastCall[0]).toBe('https://api.github.com/repos/testuser/testrepo/git/refs');
+      expect(lastCall[0]).toBe(
+        'https://api.github.com/repos/testuser/testrepo/git/refs',
+      );
       expect(lastCall[1].method).toBe('POST');
     });
   });
@@ -223,11 +283,16 @@ describe('GitHubTransport', () => {
       const files = [{ path: 'data/notes/n.json', content: '{}' }];
 
       // First blob creation fails with 409 (empty repo)
-      mockFetch.mockResolvedValueOnce(mockResponse(
-        { message: 'Git Repository is empty.', status: '409' }, 409,
-      ));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse(
+          { message: 'Git Repository is empty.', status: '409' },
+          409,
+        ),
+      );
       // _initializeEmptyRepo: PUT contents/.gitkeep
-      mockFetch.mockResolvedValueOnce(mockResponse({ content: { sha: 'init-sha' } }, 201));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse({ content: { sha: 'init-sha' } }, 201),
+      );
       // Retry blob creation succeeds
       mockFetch.mockResolvedValueOnce(mockResponse({ sha: 'b1' }, 201));
       // tree
@@ -235,16 +300,22 @@ describe('GitHubTransport', () => {
       // commit
       mockFetch.mockResolvedValueOnce(mockResponse({ sha: 'c1' }, 201));
       // ref update (branch doesn't exist yet on fresh repo)
-      mockFetch.mockResolvedValueOnce(mockResponse({ message: 'Reference does not exist' }, 422));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse({ message: 'Reference does not exist' }, 422),
+      );
       // create ref fallback
-      mockFetch.mockResolvedValueOnce(mockResponse({ ref: 'refs/heads/dev1', object: { sha: 'c1' } }, 201));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse({ ref: 'refs/heads/dev1', object: { sha: 'c1' } }, 201),
+      );
 
       const result = await transport.pushTree('dev1', files);
       expect(result).toEqual({ sha: 'c1' });
 
       // Verify the init call: PUT /repos/.../contents/.gitkeep
       const initCall = mockFetch.mock.calls[1];
-      expect(initCall[0]).toBe('https://api.github.com/repos/testuser/testrepo/contents/.gitkeep');
+      expect(initCall[0]).toBe(
+        'https://api.github.com/repos/testuser/testrepo/contents/.gitkeep',
+      );
       expect(initCall[1].method).toBe('PUT');
       const initBody = JSON.parse(initCall[1].body);
       expect(initBody.message).toMatch(/init/i);
@@ -265,12 +336,16 @@ describe('GitHubTransport', () => {
 
   describe('error handling', () => {
     it('throws on 401 unauthorized', async () => {
-      mockFetch.mockResolvedValueOnce(mockResponse({ message: 'Bad credentials' }, 401));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse({ message: 'Bad credentials' }, 401),
+      );
       await expect(transport.listBranches()).rejects.toThrow(/401/);
     });
 
     it('throws on 404 not found', async () => {
-      mockFetch.mockResolvedValueOnce(mockResponse({ message: 'Not Found' }, 404));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse({ message: 'Not Found' }, 404),
+      );
       await expect(transport.getTree('abc')).rejects.toThrow(/404/);
     });
 
@@ -321,8 +396,12 @@ describe('GitHubTransport', () => {
   describe('retry logic', () => {
     it('retries on 500 server error then succeeds', async () => {
       mockFetch
-        .mockResolvedValueOnce(mockResponse({ message: 'Internal Server Error' }, 500))
-        .mockResolvedValueOnce(mockResponse([{ name: 'dev1', commit: { sha: 'abc' } }]));
+        .mockResolvedValueOnce(
+          mockResponse({ message: 'Internal Server Error' }, 500),
+        )
+        .mockResolvedValueOnce(
+          mockResponse([{ name: 'dev1', commit: { sha: 'abc' } }]),
+        );
 
       const branches = await transport.listBranches();
       expect(branches).toEqual([{ name: 'dev1', sha: 'abc' }]);
@@ -332,7 +411,9 @@ describe('GitHubTransport', () => {
     it('retries on network error then succeeds', async () => {
       mockFetch
         .mockRejectedValueOnce(new TypeError('Failed to fetch'))
-        .mockResolvedValueOnce(mockResponse([{ name: 'dev1', commit: { sha: 'abc' } }]));
+        .mockResolvedValueOnce(
+          mockResponse([{ name: 'dev1', commit: { sha: 'abc' } }]),
+        );
 
       const branches = await transport.listBranches();
       expect(branches).toEqual([{ name: 'dev1', sha: 'abc' }]);
@@ -340,20 +421,25 @@ describe('GitHubTransport', () => {
     });
 
     it('does not retry on 401 auth error', async () => {
-      mockFetch.mockResolvedValueOnce(mockResponse({ message: 'Bad credentials' }, 401));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse({ message: 'Bad credentials' }, 401),
+      );
       await expect(transport.listBranches()).rejects.toThrow(/401/);
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
     it('does not retry on 404', async () => {
-      mockFetch.mockResolvedValueOnce(mockResponse({ message: 'Not Found' }, 404));
+      mockFetch.mockResolvedValueOnce(
+        mockResponse({ message: 'Not Found' }, 404),
+      );
       await expect(transport.getTree('abc')).rejects.toThrow(/404/);
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
     it('gives up after max retries on persistent 500', async () => {
-      mockFetch
-        .mockResolvedValue(mockResponse({ message: 'Internal Server Error' }, 500));
+      mockFetch.mockResolvedValue(
+        mockResponse({ message: 'Internal Server Error' }, 500),
+      );
 
       await expect(transport.listBranches()).rejects.toThrow(/500/);
       expect(mockFetch).toHaveBeenCalledTimes(3); // initial + 2 retries

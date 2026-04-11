@@ -128,25 +128,42 @@ Seed cases live in `seeds/` (gitignored). Each `.mjs` file exports a function re
 - **Offscreen document**: `chrome://extensions/` -> extension details -> look for "Inspect views: offscreen.html"
 - **Debug logging**: Enable in Settings -> Advanced -> Debug logging. Logs go to the service worker console via `logDebug()`.
 
+## Formatting
+
+```bash
+npm run fmt              # format all JS/JSON files in-place
+npm run fmt:check        # check formatting (CI mode, no writes)
+cargo fmt                # format Rust code
+cargo fmt -- --check     # check Rust formatting (CI mode)
+```
+
 ## Lint & Analysis
 
 ```bash
 npx knip --include files,exports,duplicates   # unused files/exports/deps
 npx jscpd extension/ --min-lines 5 --min-tokens 50  # duplicated code blocks
+cargo clippy --target wasm32-unknown-unknown -- -D warnings  # Rust lints
 ```
 
-## Data Migration Scripts
+## Replay Verification
 
-Located in `scripts/`. These operate on the persistent data directory (`~/portal-data`), not on the extension code.
+Replays the full JSONL event log through `effectOf` and diffs the result against on-disk checkpoints. Useful for validating that the replay engine reproduces the expected state.
 
-- `replay-verify.mjs` — replays full history from `data/logs/`, compares against disk checkpoints
-- `fix-history.mjs` — patches JSONL history entries
-- `overwrite-disk.mjs` — overwrites disk checkpoints from replay output
-- `backfill-page-titles.mjs` — fills missing page titles from logs
-- `backfill-created-at.mjs` — sets `createdAt` on page entities from earliest log timestamp
-- Various `migrate-*.js` scripts for schema transitions
+```bash
+npm run replay:verify                                   # default output
+node scripts/replay-verify.mjs --write /tmp/my-replay   # custom output dir
+node scripts/replay-verify.mjs --verbose                 # show all diffs (not just 5 per category)
+```
 
-The migration workflow is: (1) replay-verify to identify mismatches, (2) fix history if needed, (3) re-replay, (4) overwrite disk.
+Before replay, the script normalizes known data inconsistencies:
+- Rewrites `pin_to_list` entries that reference a list by its post-rename name before the rename event
+- Adjusts `create_list` timestamps when pins predate the list's creation
+- Filters null items from `pin_to_list`/`unpin_from_list` entries
+
+Diff results are classified into three categories:
+- **schema-gap** — field added/removed by code evolution (e.g. `createdAt` on old pages)
+- **timing-drift** — replay and disk differ because the checkpoint was written at an intermediate state
+- **data** — genuine discrepancy worth investigating
 
 ## Project Structure
 
@@ -172,7 +189,7 @@ The migration workflow is: (1) replay-verify to identify mismatches, (2) fix his
 │   ├── e2e/                # Playwright E2E specs
 │   ├── seed-builder.mjs    # Test data builder
 │   └── fixtures/           # Test data files
-├── scripts/                # Migration and verification scripts
+├── scripts/                # Manual test browser + replay verification
 ├── seeds/                  # Manual test seed cases (gitignored)
 ├── plans/                  # Implementation plans
 ├── Cargo.toml              # Rust dependencies

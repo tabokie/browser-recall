@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
 
 #[wasm_bindgen]
 extern "C" {
@@ -45,9 +45,7 @@ pub struct HistoryEntry {
     pub timestamp: i64,
     pub url: String,
     pub title: String,
-    pub intent: String,  // Search keywords, prompts
-    pub content: String,  // External data
-    pub attention: String,  // JSON string of engagement patterns
+    pub content: String,
 }
 
 #[wasm_bindgen]
@@ -59,31 +57,13 @@ impl HistoryEntry {
             timestamp,
             url,
             title,
-            intent: String::new(),
             content: String::new(),
-            attention: String::new(),
         }
-    }
-
-    #[wasm_bindgen(js_name = setIntent)]
-    pub fn set_intent(&mut self, intent: String) {
-        self.intent = intent;
     }
 
     #[wasm_bindgen(js_name = setContent)]
     pub fn set_content(&mut self, content: String) {
         self.content = content;
-    }
-
-    #[wasm_bindgen(js_name = setAttention)]
-    pub fn set_attention(&mut self, attention: String) {
-        self.attention = attention;
-    }
-
-    #[wasm_bindgen(js_name = toJSON)]
-    pub fn to_json(&self) -> Result<JsValue, JsValue> {
-        serde_wasm_bindgen::to_value(self)
-            .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
     }
 }
 
@@ -93,8 +73,6 @@ struct SearchResult {
     url: String,
     title: String,
     timestamp: i64,
-    intent: String,
-    attention: String,
     score: f64,
 }
 
@@ -106,20 +84,12 @@ struct HistoryData {
     title: String,
     #[serde(default)]
     slug: Option<String>,
-    #[serde(default)]
-    intent: String,
-    #[serde(default)]
-    attention: String,
 }
 
 /// Search result ranking algorithms
 #[wasm_bindgen]
 pub enum RankingAlgorithm {
     Content,
-    Context,
-    Lineage,
-    Attention,
-    Hybrid,
 }
 
 /// Text search engine. Currently only handles flat query strings.
@@ -128,6 +98,12 @@ pub enum RankingAlgorithm {
 #[wasm_bindgen]
 pub struct SearchEngine {
     entries: Vec<HistoryEntry>,
+}
+
+impl Default for SearchEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[wasm_bindgen]
@@ -156,39 +132,21 @@ impl SearchEngine {
         if words.is_empty() {
             return Vec::new();
         }
-        let mut results: Vec<SearchResult> = self.entries
+        let mut results: Vec<SearchResult> = self
+            .entries
             .iter()
-            .filter(|i| {
-                words_match_fields(&words, &[&i.title, &i.content, &i.intent])
-            })
+            .filter(|i| words_match_fields(&words, &[&i.title, &i.content]))
             .map(|i| SearchResult {
                 url: i.url.clone(),
                 title: i.title.clone(),
                 timestamp: i.timestamp,
-                intent: i.intent.clone(),
-                attention: i.attention.clone(),
                 score: content_score(i, &words),
             })
             .collect();
 
-        // Simple ranking implementation (can be enhanced)
         match algorithm {
             RankingAlgorithm::Content => {
-                results.sort_by(|a, b| {
-                    b.score.partial_cmp(&a.score).unwrap()
-                });
-            }
-            RankingAlgorithm::Context => {
-                results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-            }
-            RankingAlgorithm::Lineage => {
-                results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-            }
-            RankingAlgorithm::Attention => {
-                results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-            }
-            RankingAlgorithm::Hybrid => {
-                results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
             }
         }
 
@@ -223,7 +181,10 @@ fn parse_query_words(query: &str) -> Vec<QueryWord> {
                 chars.next();
             }
             if !phrase.is_empty() {
-                words.push(QueryWord { text: phrase.to_lowercase(), exact: true });
+                words.push(QueryWord {
+                    text: phrase.to_lowercase(),
+                    exact: true,
+                });
             }
         } else if ch.is_whitespace() {
             chars.next();
@@ -237,7 +198,10 @@ fn parse_query_words(query: &str) -> Vec<QueryWord> {
                 chars.next();
             }
             if !token.is_empty() {
-                words.push(QueryWord { text: token.to_lowercase(), exact: false });
+                words.push(QueryWord {
+                    text: token.to_lowercase(),
+                    exact: false,
+                });
             }
         }
     }
@@ -253,8 +217,12 @@ fn damerau_levenshtein(a: &str, b: &str) -> usize {
     let a_len = a_bytes.len();
     let b_len = b_bytes.len();
 
-    if a_len == 0 { return b_len; }
-    if b_len == 0 { return a_len; }
+    if a_len == 0 {
+        return b_len;
+    }
+    if b_len == 0 {
+        return a_len;
+    }
 
     let mut prev2 = vec![0usize; b_len + 1];
     let mut prev = (0..=b_len).collect::<Vec<_>>();
@@ -263,12 +231,17 @@ fn damerau_levenshtein(a: &str, b: &str) -> usize {
     for i in 1..=a_len {
         curr[0] = i;
         for j in 1..=b_len {
-            let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
-            curr[j] = (prev[j - 1] + cost)       // substitution
-                .min(curr[j - 1] + 1)             // insertion
-                .min(prev[j] + 1);                // deletion
-            // Transposition
-            if i > 1 && j > 1
+            let cost = if a_bytes[i - 1] == b_bytes[j - 1] {
+                0
+            } else {
+                1
+            };
+            curr[j] = (prev[j - 1] + cost) // substitution
+                .min(curr[j - 1] + 1) // insertion
+                .min(prev[j] + 1); // deletion
+                                   // Transposition
+            if i > 1
+                && j > 1
                 && a_bytes[i - 1] == b_bytes[j - 2]
                 && a_bytes[i - 2] == b_bytes[j - 1]
             {
@@ -288,7 +261,9 @@ fn tokenize(text: &str) -> Vec<&str> {
     let mut start = None;
     for (i, &b) in bytes.iter().enumerate() {
         if b.is_ascii_alphanumeric() {
-            if start.is_none() { start = Some(i); }
+            if start.is_none() {
+                start = Some(i);
+            }
         } else if let Some(s) = start {
             tokens.push(&text[s..i]);
             start = None;
@@ -310,7 +285,7 @@ enum MatchQuality {
 /// Max allowed edit distance based on query word length (Algolia-style thresholds).
 fn max_fuzzy_distance(word_len: usize) -> Option<usize> {
     match word_len {
-        0..=2 => None,  // too short for fuzzy
+        0..=2 => None, // too short for fuzzy
         3..=4 => Some(1),
         _ => Some(2),
     }
@@ -328,15 +303,17 @@ fn word_match_quality(word: &QueryWord, text: &str) -> Option<MatchQuality> {
         while let Some(pos) = lower[start..].find(needle) {
             let abs_pos = start + pos;
             let end_pos = abs_pos + needle.len();
-            let at_word_start = abs_pos == 0
-                || !lower.as_bytes()[abs_pos - 1].is_ascii_alphanumeric();
-            let at_word_end = end_pos == lower.len()
-                || !lower.as_bytes()[end_pos].is_ascii_alphanumeric();
+            let at_word_start =
+                abs_pos == 0 || !lower.as_bytes()[abs_pos - 1].is_ascii_alphanumeric();
+            let at_word_end =
+                end_pos == lower.len() || !lower.as_bytes()[end_pos].is_ascii_alphanumeric();
             if at_word_start && at_word_end {
                 return Some(MatchQuality::Exact);
             }
             start = abs_pos + 1;
-            if start >= lower.len() { break; }
+            if start >= lower.len() {
+                break;
+            }
         }
         return None;
     }
@@ -354,14 +331,20 @@ fn word_match_quality(word: &QueryWord, text: &str) -> Option<MatchQuality> {
         best_dist = best_dist.min(d);
         // Also check token prefixes around query length (handles typo + incomplete typing)
         if token.len() > word.text.len() {
-            for prefix_len in [word.text.len().saturating_sub(1), word.text.len(), word.text.len() + 1] {
+            for prefix_len in [
+                word.text.len().saturating_sub(1),
+                word.text.len(),
+                word.text.len() + 1,
+            ] {
                 if prefix_len > 0 && prefix_len <= token.len() {
                     let d = damerau_levenshtein(&word.text, &token[..prefix_len]);
                     best_dist = best_dist.min(d);
                 }
             }
         }
-        if best_dist == 0 { break; }
+        if best_dist == 0 {
+            break;
+        }
     }
     if best_dist <= max_dist {
         Some(MatchQuality::Fuzzy(best_dist))
@@ -377,9 +360,9 @@ fn word_matches_text(word: &QueryWord, text: &str) -> bool {
 
 /// Check if ALL query words match in at least one of the given text fields.
 fn words_match_fields(words: &[QueryWord], fields: &[&str]) -> bool {
-    words.iter().all(|w| {
-        fields.iter().any(|f| word_matches_text(w, f))
-    })
+    words
+        .iter()
+        .all(|w| fields.iter().any(|f| word_matches_text(w, f)))
 }
 
 /// Compute match quality for all words against a single text field.
@@ -406,12 +389,6 @@ fn content_score(entry: &HistoryEntry, words: &[QueryWord]) -> f64 {
     if !entry.content.is_empty() {
         if let Some(q) = field_match_quality(words, &entry.content) {
             score += 1.0 * q;
-        }
-    }
-
-    if !entry.intent.is_empty() {
-        if let Some(q) = field_match_quality(words, &entry.intent) {
-            score += 1.5 * q;
         }
     }
 
@@ -455,7 +432,10 @@ async fn read_latest_md(slug_dir: &FileSystemDirectoryHandle) -> Result<String, 
         return Ok(String::new());
     }
 
-    let fh: FileSystemFileHandle = slug_dir.get_file_handle(&latest_name).await?.unchecked_into();
+    let fh: FileSystemFileHandle = slug_dir
+        .get_file_handle(&latest_name)
+        .await?
+        .unchecked_into();
     read_file_text(&fh).await
 }
 
@@ -496,10 +476,7 @@ pub async fn search_batch(
 
     // 2. Load content for each slug
     let mut content_map: HashMap<String, String> = HashMap::new();
-    let slugs: HashSet<&str> = entries
-        .iter()
-        .filter_map(|i| i.slug.as_deref())
-        .collect();
+    let slugs: HashSet<&str> = entries.iter().filter_map(|i| i.slug.as_deref()).collect();
 
     for slug in slugs {
         if let Ok(slug_dir_val) = pages.get_directory_handle(slug).await {
@@ -525,9 +502,7 @@ pub async fn search_batch(
             timestamp: item.timestamp,
             url: item.url.clone(),
             title: item.title.clone(),
-            intent: item.intent.clone(),
             content: c,
-            attention: item.attention.clone(),
         });
     }
 
@@ -586,10 +561,7 @@ async fn list_directory(dir: &FileSystemDirectoryHandle) -> Result<Vec<(String, 
 /// Search all note JSON files in a directory for query matches.
 /// Returns matching notes with their URL and slug.
 #[wasm_bindgen(js_name = "searchNotes")]
-pub async fn search_notes(
-    notes_dir: JsValue,
-    query: String,
-) -> Result<JsValue, JsValue> {
+pub async fn search_notes(notes_dir: JsValue, query: String) -> Result<JsValue, JsValue> {
     let dir: &FileSystemDirectoryHandle = notes_dir.unchecked_ref();
     let words = parse_query_words(&query);
     if words.is_empty() {
@@ -638,16 +610,15 @@ pub async fn search_notes(
         let field_refs: Vec<&str> = fields.iter().map(|s| s.as_str()).collect();
         if words_match_fields(&words, &field_refs) {
             if let Some(url) = note.url {
-                let note_slug = note.slug.unwrap_or_else(|| {
-                    name.trim_end_matches(".json").to_string()
-                });
+                let note_slug = note
+                    .slug
+                    .unwrap_or_else(|| name.trim_end_matches(".json").to_string());
                 matches.push(NoteMatch { url, note_slug });
             }
         }
     }
 
-    serde_wasm_bindgen::to_value(&matches)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+    serde_wasm_bindgen::to_value(&matches).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 /// Search a batch of snapshot .md files for query matches.
@@ -690,8 +661,7 @@ pub async fn search_snapshots(
         }
     }
 
-    serde_wasm_bindgen::to_value(&matches)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+    serde_wasm_bindgen::to_value(&matches).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 /// Extract page slug from snapshot filename like "my-page-slug-1709251200000.md"
@@ -709,7 +679,7 @@ fn extract_slug_from_snapshot_name(name: &str) -> Option<String> {
 
 #[wasm_bindgen(start)]
 pub fn main() {
-    log("Portal Extension WASM module initialized");
+    log("Browser Recall WASM module initialized");
 }
 
 #[cfg(test)]
@@ -800,22 +770,37 @@ mod tests {
 
     #[test]
     fn exact_quoted_match() {
-        let w = QueryWord { text: "react".into(), exact: true };
-        assert!(matches!(word_match_quality(&w, "Learn React Today"), Some(MatchQuality::Exact)));
+        let w = QueryWord {
+            text: "react".into(),
+            exact: true,
+        };
+        assert!(matches!(
+            word_match_quality(&w, "Learn React Today"),
+            Some(MatchQuality::Exact)
+        ));
         // "react" not at word boundary inside "reactivity"
         assert!(word_match_quality(&w, "reactivity is key").is_none());
     }
 
     #[test]
     fn substring_match() {
-        let w = QueryWord { text: "reac".into(), exact: false };
+        let w = QueryWord {
+            text: "reac".into(),
+            exact: false,
+        };
         // "reac" is a substring of "react" → Exact
-        assert!(matches!(word_match_quality(&w, "react hooks"), Some(MatchQuality::Exact)));
+        assert!(matches!(
+            word_match_quality(&w, "react hooks"),
+            Some(MatchQuality::Exact)
+        ));
     }
 
     #[test]
     fn fuzzy_match_typo() {
-        let w = QueryWord { text: "raect".into(), exact: false };
+        let w = QueryWord {
+            text: "raect".into(),
+            exact: false,
+        };
         // "raect" vs token "react": DL distance 1, word len 5 → max_dist 2
         match word_match_quality(&w, "react hooks tutorial") {
             Some(MatchQuality::Fuzzy(d)) => assert!(d <= 2),
@@ -825,7 +810,10 @@ mod tests {
 
     #[test]
     fn fuzzy_match_prefix_typo() {
-        let w = QueryWord { text: "raect".into(), exact: false };
+        let w = QueryWord {
+            text: "raect".into(),
+            exact: false,
+        };
         // "raect" vs prefix "reacti"[..7] of "reactivity": should fuzzy-match
         match word_match_quality(&w, "reactivity overview") {
             Some(MatchQuality::Fuzzy(d)) => assert!(d <= 2),
@@ -836,14 +824,20 @@ mod tests {
     #[test]
     fn no_fuzzy_for_short_words() {
         // 2-char words don't get fuzzy matching
-        let w = QueryWord { text: "ab".into(), exact: false };
+        let w = QueryWord {
+            text: "ab".into(),
+            exact: false,
+        };
         assert!(word_match_quality(&w, "xy zz").is_none());
     }
 
     #[test]
     fn fuzzy_too_distant() {
         // "react" vs "python": way too different
-        let w = QueryWord { text: "react".into(), exact: false };
+        let w = QueryWord {
+            text: "react".into(),
+            exact: false,
+        };
         assert!(word_match_quality(&w, "python tutorial").is_none());
     }
 
@@ -852,8 +846,14 @@ mod tests {
     #[test]
     fn field_quality_all_exact() {
         let words = vec![
-            QueryWord { text: "react".into(), exact: false },
-            QueryWord { text: "hooks".into(), exact: false },
+            QueryWord {
+                text: "react".into(),
+                exact: false,
+            },
+            QueryWord {
+                text: "hooks".into(),
+                exact: false,
+            },
         ];
         let q = field_match_quality(&words, "react hooks tutorial").unwrap();
         assert!((q - 1.0).abs() < f64::EPSILON);
@@ -862,8 +862,14 @@ mod tests {
     #[test]
     fn field_quality_mixed() {
         let words = vec![
-            QueryWord { text: "react".into(), exact: false }, // substring match → 1.0
-            QueryWord { text: "hokos".into(), exact: false }, // fuzzy match "hooks" → 0.7
+            QueryWord {
+                text: "react".into(),
+                exact: false,
+            }, // substring match → 1.0
+            QueryWord {
+                text: "hokos".into(),
+                exact: false,
+            }, // fuzzy match "hooks" → 0.7
         ];
         let q = field_match_quality(&words, "react hooks tutorial").unwrap();
         // (1.0 + 0.7) / 2 = 0.85
@@ -873,8 +879,14 @@ mod tests {
     #[test]
     fn field_quality_none_when_word_misses() {
         let words = vec![
-            QueryWord { text: "react".into(), exact: false },
-            QueryWord { text: "zzzzz".into(), exact: false },
+            QueryWord {
+                text: "react".into(),
+                exact: false,
+            },
+            QueryWord {
+                text: "zzzzz".into(),
+                exact: false,
+            },
         ];
         assert!(field_match_quality(&words, "react hooks tutorial").is_none());
     }
@@ -883,10 +895,15 @@ mod tests {
 
     #[test]
     fn content_score_exact_title() {
-        let words = vec![QueryWord { text: "react".into(), exact: false }];
+        let words = vec![QueryWord {
+            text: "react".into(),
+            exact: false,
+        }];
         let entry = HistoryEntry {
-            timestamp: 0, url: String::new(), title: "React Tutorial".into(),
-            intent: String::new(), content: String::new(), attention: String::new(),
+            timestamp: 0,
+            url: String::new(),
+            title: "React Tutorial".into(),
+            content: String::new(),
         };
         let s = content_score(&entry, &words);
         assert!((s - 2.0).abs() < f64::EPSILON);
@@ -894,10 +911,15 @@ mod tests {
 
     #[test]
     fn content_score_fuzzy_title() {
-        let words = vec![QueryWord { text: "raect".into(), exact: false }];
+        let words = vec![QueryWord {
+            text: "raect".into(),
+            exact: false,
+        }];
         let entry = HistoryEntry {
-            timestamp: 0, url: String::new(), title: "React Tutorial".into(),
-            intent: String::new(), content: String::new(), attention: String::new(),
+            timestamp: 0,
+            url: String::new(),
+            title: "React Tutorial".into(),
+            content: String::new(),
         };
         let s = content_score(&entry, &words);
         // Fuzzy distance 1 → quality 0.7 → title score 2.0 * 0.7 = 1.4

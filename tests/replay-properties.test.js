@@ -40,7 +40,7 @@ function emptyStore() {
 
 function collectTreeIds(nodes) {
   const ids = new Set();
-  for (const n of (nodes || [])) {
+  for (const n of nodes || []) {
     ids.add(n.id);
     if (n.children) for (const id of collectTreeIds(n.children)) ids.add(id);
   }
@@ -72,8 +72,8 @@ function preseedNotes(store, seq) {
 }
 
 async function replaySequence(seq) {
-  const entries = seq.map(s => s.entry);
-  const contexts = seq.map(s => ({ deviceId: s.deviceId }));
+  const entries = seq.map((s) => s.entry);
+  const contexts = seq.map((s) => ({ deviceId: s.deviceId }));
   const store = emptyStore();
   preseedNotes(store, seq);
   return await replay(entries, store, contexts);
@@ -87,8 +87,8 @@ describe('P1: Idempotency — replaying any entry twice produces same state', ()
   it('every entry in a random sequence is idempotent', async () => {
     await fc.assert(
       fc.asyncProperty(arbEventSequence(5, 15), async (seq) => {
-        const entries = seq.map(s => s.entry);
-        const contexts = seq.map(s => ({ deviceId: s.deviceId }));
+        const entries = seq.map((s) => s.entry);
+        const contexts = seq.map((s) => ({ deviceId: s.deviceId }));
 
         // Full replay (with pre-seeded notes)
         const store = emptyStore();
@@ -97,7 +97,11 @@ describe('P1: Idempotency — replaying any entry twice produces same state', ()
 
         // Re-apply every entry against the final state — should produce no meaningful change
         for (let i = 0; i < seq.length; i++) {
-          const effects = await effectOf(entries[i], makeLoad(state), contexts[i]);
+          const effects = await effectOf(
+            entries[i],
+            makeLoad(state),
+            contexts[i],
+          );
           for (const [key, value] of Object.entries(effects)) {
             if (value === null) {
               // Deletion effect — entity should already not be present or be deleted
@@ -143,12 +147,12 @@ describe('P2: Referential integrity', () => {
       fc.asyncProperty(arbEventSequence(8, 20), async (seq) => {
         const state = await replaySequence(seq);
         const orphanKeys = new Set(
-          (state['manifest:orphaned']?.entries || []).map(e => e.key)
+          (state['manifest:orphaned']?.entries || []).map((e) => e.key),
         );
 
         for (const [key, entity] of Object.entries(state)) {
           if (!key.startsWith('page:') || !entity) continue;
-          for (const childId of (entity.childIds || [])) {
+          for (const childId of entity.childIds || []) {
             if (childId.startsWith('page:')) continue;
             // Snapshots are file-only references — no entity entry in the store.
             // They get orphaned on delete but don't have entity entries when active.
@@ -157,7 +161,7 @@ describe('P2: Referential integrity', () => {
             const childOrphaned = orphanKeys.has(childId);
             expect(
               childExists || childOrphaned,
-              `page ${key} has childId ${childId} which neither exists nor is orphaned`
+              `page ${key} has childId ${childId} which neither exists nor is orphaned`,
             ).toBe(true);
           }
         }
@@ -173,15 +177,15 @@ describe('P2: Referential integrity', () => {
 
         for (const [key, entity] of Object.entries(state)) {
           if (!key.startsWith('page:') || !entity) continue;
-          for (const parentId of (entity.parentIds || [])) {
+          for (const parentId of entity.parentIds || []) {
             if (!parentId.startsWith('list:')) continue;
             const list = state[parentId];
             if (!list) continue;
             if (list.deleted) continue;
-            const hasPin = (list.pins || []).some(p => p.id === key);
+            const hasPin = (list.pins || []).some((p) => p.id === key);
             expect(
               hasPin,
-              `page ${key} claims parentId ${parentId} but that list has no matching pin`
+              `page ${key} claims parentId ${parentId} but that list has no matching pin`,
             ).toBe(true);
           }
         }
@@ -200,10 +204,13 @@ describe('P2: Referential integrity', () => {
         for (const [name, listId] of Object.entries(nameToId.paths)) {
           const listKey = `list:${listId}`;
           const list = state[listKey];
-          expect(list, `name-to-id path "${name}" -> "${listId}" points to missing entity`).toBeTruthy();
+          expect(
+            list,
+            `name-to-id path "${name}" -> "${listId}" points to missing entity`,
+          ).toBeTruthy();
           expect(
             list.deleted,
-            `name-to-id path "${name}" -> "${listId}" points to a deleted list`
+            `name-to-id path "${name}" -> "${listId}" points to a deleted list`,
           ).toBeFalsy();
         }
       }),
@@ -223,7 +230,7 @@ describe('P2: Referential integrity', () => {
           if (entity) {
             expect(
               entity.deleted,
-              `orphaned entry ${entry.key} exists but is not marked deleted`
+              `orphaned entry ${entry.key} exists but is not marked deleted`,
             ).toBe(true);
           }
         }
@@ -244,8 +251,8 @@ describe('P3: Checkpoint equivalence — partial checkpoint + tail replay = full
         arbEventSequence(6, 15),
         fc.double({ min: 0.1, max: 0.9, noNaN: true }),
         async (seq, splitFraction) => {
-          const entries = seq.map(s => s.entry);
-          const contexts = seq.map(s => ({ deviceId: s.deviceId }));
+          const entries = seq.map((s) => s.entry);
+          const contexts = seq.map((s) => ({ deviceId: s.deviceId }));
 
           // Full replay (with pre-seeded notes)
           const store = emptyStore();
@@ -253,25 +260,46 @@ describe('P3: Checkpoint equivalence — partial checkpoint + tail replay = full
           const fullState = await replay(entries, store, contexts);
 
           // Split replay: first K events produce checkpoint, then replay remaining
-          const k = Math.max(1, Math.min(entries.length - 1, Math.floor(entries.length * splitFraction)));
+          const k = Math.max(
+            1,
+            Math.min(
+              entries.length - 1,
+              Math.floor(entries.length * splitFraction),
+            ),
+          );
           const store2 = emptyStore();
           preseedNotes(store2, seq);
-          const checkpointState = await replay(entries.slice(0, k), store2, contexts.slice(0, k));
-          const splitState = await replay(entries.slice(k), checkpointState, contexts.slice(k));
+          const checkpointState = await replay(
+            entries.slice(0, k),
+            store2,
+            contexts.slice(0, k),
+          );
+          const splitState = await replay(
+            entries.slice(k),
+            checkpointState,
+            contexts.slice(k),
+          );
 
           // Compare all entity keys
-          const allKeys = new Set([...Object.keys(fullState), ...Object.keys(splitState)]);
+          const allKeys = new Set([
+            ...Object.keys(fullState),
+            ...Object.keys(splitState),
+          ]);
           for (const key of allKeys) {
             const full = fullState[key];
             const split = splitState[key];
 
             if (key === 'manifest:orphaned') {
               // Orphaned entries may differ in order; compare as sets
-              const fullEntries = new Set((full?.entries || []).map(e => e.key));
-              const splitEntries = new Set((split?.entries || []).map(e => e.key));
+              const fullEntries = new Set(
+                (full?.entries || []).map((e) => e.key),
+              );
+              const splitEntries = new Set(
+                (split?.entries || []).map((e) => e.key),
+              );
               expect(
                 fullEntries,
-                `orphaned manifest diverges at split ${k}/${entries.length}`
+                `orphaned manifest diverges at split ${k}/${entries.length}`,
               ).toEqual(splitEntries);
               continue;
             }
@@ -286,42 +314,57 @@ describe('P3: Checkpoint equivalence — partial checkpoint + tail replay = full
             if (key.startsWith('page:')) {
               expect(full?.url, `${key}.url diverges`).toBe(split?.url);
               expect(full?.title, `${key}.title diverges`).toBe(split?.title);
-              expect(full?.user_title, `${key}.user_title diverges`).toBe(split?.user_title);
+              expect(full?.user_title, `${key}.user_title diverges`).toBe(
+                split?.user_title,
+              );
               expect(
                 new Set(full?.childIds || []),
-                `${key}.childIds diverges`
+                `${key}.childIds diverges`,
               ).toEqual(new Set(split?.childIds || []));
               // parentIds that are lists should match
-              const fullListParents = (full?.parentIds || []).filter(p => p.startsWith('list:'));
-              const splitListParents = (split?.parentIds || []).filter(p => p.startsWith('list:'));
+              const fullListParents = (full?.parentIds || []).filter((p) =>
+                p.startsWith('list:'),
+              );
+              const splitListParents = (split?.parentIds || []).filter((p) =>
+                p.startsWith('list:'),
+              );
               expect(
                 new Set(fullListParents),
-                `${key} list parentIds diverge`
+                `${key} list parentIds diverge`,
               ).toEqual(new Set(splitListParents));
             }
 
             if (key.startsWith('list:')) {
               expect(full?.name, `${key}.name diverges`).toBe(split?.name);
-              expect(full?.deleted, `${key}.deleted diverges`).toBe(split?.deleted);
-              const fullPinIds = new Set((full?.pins || []).map(p => p.id));
-              const splitPinIds = new Set((split?.pins || []).map(p => p.id));
+              expect(full?.deleted, `${key}.deleted diverges`).toBe(
+                split?.deleted,
+              );
+              const fullPinIds = new Set((full?.pins || []).map((p) => p.id));
+              const splitPinIds = new Set((split?.pins || []).map((p) => p.id));
               expect(fullPinIds, `${key} pin ids diverge`).toEqual(splitPinIds);
             }
 
             if (key.startsWith('note:')) {
-              expect(full?.deleted, `${key}.deleted diverges`).toBe(split?.deleted);
+              expect(full?.deleted, `${key}.deleted diverges`).toBe(
+                split?.deleted,
+              );
               expect(full?.url, `${key}.url diverges`).toBe(split?.url);
             }
 
             if (key === 'manifest:settings') {
               for (const settingKey of Object.keys(full || {})) {
                 if (settingKey === 'timestamps') continue;
-                expect(full[settingKey], `settings.${settingKey} diverges`).toEqual(split?.[settingKey]);
+                expect(
+                  full[settingKey],
+                  `settings.${settingKey} diverges`,
+                ).toEqual(split?.[settingKey]);
               }
             }
 
             if (key === 'manifest:name-to-id') {
-              expect(full?.paths, `name-to-id paths diverge`).toEqual(split?.paths);
+              expect(full?.paths, `name-to-id paths diverge`).toEqual(
+                split?.paths,
+              );
             }
 
             if (key === 'manifest:list-order') {
@@ -330,7 +373,7 @@ describe('P3: Checkpoint equivalence — partial checkpoint + tail replay = full
               expect(fullIds, `list-order tree ids diverge`).toEqual(splitIds);
             }
           }
-        }
+        },
       ),
       { numRuns: NUM_RUNS, endOnFailure: true },
     );
@@ -348,8 +391,8 @@ describe('P4: Multi-device convergence — permutations produce same final state
       fc.asyncProperty(arbEventSequence(3, 5), async (seq) => {
         if (seq.length > 5) return; // safety cap for permutation count (5! = 120)
 
-        const entries = seq.map(s => s.entry);
-        const contexts = seq.map(s => ({ deviceId: s.deviceId }));
+        const entries = seq.map((s) => s.entry);
+        const contexts = seq.map((s) => ({ deviceId: s.deviceId }));
 
         // Generate all permutations of indices
         const indices = entries.map((_, i) => i);
@@ -357,8 +400,8 @@ describe('P4: Multi-device convergence — permutations produce same final state
 
         const states = [];
         for (const perm of perms) {
-          const permEntries = perm.map(i => entries[i]);
-          const permContexts = perm.map(i => contexts[i]);
+          const permEntries = perm.map((i) => entries[i]);
+          const permContexts = perm.map((i) => contexts[i]);
           const store = emptyStore();
           preseedNotes(store, seq);
           states.push(await replay(permEntries, store, permContexts));
@@ -379,11 +422,11 @@ describe('P4: Multi-device convergence — permutations produce same final state
             if (ref?.deleted !== undefined || other?.deleted !== undefined) {
               expect(
                 other?.deleted,
-                `${key}.deleted diverged in permutation ${i}`
+                `${key}.deleted diverged in permutation ${i}`,
               ).toBe(ref?.deleted);
               expect(
                 other?.deletedTs,
-                `${key}.deletedTs diverged in permutation ${i}`
+                `${key}.deletedTs diverged in permutation ${i}`,
               ).toBe(ref?.deletedTs);
             }
           }
@@ -393,17 +436,21 @@ describe('P4: Multi-device convergence — permutations produce same final state
         for (let i = 1; i < states.length; i++) {
           expect(
             states[i]['manifest:name-to-id']?.paths,
-            `name-to-id paths diverged in permutation ${i}`
+            `name-to-id paths diverged in permutation ${i}`,
           ).toEqual(states[0]['manifest:name-to-id']?.paths);
         }
 
         // list-order tree node IDs should converge
-        const refTreeIds = collectTreeIds(states[0]['manifest:list-order']?.tree);
+        const refTreeIds = collectTreeIds(
+          states[0]['manifest:list-order']?.tree,
+        );
         for (let i = 1; i < states.length; i++) {
-          const otherIds = collectTreeIds(states[i]['manifest:list-order']?.tree);
+          const otherIds = collectTreeIds(
+            states[i]['manifest:list-order']?.tree,
+          );
           expect(
             otherIds,
-            `list-order tree ids diverged in permutation ${i}`
+            `list-order tree ids diverged in permutation ${i}`,
           ).toEqual(refTreeIds);
         }
       }),
@@ -432,15 +479,19 @@ describe('P5: Monotonic timestamps — timestamps[device] never decreases', () =
   it('timestamps only increase across sequential replay', async () => {
     await fc.assert(
       fc.asyncProperty(arbEventSequence(5, 15), async (seq) => {
-        const entries = seq.map(s => s.entry);
-        const contexts = seq.map(s => ({ deviceId: s.deviceId }));
+        const entries = seq.map((s) => s.entry);
+        const contexts = seq.map((s) => ({ deviceId: s.deviceId }));
 
         const state = emptyStore();
         preseedNotes(state, seq);
         const prevTimestamps = new Map(); // key -> { device -> ts }
 
         for (let i = 0; i < entries.length; i++) {
-          const effects = await effectOf(entries[i], makeLoad(state), contexts[i]);
+          const effects = await effectOf(
+            entries[i],
+            makeLoad(state),
+            contexts[i],
+          );
 
           for (const [key, value] of Object.entries(effects)) {
             if (!value || !value.timestamps) continue;
@@ -451,7 +502,7 @@ describe('P5: Monotonic timestamps — timestamps[device] never decreases', () =
               if (prev[dev] !== undefined) {
                 expect(
                   ts,
-                  `${key} timestamps[${dev}] decreased from ${prev[dev]} to ${ts} at step ${i}`
+                  `${key} timestamps[${dev}] decreased from ${prev[dev]} to ${ts} at step ${i}`,
                 ).toBeGreaterThanOrEqual(prev[dev]);
               }
               prev[dev] = ts;
@@ -495,12 +546,12 @@ describe('P6: Three-way consistency — manifests and list entities agree', () =
 
           expect(
             nameToIdListIds.has(listId),
-            `non-deleted list ${key} (name="${entity.name}") missing from name-to-id`
+            `non-deleted list ${key} (name="${entity.name}") missing from name-to-id`,
           ).toBe(true);
 
           expect(
             treeIds.has(key),
-            `non-deleted list ${key} (name="${entity.name}") missing from list-order tree`
+            `non-deleted list ${key} (name="${entity.name}") missing from list-order tree`,
           ).toBe(true);
         }
 
@@ -510,7 +561,7 @@ describe('P6: Three-way consistency — manifests and list entities agree', () =
           const entity = state[listKey];
           expect(
             entity && !entity.deleted,
-            `name-to-id entry "${path}" -> "${listId}" points to deleted/missing list`
+            `name-to-id entry "${path}" -> "${listId}" points to deleted/missing list`,
           ).toBe(true);
         }
 
@@ -521,7 +572,7 @@ describe('P6: Three-way consistency — manifests and list entities agree', () =
           if (!entity) continue;
           expect(
             !entity.deleted,
-            `list-order tree contains deleted list ${id}`
+            `list-order tree contains deleted list ${id}`,
           ).toBe(true);
         }
       }),

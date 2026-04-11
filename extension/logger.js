@@ -5,9 +5,12 @@ let debugEnabled = false;
 
 // Initialize from session storage (guarded for test environments)
 if (typeof chrome !== 'undefined' && chrome.storage?.session) {
-  chrome.storage.session.get(['debugLogging']).then(({ debugLogging }) => {
-    debugEnabled = !!debugLogging;
-  }).catch(() => {});
+  chrome.storage.session
+    .get(['debugLogging'])
+    .then(({ debugLogging }) => {
+      debugEnabled = !!debugLogging;
+    })
+    .catch(() => {});
 }
 
 // Live toggle without page reload

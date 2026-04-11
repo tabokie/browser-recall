@@ -1,8 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import {
-  PAGE_PREFIX, NOTE_PREFIX, SNAPSHOT_PREFIX, LIST_PREFIX, MANIFEST_PREFIX,
-  pageKey, noteKey, listKey, snapshotKey,
-  entityPrefix, entitySlug, isSystemList,
+  PAGE_PREFIX,
+  NOTE_PREFIX,
+  SNAPSHOT_PREFIX,
+  LIST_PREFIX,
+  MANIFEST_PREFIX,
+  pageKey,
+  noteKey,
+  listKey,
+  snapshotKey,
+  entityPrefix,
+  entitySlug,
+  isSystemList,
   entityTypeLabel,
 } from '../extension/entity-types.js';
 
@@ -30,7 +39,9 @@ describe('key constructors', () => {
   });
 
   it('snapshotKey builds snapshot:stem', () => {
-    expect(snapshotKey('example-abc123-1700000000000')).toBe('snapshot:example-abc123-1700000000000');
+    expect(snapshotKey('example-abc123-1700000000000')).toBe(
+      'snapshot:example-abc123-1700000000000',
+    );
   });
 });
 

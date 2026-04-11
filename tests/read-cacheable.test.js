@@ -24,7 +24,9 @@ describe('utils.js structural checks', () => {
   const utilsSource = readFileSync(resolve(extDir, 'utils.js'), 'utf-8');
 
   it('exports readCacheable function', () => {
-    expect(utilsSource).toMatch(/export async function readCacheable\s*\(\s*key/);
+    expect(utilsSource).toMatch(
+      /export async function readCacheable\s*\(\s*key/,
+    );
   });
 
   it('readCacheable sends readCacheable action on session miss', () => {
@@ -32,7 +34,9 @@ describe('utils.js structural checks', () => {
   });
 
   it('loadSettingsValue delegates to readCacheable for settings', () => {
-    const fnBody = utilsSource.match(/export async function loadSettingsValue[\s\S]*?\n\}/);
+    const fnBody = utilsSource.match(
+      /export async function loadSettingsValue[\s\S]*?\n\}/,
+    );
     expect(fnBody).not.toBeNull();
     expect(fnBody[0]).toMatch(/readCacheable\s*\(\s*'manifest:settings'\s*\)/);
   });
@@ -54,11 +58,12 @@ describe('background.js structural checks', () => {
   });
 
   it('readCacheable handler returns success: true', () => {
-    const match = bgSource.match(/async function handleReadCacheable\s*\([\s\S]*?\n\}/);
+    const match = bgSource.match(
+      /async function handleReadCacheable\s*\([\s\S]*?\n\}/,
+    );
     expect(match).not.toBeNull();
     expect(match[0]).toMatch(/success:\s*true/);
   });
-
 });
 
 // ---------------------------------------------------------------------------
@@ -76,7 +81,9 @@ function makeSessionStore(initial = {}) {
       for (const k of keys) if (k in store) result[k] = store[k];
       return result;
     },
-    async set(obj) { Object.assign(store, obj); },
+    async set(obj) {
+      Object.assign(store, obj);
+    },
     _store: store,
   };
 }
@@ -89,7 +96,13 @@ describe('readCacheable / readFs', () => {
   let hydrationResolve;
   let hydrationDone;
 
-  const TEST_SETTINGS = { urlBlacklist: [], titleTrimRules: [{ urlPrefix: 'https://x.com', action: 'remove_after_pipe' }], captureContent: true };
+  const TEST_SETTINGS = {
+    urlBlacklist: [],
+    titleTrimRules: [
+      { urlPrefix: 'https://x.com', action: 'remove_after_pipe' },
+    ],
+    captureContent: true,
+  };
 
   function requestOffscreen(msg) {
     offscreenCalls.push(msg);
@@ -97,14 +110,33 @@ describe('readCacheable / readFs', () => {
       case 'loadSettings':
         return { success: true, settings: TEST_SETTINGS };
       case 'loadAllListMetadata':
-        return { success: true, lists: [{ slug: 'a', name: 'A' }, { slug: 'b', name: 'B' }] };
+        return {
+          success: true,
+          lists: [
+            { slug: 'a', name: 'A' },
+            { slug: 'b', name: 'B' },
+          ],
+        };
       case 'loadNameMap':
-        return { success: true, entity: { timestamp: 42, paths: { 'my-list': 'My List' } } };
+        return {
+          success: true,
+          entity: { timestamp: 42, paths: { 'my-list': 'My List' } },
+        };
       case 'loadListOrder':
-        return { success: true, entity: { timestamp: 0, tree: [{ id: 'list:b' }, { id: 'list:a' }] } };
+        return {
+          success: true,
+          entity: { timestamp: 0, tree: [{ id: 'list:b' }, { id: 'list:a' }] },
+        };
       case 'loadListEntity':
         if (msg.listId === 'my-custom-list') {
-          return { success: true, entity: { slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }] } };
+          return {
+            success: true,
+            entity: {
+              slug: 'my-custom-list',
+              name: 'My Custom List',
+              pins: [{ id: 'page:abc', pinnedAt: 100 }],
+            },
+          };
         }
         return { success: true, entity: null };
       default:
@@ -117,7 +149,9 @@ describe('readCacheable / readFs', () => {
     offscreenCalls = [];
 
     // Create controllable hydration promise
-    hydrationDone = new Promise(r => { hydrationResolve = r; });
+    hydrationDone = new Promise((r) => {
+      hydrationResolve = r;
+    });
     // Resolve immediately by default (tests that need blocking will override)
     hydrationResolve();
 
@@ -132,11 +166,13 @@ describe('readCacheable / readFs', () => {
         }
         case 'manifest:name-to-id': {
           const r = requestOffscreen({ action: 'loadNameMap' });
-          value = r?.entity || { timestamp: 0, paths: {} }; break;
+          value = r?.entity || { timestamp: 0, paths: {} };
+          break;
         }
         case 'manifest:list-order': {
           const r = requestOffscreen({ action: 'loadListOrder' });
-          value = r?.entity || { timestamp: 0, tree: [] }; break;
+          value = r?.entity || { timestamp: 0, tree: [] };
+          break;
         }
         default: {
           if (key.startsWith('list:')) {
@@ -164,7 +200,7 @@ describe('readCacheable / readFs', () => {
       const order = await readCacheable('manifest:list-order');
       const result = [];
       function walk(nodes) {
-        for (const node of (nodes || [])) {
+        for (const node of nodes || []) {
           result.push(node.id);
           if (node.children) walk(node.children);
         }
@@ -176,9 +212,21 @@ describe('readCacheable / readFs', () => {
 
   // ── Session hit ──────────────────────────────────────────────────────
   it('returns cached value from session without offscreen call', async () => {
-    await session.set({ 'list:my-custom-list': { timestamp: 0, slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:example-abc', pinnedAt: 1 }] } });
+    await session.set({
+      'list:my-custom-list': {
+        timestamp: 0,
+        slug: 'my-custom-list',
+        name: 'My Custom List',
+        pins: [{ id: 'page:example-abc', pinnedAt: 1 }],
+      },
+    });
     const result = await readCacheable('list:my-custom-list');
-    expect(result).toEqual({ timestamp: 0, slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:example-abc', pinnedAt: 1 }] });
+    expect(result).toEqual({
+      timestamp: 0,
+      slug: 'my-custom-list',
+      name: 'My Custom List',
+      pins: [{ id: 'page:example-abc', pinnedAt: 1 }],
+    });
     expect(offscreenCalls).toEqual([]); // No offscreen call
   });
 
@@ -196,21 +244,34 @@ describe('readCacheable / readFs', () => {
     // list-order not in session — triggers readFs('manifest:list-order')
     const result = await getAllListKeys();
     expect(result).toEqual(['list:b', 'list:a']);
-    expect(offscreenCalls.some(c => c.action === 'loadListOrder')).toBe(true);
+    expect(offscreenCalls.some((c) => c.action === 'loadListOrder')).toBe(true);
   });
 
   it('falls back to filesystem for name-to-id and caches result', async () => {
     const result = await readCacheable('manifest:name-to-id');
     expect(result).toEqual({ timestamp: 42, paths: { 'my-list': 'My List' } });
-    expect(offscreenCalls.some(c => c.action === 'loadNameMap')).toBe(true);
-    expect(session._store['manifest:name-to-id']).toEqual({ timestamp: 42, paths: { 'my-list': 'My List' } });
+    expect(offscreenCalls.some((c) => c.action === 'loadNameMap')).toBe(true);
+    expect(session._store['manifest:name-to-id']).toEqual({
+      timestamp: 42,
+      paths: { 'my-list': 'My List' },
+    });
   });
 
   it('falls back to filesystem for custom list and caches result', async () => {
     const result = await readCacheable('list:my-custom-list');
-    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }] });
-    expect(offscreenCalls.some(c => c.action === 'loadListEntity')).toBe(true);
-    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }] });
+    expect(result).toEqual({
+      slug: 'my-custom-list',
+      name: 'My Custom List',
+      pins: [{ id: 'page:abc', pinnedAt: 100 }],
+    });
+    expect(offscreenCalls.some((c) => c.action === 'loadListEntity')).toBe(
+      true,
+    );
+    expect(session._store['list:my-custom-list']).toEqual({
+      slug: 'my-custom-list',
+      name: 'My Custom List',
+      pins: [{ id: 'page:abc', pinnedAt: 100 }],
+    });
   });
 
   // ── Settings batch-load ──────────────────────────────────────────────
@@ -220,7 +281,9 @@ describe('readCacheable / readFs', () => {
     // Full settings object should be cached
     expect(session._store['manifest:settings']).toEqual(TEST_SETTINGS);
     // Only ONE loadSettings call
-    const settingsCalls = offscreenCalls.filter(c => c.action === 'loadSettings');
+    const settingsCalls = offscreenCalls.filter(
+      (c) => c.action === 'loadSettings',
+    );
     expect(settingsCalls.length).toBe(1);
   });
 
@@ -235,7 +298,10 @@ describe('readCacheable / readFs', () => {
   // ── Lists ordering ───────────────────────────────────────────────────
   it('getAllListKeys returns keys in tree order', async () => {
     await session.set({
-      'manifest:list-order': { timestamp: 0, tree: [{ id: 'list:b' }, { id: 'list:a' }] },
+      'manifest:list-order': {
+        timestamp: 0,
+        tree: [{ id: 'list:b' }, { id: 'list:a' }],
+      },
     });
     const result = await getAllListKeys();
     // 'b' should come before 'a' because tree = [b, a]
@@ -255,7 +321,9 @@ describe('readCacheable / readFs', () => {
   it('blocks readCacheable until hydrationDone resolves', async () => {
     let resolved = false;
     // Create a new hydrationDone that won't resolve immediately
-    hydrationDone = new Promise(r => { hydrationResolve = r; });
+    hydrationDone = new Promise((r) => {
+      hydrationResolve = r;
+    });
 
     // Re-wire readCacheable with the new hydrationDone
     const origReadFs = readFs;
@@ -268,10 +336,13 @@ describe('readCacheable / readFs', () => {
 
     await session.set({ 'manifest:settings': { urlBlacklist: ['chrome://'] } });
 
-    const promise = readCacheable('manifest:settings').then(v => { resolved = true; return v; });
+    const promise = readCacheable('manifest:settings').then((v) => {
+      resolved = true;
+      return v;
+    });
 
     // Should not have resolved yet
-    await new Promise(r => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 10));
     expect(resolved).toBe(false);
 
     // Resolve hydration
@@ -290,16 +361,32 @@ describe('readCacheable / readFs', () => {
   // ── #4: User list keys fall back to filesystem ─────────────────────
   it('falls back to filesystem for user list keys on session miss', async () => {
     const result = await readCacheable('list:my-custom-list');
-    expect(result).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }] });
-    expect(offscreenCalls.some(c => c.action === 'loadListEntity' && c.listId === 'my-custom-list')).toBe(true);
+    expect(result).toEqual({
+      slug: 'my-custom-list',
+      name: 'My Custom List',
+      pins: [{ id: 'page:abc', pinnedAt: 100 }],
+    });
+    expect(
+      offscreenCalls.some(
+        (c) => c.action === 'loadListEntity' && c.listId === 'my-custom-list',
+      ),
+    ).toBe(true);
     // Should be cached after first load
-    expect(session._store['list:my-custom-list']).toEqual({ slug: 'my-custom-list', name: 'My Custom List', pins: [{ id: 'page:abc', pinnedAt: 100 }] });
+    expect(session._store['list:my-custom-list']).toEqual({
+      slug: 'my-custom-list',
+      name: 'My Custom List',
+      pins: [{ id: 'page:abc', pinnedAt: 100 }],
+    });
   });
 
   it('returns null for user list key that does not exist on disk', async () => {
     const result = await readCacheable('list:nonexistent-list');
     expect(result).toBeNull();
-    expect(offscreenCalls.some(c => c.action === 'loadListEntity' && c.listId === 'nonexistent-list')).toBe(true);
+    expect(
+      offscreenCalls.some(
+        (c) => c.action === 'loadListEntity' && c.listId === 'nonexistent-list',
+      ),
+    ).toBe(true);
   });
 });
 
@@ -310,7 +397,9 @@ describe('options.js toggleResultPin sends url to background', () => {
   const optionsSource = readFileSync(resolve(extDir, 'options.js'), 'utf-8');
 
   it('toggleResultPin sends url, not pre-computed id, in toggleListPin message', () => {
-    const fnBody = optionsSource.match(/async function toggleResultPin[\s\S]*?\n\}/);
+    const fnBody = optionsSource.match(
+      /async function toggleResultPin[\s\S]*?\n\}/,
+    );
     expect(fnBody).not.toBeNull();
     const fn = fnBody[0];
     // Should send url to let background resolve the id
@@ -332,7 +421,9 @@ describe('background.js toggleListPin resolves pin ID', () => {
   const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
 
   it('toggleListPin uses getListEventFields and addLog for pin toggle', () => {
-    const match = bgSource.match(/async function handleToggleListPin\s*\([\s\S]*?\n\}/);
+    const match = bgSource.match(
+      /async function handleToggleListPin\s*\([\s\S]*?\n\}/,
+    );
     expect(match).not.toBeNull();
     expect(match[0]).toMatch(/getListEventFields/);
     expect(match[0]).toMatch(/addLog/);
@@ -346,13 +437,17 @@ describe('background.js addListPins accepts urls', () => {
   const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
 
   it('addListPins handler accepts request.urls', () => {
-    const match = bgSource.match(/async function handleAddListPins\s*\([\s\S]*?\n\}/);
+    const match = bgSource.match(
+      /async function handleAddListPins\s*\([\s\S]*?\n\}/,
+    );
     expect(match).not.toBeNull();
     expect(match[0]).toMatch(/request\.urls/);
   });
 
   it('addListPins uses getListEventFields and addLog', () => {
-    const match = bgSource.match(/async function handleAddListPins\s*\([\s\S]*?\n\}/);
+    const match = bgSource.match(
+      /async function handleAddListPins\s*\([\s\S]*?\n\}/,
+    );
     expect(match).not.toBeNull();
     expect(match[0]).toMatch(/getListEventFields/);
     expect(match[0]).toMatch(/addLog/);
@@ -378,14 +473,18 @@ describe('background.js getPageRelations reads list entities', () => {
   const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
 
   it('does not use listCache: session keys for list membership check', () => {
-    const match = bgSource.match(/async function handleGetPageRelations\s*\([\s\S]*?\n\}/);
+    const match = bgSource.match(
+      /async function handleGetPageRelations\s*\([\s\S]*?\n\}/,
+    );
     expect(match).not.toBeNull();
     // Should NOT read from the options-only listCache: session keys
     expect(match[0]).not.toMatch(/listCache:/);
   });
 
   it('reads list entities via readCacheable for list membership', () => {
-    const match = bgSource.match(/async function handleGetPageRelations\s*\([\s\S]*?\n\}/);
+    const match = bgSource.match(
+      /async function handleGetPageRelations\s*\([\s\S]*?\n\}/,
+    );
     expect(match).not.toBeNull();
     // Should use readCacheable (which has disk fallback) for list entities
     expect(match[0]).toMatch(/readCacheable\s*\(\s*lk\s*\)/);
@@ -409,4 +508,3 @@ describe('background.js readFs handles user list keys', () => {
 // ---------------------------------------------------------------------------
 // offscreen.js field mismatch — structural verification
 // ---------------------------------------------------------------------------
-

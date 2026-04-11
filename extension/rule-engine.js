@@ -3,15 +3,28 @@
 
 export const RULE_TYPES = {
   KEYWORD: 'keyword',
-  SMART: 'smart',
+  FUNCTION: 'function',
 };
 
 const VALID_KEYWORD_FIELDS = ['title', 'url'];
 
 const BANNED_GLOBALS = [
-  'fetch', 'chrome', 'window', 'document', 'navigator', 'globalThis',
-  'eval', 'Function', 'setTimeout', 'setInterval', 'WebSocket',
-  'Worker', 'localStorage', 'sessionStorage', 'indexedDB', 'importScripts',
+  'fetch',
+  'chrome',
+  'window',
+  'document',
+  'navigator',
+  'globalThis',
+  'eval',
+  'Function',
+  'setTimeout',
+  'setInterval',
+  'WebSocket',
+  'Worker',
+  'localStorage',
+  'sessionStorage',
+  'indexedDB',
+  'importScripts',
 ];
 
 const MAX_FN_SOURCE_BYTES = 10240; // 10KB
@@ -51,21 +64,25 @@ export function validateRuleConfig({ type, config }) {
       }
     }
     if (config.fields) {
-      const invalid = config.fields.filter(f => !VALID_KEYWORD_FIELDS.includes(f));
+      const invalid = config.fields.filter(
+        (f) => !VALID_KEYWORD_FIELDS.includes(f),
+      );
       if (invalid.length) {
-        errors.push(`Invalid fields: ${invalid.join(', ')}. Allowed: ${VALID_KEYWORD_FIELDS.join(', ')}`);
+        errors.push(
+          `Invalid fields: ${invalid.join(', ')}. Allowed: ${VALID_KEYWORD_FIELDS.join(', ')}`,
+        );
       }
     }
   }
 
-  if (type === RULE_TYPES.SMART) {
+  if (type === RULE_TYPES.FUNCTION) {
     if (!config.description) {
-      errors.push('Smart rule requires a description');
+      errors.push('Function rule requires a description');
     }
     if (!config.fnSource) {
-      errors.push('Smart rule requires fnSource');
+      errors.push('Function rule requires fnSource');
     } else {
-      const fnValidation = validateSmartRuleFn(config.fnSource);
+      const fnValidation = validateFnRuleSource(config.fnSource);
       errors.push(...fnValidation.errors);
     }
   }
@@ -74,15 +91,17 @@ export function validateRuleConfig({ type, config }) {
 }
 
 /**
- * Validate a smart rule function source for banned globals.
+ * Validate a function rule source for banned globals.
  * Uses word-boundary regex to avoid false positives on substrings.
  * Returns { valid: boolean, errors: string[] }
  */
-export function validateSmartRuleFn(fnSource) {
+export function validateFnRuleSource(fnSource) {
   const errors = [];
 
   if (fnSource.length > MAX_FN_SOURCE_BYTES) {
-    errors.push(`Function source exceeds 10KB limit (${fnSource.length} bytes)`);
+    errors.push(
+      `Function source exceeds 10KB limit (${fnSource.length} bytes)`,
+    );
   }
 
   for (const name of BANNED_GLOBALS) {
@@ -140,27 +159,29 @@ export function matchKeywordRule(rule, pageData) {
  *
  * @param {Array} rules - Array of rule objects { id, type, config }
  * @param {Object} pageData - { title, url, body? }
- * @param {Object} options - { sandbox?, allScores? }
- *   sandbox: async (fnSource, pageData) => number — executes sandboxed function
- *   allScores: if true, return scores for ALL rules (not just above threshold)
- * @returns {Promise<Array<{ruleId, score, match}>>} — matched rules (or all if allScores)
+ * @param {Object} options - { sandbox?, allResults? }
+ *   sandbox: async (fnSource, pageData) => boolean — executes sandboxed predicate
+ *   allResults: if true, return results for ALL rules (not just matches)
+ * @returns {Promise<Array<{ruleId, match: boolean}>>}
  */
-export async function matchRules(rules, pageData, { sandbox, allScores } = {}) {
+export async function matchRules(
+  rules,
+  pageData,
+  { sandbox, allResults } = {},
+) {
   const results = [];
 
   for (const rule of rules) {
-    const threshold = rule.config.threshold ?? 0.5;
-
     if (rule.type === RULE_TYPES.KEYWORD) {
-      const score = matchKeywordRule(rule, pageData);
-      if (allScores || score >= threshold) {
-        results.push({ ruleId: rule.id, score, match: score >= threshold });
+      const match = matchKeywordRule(rule, pageData) === 1;
+      if (allResults || match) {
+        results.push({ ruleId: rule.id, match });
       }
-    } else if (rule.type === RULE_TYPES.SMART) {
+    } else if (rule.type === RULE_TYPES.FUNCTION) {
       if (!sandbox) continue;
-      const score = await sandbox(rule.config.fnSource, pageData);
-      if (allScores || score >= threshold) {
-        results.push({ ruleId: rule.id, score, match: score >= threshold });
+      const match = await sandbox(rule.config.fnSource, pageData);
+      if (allResults || match) {
+        results.push({ ruleId: rule.id, match });
       }
     }
   }
@@ -176,6 +197,7 @@ export function buildPageDataFromEntry(entry) {
     title: entry.title || '',
     url: entry.url || '',
   };
-  if (entry.bodyPreview || entry.body) data.body = entry.bodyPreview || entry.body;
+  if (entry.bodyPreview || entry.body)
+    data.body = entry.bodyPreview || entry.body;
   return data;
 }

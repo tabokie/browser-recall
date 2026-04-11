@@ -8,7 +8,7 @@ A Chrome extension that captures your browsing history, attention patterns, high
 - **Smart Search** — WASM-powered search across history, notes, and snapshots with multiple ranking algorithms
 - **Attention Tracking** — scroll depth, time on page, highlights, clicks
 - **Notes & Highlights** — inline text highlights extracted as first-class note entities
-- **Lists** — curated collections with keyword and smart rule auto-pinning
+- **Lists** — curated collections with keyword and function rule auto-pinning
 - **Snapshots** — self-contained HTML archives of any page (via Save Page WE)
 - **Multi-Device Sync** — optional sync via your own GitHub repository
 - **Privacy-First** — all data stays on your machine, no telemetry, no server

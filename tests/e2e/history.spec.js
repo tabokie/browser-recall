@@ -1,15 +1,34 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, getSlugForUrl, openOptionsPage, openHelperPage } from './helpers.js';
+import {
+  resetAndSeed,
+  getSlugForUrl,
+  openOptionsPage,
+  openHelperPage,
+} from './helpers.js';
 
 test.describe('History recording', () => {
-  test('seeded history entry appears in options explore view', async ({ extContext, extensionId, setupDir }) => {
+  test('seeded history entry appears in options explore view', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'leave_page', url: 'https://example.com/', title: 'Example Domain', timeOnPage: 5, scrollDepth: 50 },
-      ]},
+      {
+        path: 'data/logs/test-device/2026-03-01.jsonl',
+        lines: [
+          {
+            timestamp: now,
+            action: 'leave_page',
+            url: 'https://example.com/',
+            title: 'Example Domain',
+            timeOnPage: 5,
+            scrollDepth: 50,
+          },
+        ],
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
@@ -19,7 +38,11 @@ test.describe('History recording', () => {
     await options.close();
   });
 
-  test('clean state between tests — no leftover data', async ({ extContext, extensionId, setupDir }) => {
+  test('clean state between tests — no leftover data', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
@@ -32,10 +55,17 @@ test.describe('History recording', () => {
     await options.close();
   });
 
-  test('content script auto-reports page visit', async ({ extContext, extensionId, setupDir }) => {
+  test('content script auto-reports page visit', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
     ]);
 
     // Navigate to a real page — content script injects and sends reportPage
@@ -52,22 +82,46 @@ test.describe('History recording', () => {
     await options.close();
   });
 
-  test('multiple entries appear sorted by recency (newest first)', async ({ extContext, extensionId, setupDir }) => {
+  test('multiple entries appear sorted by recency (newest first)', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const base = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
-        { timestamp: base - 2000, action: 'visit_page', url: 'https://older.example.com/', title: 'Older Page' },
-        { timestamp: base - 1000, action: 'visit_page', url: 'https://middle.example.com/', title: 'Middle Page' },
-        { timestamp: base, action: 'visit_page', url: 'https://newest.example.com/', title: 'Newest Page' },
-      ]},
+      {
+        path: 'data/logs/test-device/2026-03-01.jsonl',
+        lines: [
+          {
+            timestamp: base - 2000,
+            action: 'visit_page',
+            url: 'https://older.example.com/',
+            title: 'Older Page',
+          },
+          {
+            timestamp: base - 1000,
+            action: 'visit_page',
+            url: 'https://middle.example.com/',
+            title: 'Middle Page',
+          },
+          {
+            timestamp: base,
+            action: 'visit_page',
+            url: 'https://newest.example.com/',
+            title: 'Newest Page',
+          },
+        ],
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
     await options.waitForSelector('.result-row', { timeout: 5000 });
 
-    const titles = await options.$$eval('.result-title', els => els.map(el => el.textContent.trim()));
+    const titles = await options.$$eval('.result-title', (els) =>
+      els.map((el) => el.textContent.trim()),
+    );
     // >= not == : content script auto-reports from prior tests in the same worker
     // can race with resetAndSeed (isLeaving report arrives after reset).
     expect(titles.length).toBeGreaterThanOrEqual(3);
@@ -81,7 +135,11 @@ test.describe('History recording', () => {
   });
 
   // Bug: title-less history entries not enriched from page checkpoint (086e139)
-  test('title-less history entry enriched from page checkpoint', async ({ extContext, extensionId, setupDir }) => {
+  test('title-less history entry enriched from page checkpoint', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const url = 'https://example.com/enriched';
     const slug = getSlugForUrl(url);
     const now = Date.now();
@@ -89,25 +147,39 @@ test.describe('History recording', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: `pages/${slug}.json`, data: {
-        slug, url, title: 'Enriched Title',
-        timestamp: now, parentIds: [], childIds: [],
-      }},
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url,
+          title: 'Enriched Title',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
       // History entry has NO title — enrichFromEntityStorage should fill it from checkpoint
-      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'visit_page', url },
-      ]},
+      {
+        path: 'data/logs/test-device/2026-03-01.jsonl',
+        lines: [{ timestamp: now, action: 'visit_page', url }],
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
     await options.waitForSelector('.result-row', { timeout: 10000 });
-    const title = await options.$eval('.result-title', el => el.textContent.trim());
+    const title = await options.$eval('.result-title', (el) =>
+      el.textContent.trim(),
+    );
     expect(title).toBe('Enriched Title');
     await options.close();
   });
 
   // Title-less history entry enriched from page entity
-  test('title-less history entry enriched from page entity', async ({ extContext, extensionId, setupDir }) => {
+  test('title-less history entry enriched from page entity', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const url = 'https://example.com/shallow-title';
     const slug = getSlugForUrl(url);
     const now = Date.now();
@@ -116,18 +188,28 @@ test.describe('History recording', () => {
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       // History entry has no title, but page entity does
-      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'visit_page', url },
-      ]},
-      { path: `pages/${slug}.json`, data: {
-        slug, url, title: 'Entity Title', timestamp: now,
-        parentIds: [], childIds: [],
-      }},
+      {
+        path: 'data/logs/test-device/2026-03-01.jsonl',
+        lines: [{ timestamp: now, action: 'visit_page', url }],
+      },
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url,
+          title: 'Entity Title',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
     await options.waitForSelector('.result-row', { timeout: 10000 });
-    const title = await options.$eval('.result-title', el => el.textContent.trim());
+    const title = await options.$eval('.result-title', (el) =>
+      el.textContent.trim(),
+    );
     expect(title).toBe('Entity Title');
     await options.close();
   });
@@ -141,7 +223,11 @@ test.describe('History recording', () => {
 
   // When neither the log entry nor a page entity has a title, the card should
   // fall back to the URL hostname rather than showing <unknown>.
-  test('title-less entry with no page entity falls back to hostname', async ({ extContext, extensionId, setupDir }) => {
+  test('title-less entry with no page entity falls back to hostname', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const url = 'https://titterfun.com/';
     const now = Date.now();
 
@@ -149,14 +235,17 @@ test.describe('History recording', () => {
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Log entry has NO title field; no page entity seeded
-      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'visit_page', url },
-      ]},
+      {
+        path: 'data/logs/test-device/2026-03-01.jsonl',
+        lines: [{ timestamp: now, action: 'visit_page', url }],
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);
     await options.waitForSelector('.result-row', { timeout: 5000 });
-    const title = await options.$eval('.result-title', el => el.textContent.trim());
+    const title = await options.$eval('.result-title', (el) =>
+      el.textContent.trim(),
+    );
     expect(title).toBe('titterfun.com');
     await options.close();
   });
@@ -164,19 +253,32 @@ test.describe('History recording', () => {
   // Bug 20260224: title trimming must apply consistently to all page reports.
   // Regression: first visit logged trimmed, subsequent visits logged untrimmed.
   // This test visits twice and verifies BOTH entries use the trimmed title.
-  test('title trimming applies to both first and subsequent visits', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('title trimming applies to both first and subsequent visits', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     localServer.addPage('/trim-test', {
       title: 'Article Title | Site Name',
       body: '<p>Content</p>',
     });
-    localServer.addPage('/other', { title: 'Other Page', body: '<p>Other</p>' });
+    localServer.addPage('/other', {
+      title: 'Other Page',
+      body: '<p>Other</p>',
+    });
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: {
-        titleTrimRules: [{ urlPrefix: 'http://127.0.0.1', action: 'remove_after_pipe' }],
-        blacklist: [],
-      }},
+      {
+        path: 'manifest/settings.json',
+        data: {
+          titleTrimRules: [
+            { urlPrefix: 'http://127.0.0.1', action: 'remove_after_pipe' },
+          ],
+          blacklist: [],
+        },
+      },
     ]);
 
     const url = localServer.url('/trim-test');
@@ -196,18 +298,31 @@ test.describe('History recording', () => {
     const helper = await openHelperPage(extContext, extensionId);
 
     // Wait for at least 2 entries with title
-    await helper.waitForFunction(({ u, dateKey }) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dateKey })
-        .then(r => r.value && r.value.filter(e => e.url === u && e.title).length >= 2)
-    , { u: url, dateKey: today }, { timeout: 5000 });
+    await helper.waitForFunction(
+      ({ u, dateKey }) =>
+        chrome.runtime
+          .sendMessage({ action: 'readCacheable', key: 'log:' + dateKey })
+          .then(
+            (r) =>
+              r.value &&
+              r.value.filter((e) => e.url === u && e.title).length >= 2,
+          ),
+      { u: url, dateKey: today },
+      { timeout: 5000 },
+    );
 
-    const hist = await helper.evaluate(({ dateKey }) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dateKey })
-    , { dateKey: today });
+    const hist = await helper.evaluate(
+      ({ dateKey }) =>
+        chrome.runtime.sendMessage({
+          action: 'readCacheable',
+          key: 'log:' + dateKey,
+        }),
+      { dateKey: today },
+    );
     await helper.close();
     await page.close();
 
-    const entries = hist.value.filter(e => e.url === url && e.title);
+    const entries = hist.value.filter((e) => e.url === url && e.title);
     expect(entries.length).toBeGreaterThanOrEqual(2);
     // Both entries should have the trimmed title
     for (const entry of entries) {

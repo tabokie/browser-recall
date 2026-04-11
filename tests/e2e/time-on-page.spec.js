@@ -13,8 +13,16 @@ import { resetAndSeed, openHelperPage } from './helpers.js';
 //   - Use `visibilitychange` event to trigger the "visible" branch (since headless
 //     reports visibilityState='visible', the else branch resets the foreground timer)
 
-test('timeOnPage reports foreground delta, not cumulative time since load', async ({ extContext, extensionId, setupDir, localServer }) => {
-  localServer.addPage('/time-test', { title: 'Time Test', body: '<h1>Time Test</h1>' });
+test('timeOnPage reports foreground delta, not cumulative time since load', async ({
+  extContext,
+  extensionId,
+  setupDir,
+  localServer,
+}) => {
+  localServer.addPage('/time-test', {
+    title: 'Time Test',
+    body: '<h1>Time Test</h1>',
+  });
   await resetAndSeed(extContext, extensionId, [
     { path: 'CURRENT', content: 'test-device' },
     { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
@@ -37,7 +45,9 @@ test('timeOnPage reports foreground delta, not cumulative time since load', asyn
   // Simulate "tab switch back" via visibilitychange event.
   // In headless, document.visibilityState is 'visible', so the content script's
   // visibilitychange handler enters the else (visible) branch, resetting the timer.
-  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event('visibilitychange')),
+  );
 
   // Spend ~500ms in foreground
   await page.waitForTimeout(500);
@@ -52,7 +62,7 @@ test('timeOnPage reports foreground delta, not cumulative time since load', asyn
     const today = new Date().toISOString().slice(0, 10);
     const data = await chrome.storage.session.get(['log:' + today]);
     const entries = data['log:' + today] || [];
-    return entries.filter(e => e.url === url && e.action === 'leave_page');
+    return entries.filter((e) => e.url === url && e.action === 'leave_page');
   }, testUrl);
   await helper.close();
 

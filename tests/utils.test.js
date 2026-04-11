@@ -45,7 +45,6 @@ describe('generateSlugFromUrl', () => {
 // collectQbTrees
 // ---------------------------------------------------------------------------
 
-
 // ---------------------------------------------------------------------------
 // readCacheable / loadSettingsValue (behavioral tests with mocked chrome APIs)
 // ---------------------------------------------------------------------------
@@ -63,7 +62,8 @@ describe('readCacheable', () => {
           get: vi.fn(async (keys) => {
             const arr = Array.isArray(keys) ? keys : [keys];
             const result = {};
-            for (const k of arr) if (k in sessionStore) result[k] = sessionStore[k];
+            for (const k of arr)
+              if (k in sessionStore) result[k] = sessionStore[k];
             return result;
           }),
         },
@@ -89,10 +89,17 @@ describe('readCacheable', () => {
   });
 
   it('sends readCacheable action on session miss and returns resp.value', async () => {
-    sendMessageMock.mockResolvedValue({ success: true, value: { timestamp: 0, pins: [] } });
+    sendMessageMock.mockResolvedValue({
+      success: true,
+      value: { timestamp: 0, pins: [] },
+    });
     const { readCacheable } = await import('../extension/utils.js');
     const result = await readCacheable('list:some-list');
-    expect(sendMessageMock).toHaveBeenCalledWith({ action: 'readCacheable', key: 'list:some-list', includeDeleted: false });
+    expect(sendMessageMock).toHaveBeenCalledWith({
+      action: 'readCacheable',
+      key: 'list:some-list',
+      includeDeleted: false,
+    });
     expect(result).toEqual({ timestamp: 0, pins: [] });
   });
 
@@ -116,7 +123,8 @@ describe('loadSettingsValue delegates to readCacheable', () => {
           get: vi.fn(async (keys) => {
             const arr = Array.isArray(keys) ? keys : [keys];
             const result = {};
-            for (const k of arr) if (k in sessionStore) result[k] = sessionStore[k];
+            for (const k of arr)
+              if (k in sessionStore) result[k] = sessionStore[k];
             return result;
           }),
         },

@@ -246,8 +246,8 @@ Used internally in: `page.parentIds`, `page.childIds`, list pin `id` fields. Not
 | **popup.js**              | Current-page dashboard UI                                               | `chrome.runtime.sendMessage`, `chrome.tabs.query`                                   |
 | **options.js**            | Full UI: search, explore, lists, settings                               | `chrome.runtime.sendMessage`, `chrome.storage.session` (transient UI state)         |
 | **replay.js**             | Pure event replay functions (no chrome APIs)                            | None                                                                                |
-| **rule-engine.js**        | Pure rule matching (keyword/smart), validation, ID generation           | None                                                                                |
-| **smart-rule-sandbox.js** | Sandboxed JS execution for smart rules (manifest sandbox page)          | `new Function` (via unsafe-eval CSP)                                                |
+| **rule-engine.js**        | Pure rule matching (keyword/function), validation, ID generation        | None                                                                                |
+| **fn-rule-sandbox.js**    | Sandboxed JS execution for function rules (manifest sandbox page)       | `new Function` (via unsafe-eval CSP)                                                |
 | **utils.js**              | Shared utilities, `readCacheable`, `sendAction`                         | `chrome.runtime.sendMessage`, `chrome.storage.session` (cache read)                 |
 | **entity-cache.js**       | Session cache with LRU eviction                                         | `chrome.storage.session`                                                            |
 | **filesystem-storage.js** | File System Access API wrapper                                          | File System Access, IndexedDB                                                       |
@@ -319,7 +319,7 @@ Lists can have **rules** that automatically pin matching pages. Rules are event-
 | Type        | Matching                                   | Implementation                                                                                       |
 | ----------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
 | **keyword** | Substring or `/regex/` match on title/url  | Pure function in `rule-engine.js`                                                                    |
-| **smart**   | User-written JS function `(page) => score` | Offscreen → sandbox iframe (`smart-rule-sandbox.html`, manifest `sandbox` key for `unsafe-eval` CSP) |
+| **function** | User-written JS predicate `(page) => boolean` | Offscreen → sandbox iframe (`fn-rule-sandbox.html`, manifest `sandbox` key for `unsafe-eval` CSP) |
 
 
 ### Data Model
@@ -330,7 +330,7 @@ List entity gains `rules: []` array. Each rule: `{ id, type, config, createdAt }
 
 content.js captures the first 200 words of `document.body.innerText` at visit time and sends it as `bodyPreview` in the `reportPage` message. background.js stores it in the `visit_page` JSONL entry. This enriches rule matching with page content beyond title/URL. The word limit is defined as `BODY_WORD_LIMIT` in `utils.js` (canonical) and duplicated in `content.js` (non-module, can't import).
 
-For keyword rules, `matchKeywordRule` automatically checks `body` when present in `pageData`. For smart rules, `page.body` is accessible to user functions.
+For keyword rules, `matchKeywordRule` automatically checks `body` when present in `pageData`. For function rules, `page.body` is accessible to user functions.
 
 ### Execution Flow
 
@@ -342,13 +342,13 @@ For keyword rules, `matchKeywordRule` automatically checks `body` when present i
 
 **Preview** (`previewRule` handler in background.js):
 
-- Dry-run matching without side effects. Uses `matchRules` with `allScores: true` to return raw scores for all entries (not just above-threshold matches).
+- Dry-run matching without side effects. Uses `matchRules` with `allResults: true` to return match results for all entries (not just matches).
 
-**Smart sandbox**: background → offscreen port `executeSandboxFn` → sandbox iframe `postMessage` → `new Function('page', fnSource)(pageData)` → result clamped 0-1. 5s timeout.
+**Function sandbox**: background → offscreen port `executeSandboxFn` → sandbox iframe `postMessage` → `new Function('page', fnSource)(pageData)` → result coerced to boolean. 5s timeout.
 
 ### Security
 
-**Threat model.** Users write their own smart rule functions — there is no untrusted third-party code execution. The primary risk is accidental misuse (infinite loops, unintended network calls) rather than adversarial attack. The sandbox exists as defense-in-depth, not as a trust boundary against a malicious author.
+**Threat model.** Users write their own function rule predicates — there is no untrusted third-party code execution. The primary risk is accidental misuse (infinite loops, unintended network calls) rather than adversarial attack. The sandbox exists as defense-in-depth, not as a trust boundary against a malicious author.
 
 **Defense layers (defense-in-depth):**
 
@@ -357,7 +357,7 @@ For keyword rules, `matchKeywordRule` automatically checks `body` when present i
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | **Static validation** | `validateSmartRuleFn()` in `rule-engine.js` scans source with `\b<name>\b` word-boundary regex for 16 banned globals: `fetch`, `chrome`, `window`, `document`, `navigator`, `globalThis`, `eval`, `Function`, `setTimeout`, `setInterval`, `WebSocket`, `Worker`, `localStorage`, `sessionStorage`, `indexedDB`, `importScripts` | Network access, DOM manipulation, extension API access, dynamic code generation, timer abuse |
 | **Size limit**        | Max 10KB source (`MAX_FN_SOURCE_BYTES`)                                                                                                                                                                                                                                                                                          | Resource exhaustion via oversized payloads                                                   |
-| **Manifest sandbox**  | `smart-rule-sandbox.html` declared in manifest `"sandbox"` key — runs in a unique origin with no extension API access                                                                                                                                                                                                            | Even if validation is bypassed, `chrome.`* APIs are unavailable                              |
+| **Manifest sandbox**  | `fn-rule-sandbox.html` declared in manifest `"sandbox"` key — runs in a unique origin with no extension API access                                                                                                                                                                                                            | Even if validation is bypassed, `chrome.`* APIs are unavailable                              |
 | **Iframe isolation**  | Sandbox loaded as hidden `<iframe>` inside offscreen document, communicates only via `postMessage`                                                                                                                                                                                                                               | No direct access to offscreen or background globals                                          |
 | **Execution timeout** | 5-second timeout in `executeSandbox()` (`offscreen.js`)                                                                                                                                                                                                                                                                          | Infinite loops, long-running computations                                                    |
 | **Output clamping**   | Return value coerced to number in 0–1 range                                                                                                                                                                                                                                                                                      | No data exfiltration via return value                                                        |
@@ -367,7 +367,7 @@ For keyword rules, `matchKeywordRule` automatically checks `body` when present i
 
 - **Unbanned globals**: `Proxy`, `Reflect`, `Symbol`, `WeakRef`, `FinalizationRegistry`, `SharedArrayBuffer`, `Atomics`, `structuredClone` are not banned. These are low-risk in the sandbox context (no I/O, no DOM) but could be used for metaprogramming or object introspection.
 - **String construction bypass**: `this.constructor.constructor('return fetch')()` or bracket notation (`this['constru' + 'ctor']`) can evade word-boundary regex. The manifest sandbox is the real enforcement layer here — even successfully constructing `fetch` would execute in a sandboxed origin with no cookies or extension permissions.
-- **Property access**: `event.source` is available inside the `message` handler in `smart-rule-sandbox.js`, but user code runs inside `new Function('page', fnSource)` which does not close over `event`.
+- **Property access**: `event.source` is available inside the `message` handler in `fn-rule-sandbox.js`, but user code runs inside `new Function('page', fnSource)` which does not close over `event`.
 
 **Accepted risk.** Since users author their own rules, the static validation is a convenience guardrail (catch mistakes early with clear error messages), not a security boundary. The manifest sandbox provides the actual isolation guarantee.
 
@@ -375,8 +375,8 @@ For keyword rules, `matchKeywordRule` automatically checks `body` when present i
 
 Rules section is a collapsible glass panel inside `#listLayout`, between the header and `#listQueryBuilder`. Hidden for system lists (`system/`*). Shows rule count badge and Run button when rules exist.
 
-- **Rendering**: `renderRulesSection(listId, rules)` shows/hides section + count badge; `renderRulesList()` renders entries with type badges (keyword=orange, smart=green) + remove buttons following `blacklist-entry` pattern.
-- **Inline add form**: type toggle switches between keyword (pattern + field checkboxes) and smart (description + function textarea). Saves via `sendAction('addRule', ...)` with `{ type, config: {...} }` shape.
+- **Rendering**: `renderRulesSection(listId, rules)` shows/hides section + count badge; `renderRulesList()` renders entries with type badges (keyword=orange, function=green) + remove buttons following `blacklist-entry` pattern.
+- **Inline add form**: type toggle switches between keyword (pattern + field checkboxes) and function (description + function textarea). Saves via `sendAction('addRule', ...)` with `{ type, config: {...} }` shape.
 - **Preview button**: two-pass check — (1) recent visits from history (progressive batched, up to 100 checked / 20 matches), (2) all pinned pages in the current list. Entries missing `bodyPreview` are fetched on-the-fly via `fetchPageBody()` in options.js. Shows all results with green (match) / red (miss) score coloring.
 - **Run button**: reads today's `visit_page` history, fetches `bodyPreview` on-the-fly for entries missing it, calls `runRuleBatch`, shows match count.
 - **Mutation handler**: `type === 'rules'` mutation refreshes rules panel for the affected list via `refreshRulesForActiveList()`.

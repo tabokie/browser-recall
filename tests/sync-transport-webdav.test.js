@@ -60,7 +60,9 @@ describe('WebDAVTransport', () => {
 </D:multistatus>`;
 
   function fileListXml(deviceName, files) {
-    const entries = files.map(f => `
+    const entries = files
+      .map(
+        (f) => `
   <D:response>
     <D:href>/sync/${deviceName}/${f.path}</D:href>
     <D:propstat>
@@ -68,13 +70,19 @@ describe('WebDAVTransport', () => {
         <D:getetag>"${f.etag}"</D:getetag>
       </D:prop>
     </D:propstat>
-  </D:response>`).join('');
+  </D:response>`,
+      )
+      .join('');
     return `<?xml version="1.0"?><D:multistatus xmlns:D="DAV:">${entries}</D:multistatus>`;
   }
 
   describe('constructor', () => {
     it('normalizes URL with trailing slash', () => {
-      const t = new WebDAVTransport({ url: 'https://dav.example.com/sync', username: '', password: '' });
+      const t = new WebDAVTransport({
+        url: 'https://dav.example.com/sync',
+        username: '',
+        password: '',
+      });
       // Internal URL should end with /
       expect(t._url).toBe('https://dav.example.com/sync/');
     });
@@ -84,7 +92,11 @@ describe('WebDAVTransport', () => {
     it('sends correct Basic auth header', async () => {
       mockFetch.mockResolvedValueOnce(davResponse(DEVICE_LIST_XML));
       // The depth-infinity calls for each device — make them return empty
-      mockFetch.mockResolvedValue(davResponse('<?xml version="1.0"?><D:multistatus xmlns:D="DAV:"></D:multistatus>'));
+      mockFetch.mockResolvedValue(
+        davResponse(
+          '<?xml version="1.0"?><D:multistatus xmlns:D="DAV:"></D:multistatus>',
+        ),
+      );
 
       await transport.listBranches();
 
@@ -98,12 +110,20 @@ describe('WebDAVTransport', () => {
     it('sends PROPFIND with Depth 1 to root', async () => {
       mockFetch.mockResolvedValueOnce(davResponse(DEVICE_LIST_XML));
       // depth-infinity for deviceA and deviceB
-      mockFetch.mockResolvedValueOnce(davResponse(fileListXml('deviceA', [
-        { path: 'data/logs/deviceA/day.jsonl', etag: 'etag-a1' },
-      ])));
-      mockFetch.mockResolvedValueOnce(davResponse(fileListXml('deviceB', [
-        { path: 'data/logs/deviceB/day.jsonl', etag: 'etag-b1' },
-      ])));
+      mockFetch.mockResolvedValueOnce(
+        davResponse(
+          fileListXml('deviceA', [
+            { path: 'data/logs/deviceA/day.jsonl', etag: 'etag-a1' },
+          ]),
+        ),
+      );
+      mockFetch.mockResolvedValueOnce(
+        davResponse(
+          fileListXml('deviceB', [
+            { path: 'data/logs/deviceB/day.jsonl', etag: 'etag-b1' },
+          ]),
+        ),
+      );
 
       const branches = await transport.listBranches();
 
@@ -122,14 +142,15 @@ describe('WebDAVTransport', () => {
       mockFetch.mockResolvedValueOnce(davResponse(DEVICE_LIST_XML));
       // deviceA: depth infinity fails with 403
       mockFetch.mockResolvedValueOnce({
-        ok: false, status: 403,
+        ok: false,
+        status: 403,
         text: async () => 'Depth infinity not allowed',
         headers: new Headers(),
       });
       // deviceB: works
-      mockFetch.mockResolvedValueOnce(davResponse(fileListXml('deviceB', [
-        { path: 'f.txt', etag: 'e1' },
-      ])));
+      mockFetch.mockResolvedValueOnce(
+        davResponse(fileListXml('deviceB', [{ path: 'f.txt', etag: 'e1' }])),
+      );
 
       const branches = await transport.listBranches();
       expect(branches).toHaveLength(1);
@@ -140,10 +161,14 @@ describe('WebDAVTransport', () => {
   describe('getTree', () => {
     it('returns file listing with etags as shas', async () => {
       mockFetch.mockResolvedValueOnce(davResponse(DEVICE_LIST_XML));
-      mockFetch.mockResolvedValueOnce(davResponse(fileListXml('deviceA', [
-        { path: 'data/logs/deviceA/day.jsonl', etag: 'etag-111' },
-        { path: 'data/notes/note.json', etag: 'etag-222' },
-      ])));
+      mockFetch.mockResolvedValueOnce(
+        davResponse(
+          fileListXml('deviceA', [
+            { path: 'data/logs/deviceA/day.jsonl', etag: 'etag-111' },
+            { path: 'data/notes/note.json', etag: 'etag-222' },
+          ]),
+        ),
+      );
       mockFetch.mockResolvedValueOnce(davResponse(fileListXml('deviceB', [])));
 
       const branches = await transport.listBranches();
@@ -155,16 +180,22 @@ describe('WebDAVTransport', () => {
     });
 
     it('throws on unknown sha', async () => {
-      await expect(transport.getTree('bogus')).rejects.toThrow('Unknown tree sha');
+      await expect(transport.getTree('bogus')).rejects.toThrow(
+        'Unknown tree sha',
+      );
     });
   });
 
   describe('getBlob', () => {
     it('fetches file content via GET using cached path', async () => {
       mockFetch.mockResolvedValueOnce(davResponse(DEVICE_LIST_XML));
-      mockFetch.mockResolvedValueOnce(davResponse(fileListXml('deviceA', [
-        { path: 'data/logs/deviceA/day.jsonl', etag: 'etag-abc' },
-      ])));
+      mockFetch.mockResolvedValueOnce(
+        davResponse(
+          fileListXml('deviceA', [
+            { path: 'data/logs/deviceA/day.jsonl', etag: 'etag-abc' },
+          ]),
+        ),
+      );
       mockFetch.mockResolvedValueOnce(davResponse(fileListXml('deviceB', [])));
 
       const branches = await transport.listBranches();
@@ -182,7 +213,9 @@ describe('WebDAVTransport', () => {
     });
 
     it('throws on unknown etag', async () => {
-      await expect(transport.getBlob('no-such-etag')).rejects.toThrow('Unknown blob sha');
+      await expect(transport.getBlob('no-such-etag')).rejects.toThrow(
+        'Unknown blob sha',
+      );
     });
   });
 
@@ -214,7 +247,12 @@ describe('WebDAVTransport', () => {
       // All MKCOLs return 405
       mockFetch.mockImplementation(async (url, opts) => {
         if (opts.method === 'MKCOL') {
-          return { ok: false, status: 405, text: async () => 'Method Not Allowed', headers: new Headers() };
+          return {
+            ok: false,
+            status: 405,
+            text: async () => 'Method Not Allowed',
+            headers: new Headers(),
+          };
         }
         return textResponse('', 201);
       });
@@ -240,7 +278,8 @@ describe('WebDAVTransport', () => {
     it('retries on 500 error', async () => {
       // First call: 500, second call: success
       mockFetch.mockResolvedValueOnce({
-        ok: false, status: 500,
+        ok: false,
+        status: 500,
         text: async () => 'Internal Server Error',
         headers: new Headers(),
       });
@@ -252,7 +291,8 @@ describe('WebDAVTransport', () => {
 
     it('does not retry on 404', async () => {
       mockFetch.mockResolvedValue({
-        ok: false, status: 404,
+        ok: false,
+        status: 404,
         text: async () => 'Not Found',
         headers: new Headers(),
       });

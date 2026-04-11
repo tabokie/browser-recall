@@ -29,7 +29,7 @@ The `reportPage` case (line 1601, 130 lines) becomes:
 
 ```js
 async function handleReportPage(request, sender) {
-  // blacklist check, URL tracking, workspace auto-pin, smart-rule evaluation,
+  // blacklist check, URL tracking, workspace auto-pin, function-rule evaluation,
   // leave-page handling, title trimming, referrer resolution, badge updates
   // Returns the response object
 }

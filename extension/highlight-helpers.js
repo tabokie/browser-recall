@@ -1,7 +1,8 @@
 // Highlight helper functions — shared between content.js (inlined) and tests (imported).
 // content.js cannot import modules, so these are duplicated there.
 
-const MARK_STYLE = 'background: #fff3b0; border-bottom: 2px solid #f0c000; cursor: pointer;';
+const MARK_STYLE =
+  'background: #fff3b0; border-bottom: 2px solid #f0c000; cursor: pointer;';
 
 /**
  * Create a <mark> wrapping a DOM Range.
@@ -24,7 +25,9 @@ export function wrapRangeWithMark(range, text, timestamp) {
       // Empty mark — undo
       unwrapMark(mark);
       return null;
-    } catch (e) { /* fall through to extractContents */ }
+    } catch (e) {
+      /* fall through to extractContents */
+    }
   }
 
   // Cross-node path: extract content, wrap in mark, re-insert
@@ -60,13 +63,21 @@ function collectTextNodes(root, ownerDoc) {
     const walker = doc.createTreeWalker(parent, NodeFilter.SHOW_ALL, {
       acceptNode: (node) => {
         if (node.nodeType === Node.TEXT_NODE) {
-          if (node.parentElement && node.parentElement.closest('#portal-highlight-overlay')) return NodeFilter.FILTER_REJECT;
-          if (node.parentElement && node.parentElement.closest('mark.portal-highlight')) return NodeFilter.FILTER_REJECT;
+          if (
+            node.parentElement &&
+            node.parentElement.closest('#portal-highlight-overlay')
+          )
+            return NodeFilter.FILTER_REJECT;
+          if (
+            node.parentElement &&
+            node.parentElement.closest('mark.portal-highlight')
+          )
+            return NodeFilter.FILTER_REJECT;
           return NodeFilter.FILTER_ACCEPT;
         }
         // For element nodes, check for shadow root to descend into
         return NodeFilter.FILTER_SKIP;
-      }
+      },
     });
     let node;
     while ((node = walker.nextNode())) {
@@ -105,7 +116,10 @@ export function findTextRange(root, text, ownerDoc) {
   if (idx === -1) return null;
   const endIdx = idx + text.length;
 
-  let startNode = null, startOffset = 0, endNode = null, endOffset = 0;
+  let startNode = null,
+    startOffset = 0,
+    endNode = null,
+    endOffset = 0;
   for (let i = 0; i < textNodes.length; i++) {
     const nodeStart = offsets[i];
     const nodeEnd = nodeStart + textNodes[i].textContent.length;
@@ -144,11 +158,43 @@ export function highlightTextInPage(root, text) {
 // --- Case 3: Cross-block helpers ---
 
 const BLOCK_TAGS = new Set([
-  'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DD', 'DETAILS', 'DIALOG',
-  'DIV', 'DL', 'DT', 'FIELDSET', 'FIGCAPTION', 'FIGURE', 'FOOTER',
-  'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HGROUP', 'HR',
-  'LI', 'MAIN', 'NAV', 'OL', 'P', 'PRE', 'SECTION', 'TABLE', 'UL',
-  'TR', 'TH', 'TD', 'SUMMARY'
+  'ADDRESS',
+  'ARTICLE',
+  'ASIDE',
+  'BLOCKQUOTE',
+  'DD',
+  'DETAILS',
+  'DIALOG',
+  'DIV',
+  'DL',
+  'DT',
+  'FIELDSET',
+  'FIGCAPTION',
+  'FIGURE',
+  'FOOTER',
+  'FORM',
+  'H1',
+  'H2',
+  'H3',
+  'H4',
+  'H5',
+  'H6',
+  'HEADER',
+  'HGROUP',
+  'HR',
+  'LI',
+  'MAIN',
+  'NAV',
+  'OL',
+  'P',
+  'PRE',
+  'SECTION',
+  'TABLE',
+  'UL',
+  'TR',
+  'TH',
+  'TD',
+  'SUMMARY',
 ]);
 
 export function isBlockElement(el) {

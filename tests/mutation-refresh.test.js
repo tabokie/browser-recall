@@ -10,7 +10,10 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const optionsSource = readFileSync(resolve(__dirname, '..', 'extension', 'options.js'), 'utf-8');
+const optionsSource = readFileSync(
+  resolve(__dirname, '..', 'extension', 'options.js'),
+  'utf-8',
+);
 
 /**
  * Extract a named branch from the mutation listener.
@@ -18,13 +21,18 @@ const optionsSource = readFileSync(resolve(__dirname, '..', 'extension', 'option
  */
 function extractMutationBranch(branchName) {
   // Find the mutation listener block
-  const listenerStart = optionsSource.indexOf("if (request.action !== 'mutation') return;");
+  const listenerStart = optionsSource.indexOf(
+    "if (request.action !== 'mutation') return;",
+  );
   if (listenerStart === -1) throw new Error('Could not find mutation listener');
 
   const searchFrom = listenerStart;
   const branchMarker = `type === '${branchName}'`;
   const branchStart = optionsSource.indexOf(branchMarker, searchFrom);
-  if (branchStart === -1) throw new Error(`Could not find '${branchName}' branch in mutation listener`);
+  if (branchStart === -1)
+    throw new Error(
+      `Could not find '${branchName}' branch in mutation listener`,
+    );
 
   // Find the end of this branch — next `} else if` or the listener's closing
   let depth = 0;
@@ -81,28 +89,34 @@ describe('mutation refresh completeness', () => {
     // Pins branch should call refreshCurrentView() so that pin mutations
     // arriving from other contexts (popup, content script) are reflected
     // immediately — entity storage is the source of truth, not in-memory cache.
-    expect(pinsBranch, 'pins branch should call refreshCurrentView()').toContain('refreshCurrentView()');
+    expect(
+      pinsBranch,
+      'pins branch should call refreshCurrentView()',
+    ).toContain('refreshCurrentView()');
   });
 
   it('history mutation branch refreshes all view types (not just category)', () => {
     const historyBranch = extractMutationBranch('history');
     // Should call refreshCurrentView() unconditionally on change, not gated to category
     expect(historyBranch).toContain('refreshCurrentView()');
-    expect(historyBranch, 'should not gate refresh to category-only').not.toMatch(
-      /activeView\.type\s*===\s*'category'/
-    );
+    expect(
+      historyBranch,
+      'should not gate refresh to category-only',
+    ).not.toMatch(/activeView\.type\s*===\s*'category'/);
   });
 
   it('visibilitychange handler calls renderLists()', () => {
     const handler = extractVisibilityHandler();
-    expect(handler, 'visibilitychange should refresh sidebar lists').toContain('renderLists()');
+    expect(handler, 'visibilitychange should refresh sidebar lists').toContain(
+      'renderLists()',
+    );
   });
 
   it('visibilitychange handler refreshes all view types (not just category)', () => {
     const handler = extractVisibilityHandler();
     expect(handler).toContain('refreshCurrentView()');
     expect(handler, 'should not gate refresh to category-only').not.toMatch(
-      /activeView\.type\s*===\s*'category'/
+      /activeView\.type\s*===\s*'category'/,
     );
   });
 });

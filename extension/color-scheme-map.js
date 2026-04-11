@@ -38,7 +38,7 @@ const PALETTES = {
 };
 
 export const SCHEME_HEX = Object.fromEntries(
-  Object.entries(PALETTES).map(([k, v]) => [k, v.accent])
+  Object.entries(PALETTES).map(([k, v]) => [k, v.accent]),
 );
 
 export function getSchemePalette(scheme) {

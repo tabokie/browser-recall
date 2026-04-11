@@ -11,11 +11,19 @@
  *   P10  History sorted newest-first
  */
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, openOptionsPage, openHelperPage, waitForListView } from './helpers.js';
+import {
+  resetAndSeed,
+  openOptionsPage,
+  openHelperPage,
+  waitForListView,
+} from './helpers.js';
 import fc from 'fast-check';
 import { buildSeedFiles } from '../seed-builder.mjs';
 import { effectOf, defaultEntity } from '../../extension/replay.js';
-import { generateSlugFromUrl, generateNoteSlug } from '../../extension/utils.js';
+import {
+  generateSlugFromUrl,
+  generateNoteSlug,
+} from '../../extension/utils.js';
 
 // Fixed seed for reproducibility across CI runs. Override with PROP_SEED env.
 const SEED = process.env.PROP_SEED ? parseInt(process.env.PROP_SEED) : 20260411;
@@ -25,7 +33,10 @@ const SAMPLES_PER_TEST = 3;
 // Lightweight event generators (no fast-check dependency on stateful tracking)
 // ---------------------------------------------------------------------------
 
-const URL_POOL = Array.from({ length: 6 }, (_, i) => `https://example.com/page-${i}`);
+const URL_POOL = Array.from(
+  { length: 6 },
+  (_, i) => `https://example.com/page-${i}`,
+);
 const LIST_NAMES = ['Alpha', 'Beta', 'Gamma'];
 const DEVICE = 'test-device';
 
@@ -225,7 +236,11 @@ const testSeeds = generateSeeds(SAMPLES_PER_TEST, SEED);
 
 test.describe('P7: Sidebar list count matches non-deleted lists', () => {
   for (let i = 0; i < testSeeds.length; i++) {
-    test(`seed ${testSeeds[i]}`, async ({ extContext, extensionId, setupDir }) => {
+    test(`seed ${testSeeds[i]}`, async ({
+      extContext,
+      extensionId,
+      setupDir,
+    }) => {
       const { files, store } = await buildScenarioData(testSeeds[i]);
       await resetAndSeed(extContext, extensionId, files);
 
@@ -234,7 +249,12 @@ test.describe('P7: Sidebar list count matches non-deleted lists', () => {
       // Count non-deleted, non-system lists from replay state
       let expectedListCount = 0;
       for (const [key, entity] of store) {
-        if (key.startsWith('list:') && !key.startsWith('list:system/') && entity && !entity.deleted) {
+        if (
+          key.startsWith('list:') &&
+          !key.startsWith('list:system/') &&
+          entity &&
+          !entity.deleted
+        ) {
           expectedListCount++;
         }
       }
@@ -242,16 +262,18 @@ test.describe('P7: Sidebar list count matches non-deleted lists', () => {
       if (expectedListCount > 0) {
         // Wait for sidebar items to render
         await options.waitForFunction(
-          (expected) => document.querySelectorAll('.sidebar-item[data-list-id]').length >= expected,
+          (expected) =>
+            document.querySelectorAll('.sidebar-item[data-list-id]').length >=
+            expected,
           expectedListCount,
-          { timeout: 10000 }
+          { timeout: 10000 },
         );
       }
 
       const sidebarItems = await options.$$('.sidebar-item[data-list-id]');
       expect(
         sidebarItems.length,
-        `Expected ${expectedListCount} lists in sidebar (seed: ${testSeeds[i]})`
+        `Expected ${expectedListCount} lists in sidebar (seed: ${testSeeds[i]})`,
       ).toBe(expectedListCount);
 
       await options.close();
@@ -265,14 +287,23 @@ test.describe('P7: Sidebar list count matches non-deleted lists', () => {
 
 test.describe('P8: List pin count matches entity pins array', () => {
   for (let i = 0; i < testSeeds.length; i++) {
-    test(`seed ${testSeeds[i]}`, async ({ extContext, extensionId, setupDir }) => {
+    test(`seed ${testSeeds[i]}`, async ({
+      extContext,
+      extensionId,
+      setupDir,
+    }) => {
       const { files, store } = await buildScenarioData(testSeeds[i]);
       await resetAndSeed(extContext, extensionId, files);
 
       // Find a non-deleted list with pins
       let targetList = null;
       for (const [key, entity] of store) {
-        if (key.startsWith('list:') && !key.startsWith('list:system/') && entity && !entity.deleted) {
+        if (
+          key.startsWith('list:') &&
+          !key.startsWith('list:system/') &&
+          entity &&
+          !entity.deleted
+        ) {
           if (entity.pins && entity.pins.length > 0) {
             targetList = { key, entity };
             break;
@@ -286,7 +317,9 @@ test.describe('P8: List pin count matches entity pins array', () => {
       const listId = targetList.key.slice('list:'.length);
 
       // Click into the list
-      const listItem = options.locator(`.sidebar-item[data-list-id="${listId}"]`);
+      const listItem = options.locator(
+        `.sidebar-item[data-list-id="${listId}"]`,
+      );
       await expect(listItem).toBeVisible({ timeout: 5000 });
       await listItem.click();
       await waitForListView(options);
@@ -294,15 +327,17 @@ test.describe('P8: List pin count matches entity pins array', () => {
       // Wait for pinned rows to appear
       const expectedPinCount = targetList.entity.pins.length;
       await options.waitForFunction(
-        (expected) => document.querySelectorAll('#relatedResults .result-row').length >= expected,
+        (expected) =>
+          document.querySelectorAll('#relatedResults .result-row').length >=
+          expected,
         expectedPinCount,
-        { timeout: 10000 }
+        { timeout: 10000 },
       );
 
       const pinnedRows = await options.$$('#relatedResults .result-row');
       expect(
         pinnedRows.length,
-        `Expected ${expectedPinCount} pins in list "${targetList.entity.name}" (seed: ${testSeeds[i]})`
+        `Expected ${expectedPinCount} pins in list "${targetList.entity.name}" (seed: ${testSeeds[i]})`,
       ).toBe(expectedPinCount);
 
       await options.close();
@@ -316,7 +351,11 @@ test.describe('P8: List pin count matches entity pins array', () => {
 
 test.describe('P9: Recycle bin matches orphaned manifest', () => {
   for (let i = 0; i < testSeeds.length; i++) {
-    test(`seed ${testSeeds[i]}`, async ({ extContext, extensionId, setupDir }) => {
+    test(`seed ${testSeeds[i]}`, async ({
+      extContext,
+      extensionId,
+      setupDir,
+    }) => {
       const { files, store } = await buildScenarioData(testSeeds[i]);
       await resetAndSeed(extContext, extensionId, files);
 
@@ -327,26 +366,35 @@ test.describe('P9: Recycle bin matches orphaned manifest', () => {
 
       // Read orphaned manifest through background to verify it matches
       const resp = await helper.evaluate(() =>
-        chrome.runtime.sendMessage({ action: 'readCacheable', key: 'manifest:orphaned' })
+        chrome.runtime.sendMessage({
+          action: 'readCacheable',
+          key: 'manifest:orphaned',
+        }),
       );
       expect(resp.success !== false).toBe(true);
 
       const actualCount = resp.value?.entries?.length || 0;
       expect(
         actualCount,
-        `Expected ${expectedCount} orphaned entries (seed: ${testSeeds[i]})`
+        `Expected ${expectedCount} orphaned entries (seed: ${testSeeds[i]})`,
       ).toBe(expectedCount);
 
       // Verify each orphaned key is indeed deleted in the extension state
       if (actualCount > 0) {
         for (const entry of resp.value.entries) {
-          const entityResp = await helper.evaluate((key) =>
-            chrome.runtime.sendMessage({ action: 'readCacheable', key, includeDeleted: true })
-          , entry.key);
+          const entityResp = await helper.evaluate(
+            (key) =>
+              chrome.runtime.sendMessage({
+                action: 'readCacheable',
+                key,
+                includeDeleted: true,
+              }),
+            entry.key,
+          );
           if (entityResp.value) {
             expect(
               entityResp.value.deleted,
-              `Orphaned entry ${entry.key} should be marked deleted (seed: ${testSeeds[i]})`
+              `Orphaned entry ${entry.key} should be marked deleted (seed: ${testSeeds[i]})`,
             ).toBe(true);
           }
         }
@@ -363,7 +411,11 @@ test.describe('P9: Recycle bin matches orphaned manifest', () => {
 
 test.describe('P10: History sorted newest-first', () => {
   for (let i = 0; i < testSeeds.length; i++) {
-    test(`seed ${testSeeds[i]}`, async ({ extContext, extensionId, setupDir }) => {
+    test(`seed ${testSeeds[i]}`, async ({
+      extContext,
+      extensionId,
+      setupDir,
+    }) => {
       const { files, scenario } = await buildScenarioData(testSeeds[i]);
       await resetAndSeed(extContext, extensionId, files);
 
@@ -372,13 +424,13 @@ test.describe('P10: History sorted newest-first', () => {
       // Wait for at least some history results to appear
       await options.waitForFunction(
         () => document.querySelectorAll('.result-row').length >= 1,
-        { timeout: 10000 }
+        { timeout: 10000 },
       );
 
       // Extract titles from rendered rows — the extension deduplicates by URL
       // and shows each page's latest visit, sorted newest-first
-      const titles = await options.$$eval('.result-row .result-title', els =>
-        els.map(el => el.textContent.trim())
+      const titles = await options.$$eval('.result-row .result-title', (els) =>
+        els.map((el) => el.textContent.trim()),
       );
       expect(titles.length).toBeGreaterThan(0);
 
@@ -390,29 +442,33 @@ test.describe('P10: History sorted newest-first', () => {
           visitsByUrl.set(evt.url, evt);
         }
       }
-      const uniqueVisits = [...visitsByUrl.values()].sort((a, b) => b.timestamp - a.timestamp);
-      const expectedTitles = uniqueVisits.map(v => v.title);
+      const uniqueVisits = [...visitsByUrl.values()].sort(
+        (a, b) => b.timestamp - a.timestamp,
+      );
+      const expectedTitles = uniqueVisits.map((v) => v.title);
 
       // The first displayed title should be the newest visit's title.
       // (Exact match may vary due to enrichment, but the newest should be first.)
       if (expectedTitles.length > 0) {
         expect(
           titles[0],
-          `Newest entry should appear first (seed: ${testSeeds[i]})`
+          `Newest entry should appear first (seed: ${testSeeds[i]})`,
         ).toBe(expectedTitles[0]);
       }
 
       // Verify ordering: for each pair of consecutive displayed titles that
       // both appear in our expected list, the first should come before or at
       // the same position as the second in the expected order.
-      const expectedIndexMap = new Map(expectedTitles.map((t, idx) => [t, idx]));
+      const expectedIndexMap = new Map(
+        expectedTitles.map((t, idx) => [t, idx]),
+      );
       for (let j = 0; j < titles.length - 1; j++) {
         const idxA = expectedIndexMap.get(titles[j]);
         const idxB = expectedIndexMap.get(titles[j + 1]);
         if (idxA !== undefined && idxB !== undefined) {
           expect(
             idxA,
-            `"${titles[j]}" should appear before "${titles[j + 1]}" (seed: ${testSeeds[i]})`
+            `"${titles[j]}" should appear before "${titles[j + 1]}" (seed: ${testSeeds[i]})`,
           ).toBeLessThanOrEqual(idxB);
         }
       }

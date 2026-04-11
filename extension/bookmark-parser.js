@@ -71,7 +71,10 @@ function parseDL(dlElement) {
         : { bookmarks: [], skipped: [], children: [] };
 
       const ownCount = childResult.bookmarks.length;
-      const descendantCount = childResult.children.reduce((sum, c) => sum + c.bookmarkCount, 0);
+      const descendantCount = childResult.children.reduce(
+        (sum, c) => sum + c.bookmarkCount,
+        0,
+      );
 
       children.push({
         title: h3.textContent,

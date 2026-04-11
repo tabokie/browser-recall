@@ -13,8 +13,14 @@ export async function readCacheable(key, includeDeleted = false) {
       if (!includeDeleted && cached[key]?.deleted) return null;
       return cached[key];
     }
-  } catch (e) { logDebug('[readCacheable] session cache error:', e.message); }
-  const resp = await chrome.runtime.sendMessage({ action: 'readCacheable', key, includeDeleted });
+  } catch (e) {
+    logDebug('[readCacheable] session cache error:', e.message);
+  }
+  const resp = await chrome.runtime.sendMessage({
+    action: 'readCacheable',
+    key,
+    includeDeleted,
+  });
   if (resp?.success === false) {
     throw new Error(resp.error || `Failed to load ${key}`);
   }
@@ -32,7 +38,8 @@ export async function loadSettingsValue(key, defaultValue) {
 // Use for all data-reading messages where silent defaults are unacceptable.
 export async function sendAction(msg) {
   const resp = await chrome.runtime.sendMessage(msg);
-  if (resp?.success === false) throw new Error(resp.error || `${msg.action} failed`);
+  if (resp?.success === false)
+    throw new Error(resp.error || `${msg.action} failed`);
   return resp ?? {};
 }
 
@@ -51,7 +58,8 @@ function generateSlug(text, hashInput) {
     throw new Error('generateSlug: text must be non-empty');
   }
   // Normalize: lowercase, replace non-alphanumeric with hyphens, trim to 30 chars
-  const base = text.toLowerCase()
+  const base = text
+    .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, '-')
     .replace(/^-+|-+$/g, '')
     .substring(0, 30)

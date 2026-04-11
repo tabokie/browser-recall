@@ -13,27 +13,69 @@ const dateStr = new Date(now).toISOString().slice(0, 10).replace(/-/g, '');
 function seedFiles() {
   return [
     { path: 'CURRENT', content: 'test-device' },
-    { path: 'manifest/settings.json', data: { trimRules: [], syncEnabled: false } },
-    { path: 'manifest/list-name-to-id.json', data: { timestamps: {}, paths: {} } },
+    {
+      path: 'manifest/settings.json',
+      data: { trimRules: [], syncEnabled: false },
+    },
+    {
+      path: 'manifest/list-name-to-id.json',
+      data: { timestamps: {}, paths: {} },
+    },
     { path: 'manifest/orphaned.json', data: { timestamps: {}, keys: [] } },
     { path: 'manifest/list-order.json', data: { timestamps: {}, tree: [] } },
-    { path: `pages/${slug1}.json`, data: {
-      slug: slug1, url: url1, title: 'Contract Page', timestamps: { 'test-device': now },
-      parentIds: [], childIds: [`note:${slug1}-n1`, `snapshot:${slug1}-${now}`],
-    }},
-    { path: `notes/${slug1}-n1.json`, data: {
-      slug: `${slug1}-n1`, excerpt: 'Test note', note: '', cssPath: '', url: url1,
-      timestamps: { 'test-device': now },
-    }},
-    { path: `data/snapshots/${slug1}-${now}.html`, content: '<html><body>snapshot</body></html>' },
+    {
+      path: `pages/${slug1}.json`,
+      data: {
+        slug: slug1,
+        url: url1,
+        title: 'Contract Page',
+        timestamps: { 'test-device': now },
+        parentIds: [],
+        childIds: [`note:${slug1}-n1`, `snapshot:${slug1}-${now}`],
+      },
+    },
+    {
+      path: `notes/${slug1}-n1.json`,
+      data: {
+        slug: `${slug1}-n1`,
+        excerpt: 'Test note',
+        note: '',
+        cssPath: '',
+        url: url1,
+        timestamps: { 'test-device': now },
+      },
+    },
+    {
+      path: `data/snapshots/${slug1}-${now}.html`,
+      content: '<html><body>snapshot</body></html>',
+    },
     { path: `data/snapshots/${slug1}-${now}.md`, content: '# snapshot' },
-    { path: `data/logs/test-device/${dateStr}.jsonl`, lines: [
-      { timestamp: now, action: 'visit_page', url: url1, title: 'Contract Page' },
-    ]},
-    { path: 'lists/test-list-1.json', data: {
-      id: 'test-list-1', name: 'Test List', timestamps: { 'test-device': now },
-      pins: [{ url: url1, title: 'Contract Page', timestamps: { 'test-device': now } }],
-    }},
+    {
+      path: `data/logs/test-device/${dateStr}.jsonl`,
+      lines: [
+        {
+          timestamp: now,
+          action: 'visit_page',
+          url: url1,
+          title: 'Contract Page',
+        },
+      ],
+    },
+    {
+      path: 'lists/test-list-1.json',
+      data: {
+        id: 'test-list-1',
+        name: 'Test List',
+        timestamps: { 'test-device': now },
+        pins: [
+          {
+            url: url1,
+            title: 'Contract Page',
+            timestamps: { 'test-device': now },
+          },
+        ],
+      },
+    },
   ];
 }
 
@@ -80,19 +122,30 @@ test.describe('Port contract: response shapes', () => {
   // ── Snapshots ──
 
   test('listSnapshots', async () => {
-    const resp = await sendMsg(helper, { action: 'listSnapshots', slug: slug1 });
+    const resp = await sendMsg(helper, {
+      action: 'listSnapshots',
+      slug: slug1,
+    });
     assertShape(resp, ['snapshots']);
     expect(Array.isArray(resp.snapshots)).toBe(true);
   });
 
   test('getSnapshotUrl', async () => {
-    const resp = await sendMsg(helper, { action: 'getSnapshotUrl', slug: slug1, timestamp: now });
+    const resp = await sendMsg(helper, {
+      action: 'getSnapshotUrl',
+      slug: slug1,
+      timestamp: now,
+    });
     assertShape(resp, ['url']);
     expect(typeof resp.url).toBe('string');
   });
 
   test('getSnapshotHtml', async () => {
-    const resp = await sendMsg(helper, { action: 'getSnapshotHtml', slug: slug1, timestamp: now });
+    const resp = await sendMsg(helper, {
+      action: 'getSnapshotHtml',
+      slug: slug1,
+      timestamp: now,
+    });
     assertShape(resp, ['html']);
     expect(typeof resp.html).toBe('string');
   });
@@ -100,7 +153,10 @@ test.describe('Port contract: response shapes', () => {
   // ── Notes ──
 
   test('loadPageNotes', async () => {
-    const resp = await sendMsg(helper, { action: 'loadPageNotes', slug: slug1 });
+    const resp = await sendMsg(helper, {
+      action: 'loadPageNotes',
+      slug: slug1,
+    });
     assertShape(resp, ['notes']);
     expect(Array.isArray(resp.notes)).toBe(true);
   });
@@ -108,7 +164,10 @@ test.describe('Port contract: response shapes', () => {
   // ── Pages ──
 
   test('readCacheable for page entity', async () => {
-    const resp = await sendMsg(helper, { action: 'readCacheable', key: `page:${slug1}` });
+    const resp = await sendMsg(helper, {
+      action: 'readCacheable',
+      key: `page:${slug1}`,
+    });
     assertShape(resp, ['value']);
     expect(resp.value).toBeTruthy();
     expect(resp.value.slug).toBe(slug1);
@@ -123,7 +182,10 @@ test.describe('Port contract: response shapes', () => {
   });
 
   test('listHistoryFiles with sizes', async () => {
-    const resp = await sendMsg(helper, { action: 'listHistoryFiles', includeSizes: true });
+    const resp = await sendMsg(helper, {
+      action: 'listHistoryFiles',
+      includeSizes: true,
+    });
     assertShape(resp, ['files', 'sizes']);
     expect(typeof resp.sizes).toBe('object');
   });
@@ -131,7 +193,10 @@ test.describe('Port contract: response shapes', () => {
   test('loadHistoryBatch', async () => {
     const listResp = await sendMsg(helper, { action: 'listHistoryFiles' });
     expect(listResp.files.length).toBeGreaterThan(0);
-    const resp = await sendMsg(helper, { action: 'loadHistoryBatch', files: listResp.files.slice(0, 1) });
+    const resp = await sendMsg(helper, {
+      action: 'loadHistoryBatch',
+      files: listResp.files.slice(0, 1),
+    });
     assertShape(resp, ['entries']);
     expect(Array.isArray(resp.entries)).toBe(true);
   });
@@ -139,25 +204,37 @@ test.describe('Port contract: response shapes', () => {
   // ── Manifest Entities ──
 
   test('readCacheable for settings', async () => {
-    const resp = await sendMsg(helper, { action: 'readCacheable', key: 'manifest:settings' });
+    const resp = await sendMsg(helper, {
+      action: 'readCacheable',
+      key: 'manifest:settings',
+    });
     assertShape(resp, ['value']);
     expect(resp.value).toBeTruthy();
   });
 
   test('readCacheable for name-to-id', async () => {
-    const resp = await sendMsg(helper, { action: 'readCacheable', key: 'manifest:name-to-id' });
+    const resp = await sendMsg(helper, {
+      action: 'readCacheable',
+      key: 'manifest:name-to-id',
+    });
     assertShape(resp, ['value']);
     expect(resp.value).toBeTruthy();
   });
 
   test('readCacheable for orphaned', async () => {
-    const resp = await sendMsg(helper, { action: 'readCacheable', key: 'manifest:orphaned' });
+    const resp = await sendMsg(helper, {
+      action: 'readCacheable',
+      key: 'manifest:orphaned',
+    });
     assertShape(resp, ['value']);
     expect(resp.value).toBeTruthy();
   });
 
   test('readCacheable for list-order', async () => {
-    const resp = await sendMsg(helper, { action: 'readCacheable', key: 'manifest:list-order' });
+    const resp = await sendMsg(helper, {
+      action: 'readCacheable',
+      key: 'manifest:list-order',
+    });
     assertShape(resp, ['value']);
     expect(resp.value).toBeTruthy();
   });
@@ -165,20 +242,31 @@ test.describe('Port contract: response shapes', () => {
   // ── Not-found cases ──
 
   test('getSnapshotUrl returns error shape for missing snapshot', async () => {
-    const resp = await sendMsg(helper, { action: 'getSnapshotUrl', slug: 'no-such-slug', timestamp: 0 });
+    const resp = await sendMsg(helper, {
+      action: 'getSnapshotUrl',
+      slug: 'no-such-slug',
+      timestamp: 0,
+    });
     expect(resp.success).toBe(false);
     expect(resp).toHaveProperty('error');
     expect(typeof resp.error).toBe('string');
   });
 
   test('getSnapshotHtml returns error shape for missing snapshot', async () => {
-    const resp = await sendMsg(helper, { action: 'getSnapshotHtml', slug: 'no-such-slug', timestamp: 0 });
+    const resp = await sendMsg(helper, {
+      action: 'getSnapshotHtml',
+      slug: 'no-such-slug',
+      timestamp: 0,
+    });
     expect(resp.success).toBe(false);
     expect(resp).toHaveProperty('error');
   });
 
   test('readCacheable returns null value for missing entity', async () => {
-    const resp = await sendMsg(helper, { action: 'readCacheable', key: 'page:nonexistent' });
+    const resp = await sendMsg(helper, {
+      action: 'readCacheable',
+      key: 'page:nonexistent',
+    });
     assertShape(resp, ['value']);
     expect(resp.value).toBeNull();
   });
@@ -197,7 +285,10 @@ test.describe('Port contract: write round-trips', () => {
   });
 
   test('listSnapshots returns seeded snapshots', async () => {
-    const resp = await sendMsg(helper, { action: 'listSnapshots', slug: slug1 });
+    const resp = await sendMsg(helper, {
+      action: 'listSnapshots',
+      slug: slug1,
+    });
     assertShape(resp, ['snapshots']);
     expect(resp.snapshots.length).toBeGreaterThan(0);
     expect(resp.snapshots[0]).toHaveProperty('timestamp');
@@ -235,12 +326,32 @@ test.describe('Port contract: exhaustive offscreen handler coverage', () => {
   // and their minimal request payloads.
   const directActions = [
     { action: 'getDirectoryInfo', expectedFields: ['info'] },
-    { action: 'listSnapshots', params: { slug: slug1 }, expectedFields: ['snapshots'] },
-    { action: 'getSnapshotUrl', params: { slug: slug1, timestamp: now }, expectedFields: ['url'] },
-    { action: 'getSnapshotHtml', params: { slug: slug1, timestamp: now }, expectedFields: ['html'] },
+    {
+      action: 'listSnapshots',
+      params: { slug: slug1 },
+      expectedFields: ['snapshots'],
+    },
+    {
+      action: 'getSnapshotUrl',
+      params: { slug: slug1, timestamp: now },
+      expectedFields: ['url'],
+    },
+    {
+      action: 'getSnapshotHtml',
+      params: { slug: slug1, timestamp: now },
+      expectedFields: ['html'],
+    },
     { action: 'listHistoryFiles', expectedFields: ['files'] },
-    { action: 'loadHistoryBatch', params: { files: [`test-device/${dateStr}.jsonl`] }, expectedFields: ['entries'] },
-    { action: 'loadPageNotes', params: { slug: slug1 }, expectedFields: ['notes'] },
+    {
+      action: 'loadHistoryBatch',
+      params: { files: [`test-device/${dateStr}.jsonl`] },
+      expectedFields: ['entries'],
+    },
+    {
+      action: 'loadPageNotes',
+      params: { slug: slug1 },
+      expectedFields: ['notes'],
+    },
     { action: 'flushLogBuffer', expectedFields: [] },
   ];
 

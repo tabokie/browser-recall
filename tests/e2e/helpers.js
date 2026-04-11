@@ -1,6 +1,7 @@
 function timer(label) {
   const t0 = performance.now();
-  return () => console.log(`[timer] ${label}: ${(performance.now() - t0).toFixed(0)}ms`);
+  return () =>
+    console.log(`[timer] ${label}: ${(performance.now() - t0).toFixed(0)}ms`);
 }
 
 // Reset extension state and seed fresh data for a test.
@@ -8,12 +9,14 @@ export async function resetAndSeed(extContext, extensionId, files) {
   let done = timer('resetAndSeed: open helper page');
   const page = await extContext.newPage();
   await page.goto(`chrome-extension://${extensionId}/test-helper.html`);
-  await page.waitForFunction(() => typeof chrome !== 'undefined' && chrome.runtime);
+  await page.waitForFunction(
+    () => typeof chrome !== 'undefined' && chrome.runtime,
+  );
   done();
 
   done = timer('resetAndSeed: resetForTest');
   const resetResult = await page.evaluate(() =>
-    chrome.runtime.sendMessage({ action: 'resetForTest' })
+    chrome.runtime.sendMessage({ action: 'resetForTest' }),
   );
   if (!resetResult?.success) {
     throw new Error(`resetForTest failed: ${JSON.stringify(resetResult)}`);
@@ -22,9 +25,10 @@ export async function resetAndSeed(extContext, extensionId, files) {
 
   if (files?.length > 0) {
     done = timer('resetAndSeed: seedTestData');
-    const seedResult = await page.evaluate((f) =>
-      chrome.runtime.sendMessage({ action: 'seedTestData', files: f })
-    , files);
+    const seedResult = await page.evaluate(
+      (f) => chrome.runtime.sendMessage({ action: 'seedTestData', files: f }),
+      files,
+    );
     if (!seedResult?.success) {
       throw new Error(`seedTestData failed: ${JSON.stringify(seedResult)}`);
     }
@@ -32,10 +36,12 @@ export async function resetAndSeed(extContext, extensionId, files) {
 
     done = timer('resetAndSeed: rehydrateForTest');
     const rehydrateResult = await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'rehydrateForTest' })
+      chrome.runtime.sendMessage({ action: 'rehydrateForTest' }),
     );
     if (!rehydrateResult?.success) {
-      throw new Error(`rehydrateForTest failed: ${JSON.stringify(rehydrateResult)}`);
+      throw new Error(
+        `rehydrateForTest failed: ${JSON.stringify(rehydrateResult)}`,
+      );
     }
     done();
   }
@@ -50,7 +56,9 @@ export async function openHelperPage(extContext, extensionId) {
   const done = timer('openHelperPage');
   const page = await extContext.newPage();
   await page.goto(`chrome-extension://${extensionId}/test-helper.html`);
-  await page.waitForFunction(() => typeof chrome !== 'undefined' && chrome.runtime);
+  await page.waitForFunction(
+    () => typeof chrome !== 'undefined' && chrome.runtime,
+  );
   done();
   return page;
 }
@@ -60,7 +68,7 @@ export async function openHelperPage(extContext, extensionId) {
 export async function openOptionsPage(extContext, extensionId) {
   let done = timer('openOptionsPage (goto)');
   const page = await extContext.newPage();
-  page.on('console', msg => {
+  page.on('console', (msg) => {
     const text = msg.text();
     if (text.includes('-timer]')) console.log(text);
   });
@@ -68,7 +76,9 @@ export async function openOptionsPage(extContext, extensionId) {
   done();
 
   done = timer('openOptionsPage (wait ready)');
-  await page.waitForFunction(() => document.body.dataset.ready === 'true', { timeout: 10000 });
+  await page.waitForFunction(() => document.body.dataset.ready === 'true', {
+    timeout: 10000,
+  });
   done();
 
   return page;
@@ -82,7 +92,7 @@ export async function waitForListView(page) {
       const layout = document.getElementById('listLayout');
       return layout && layout.style.display !== 'none';
     },
-    { timeout: 10000 }
+    { timeout: 10000 },
   );
 }
 
@@ -96,7 +106,8 @@ export function getSlugForUrl(url) {
     const lastDot = domain.lastIndexOf('.');
     if (lastDot > 0) domain = domain.slice(0, lastDot);
     const text = domain + parsed.pathname;
-    const base = text.toLowerCase()
+    const base = text
+      .toLowerCase()
       .replace(/[^\p{L}\p{N}]+/gu, '-')
       .replace(/^-+|-+$/g, '')
       .substring(0, 30)
@@ -107,7 +118,9 @@ export function getSlugForUrl(url) {
     }
     const hashStr = Math.abs(hash).toString(36);
     return `${base}-${hashStr}`.substring(0, 80);
-  } catch { throw new Error(`getSlugForUrl: invalid URL: ${url}`); }
+  } catch {
+    throw new Error(`getSlugForUrl: invalid URL: ${url}`);
+  }
 }
 
 // Wait for a visit_page to be recorded for a URL after a link-click navigation.
@@ -120,27 +133,40 @@ export async function waitForVisitRecorded(helper, page, url, referrer) {
   // Check if content script already reported (up to 2s)
   let recorded = false;
   for (let i = 0; i < 20; i++) {
-    const r = await helper.evaluate((k) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: k })
-    , pageKey);
-    if (r?.value?.timestamps) { recorded = true; break; }
-    await helper.evaluate(() => new Promise(r => setTimeout(r, 100)));
+    const r = await helper.evaluate(
+      (k) => chrome.runtime.sendMessage({ action: 'readCacheable', key: k }),
+      pageKey,
+    );
+    if (r?.value?.timestamps) {
+      recorded = true;
+      break;
+    }
+    await helper.evaluate(() => new Promise((r) => setTimeout(r, 100)));
   }
 
   if (!recorded) {
     // Content script didn't inject — send reportPage from helper page
     const title = await page.title();
-    await helper.evaluate(({ url, ref, title }) =>
-      chrome.runtime.sendMessage({
-        action: 'reportPage', url, isInitialLoad: true, title, referrer: ref,
-      })
-    , { url, ref: referrer, title });
+    await helper.evaluate(
+      ({ url, ref, title }) =>
+        chrome.runtime.sendMessage({
+          action: 'reportPage',
+          url,
+          isInitialLoad: true,
+          title,
+          referrer: ref,
+        }),
+      { url, ref: referrer, title },
+    );
     // Wait for processing
     await helper.evaluate(async (k) => {
       for (let i = 0; i < 20; i++) {
-        const r = await chrome.runtime.sendMessage({ action: 'readCacheable', key: k });
+        const r = await chrome.runtime.sendMessage({
+          action: 'readCacheable',
+          key: k,
+        });
         if (r?.value?.timestamps) return;
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise((r) => setTimeout(r, 100));
       }
     }, pageKey);
   }

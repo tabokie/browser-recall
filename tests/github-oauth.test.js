@@ -27,7 +27,7 @@ describe('github-oauth', () => {
         'https://api.github.com/user',
         expect.objectContaining({
           headers: expect.objectContaining({
-            'Authorization': 'token gho_token',
+            Authorization: 'token gho_token',
           }),
         }),
       );

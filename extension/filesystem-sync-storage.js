@@ -30,7 +30,7 @@ export class FileSystemSyncStorage {
     try {
       this.syncDirectoryHandle = await window.showDirectoryPicker({
         mode: 'readwrite',
-        startIn: 'documents'
+        startIn: 'documents',
       });
       const db = await this.mainStorage.initDB();
       await new Promise((resolve, reject) => {
@@ -42,7 +42,8 @@ export class FileSystemSyncStorage {
       });
       return { success: true, name: this.syncDirectoryHandle.name };
     } catch (error) {
-      if (error.name === 'AbortError') return { success: false, error: 'User cancelled' };
+      if (error.name === 'AbortError')
+        return { success: false, error: 'User cancelled' };
       throw error;
     }
   }
@@ -58,10 +59,13 @@ export class FileSystemSyncStorage {
         req.onerror = () => reject(req.error);
       });
     }
-    if (!this.syncDirectoryHandle) throw new Error('No sync directory configured');
+    if (!this.syncDirectoryHandle)
+      throw new Error('No sync directory configured');
     const opts = { mode: 'readwrite' };
     if ((await this.syncDirectoryHandle.queryPermission(opts)) !== 'granted') {
-      if ((await this.syncDirectoryHandle.requestPermission(opts)) !== 'granted') {
+      if (
+        (await this.syncDirectoryHandle.requestPermission(opts)) !== 'granted'
+      ) {
         throw new Error('Sync directory permission denied');
       }
     }
@@ -80,7 +84,11 @@ export class FileSystemSyncStorage {
   async syncFsListFiles(deviceDir) {
     const root = await this._getSyncDir();
     let dir;
-    try { dir = await root.getDirectoryHandle(deviceDir); } catch { return []; }
+    try {
+      dir = await root.getDirectoryHandle(deviceDir);
+    } catch {
+      return [];
+    }
     const results = [];
     await this._syncWalkDir(dir, '', results);
     return results;
@@ -91,7 +99,11 @@ export class FileSystemSyncStorage {
       const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.kind === 'file') {
         const file = await entry.getFile();
-        results.push({ path: entryPath, content: await file.text(), size: file.size });
+        results.push({
+          path: entryPath,
+          content: await file.text(),
+          size: file.size,
+        });
       } else if (entry.kind === 'directory') {
         await this._syncWalkDir(entry, entryPath, results);
       }
@@ -117,7 +129,9 @@ export class FileSystemSyncStorage {
     for (let i = 0; i < segments.length - 1; i++) {
       current = await current.getDirectoryHandle(segments[i], { create: true });
     }
-    const fh = await current.getFileHandle(segments[segments.length - 1], { create: true });
+    const fh = await current.getFileHandle(segments[segments.length - 1], {
+      create: true,
+    });
     const w = await fh.createWritable();
     await w.write(content);
     await w.close();

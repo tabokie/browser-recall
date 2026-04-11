@@ -15,11 +15,16 @@ export const listKey = (id) => LIST_PREFIX + id;
 export const snapshotKey = (stem) => SNAPSHOT_PREFIX + stem;
 
 // --- Key parsing ---
-const ALL_PREFIXES = [PAGE_PREFIX, NOTE_PREFIX, SNAPSHOT_PREFIX, LIST_PREFIX, MANIFEST_PREFIX];
+const ALL_PREFIXES = [
+  PAGE_PREFIX,
+  NOTE_PREFIX,
+  SNAPSHOT_PREFIX,
+  LIST_PREFIX,
+  MANIFEST_PREFIX,
+];
 
 export function entityPrefix(key) {
-  for (const p of ALL_PREFIXES)
-    if (key.startsWith(p)) return p;
+  for (const p of ALL_PREFIXES) if (key.startsWith(p)) return p;
   return null;
 }
 

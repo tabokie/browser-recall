@@ -9,7 +9,12 @@ test.describe('Tab reported URL tracking', () => {
     });
   });
 
-  test('getReportedUrl returns URL from content script report, survives pushState', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('getReportedUrl returns URL from content script report, survives pushState', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
@@ -27,23 +32,29 @@ test.describe('Tab reported URL tracking', () => {
     // Wait for the visit to be recorded
     await helper.evaluate(async (key) => {
       for (let i = 0; i < 30; i++) {
-        const r = await chrome.runtime.sendMessage({ action: 'readCacheable', key });
+        const r = await chrome.runtime.sendMessage({
+          action: 'readCacheable',
+          key,
+        });
         if (r?.value?.timestamps) return;
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise((r) => setTimeout(r, 100));
       }
     }, pageKey);
 
     // Find the tab ID from the helper page via chrome.tabs.query
     const tabId = await helper.evaluate(async (url) => {
       const tabs = await chrome.tabs.query({});
-      const match = tabs.find(t => t.url && t.url.startsWith(url));
+      const match = tabs.find((t) => t.url && t.url.startsWith(url));
       return match?.id;
     }, originalUrl);
     expect(tabId).toBeTruthy();
 
     // getReportedUrl should return the original URL
     const reportedResp = await helper.evaluate(async (tid) => {
-      return chrome.runtime.sendMessage({ action: 'getReportedUrl', tabId: tid });
+      return chrome.runtime.sendMessage({
+        action: 'getReportedUrl',
+        tabId: tid,
+      });
     }, tabId);
     expect(reportedResp.success).toBe(true);
     expect(reportedResp.url).toBe(originalUrl);
@@ -56,7 +67,10 @@ test.describe('Tab reported URL tracking', () => {
 
     // getReportedUrl should still return the ORIGINAL URL, not the pushState'd one
     const afterPushResp = await helper.evaluate(async (tid) => {
-      return chrome.runtime.sendMessage({ action: 'getReportedUrl', tabId: tid });
+      return chrome.runtime.sendMessage({
+        action: 'getReportedUrl',
+        tabId: tid,
+      });
     }, tabId);
     expect(afterPushResp.success).toBe(true);
     expect(afterPushResp.url).toBe(originalUrl);

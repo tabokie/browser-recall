@@ -1,29 +1,68 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, getSlugForUrl, openHelperPage, openOptionsPage, waitForListView } from './helpers.js';
+import {
+  resetAndSeed,
+  getSlugForUrl,
+  openHelperPage,
+  openOptionsPage,
+  waitForListView,
+} from './helpers.js';
 
 const TEST_URL = 'https://example.com/';
 const TEST_SLUG = getSlugForUrl(TEST_URL);
 
 test.describe('Cross-context consistency', () => {
-  test('pin from helper page reflects in already-open options list view', async ({ extContext, extensionId, setupDir }) => {
+  test('pin from helper page reflects in already-open options list view', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: {
-        timestamp: now, tree: [{ id: 'list:research' }],
-      }},
-      { path: 'lists/research.json', data: {
-        slug: 'research', name: 'Research', owner: 'test-device', timestamp: now, pins: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Research': 'research' } } },
-      { path: `pages/${TEST_SLUG}.json`, data: {
-        slug: TEST_SLUG, url: TEST_URL, title: 'Example Domain',
-        timestamp: now, parentIds: [], childIds: [],
-      }},
-      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Example Domain' },
-      ]},
+      {
+        path: 'manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:research' }],
+        },
+      },
+      {
+        path: 'lists/research.json',
+        data: {
+          slug: 'research',
+          name: 'Research',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: { timestamp: now, paths: { 'test-device/Research': 'research' } },
+      },
+      {
+        path: `pages/${TEST_SLUG}.json`,
+        data: {
+          slug: TEST_SLUG,
+          url: TEST_URL,
+          title: 'Example Domain',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+      {
+        path: 'data/logs/test-device/2026-03-01.jsonl',
+        lines: [
+          {
+            timestamp: now,
+            action: 'visit_page',
+            url: TEST_URL,
+            title: 'Example Domain',
+          },
+        ],
+      },
     ]);
 
     const optionsA = await openOptionsPage(extContext, extensionId);
@@ -36,9 +75,15 @@ test.describe('Cross-context consistency', () => {
     expect(pinnedRows.length).toBe(0);
 
     const helper = await openHelperPage(extContext, extensionId);
-    await helper.evaluate((url) =>
-      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'research', url })
-    , TEST_URL);
+    await helper.evaluate(
+      (url) =>
+        chrome.runtime.sendMessage({
+          action: 'toggleListPin',
+          listId: 'research',
+          url,
+        }),
+      TEST_URL,
+    );
     await helper.close();
 
     const pinnedRow = optionsA.locator('#relatedResults .result-row');
@@ -48,10 +93,17 @@ test.describe('Cross-context consistency', () => {
     await optionsA.close();
   });
 
-  test('new page visit notification updates explore view in already-open options', async ({ extContext, extensionId, setupDir }) => {
+  test('new page visit notification updates explore view in already-open options', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
     ]);
 
     const options = await openOptionsPage(extContext, extensionId);

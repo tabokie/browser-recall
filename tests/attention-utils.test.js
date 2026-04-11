@@ -12,14 +12,14 @@ describe('attentionStrength', () => {
   });
 
   it('scores timeOnPage (minutes, capped at 10)', () => {
-    expect(attentionStrength({ timeOnPage: 60000 })).toBe(1);   // 1 minute
-    expect(attentionStrength({ timeOnPage: 600000 })).toBe(10);  // 10 minutes (cap)
+    expect(attentionStrength({ timeOnPage: 60000 })).toBe(1); // 1 minute
+    expect(attentionStrength({ timeOnPage: 600000 })).toBe(10); // 10 minutes (cap)
     expect(attentionStrength({ timeOnPage: 1200000 })).toBe(10); // 20 minutes (still capped at 10)
   });
 
   it('scores scrollDepth (0-2 range)', () => {
-    expect(attentionStrength({ scrollDepth: 100 })).toBe(2);  // 100% = 2
-    expect(attentionStrength({ scrollDepth: 50 })).toBe(1);   // 50% = 1
+    expect(attentionStrength({ scrollDepth: 100 })).toBe(2); // 100% = 2
+    expect(attentionStrength({ scrollDepth: 50 })).toBe(1); // 50% = 1
   });
 
   it('scores likes (1 per like, capped at 5)', () => {

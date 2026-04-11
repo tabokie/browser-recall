@@ -91,7 +91,12 @@ export async function cacheSet(key, value, { timestamp } = {}) {
   lruKeys.push(key);
   // Track timestamp — auto-extract max from timestamps map if not provided
   if (timestamp === undefined) {
-    if (value && typeof value === 'object' && !Array.isArray(value) && value.timestamps) {
+    if (
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      value.timestamps
+    ) {
       const vals = Object.values(value.timestamps);
       timestamp = vals.length ? Math.max(...vals) : 0;
     } else {
@@ -137,7 +142,7 @@ async function emergencyEvict() {
   if (toRemove.length > 0) {
     await chrome.storage.session.remove(toRemove);
     const removeSet = new Set(toRemove);
-    lruKeys = lruKeys.filter(k => !removeSet.has(k));
+    lruKeys = lruKeys.filter((k) => !removeSet.has(k));
     for (const k of toRemove) {
       keyTimestamps.delete(k);
       pinnedKeys.delete(k);
@@ -167,8 +172,7 @@ async function evict() {
   if (toRemove.length > 0) {
     await chrome.storage.session.remove(toRemove);
     const removeSet = new Set(toRemove);
-    lruKeys = lruKeys.filter(k => !removeSet.has(k));
+    lruKeys = lruKeys.filter((k) => !removeSet.has(k));
     for (const k of toRemove) keyTimestamps.delete(k);
   }
 }
-

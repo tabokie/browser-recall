@@ -32,7 +32,7 @@ Create in repo root. Cover:
 "Save your browsing history, notes, and highlights to a local folder you control. Your data stays on your device."
 
 **Detailed description**:
-Draft covering: local-first storage, browsing history tracking, full-text search, notes & highlights, page snapshots, multi-device sync via GitHub, keyboard shortcuts, smart rules.
+Draft covering: local-first storage, browsing history tracking, full-text search, notes & highlights, page snapshots, multi-device sync via GitHub, keyboard shortcuts, function rules.
 
 ### Icons
 

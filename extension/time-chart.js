@@ -13,7 +13,13 @@ function aggregateVisitsByDay(entries) {
   return sorted; // [[dateStr, count], ...]
 }
 
-export function renderTimeChartInto(chartEl, barsEl, entries, label, estimatedByDay) {
+export function renderTimeChartInto(
+  chartEl,
+  barsEl,
+  entries,
+  label,
+  estimatedByDay,
+) {
   if (label !== undefined) {
     const labelEl = chartEl.querySelector('.chart-label');
     if (labelEl) labelEl.textContent = label;
@@ -43,16 +49,19 @@ export function renderTimeChartInto(chartEl, barsEl, entries, label, estimatedBy
   }
 
   const maxScore = Math.max(
-    ...data.map(d => d[1]),
+    ...data.map((d) => d[1]),
     ...(hasEstimates ? [...estimatedByDay.values()] : []),
-    0.1
+    0.1,
   );
   const chartHeight = 44;
 
   // Expand range: 1st of earliest month → today (all local time)
   const todayKey = dateKeyFromTimestamp(Date.now());
   const firstKey = allDataDates[0];
-  const lastKey = allDataDates[allDataDates.length - 1] > todayKey ? allDataDates[allDataDates.length - 1] : todayKey;
+  const lastKey =
+    allDataDates[allDataDates.length - 1] > todayKey
+      ? allDataDates[allDataDates.length - 1]
+      : todayKey;
   const firstParts = firstKey.split('-').map(Number);
   const rangeStart = new Date(firstParts[0], firstParts[1] - 1, 1); // 1st of earliest local month
   const lastParts = lastKey.split('-').map(Number);
@@ -61,7 +70,11 @@ export function renderTimeChartInto(chartEl, barsEl, entries, label, estimatedBy
   const days = [];
   const months = []; // { label, dayIndex }
   let prevMonth = null;
-  for (let d = new Date(rangeStart); d <= lastDate; d.setDate(d.getDate() + 1)) {
+  for (
+    let d = new Date(rangeStart);
+    d <= lastDate;
+    d.setDate(d.getDate() + 1)
+  ) {
     const dateStr = dateKeyFromTimestamp(d.getTime());
     const month = dateStr.slice(0, 7);
     if (month !== prevMonth) {
@@ -73,23 +86,29 @@ export function renderTimeChartInto(chartEl, barsEl, entries, label, estimatedBy
 
   // Bars row
   const daySlotPx = 11; // 10px bar + 1px gap
-  const barsHtml = days.map(dateStr => {
-    const score = scoreMap.get(dateStr);
-    const estScore = hasEstimates ? estimatedByDay.get(dateStr) : undefined;
-    const effectiveScore = score ?? estScore;
-    if (effectiveScore != null) {
-      // sqrt scaling + 5px floor: low-count bars stay clickable while preserving relative proportions
-      const barH = Math.round(Math.sqrt(effectiveScore / maxScore) * chartHeight) + 5;
-      return `<div class="chart-bar-group has-data" data-date="${dateStr}"><div class="chart-bar" style="height:${barH}px"></div></div>`;
-    }
-    return `<div class="chart-bar-group" data-date="${dateStr}"></div>`;
-  }).join('');
+  const barsHtml = days
+    .map((dateStr) => {
+      const score = scoreMap.get(dateStr);
+      const estScore = hasEstimates ? estimatedByDay.get(dateStr) : undefined;
+      const effectiveScore = score ?? estScore;
+      if (effectiveScore != null) {
+        // sqrt scaling + 5px floor: low-count bars stay clickable while preserving relative proportions
+        const barH =
+          Math.round(Math.sqrt(effectiveScore / maxScore) * chartHeight) + 5;
+        return `<div class="chart-bar-group has-data" data-date="${dateStr}"><div class="chart-bar" style="height:${barH}px"></div></div>`;
+      }
+      return `<div class="chart-bar-group" data-date="${dateStr}"></div>`;
+    })
+    .join('');
 
   // Axis row
   const totalBarWidth = days.length * daySlotPx - 1;
-  const axisHtml = months.map(m =>
-    `<span class="chart-month" style="left:${m.dayIndex * daySlotPx}px">${m.label}</span>`
-  ).join('');
+  const axisHtml = months
+    .map(
+      (m) =>
+        `<span class="chart-month" style="left:${m.dayIndex * daySlotPx}px">${m.label}</span>`,
+    )
+    .join('');
 
   // Compute min-width: max(bar total, rightmost label end)
   // Label ~45px wide; last label starts at its dayIndex * daySlotPx
@@ -105,7 +124,9 @@ export function renderTimeChartInto(chartEl, barsEl, entries, label, estimatedBy
   chartEl.classList.add('visible');
 
   // Scroll to the right (most recent bars) after render
-  requestAnimationFrame(() => { barsEl.scrollLeft = barsEl.scrollWidth; });
+  requestAnimationFrame(() => {
+    barsEl.scrollLeft = barsEl.scrollWidth;
+  });
 }
 
 export function renderTimeChart(entries, estimatedByDay) {
@@ -114,9 +135,12 @@ export function renderTimeChart(entries, estimatedByDay) {
     document.getElementById('chartBars'),
     entries,
     'Visits over time',
-    estimatedByDay
+    estimatedByDay,
   );
-  bindChartBarClick(document.getElementById('timeChart'), document.getElementById('results'));
+  bindChartBarClick(
+    document.getElementById('timeChart'),
+    document.getElementById('results'),
+  );
 }
 
 // Chart tooltip handler (shared for both charts)
@@ -125,13 +149,21 @@ function bindChartTooltip(chartEl) {
   const tooltip = chartEl.querySelector('.chart-tooltip');
   barsEl.addEventListener('mouseover', (e) => {
     const group = e.target.closest('.chart-bar-group.has-data');
-    if (!group) { tooltip.style.display = 'none'; return; }
+    if (!group) {
+      tooltip.style.display = 'none';
+      return;
+    }
     tooltip.textContent = group.dataset.date;
     tooltip.style.display = 'block';
     const rect = group.getBoundingClientRect();
     const chartRect = chartEl.getBoundingClientRect();
-    tooltip.style.left = (rect.left - chartRect.left + rect.width / 2 - tooltip.offsetWidth / 2) + 'px';
-    tooltip.style.top = (rect.top - chartRect.top - 22) + 'px';
+    tooltip.style.left =
+      rect.left -
+      chartRect.left +
+      rect.width / 2 -
+      tooltip.offsetWidth / 2 +
+      'px';
+    tooltip.style.top = rect.top - chartRect.top - 22 + 'px';
   });
   barsEl.addEventListener('mouseout', () => {
     tooltip.style.display = 'none';
@@ -152,22 +184,28 @@ export function syncChartHighlights() {
 
     // Collect dates from selected rows
     const selectedDates = new Set();
-    container.querySelectorAll('.result-row.selected').forEach(row => {
+    container.querySelectorAll('.result-row.selected').forEach((row) => {
       const d = row.dataset.dates;
-      if (d) d.split(',').forEach(date => selectedDates.add(date));
+      if (d) d.split(',').forEach((date) => selectedDates.add(date));
     });
 
     // Toggle highlighted class on chart bars
-    barsEl.querySelectorAll('.chart-bar-group').forEach(group => {
+    barsEl.querySelectorAll('.chart-bar-group').forEach((group) => {
       const bar = group.querySelector('.chart-bar');
-      if (bar) bar.classList.toggle('highlighted', selectedDates.has(group.dataset.date));
+      if (bar)
+        bar.classList.toggle(
+          'highlighted',
+          selectedDates.has(group.dataset.date),
+        );
     });
   }
 }
 
 export function applyDateFilter(chartEl, resultsContainer) {
   const activeDates = new Set();
-  chartEl.querySelectorAll('.chart-bar-group.active').forEach(g => activeDates.add(g.dataset.date));
+  chartEl
+    .querySelectorAll('.chart-bar-group.active')
+    .forEach((g) => activeDates.add(g.dataset.date));
   const hasFilter = activeDates.size > 0;
 
   // For virtual-scrolled containers, filter at the data level
@@ -176,21 +214,26 @@ export function applyDateFilter(chartEl, resultsContainer) {
     if (!hasFilter) {
       vs.applyFilter(null);
     } else {
-      vs.applyFilter(item => {
+      vs.applyFilter((item) => {
         const ts = item.timestamps || [];
-        return ts.some(t => activeDates.has(new Date(t).toISOString().slice(0, 10)));
+        return ts.some((t) =>
+          activeDates.has(new Date(t).toISOString().slice(0, 10)),
+        );
       });
     }
     return;
   }
 
   // Non-virtual containers: hide/show DOM nodes directly
-  resultsContainer.querySelectorAll('.result-item').forEach(item => {
+  resultsContainer.querySelectorAll('.result-item').forEach((item) => {
     const row = item.querySelector('.result-row');
     if (!row) return;
-    if (!hasFilter) { item.style.display = ''; return; }
+    if (!hasFilter) {
+      item.style.display = '';
+      return;
+    }
     const rowDates = row.dataset.dates ? row.dataset.dates.split(',') : [];
-    const match = rowDates.some(d => activeDates.has(d));
+    const match = rowDates.some((d) => activeDates.has(d));
     item.style.display = match ? '' : 'none';
   });
 }
@@ -210,7 +253,9 @@ export function bindChartBarClick(chartEl, resultsContainer) {
     // Notify about selected dates for demand loading
     if (chartEl._onDateSelect) {
       const activeDates = new Set();
-      chartEl.querySelectorAll('.chart-bar-group.active').forEach(g => activeDates.add(g.dataset.date));
+      chartEl
+        .querySelectorAll('.chart-bar-group.active')
+        .forEach((g) => activeDates.add(g.dataset.date));
       chartEl._onDateSelect(activeDates);
     }
   });
@@ -219,7 +264,9 @@ export function bindChartBarClick(chartEl, resultsContainer) {
     chartEl._chartBgClickBound = true;
     chartEl.addEventListener('click', (e) => {
       if (e.target.closest('.chart-bar')) return;
-      chartEl.querySelectorAll('.chart-bar-group.active').forEach(g => g.classList.remove('active'));
+      chartEl
+        .querySelectorAll('.chart-bar-group.active')
+        .forEach((g) => g.classList.remove('active'));
       applyDateFilter(chartEl, resultsContainer);
       syncChartHighlights();
     });

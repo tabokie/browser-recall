@@ -42,7 +42,7 @@ class FileSystemStorage {
       // Request directory access
       this.directoryHandle = await window.showDirectoryPicker({
         mode: 'readwrite',
-        startIn: 'documents'
+        startIn: 'documents',
       });
 
       this.clearCache();
@@ -52,7 +52,7 @@ class FileSystemStorage {
 
       return {
         success: true,
-        name: this.directoryHandle.name
+        name: this.directoryHandle.name,
       };
     } catch (error) {
       if (error.name === 'AbortError') {
@@ -218,9 +218,13 @@ class FileSystemStorage {
       const date = new Date(metadata.timestamp);
       const filename = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}.jsonl`;
 
-      const fileHandle = await this.resolveFile('data/logs/' + filename, { create: true });
+      const fileHandle = await this.resolveFile('data/logs/' + filename, {
+        create: true,
+      });
 
-      const writable = await fileHandle.createWritable({ keepExistingData: true });
+      const writable = await fileHandle.createWritable({
+        keepExistingData: true,
+      });
       const file = await fileHandle.getFile();
       await writable.seek(file.size);
 
@@ -230,7 +234,12 @@ class FileSystemStorage {
 
       // Write content files using versioned snapshot directory structure
       if (metadata.slug && (markdown || html)) {
-        await this.captureSnapshot(metadata.slug, metadata.timestamp, markdown, html);
+        await this.captureSnapshot(
+          metadata.slug,
+          metadata.timestamp,
+          markdown,
+          html,
+        );
       }
 
       return { success: true };
@@ -254,7 +263,7 @@ class FileSystemStorage {
 
     return {
       name: this.directoryHandle.name,
-      hasPermission
+      hasPermission,
     };
   }
 
@@ -305,7 +314,7 @@ class FileSystemStorage {
   // Returns flat string array ['YYYY-MM-DD.jsonl', ...] deduplicated across devices.
   async listHistoryFiles() {
     const all = await this._scanLogFiles();
-    const unique = [...new Set(all.map(f => f.name))];
+    const unique = [...new Set(all.map((f) => f.name))];
     unique.sort().reverse(); // newest-first
     return unique;
   }
@@ -325,14 +334,14 @@ class FileSystemStorage {
   // Returns { entries, files } — entries in chronological order, files sorted oldest-first.
   async loadHistoryFileRange(fromDate, toDate) {
     const allFiles = await this._scanLogFiles();
-    const filtered = allFiles.filter(f => {
+    const filtered = allFiles.filter((f) => {
       const dateStr = f.name.replace('.jsonl', '');
       return dateStr >= fromDate && dateStr <= toDate;
     });
     filtered.sort((a, b) => a.name.localeCompare(b.name)); // oldest-first for chronological reading
     const entries = await this._loadFromDeviceFiles(filtered);
     // Deduplicated file names for the caller
-    const fileNames = [...new Set(filtered.map(f => f.name))];
+    const fileNames = [...new Set(filtered.map((f) => f.name))];
     return { entries, files: fileNames };
   }
 
@@ -341,27 +350,29 @@ class FileSystemStorage {
     if (!(await this.verifyPermission())) {
       throw new Error('No permission to read directory');
     }
-    const results = await Promise.all(fileList.map(async ({ device, name }) => {
-      try {
-        const path = `data/logs/${device}/${name}`;
-        const fh = await this.resolveFile(path);
-        const file = await fh.getFile();
-        const text = await file.text();
-        const fileEntries = [];
-        for (const line of text.split('\n')) {
-          if (!line.trim()) continue;
-          try {
-            const entry = JSON.parse(line);
-            entry.deviceId = device;
-            fileEntries.push(entry);
-          } catch {}
+    const results = await Promise.all(
+      fileList.map(async ({ device, name }) => {
+        try {
+          const path = `data/logs/${device}/${name}`;
+          const fh = await this.resolveFile(path);
+          const file = await fh.getFile();
+          const text = await file.text();
+          const fileEntries = [];
+          for (const line of text.split('\n')) {
+            if (!line.trim()) continue;
+            try {
+              const entry = JSON.parse(line);
+              entry.deviceId = device;
+              fileEntries.push(entry);
+            } catch {}
+          }
+          return fileEntries;
+        } catch (error) {
+          if (!isNotFound(error)) throw error;
+          return [];
         }
-        return fileEntries;
-      } catch (error) {
-        if (!isNotFound(error)) throw error;
-        return [];
-      }
-    }));
+      }),
+    );
     return results.flat();
   }
 
@@ -369,7 +380,7 @@ class FileSystemStorage {
   async loadHistoryFiles(filenames) {
     const nameSet = new Set(filenames);
     const allFiles = await this._scanLogFiles();
-    const matching = allFiles.filter(f => nameSet.has(f.name));
+    const matching = allFiles.filter((f) => nameSet.has(f.name));
     return this._loadFromDeviceFiles(matching);
   }
 
@@ -395,7 +406,9 @@ class FileSystemStorage {
           }
         }
       }
-    } catch (error) { if (!isNotFound(error)) throw error; }
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
 
     return notesMap;
   }
@@ -405,7 +418,10 @@ class FileSystemStorage {
     const snapshotsDir = await this.resolveDir('data/snapshots');
 
     if (markdown) {
-      const mdHandle = await snapshotsDir.getFileHandle(`${slug}-${timestamp}.md`, { create: true });
+      const mdHandle = await snapshotsDir.getFileHandle(
+        `${slug}-${timestamp}.md`,
+        { create: true },
+      );
       const mdWritable = await mdHandle.createWritable();
       await mdWritable.write(markdown);
       await mdWritable.close();
@@ -413,13 +429,24 @@ class FileSystemStorage {
 
     if (html) {
       // Strip portal highlight marks — viewer reapplies from notes
-      const strippedHtml = html.replace(/<mark\b[^>]*class="[^"]*portal-highlight[^"]*"[^>]*>([\s\S]*?)<\/mark>/gi, '$1');
+      const strippedHtml = html.replace(
+        /<mark\b[^>]*class="[^"]*portal-highlight[^"]*"[^>]*>([\s\S]*?)<\/mark>/gi,
+        '$1',
+      );
       // Embed slug identity so viewer page can load the original page's notes
       const metaTag = `<meta name="x-portal-slug" content="${slug}">`;
-      const taggedHtml = strippedHtml.replace(/<head([^>]*)>/i, `<head$1>${metaTag}`);
-      const htmlHandle = await snapshotsDir.getFileHandle(`${slug}-${timestamp}.html`, { create: true });
+      const taggedHtml = strippedHtml.replace(
+        /<head([^>]*)>/i,
+        `<head$1>${metaTag}`,
+      );
+      const htmlHandle = await snapshotsDir.getFileHandle(
+        `${slug}-${timestamp}.html`,
+        { create: true },
+      );
       const htmlWritable = await htmlHandle.createWritable();
-      await htmlWritable.write(taggedHtml === strippedHtml ? metaTag + strippedHtml : taggedHtml);
+      await htmlWritable.write(
+        taggedHtml === strippedHtml ? metaTag + strippedHtml : taggedHtml,
+      );
       await htmlWritable.close();
     }
   }
@@ -441,7 +468,9 @@ class FileSystemStorage {
         if (entry.kind !== 'file') continue;
         if (!entry.name.startsWith(prefix)) continue;
 
-        const match = entry.name.slice(prefix.length).match(/^(\d+)\.(md|html)$/);
+        const match = entry.name
+          .slice(prefix.length)
+          .match(/^(\d+)\.(md|html)$/);
         if (!match) continue;
 
         const ts = parseInt(match[1], 10);
@@ -469,10 +498,14 @@ class FileSystemStorage {
     const snapshotsDir = await this.resolveDir('data/snapshots');
     for (const ext of ['html', 'md']) {
       try {
-        const handle = await snapshotsDir.getFileHandle(`${slug}-${timestamp}.${ext}`);
+        const handle = await snapshotsDir.getFileHandle(
+          `${slug}-${timestamp}.${ext}`,
+        );
         const file = await handle.getFile();
         return URL.createObjectURL(file);
-      } catch (e) { if (!isNotFound(e)) throw e; }
+      } catch (e) {
+        if (!isNotFound(e)) throw e;
+      }
     }
     return null;
   }
@@ -481,10 +514,14 @@ class FileSystemStorage {
   async getSnapshotHtml(slug, timestamp) {
     const snapshotsDir = await this.resolveDir('data/snapshots');
     try {
-      const handle = await snapshotsDir.getFileHandle(`${slug}-${timestamp}.html`);
+      const handle = await snapshotsDir.getFileHandle(
+        `${slug}-${timestamp}.html`,
+      );
       const file = await handle.getFile();
       return await file.text();
-    } catch (e) { if (!isNotFound(e)) throw e; }
+    } catch (e) {
+      if (!isNotFound(e)) throw e;
+    }
     return null;
   }
 
@@ -495,8 +532,16 @@ class FileSystemStorage {
     }
 
     const snapshotsDir = await this.resolveDir('data/snapshots');
-    try { await this.removeFile(snapshotsDir, `${slug}-${timestamp}.md`); } catch (e) { if (!isNotFound(e)) throw e; }
-    try { await this.removeFile(snapshotsDir, `${slug}-${timestamp}.html`); } catch (e) { if (!isNotFound(e)) throw e; }
+    try {
+      await this.removeFile(snapshotsDir, `${slug}-${timestamp}.md`);
+    } catch (e) {
+      if (!isNotFound(e)) throw e;
+    }
+    try {
+      await this.removeFile(snapshotsDir, `${slug}-${timestamp}.html`);
+    } catch (e) {
+      if (!isNotFound(e)) throw e;
+    }
   }
 
   // Delete a page entity file from pages/{slug}.json
@@ -571,7 +616,9 @@ class FileSystemStorage {
           if (!slugSet.has(item.slug)) continue;
           if (!visitDays.has(item.slug)) visitDays.set(item.slug, new Set());
           visitDays.get(item.slug).add(dateStr);
-        } catch { /* skip malformed */ }
+        } catch {
+          /* skip malformed */
+        }
       }
     }
 
@@ -617,16 +664,22 @@ class FileSystemStorage {
           const slug = entry.name.slice(0, -5);
           try {
             result[slug] = await this.readJson(entry);
-          } catch { /* skip corrupted files */ }
+          } catch {
+            /* skip corrupted files */
+          }
         }
       }
-    } catch { /* pages dir may not exist yet */ }
+    } catch {
+      /* pages dir may not exist yet */
+    }
     return result;
   }
 
   // Save page metadata to pages/{slug}.json
   async savePage(slug, data) {
-    const fileHandle = await this.resolveFile(`pages/${slug}.json`, { create: true });
+    const fileHandle = await this.resolveFile(`pages/${slug}.json`, {
+      create: true,
+    });
     await this.writeJson(fileHandle, data);
   }
 
@@ -643,7 +696,9 @@ class FileSystemStorage {
 
   // Save note metadata to data/notes/{slug}.json
   async saveNote(slug, data) {
-    const fileHandle = await this.resolveFile(`data/notes/${slug}.json`, { create: true });
+    const fileHandle = await this.resolveFile(`data/notes/${slug}.json`, {
+      create: true,
+    });
     await this.writeJson(fileHandle, data);
   }
 
@@ -661,7 +716,9 @@ class FileSystemStorage {
       if (data && typeof data === 'object' && !Array.isArray(data)) {
         existing = data;
       }
-    } catch (error) { if (!isNotFound(error)) throw error; }
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
     const fileHandle = await this.resolveFile(path, { create: true });
     await this.writeJson(fileHandle, { ...existing, ...updates });
   }
@@ -727,7 +784,9 @@ class FileSystemStorage {
           allPins[id] = data.pins;
         }
       }
-    } catch (error) { if (!isNotFound(error)) throw error; }
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
     return allPins;
   }
 
@@ -762,7 +821,9 @@ class FileSystemStorage {
       const listsDir = await this.resolveDir('lists');
       await this.removeFile(listsDir, `${listId}.json`);
       this.#fileCache.delete(path);
-    } catch (error) { if (!isNotFound(error)) throw error; }
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
   }
 
   // Load metadata for all lists from lists/ files.
@@ -797,7 +858,9 @@ class FileSystemStorage {
           result.push(parseListEntry(slug, data));
         }
       }
-    } catch (error) { if (!isNotFound(error)) throw error; }
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
     return result;
   }
 
@@ -813,7 +876,7 @@ class FileSystemStorage {
     // Write each list, preserving metadata
     const activeFilenames = new Set();
     for (const [id, pins] of Object.entries(allPins)) {
-      const pinsArray = Array.isArray(pins) ? pins : (pins.pins || []);
+      const pinsArray = Array.isArray(pins) ? pins : pins.pins || [];
       const path = this.#resolveListPath(id);
 
       // Track active IDs for cleanup (only for user lists)
@@ -828,7 +891,11 @@ class FileSystemStorage {
     for await (const entry of listsDir.values()) {
       if (entry.kind === 'file' && entry.name.endsWith('.json')) {
         const filename = entry.name.replace('.json', '');
-        if (!filename.startsWith('system') && !filename.startsWith('index') && !activeFilenames.has(filename)) {
+        if (
+          !filename.startsWith('system') &&
+          !filename.startsWith('index') &&
+          !activeFilenames.has(filename)
+        ) {
           await this.removeFile(listsDir, entry.name);
         }
       }
@@ -856,7 +923,9 @@ class FileSystemStorage {
       throw new Error('No permission to write directory');
     }
 
-    const fileHandle = await this.resolveFile('manifest/settings.json', { create: true });
+    const fileHandle = await this.resolveFile('manifest/settings.json', {
+      create: true,
+    });
     await this.writeJson(fileHandle, data);
   }
 
@@ -881,9 +950,14 @@ class FileSystemStorage {
         const dateStr = entry.name.replace('.jsonl', '');
         if (dateStr < cutoffStr) continue;
         const file = await entry.getFile();
-        files.push({ path: `data/logs/${deviceId}/${entry.name}`, content: await file.text() });
+        files.push({
+          path: `data/logs/${deviceId}/${entry.name}`,
+          content: await file.text(),
+        });
       }
-    } catch (e) { if (!isNotFound(e)) throw e; }
+    } catch (e) {
+      if (!isNotFound(e)) throw e;
+    }
 
     // Notes: data/notes/*.json (all)
     try {
@@ -891,9 +965,14 @@ class FileSystemStorage {
       for await (const entry of notesDir.values()) {
         if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue;
         const file = await entry.getFile();
-        files.push({ path: `data/notes/${entry.name}`, content: await file.text() });
+        files.push({
+          path: `data/notes/${entry.name}`,
+          content: await file.text(),
+        });
       }
-    } catch (e) { if (!isNotFound(e)) throw e; }
+    } catch (e) {
+      if (!isNotFound(e)) throw e;
+    }
 
     return files;
   }
@@ -965,7 +1044,6 @@ class FileSystemStorage {
     // Pre-create log directory for this device
     await this.resolveDir(`data/logs/${deviceId}`);
   }
-
 }
 
 export { FileSystemStorage };

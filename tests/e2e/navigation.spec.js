@@ -1,5 +1,11 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, openHelperPage, openOptionsPage, getSlugForUrl, waitForVisitRecorded } from './helpers.js';
+import {
+  resetAndSeed,
+  openHelperPage,
+  openOptionsPage,
+  getSlugForUrl,
+  waitForVisitRecorded,
+} from './helpers.js';
 
 test.describe('Navigation and referrer tracking', () => {
   test.beforeAll(({ localServer }) => {
@@ -21,11 +27,18 @@ test.describe('Navigation and referrer tracking', () => {
     });
     localServer.addPage('/page-long', {
       title: 'Long Page',
-      body: '<h1>Long Page</h1>' + '<p>Lorem ipsum dolor sit amet. </p>'.repeat(200),
+      body:
+        '<h1>Long Page</h1>' +
+        '<p>Lorem ipsum dolor sit amet. </p>'.repeat(200),
     });
   });
 
-  test('click navigation: getPageRelations resolves referrer URL', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('click navigation: getPageRelations resolves referrer URL', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     const homeUrl = localServer.url('/');
     const pageAUrl = localServer.url('/page-a');
     const homeSlug = getSlugForUrl(homeUrl);
@@ -35,13 +48,32 @@ test.describe('Navigation and referrer tracking', () => {
     // Seed page entities so visit_page can enrich them with referrer relations
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
-      { path: `pages/${homeSlug}.json`, data: {
-        slug: homeSlug, url: homeUrl, title: 'Home Page', timestamp: now, parentIds: [], childIds: [],
-      }},
-      { path: `pages/${pageASlug}.json`, data: {
-        slug: pageASlug, url: pageAUrl, title: 'Page A', timestamp: now, parentIds: [], childIds: [],
-      }},
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
+      {
+        path: `pages/${homeSlug}.json`,
+        data: {
+          slug: homeSlug,
+          url: homeUrl,
+          title: 'Home Page',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+      {
+        path: `pages/${pageASlug}.json`,
+        data: {
+          slug: pageASlug,
+          url: pageAUrl,
+          title: 'Page A',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
     ]);
 
     // Navigate home → page-a via link click
@@ -54,9 +86,10 @@ test.describe('Navigation and referrer tracking', () => {
     const helper = await openHelperPage(extContext, extensionId);
     await waitForVisitRecorded(helper, page, pageAUrl, homeUrl);
 
-    const relations = await helper.evaluate((url) =>
-      chrome.runtime.sendMessage({ action: 'getPageRelations', url })
-    , pageAUrl);
+    const relations = await helper.evaluate(
+      (url) => chrome.runtime.sendMessage({ action: 'getPageRelations', url }),
+      pageAUrl,
+    );
 
     await page.close();
     await helper.close();
@@ -67,7 +100,12 @@ test.describe('Navigation and referrer tracking', () => {
     await page.close();
   });
 
-  test('three-page chain: getPageRelations resolves full parent chain', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('three-page chain: getPageRelations resolves full parent chain', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     localServer.addPage('/chain-a', {
       title: 'Chain A',
       body: '<a href="/chain-b" id="next">Next</a>',
@@ -89,16 +127,43 @@ test.describe('Navigation and referrer tracking', () => {
     // Seed page entities so visit_page can enrich them with referrer relations
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
-      { path: `pages/${getSlugForUrl(chainAUrl)}.json`, data: {
-        slug: getSlugForUrl(chainAUrl), url: chainAUrl, title: 'Chain A', timestamp: now, parentIds: [], childIds: [],
-      }},
-      { path: `pages/${getSlugForUrl(chainBUrl)}.json`, data: {
-        slug: getSlugForUrl(chainBUrl), url: chainBUrl, title: 'Chain B', timestamp: now, parentIds: [], childIds: [],
-      }},
-      { path: `pages/${getSlugForUrl(chainCUrl)}.json`, data: {
-        slug: getSlugForUrl(chainCUrl), url: chainCUrl, title: 'Chain C', timestamp: now, parentIds: [], childIds: [],
-      }},
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
+      {
+        path: `pages/${getSlugForUrl(chainAUrl)}.json`,
+        data: {
+          slug: getSlugForUrl(chainAUrl),
+          url: chainAUrl,
+          title: 'Chain A',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+      {
+        path: `pages/${getSlugForUrl(chainBUrl)}.json`,
+        data: {
+          slug: getSlugForUrl(chainBUrl),
+          url: chainBUrl,
+          title: 'Chain B',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+      {
+        path: `pages/${getSlugForUrl(chainCUrl)}.json`,
+        data: {
+          slug: getSlugForUrl(chainCUrl),
+          url: chainCUrl,
+          title: 'Chain C',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
     ]);
 
     const page = await extContext.newPage();
@@ -114,15 +179,17 @@ test.describe('Navigation and referrer tracking', () => {
     await page.waitForSelector('p');
     await waitForVisitRecorded(helper, page, chainCUrl, chainBUrl);
 
-    const relB = await helper.evaluate((url) =>
-      chrome.runtime.sendMessage({ action: 'getPageRelations', url })
-    , chainBUrl);
+    const relB = await helper.evaluate(
+      (url) => chrome.runtime.sendMessage({ action: 'getPageRelations', url }),
+      chainBUrl,
+    );
     expect(relB.success).toBe(true);
     expect(relB.parents.referrers).toContain(chainAUrl);
 
-    const relC = await helper.evaluate((url) =>
-      chrome.runtime.sendMessage({ action: 'getPageRelations', url })
-    , chainCUrl);
+    const relC = await helper.evaluate(
+      (url) => chrome.runtime.sendMessage({ action: 'getPageRelations', url }),
+      chainCUrl,
+    );
     expect(relC.success).toBe(true);
     expect(relC.parents.referrers).toContain(chainBUrl);
 
@@ -130,10 +197,18 @@ test.describe('Navigation and referrer tracking', () => {
     await page.close();
   });
 
-  test('multiple pages visited appear in explore with correct titles', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('multiple pages visited appear in explore with correct titles', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
     ]);
 
     const page = await extContext.newPage();
@@ -148,10 +223,12 @@ test.describe('Navigation and referrer tracking', () => {
     const options = await openOptionsPage(extContext, extensionId);
     await options.waitForFunction(
       () => document.querySelectorAll('.result-row').length >= 3,
-      { timeout: 15000 }
+      { timeout: 15000 },
     );
 
-    const titles = await options.$$eval('.result-title', els => els.map(el => el.textContent.trim()));
+    const titles = await options.$$eval('.result-title', (els) =>
+      els.map((el) => el.textContent.trim()),
+    );
     expect(titles).toContain('Home Page');
     expect(titles).toContain('Page A');
     expect(titles).toContain('Page B');
@@ -160,12 +237,21 @@ test.describe('Navigation and referrer tracking', () => {
     await options.close();
   });
 
-  test('blacklisted URL is not recorded', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('blacklisted URL is not recorded', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: {
-        trimRules: [], urlBlacklist: [localServer.url('/page-c')],
-      }},
+      {
+        path: 'manifest/settings.json',
+        data: {
+          trimRules: [],
+          urlBlacklist: [localServer.url('/page-c')],
+        },
+      },
     ]);
 
     const page = await extContext.newPage();
@@ -175,9 +261,10 @@ test.describe('Navigation and referrer tracking', () => {
     await page.waitForTimeout(500);
 
     const helper = await openHelperPage(extContext, extensionId);
-    const info = await helper.evaluate((url) =>
-      chrome.runtime.sendMessage({ action: 'getPageInfo', url })
-    , localServer.url('/page-c'));
+    const info = await helper.evaluate(
+      (url) => chrome.runtime.sendMessage({ action: 'getPageInfo', url }),
+      localServer.url('/page-c'),
+    );
     await helper.close();
 
     expect(info.success).toBe(true);
@@ -186,15 +273,24 @@ test.describe('Navigation and referrer tracking', () => {
     await page.close();
   });
 
-  test('blacklisted URL: "Capture It" overrides blacklist, revisit is tracked', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('blacklisted URL: "Capture It" overrides blacklist, revisit is tracked', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     const url = localServer.url('/page-c');
 
     // No page entity seeded — bypassBlacklist creates it via checkpoint flag
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: {
-        trimRules: [], urlBlacklist: [url],
-      }},
+      {
+        path: 'manifest/settings.json',
+        data: {
+          trimRules: [],
+          urlBlacklist: [url],
+        },
+      },
     ]);
 
     const page = await extContext.newPage();
@@ -207,37 +303,50 @@ test.describe('Navigation and referrer tracking', () => {
 
     let helper = await openHelperPage(extContext, extensionId);
     const today = new Date().toISOString().slice(0, 10);
-    let hist = await helper.evaluate(({ dateKey }) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dateKey })
-    , { dateKey: today });
-    const blacklistedEntries = (hist.value || []).filter(e => e.url === url);
+    let hist = await helper.evaluate(
+      ({ dateKey }) =>
+        chrome.runtime.sendMessage({
+          action: 'readCacheable',
+          key: 'log:' + dateKey,
+        }),
+      { dateKey: today },
+    );
+    const blacklistedEntries = (hist.value || []).filter((e) => e.url === url);
     // The initial blacklisted visit should not be recorded (URL not yet in DB)
     // but once in DB subsequent visits ARE tracked
     expect(blacklistedEntries.length).toBe(0);
 
     // Step 2: "Capture It" — simulates popup's bypassBlacklist reportPage
-    const captureResult = await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({
-        action: 'reportPage',
-        url: u,
-        title: 'Page C',
-        isInitialLoad: true,
-        bypassBlacklist: true,
-      })
-    , url);
+    const captureResult = await helper.evaluate(
+      (u) =>
+        chrome.runtime.sendMessage({
+          action: 'reportPage',
+          url: u,
+          title: 'Page C',
+          isInitialLoad: true,
+          bypassBlacklist: true,
+        }),
+      url,
+    );
     expect(captureResult.success).toBe(true);
 
     // Verify the page now has visit_page entry in history
-    hist = await helper.evaluate(({ dateKey }) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'log:' + dateKey })
-    , { dateKey: today });
-    const bypassEntries = (hist.value || []).filter(e => e.url === url);
+    hist = await helper.evaluate(
+      ({ dateKey }) =>
+        chrome.runtime.sendMessage({
+          action: 'readCacheable',
+          key: 'log:' + dateKey,
+        }),
+      { dateKey: today },
+    );
+    const bypassEntries = (hist.value || []).filter((e) => e.url === url);
     expect(bypassEntries.length).toBeGreaterThanOrEqual(1);
 
     // Verify getPageInfo returns the page (entity created by checkpoint)
-    let info = await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'getPageInfo', url: u })
-    , url);
+    let info = await helper.evaluate(
+      (u) => chrome.runtime.sendMessage({ action: 'getPageInfo', url: u }),
+      url,
+    );
     expect(info.entry).not.toBeNull();
     expect(info.entry.url).toBe(url);
     await helper.close();
@@ -249,9 +358,10 @@ test.describe('Navigation and referrer tracking', () => {
     await page.waitForTimeout(1000);
 
     helper = await openHelperPage(extContext, extensionId);
-    info = await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'getPageInfo', url: u })
-    , url);
+    info = await helper.evaluate(
+      (u) => chrome.runtime.sendMessage({ action: 'getPageInfo', url: u }),
+      url,
+    );
     expect(info.entry).not.toBeNull();
     expect(info.entry.url).toBe(url);
     await helper.close();
@@ -259,16 +369,26 @@ test.describe('Navigation and referrer tracking', () => {
     await page.close();
   });
 
-  test('scroll depth and time on page recorded after navigation away', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('scroll depth and time on page recorded after navigation away', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
     ]);
 
     const page = await extContext.newPage();
     await page.goto(localServer.url('/page-long'));
     await page.waitForSelector('h1');
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2));
+    await page.evaluate(() =>
+      window.scrollTo(0, document.body.scrollHeight / 2),
+    );
     await page.waitForTimeout(1500);
     // Navigate away to trigger isLeaving report
     await page.goto(localServer.url('/'));
@@ -281,13 +401,13 @@ test.describe('Navigation and referrer tracking', () => {
       const today = new Date().toISOString().slice(0, 10);
       const data = await chrome.storage.session.get(['log:' + today]);
       const entries = data['log:' + today] || [];
-      return entries.filter(e => e.url === url);
+      return entries.filter((e) => e.url === url);
     }, localServer.url('/page-long'));
     await helper.close();
 
     expect(historyEntries.length).toBeGreaterThan(0);
-    expect(historyEntries.some(e => e.scrollDepth > 0)).toBe(true);
-    expect(historyEntries.some(e => e.timeOnPage > 0)).toBe(true);
+    expect(historyEntries.some((e) => e.scrollDepth > 0)).toBe(true);
+    expect(historyEntries.some((e) => e.timeOnPage > 0)).toBe(true);
 
     await page.close();
   });
@@ -297,7 +417,12 @@ test.describe('Navigation and referrer tracking', () => {
   // the current URL. This test uses a regular same-page link click, which also
   // sets document.referrer to the same URL. The guard compares slugs, so both
   // SPA and regular navigation are covered by the same code path.
-  test('self-referential navigation does not create self-parent', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('self-referential navigation does not create self-parent', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     localServer.addPage('/self-link', {
       title: 'Self Link',
       body: '<a href="/self-link" id="self">Self</a>',
@@ -305,7 +430,10 @@ test.describe('Navigation and referrer tracking', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
     ]);
 
     const page = await extContext.newPage();
@@ -318,27 +446,38 @@ test.describe('Navigation and referrer tracking', () => {
     const helper = await openHelperPage(extContext, extensionId);
     await helper.waitForFunction(
       async (url) => {
-        const resp = await chrome.runtime.sendMessage({ action: 'getPageInfo', url });
+        const resp = await chrome.runtime.sendMessage({
+          action: 'getPageInfo',
+          url,
+        });
         return resp?.entry != null;
       },
       localServer.url('/self-link'),
-      { timeout: 10000 }
+      { timeout: 10000 },
     );
 
-    const relations = await helper.evaluate((url) =>
-      chrome.runtime.sendMessage({ action: 'getPageRelations', url })
-    , localServer.url('/self-link'));
+    const relations = await helper.evaluate(
+      (url) => chrome.runtime.sendMessage({ action: 'getPageRelations', url }),
+      localServer.url('/self-link'),
+    );
     await helper.close();
 
     expect(relations.success).toBe(true);
     // Self-referrer guard: page should NOT list itself as its own parent
-    expect(relations.parents.referrers).not.toContain(localServer.url('/self-link'));
+    expect(relations.parents.referrers).not.toContain(
+      localServer.url('/self-link'),
+    );
 
     await page.close();
   });
 
   // visit_page enriches existing page entity with referrer parentIds
-  test('parent refs set on page entity via visit_page referrer', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('parent refs set on page entity via visit_page referrer', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     localServer.addPage('/parent-page', {
       title: 'Parent Page',
       body: '<a href="/child-page" id="go-child">Go Child</a>',
@@ -357,13 +496,32 @@ test.describe('Navigation and referrer tracking', () => {
     // Seed page entities so visit_page can enrich them
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
-      { path: `pages/${parentSlug}.json`, data: {
-        slug: parentSlug, url: parentUrl, title: 'Parent Page', timestamp: now, parentIds: [], childIds: [],
-      }},
-      { path: `pages/${childSlug}.json`, data: {
-        slug: childSlug, url: childUrl, title: 'Child Page', timestamp: now, parentIds: [], childIds: [],
-      }},
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
+      {
+        path: `pages/${parentSlug}.json`,
+        data: {
+          slug: parentSlug,
+          url: parentUrl,
+          title: 'Parent Page',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+      {
+        path: `pages/${childSlug}.json`,
+        data: {
+          slug: childSlug,
+          url: childUrl,
+          title: 'Child Page',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
     ]);
 
     // Navigate parent → child to establish referrer relationship
@@ -376,9 +534,10 @@ test.describe('Navigation and referrer tracking', () => {
     const helper = await openHelperPage(extContext, extensionId);
     await waitForVisitRecorded(helper, page, childUrl, parentUrl);
 
-    const relations = await helper.evaluate((url) =>
-      chrome.runtime.sendMessage({ action: 'getPageRelations', url })
-    , childUrl);
+    const relations = await helper.evaluate(
+      (url) => chrome.runtime.sendMessage({ action: 'getPageRelations', url }),
+      childUrl,
+    );
     await helper.close();
 
     expect(relations.success).toBe(true);
@@ -389,7 +548,11 @@ test.describe('Navigation and referrer tracking', () => {
 
   // page entity title enrichment: pin_to_list on a URL with prior history
   // should create a page entity with the title from that history.
-  test('page entity title enriched from history when created by pin action', async ({ extContext, extensionId, setupDir }) => {
+  test('page entity title enriched from history when created by pin action', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const url = 'https://example.com/enrich-title-test';
     const slug = getSlugForUrl(url);
@@ -398,26 +561,56 @@ test.describe('Navigation and referrer tracking', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
-      { path: 'manifest/list-order.json', data: { timestamp: now, tree: [{ id: 'list:reading' }] } },
-      { path: 'lists/reading.json', data: { slug: 'reading', name: 'Reading', owner: 'test-device', timestamp: now, pins: [] } },
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } } },
+      {
+        path: 'manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading' }] },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: { timestamp: now, paths: { 'test-device/Reading': 'reading' } },
+      },
       // Page visited with title in history, but no page entity yet
-      { path: `data/logs/test-device/${today}.jsonl`, lines: [
-        { timestamp: now, action: 'visit_page', url, title: 'Enriched Title' },
-      ]},
+      {
+        path: `data/logs/test-device/${today}.jsonl`,
+        lines: [
+          {
+            timestamp: now,
+            action: 'visit_page',
+            url,
+            title: 'Enriched Title',
+          },
+        ],
+      },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
 
     // Pin the page — pin_to_list effectOf creates page entity via ensurePageEntity
-    await helper.evaluate((u) =>
-      chrome.runtime.sendMessage({ action: 'toggleListPin', listId: 'reading', url: u })
-    , url);
+    await helper.evaluate(
+      (u) =>
+        chrome.runtime.sendMessage({
+          action: 'toggleListPin',
+          listId: 'reading',
+          url: u,
+        }),
+      url,
+    );
 
     // Check the page entity was created with the correct URL
-    const page = await helper.evaluate((key) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key })
-    , `page:${slug}`);
+    const page = await helper.evaluate(
+      (key) => chrome.runtime.sendMessage({ action: 'readCacheable', key }),
+      `page:${slug}`,
+    );
     await helper.close();
 
     expect(page.value).toBeTruthy();
@@ -425,7 +618,12 @@ test.describe('Navigation and referrer tracking', () => {
   });
 
   // Idempotency: navigating parent→child twice should not duplicate referrer parentIds.
-  test('repeated referrer navigation does not duplicate parentIds', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('repeated referrer navigation does not duplicate parentIds', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     localServer.addPage('/idem-parent', {
       title: 'Idem Parent',
       body: '<a href="/idem-child" id="go">Go</a>',
@@ -443,13 +641,32 @@ test.describe('Navigation and referrer tracking', () => {
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
-      { path: `pages/${parentSlug}.json`, data: {
-        slug: parentSlug, url: parentUrl, title: 'Idem Parent', timestamp: now, parentIds: [], childIds: [],
-      }},
-      { path: `pages/${childSlug}.json`, data: {
-        slug: childSlug, url: childUrl, title: 'Idem Child', timestamp: now, parentIds: [], childIds: [],
-      }},
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
+      {
+        path: `pages/${parentSlug}.json`,
+        data: {
+          slug: parentSlug,
+          url: parentUrl,
+          title: 'Idem Parent',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+      {
+        path: `pages/${childSlug}.json`,
+        data: {
+          slug: childSlug,
+          url: childUrl,
+          title: 'Idem Child',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
     ]);
 
     const page = await extContext.newPage();
@@ -462,10 +679,14 @@ test.describe('Navigation and referrer tracking', () => {
 
     // Wait for referrer to be recorded
     const helper = await openHelperPage(extContext, extensionId);
-    await helper.waitForFunction((u) =>
-      chrome.runtime.sendMessage({ action: 'getPageRelations', url: u })
-        .then(r => r.success && r.parents.referrers.length > 0)
-    , childUrl, { timeout: 5000 });
+    await helper.waitForFunction(
+      (u) =>
+        chrome.runtime
+          .sendMessage({ action: 'getPageRelations', url: u })
+          .then((r) => r.success && r.parents.referrers.length > 0),
+      childUrl,
+      { timeout: 5000 },
+    );
 
     // Second navigation: back to parent → child again
     await page.click('#back');
@@ -475,26 +696,37 @@ test.describe('Navigation and referrer tracking', () => {
     await page.waitForTimeout(500);
 
     // Check child's parentIds — should have exactly 1 referrer (not 2)
-    const childEntity = await helper.evaluate((key) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key })
-    , `page:${childSlug}`);
+    const childEntity = await helper.evaluate(
+      (key) => chrome.runtime.sendMessage({ action: 'readCacheable', key }),
+      `page:${childSlug}`,
+    );
 
     // Check parent's childIds — should have exactly 1 child ref (not 2)
-    const parentEntity = await helper.evaluate((key) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key })
-    , `page:${parentSlug}`);
+    const parentEntity = await helper.evaluate(
+      (key) => chrome.runtime.sendMessage({ action: 'readCacheable', key }),
+      `page:${parentSlug}`,
+    );
     await helper.close();
     await page.close();
 
     const parentRef = `page:${parentSlug}`;
     const childRef = `page:${childSlug}`;
-    expect(childEntity.value.parentIds.filter(id => id === parentRef)).toHaveLength(1);
-    expect(parentEntity.value.childIds.filter(id => id === childRef)).toHaveLength(1);
+    expect(
+      childEntity.value.parentIds.filter((id) => id === parentRef),
+    ).toHaveLength(1);
+    expect(
+      parentEntity.value.childIds.filter((id) => id === childRef),
+    ).toHaveLength(1);
   });
 
   // Bug: when a page starts without <title> and gets one via JS,
   // leave_page should include the dynamically added title.
-  test('leave_page includes title added after initial load', async ({ extContext, extensionId, setupDir, localServer }) => {
+  test('leave_page includes title added after initial load', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
     localServer.addPage('/no-title', {
       title: null,
       body: '<h1>No Title</h1><script>setTimeout(() => { const t = document.createElement("title"); t.textContent = "Dynamic Title"; document.head.appendChild(t); }, 50);</script>',
@@ -512,9 +744,17 @@ test.describe('Navigation and referrer tracking', () => {
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       // Pre-create page entity so visit_page enriches it and leave_page title is stored
-      { path: `pages/${slug}.json`, data: {
-        slug, url: noTitleUrl, timestamp: 1, parentIds: [], childIds: [], user_title: 'Kept',
-      }},
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url: noTitleUrl,
+          timestamp: 1,
+          parentIds: [],
+          childIds: [],
+          user_title: 'Kept',
+        },
+      },
     ]);
 
     const page = await extContext.newPage();
@@ -528,13 +768,14 @@ test.describe('Navigation and referrer tracking', () => {
     // Flush drain to disk
     const helper = await openHelperPage(extContext, extensionId);
     await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'flushLogBuffer' })
+      chrome.runtime.sendMessage({ action: 'flushLogBuffer' }),
     );
 
     // Read the page entity — leave_page should have updated the title
-    const entity = await helper.evaluate((key) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key })
-    , `page:${slug}`);
+    const entity = await helper.evaluate(
+      (key) => chrome.runtime.sendMessage({ action: 'readCacheable', key }),
+      `page:${slug}`,
+    );
     await helper.close();
     await page.close();
 

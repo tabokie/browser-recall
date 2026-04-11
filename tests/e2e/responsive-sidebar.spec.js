@@ -9,7 +9,10 @@ test.describe('Responsive sidebar', () => {
     ]);
   });
 
-  test('sidebar collapses below breakpoint and toggle button appears', async ({ extContext, extensionId }) => {
+  test('sidebar collapses below breakpoint and toggle button appears', async ({
+    extContext,
+    extensionId,
+  }) => {
     const page = await openOptionsPage(extContext, extensionId);
 
     // At default (wide) width, sidebar should be visible, toggle hidden

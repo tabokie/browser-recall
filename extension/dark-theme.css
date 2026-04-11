@@ -1,11 +1,20 @@
 /* Dark theme variable overrides — shared by options.html and popup.html */
 /* theme.js resolves 'system' preference into explicit data-theme="dark"|"light" */
 
-html[data-theme="dark"] {
+html[data-theme='dark'] {
   --bg-base: #1a1412;
-  --bg-ambient: radial-gradient(ellipse at 20% 20%, rgba(140, 80, 40, 0.15) 0%, transparent 50%),
-                radial-gradient(ellipse at 80% 60%, rgba(100, 80, 140, 0.08) 0%, transparent 50%),
-                linear-gradient(160deg, #1e1814 0%, #1a1410 40%, #16120e 100%);
+  --bg-ambient:
+    radial-gradient(
+      ellipse at 20% 20%,
+      rgba(140, 80, 40, 0.15) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse at 80% 60%,
+      rgba(100, 80, 140, 0.08) 0%,
+      transparent 50%
+    ),
+    linear-gradient(160deg, #1e1814 0%, #1a1410 40%, #16120e 100%);
   --bg-surface: rgba(40, 32, 28, 0.6);
   --bg-surface-solid: rgba(40, 32, 28, 0.85);
   --bg-surface-hover: rgba(50, 40, 34, 0.7);
@@ -57,14 +66,19 @@ html[data-theme="dark"] {
 
   /* Component-level overrides for hardcoded light colors */
   --bg-frosted: rgba(40, 32, 28, 0.5);
-  --bg-frosted-strong: rgba(40, 32, 28, 0.65);
+  --bg-frosted-strong: rgba(40, 32, 28, 0.75);
   --bg-input: rgba(30, 26, 22, 0.4);
   --bg-warm-tint: rgba(35, 28, 24, 0.6);
   --bg-warm-hover: rgba(50, 40, 34, 0.7);
   --bg-tab-active: rgba(50, 40, 34, 0.8);
   --border-section: rgba(100, 85, 70, 0.15);
   --scrollbar-thumb: rgba(100, 85, 70, 0.4);
-  --glass-shine: linear-gradient(170deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 40%, transparent 100%);
+  --glass-shine: linear-gradient(
+    170deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    rgba(255, 255, 255, 0.02) 40%,
+    transparent 100%
+  );
   --glass-inset: inset 0 16px 24px -12px rgba(255, 255, 255, 0.04);
   --btn-glow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 
@@ -72,13 +86,23 @@ html[data-theme="dark"] {
 }
 
 /* Syntax highlighting tokens for function rule editor — dark mode */
-html[data-theme="dark"] .tok-keyword,
-html[data-theme="dark"] .tok-literal { color: var(--tok-keyword, #c792ea); }
-html[data-theme="dark"] .tok-string  { color: var(--tok-string, #c3e88d); }
-html[data-theme="dark"] .tok-regex   { color: var(--tok-regex, #f07178); }
-html[data-theme="dark"] .tok-number  { color: var(--tok-number, #f78c6c); }
-html[data-theme="dark"] .tok-comment { color: var(--tok-comment, #676e95); }
-html[data-theme="dark"] .rule-fn-editor {
+html[data-theme='dark'] .tok-keyword,
+html[data-theme='dark'] .tok-literal {
+  color: var(--tok-keyword, #c792ea);
+}
+html[data-theme='dark'] .tok-string {
+  color: var(--tok-string, #c3e88d);
+}
+html[data-theme='dark'] .tok-regex {
+  color: var(--tok-regex, #f07178);
+}
+html[data-theme='dark'] .tok-number {
+  color: var(--tok-number, #f78c6c);
+}
+html[data-theme='dark'] .tok-comment {
+  color: var(--tok-comment, #676e95);
+}
+html[data-theme='dark'] .rule-fn-editor {
   background: rgba(30, 26, 22, 0.4);
   border-color: rgba(80, 68, 58, 0.4);
 }

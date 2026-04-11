@@ -5,8 +5,8 @@
 export async function fetchGitHubUser(token) {
   const resp = await fetch('https://api.github.com/user', {
     headers: {
-      'Authorization': `token ${token}`,
-      'Accept': 'application/vnd.github.v3+json',
+      Authorization: `token ${token}`,
+      Accept: 'application/vnd.github.v3+json',
     },
   });
   if (!resp.ok) {

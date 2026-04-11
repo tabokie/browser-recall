@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { wrapRangeWithMark, findTextRange, highlightTextInPage, isBlockElement, getClosestBlock, isCrossBlock, splitSelectionByBlock } from '../extension/highlight-helpers.js';
+import {
+  wrapRangeWithMark,
+  findTextRange,
+  highlightTextInPage,
+  isBlockElement,
+  getClosestBlock,
+  isCrossBlock,
+  splitSelectionByBlock,
+} from '../extension/highlight-helpers.js';
 
 // Set up a fresh jsdom for each test
 let dom;
@@ -29,7 +37,9 @@ describe('Case 1: plain text (single text node)', () => {
     expect(mark.dataset.highlightText).toBe('brown fox');
     expect(getMarks().length).toBe(1);
     // Surrounding text preserved
-    expect(document.body.textContent).toBe('The quick brown fox jumps over the lazy dog.');
+    expect(document.body.textContent).toBe(
+      'The quick brown fox jumps over the lazy dog.',
+    );
   });
 
   it('highlights text at the start of a node', () => {
@@ -66,7 +76,9 @@ describe('Case 1: plain text (single text node)', () => {
 describe('Case 2: inline styled text (cross-inline nodes)', () => {
   it('highlights text spanning <strong><code> and plain text', () => {
     // MDN pattern: "The HTTP <strong><code>Referer</code></strong> request header"
-    setBody('<p>The HTTP <strong><code>Referer</code></strong> request header</p>');
+    setBody(
+      '<p>The HTTP <strong><code>Referer</code></strong> request header</p>',
+    );
     const mark = highlightTextInPage(document.body, 'Referer request header');
     expect(mark).not.toBeNull();
     expect(mark.textContent).toBe('Referer request header');
@@ -77,8 +89,13 @@ describe('Case 2: inline styled text (cross-inline nodes)', () => {
 
   it('highlights text spanning <em> tags', () => {
     // MDN pattern: "an <em>origin</em>, <em>path</em>, and <em>querystring</em>"
-    setBody('<p>an <em>origin</em>, <em>path</em>, and <em>querystring</em></p>');
-    const mark = highlightTextInPage(document.body, 'origin, path, and querystring');
+    setBody(
+      '<p>an <em>origin</em>, <em>path</em>, and <em>querystring</em></p>',
+    );
+    const mark = highlightTextInPage(
+      document.body,
+      'origin, path, and querystring',
+    );
     expect(mark).not.toBeNull();
     expect(mark.textContent).toBe('origin, path, and querystring');
     expect(getMarks().length).toBe(1);
@@ -86,7 +103,10 @@ describe('Case 2: inline styled text (cross-inline nodes)', () => {
 
   it('highlights text spanning <a> and plain text', () => {
     setBody('<p>See <a href="/doc">the documentation</a> for details.</p>');
-    const mark = highlightTextInPage(document.body, 'the documentation for details');
+    const mark = highlightTextInPage(
+      document.body,
+      'the documentation for details',
+    );
     expect(mark).not.toBeNull();
     expect(mark.textContent).toBe('the documentation for details');
   });
@@ -100,7 +120,9 @@ describe('Case 2: inline styled text (cross-inline nodes)', () => {
 
   it('highlights text spanning multiple nested inline elements', () => {
     // <a><code>Referrer-Policy</code></a> pattern from MDN
-    setBody('<p>See <a href="/rp"><code>Referrer-Policy</code></a> for info.</p>');
+    setBody(
+      '<p>See <a href="/rp"><code>Referrer-Policy</code></a> for info.</p>',
+    );
     const mark = highlightTextInPage(document.body, 'Referrer-Policy for info');
     expect(mark).not.toBeNull();
     expect(mark.textContent).toBe('Referrer-Policy for info');
@@ -118,10 +140,17 @@ describe('Case 2: inline styled text (cross-inline nodes)', () => {
 // --- Code blocks ---
 describe('Code blocks', () => {
   it('highlights multi-line text in a single text node inside pre>code', () => {
-    setBody('<pre><code>Referer: https://example.com\nReferer: https://other.com\n</code></pre>');
-    const mark = highlightTextInPage(document.body, 'Referer: https://example.com\nReferer: https://other.com');
+    setBody(
+      '<pre><code>Referer: https://example.com\nReferer: https://other.com\n</code></pre>',
+    );
+    const mark = highlightTextInPage(
+      document.body,
+      'Referer: https://example.com\nReferer: https://other.com',
+    );
     expect(mark).not.toBeNull();
-    expect(mark.textContent).toBe('Referer: https://example.com\nReferer: https://other.com');
+    expect(mark.textContent).toBe(
+      'Referer: https://example.com\nReferer: https://other.com',
+    );
   });
 
   it('highlights multi-line text across per-line spans in pre>code', () => {
@@ -129,62 +158,72 @@ describe('Code blocks', () => {
     setBody(`<pre><code><span class="token">Referer: https://example.com</span>
 <span class="token">Referer: https://other.com</span>
 </code></pre>`);
-    const mark = highlightTextInPage(document.body,
-      'Referer: https://example.com\nReferer: https://other.com');
+    const mark = highlightTextInPage(
+      document.body,
+      'Referer: https://example.com\nReferer: https://other.com',
+    );
     expect(mark).not.toBeNull();
-    expect(mark.textContent).toBe('Referer: https://example.com\nReferer: https://other.com');
+    expect(mark.textContent).toBe(
+      'Referer: https://example.com\nReferer: https://other.com',
+    );
   });
 
   it('highlights multi-line text across per-line spans with newlines as separate text nodes', () => {
     // Another common pattern: spans with text nodes for newlines between them
-    setBody('<pre><code><span>line1</span>\n<span>line2</span>\n<span>line3</span></code></pre>');
+    setBody(
+      '<pre><code><span>line1</span>\n<span>line2</span>\n<span>line3</span></code></pre>',
+    );
     const mark = highlightTextInPage(document.body, 'line1\nline2\nline3');
     expect(mark).not.toBeNull();
     expect(mark.textContent).toBe('line1\nline2\nline3');
   });
 });
 
-  it('highlights multi-line text in MDN-style syntax-highlighted code block', () => {
-    // Exact MDN structure: nested token spans with newline text nodes between lines
-    setBody(`<pre><code><span class="token header"><span class="token header-name keyword">Referer</span><span class="token punctuation">:</span> <span class="token header-value">https://developer.mozilla.org/en-US/docs/Web/JavaScript</span></span>
+it('highlights multi-line text in MDN-style syntax-highlighted code block', () => {
+  // Exact MDN structure: nested token spans with newline text nodes between lines
+  setBody(`<pre><code><span class="token header"><span class="token header-name keyword">Referer</span><span class="token punctuation">:</span> <span class="token header-value">https://developer.mozilla.org/en-US/docs/Web/JavaScript</span></span>
 <span class="token header"><span class="token header-name keyword">Referer</span><span class="token punctuation">:</span> <span class="token header-value">https://example.com/page?q=123</span></span>
 <span class="token header"><span class="token header-name keyword">Referer</span><span class="token punctuation">:</span> <span class="token header-value">https://example.com/</span></span>
 </code></pre>`);
-    const text = 'Referer: https://developer.mozilla.org/en-US/docs/Web/JavaScript\nReferer: https://example.com/page?q=123\nReferer: https://example.com/';
-    const mark = highlightTextInPage(document.body, text);
-    expect(mark).not.toBeNull();
-    expect(mark.textContent).toBe(text);
-    expect(getMarks().length).toBe(1);
-  });
+  const text =
+    'Referer: https://developer.mozilla.org/en-US/docs/Web/JavaScript\nReferer: https://example.com/page?q=123\nReferer: https://example.com/';
+  const mark = highlightTextInPage(document.body, text);
+  expect(mark).not.toBeNull();
+  expect(mark.textContent).toBe(text);
+  expect(getMarks().length).toBe(1);
+});
 
-  it('highlights partial selection within MDN code block (single line)', () => {
-    setBody(`<pre><code><span class="token header"><span class="token header-name keyword">Referer</span><span class="token punctuation">:</span> <span class="token header-value">https://example.com/</span></span>
+it('highlights partial selection within MDN code block (single line)', () => {
+  setBody(`<pre><code><span class="token header"><span class="token header-name keyword">Referer</span><span class="token punctuation">:</span> <span class="token header-value">https://example.com/</span></span>
 </code></pre>`);
-    const mark = highlightTextInPage(document.body, 'Referer: https://example.com/');
-    expect(mark).not.toBeNull();
-    expect(mark.textContent).toBe('Referer: https://example.com/');
-  });
+  const mark = highlightTextInPage(
+    document.body,
+    'Referer: https://example.com/',
+  );
+  expect(mark).not.toBeNull();
+  expect(mark.textContent).toBe('Referer: https://example.com/');
+});
 
-  it('wrapRangeWithMark works when text param differs from range content (trim mismatch)', () => {
-    // Simulates: selection includes trailing newline but selectedText is trimmed
-    setBody('<pre><code><span>line1</span>\n<span>line2</span>\n</code></pre>');
-    const code = document.querySelector('code');
-    const firstText = code.querySelector('span').firstChild; // "line1"
-    const lastText = code.lastChild; // trailing "\n"
+it('wrapRangeWithMark works when text param differs from range content (trim mismatch)', () => {
+  // Simulates: selection includes trailing newline but selectedText is trimmed
+  setBody('<pre><code><span>line1</span>\n<span>line2</span>\n</code></pre>');
+  const code = document.querySelector('code');
+  const firstText = code.querySelector('span').firstChild; // "line1"
+  const lastText = code.lastChild; // trailing "\n"
 
-    const range = document.createRange();
-    range.setStart(firstText, 0);
-    range.setEnd(lastText, lastText.textContent.length);
+  const range = document.createRange();
+  range.setStart(firstText, 0);
+  range.setEnd(lastText, lastText.textContent.length);
 
-    // The range covers "line1\nline2\n" but we pass trimmed text
-    const mark = wrapRangeWithMark(range, 'line1\nline2');
-    expect(mark).not.toBeNull();
-    // The mark wraps the full range content (including trailing newline)
-    expect(mark.textContent).toContain('line1');
-    expect(mark.textContent).toContain('line2');
-    // But dataset stores the trimmed version
-    expect(mark.dataset.highlightText).toBe('line1\nline2');
-  });
+  // The range covers "line1\nline2\n" but we pass trimmed text
+  const mark = wrapRangeWithMark(range, 'line1\nline2');
+  expect(mark).not.toBeNull();
+  // The mark wraps the full range content (including trailing newline)
+  expect(mark.textContent).toContain('line1');
+  expect(mark.textContent).toContain('line2');
+  // But dataset stores the trimmed version
+  expect(mark.dataset.highlightText).toBe('line1\nline2');
+});
 
 // --- Shadow DOM ---
 describe('Shadow DOM content', () => {
@@ -192,9 +231,13 @@ describe('Shadow DOM content', () => {
     setBody('<div id="host"></div>');
     const host = document.getElementById('host');
     const shadow = host.attachShadow({ mode: 'open' });
-    shadow.innerHTML = '<pre><code><span>Referer: https://example.com</span></code></pre>';
+    shadow.innerHTML =
+      '<pre><code><span>Referer: https://example.com</span></code></pre>';
 
-    const mark = highlightTextInPage(document.body, 'Referer: https://example.com');
+    const mark = highlightTextInPage(
+      document.body,
+      'Referer: https://example.com',
+    );
     expect(mark).not.toBeNull();
     expect(mark.textContent).toBe('Referer: https://example.com');
     // Mark should be inside the shadow root
@@ -207,7 +250,10 @@ describe('Shadow DOM content', () => {
     const shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = `<pre><code><span class="keyword">Referer</span><span class="punct">:</span> <span class="value">https://example.com</span></code></pre>`;
 
-    const mark = highlightTextInPage(document.body, 'Referer: https://example.com');
+    const mark = highlightTextInPage(
+      document.body,
+      'Referer: https://example.com',
+    );
     expect(mark).not.toBeNull();
     expect(mark.textContent).toBe('Referer: https://example.com');
   });
@@ -220,13 +266,20 @@ describe('MDN page patterns', () => {
       <p><strong>Note:</strong> The header name "referer" is actually a misspelling.
       See <a href="/wiki" class="external">HTTP referer on Wikipedia</a> for details.</p>
     </div>`);
-    const mark = highlightTextInPage(document.body, 'The header name "referer" is actually a misspelling.');
+    const mark = highlightTextInPage(
+      document.body,
+      'The header name "referer" is actually a misspelling.',
+    );
     expect(mark).not.toBeNull();
-    expect(mark.textContent).toBe('The header name "referer" is actually a misspelling.');
+    expect(mark.textContent).toBe(
+      'The header name "referer" is actually a misspelling.',
+    );
   });
 
   it('note box: selection spanning strong into text', () => {
-    setBody(`<div class="notecard note"><p><strong>Note:</strong> The misspelling is intentional.</p></div>`);
+    setBody(
+      `<div class="notecard note"><p><strong>Note:</strong> The misspelling is intentional.</p></div>`,
+    );
     const mark = highlightTextInPage(document.body, 'Note: The misspelling');
     expect(mark).not.toBeNull();
     expect(mark.textContent).toBe('Note: The misspelling');
@@ -237,13 +290,20 @@ describe('MDN page patterns', () => {
       <dt id="url"><a href="#url"><code>&lt;url&gt;</code></a></dt>
       <dd><p>An absolute or partial address. URL fragments (i.e., <code>#section</code>) are not included.</p></dd>
     </dl>`);
-    const mark = highlightTextInPage(document.body, 'URL fragments (i.e., #section) are not included.');
+    const mark = highlightTextInPage(
+      document.body,
+      'URL fragments (i.e., #section) are not included.',
+    );
     expect(mark).not.toBeNull();
-    expect(mark.textContent).toBe('URL fragments (i.e., #section) are not included.');
+    expect(mark.textContent).toBe(
+      'URL fragments (i.e., #section) are not included.',
+    );
   });
 
   it('heading with anchor link', () => {
-    setBody('<h2 id="syntax" class="heading"><a class="heading-anchor" href="#syntax">Syntax</a></h2>');
+    setBody(
+      '<h2 id="syntax" class="heading"><a class="heading-anchor" href="#syntax">Syntax</a></h2>',
+    );
     const mark = highlightTextInPage(document.body, 'Syntax');
     expect(mark).not.toBeNull();
     expect(mark.textContent).toBe('Syntax');
@@ -268,7 +328,9 @@ describe('MDN page patterns', () => {
   });
 
   it('text adjacent to visually-hidden spans does not include hidden text', () => {
-    setBody(`<td class="bc-support"><abbr class="icon" title="Full support"><span class="visually-hidden">Full support</span></abbr> 77</td>`);
+    setBody(
+      `<td class="bc-support"><abbr class="icon" title="Full support"><span class="visually-hidden">Full support</span></abbr> 77</td>`,
+    );
     // User sees and selects "77" — should not match hidden "Full support"
     const mark = highlightTextInPage(document.body, '77');
     expect(mark).not.toBeNull();
@@ -277,7 +339,9 @@ describe('MDN page patterns', () => {
 
   it('deeply nested code example with lit comments (light DOM)', () => {
     // Lit comments between elements shouldn't affect highlighting
-    setBody('<p><!--lit-part-->The <code>Referer</code><!--/lit-part--> header</p>');
+    setBody(
+      '<p><!--lit-part-->The <code>Referer</code><!--/lit-part--> header</p>',
+    );
     const mark = highlightTextInPage(document.body, 'The Referer header');
     expect(mark).not.toBeNull();
     expect(mark.textContent).toBe('The Referer header');
@@ -291,7 +355,10 @@ describe('MDN page patterns', () => {
     shadow.innerHTML = '<p>Inside shadow</p>';
     // Selection spanning both — findTextRange would find it since collectTextNodes
     // traverses shadow roots, but the range crosses trees
-    const mark = highlightTextInPage(document.body, 'Before shadow Inside shadow');
+    const mark = highlightTextInPage(
+      document.body,
+      'Before shadow Inside shadow',
+    );
     // This SHOULD work since findTextRange concatenates all text including shadow
     // and wrapRangeWithMark uses extractContents
     // But the range spans different DOM trees (light + shadow) which may fail
@@ -301,7 +368,9 @@ describe('MDN page patterns', () => {
     }
     // Either works or returns null — either is acceptable
     // Key: no empty marks left in DOM
-    const emptyMarks = [...document.querySelectorAll('mark.portal-highlight')].filter(m => !m.textContent);
+    const emptyMarks = [
+      ...document.querySelectorAll('mark.portal-highlight'),
+    ].filter((m) => !m.textContent);
     expect(emptyMarks.length).toBe(0);
   });
 });
@@ -439,7 +508,10 @@ describe('Case 3: cross-block selection', () => {
       range.setEnd(p2.firstChild, p2.firstChild.textContent.length);
 
       const chunks = splitSelectionByBlock(range);
-      expect(chunks.map(c => c.text)).toEqual(['First paragraph', 'Second paragraph']);
+      expect(chunks.map((c) => c.text)).toEqual([
+        'First paragraph',
+        'Second paragraph',
+      ]);
       expect(chunks[0].block).toBe(p1);
       expect(chunks[1].block).toBe(p2);
     });
@@ -453,7 +525,7 @@ describe('Case 3: cross-block selection', () => {
       range.setEnd(li3.firstChild, li3.firstChild.textContent.length);
 
       const chunks = splitSelectionByBlock(range);
-      expect(chunks.map(c => c.text)).toEqual(['Item 1', 'Item 2', 'Item 3']);
+      expect(chunks.map((c) => c.text)).toEqual(['Item 1', 'Item 2', 'Item 3']);
       // Each chunk references its own <li>
       expect(chunks[0].block.tagName).toBe('LI');
       expect(chunks[2].block.tagName).toBe('LI');
@@ -465,10 +537,10 @@ describe('Case 3: cross-block selection', () => {
       const p2 = document.querySelectorAll('p')[1];
       const range = document.createRange();
       range.setStart(p1.firstChild, 6); // starts at "world"
-      range.setEnd(p2.firstChild, 7);   // ends at "Goodbye"
+      range.setEnd(p2.firstChild, 7); // ends at "Goodbye"
 
       const chunks = splitSelectionByBlock(range);
-      expect(chunks.map(c => c.text)).toEqual(['world', 'Goodbye']);
+      expect(chunks.map((c) => c.text)).toEqual(['world', 'Goodbye']);
     });
 
     it('handles blocks with inline elements', () => {
@@ -480,7 +552,7 @@ describe('Case 3: cross-block selection', () => {
       range.setEnd(p2.firstChild, p2.firstChild.textContent.length);
 
       const chunks = splitSelectionByBlock(range);
-      expect(chunks.map(c => c.text)).toEqual(['Foo bar baz', 'Next']);
+      expect(chunks.map((c) => c.text)).toEqual(['Foo bar baz', 'Next']);
     });
 
     it('returns single chunk for same-block selection', () => {
@@ -490,7 +562,7 @@ describe('Case 3: cross-block selection', () => {
       range.setEnd(document.querySelector('p').firstChild, 11);
 
       const chunks = splitSelectionByBlock(range);
-      expect(chunks.map(c => c.text)).toEqual(['Hello world']);
+      expect(chunks.map((c) => c.text)).toEqual(['Hello world']);
     });
 
     it('handles selection across divs', () => {
@@ -502,7 +574,7 @@ describe('Case 3: cross-block selection', () => {
       range.setEnd(div2.firstChild, div2.firstChild.textContent.length);
 
       const chunks = splitSelectionByBlock(range);
-      expect(chunks.map(c => c.text)).toEqual(['Block A', 'Block B']);
+      expect(chunks.map((c) => c.text)).toEqual(['Block A', 'Block B']);
     });
 
     it('trims whitespace from chunks', () => {
@@ -514,7 +586,7 @@ describe('Case 3: cross-block selection', () => {
       range.setEnd(p2.firstChild, p2.firstChild.textContent.length);
 
       const chunks = splitSelectionByBlock(range);
-      expect(chunks.map(c => c.text)).toEqual(['Padded text', 'More text']);
+      expect(chunks.map((c) => c.text)).toEqual(['Padded text', 'More text']);
     });
 
     it('skips empty blocks', () => {
@@ -526,13 +598,15 @@ describe('Case 3: cross-block selection', () => {
       range.setEnd(p3.firstChild, p3.firstChild.textContent.length);
 
       const chunks = splitSelectionByBlock(range);
-      expect(chunks.map(c => c.text)).toEqual(['Content', 'More content']);
+      expect(chunks.map((c) => c.text)).toEqual(['Content', 'More content']);
     });
 
     it('block-scoped search finds correct occurrence (not global first)', () => {
       // "Apple" appears in both <p> and <li>, but the chunk from <li> should
       // only be searched within that <li>
-      setBody('<div><p>Apple is a fruit</p><ul><li>Apple</li><li>Banana</li></ul></div>');
+      setBody(
+        '<div><p>Apple is a fruit</p><ul><li>Apple</li><li>Banana</li></ul></div>',
+      );
       const li1 = document.querySelectorAll('li')[0];
       const li2 = document.querySelectorAll('li')[1];
       const range = document.createRange();
@@ -540,7 +614,7 @@ describe('Case 3: cross-block selection', () => {
       range.setEnd(li2.firstChild, li2.firstChild.textContent.length);
 
       const chunks = splitSelectionByBlock(range);
-      expect(chunks.map(c => c.text)).toEqual(['Apple', 'Banana']);
+      expect(chunks.map((c) => c.text)).toEqual(['Apple', 'Banana']);
       // "Apple" chunk's block should be the <li>, not the <p>
       expect(chunks[0].block).toBe(li1);
 
@@ -557,9 +631,13 @@ describe('Case 3: cross-block selection', () => {
 
   describe('end-to-end: highlight array chunks', () => {
     it('highlights each chunk from a split selection', () => {
-      setBody('<div><p>First paragraph text here</p><p>Second paragraph text here</p></div>');
+      setBody(
+        '<div><p>First paragraph text here</p><p>Second paragraph text here</p></div>',
+      );
       const texts = ['First paragraph', 'Second paragraph'];
-      const marks = texts.map(t => highlightTextInPage(document.body, t)).filter(Boolean);
+      const marks = texts
+        .map((t) => highlightTextInPage(document.body, t))
+        .filter(Boolean);
       expect(marks.length).toBe(2);
       expect(marks[0].textContent).toBe('First paragraph');
       expect(marks[1].textContent).toBe('Second paragraph');
@@ -567,18 +645,26 @@ describe('Case 3: cross-block selection', () => {
     });
 
     it('highlights chunks from list items', () => {
-      setBody('<ul><li>Buy groceries</li><li>Walk the dog</li><li>Read a book</li></ul>');
+      setBody(
+        '<ul><li>Buy groceries</li><li>Walk the dog</li><li>Read a book</li></ul>',
+      );
       const texts = ['Buy groceries', 'Walk the dog'];
-      const marks = texts.map(t => highlightTextInPage(document.body, t)).filter(Boolean);
+      const marks = texts
+        .map((t) => highlightTextInPage(document.body, t))
+        .filter(Boolean);
       expect(marks.length).toBe(2);
       // Original list structure preserved
       expect(document.querySelectorAll('li').length).toBe(3);
     });
 
     it('handles chunks with inline formatting', () => {
-      setBody('<div><p>See <a href="/doc">the docs</a> here</p><p>Another <strong>block</strong></p></div>');
+      setBody(
+        '<div><p>See <a href="/doc">the docs</a> here</p><p>Another <strong>block</strong></p></div>',
+      );
       const texts = ['the docs here', 'Another block'];
-      const marks = texts.map(t => highlightTextInPage(document.body, t)).filter(Boolean);
+      const marks = texts
+        .map((t) => highlightTextInPage(document.body, t))
+        .filter(Boolean);
       expect(marks.length).toBe(2);
     });
   });

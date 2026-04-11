@@ -8,7 +8,13 @@
  * sendMessage → background → disk fallback path.
  */
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, openHelperPage, openOptionsPage, getSlugForUrl, waitForListView } from './helpers.js';
+import {
+  resetAndSeed,
+  openHelperPage,
+  openOptionsPage,
+  getSlugForUrl,
+  waitForListView,
+} from './helpers.js';
 
 // Clear chrome.storage.session to simulate degraded cache.
 async function clearSessionCache(extContext, extensionId) {
@@ -18,18 +24,42 @@ async function clearSessionCache(extContext, extensionId) {
 }
 
 test.describe('Degraded session cache', () => {
-  test('sidebar lists render after session cache clear', async ({ extContext, extensionId, setupDir }) => {
+  test('sidebar lists render after session cache clear', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
-      { path: 'manifest/list-order.json', data: {
-        timestamp: now, tree: [{ id: 'list:reading' }],
-      }},
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now, pins: [],
-      }},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
+      {
+        path: 'manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:reading' }],
+        },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     await clearSessionCache(extContext, extensionId);
@@ -41,29 +71,67 @@ test.describe('Degraded session cache', () => {
     await options.close();
   });
 
-  test('list pin shows title after session cache clear', async ({ extContext, extensionId, setupDir }) => {
+  test('list pin shows title after session cache clear', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const TEST_URL = 'https://example.com/pinned-article';
     const TEST_SLUG = getSlugForUrl(TEST_URL);
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
-      { path: 'manifest/list-order.json', data: {
-        timestamp: now, tree: [{ id: 'list:reading' }],
-      }},
-      { path: 'lists/reading.json', data: {
-        slug: 'reading', name: 'Reading List', owner: 'test-device', timestamp: now,
-        pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
-      }},
-      { path: `pages/${TEST_SLUG}.json`, data: {
-        slug: TEST_SLUG, url: TEST_URL, title: 'Pinned Article', timestamp: now,
-        parentIds: [], childIds: [],
-      }},
-      { path: 'data/logs/test-device/2026-03-01.jsonl', lines: [
-        { timestamp: now, action: 'visit_page', url: TEST_URL, title: 'Pinned Article' },
-      ]},
-      { path: 'manifest/list-name-to-id.json', data: { timestamp: now, paths: { 'test-device/Reading List': 'reading' } } },
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
+      {
+        path: 'manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:reading' }],
+        },
+      },
+      {
+        path: 'lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [{ id: `page:${TEST_SLUG}`, pinnedAt: now }],
+        },
+      },
+      {
+        path: `pages/${TEST_SLUG}.json`,
+        data: {
+          slug: TEST_SLUG,
+          url: TEST_URL,
+          title: 'Pinned Article',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+      {
+        path: 'data/logs/test-device/2026-03-01.jsonl',
+        lines: [
+          {
+            timestamp: now,
+            action: 'visit_page',
+            url: TEST_URL,
+            title: 'Pinned Article',
+          },
+        ],
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: { 'test-device/Reading List': 'reading' },
+        },
+      },
     ]);
 
     await clearSessionCache(extContext, extensionId);
@@ -82,18 +150,43 @@ test.describe('Degraded session cache', () => {
     await options.close();
   });
 
-  test('explore view renders history after session cache clear', async ({ extContext, extensionId, setupDir }) => {
+  test('explore view renders history after session cache clear', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const now = Date.now();
     const todayStr = new Date().toISOString().slice(0, 10);
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
-      { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
-      { path: `data/logs/test-device/${todayStr}.jsonl`, lines: [
-        { timestamp: now - 3000, action: 'visit_page', url: 'https://example.com/page1', title: 'Page One' },
-        { timestamp: now - 2000, action: 'visit_page', url: 'https://example.com/page2', title: 'Page Two' },
-        { timestamp: now - 1000, action: 'visit_page', url: 'https://example.com/page3', title: 'Page Three' },
-      ]},
+      {
+        path: 'manifest/settings.json',
+        data: { trimRules: [], blacklist: [] },
+      },
+      {
+        path: `data/logs/test-device/${todayStr}.jsonl`,
+        lines: [
+          {
+            timestamp: now - 3000,
+            action: 'visit_page',
+            url: 'https://example.com/page1',
+            title: 'Page One',
+          },
+          {
+            timestamp: now - 2000,
+            action: 'visit_page',
+            url: 'https://example.com/page2',
+            title: 'Page Two',
+          },
+          {
+            timestamp: now - 1000,
+            action: 'visit_page',
+            url: 'https://example.com/page3',
+            title: 'Page Three',
+          },
+        ],
+      },
     ]);
 
     await clearSessionCache(extContext, extensionId);

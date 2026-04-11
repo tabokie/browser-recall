@@ -32,7 +32,10 @@ import { dateKeyFromTimestamp } from '../extension/utils.js';
  * @param {object}   [opts.entities={}] - Pre-existing entities keyed by cache key (e.g. 'note:slug').
  * @returns {object[]} File descriptors for seedTestData.
  */
-export async function buildSeedFiles(events, { deviceId, checkpointProgress, settings, entities } = {}) {
+export async function buildSeedFiles(
+  events,
+  { deviceId, checkpointProgress, settings, entities } = {},
+) {
   if (!deviceId) throw new Error('buildSeedFiles: deviceId is required');
   if (checkpointProgress == null) checkpointProgress = events.length;
 

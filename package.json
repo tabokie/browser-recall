@@ -14,7 +14,10 @@
     "manual": "node scripts/manual-test-browser.mjs",
     "manual:seed": "node scripts/manual-test-browser.mjs --seed",
     "manual:case": "node scripts/manual-test-browser.mjs --case",
-    "manual:onboarding": "node scripts/manual-test-browser.mjs --onboarding"
+    "manual:onboarding": "node scripts/manual-test-browser.mjs --onboarding",
+    "replay:verify": "node scripts/replay-verify.mjs",
+    "fmt": "prettier --write .",
+    "fmt:check": "prettier --check ."
   },
   "keywords": [
     "chrome-extension",
@@ -31,6 +34,7 @@
     "flexsearch": "^0.8.212",
     "jsdom": "^28.0.0",
     "minisearch": "^7.2.0",
+    "prettier": "^3.8.2",
     "vitest": "^3.0.0"
   }
 }

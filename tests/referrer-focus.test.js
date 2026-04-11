@@ -14,7 +14,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const extDir = resolve(__dirname, '..', 'extension');
 
 describe('referrer tracking via webNavigation', () => {
-  const manifest = JSON.parse(readFileSync(resolve(extDir, 'manifest.json'), 'utf-8'));
+  const manifest = JSON.parse(
+    readFileSync(resolve(extDir, 'manifest.json'), 'utf-8'),
+  );
   const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
 
   it('manifest.json includes webNavigation permission', () => {
@@ -37,7 +39,7 @@ describe('focus panel parent titles', () => {
   it('renderFocusWaterfall parents do NOT hard-code hostname for title', () => {
     // Extract the parents.referrers.map(...) call inside renderFocusWaterfall
     const fnMatch = optSource.match(
-      /parents\.referrers\.map\(ref\s*=>\s*\{?([\s\S]*?)\}?\)\.join/
+      /parents\.referrers\.map\(\(?ref\)?\s*=>\s*\{?([\s\S]*?)\}?\)\.join/,
     );
     expect(fnMatch).not.toBeNull();
     const mapBody = fnMatch[1];

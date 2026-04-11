@@ -18,7 +18,7 @@
 
 ## Security
 
-- [x] **Document smart rule sandbox security model.** Smart rules execute in a manifest-sandboxed page with `unsafe-eval`. Validation bans 16 globals via word-boundary regex but new globals could be missed (e.g., `Proxy`, `Reflect`). Low risk (users write their own rules) but the security model should be documented.
+- [x] **Document function rule sandbox security model.** Function rules execute in a manifest-sandboxed page with `unsafe-eval`. Validation bans 16 globals via word-boundary regex but new globals could be missed (e.g., `Proxy`, `Reflect`). Low risk (users write their own rules) but the security model should be documented.
 
 ## Resilience
 

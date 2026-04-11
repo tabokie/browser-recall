@@ -3,10 +3,16 @@
 // Each function is idempotent — safe to replay the same entry twice.
 import { generateSlugFromUrl } from './utils.js';
 import { generateRuleId } from './rule-engine.js';
-import { PAGE_PREFIX, NOTE_PREFIX, SNAPSHOT_PREFIX, LIST_PREFIX, entitySlug, isSystemList } from './entity-types.js';
+import {
+  PAGE_PREFIX,
+  NOTE_PREFIX,
+  SNAPSHOT_PREFIX,
+  LIST_PREFIX,
+  entitySlug,
+  isSystemList,
+} from './entity-types.js';
 
 const REFERRER_CAP = 50;
-
 
 /** Update the per-device timestamp on an entity, returning a shallow copy. */
 function touchTimestamp(entity, deviceId, ts) {
@@ -41,7 +47,6 @@ export function getAffectedKeys(entry) {
 
   return keys;
 }
-
 
 // ---------------------------------------------------------------------------
 // Unified replay interface: effectOf
@@ -128,7 +133,10 @@ function appendToTreeRecursive(nodes, listId, parentId) {
       node.children.push({ id: listId });
       return true;
     }
-    if (node.children && appendToTreeRecursive(node.children, listId, parentId)) {
+    if (
+      node.children &&
+      appendToTreeRecursive(node.children, listId, parentId)
+    ) {
       return true;
     }
   }
@@ -151,8 +159,13 @@ function deepCloneTree(node) {
  * - likes is set and non-zero
  */
 export function isPageEligible(entity) {
-  if (entity.parentIds?.some(id => id.startsWith(LIST_PREFIX))) return true;
-  if (entity.childIds?.some(id => id.startsWith(NOTE_PREFIX) || id.startsWith(SNAPSHOT_PREFIX))) return true;
+  if (entity.parentIds?.some((id) => id.startsWith(LIST_PREFIX))) return true;
+  if (
+    entity.childIds?.some(
+      (id) => id.startsWith(NOTE_PREFIX) || id.startsWith(SNAPSHOT_PREFIX),
+    )
+  )
+    return true;
   if (entity.user_title) return true;
   if (entity.likes) return true;
   return false;
@@ -191,8 +204,14 @@ class ReplayContext {
   async linkChild(childKey, parentIds) {
     if (!parentIds) return;
     for (const parentKey of parentIds) {
-      const parent = this.result[parentKey] !== undefined ? this.result[parentKey] : await this.load(parentKey);
-      if (!parent) { this.result[parentKey] = null; continue; }
+      const parent =
+        this.result[parentKey] !== undefined
+          ? this.result[parentKey]
+          : await this.load(parentKey);
+      if (!parent) {
+        this.result[parentKey] = null;
+        continue;
+      }
       const childIds = [...(parent.childIds || [])];
       if (!childIds.includes(childKey)) childIds.push(childKey);
       this.result[parentKey] = { ...parent, childIds };
@@ -202,28 +221,44 @@ class ReplayContext {
   async unlinkChild(childKey, parentIds) {
     if (!parentIds) return;
     for (const parentKey of parentIds) {
-      const parent = this.result[parentKey] !== undefined ? this.result[parentKey] : await this.load(parentKey);
-      if (!parent) { this.result[parentKey] = null; continue; }
-      const childIds = (parent.childIds || []).filter(c => c !== childKey);
+      const parent =
+        this.result[parentKey] !== undefined
+          ? this.result[parentKey]
+          : await this.load(parentKey);
+      if (!parent) {
+        this.result[parentKey] = null;
+        continue;
+      }
+      const childIds = (parent.childIds || []).filter((c) => c !== childKey);
       this.result[parentKey] = { ...parent, childIds };
     }
   }
 
   async orphan(childKey, ts, parentUrl) {
-    const orphaned = this.result['manifest:orphaned'] || await this.loadOrDefault('manifest:orphaned');
+    const orphaned =
+      this.result['manifest:orphaned'] ||
+      (await this.loadOrDefault('manifest:orphaned'));
     const entries = [...(orphaned.entries || [])];
-    if (!entries.some(e => e.key === childKey)) {
+    if (!entries.some((e) => e.key === childKey)) {
       const entry = { key: childKey };
       if (parentUrl) entry.url = parentUrl;
       entries.push(entry);
     }
-    this.result['manifest:orphaned'] = { ...touchTimestamp(orphaned, this.context.deviceId, ts), entries };
+    this.result['manifest:orphaned'] = {
+      ...touchTimestamp(orphaned, this.context.deviceId, ts),
+      entries,
+    };
   }
 
   async unorphan(childKey, ts) {
-    const orphaned = this.result['manifest:orphaned'] || await this.loadOrDefault('manifest:orphaned');
-    const entries = (orphaned.entries || []).filter(e => e.key !== childKey);
-    this.result['manifest:orphaned'] = { ...touchTimestamp(orphaned, this.context.deviceId, ts), entries };
+    const orphaned =
+      this.result['manifest:orphaned'] ||
+      (await this.loadOrDefault('manifest:orphaned'));
+    const entries = (orphaned.entries || []).filter((e) => e.key !== childKey);
+    this.result['manifest:orphaned'] = {
+      ...touchTimestamp(orphaned, this.context.deviceId, ts),
+      entries,
+    };
   }
 
   async resolveListKey(name) {
@@ -231,14 +266,18 @@ class ReplayContext {
     if (name.startsWith('system/')) {
       return LIST_PREFIX + name;
     }
-    const nameToId = this.result['manifest:name-to-id'] || await this.loadOrDefault('manifest:name-to-id');
+    const nameToId =
+      this.result['manifest:name-to-id'] ||
+      (await this.loadOrDefault('manifest:name-to-id'));
     const owner = this.entry.listOwner;
     if (!owner) return null;
     const id = nameToId.paths?.[owner + '/' + name];
     if (id) return LIST_PREFIX + id;
     // Fallback: search orphaned entities by owner+name (deleted lists removed from name-to-id)
-    const orphanedEntity = this.result['manifest:orphaned'] || await this.loadOrDefault('manifest:orphaned');
-    for (const oe of (orphanedEntity.entries || [])) {
+    const orphanedEntity =
+      this.result['manifest:orphaned'] ||
+      (await this.loadOrDefault('manifest:orphaned'));
+    for (const oe of orphanedEntity.entries || []) {
       if (!oe.key.startsWith(LIST_PREFIX) || isSystemList(oe.key)) continue;
       const entity = await this.load(oe.key, { includeDeleted: true });
       if (entity?.owner === owner && entity?.name === name) return oe.key;
@@ -249,7 +288,10 @@ class ReplayContext {
   async ensurePageEntity(url, ts, title) {
     const slug = generateSlugFromUrl(url);
     const pageKey = PAGE_PREFIX + slug;
-    let page = this.result[pageKey] !== undefined ? this.result[pageKey] : await this.load(pageKey);
+    let page =
+      this.result[pageKey] !== undefined
+        ? this.result[pageKey]
+        : await this.load(pageKey);
     if (!page) {
       page = { ...defaultEntity(pageKey), url, createdAt: ts };
       if (title) page.title = title;
@@ -259,12 +301,15 @@ class ReplayContext {
   }
 
   async findListsWithPin(pinId) {
-    const nameToId = this.result['manifest:name-to-id'] || await this.loadOrDefault('manifest:name-to-id');
+    const nameToId =
+      this.result['manifest:name-to-id'] ||
+      (await this.loadOrDefault('manifest:name-to-id'));
     const lists = [];
     for (const id of Object.values(nameToId.paths || {})) {
       const lk = LIST_PREFIX + id;
-      const list = this.result[lk] !== undefined ? this.result[lk] : await this.load(lk);
-      if (list && (list.pins || []).some(p => p.id === pinId)) lists.push(lk);
+      const list =
+        this.result[lk] !== undefined ? this.result[lk] : await this.load(lk);
+      if (list && (list.pins || []).some((p) => p.id === pinId)) lists.push(lk);
     }
     return lists;
   }
@@ -280,7 +325,10 @@ class ReplayContext {
 
 async function handleUpdateSetting(ctx) {
   const settings = await ctx.loadOrDefault('manifest:settings');
-  ctx.result['manifest:settings'] = { ...touchTimestamp(settings, ctx.context.deviceId, ctx.entry.timestamp), [ctx.entry.key]: ctx.entry.value };
+  ctx.result['manifest:settings'] = {
+    ...touchTimestamp(settings, ctx.context.deviceId, ctx.entry.timestamp),
+    [ctx.entry.key]: ctx.entry.value,
+  };
 }
 
 async function handleVisitPage(ctx) {
@@ -292,13 +340,18 @@ async function handleVisitPage(ctx) {
     : await ctx.load(pageKey);
 
   if (page) {
-    const updated = touchTimestamp(page, ctx.context.deviceId, ctx.entry.timestamp);
+    const updated = touchTimestamp(
+      page,
+      ctx.context.deviceId,
+      ctx.entry.timestamp,
+    );
     if (entry.url) updated.url = entry.url;
     if (entry.title) updated.title = entry.title;
 
     // visitDates
     const d = new Date(entry.timestamp);
-    const yyyymmdd = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    const yyyymmdd =
+      d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
     const visitDates = [...(updated.visitDates || [])];
     if (!visitDates.includes(yyyymmdd)) visitDates.push(yyyymmdd);
     updated.visitDates = visitDates;
@@ -322,7 +375,10 @@ async function handleVisitPage(ctx) {
     const referrerSlug = generateSlugFromUrl(entry.referrerUrl);
     const referrerKey = PAGE_PREFIX + referrerSlug;
     if (referrerKey !== pageKey) {
-      const parent = ctx.result[referrerKey] !== undefined ? ctx.result[referrerKey] : await ctx.load(referrerKey);
+      const parent =
+        ctx.result[referrerKey] !== undefined
+          ? ctx.result[referrerKey]
+          : await ctx.load(referrerKey);
       if (parent) {
         const childIds = [...(parent.childIds || [])];
         const childRef = PAGE_PREFIX + slug;
@@ -330,7 +386,10 @@ async function handleVisitPage(ctx) {
           childIds.push(childRef);
           if (childIds.length > REFERRER_CAP) childIds.shift();
         }
-        ctx.result[referrerKey] = { ...touchTimestamp(parent, ctx.context.deviceId, ctx.entry.timestamp), childIds };
+        ctx.result[referrerKey] = {
+          ...touchTimestamp(parent, ctx.context.deviceId, ctx.entry.timestamp),
+          childIds,
+        };
       }
     }
   }
@@ -343,7 +402,11 @@ async function handleLeavePage(ctx) {
   const page = await ctx.load(pageKey);
 
   if (page) {
-    const updated = touchTimestamp(page, ctx.context.deviceId, ctx.entry.timestamp);
+    const updated = touchTimestamp(
+      page,
+      ctx.context.deviceId,
+      ctx.entry.timestamp,
+    );
 
     // Title: latest auto-detected from MutationObserver, folded into leave report
     if (entry.title) updated.title = entry.title;
@@ -352,7 +415,10 @@ async function handleLeavePage(ctx) {
     const deviceTs = (page.timestamps || {})[ctx.context.deviceId] || 0;
     if (entry.timestamp > deviceTs) {
       if (entry.scrollDepth !== undefined) {
-        updated.scrollDepth = Math.max(updated.scrollDepth || 0, entry.scrollDepth);
+        updated.scrollDepth = Math.max(
+          updated.scrollDepth || 0,
+          entry.scrollDepth,
+        );
       }
       if (entry.timeOnPage !== undefined) {
         updated.timeOnPage = (updated.timeOnPage || 0) + entry.timeOnPage;
@@ -367,14 +433,25 @@ async function handleRenamePage(ctx) {
   const { entry } = ctx;
   const { pageKey } = await ctx.ensurePageEntity(entry.url, entry.timestamp);
   const page = ctx.result[pageKey];
-  ctx.result[pageKey] = { ...touchTimestamp(page, ctx.context.deviceId, ctx.entry.timestamp), user_title: entry.user_title };
+  ctx.result[pageKey] = {
+    ...touchTimestamp(page, ctx.context.deviceId, ctx.entry.timestamp),
+    user_title: entry.user_title,
+  };
 }
 
 async function handleRatePage(ctx) {
   const { entry } = ctx;
-  const { pageKey } = await ctx.ensurePageEntity(entry.url, entry.timestamp, entry.title);
+  const { pageKey } = await ctx.ensurePageEntity(
+    entry.url,
+    entry.timestamp,
+    entry.title,
+  );
   const page = ctx.result[pageKey];
-  const updated = touchTimestamp(page, ctx.context.deviceId, ctx.entry.timestamp);
+  const updated = touchTimestamp(
+    page,
+    ctx.context.deviceId,
+    ctx.entry.timestamp,
+  );
 
   // Per-device guard (skip additive fields if already applied)
   const deviceTs = (page.timestamps || {})[ctx.context.deviceId] || 0;
@@ -387,9 +464,17 @@ async function handleRatePage(ctx) {
 
 async function handleCreateSnapshot(ctx) {
   const { entry } = ctx;
-  const { pageKey } = await ctx.ensurePageEntity(entry.url, entry.timestamp, entry.title);
+  const { pageKey } = await ctx.ensurePageEntity(
+    entry.url,
+    entry.timestamp,
+    entry.title,
+  );
   const page = ctx.result[pageKey];
-  const updated = touchTimestamp(page, ctx.context.deviceId, ctx.entry.timestamp);
+  const updated = touchTimestamp(
+    page,
+    ctx.context.deviceId,
+    ctx.entry.timestamp,
+  );
 
   // Snapshot key derived from path: "snapshots/<slug>-<ts>" → "snapshot:<slug>-<ts>"
   const snapKey = `${SNAPSHOT_PREFIX}${entry.path.slice('snapshots/'.length)}`;
@@ -412,7 +497,10 @@ async function handleCreateNote(ctx) {
   // Link note as child of page (page.childIds)
   await ctx.linkChild(noteKey, [pageKey]);
   // Set url on note entity
-  const note = ctx.result[noteKey] !== undefined ? ctx.result[noteKey] : await ctx.load(noteKey);
+  const note =
+    ctx.result[noteKey] !== undefined
+      ? ctx.result[noteKey]
+      : await ctx.load(noteKey);
   if (note) ctx.result[noteKey] = { ...note, url: entry.url };
 }
 
@@ -437,9 +525,13 @@ async function handleDeleteNote(ctx) {
   // Remove note pin from lists (find via pins scan)
   const listKeys = await ctx.findListsWithPin(noteKey);
   for (const lk of listKeys) {
-    const list = ctx.result[lk] !== undefined ? ctx.result[lk] : await ctx.load(lk);
+    const list =
+      ctx.result[lk] !== undefined ? ctx.result[lk] : await ctx.load(lk);
     if (!list) continue;
-    ctx.result[lk] = { ...list, pins: (list.pins || []).filter(p => p.id !== noteKey) };
+    ctx.result[lk] = {
+      ...list,
+      pins: (list.pins || []).filter((p) => p.id !== noteKey),
+    };
   }
   // Mark deleted
   const deletedNote = { ...note, deleted: true, deletedTs: entry.timestamp };
@@ -458,8 +550,10 @@ async function handleRestoreNote(ctx) {
   if (ctx.isStaleByLWW(note)) return;
 
   // Get parent URL from orphaned entries or note.url
-  const orphaned = ctx.result['manifest:orphaned'] || await ctx.loadOrDefault('manifest:orphaned');
-  const orphanEntry = (orphaned.entries || []).find(e => e.key === noteKey);
+  const orphaned =
+    ctx.result['manifest:orphaned'] ||
+    (await ctx.loadOrDefault('manifest:orphaned'));
+  const orphanEntry = (orphaned.entries || []).find((e) => e.key === noteKey);
   const noteUrl = orphanEntry?.url || note.url || entry.url;
   // Re-link to parent page
   if (noteUrl) {
@@ -518,10 +612,11 @@ async function handleReplaceNote(ctx) {
   // Transfer list pins: replace old note with new note in each list
   const listKeys = await ctx.findListsWithPin(oldNoteKey);
   for (const lk of listKeys) {
-    const list = ctx.result[lk] !== undefined ? ctx.result[lk] : await ctx.load(lk);
+    const list =
+      ctx.result[lk] !== undefined ? ctx.result[lk] : await ctx.load(lk);
     if (!list) continue;
-    const pins = (list.pins || []).map(p =>
-      p.id === oldNoteKey ? { ...p, id: newNoteKey } : p
+    const pins = (list.pins || []).map((p) =>
+      p.id === oldNoteKey ? { ...p, id: newNoteKey } : p,
     );
     ctx.result[lk] = { ...list, pins };
   }
@@ -530,7 +625,10 @@ async function handleReplaceNote(ctx) {
   // If the new note file can't be loaded (transient save error, missing file),
   // inherit content fields from the old note — these are primary user data
   // (excerpt, cssPath, note text) that would be lost if we fell back to defaultEntity.
-  const newNote = ctx.result[newNoteKey] !== undefined ? ctx.result[newNoteKey] : await ctx.load(newNoteKey);
+  const newNote =
+    ctx.result[newNoteKey] !== undefined
+      ? ctx.result[newNoteKey]
+      : await ctx.load(newNoteKey);
   if (newNote) {
     ctx.result[newNoteKey] = { ...newNote, url: noteUrl };
   } else {
@@ -547,8 +645,11 @@ async function handleReplaceNote(ctx) {
   const oldDeletedTs = oldNote.deletedTs || 0;
   if (entry.timestamp > oldDeletedTs) {
     ctx.result[oldNoteKey] = {
-      ...oldNote, deleted: true, deletedTs: entry.timestamp,
-      deletionReason: 'replaced', replacedBy: newNoteKey,
+      ...oldNote,
+      deleted: true,
+      deletedTs: entry.timestamp,
+      deletionReason: 'replaced',
+      replacedBy: newNoteKey,
     };
     await ctx.orphan(oldNoteKey, entry.timestamp, noteUrl);
   }
@@ -563,7 +664,8 @@ async function handlePinToList(ctx) {
   if (!entity) return;
   const pins = [...(entity.pins || [])];
 
-  for (const item of (entry.items || [])) {
+  for (const item of entry.items || []) {
+    if (!item) continue;
     // Resolve item to pin ID — notes use path prefix, others are URLs
     let pinId;
     if (item.startsWith('notes/')) {
@@ -577,7 +679,7 @@ async function handlePinToList(ctx) {
       pinId = pageKey;
     }
 
-    if (!pins.some(p => p.id === pinId)) {
+    if (!pins.some((p) => p.id === pinId)) {
       const pin = { id: pinId, pinnedAt: entry.timestamp };
       if (entry.source) pin.source = entry.source;
       pins.push(pin);
@@ -585,7 +687,7 @@ async function handlePinToList(ctx) {
 
     // Update page parentIds with list key (notes don't track parentIds)
     if (pinId.startsWith(PAGE_PREFIX)) {
-      const page = ctx.result[pinId] || await ctx.load(pinId);
+      const page = ctx.result[pinId] || (await ctx.load(pinId));
       if (page) {
         const parentIds = [...(page.parentIds || [])];
         if (!parentIds.includes(listKey)) parentIds.push(listKey);
@@ -594,7 +696,10 @@ async function handlePinToList(ctx) {
     }
   }
 
-  ctx.result[listKey] = { ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp), pins };
+  ctx.result[listKey] = {
+    ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp),
+    pins,
+  };
 }
 
 async function handleUnpinFromList(ctx) {
@@ -606,7 +711,8 @@ async function handleUnpinFromList(ctx) {
   if (!entity) return;
   const removeIds = new Set();
 
-  for (const item of (entry.items || [])) {
+  for (const item of entry.items || []) {
+    if (!item) continue;
     let pinId;
     if (item.startsWith('notes/')) {
       const noteSlug = item.slice('notes/'.length, -'.json'.length);
@@ -617,15 +723,18 @@ async function handleUnpinFromList(ctx) {
     removeIds.add(pinId);
   }
 
-  const pins = (entity.pins || []).filter(p => !removeIds.has(p.id));
-  ctx.result[listKey] = { ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp), pins };
+  const pins = (entity.pins || []).filter((p) => !removeIds.has(p.id));
+  ctx.result[listKey] = {
+    ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp),
+    pins,
+  };
 
   // Update page parentIds: remove list key (notes don't track parentIds)
   for (const pinId of removeIds) {
     if (pinId.startsWith(PAGE_PREFIX)) {
       const page = await ctx.load(pinId);
       if (page) {
-        const parentIds = (page.parentIds || []).filter(p => p !== listKey);
+        const parentIds = (page.parentIds || []).filter((p) => p !== listKey);
         const updated = { ...page, parentIds };
         ctx.result[pinId] = isPageEligible(updated) ? updated : null;
       }
@@ -641,10 +750,11 @@ async function handleAddRule(ctx) {
   const entity = await ctx.loadListForMutation(listKey);
   if (!entity) return;
   const rules = [...(entity.rules || [])];
-  const ruleId = entry.rule.id || generateRuleId(entry.rule.type, entry.timestamp);
+  const ruleId =
+    entry.rule.id || generateRuleId(entry.rule.type, entry.timestamp);
 
   // Idempotent: skip if rule with same ID already exists
-  if (!rules.some(r => r.id === ruleId)) {
+  if (!rules.some((r) => r.id === ruleId)) {
     rules.push({
       id: ruleId,
       type: entry.rule.type,
@@ -653,7 +763,10 @@ async function handleAddRule(ctx) {
     });
   }
 
-  ctx.result[listKey] = { ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp), rules };
+  ctx.result[listKey] = {
+    ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp),
+    rules,
+  };
 }
 
 async function handleRemoveRule(ctx) {
@@ -663,8 +776,11 @@ async function handleRemoveRule(ctx) {
 
   const entity = await ctx.loadListForMutation(listKey);
   if (!entity) return;
-  const rules = (entity.rules || []).filter(r => r.id !== entry.ruleId);
-  ctx.result[listKey] = { ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp), rules };
+  const rules = (entity.rules || []).filter((r) => r.id !== entry.ruleId);
+  ctx.result[listKey] = {
+    ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp),
+    rules,
+  };
 }
 
 async function handleUpdateRule(ctx) {
@@ -674,27 +790,45 @@ async function handleUpdateRule(ctx) {
 
   const entity = await ctx.loadListForMutation(listKey);
   if (!entity) return;
-  const rules = (entity.rules || []).map(r => {
+  const rules = (entity.rules || []).map((r) => {
     if (r.id !== entry.ruleId) return r;
     return { ...r, config: { ...r.config, ...entry.config } };
   });
-  ctx.result[listKey] = { ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp), rules };
+  ctx.result[listKey] = {
+    ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp),
+    rules,
+  };
 }
 
 async function handleCreateList(ctx) {
   const { entry } = ctx;
-  const nameToId = ctx.result['manifest:name-to-id'] || await ctx.loadOrDefault('manifest:name-to-id');
+  const nameToId =
+    ctx.result['manifest:name-to-id'] ||
+    (await ctx.loadOrDefault('manifest:name-to-id'));
   const paths = { ...nameToId.paths };
 
   // Resolve parent for tree placement (optional)
-  const parentKey = entry.parentListId ? LIST_PREFIX + entry.parentListId : null;
+  const parentKey = entry.parentListId
+    ? LIST_PREFIX + entry.parentListId
+    : null;
 
   // Use provided listId (migrated events) or generate from name+timestamp (new events)
-  const listId = entry.listId || (entry.name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').substring(0, 30) + '-' + Math.abs(hashString(entry.name + entry.timestamp)).toString(36));
+  const listId =
+    entry.listId ||
+    entry.name
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, '-')
+      .replace(/^-+|-+$/g, '')
+      .substring(0, 30) +
+      '-' +
+      Math.abs(hashString(entry.name + entry.timestamp)).toString(36);
   const listKey = LIST_PREFIX + listId;
 
   // Idempotency: if entity already exists, this is a redundant replay — skip
-  const existing = ctx.result[listKey] !== undefined ? ctx.result[listKey] : await ctx.load(listKey);
+  const existing =
+    ctx.result[listKey] !== undefined
+      ? ctx.result[listKey]
+      : await ctx.load(listKey);
   if (existing) return;
 
   // Create list entity (no parentList/childLists)
@@ -705,14 +839,22 @@ async function handleCreateList(ctx) {
   ctx.result[listKey] = entity;
 
   // Append to tree manifest
-  const treeEntity = ctx.result['manifest:list-order'] || await ctx.loadOrDefault('manifest:list-order');
+  const treeEntity =
+    ctx.result['manifest:list-order'] ||
+    (await ctx.loadOrDefault('manifest:list-order'));
   const newTree = appendToTree(treeEntity.tree || [], listKey, parentKey);
-  ctx.result['manifest:list-order'] = { ...touchTimestamp(treeEntity, ctx.context.deviceId, ctx.entry.timestamp), tree: newTree };
+  ctx.result['manifest:list-order'] = {
+    ...touchTimestamp(treeEntity, ctx.context.deviceId, ctx.entry.timestamp),
+    tree: newTree,
+  };
 
   // Update name-to-id: compound key owner/name
   const nameKey = entry.listOwner + '/' + entry.name;
   paths[nameKey] = listId;
-  ctx.result['manifest:name-to-id'] = { ...touchTimestamp(nameToId, ctx.context.deviceId, ctx.entry.timestamp), paths };
+  ctx.result['manifest:name-to-id'] = {
+    ...touchTimestamp(nameToId, ctx.context.deviceId, ctx.entry.timestamp),
+    paths,
+  };
 }
 
 async function handleUpdateList(ctx) {
@@ -723,7 +865,11 @@ async function handleUpdateList(ctx) {
   // Guard: reject actions on orphaned (deleted) lists
   const entity = await ctx.loadListForMutation(listKey);
   if (!entity) return;
-  const updated = touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp);
+  const updated = touchTimestamp(
+    entity,
+    ctx.context.deviceId,
+    ctx.entry.timestamp,
+  );
 
   if (entry.newName !== undefined) {
     const oldName = entity.name;
@@ -731,7 +877,9 @@ async function handleUpdateList(ctx) {
 
     // Update name-to-id: delete old key, add new key
     if (oldName !== entry.newName) {
-      const nameToId = ctx.result['manifest:name-to-id'] || await ctx.loadOrDefault('manifest:name-to-id');
+      const nameToId =
+        ctx.result['manifest:name-to-id'] ||
+        (await ctx.loadOrDefault('manifest:name-to-id'));
       const paths = { ...nameToId.paths };
       const listId = entitySlug(listKey);
       const owner = entity.owner;
@@ -739,7 +887,10 @@ async function handleUpdateList(ctx) {
       const newKey = owner + '/' + entry.newName;
       delete paths[oldKey];
       paths[newKey] = listId;
-      ctx.result['manifest:name-to-id'] = { ...touchTimestamp(nameToId, ctx.context.deviceId, ctx.entry.timestamp), paths };
+      ctx.result['manifest:name-to-id'] = {
+        ...touchTimestamp(nameToId, ctx.context.deviceId, ctx.entry.timestamp),
+        paths,
+      };
     }
   }
 
@@ -748,7 +899,9 @@ async function handleUpdateList(ctx) {
 
 async function handleUpdateListTree(ctx) {
   const { entry } = ctx;
-  const treeEntity = ctx.result['manifest:list-order'] || await ctx.loadOrDefault('manifest:list-order');
+  const treeEntity =
+    ctx.result['manifest:list-order'] ||
+    (await ctx.loadOrDefault('manifest:list-order'));
   const treeDeviceTs = (treeEntity.timestamps || {})[ctx.context.deviceId] || 0;
   if (treeDeviceTs >= entry.timestamp) return;
   // Reconcile the accepted tree against current entity state:
@@ -774,7 +927,9 @@ async function handleUpdateListTree(ctx) {
   }
   // Append non-deleted lists that exist in name-to-id but are missing from tree
   const reconciledIds = collectIds(reconciled);
-  const nameToId = ctx.result['manifest:name-to-id'] || await ctx.loadOrDefault('manifest:name-to-id');
+  const nameToId =
+    ctx.result['manifest:name-to-id'] ||
+    (await ctx.loadOrDefault('manifest:name-to-id'));
   for (const listId of Object.values(nameToId.paths || {})) {
     const listKey = LIST_PREFIX + listId;
     if (reconciledIds.has(listKey)) continue;
@@ -786,7 +941,10 @@ async function handleUpdateListTree(ctx) {
     }
   }
   newTree = reconciled;
-  ctx.result['manifest:list-order'] = { ...touchTimestamp(treeEntity, ctx.context.deviceId, ctx.entry.timestamp), tree: newTree };
+  ctx.result['manifest:list-order'] = {
+    ...touchTimestamp(treeEntity, ctx.context.deviceId, ctx.entry.timestamp),
+    tree: newTree,
+  };
 }
 
 async function handleDeleteList(ctx) {
@@ -801,12 +959,21 @@ async function handleDeleteList(ctx) {
   if (ctx.isStaleByLWW(entity)) return;
 
   // Mark deleted
-  const deletedEntity = { ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp), deleted: true, deletedTs: entry.timestamp };
+  const deletedEntity = {
+    ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp),
+    deleted: true,
+    deletedTs: entry.timestamp,
+  };
   ctx.result[listKey] = deletedEntity;
 
   // Remove from tree manifest (promotes children to parent level)
-  const treeEntity = ctx.result['manifest:list-order'] || await ctx.loadOrDefault('manifest:list-order');
-  ctx.result['manifest:list-order'] = { ...touchTimestamp(treeEntity, ctx.context.deviceId, ctx.entry.timestamp), tree: removeFromTree(treeEntity.tree || [], listKey) };
+  const treeEntity =
+    ctx.result['manifest:list-order'] ||
+    (await ctx.loadOrDefault('manifest:list-order'));
+  ctx.result['manifest:list-order'] = {
+    ...touchTimestamp(treeEntity, ctx.context.deviceId, ctx.entry.timestamp),
+    tree: removeFromTree(treeEntity.tree || [], listKey),
+  };
 
   // Remove list key from all pinned page parentIds (notes don't track parentIds)
   const pins = entity.pins || [];
@@ -814,19 +981,24 @@ async function handleDeleteList(ctx) {
     if (pin.id.startsWith(PAGE_PREFIX)) {
       const page = await ctx.load(pin.id);
       if (!page) continue;
-      const parentIds = (page.parentIds || []).filter(p => p !== listKey);
+      const parentIds = (page.parentIds || []).filter((p) => p !== listKey);
       const updated = { ...page, parentIds };
       ctx.result[pin.id] = isPageEligible(updated) ? updated : null;
     }
   }
 
   // Remove from name-to-id
-  const nameToId = ctx.result['manifest:name-to-id'] || await ctx.loadOrDefault('manifest:name-to-id');
+  const nameToId =
+    ctx.result['manifest:name-to-id'] ||
+    (await ctx.loadOrDefault('manifest:name-to-id'));
   const paths = { ...nameToId.paths };
   const listName = entity.name || entry.name;
   const nameKey = entity.owner + '/' + listName;
   delete paths[nameKey];
-  ctx.result['manifest:name-to-id'] = { ...touchTimestamp(nameToId, ctx.context.deviceId, ctx.entry.timestamp), paths };
+  ctx.result['manifest:name-to-id'] = {
+    ...touchTimestamp(nameToId, ctx.context.deviceId, ctx.entry.timestamp),
+    paths,
+  };
 
   await ctx.orphan(listKey, entry.timestamp);
 }
@@ -839,12 +1011,15 @@ async function handleRestoreList(ctx) {
   // Deleted lists are removed from name-to-id, so resolve from orphaned entities
   if (!listKey) {
     const orphanedEntity = await ctx.loadOrDefault('manifest:orphaned');
-    for (const oe of (orphanedEntity.entries || [])) {
+    for (const oe of orphanedEntity.entries || []) {
       const key = oe.key;
       if (!key.startsWith(LIST_PREFIX) || isSystemList(key)) continue;
       const entity = await ctx.load(key, { includeDeleted: true });
       if (!entity) continue;
-      if (entity.owner === entry.listOwner && entity.name === entry.name) { listKey = key; break; }
+      if (entity.owner === entry.listOwner && entity.name === entry.name) {
+        listKey = key;
+        break;
+      }
     }
   }
   if (!listKey) return;
@@ -855,11 +1030,17 @@ async function handleRestoreList(ctx) {
   // LWW via deletedTs
   if (ctx.isStaleByLWW(entity)) return;
 
-  const restored = { ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp), deleted: false, deletedTs: entry.timestamp };
+  const restored = {
+    ...touchTimestamp(entity, ctx.context.deviceId, ctx.entry.timestamp),
+    deleted: false,
+    deletedTs: entry.timestamp,
+  };
   ctx.result[listKey] = restored;
 
   // Append to tree manifest as top-level node
-  const treeEntity = ctx.result['manifest:list-order'] || await ctx.loadOrDefault('manifest:list-order');
+  const treeEntity =
+    ctx.result['manifest:list-order'] ||
+    (await ctx.loadOrDefault('manifest:list-order'));
   const tree = treeEntity.tree || [];
   // Only add if not already in tree
   const inTree = (function findInTree(nodes) {
@@ -870,7 +1051,10 @@ async function handleRestoreList(ctx) {
     return false;
   })(tree);
   if (!inTree) {
-    ctx.result['manifest:list-order'] = { ...touchTimestamp(treeEntity, ctx.context.deviceId, ctx.entry.timestamp), tree: [...tree.map(deepCloneTree), { id: listKey }] };
+    ctx.result['manifest:list-order'] = {
+      ...touchTimestamp(treeEntity, ctx.context.deviceId, ctx.entry.timestamp),
+      tree: [...tree.map(deepCloneTree), { id: listKey }],
+    };
   }
 
   // Restore page parentIds for pins
@@ -886,13 +1070,18 @@ async function handleRestoreList(ctx) {
   }
 
   // Re-add to name-to-id
-  const nameToId = ctx.result['manifest:name-to-id'] || await ctx.loadOrDefault('manifest:name-to-id');
+  const nameToId =
+    ctx.result['manifest:name-to-id'] ||
+    (await ctx.loadOrDefault('manifest:name-to-id'));
   const paths = { ...nameToId.paths };
   const listName = restored.name || entry.name;
   const listId = entitySlug(listKey);
   const nameKey = restored.owner + '/' + listName;
   paths[nameKey] = listId;
-  ctx.result['manifest:name-to-id'] = { ...touchTimestamp(nameToId, ctx.context.deviceId, ctx.entry.timestamp), paths };
+  ctx.result['manifest:name-to-id'] = {
+    ...touchTimestamp(nameToId, ctx.context.deviceId, ctx.entry.timestamp),
+    paths,
+  };
 
   await ctx.unorphan(listKey, entry.timestamp);
 }
@@ -964,5 +1153,8 @@ function hashString(str) {
  */
 export function applyLogToSettings(settings, entry, context = {}) {
   if (entry.action !== 'update_setting') return settings;
-  return { ...touchTimestamp(settings, context.deviceId, entry.timestamp), [entry.key]: entry.value };
+  return {
+    ...touchTimestamp(settings, context.deviceId, entry.timestamp),
+    [entry.key]: entry.value,
+  };
 }

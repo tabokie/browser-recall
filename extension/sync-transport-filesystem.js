@@ -5,7 +5,14 @@
 import { hashContent } from './sync-manager.js';
 
 export class FilesystemTransport {
-  constructor({ listDeviceDirs, listFiles, readFile, writeFile, ensureDir, removeFile }) {
+  constructor({
+    listDeviceDirs,
+    listFiles,
+    readFile,
+    writeFile,
+    ensureDir,
+    removeFile,
+  }) {
     this._listDeviceDirs = listDeviceDirs;
     this._listFiles = listFiles;
     this._readFile = readFile;
@@ -29,7 +36,7 @@ export class FilesystemTransport {
       const files = await this._listFiles(name);
       // Hash sorted paths + sizes as a lightweight change token.
       const meta = files
-        .map(f => `${f.path}:${f.size}`)
+        .map((f) => `${f.path}:${f.size}`)
         .sort()
         .join('\n');
       const sha = hashContent(meta);
@@ -46,7 +53,8 @@ export class FilesystemTransport {
     if (!entry) throw new Error(`Unknown tree sha: ${sha}`);
     const tree = [];
     for (const f of entry.files) {
-      const content = f.content ?? await this._readFile(`${entry.name}/${f.path}`);
+      const content =
+        f.content ?? (await this._readFile(`${entry.name}/${f.path}`));
       const fileSha = hashContent(content);
       this._blobCache.set(fileSha, content);
       tree.push({ path: f.path, sha: fileSha });
@@ -78,10 +86,17 @@ export class FilesystemTransport {
     }
     for (const f of existing) {
       if (!writtenPaths.has(f.path)) {
-        try { await this._removeFile(`${branch}/${f.path}`); } catch { /* best-effort */ }
+        try {
+          await this._removeFile(`${branch}/${f.path}`);
+        } catch {
+          /* best-effort */
+        }
       }
     }
-    const combined = files.map(f => `${f.path}:${f.content.length}`).sort().join('\n');
+    const combined = files
+      .map((f) => `${f.path}:${f.content.length}`)
+      .sort()
+      .join('\n');
     return { sha: hashContent(combined) };
   }
 
@@ -93,9 +108,15 @@ export class FilesystemTransport {
     let files;
     try {
       files = await this._listFiles(name);
-    } catch { return; }
+    } catch {
+      return;
+    }
     for (const f of files) {
-      try { await this._removeFile(`${name}/${f.path}`); } catch { /* best-effort */ }
+      try {
+        await this._removeFile(`${name}/${f.path}`);
+      } catch {
+        /* best-effort */
+      }
     }
   }
 }

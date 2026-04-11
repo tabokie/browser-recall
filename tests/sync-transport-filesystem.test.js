@@ -27,8 +27,21 @@ describe('FilesystemTransport', () => {
     it('returns one entry per device with metadata hash as sha', async () => {
       io.listDeviceDirs.mockResolvedValue(['deviceA', 'deviceB']);
       io.listFiles.mockImplementation(async (dir) => {
-        if (dir === 'deviceA') return [{ path: 'data/logs/deviceA/2026-04-01.jsonl', content: '{"a":1}', size: 7 }];
-        return [{ path: 'data/logs/deviceB/2026-04-01.jsonl', content: '{"b":2}', size: 7 }];
+        if (dir === 'deviceA')
+          return [
+            {
+              path: 'data/logs/deviceA/2026-04-01.jsonl',
+              content: '{"a":1}',
+              size: 7,
+            },
+          ];
+        return [
+          {
+            path: 'data/logs/deviceB/2026-04-01.jsonl',
+            content: '{"b":2}',
+            size: 7,
+          },
+        ];
       });
 
       const branches = await transport.listBranches();
@@ -42,10 +55,14 @@ describe('FilesystemTransport', () => {
 
     it('sha changes when file size changes', async () => {
       io.listDeviceDirs.mockResolvedValue(['dev1']);
-      io.listFiles.mockResolvedValue([{ path: 'data/logs/dev1/day.jsonl', content: 'abc', size: 3 }]);
+      io.listFiles.mockResolvedValue([
+        { path: 'data/logs/dev1/day.jsonl', content: 'abc', size: 3 },
+      ]);
       const b1 = await transport.listBranches();
 
-      io.listFiles.mockResolvedValue([{ path: 'data/logs/dev1/day.jsonl', content: 'abcdef', size: 6 }]);
+      io.listFiles.mockResolvedValue([
+        { path: 'data/logs/dev1/day.jsonl', content: 'abcdef', size: 6 },
+      ]);
       const b2 = await transport.listBranches();
 
       expect(b1[0].sha).not.toBe(b2[0].sha);
@@ -98,14 +115,18 @@ describe('FilesystemTransport', () => {
     });
 
     it('throws on unknown sha', async () => {
-      await expect(transport.getTree('bogus')).rejects.toThrow('Unknown tree sha');
+      await expect(transport.getTree('bogus')).rejects.toThrow(
+        'Unknown tree sha',
+      );
     });
   });
 
   describe('getBlob', () => {
     it('returns content from cache after getTree', async () => {
       io.listDeviceDirs.mockResolvedValue(['dev1']);
-      io.listFiles.mockResolvedValue([{ path: 'f.txt', content: 'data here', size: 9 }]);
+      io.listFiles.mockResolvedValue([
+        { path: 'f.txt', content: 'data here', size: 9 },
+      ]);
 
       const branches = await transport.listBranches();
       const tree = await transport.getTree(branches[0].sha);
@@ -114,7 +135,9 @@ describe('FilesystemTransport', () => {
     });
 
     it('throws on unknown sha', async () => {
-      await expect(transport.getBlob('bogus')).rejects.toThrow('Unknown blob sha');
+      await expect(transport.getBlob('bogus')).rejects.toThrow(
+        'Unknown blob sha',
+      );
     });
   });
 
@@ -129,8 +152,14 @@ describe('FilesystemTransport', () => {
       const result = await transport.pushTree('dev1', files);
 
       expect(io.ensureDir).toHaveBeenCalledWith('dev1');
-      expect(io.writeFile).toHaveBeenCalledWith('dev1/data/logs/dev1/day.jsonl', '{"a":1}');
-      expect(io.writeFile).toHaveBeenCalledWith('dev1/data/notes/note.json', '{"n":1}');
+      expect(io.writeFile).toHaveBeenCalledWith(
+        'dev1/data/logs/dev1/day.jsonl',
+        '{"a":1}',
+      );
+      expect(io.writeFile).toHaveBeenCalledWith(
+        'dev1/data/notes/note.json',
+        '{"n":1}',
+      );
       expect(result.sha).toBeTruthy();
     });
 
@@ -144,13 +173,19 @@ describe('FilesystemTransport', () => {
         { path: 'data/logs/dev1/day.jsonl', content: 'updated' },
       ]);
 
-      expect(io.removeFile).toHaveBeenCalledWith('dev1/data/logs/dev1/old.jsonl');
+      expect(io.removeFile).toHaveBeenCalledWith(
+        'dev1/data/logs/dev1/old.jsonl',
+      );
       // The kept file should not be removed
-      expect(io.removeFile).not.toHaveBeenCalledWith('dev1/data/logs/dev1/day.jsonl');
+      expect(io.removeFile).not.toHaveBeenCalledWith(
+        'dev1/data/logs/dev1/day.jsonl',
+      );
     });
 
     it('ignores errors when removing stale files', async () => {
-      io.listFiles.mockResolvedValue([{ path: 'gone.txt', content: '', size: 0 }]);
+      io.listFiles.mockResolvedValue([
+        { path: 'gone.txt', content: '', size: 0 },
+      ]);
       io.removeFile.mockRejectedValue(new Error('not found'));
 
       // Should not throw
@@ -170,13 +205,20 @@ describe('FilesystemTransport', () => {
     it('push then pull discovers files', async () => {
       io.listFiles.mockResolvedValue([]);
       await transport.pushTree('dev1', [
-        { path: 'data/logs/dev1/day.jsonl', content: '{"action":"visit_page"}' },
+        {
+          path: 'data/logs/dev1/day.jsonl',
+          content: '{"action":"visit_page"}',
+        },
       ]);
 
       // Now simulate listing: the pushed files appear as a device directory
       io.listDeviceDirs.mockResolvedValue(['dev1']);
       io.listFiles.mockResolvedValue([
-        { path: 'data/logs/dev1/day.jsonl', content: '{"action":"visit_page"}', size: 23 },
+        {
+          path: 'data/logs/dev1/day.jsonl',
+          content: '{"action":"visit_page"}',
+          size: 23,
+        },
       ]);
 
       const branches = await transport.listBranches();

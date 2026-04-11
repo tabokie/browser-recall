@@ -2,13 +2,52 @@
 // Bookmark-manager style UI with sidebar navigation, search, and settings modal
 import { FileSystemStorage } from './filesystem-storage.js';
 import { FileSystemSyncStorage } from './filesystem-sync-storage.js';
-import init, { HistoryEntry, SearchEngine, searchBatch, searchNotes, searchSnapshots } from './pkg/portal_extension.js';
-import { mergeBufferIntoHistory, getBufferContentMap, buildHistoryForEngine, extractHistoryBuffer } from './search-helpers.js';
-import { generateSlugFromUrl, generateSlugFromTitle, loadSettingsValue, saveSettingsValue, readCacheable, sendAction, escapeHtml, BODY_WORD_LIMIT } from './utils.js';
+import init, {
+  HistoryEntry,
+  SearchEngine,
+  searchBatch,
+  searchNotes,
+  searchSnapshots,
+} from './pkg/portal_extension.js';
+import {
+  mergeBufferIntoHistory,
+  getBufferContentMap,
+  buildHistoryForEngine,
+  extractHistoryBuffer,
+} from './search-helpers.js';
+import {
+  generateSlugFromUrl,
+  generateSlugFromTitle,
+  loadSettingsValue,
+  saveSettingsValue,
+  readCacheable,
+  sendAction,
+  escapeHtml,
+  BODY_WORD_LIMIT,
+} from './utils.js';
 import { attentionStrength, aggregateAttention } from './attention-utils.js';
-import { initCharts, renderTimeChart, renderTimeChartInto, bindChartBarClick, syncChartHighlights, applyDateFilter } from './time-chart.js';
+import {
+  initCharts,
+  renderTimeChart,
+  renderTimeChartInto,
+  bindChartBarClick,
+  syncChartHighlights,
+  applyDateFilter,
+} from './time-chart.js';
 import { VirtualScroller } from './virtual-scroller.js';
-import { entityTypeLabel, PAGE_PREFIX, NOTE_PREFIX, SNAPSHOT_PREFIX, LIST_PREFIX, entitySlug, isSystemList, pageKey, noteKey, listKey, snapshotKey } from './entity-types.js';
+import {
+  entityTypeLabel,
+  PAGE_PREFIX,
+  NOTE_PREFIX,
+  SNAPSHOT_PREFIX,
+  LIST_PREFIX,
+  entitySlug,
+  isSystemList,
+  pageKey,
+  noteKey,
+  listKey,
+  snapshotKey,
+} from './entity-types.js';
 import { fetchGitHubUser } from './github-oauth.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
@@ -26,24 +65,27 @@ function autoResizeTextarea(textarea) {
 // ─── Error UI ────────────────────────────────────────────────────────
 
 const ERROR_CODE_MESSAGES = {
-  fs_permission:   { text: 'Storage access was revoked', action: 'regrant' },
-  session_quota:   { text: 'Session storage full',       action: 'reload' },
-  local_quota:     { text: 'Local storage full',         action: 'reload' },
-  offscreen_crash: { text: 'Storage worker crashed',     action: 'reload' },
+  fs_permission: { text: 'Storage access was revoked', action: 'regrant' },
+  session_quota: { text: 'Session storage full', action: 'reload' },
+  local_quota: { text: 'Local storage full', action: 'reload' },
+  offscreen_crash: { text: 'Storage worker crashed', action: 'reload' },
 };
 
 function showServiceErrorBanner(svcErr) {
-  const banner  = document.getElementById('serviceErrorBanner');
-  const msgEl   = document.getElementById('serviceErrorMessage');
-  const reloadBtn  = document.getElementById('serviceErrorReloadBtn');
+  const banner = document.getElementById('serviceErrorBanner');
+  const msgEl = document.getElementById('serviceErrorMessage');
+  const reloadBtn = document.getElementById('serviceErrorReloadBtn');
   const regrantBtn = document.getElementById('serviceErrorRegrantBtn');
   if (!banner || !msgEl) return;
 
-  const info = ERROR_CODE_MESSAGES[svcErr.code] || { text: svcErr.message || 'Service unavailable', action: 'reload' };
+  const info = ERROR_CODE_MESSAGES[svcErr.code] || {
+    text: svcErr.message || 'Service unavailable',
+    action: 'reload',
+  };
   msgEl.textContent = info.text;
 
-  reloadBtn.style.display  = info.action === 'reload'   ? '' : 'none';
-  regrantBtn.style.display = info.action === 'regrant'  ? '' : 'none';
+  reloadBtn.style.display = info.action === 'reload' ? '' : 'none';
+  regrantBtn.style.display = info.action === 'regrant' ? '' : 'none';
 
   reloadBtn.onclick = () => chrome.runtime.reload();
   regrantBtn.onclick = async () => {
@@ -58,45 +100,55 @@ function showServiceErrorBanner(svcErr) {
 }
 
 // Listen for serviceError changes while options page is open (service pauses mid-session).
-if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'session') return;
-  if ('serviceError' in changes) {
-    const svcErr = changes.serviceError.newValue;
-    const banner = document.getElementById('serviceErrorBanner');
-    if (!banner) return;
-    if (svcErr) {
-      showServiceErrorBanner(svcErr);
-    } else {
-      banner.style.display = 'none';
+if (typeof chrome !== 'undefined' && chrome.storage?.onChanged)
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'session') return;
+    if ('serviceError' in changes) {
+      const svcErr = changes.serviceError.newValue;
+      const banner = document.getElementById('serviceErrorBanner');
+      if (!banner) return;
+      if (svcErr) {
+        showServiceErrorBanner(svcErr);
+      } else {
+        banner.style.display = 'none';
+      }
     }
-  }
-});
+  });
 
 function showFatalError(message) {
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:999999;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+  overlay.style.cssText =
+    'position:fixed;inset:0;z-index:999999;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
   overlay.innerHTML = `
     <div style="color:#b41e1e;font-size:18px;font-weight:600;">Storage Unavailable</div>
     <div style="color:#555;font-size:14px;max-width:480px;text-align:center;">${escapeHtml(message)}</div>
     <button id="fatalReloadBtn" style="margin-top:8px;padding:6px 16px;border:1px solid #ccc;border-radius:4px;background:#f5f5f5;cursor:pointer;font-size:13px;">Reload Extension</button>
   `;
   document.body.appendChild(overlay);
-  overlay.querySelector('#fatalReloadBtn').addEventListener('click', () => chrome.runtime.reload());
+  overlay
+    .querySelector('#fatalReloadBtn')
+    .addEventListener('click', () => chrome.runtime.reload());
 }
 
 let _errorBubbleTimer = null;
-function showErrorBubble(message, { suffix = ' \u2014 please reload the extension.' } = {}) {
+function showErrorBubble(
+  message,
+  { suffix = ' \u2014 please reload the extension.' } = {},
+) {
   let bubble = document.getElementById('errorBubble');
   if (!bubble) {
     bubble = document.createElement('div');
     bubble.id = 'errorBubble';
-    bubble.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(180,30,30,0.92);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
+    bubble.style.cssText =
+      'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(180,30,30,0.92);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
     document.body.appendChild(bubble);
   }
   bubble.textContent = message + suffix;
   bubble.style.opacity = '1';
   clearTimeout(_errorBubbleTimer);
-  _errorBubbleTimer = setTimeout(() => { bubble.style.opacity = '0'; }, 4000);
+  _errorBubbleTimer = setTimeout(() => {
+    bubble.style.opacity = '0';
+  }, 4000);
 }
 
 let _blockedBubbleTimer = null;
@@ -105,13 +157,16 @@ function showBlockedBubble(message) {
   if (!bubble) {
     bubble = document.createElement('div');
     bubble.id = 'blockedBubble';
-    bubble.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(120,120,120,0.88);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
+    bubble.style.cssText =
+      'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(120,120,120,0.88);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
     document.body.appendChild(bubble);
   }
   bubble.textContent = '\u2715 ' + message;
   bubble.style.opacity = '1';
   clearTimeout(_blockedBubbleTimer);
-  _blockedBubbleTimer = setTimeout(() => { bubble.style.opacity = '0'; }, 2000);
+  _blockedBubbleTimer = setTimeout(() => {
+    bubble.style.opacity = '0';
+  }, 2000);
 }
 
 let _infoBubbleTimer = null;
@@ -120,15 +175,17 @@ function showInfoBubble(message) {
   if (!bubble) {
     bubble = document.createElement('div');
     bubble.id = 'infoBubble';
-    bubble.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:var(--bg-surface-solid, rgba(255,255,255,0.75));color:var(--text-secondary, #5E4D3E);font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;border:1px solid var(--border-glass, rgba(255,255,255,0.55));backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 2px 8px rgba(0,0,0,0.08);opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
+    bubble.style.cssText =
+      'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:999999;background:var(--bg-surface-solid, rgba(255,255,255,0.75));color:var(--text-secondary, #5E4D3E);font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 18px;border-radius:6px;border:1px solid var(--border-glass, rgba(255,255,255,0.55));backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 2px 8px rgba(0,0,0,0.08);opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:480px;text-align:center;';
     document.body.appendChild(bubble);
   }
   bubble.textContent = message;
   bubble.style.opacity = '1';
   clearTimeout(_infoBubbleTimer);
-  _infoBubbleTimer = setTimeout(() => { bubble.style.opacity = '0'; }, 3000);
+  _infoBubbleTimer = setTimeout(() => {
+    bubble.style.opacity = '0';
+  }, 3000);
 }
-
 
 // --- State ---
 let currentSortState = { column: null, direction: null };
@@ -139,18 +196,18 @@ let pinnedExtraColumns = [];
 let relatedExtraColumns = [];
 let wasmInitialized = false;
 // --- Demand-loaded history ---
-const HISTORY_MAX_FILES = 100;    // cap total loaded files
+const HISTORY_MAX_FILES = 100; // cap total loaded files
 const DEFAULT_AVG_ENTRY_SIZE = 200;
 const historyState = {
-  fileBatch: 10,               // files per load (configurable in settings)
-  files: [],                   // all JSONL filenames, newest-first
-  loadedCount: 0,              // how many files loaded so far
-  byUrl: new Map(),            // url → history entry (deduped, newest wins)
-  allEntries: [],              // all loaded entries (not deduped), for date-boundary rendering
-  loading: false,              // guard against concurrent loads
-  fileSizes: {},               // filename → total byte size (for chart estimation)
+  fileBatch: 10, // files per load (configurable in settings)
+  files: [], // all JSONL filenames, newest-first
+  loadedCount: 0, // how many files loaded so far
+  byUrl: new Map(), // url → history entry (deduped, newest wins)
+  allEntries: [], // all loaded entries (not deduped), for date-boundary rendering
+  loading: false, // guard against concurrent loads
+  fileSizes: {}, // filename → total byte size (for chart estimation)
   avgEntrySize: DEFAULT_AVG_ENTRY_SIZE, // calibrated from loaded batches
-  batchRawCount: 0,            // total raw entries from loaded JSONL files
+  batchRawCount: 0, // total raw entries from loaded JSONL files
 };
 let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'list', query: '...', id: '...' } or { type: 'explore', query: '...', filter: '...' }
 let allListPins = {}; // listId -> [{ url, title, pinnedAt }]
@@ -165,14 +222,14 @@ let bufferContentMap = {}; // slug → markdown from write buffer (small, kept i
 // Keys: 'page:{slug}' for pages.
 
 // --- Search/filter state ---
-let savedSearches = [];           // string[] — session-only, per-view UI state
-let currentSearchInput = '';      // unsaved draft (also participates in live search)
+let savedSearches = []; // string[] — session-only, per-view UI state
+let currentSearchInput = ''; // unsaved draft (also participates in live search)
 let filterState = {
-  firstSeen: { lo: null, hi: null },  // null = unbounded (days ago)
+  firstSeen: { lo: null, hi: null }, // null = unbounded (days ago)
   lastSeen: { lo: null, hi: null },
-  devices: {},                    // { deviceId: true } — only stores enabled devices; empty = show all
-  lists: {},                      // { listSlug: true } — only stores enabled lists; empty = show all
-  hasHighlights: null,            // null=any, true=require
+  devices: {}, // { deviceId: true } — only stores enabled devices; empty = show all
+  lists: {}, // { listSlug: true } — only stores enabled lists; empty = show all
+  hasHighlights: null, // null=any, true=require
   hasSnapshots: null,
   liked: null,
   visitedMultipleTimes: null,
@@ -181,7 +238,13 @@ let filterVisible = false;
 let exploreDebounceTimer = null;
 
 const KEYWORD_FIELDS = ['title', 'url', 'captures', 'highlights', 'notes'];
-const KEYWORD_FIELD_LABELS = { title: 'Title', url: 'URL', captures: 'Captures', highlights: 'Highlights', notes: 'Notes' };
+const KEYWORD_FIELD_LABELS = {
+  title: 'Title',
+  url: 'URL',
+  captures: 'Captures',
+  highlights: 'Highlights',
+  notes: 'Notes',
+};
 
 function normalizeFieldToArray(field) {
   if (!field || field === 'any') return [...KEYWORD_FIELDS];
@@ -195,8 +258,20 @@ function daysAgoToDate(v) {
   return d.toISOString().slice(0, 10);
 }
 const RANGE_CONFIGS = {
-  lastVisit:  { min: 0, max: 365, step: 1, format: daysAgoToDate, isDaysAgo: true },
-  firstVisit: { min: 0, max: 365, step: 1, format: daysAgoToDate, isDaysAgo: true },
+  lastVisit: {
+    min: 0,
+    max: 365,
+    step: 1,
+    format: daysAgoToDate,
+    isDaysAgo: true,
+  },
+  firstVisit: {
+    min: 0,
+    max: 365,
+    step: 1,
+    format: daysAgoToDate,
+    isDaysAgo: true,
+  },
 };
 let cachedFieldRanges = null; // { field: { min, max } } — computed from data
 
@@ -212,7 +287,7 @@ function computeFieldRanges(entries) {
     ranges[key] = { min: Infinity, max: -Infinity };
   }
   for (const [, group] of byUrl) {
-    const timestamps = group.map(i => i.timestamp);
+    const timestamps = group.map((i) => i.timestamp);
     const lastVisit = (Date.now() - Math.max(...timestamps)) / 86400000;
     const firstVisit = (Date.now() - Math.min(...timestamps)) / 86400000;
     const vals = { lastVisit, firstVisit };
@@ -232,15 +307,24 @@ function computeFieldRanges(entries) {
 
 function getFieldRanges() {
   if (cachedFieldRanges) return cachedFieldRanges;
-  if (historyState.byUrl.size === 0 && historyState.files.length === 0) return null;
-  cachedFieldRanges = historyState.byUrl.size > 0
-    ? computeFieldRanges(Array.from(historyState.byUrl.values()))
-    : Object.fromEntries(Object.keys(RANGE_CONFIGS).map(k => [k, { min: RANGE_CONFIGS[k].min, max: RANGE_CONFIGS[k].max }]));
+  if (historyState.byUrl.size === 0 && historyState.files.length === 0)
+    return null;
+  cachedFieldRanges =
+    historyState.byUrl.size > 0
+      ? computeFieldRanges(Array.from(historyState.byUrl.values()))
+      : Object.fromEntries(
+          Object.keys(RANGE_CONFIGS).map((k) => [
+            k,
+            { min: RANGE_CONFIGS[k].min, max: RANGE_CONFIGS[k].max },
+          ]),
+        );
   // Extend date ranges to cover all known files (even unloaded ones)
   if (historyState.files.length > 0) {
     const oldestFile = historyState.files[historyState.files.length - 1]; // files are newest-first
     const oldestDate = oldestFile.replace('.jsonl', '');
-    const oldestDaysAgo = Math.ceil((Date.now() - new Date(oldestDate + 'T00:00:00Z').getTime()) / 86400000);
+    const oldestDaysAgo = Math.ceil(
+      (Date.now() - new Date(oldestDate + 'T00:00:00Z').getTime()) / 86400000,
+    );
     for (const key of ['lastVisit', 'firstVisit']) {
       if (oldestDaysAgo > cachedFieldRanges[key].max) {
         cachedFieldRanges[key].max = oldestDaysAgo;
@@ -270,7 +354,11 @@ function getRangeConfig(field) {
 async function fetchPageBody(url) {
   try {
     const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!resp.ok || !(resp.headers.get('content-type') || '').includes('text/html')) return '';
+    if (
+      !resp.ok ||
+      !(resp.headers.get('content-type') || '').includes('text/html')
+    )
+      return '';
     const html = await resp.text();
     return html
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -279,8 +367,12 @@ async function fetchPageBody(url) {
       .replace(/&[a-z#0-9]+;/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim()
-      .split(/\s+/).slice(0, BODY_WORD_LIMIT).join(' ');
-  } catch { return ''; }
+      .split(/\s+/)
+      .slice(0, BODY_WORD_LIMIT)
+      .join(' ');
+  } catch {
+    return '';
+  }
 }
 
 async function initWasm() {
@@ -296,10 +388,10 @@ async function initWasm() {
 
 // --- Progressive search ---
 const searchState = {
-  generation: 0,         // generation counter — stale phase callbacks are discarded
-  results: [],           // master result array, mutated by mergeSearchResults
+  generation: 0, // generation counter — stale phase callbacks are discarded
+  results: [], // master result array, mutated by mergeSearchResults
   resultIndex: new Map(), // url → index into results[] for O(1) dedup in mergeSearchResults
-  pendingPhases: 0,      // count of in-flight phases — spinner shown while > 0
+  pendingPhases: 0, // count of in-flight phases — spinner shown while > 0
 };
 
 // Run a limited-concurrency pool of async tasks, calling onResult after each completes.
@@ -328,7 +420,11 @@ function mergeSearchResults(newResults, source, gen) {
     if (idx !== undefined) {
       const existing = searchState.results[idx];
       if ((r.score || 0) > (existing.score || 0)) existing.score = r.score;
-      if (r.createdAt && (!existing.createdAt || r.createdAt < existing.createdAt)) existing.createdAt = r.createdAt;
+      if (
+        r.createdAt &&
+        (!existing.createdAt || r.createdAt < existing.createdAt)
+      )
+        existing.createdAt = r.createdAt;
       if (!existing.matchSources) existing.matchSources = new Set();
       existing.matchSources.add(source);
     } else {
@@ -357,7 +453,7 @@ function mergeSearchResults(newResults, source, gen) {
 async function renderProgressiveResults(gen) {
   if (gen !== searchState.generation) return;
   // Enrich all entries that haven't been enriched yet
-  const unenriched = searchState.results.filter(r => !r._enriched);
+  const unenriched = searchState.results.filter((r) => !r._enriched);
   if (unenriched.length > 0) {
     await enrichFromEntityStorage(unenriched);
     for (const r of unenriched) r._enriched = true;
@@ -365,7 +461,7 @@ async function renderProgressiveResults(gen) {
   // Apply filters
   let results = searchState.results;
   if (!isDefaultFilterState(filterState)) {
-    const notFilterEnriched = results.filter(r => !r._filterEnriched);
+    const notFilterEnriched = results.filter((r) => !r._filterEnriched);
     if (notFilterEnriched.length > 0) {
       await enrichForFilters(notFilterEnriched);
       for (const r of notFilterEnriched) r._filterEnriched = true;
@@ -381,30 +477,46 @@ async function renderProgressiveResults(gen) {
     return;
   }
 
-  const effectiveSort = relatedSortState.column ? relatedSortState : { column: 'relevance', direction: 'desc' };
+  const effectiveSort = relatedSortState.column
+    ? relatedSortState
+    : { column: 'relevance', direction: 'desc' };
   const sorted = applySortOrder(results, effectiveSort);
-  const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
+  const maxAtt = Math.max(...sorted.map((r) => r.attScore), 0.1);
 
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = '';
   vs.updateData(sorted, (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
-      attScore: r.attScore, maxAtt, attDetail: r.attDetail,
-      notes: r.notes, timestamps: r.timestamps, context: 'related',
-      childIds: r.childIds, parentIds: r.parentIds, likes: r.likes,
-      matchSources: r.matchSources, hasHighlightNotes: r.hasHighlightNotes,
-    })
+      attScore: r.attScore,
+      maxAtt,
+      attDetail: r.attDetail,
+      notes: r.notes,
+      timestamps: r.timestamps,
+      context: 'related',
+      childIds: r.childIds,
+      parentIds: r.parentIds,
+      likes: r.likes,
+      matchSources: r.matchSources,
+      hasHighlightNotes: r.hasHighlightNotes,
+    }),
   );
   relatedContainer.dataset.searchCount = String(searchState.results.length);
   // Update time chart
-  const chartData = sorted.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || Date.now(), attention: '' }));
+  const chartData = sorted.map((r) => ({
+    url: r.url,
+    timestamp: r.timestamps?.[0] || Date.now(),
+    attention: '',
+  }));
   renderTimeChartInto(
     document.getElementById('relatedChart'),
     document.getElementById('relatedChartBars'),
     chartData,
-    'Explore results'
+    'Explore results',
   );
-  bindChartBarClick(document.getElementById('relatedChart'), document.getElementById('relatedResults'));
+  bindChartBarClick(
+    document.getElementById('relatedChart'),
+    document.getElementById('relatedResults'),
+  );
 }
 
 function showSearchSpinner() {
@@ -430,7 +542,9 @@ async function runPhase1(query, gen) {
     await fsStorage.loadDirectoryHandle();
     const rootDir = fsStorage.directoryHandle;
     if (!rootDir) return;
-    const logsDir = await rootDir.getDirectoryHandle('data').then(d => d.getDirectoryHandle('logs'));
+    const logsDir = await rootDir
+      .getDirectoryHandle('data')
+      .then((d) => d.getDirectoryHandle('logs'));
     const pagesDir = await rootDir.getDirectoryHandle('pages');
 
     // Dirty data: search logBuffer entries in JS
@@ -439,7 +553,12 @@ async function runPhase1(query, gen) {
     bufferContentMap = getBufferContentMap(historyBuffer);
     if (historyBuffer.length > 0) {
       const engine = new SearchEngine();
-      buildHistoryForEngine(HistoryEntry, engine, historyBuffer, bufferContentMap);
+      buildHistoryForEngine(
+        HistoryEntry,
+        engine,
+        historyBuffer,
+        bufferContentMap,
+      );
       const bufferResults = await engine.search(query, 0);
       mergeSearchResults(bufferResults, 'history', gen);
       await renderProgressiveResults(gen);
@@ -471,10 +590,12 @@ async function runPhase1(query, gen) {
     }
     await runPool(tasks, 3, (results) => {
       if (gen !== searchState.generation) return;
-      const formatted = results.map(r => ({
-        url: r.url, title: r.title, slug: generateSlugFromUrl(r.url),
-        timestamp: r.timestamp, score: r.score || 0,
-        intent: r.intent, attention: r.attention,
+      const formatted = results.map((r) => ({
+        url: r.url,
+        title: r.title,
+        slug: generateSlugFromUrl(r.url),
+        timestamp: r.timestamp,
+        score: r.score || 0,
         timestamps: [r.timestamp],
       }));
       mergeSearchResults(formatted, 'history', gen);
@@ -494,7 +615,9 @@ async function runPhase2a(query, gen) {
     await fsStorage.loadDirectoryHandle();
     const rootDir = fsStorage.directoryHandle;
     if (!rootDir) return;
-    const notesDir = await rootDir.getDirectoryHandle('data').then(d => d.getDirectoryHandle('notes'));
+    const notesDir = await rootDir
+      .getDirectoryHandle('data')
+      .then((d) => d.getDirectoryHandle('notes'));
     const matches = await searchNotes(notesDir, query);
     if (gen !== searchState.generation) return;
     // Convert note matches to result entries — need page metadata from slug
@@ -502,8 +625,12 @@ async function runPhase2a(query, gen) {
     for (const m of matches) {
       const slug = generateSlugFromUrl(m.url);
       noteResults.push({
-        url: m.url, title: '', slug, timestamp: Date.now(),
-        score: 1.0, timestamps: [Date.now()],
+        url: m.url,
+        title: '',
+        slug,
+        timestamp: Date.now(),
+        score: 1.0,
+        timestamps: [Date.now()],
       });
     }
     mergeSearchResults(noteResults, 'note', gen);
@@ -522,7 +649,9 @@ async function runPhase2b(query, gen) {
     await fsStorage.loadDirectoryHandle();
     const rootDir = fsStorage.directoryHandle;
     if (!rootDir) return;
-    const snapshotsDir = await rootDir.getDirectoryHandle('data').then(d => d.getDirectoryHandle('snapshots'));
+    const snapshotsDir = await rootDir
+      .getDirectoryHandle('data')
+      .then((d) => d.getDirectoryHandle('snapshots'));
 
     // List all .md files, group by slug, pick latest per slug
     const allFiles = [];
@@ -543,7 +672,7 @@ async function runPhase2b(query, gen) {
         latestBySlug.set(slug, { name, ts });
       }
     }
-    const fileNames = Array.from(latestBySlug.values()).map(v => v.name);
+    const fileNames = Array.from(latestBySlug.values()).map((v) => v.name);
 
     // Chunk and search with limited concurrency
     const CHUNK = 10;
@@ -551,19 +680,27 @@ async function runPhase2b(query, gen) {
     for (let i = 0; i < fileNames.length; i += CHUNK) {
       chunks.push(fileNames.slice(i, i + CHUNK));
     }
-    const tasks = chunks.map(chunk => () => searchSnapshots(snapshotsDir, query, chunk));
+    const tasks = chunks.map(
+      (chunk) => () => searchSnapshots(snapshotsDir, query, chunk),
+    );
     await runPool(tasks, 2, async (matches) => {
       if (gen !== searchState.generation) return;
       // Load page entities to get URLs for matched slugs
-      const slugs = matches.map(m => m.slug);
-      const pages = await Promise.all(slugs.map(s => readCacheable(pageKey(s))));
+      const slugs = matches.map((m) => m.slug);
+      const pages = await Promise.all(
+        slugs.map((s) => readCacheable(pageKey(s))),
+      );
       const snapshotResults = [];
       for (let i = 0; i < matches.length; i++) {
         const page = pages[i];
         if (!page || !page.url) continue;
         snapshotResults.push({
-          url: page.url, title: page.title || '', slug: matches[i].slug,
-          timestamp: Date.now(), score: 1.0, timestamps: [Date.now()],
+          url: page.url,
+          title: page.title || '',
+          slug: matches[i].slug,
+          timestamp: Date.now(),
+          score: 1.0,
+          timestamps: [Date.now()],
         });
       }
       mergeSearchResults(snapshotResults, 'snapshot', gen);
@@ -611,18 +748,29 @@ async function runProgressiveSearch(allQueries) {
   const words = parseSearchWords(query);
   if (words.length > 0) {
     // Build haystack: one string per entry combining all searchable fields
-    const haystack = historyState.allEntries.map(item =>
-      [item.user_title || '', item.title || '', item.url || ''].join(' ')
+    const haystack = historyState.allEntries.map((item) =>
+      [item.user_title || '', item.title || '', item.url || ''].join(' '),
     );
-    const matchedIndices = fuzzyMatchPhase0(words, haystack, historyState.allEntries);
+    const matchedIndices = fuzzyMatchPhase0(
+      words,
+      haystack,
+      historyState.allEntries,
+    );
     for (const idx of matchedIndices) {
       const item = historyState.allEntries[idx];
       if (item.url) matchedUrls.add(item.url);
     }
   }
-  const phase0Entries = historyState.allEntries.filter(item => item.url && matchedUrls.has(item.url));
-  const phase0Results = processHistoryForDisplay(phase0Entries, { globalDedup: true })
-    .map(item => ({ ...item, score: phase0Score(item, words), matchSources: new Set(['title']) }));
+  const phase0Entries = historyState.allEntries.filter(
+    (item) => item.url && matchedUrls.has(item.url),
+  );
+  const phase0Results = processHistoryForDisplay(phase0Entries, {
+    globalDedup: true,
+  }).map((item) => ({
+    ...item,
+    score: phase0Score(item, words),
+    matchSources: new Set(['title']),
+  }));
   mergeSearchResults(phase0Results, 'title', gen);
   await renderProgressiveResults(gen);
 
@@ -634,7 +782,6 @@ async function runProgressiveSearch(allQueries) {
   runPhase2b(query, gen);
 }
 
-
 // --- Demand-loaded history ---
 
 async function initHistoryFiles() {
@@ -642,7 +789,10 @@ async function initHistoryFiles() {
 
   // Always get file list from offscreen (no session cache for file list)
   try {
-    const resp = await sendAction({ action: 'listHistoryFiles', includeSizes: true });
+    const resp = await sendAction({
+      action: 'listHistoryFiles',
+      includeSizes: true,
+    });
     historyState.files = resp.files;
     historyState.fileSizes = resp.sizes || {};
   } catch (error) {
@@ -651,15 +801,21 @@ async function initHistoryFiles() {
 
   // Merge today's history — session cache has disk + undrained entries via addLog
   const todayStr = new Date().toISOString().slice(0, 10);
-  const todayEntries = await readCacheable('log:' + todayStr) || [];
-  const historyBuffer = todayEntries.filter(e => (e.action === 'visit_page' || e.action === 'leave_page' || !e.action) && e.url);
+  const todayEntries = (await readCacheable('log:' + todayStr)) || [];
+  const historyBuffer = todayEntries.filter(
+    (e) =>
+      (e.action === 'visit_page' || e.action === 'leave_page' || !e.action) &&
+      e.url,
+  );
   for (const entry of historyBuffer) {
     const existing = historyState.byUrl.get(entry.url);
     if (!existing || entry.timestamp > existing.timestamp) {
       historyState.byUrl.set(entry.url, entry);
       // Preserve title/user_title from older entry if new one lacks it
-      if (existing && existing.title && !entry.title) entry.title = existing.title;
-      if (existing && existing.user_title && !entry.user_title) entry.user_title = existing.user_title;
+      if (existing && existing.title && !entry.title)
+        entry.title = existing.title;
+      if (existing && existing.user_title && !entry.user_title)
+        entry.user_title = existing.user_title;
     } else if (entry.title && !existing.title) {
       existing.title = entry.title;
     }
@@ -672,10 +828,17 @@ async function initHistoryFiles() {
 }
 
 async function loadHistoryBatch() {
-  if (historyState.loading || historyState.loadedCount >= historyState.files.length
-      || historyState.loadedCount >= HISTORY_MAX_FILES) return [];
+  if (
+    historyState.loading ||
+    historyState.loadedCount >= historyState.files.length ||
+    historyState.loadedCount >= HISTORY_MAX_FILES
+  )
+    return [];
   historyState.loading = true;
-  const batch = historyState.files.slice(historyState.loadedCount, historyState.loadedCount + historyState.fileBatch);
+  const batch = historyState.files.slice(
+    historyState.loadedCount,
+    historyState.loadedCount + historyState.fileBatch,
+  );
   try {
     const t0 = performance.now();
     const resp = await sendAction({ action: 'loadHistoryBatch', files: batch });
@@ -688,7 +851,12 @@ async function loadHistoryBatch() {
     // often lack a title when it hasn't changed since the previous write).
     for (const item of batchEntries) {
       // Skip non-visit entries (settings, list ops, etc.)
-      if (item.action && item.action !== 'visit_page' && item.action !== 'leave_page') continue;
+      if (
+        item.action &&
+        item.action !== 'visit_page' &&
+        item.action !== 'leave_page'
+      )
+        continue;
       if (!item.url) continue;
       historyState.allEntries.push(item);
       const existing = historyState.byUrl.get(item.url);
@@ -700,12 +868,15 @@ async function loadHistoryBatch() {
       }
       newItems.push(item);
     }
-    logDebug(`[I/O] loadHistoryBatch: ${batch.length} files, ${batchEntries.length} items, ${newItems.length} new in ${(performance.now() - t0).toFixed(1)}ms`);
+    logDebug(
+      `[I/O] loadHistoryBatch: ${batch.length} files, ${batchEntries.length} items, ${newItems.length} new in ${(performance.now() - t0).toFixed(1)}ms`,
+    );
     historyState.loadedCount += batch.length;
     if (newItems.length > 0) cachedFieldRanges = null;
     // Calibrate avg entry size from loaded file data
     historyState.batchRawCount += batchEntries.length;
-    const loadedSize = historyState.files.slice(0, historyState.loadedCount)
+    const loadedSize = historyState.files
+      .slice(0, historyState.loadedCount)
       .reduce((sum, f) => sum + (historyState.fileSizes[f] || 0), 0);
     if (loadedSize > 0 && historyState.batchRawCount > 0) {
       historyState.avgEntrySize = loadedSize / historyState.batchRawCount;
@@ -744,7 +915,7 @@ function resetHistory() {
   allListPins = {};
 
   bufferContentMap = {};
-  searchState.generation++;    // invalidate any in-flight progressive search
+  searchState.generation++; // invalidate any in-flight progressive search
   searchState.results = [];
   searchState.pendingPhases = 0;
   hideSearchSpinner();
@@ -754,13 +925,18 @@ function resetHistory() {
 // Returns Map<dateStr, estimatedCount> for dates not yet loaded.
 function getEstimatedByDay() {
   const estimated = new Map();
-  const loadedSet = new Set(historyState.files.slice(0, historyState.loadedCount));
+  const loadedSet = new Set(
+    historyState.files.slice(0, historyState.loadedCount),
+  );
   for (const filename of historyState.files) {
     if (loadedSet.has(filename)) continue;
     const dateStr = filename.replace('.jsonl', '');
     const size = historyState.fileSizes[filename] || 0;
     if (size > 0) {
-      estimated.set(dateStr, Math.max(1, Math.round(size / historyState.avgEntrySize)));
+      estimated.set(
+        dateStr,
+        Math.max(1, Math.round(size / historyState.avgEntrySize)),
+      );
     }
   }
   return estimated;
@@ -782,7 +958,7 @@ function slugFromPinId(id) {
 // Returns { pinsResolved, pageSnap } — pageSnap is needed by enrichPinResult.
 async function resolvePinsForDisplay(pins) {
   const { pageSnap, noteSnap } = await loadPinContext(pins);
-  const pinsResolved = pins.map(p => {
+  const pinsResolved = pins.map((p) => {
     const ref = resolvePageRef(p.id, pageSnap, noteSnap);
     let url = ref?.url || null;
     let title = ref?.title || null;
@@ -790,7 +966,15 @@ async function resolvePinsForDisplay(pins) {
       const hist = historyState.byUrl.get(url);
       if (hist?.title) title = hist.title;
     }
-    return { ...p, url, title, user_title: ref?.user_title || null, isNote: ref?.isNote || false, childIds: ref?.childIds || [], parentIds: ref?.parentIds || [] };
+    return {
+      ...p,
+      url,
+      title,
+      user_title: ref?.user_title || null,
+      isNote: ref?.isNote || false,
+      childIds: ref?.childIds || [],
+      parentIds: ref?.parentIds || [],
+    };
   });
   return { pinsResolved, pageSnap };
 }
@@ -805,7 +989,13 @@ function resolvePageRef(refId, pageSnap, noteSnap) {
   if (refId.startsWith(NOTE_PREFIX)) {
     const note = noteSnap?.get(entitySlug(refId));
     if (!note) return null;
-    return { url: null, title: note.excerpt || 'Note', user_title: null, isNote: true, note };
+    return {
+      url: null,
+      title: note.excerpt || 'Note',
+      user_title: null,
+      isNote: true,
+      note,
+    };
   }
   return null;
 }
@@ -819,8 +1009,12 @@ async function loadPinContext(pins) {
     if (p.id?.startsWith(PAGE_PREFIX)) pagePinSlugs.push(entitySlug(p.id));
     else if (p.id?.startsWith(NOTE_PREFIX)) notePinSlugs.push(entitySlug(p.id));
   }
-  const sessionKeys = [...pagePinSlugs.map(s => pageKey(s)), ...notePinSlugs.map(s => noteKey(s))];
-  const sessionBatch = sessionKeys.length > 0 ? await chrome.storage.session.get(sessionKeys) : {};
+  const sessionKeys = [
+    ...pagePinSlugs.map((s) => pageKey(s)),
+    ...notePinSlugs.map((s) => noteKey(s)),
+  ];
+  const sessionBatch =
+    sessionKeys.length > 0 ? await chrome.storage.session.get(sessionKeys) : {};
   const pageSnap = new Map();
   const missingSlugs = [];
   for (const slug of pagePinSlugs) {
@@ -829,7 +1023,9 @@ async function loadPinContext(pins) {
     else missingSlugs.push(slug);
   }
   if (missingSlugs.length > 0) {
-    const pages = await Promise.all(missingSlugs.map(s => readCacheable(pageKey(s))));
+    const pages = await Promise.all(
+      missingSlugs.map((s) => readCacheable(pageKey(s))),
+    );
     for (let i = 0; i < missingSlugs.length; i++) {
       if (pages[i]) pageSnap.set(missingSlugs[i], pages[i]);
     }
@@ -842,7 +1038,9 @@ async function loadPinContext(pins) {
     else missingNoteSlugs.push(slug);
   }
   if (missingNoteSlugs.length > 0) {
-    const notes = await Promise.all(missingNoteSlugs.map(s => readCacheable(noteKey(s))));
+    const notes = await Promise.all(
+      missingNoteSlugs.map((s) => readCacheable(noteKey(s))),
+    );
     for (let i = 0; i < missingNoteSlugs.length; i++) {
       if (notes[i]) noteSnap.set(missingNoteSlugs[i], notes[i]);
     }
@@ -865,7 +1063,9 @@ function showListLayout() {
   document.getElementById('listLayout').classList.add('visible');
   document.getElementById('recycleBinLayout').classList.remove('visible');
   document.getElementById('queryBuilder').style.display = 'none';
-  document.getElementById('rulesSection').style.display = 'none';
+  document.getElementById('inboxToggleBtn').style.display = 'none';
+  document.getElementById('inboxPanel').style.display = 'none';
+  document.getElementById('inboxToggleBtn').classList.remove('active');
   cancelRuleEdit();
 }
 
@@ -873,6 +1073,9 @@ function showNormalLayout() {
   document.getElementById('resultsWrapper').style.display = '';
   document.getElementById('listLayout').classList.remove('visible');
   document.getElementById('recycleBinLayout').classList.remove('visible');
+  document.getElementById('inboxToggleBtn').style.display = 'none';
+  document.getElementById('inboxPanel').style.display = 'none';
+  document.getElementById('inboxToggleBtn').classList.remove('active');
 }
 
 function showRecycleBinLayout() {
@@ -881,6 +1084,9 @@ function showRecycleBinLayout() {
   document.getElementById('listLayout').classList.remove('visible');
   document.getElementById('recycleBinLayout').classList.add('visible');
   document.getElementById('queryBuilder').style.display = 'none';
+  document.getElementById('inboxToggleBtn').style.display = 'none';
+  document.getElementById('inboxPanel').style.display = 'none';
+  document.getElementById('inboxToggleBtn').classList.remove('active');
 }
 
 // --- Recycle Bin ---
@@ -919,21 +1125,36 @@ async function showRecycleBin() {
       const ts = parseInt(snapStem.slice(lastDash + 1), 10);
       // Try to load page entity for a human title
       try {
-        const pageResp = await sendAction({ action: 'readCacheable', key: pageKey(pageSlug), includeDeleted: true });
+        const pageResp = await sendAction({
+          action: 'readCacheable',
+          key: pageKey(pageSlug),
+          includeDeleted: true,
+        });
         displayName = `${pageResp?.value?.title || pageSlug} — ${new Date(ts).toLocaleString()}`;
       } catch {
         displayName = `${pageSlug} — ${new Date(ts).toLocaleString()}`;
       }
     } else {
       try {
-        const resp = await sendAction({ action: 'readCacheable', key, includeDeleted: true });
+        const resp = await sendAction({
+          action: 'readCacheable',
+          key,
+          includeDeleted: true,
+        });
         const entity = resp?.value;
         if (entity) {
           if (key.startsWith(NOTE_PREFIX)) {
             const raw = entity.excerpt;
-            const excerptText = Array.isArray(raw) ? raw.join(' ') : (typeof raw === 'string' ? raw : '');
+            const excerptText = Array.isArray(raw)
+              ? raw.join(' ')
+              : typeof raw === 'string'
+                ? raw
+                : '';
             if (excerptText) displayName = excerptText.substring(0, 80);
-            else if (entity.note) displayName = (entity.excerpt === null ? 'Page note: ' : '') + entity.note.substring(0, 60);
+            else if (entity.note)
+              displayName =
+                (entity.excerpt === null ? 'Page note: ' : '') +
+                entity.note.substring(0, 60);
             else if (entity.url) displayName = `Note on ${entity.url}`;
             else displayName = `Note (${entitySlug(key)})`;
           } else if (key.startsWith(LIST_PREFIX)) {
@@ -1015,7 +1236,7 @@ function wordsMatchItem(words, item) {
   if (words.length === 0) return true;
   return words.every(({ q, exact }) => {
     const fields = [item.user_title, item.title, item.url];
-    return fields.some(f => {
+    return fields.some((f) => {
       if (!f) return false;
       if (exact) return matchesExactWithBoundary(f, q);
       return f.toLowerCase().includes(q.toLowerCase());
@@ -1037,7 +1258,7 @@ function fuzzyMatchPhase0(words, haystack, entries) {
       for (let i = 0; i < entries.length; i++) {
         const item = entries[i];
         const fields = [item.user_title, item.title, item.url];
-        if (fields.some(f => f && matchesExactWithBoundary(f, q))) {
+        if (fields.some((f) => f && matchesExactWithBoundary(f, q))) {
           wordMatches.add(i);
         }
       }
@@ -1051,7 +1272,7 @@ function fuzzyMatchPhase0(words, haystack, entries) {
       for (let i = 0; i < entries.length; i++) {
         const item = entries[i];
         const fields = [item.user_title, item.title, item.url];
-        if (fields.some(f => f && f.toLowerCase().includes(ql))) {
+        if (fields.some((f) => f && f.toLowerCase().includes(ql))) {
           wordMatches.add(i);
         }
       }
@@ -1068,49 +1289,81 @@ function fuzzyMatchPhase0(words, haystack, entries) {
 }
 
 function isDefaultFilterState(state) {
-  return state.firstSeen.lo === null && state.firstSeen.hi === null
-    && state.lastSeen.lo === null && state.lastSeen.hi === null
-    && Object.keys(state.devices || {}).length === 0
-    && Object.keys(state.lists || {}).length === 0
-    && state.hasHighlights === null && state.hasSnapshots === null && state.liked === null && state.visitedMultipleTimes === null;
+  return (
+    state.firstSeen.lo === null &&
+    state.firstSeen.hi === null &&
+    state.lastSeen.lo === null &&
+    state.lastSeen.hi === null &&
+    Object.keys(state.devices || {}).length === 0 &&
+    Object.keys(state.lists || {}).length === 0 &&
+    state.hasHighlights === null &&
+    state.hasSnapshots === null &&
+    state.liked === null &&
+    state.visitedMultipleTimes === null
+  );
 }
 
 async function applyFilters(results) {
   if (isDefaultFilterState(filterState)) return results;
   const now = Date.now();
-  const enabledDevices = Object.entries(filterState.devices || {}).filter(([, v]) => v === true).map(([k]) => k);
-  const enabledLists = Object.entries(filterState.lists || {}).filter(([, v]) => v === true).map(([k]) => k);
-  return results.filter(item => {
+  const enabledDevices = Object.entries(filterState.devices || {})
+    .filter(([, v]) => v === true)
+    .map(([k]) => k);
+  const enabledLists = Object.entries(filterState.lists || {})
+    .filter(([, v]) => v === true)
+    .map(([k]) => k);
+  return results.filter((item) => {
     // Device filter: when bubbles are active, only show items from at least one enabled device
     if (enabledDevices.length > 0 && item.deviceIds) {
-      if (!enabledDevices.some(d => item.deviceIds.has(d))) return false;
+      if (!enabledDevices.some((d) => item.deviceIds.has(d))) return false;
     }
     // List filter: when list bubbles active, only show items belonging to at least one enabled list
     if (enabledLists.length > 0) {
       const itemListSlugs = (item.parentIds || [])
-        .filter(pid => pid.startsWith(LIST_PREFIX) && !isSystemList(pid))
-        .map(pid => entitySlug(pid));
-      if (!enabledLists.some(ls => itemListSlugs.includes(ls))) return false;
+        .filter((pid) => pid.startsWith(LIST_PREFIX) && !isSystemList(pid))
+        .map((pid) => entitySlug(pid));
+      if (!enabledLists.some((ls) => itemListSlugs.includes(ls))) return false;
     }
     // Time filters (days ago)
     if (filterState.lastSeen.lo !== null || filterState.lastSeen.hi !== null) {
       const lastTs = item.timestamps?.[0] || now;
       const daysAgo = (now - lastTs) / 86400000;
-      if (filterState.lastSeen.lo !== null && daysAgo < filterState.lastSeen.lo) return false;
-      if (filterState.lastSeen.hi !== null && daysAgo > filterState.lastSeen.hi) return false;
+      if (filterState.lastSeen.lo !== null && daysAgo < filterState.lastSeen.lo)
+        return false;
+      if (filterState.lastSeen.hi !== null && daysAgo > filterState.lastSeen.hi)
+        return false;
     }
-    if (filterState.firstSeen.lo !== null || filterState.firstSeen.hi !== null) {
-      const firstTs = item.firstTimestamp || item.timestamps?.[item.timestamps.length - 1] || now;
+    if (
+      filterState.firstSeen.lo !== null ||
+      filterState.firstSeen.hi !== null
+    ) {
+      const firstTs =
+        item.firstTimestamp ||
+        item.timestamps?.[item.timestamps.length - 1] ||
+        now;
       const daysAgo = (now - firstTs) / 86400000;
-      if (filterState.firstSeen.lo !== null && daysAgo < filterState.firstSeen.lo) return false;
-      if (filterState.firstSeen.hi !== null && daysAgo > filterState.firstSeen.hi) return false;
+      if (
+        filterState.firstSeen.lo !== null &&
+        daysAgo < filterState.firstSeen.lo
+      )
+        return false;
+      if (
+        filterState.firstSeen.hi !== null &&
+        daysAgo > filterState.firstSeen.hi
+      )
+        return false;
     }
     // Page-specific booleans
     if (filterState.hasHighlights === true) {
-      if (!item.notes || !item.notes.some(n => n.excerpt !== null)) return false;
+      if (!item.notes || !item.notes.some((n) => n.excerpt !== null))
+        return false;
     }
     if (filterState.hasSnapshots === true) {
-      if (!item.childIds || !item.childIds.some(id => id.startsWith(SNAPSHOT_PREFIX))) return false;
+      if (
+        !item.childIds ||
+        !item.childIds.some((id) => id.startsWith(SNAPSHOT_PREFIX))
+      )
+        return false;
     }
     if (filterState.liked === true) {
       if (!item.likes || item.likes <= 0) return false;
@@ -1123,12 +1376,18 @@ async function applyFilters(results) {
 }
 
 function saveFilterState() {
-  const key = activeView.type === 'explore' ? 'exploreFilterState' : 'listFilterState:' + activeView.id;
+  const key =
+    activeView.type === 'explore'
+      ? 'exploreFilterState'
+      : 'listFilterState:' + activeView.id;
   chrome.storage.session.set({ [key]: filterState });
 }
 
 async function loadFilterState() {
-  const key = activeView.type === 'explore' ? 'exploreFilterState' : 'listFilterState:' + activeView.id;
+  const key =
+    activeView.type === 'explore'
+      ? 'exploreFilterState'
+      : 'listFilterState:' + activeView.id;
   try {
     const data = await chrome.storage.session.get(key);
     if (data[key]) {
@@ -1137,7 +1396,9 @@ async function loadFilterState() {
       if (!filterState.lists) filterState.lists = {};
       return;
     }
-  } catch { /* session miss */ }
+  } catch {
+    /* session miss */
+  }
   filterState = {
     firstSeen: { lo: null, hi: null },
     lastSeen: { lo: null, hi: null },
@@ -1186,7 +1447,7 @@ const COLUMN_LABELS = {
   lastVisit: 'Last Visit',
   firstVisit: 'First Visit',
   attention: 'Att',
-  pinTime: 'Pin Time'
+  pinTime: 'Pin Time',
 };
 
 function applySortOrder(items, sortState) {
@@ -1195,13 +1456,15 @@ function applySortOrder(items, sortState) {
   const dir = direction === 'asc' ? 1 : -1;
 
   // Precompute timestamp extremes once instead of per-comparison O(T) scans
-  const needsTs = column === 'lastVisit' || column === 'firstVisit' || column === 'relevance';
+  const needsTs =
+    column === 'lastVisit' || column === 'firstVisit' || column === 'relevance';
   if (needsTs) {
     for (const item of items) {
       if (item._maxTs === undefined) {
         const ts = item.timestamps;
         if (ts && ts.length > 0) {
-          let lo = ts[0], hi = ts[0];
+          let lo = ts[0],
+            hi = ts[0];
           for (let i = 1; i < ts.length; i++) {
             if (ts[i] < lo) lo = ts[i];
             if (ts[i] > hi) hi = ts[i];
@@ -1381,8 +1644,8 @@ function showColumnPopover(anchorBtn, context) {
 
   const rect = anchorBtn.getBoundingClientRect();
   popover.style.position = 'fixed';
-  popover.style.top = (rect.bottom + 4) + 'px';
-  popover.style.right = (window.innerWidth - rect.right) + 'px';
+  popover.style.top = rect.bottom + 4 + 'px';
+  popover.style.right = window.innerWidth - rect.right + 'px';
 
   document.body.appendChild(popover);
   activePopover = popover;
@@ -1396,7 +1659,6 @@ function showColumnPopover(anchorBtn, context) {
   };
   setTimeout(() => document.addEventListener('click', closeHandler), 0);
 }
-
 
 // Show chart frame immediately (rows fill in after data loads)
 function renderResultsSkeleton(opts = {}) {
@@ -1432,12 +1694,21 @@ function refreshCurrentView() {
 }
 
 function resortActiveScroller(context) {
-  if (context === 'pinned') { refreshCurrentView(); return; }
-  const vs = context === 'related' ? relatedVirtualScroller : globalVirtualScroller;
-  if (!vs || vs.data.length === 0) { refreshCurrentView(); return; }
+  if (context === 'pinned') {
+    refreshCurrentView();
+    return;
+  }
+  const vs =
+    context === 'related' ? relatedVirtualScroller : globalVirtualScroller;
+  if (!vs || vs.data.length === 0) {
+    refreshCurrentView();
+    return;
+  }
 
   const sortState = getSortState(context);
-  const effectiveSort = sortState.column ? sortState : { column: 'lastVisit', direction: 'desc' };
+  const effectiveSort = sortState.column
+    ? sortState
+    : { column: 'lastVisit', direction: 'desc' };
   const sorted = applySortOrder([...vs._fullData], effectiveSort);
 
   vs.updateData(sorted);
@@ -1449,14 +1720,14 @@ function filterByCategory(entries, category) {
   switch (category) {
     case 'today': {
       const startOfDay = new Date().setHours(0, 0, 0, 0);
-      return entries.filter(i => i.timestamp >= startOfDay);
+      return entries.filter((i) => i.timestamp >= startOfDay);
     }
     case 'week': {
       const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-      return entries.filter(i => i.timestamp >= weekAgo);
+      return entries.filter((i) => i.timestamp >= weekAgo);
     }
     case 'highlighted':
-      return entries.filter(i => (i.likes > 0));
+      return entries.filter((i) => i.likes > 0);
     case 'all':
     default:
       return entries;
@@ -1465,12 +1736,17 @@ function filterByCategory(entries, category) {
 
 // Time chart tooltips initialized via initCharts() in initialize()
 
-
 // --- Display ---
 async function showCategory(category) {
   activeView = { type: 'category', value: category };
   updateSidebarActive();
-  const categoryLabels = { all: 'History', today: 'Today', week: 'This Week', highlighted: 'Highlighted', explore: 'Explore' };
+  const categoryLabels = {
+    all: 'History',
+    today: 'Today',
+    week: 'This Week',
+    highlighted: 'Highlighted',
+    explore: 'Explore',
+  };
   updateMainTitle(categoryLabels[category] || category);
   document.getElementById('queryBuilder').style.display = 'none';
 
@@ -1494,7 +1770,9 @@ async function showCategory(category) {
     if (newItems.length > 0) {
       const newFiltered = filterByCategory(newItems, activeView.value);
       if (newFiltered.length > 0) {
-        const sort = currentSortState.column ? currentSortState : { column: 'lastVisit', direction: 'desc' };
+        const sort = currentSortState.column
+          ? currentSortState
+          : { column: 'lastVisit', direction: 'desc' };
         const newEntries = processHistoryForDisplay(newFiltered);
         vs.appendData(applySortOrder(newEntries, sort));
         // Enrich in background — re-render visible rows when done
@@ -1503,7 +1781,8 @@ async function showCategory(category) {
       // Re-render chart with all loaded history + updated estimates
       const allLoaded = [...historyState.allEntries];
       const allFiltered = filterByCategory(allLoaded, activeView.value);
-      const updatedEstimates = activeView.value === 'all' ? getEstimatedByDay() : undefined;
+      const updatedEstimates =
+        activeView.value === 'all' ? getEstimatedByDay() : undefined;
       renderTimeChart(allFiltered, updatedEstimates);
     }
   };
@@ -1526,18 +1805,32 @@ function matchKeyword(item, field, value) {
   if (!value) return false;
   const { q, exact } = parseKeywordQuery(value);
   const fields = normalizeFieldToArray(field);
-  if (fields.includes('title') && (textMatches(item.user_title, q, exact) || textMatches(item.title, q, exact))) return true;
+  if (
+    fields.includes('title') &&
+    (textMatches(item.user_title, q, exact) ||
+      textMatches(item.title, q, exact))
+  )
+    return true;
   if (fields.includes('url') && textMatches(item.url, q, exact)) return true;
   // 'captures' field search is handled by Phase 2b (WASM snapshot search) in progressive search
-  if (fields.includes('highlights') && item.notes && item.notes.some(n => {
-    if (n.excerpt === null) return false; // skip global notes
-    const quotes = Array.isArray(n.excerpt) ? n.excerpt : [n.excerpt || ''];
-    return quotes.some(t => textMatches(t, q, exact));
-  })) return true;
-  if (fields.includes('notes') && item.notes && item.notes.some(n => textMatches(n.note, q, exact))) return true;
+  if (
+    fields.includes('highlights') &&
+    item.notes &&
+    item.notes.some((n) => {
+      if (n.excerpt === null) return false; // skip global notes
+      const quotes = Array.isArray(n.excerpt) ? n.excerpt : [n.excerpt || ''];
+      return quotes.some((t) => textMatches(t, q, exact));
+    })
+  )
+    return true;
+  if (
+    fields.includes('notes') &&
+    item.notes &&
+    item.notes.some((n) => textMatches(n.note, q, exact))
+  )
+    return true;
   return false;
 }
-
 
 // --- Query builder: Tree manipulation (n-ary operators) ---
 
@@ -1545,24 +1838,32 @@ function matchKeyword(item, field, value) {
 // Deduplicates per-day: the same URL visited on different days produces separate
 // results. Consumers must not assume results are unique by URL/slug.
 
-
 // Save search queries to session storage (per-view, ephemeral)
 function saveSearchQueries() {
-  const viewKey = activeView.type === 'explore' ? 'explore'
-    : activeView.type === 'list' ? listKey(activeView.id) : null;
+  const viewKey =
+    activeView.type === 'explore'
+      ? 'explore'
+      : activeView.type === 'list'
+        ? listKey(activeView.id)
+        : null;
   if (!viewKey) return;
-  chrome.storage.session.set({ [`searchQueries:${viewKey}`]: savedSearches }).catch(() => {});
+  chrome.storage.session
+    .set({ [`searchQueries:${viewKey}`]: savedSearches })
+    .catch(() => {});
 }
 
 // Load search queries from session storage for the current view
 async function loadSearchQueries() {
-  const viewKey = activeView.type === 'explore' ? 'explore'
-    : activeView.type === 'list' ? listKey(activeView.id) : null;
+  const viewKey =
+    activeView.type === 'explore'
+      ? 'explore'
+      : activeView.type === 'list'
+        ? listKey(activeView.id)
+        : null;
   if (!viewKey) return [];
   const data = await chrome.storage.session.get(`searchQueries:${viewKey}`);
   return data[`searchQueries:${viewKey}`] || [];
 }
-
 
 // --- Query builder: Rendering ---
 
@@ -1572,37 +1873,41 @@ function enrichPinResult(r, pins, pageSnap) {
   if (!r.url && !r.slug) return r;
   const slug = r.slug || generateSlugFromUrl(r.url);
   const cached = pageSnap.get(slug);
-  const source = (cached && cached.watermark > (r.watermark || 0)) ? cached : r;
+  const source = cached && cached.watermark > (r.watermark || 0) ? cached : r;
   let attSource = source.attDetail || source;
   // Fallback: use attention from loaded history when page lacks it
-  if (attSource.scrollDepth === undefined && attSource.timeOnPage === undefined) {
+  if (
+    attSource.scrollDepth === undefined &&
+    attSource.timeOnPage === undefined
+  ) {
     const histEntry = historyState.byUrl.get(r.url);
     if (histEntry) attSource = histEntry;
   }
-  const attScore = attentionStrength(attSource) || (source.attScore || 0);
+  const attScore = attentionStrength(attSource) || source.attScore || 0;
   const rSlug = slug;
-  const pin = pins.find(p => slugFromPinId(p.id) === rSlug);
+  const pin = pins.find((p) => slugFromPinId(p.id) === rSlug);
   const enriched = {
-    ...r, slug, attScore, attDetail: attSource,
+    ...r,
+    slug,
+    attScore,
+    attDetail: attSource,
     notes: source.notes || r.notes || [],
     timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
-    pinnedAt: pin ? pin.pinnedAt : (r.pinnedAt || null),
+    pinnedAt: pin ? pin.pinnedAt : r.pinnedAt || null,
     pinSource: pin?.source || r.pinSource || null,
   };
   if (source.user_title) enriched.user_title = source.user_title;
   return enriched;
 }
 
-
-
-
-
-
 // Summarize a query tree into a short display name for lists
 
 async function showExplore() {
   const _t0 = performance.now();
-  const _timer = (label) => logDebug(`[explore-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
+  const _timer = (label) =>
+    logDebug(
+      `[explore-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`,
+    );
 
   activeView = { type: 'explore', name: null };
   updateSidebarActive();
@@ -1619,7 +1924,8 @@ async function showExplore() {
     _timer('renderListSearchFilters');
   } catch (error) {
     logError('Explore load error:', error);
-    document.getElementById('relatedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
+    document.getElementById('relatedResults').innerHTML =
+      `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
   }
   document.body.dataset.ready = 'true';
 }
@@ -1635,12 +1941,16 @@ async function refreshPins() {
       allListPins[listId] = entity?.pins || [];
     }
     const pins = allListPins[listId];
+    updatePinCount(listId, pins.length);
     if (pins.length === 0) {
-      document.getElementById('relatedResults').innerHTML = '<div class="no-results">No pinned pages</div>';
+      document.getElementById('relatedResults').innerHTML =
+        '<div class="no-results">No pinned pages</div>';
       document.getElementById('relatedChart').classList.remove('visible');
     } else {
       const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
-      const enriched = pinsResolved.map(r => enrichPinResult(r, pins, pageSnap));
+      const enriched = pinsResolved.map((r) =>
+        enrichPinResult(r, pins, pageSnap),
+      );
       await renderListPinView(enriched, listId);
     }
   }
@@ -1658,17 +1968,25 @@ async function showList(list) {
   const titleEl = document.getElementById('mainTitle');
   function attachDblClick(currentName) {
     titleEl.ondblclick = () => {
-      enterTitleEditMode(currentName, async (newName) => {
-        list.name = newName;
-        await chrome.runtime.sendMessage({ action: 'saveListMeta', listId: list.slug, name: newName });
-        await renderLists();
-        activeView.name = newName;
-        updateMainTitle(newName);
-        attachDblClick(newName);
-      }, () => {
-        updateMainTitle(currentName);
-        attachDblClick(currentName);
-      });
+      enterTitleEditMode(
+        currentName,
+        async (newName) => {
+          list.name = newName;
+          await chrome.runtime.sendMessage({
+            action: 'saveListMeta',
+            listId: list.slug,
+            name: newName,
+          });
+          await renderLists();
+          activeView.name = newName;
+          updateMainTitle(newName);
+          attachDblClick(newName);
+        },
+        () => {
+          updateMainTitle(currentName);
+          attachDblClick(currentName);
+        },
+      );
     };
   }
   attachDblClick(displayName);
@@ -1684,6 +2002,7 @@ async function showList(list) {
     const listEntity = await readCacheable(listKey(listId));
     allListPins[listId] = listEntity?.pins || [];
     const pins = allListPins[listId];
+    updatePinCount(listId, pins.length);
 
     // Render rules section
     renderRulesSection(listId, listEntity?.rules || []);
@@ -1692,19 +2011,22 @@ async function showList(list) {
       listPinsData = [];
       listPinsListId = listId;
       await renderSearchPanel();
-      document.getElementById('relatedResults').innerHTML = '<div class="no-results">No pinned pages</div>';
+      document.getElementById('relatedResults').innerHTML =
+        '<div class="no-results">No pinned pages</div>';
       document.getElementById('relatedChart').classList.remove('visible');
     } else {
       const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
-      const enriched = pinsResolved.map(r => enrichPinResult(r, pins, pageSnap));
+      const enriched = pinsResolved.map((r) =>
+        enrichPinResult(r, pins, pageSnap),
+      );
       await renderListPinView(enriched, listId);
     }
   } catch (error) {
     logError('List load error:', error);
-    document.getElementById('relatedResults').innerHTML = `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
+    document.getElementById('relatedResults').innerHTML =
+      `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
   }
 }
-
 
 // ─── Rules section ──────────────────────────────────────────────────
 
@@ -1713,31 +2035,27 @@ function ruleDescription(rule) {
   if (rule.type === 'keyword') {
     const fields = c.fields || ['title', 'url'];
     return `${c.pattern || ''} (${fields.join(', ')})`;
-  } else if (rule.type === 'smart') {
+  } else if (rule.type === 'function') {
     return c.description || '(custom function)';
   }
   return rule.type || 'unknown';
 }
 
 function renderRulesSection(listId, rules) {
-  const section = document.getElementById('rulesSection');
-  const countBadge = document.getElementById('rulesCount');
-  const runBtn = document.getElementById('rulesRunBtn');
+  const inboxBtn = document.getElementById('inboxToggleBtn');
+  const panel = document.getElementById('inboxPanel');
 
-  // Only show for non-system lists
   if (listId.startsWith('system/')) {
-    section.style.display = 'none';
+    inboxBtn.style.display = 'none';
+    panel.style.display = 'none';
     return;
   }
-  section.style.display = '';
 
+  inboxBtn.style.display = '';
   if (rules.length > 0) {
-    countBadge.textContent = rules.length;
-    countBadge.style.display = '';
-    runBtn.style.display = '';
+    inboxBtn.classList.add('has-rules');
   } else {
-    countBadge.style.display = 'none';
-    runBtn.style.display = 'none';
+    inboxBtn.classList.remove('has-rules');
   }
 
   renderRulesList(listId, rules);
@@ -1746,12 +2064,13 @@ function renderRulesSection(listId, rules) {
 function renderRulesList(listId, rules) {
   const container = document.getElementById('rulesList');
   if (rules.length === 0) {
-    container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);font-style:italic;padding:2px 0">No rules</div>';
+    container.innerHTML = '';
     return;
   }
-  const typeLabel = (t) => t === 'smart' ? 'function' : t;
-  container.innerHTML = rules.map(rule => {
-    return `<div class="rule-entry" data-rule-id="${escapeHtml(rule.id)}">
+  const typeLabel = (t) => t;
+  container.innerHTML = rules
+    .map((rule) => {
+      return `<div class="rule-entry" data-rule-id="${escapeHtml(rule.id)}">
       <div class="rule-header">
         <span class="rule-type-badge rule-type-${escapeHtml(rule.type)}">${escapeHtml(typeLabel(rule.type))}</span>
         <span class="rule-desc">${escapeHtml(ruleDescription(rule))}</span>
@@ -1759,19 +2078,20 @@ function renderRulesList(listId, rules) {
         <button class="rule-action-btn rule-remove" title="Remove">&times;</button>
       </div>
     </div>`;
-  }).join('');
+    })
+    .join('');
 
-  container.querySelectorAll('.rule-edit').forEach(btn => {
+  container.querySelectorAll('.rule-edit').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const entry = btn.closest('.rule-entry');
       const ruleId = entry.dataset.ruleId;
-      const rule = rules.find(r => r.id === ruleId);
+      const rule = rules.find((r) => r.id === ruleId);
       if (rule) startRuleEdit(listId, ruleId, rule);
     });
   });
 
-  container.querySelectorAll('.rule-remove').forEach(btn => {
+  container.querySelectorAll('.rule-remove').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const entry = btn.closest('.rule-entry');
@@ -1795,31 +2115,48 @@ async function refreshRulesForActiveList() {
 // ─── Inline rule editing state ───
 let previewResults = [];
 let previewPinsResults = [];
+let previewHistoryRunning = false;
+let previewPinsRunning = false;
+let previewAbort = null;
 
-function renderPreviewSection(results, listEl, countEl) {
-  const matches = results.filter(r => r.score >= 0.5);
-  countEl.textContent = `${matches.length} matches (${results.length} checked)`;
+function renderPreviewSection(results, listEl, countEl, running) {
+  const matches = results.filter((r) => r.match);
+  const spinnerHtml = running
+    ? ' <span class="spinner spinner-sm"></span>'
+    : '';
+  countEl.innerHTML = `${matches.length} matches (${results.length} checked)${spinnerHtml}`;
   if (matches.length === 0) {
-    listEl.innerHTML = '<div class="rules-preview-empty">No matches</div>';
+    listEl.innerHTML = running
+      ? ''
+      : '<div class="rules-preview-empty">No matches</div>';
     return;
   }
-  listEl.innerHTML = matches.map(r =>
-    `<div class="rules-preview-item">
+  listEl.innerHTML = matches
+    .map(
+      (r) =>
+        `<div class="rules-preview-item">
       <span class="rules-preview-title">${escapeHtml(r.title || r.url)}</span>
-    </div>`
-  ).join('');
+    </div>`,
+    )
+    .join('');
 }
 
 function rerenderPreview() {
-  if (previewResults.length > 0) {
-    renderPreviewSection(previewResults,
+  if (previewResults.length > 0 || previewHistoryRunning) {
+    renderPreviewSection(
+      previewResults,
       document.getElementById('rulesPreviewList'),
-      document.getElementById('rulesPreviewCount'));
+      document.getElementById('rulesPreviewCount'),
+      previewHistoryRunning,
+    );
   }
-  if (previewPinsResults.length > 0) {
-    renderPreviewSection(previewPinsResults,
+  if (previewPinsResults.length > 0 || previewPinsRunning) {
+    renderPreviewSection(
+      previewPinsResults,
       document.getElementById('rulesPinsPreviewList'),
-      document.getElementById('rulesPinsPreviewCount'));
+      document.getElementById('rulesPinsPreviewCount'),
+      previewPinsRunning,
+    );
   }
 }
 
@@ -1827,15 +2164,28 @@ function rerenderPreview() {
 function buildRuleFromEditRow() {
   const editRow = document.querySelector('.rule-entry.rule-editing');
   if (!editRow) return { error: 'No edit row' };
-  const activeType = editRow.querySelector('.rule-type-option.active')?.dataset.type || 'keyword';
+  const activeType =
+    editRow.querySelector('.rule-type-option.active')?.dataset.type ||
+    'keyword';
   const inputVal = editRow.querySelector('.rule-edit-input').value.trim();
   if (activeType === 'keyword') {
     if (!inputVal) return { error: 'Pattern is required' };
-    return { rule: { type: 'keyword', config: { pattern: inputVal, fields: ['title', 'url'] } } };
-  } else if (activeType === 'smart') {
-    const fnSource = editRow.querySelector('.rule-smart-fn-input')?.value.trim() || '';
+    return {
+      rule: {
+        type: 'keyword',
+        config: { pattern: inputVal, fields: ['title', 'url'] },
+      },
+    };
+  } else if (activeType === 'function') {
+    const fnSource =
+      editRow.querySelector('.rule-fn-input')?.value.trim() || '';
     if (!fnSource) return { error: 'Function body is required' };
-    return { rule: { type: 'smart', config: { description: inputVal || '(custom)', fnSource } } };
+    return {
+      rule: {
+        type: 'function',
+        config: { description: inputVal || '(custom)', fnSource },
+      },
+    };
   }
   return { error: 'Unknown rule type' };
 }
@@ -1850,22 +2200,68 @@ function cancelRuleEdit() {
 }
 
 const JS_KEYWORDS = new Set([
-  'break', 'case', 'catch', 'const', 'continue', 'debugger', 'default', 'delete',
-  'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import',
-  'in', 'instanceof', 'let', 'new', 'of', 'return', 'switch', 'throw', 'try',
-  'typeof', 'var', 'void', 'while', 'with', 'yield', 'await', 'async', 'class',
+  'break',
+  'case',
+  'catch',
+  'const',
+  'continue',
+  'debugger',
+  'default',
+  'delete',
+  'do',
+  'else',
+  'export',
+  'extends',
+  'finally',
+  'for',
+  'function',
+  'if',
+  'import',
+  'in',
+  'instanceof',
+  'let',
+  'new',
+  'of',
+  'return',
+  'switch',
+  'throw',
+  'try',
+  'typeof',
+  'var',
+  'void',
+  'while',
+  'with',
+  'yield',
+  'await',
+  'async',
+  'class',
 ]);
-const JS_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity', 'this']);
-const JS_TOKEN_RE = /\/\/.*|\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\/(?:[^/\\]|\\.)+\/[gimsuy]*|\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b|[a-zA-Z_$][\w$]*|[^\s]/g;
+const JS_LITERALS = new Set([
+  'true',
+  'false',
+  'null',
+  'undefined',
+  'NaN',
+  'Infinity',
+  'this',
+]);
+const JS_TOKEN_RE =
+  /\/\/.*|\/\*[\s\S]*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\/(?:[^/\\]|\\.)+\/[gimsuy]*|\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b|[a-zA-Z_$][\w$]*|[^\s]/g;
 
 function highlightJS(src) {
   return src.replace(JS_TOKEN_RE, (tok) => {
-    if (tok.startsWith('//') || tok.startsWith('/*')) return `<span class="tok-comment">${escapeHtml(tok)}</span>`;
-    if (tok[0] === '"' || tok[0] === "'" || tok[0] === '`') return `<span class="tok-string">${escapeHtml(tok)}</span>`;
-    if (tok[0] === '/' && tok.length > 1 && tok[1] !== '/') return `<span class="tok-regex">${escapeHtml(tok)}</span>`;
-    if (/^\d/.test(tok)) return `<span class="tok-number">${escapeHtml(tok)}</span>`;
-    if (JS_KEYWORDS.has(tok)) return `<span class="tok-keyword">${escapeHtml(tok)}</span>`;
-    if (JS_LITERALS.has(tok)) return `<span class="tok-literal">${escapeHtml(tok)}</span>`;
+    if (tok.startsWith('//') || tok.startsWith('/*'))
+      return `<span class="tok-comment">${escapeHtml(tok)}</span>`;
+    if (tok[0] === '"' || tok[0] === "'" || tok[0] === '`')
+      return `<span class="tok-string">${escapeHtml(tok)}</span>`;
+    if (tok[0] === '/' && tok.length > 1 && tok[1] !== '/')
+      return `<span class="tok-regex">${escapeHtml(tok)}</span>`;
+    if (/^\d/.test(tok))
+      return `<span class="tok-number">${escapeHtml(tok)}</span>`;
+    if (JS_KEYWORDS.has(tok))
+      return `<span class="tok-keyword">${escapeHtml(tok)}</span>`;
+    if (JS_LITERALS.has(tok))
+      return `<span class="tok-literal">${escapeHtml(tok)}</span>`;
     return escapeHtml(tok);
   });
 }
@@ -1876,14 +2272,16 @@ function syncHighlight(textarea, pre) {
 
 function buildEditRowHTML(type, config) {
   const isKeyword = (type || 'keyword') === 'keyword';
-  const inputValue = isKeyword ? (config?.pattern || '') : (config?.description || '');
+  const inputValue = isKeyword
+    ? config?.pattern || ''
+    : config?.description || '';
   const inputPlaceholder = isKeyword ? 'keyword or /regex/' : 'description';
   const fnSource = config?.fnSource || '';
   return `<div class="rule-entry rule-editing">
     <div class="rule-edit-main">
       <div class="rule-type-toggle">
         <span class="rule-type-option ${isKeyword ? 'active' : ''}" data-type="keyword">Keyword</span>
-        <span class="rule-type-option ${!isKeyword ? 'active' : ''}" data-type="smart">Function</span>
+        <span class="rule-type-option ${!isKeyword ? 'active' : ''}" data-type="function">Function</span>
       </div>
       <input class="rule-edit-input" type="text" value="${escapeHtml(inputValue)}" placeholder="${inputPlaceholder}">
       <button class="rule-preview-btn">Preview</button>
@@ -1892,21 +2290,25 @@ function buildEditRowHTML(type, config) {
     </div>
     <div class="rule-fn-editor" style="${isKeyword ? 'display:none' : ''}">
       <pre class="rule-fn-highlight" aria-hidden="true"></pre>
-      <textarea class="rule-smart-fn-input" rows="20" placeholder="// page = { title, url, body }\nreturn page.title.length > 50 ? 1 : 0;" spellcheck="false">${escapeHtml(fnSource)}</textarea>
+      <textarea class="rule-fn-input" rows="20" placeholder="// page = { title, url, body }\nreturn page.title.length > 50;" spellcheck="false">${escapeHtml(fnSource)}</textarea>
     </div>
   </div>`;
 }
 
 function attachEditRowHandlers(editRow, listId, existingRuleId) {
   // Type toggle
-  editRow.querySelectorAll('.rule-type-option').forEach(opt => {
+  editRow.querySelectorAll('.rule-type-option').forEach((opt) => {
     opt.addEventListener('click', () => {
-      editRow.querySelectorAll('.rule-type-option').forEach(o => o.classList.remove('active'));
+      editRow
+        .querySelectorAll('.rule-type-option')
+        .forEach((o) => o.classList.remove('active'));
       opt.classList.add('active');
       const type = opt.dataset.type;
       const input = editRow.querySelector('.rule-edit-input');
-      input.placeholder = type === 'keyword' ? 'keyword or /regex/' : 'description';
-      editRow.querySelector('.rule-fn-editor').style.display = type === 'smart' ? '' : 'none';
+      input.placeholder =
+        type === 'keyword' ? 'keyword or /regex/' : 'description';
+      editRow.querySelector('.rule-fn-editor').style.display =
+        type === 'function' ? '' : 'none';
     });
   });
 
@@ -1922,7 +2324,11 @@ function attachEditRowHandlers(editRow, listId, existingRuleId) {
     }
     try {
       if (existingRuleId) {
-        await sendAction({ action: 'removeRule', listId, ruleId: existingRuleId });
+        await sendAction({
+          action: 'removeRule',
+          listId,
+          ruleId: existingRuleId,
+        });
       }
       await sendAction({ action: 'addRule', listId, rule: built.rule });
       cancelRuleEdit();
@@ -1932,24 +2338,34 @@ function attachEditRowHandlers(editRow, listId, existingRuleId) {
     }
   }
 
-  editRow.querySelector('.rule-save-btn').addEventListener('click', saveCurrentRule);
+  editRow
+    .querySelector('.rule-save-btn')
+    .addEventListener('click', saveCurrentRule);
 
   // Cancel
-  editRow.querySelector('.rule-cancel-btn').addEventListener('click', () => cancelRuleEdit());
+  editRow
+    .querySelector('.rule-cancel-btn')
+    .addEventListener('click', () => cancelRuleEdit());
 
   // Preview
-  editRow.querySelector('.rule-preview-btn').addEventListener('click', () => runPreview());
+  editRow
+    .querySelector('.rule-preview-btn')
+    .addEventListener('click', () => runPreview());
 
   // Enter key saves (but not inside the function textarea — let Enter create newlines there)
   editRow.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.target.classList.contains('rule-smart-fn-input')) {
+    if (
+      e.key === 'Enter' &&
+      !e.shiftKey &&
+      !e.target.classList.contains('rule-fn-input')
+    ) {
       e.preventDefault();
       saveCurrentRule();
     }
   });
 
   // Syntax highlight sync
-  const fnTextarea = editRow.querySelector('.rule-smart-fn-input');
+  const fnTextarea = editRow.querySelector('.rule-fn-input');
   const fnPre = editRow.querySelector('.rule-fn-highlight');
   syncHighlight(fnTextarea, fnPre);
   fnTextarea.addEventListener('input', () => syncHighlight(fnTextarea, fnPre));
@@ -1975,9 +2391,14 @@ function startRuleEdit(listId, ruleId, rule) {
   const container = document.getElementById('rulesList');
   if (ruleId) {
     // Replace existing display row with edit row
-    const displayRow = container.querySelector(`.rule-entry[data-rule-id="${ruleId}"]`);
+    const displayRow = container.querySelector(
+      `.rule-entry[data-rule-id="${ruleId}"]`,
+    );
     if (displayRow) {
-      displayRow.insertAdjacentHTML('afterend', buildEditRowHTML(rule.type, rule.config));
+      displayRow.insertAdjacentHTML(
+        'afterend',
+        buildEditRowHTML(rule.type, rule.config),
+      );
       displayRow.remove();
     }
   } else {
@@ -1988,12 +2409,15 @@ function startRuleEdit(listId, ruleId, rule) {
   attachEditRowHandlers(editRow, listId, ruleId);
 }
 
-async function runPreviewAgainstHistory(rule) {
+async function runPreviewAgainstHistory(rule, signal) {
   const MAX_CHECKED = 100;
   const MAX_MATCHES = 20;
   const BATCH_SIZE = 20;
   const previewListEl = document.getElementById('rulesPreviewList');
   const previewCountEl = document.getElementById('rulesPreviewCount');
+
+  previewHistoryRunning = true;
+  rerenderPreview();
 
   let matchCount = 0;
   let checked = 0;
@@ -2001,13 +2425,17 @@ async function runPreviewAgainstHistory(rule) {
 
   const today = new Date();
   for (let dayOffset = 0; dayOffset < 30; dayOffset++) {
+    if (signal?.aborted) break;
     if (checked >= MAX_CHECKED || matchCount >= MAX_MATCHES) break;
     const d = new Date(today);
     d.setDate(d.getDate() - dayOffset);
     const dateKey = d.toISOString().slice(0, 10);
-    const dayEntries = await readCacheable('log:' + dateKey) || [];
+    const dayEntries = (await readCacheable('log:' + dateKey)) || [];
     const visits = dayEntries
-      .filter(e => e.action === 'visit_page' && e.url && e.title && !seenUrls.has(e.url))
+      .filter(
+        (e) =>
+          e.action === 'visit_page' && e.url && e.title && !seenUrls.has(e.url),
+      )
       .reverse();
     const uniqueVisits = [];
     for (const v of visits) {
@@ -2019,18 +2447,24 @@ async function runPreviewAgainstHistory(rule) {
     if (uniqueVisits.length === 0) continue;
 
     for (let i = 0; i < uniqueVisits.length; i += BATCH_SIZE) {
+      if (signal?.aborted) break;
       if (checked >= MAX_CHECKED || matchCount >= MAX_MATCHES) break;
       const remaining = Math.min(BATCH_SIZE, MAX_CHECKED - checked);
       const batch = uniqueVisits.slice(i, i + remaining);
-      const bodies = await Promise.all(batch.map(e =>
-        e.bodyPreview ? Promise.resolve(e.bodyPreview) : fetchPageBody(e.url)
-      ));
+      const bodies = await Promise.all(
+        batch.map((e) =>
+          e.bodyPreview ? Promise.resolve(e.bodyPreview) : fetchPageBody(e.url),
+        ),
+      );
       const entries = [];
       for (let j = 0; j < batch.length; j++) {
         if (!bodies[j]) continue;
         entries.push({
-          timestamp: batch[j].timestamp, action: batch[j].action, url: batch[j].url,
-          title: batch[j].title || '', bodyPreview: bodies[j],
+          timestamp: batch[j].timestamp,
+          action: batch[j].action,
+          url: batch[j].url,
+          title: batch[j].title || '',
+          bodyPreview: bodies[j],
         });
       }
       if (entries.length === 0) continue;
@@ -2043,44 +2477,90 @@ async function runPreviewAgainstHistory(rule) {
       rerenderPreview();
     }
   }
-  if (checked === 0) {
+  previewHistoryRunning = false;
+  if (checked === 0 && !signal?.aborted) {
     previewCountEl.textContent = '';
-    previewListEl.innerHTML = '<div class="rules-preview-empty">No visits found to match against</div>';
+    previewListEl.innerHTML =
+      '<div class="rules-preview-empty">No visits found to match against</div>';
   } else {
     rerenderPreview();
   }
 }
 
-async function runPreviewAgainstPins(rule, listId) {
+async function runPreviewAgainstPins(rule, listId, signal) {
+  const BATCH_SIZE = 5;
   const pinsPreviewEl = document.getElementById('rulesPinsPreview');
   const pinsPreviewListEl = document.getElementById('rulesPinsPreviewList');
+  const pinsPreviewCountEl = document.getElementById('rulesPinsPreviewCount');
 
   const listEntity = await readCacheable(listKey(listId));
   const pins = listEntity?.pins || [];
   if (pins.length === 0) return;
 
   pinsPreviewEl.style.display = '';
-  const pinEntries = [];
+  previewPinsRunning = true;
+  rerenderPreview();
+
+  const pinMeta = [];
   for (const pin of pins) {
+    if (signal?.aborted) break;
     const page = await readCacheable(pin.id);
     if (!page?.url) continue;
     const title = page.user_title || page.title || '';
     if (!title) continue;
-    const body = await fetchPageBody(page.url);
-    if (!body) continue;
-    pinEntries.push({ url: page.url, title, bodyPreview: body });
+    pinMeta.push({ url: page.url, title });
   }
-  if (pinEntries.length > 0) {
-    const resp = await sendAction({ action: 'previewRule', rule, entries: pinEntries });
-    previewPinsResults = resp.results || [];
+
+  let checked = 0;
+  for (let i = 0; i < pinMeta.length; i += BATCH_SIZE) {
+    if (signal?.aborted) break;
+    const batch = pinMeta.slice(i, i + BATCH_SIZE);
+    const bodies = await Promise.all(batch.map((e) => fetchPageBody(e.url)));
+    const entries = [];
+    for (let j = 0; j < batch.length; j++) {
+      if (!bodies[j]) {
+        checked++;
+        continue;
+      }
+      entries.push({
+        url: batch[j].url,
+        title: batch[j].title,
+        bodyPreview: bodies[j],
+      });
+    }
+    if (entries.length > 0) {
+      const resp = await sendAction({ action: 'previewRule', rule, entries });
+      for (const r of resp.results || []) {
+        previewPinsResults.push(r);
+        checked++;
+      }
+    }
     rerenderPreview();
+  }
+
+  previewPinsRunning = false;
+  if (checked === 0 && !signal?.aborted) {
+    pinsPreviewCountEl.textContent = '';
+    pinsPreviewListEl.innerHTML =
+      '<div class="rules-preview-empty">No pinned pages with fetchable content</div>';
   } else {
-    document.getElementById('rulesPinsPreviewCount').textContent = '';
-    pinsPreviewListEl.innerHTML = '<div class="rules-preview-empty">No pinned pages with fetchable content</div>';
+    rerenderPreview();
+  }
+}
+
+function cancelPreview() {
+  if (previewAbort) {
+    previewAbort.abort();
+    previewAbort = null;
   }
 }
 
 async function runPreview() {
+  if (previewAbort) {
+    cancelPreview();
+    return;
+  }
+
   const errorEl = document.getElementById('rulesFormError');
   const previewEl = document.getElementById('rulesPreview');
   const previewListEl = document.getElementById('rulesPreviewList');
@@ -2100,72 +2580,57 @@ async function runPreview() {
     return;
   }
 
+  const ac = new AbortController();
+  previewAbort = ac;
+
   const previewBtn = document.querySelector('.rule-preview-btn');
-  if (previewBtn) { previewBtn.disabled = true; previewBtn.textContent = 'Running…'; }
+  if (previewBtn) {
+    previewBtn.textContent = 'Cancel Preview';
+  }
   previewEl.style.display = '';
 
   previewResults = [];
   previewPinsResults = [];
 
   try {
-    await runPreviewAgainstHistory(built.rule);
+    await runPreviewAgainstHistory(built.rule, ac.signal);
 
-    const listId = activeView.id;
-    if (listId && activeView.type === 'list') {
-      await runPreviewAgainstPins(built.rule, listId);
+    if (!ac.signal.aborted) {
+      const listId = activeView.id;
+      if (listId && activeView.type === 'list') {
+        await runPreviewAgainstPins(built.rule, listId, ac.signal);
+      }
     }
   } catch (err) {
-    previewEl.style.display = '';
-    previewListEl.innerHTML = `<div class="rules-preview-error">${escapeHtml(err.message)}</div>`;
-    previewCountEl.textContent = '';
-    pinsPreviewEl.style.display = 'none';
+    if (!ac.signal.aborted) {
+      previewEl.style.display = '';
+      previewListEl.innerHTML = `<div class="rules-preview-error">${escapeHtml(err.message)}</div>`;
+      previewCountEl.textContent = '';
+      pinsPreviewEl.style.display = 'none';
+    }
   } finally {
-    if (previewBtn) { previewBtn.disabled = false; previewBtn.textContent = 'Preview'; }
+    previewHistoryRunning = false;
+    previewPinsRunning = false;
+    previewAbort = null;
+    if (previewBtn) {
+      previewBtn.textContent = 'Preview';
+    }
+    rerenderPreview();
   }
 }
 
 function initRulesPanel() {
-  // Add button → inline edit row
   document.getElementById('rulesAddBtn').addEventListener('click', () => {
     if (activeView.type !== 'list') return;
     startRuleEdit(activeView.id, null, null);
   });
 
-  // Run button
-  document.getElementById('rulesRunBtn').addEventListener('click', async () => {
-    if (activeView.type !== 'list') return;
-    const listId = activeView.id;
-    const runBtn = document.getElementById('rulesRunBtn');
-    runBtn.disabled = true;
-    runBtn.textContent = 'Running…';
-    try {
-      const todayKey = new Date().toISOString().slice(0, 10);
-      const todayEntries = await readCacheable('log:' + todayKey) || [];
-      const visits = todayEntries.filter(e => e.action === 'visit_page' && e.url);
-      if (visits.length === 0) {
-        showInfoBubble('No visits today to match');
-        return;
-      }
-      const bodies = await Promise.all(visits.map(e =>
-        e.bodyPreview ? Promise.resolve(e.bodyPreview) : fetchPageBody(e.url)
-      ));
-      const entries = [];
-      for (let j = 0; j < visits.length; j++) {
-        entries.push({
-          timestamp: visits[j].timestamp, action: visits[j].action, url: visits[j].url,
-          title: visits[j].title || '', bodyPreview: bodies[j] || '',
-        });
-      }
-      const resp = await sendAction({ action: 'runRuleBatch', listIds: [listId], entries });
-      const results = resp.results || [];
-      const matched = results.reduce((n, r) => n + (r.matches?.length || 0), 0);
-      showInfoBubble(matched > 0 ? `Matched ${matched} page${matched !== 1 ? 's' : ''}` : 'No matches');
-    } catch (err) {
-      showErrorBubble('Run rules failed: ' + err.message);
-    } finally {
-      runBtn.disabled = false;
-      runBtn.textContent = 'Run';
-    }
+  document.getElementById('inboxToggleBtn').addEventListener('click', () => {
+    const panel = document.getElementById('inboxPanel');
+    const btn = document.getElementById('inboxToggleBtn');
+    const visible = panel.style.display !== 'none';
+    panel.style.display = visible ? 'none' : '';
+    btn.classList.toggle('active', !visible);
   });
 }
 
@@ -2197,11 +2662,11 @@ async function runListPinFilter() {
   if (currentSearchInput.trim()) allQueries.push(currentSearchInput.trim());
 
   let filtered;
-  if (allQueries.length === 0 || allQueries.every(q => !q.trim())) {
+  if (allQueries.length === 0 || allQueries.every((q) => !q.trim())) {
     filtered = listPinsData;
   } else {
-    filtered = listPinsData.filter(r => {
-      return allQueries.some(query => {
+    filtered = listPinsData.filter((r) => {
+      return allQueries.some((query) => {
         const words = parseSearchWords(query);
         return wordsMatchItem(words, r);
       });
@@ -2229,29 +2694,46 @@ function renderFilteredPins(pins, listId, searchQuery) {
     return;
   }
 
-  const effectiveSort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
+  const effectiveSort = relatedSortState.column
+    ? relatedSortState
+    : { column: 'lastVisit', direction: 'desc' };
   const sorted = applySortOrder([...pins], effectiveSort);
-  const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
+  const maxAtt = Math.max(...sorted.map((r) => r.attScore), 0.1);
 
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = '';
   vs.onLoadMore = null; // Clear stale explore demand-loader
   vs.updateData(sorted, (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
-      pinned: true, attScore: r.attScore, maxAtt, attDetail: r.attDetail,
-      notes: r.notes, timestamps: r.timestamps, context: 'related',
-      pinnedAt: r.pinnedAt, pinSource: r.pinSource, childIds: r.childIds, parentIds: r.parentIds, excludeListId: listId, likes: r.likes, hasHighlightNotes: r.hasHighlightNotes,
-    })
+      pinned: true,
+      attScore: r.attScore,
+      maxAtt,
+      attDetail: r.attDetail,
+      notes: r.notes,
+      timestamps: r.timestamps,
+      context: 'related',
+      pinnedAt: r.pinnedAt,
+      pinSource: r.pinSource,
+      childIds: r.childIds,
+      parentIds: r.parentIds,
+      excludeListId: listId,
+      likes: r.likes,
+      hasHighlightNotes: r.hasHighlightNotes,
+    }),
   );
   bindPinClicks(relatedContainer, listId);
 
   // Time chart for pins
-  const chartData = sorted.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || r.pinnedAt || Date.now(), attention: '' }));
+  const chartData = sorted.map((r) => ({
+    url: r.url,
+    timestamp: r.timestamps?.[0] || r.pinnedAt || Date.now(),
+    attention: '',
+  }));
   renderTimeChartInto(
     document.getElementById('relatedChart'),
     document.getElementById('relatedChartBars'),
     chartData,
-    'Pinned pages'
+    'Pinned pages',
   );
   bindChartBarClick(document.getElementById('relatedChart'), relatedContainer);
 }
@@ -2281,7 +2763,8 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
 
   for (const item of sorted) {
     const d = new Date(item.timestamp);
-    const day = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    const day =
+      d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
 
     if (globalDedup) {
       if (globalIndex.has(item.url)) {
@@ -2302,7 +2785,8 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
     results.push({
       url: item.url,
       title: item.title || historyState.byUrl.get(item.url)?.title || '',
-      user_title: item.user_title || historyState.byUrl.get(item.url)?.user_title,
+      user_title:
+        item.user_title || historyState.byUrl.get(item.url)?.user_title,
       slug: item.slug || generateSlugFromUrl(item.url),
       timestamp: item.timestamp,
       day,
@@ -2319,9 +2803,11 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
 
 // Batch-fetch page entities for all unique slugs in entries, enrich with entity titles.
 async function enrichFromEntityStorage(entries) {
-  const allSlugs = [...new Set(entries.map(r => r.slug).filter(Boolean))];
+  const allSlugs = [...new Set(entries.map((r) => r.slug).filter(Boolean))];
   if (allSlugs.length === 0) return;
-  const loaded = await Promise.all(allSlugs.map(s => readCacheable(pageKey(s))));
+  const loaded = await Promise.all(
+    allSlugs.map((s) => readCacheable(pageKey(s))),
+  );
   const pages = {};
   for (let i = 0; i < allSlugs.length; i++) {
     if (loaded[i]) pages[allSlugs[i]] = loaded[i];
@@ -2339,7 +2825,9 @@ async function enrichFromEntityStorage(entries) {
   const noteMap = new Map();
   if (allNoteRefs.size > 0) {
     const noteKeys = [...allNoteRefs];
-    const noteEntities = await Promise.all(noteKeys.map(k => readCacheable(k)));
+    const noteEntities = await Promise.all(
+      noteKeys.map((k) => readCacheable(k)),
+    );
     for (let i = 0; i < noteKeys.length; i++) {
       if (noteEntities[i]) noteMap.set(noteKeys[i], noteEntities[i]);
     }
@@ -2349,14 +2837,17 @@ async function enrichFromEntityStorage(entries) {
     const page = pages[entry.slug];
     if (!page) continue;
     if (!entry.title && page.title) entry.title = page.title;
-    if (!entry.user_title && page.user_title) entry.user_title = page.user_title;
+    if (!entry.user_title && page.user_title)
+      entry.user_title = page.user_title;
     if (page.childIds) entry.childIds = page.childIds;
     if (page.parentIds) entry.parentIds = page.parentIds;
     if (page.likes) entry.likes = page.likes;
     if (page.createdAt && !entry.createdAt) entry.createdAt = page.createdAt;
     // Check if any child note is a non-deleted highlight note (excerpt !== null)
-    const noteRefs = (page.childIds || []).filter(id => id.startsWith(NOTE_PREFIX));
-    entry.hasHighlightNotes = noteRefs.some(ref => {
+    const noteRefs = (page.childIds || []).filter((id) =>
+      id.startsWith(NOTE_PREFIX),
+    );
+    entry.hasHighlightNotes = noteRefs.some((ref) => {
       const note = noteMap.get(ref);
       return note && note.excerpt !== null && !note.deleted;
     });
@@ -2366,9 +2857,9 @@ async function enrichFromEntityStorage(entries) {
 // Enrich results with page entity fields needed by filters (notes, childIds, visitCount).
 // Only called when non-default filters are active.
 async function enrichForFilters(entries) {
-  const slugs = [...new Set(entries.map(r => r.slug).filter(Boolean))];
+  const slugs = [...new Set(entries.map((r) => r.slug).filter(Boolean))];
   if (slugs.length === 0) return;
-  const loaded = await Promise.all(slugs.map(s => readCacheable(pageKey(s))));
+  const loaded = await Promise.all(slugs.map((s) => readCacheable(pageKey(s))));
   const pages = {};
   for (let i = 0; i < slugs.length; i++) {
     if (loaded[i]) pages[slugs[i]] = loaded[i];
@@ -2385,7 +2876,9 @@ async function enrichForFilters(entries) {
   const noteMap = new Map();
   if (allNoteRefs.size > 0) {
     const noteKeys = [...allNoteRefs];
-    const noteEntities = await Promise.all(noteKeys.map(k => readCacheable(k)));
+    const noteEntities = await Promise.all(
+      noteKeys.map((k) => readCacheable(k)),
+    );
     for (let i = 0; i < noteKeys.length; i++) {
       if (noteEntities[i]) noteMap.set(noteKeys[i], noteEntities[i]);
     }
@@ -2397,8 +2890,10 @@ async function enrichForFilters(entries) {
     if (!page) continue;
     if (page.childIds) {
       entry.childIds = page.childIds;
-      const noteRefs = page.childIds.filter(id => id.startsWith(NOTE_PREFIX));
-      const notes = noteRefs.map(ref => noteMap.get(ref)).filter(n => n && !n.deleted);
+      const noteRefs = page.childIds.filter((id) => id.startsWith(NOTE_PREFIX));
+      const notes = noteRefs
+        .map((ref) => noteMap.get(ref))
+        .filter((n) => n && !n.deleted);
       if (notes.length > 0) entry.notes = notes;
     }
     if (page.parentIds) entry.parentIds = page.parentIds;
@@ -2406,7 +2901,8 @@ async function enrichForFilters(entries) {
       if (!visitCountMap) {
         visitCountMap = new Map();
         for (const h of historyState.allEntries) {
-          if (h.url) visitCountMap.set(h.url, (visitCountMap.get(h.url) || 0) + 1);
+          if (h.url)
+            visitCountMap.set(h.url, (visitCountMap.get(h.url) || 0) + 1);
         }
       }
       entry.visitCount = visitCountMap.get(entry.url) || 0;
@@ -2423,23 +2919,37 @@ async function displayHistoryRows(entries) {
   const displayEntries = processHistoryForDisplay(entries);
 
   // When sort is null, default to lastVisit desc
-  const effectiveSort = currentSortState.column ? currentSortState : { column: 'lastVisit', direction: 'desc' };
+  const effectiveSort = currentSortState.column
+    ? currentSortState
+    : { column: 'lastVisit', direction: 'desc' };
   const sorted = applySortOrder(displayEntries, effectiveSort);
-  const maxAtt = Math.max(...sorted.map(e => e.attScore), 0.1);
+  const maxAtt = Math.max(...sorted.map((e) => e.attScore), 0.1);
 
   const vs = getOrCreateGlobalScroller();
   vs._headerHtml = '';
   const renderFn = (e) =>
-    resultRowHtml(e.user_title || e.title, e.url, { attScore: e.attScore, maxAtt, attDetail: e.attDetail, notes: e.notes, timestamps: e.timestamps, context: 'global', childIds: e.childIds, parentIds: e.parentIds, likes: e.likes, hasHighlightNotes: e.hasHighlightNotes });
+    resultRowHtml(e.user_title || e.title, e.url, {
+      attScore: e.attScore,
+      maxAtt,
+      attDetail: e.attDetail,
+      notes: e.notes,
+      timestamps: e.timestamps,
+      context: 'global',
+      childIds: e.childIds,
+      parentIds: e.parentIds,
+      likes: e.likes,
+      hasHighlightNotes: e.hasHighlightNotes,
+    });
   vs.setData(sorted, renderFn);
 
   // Enrich in background — mutates entries in place, then re-render visible rows
   enrichFromEntityStorage(displayEntries).then(() => vs.refreshVisible());
 }
 
-const PIN_SVG = '<svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>';
-const DELETE_SVG = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
-
+const PIN_SVG =
+  '<svg viewBox="0 0 24 24"><path d="M14 4v5c0 1.12.37 2.16 1 3H9c.65-.86 1-1.9 1-3V4h4m3-2H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3V4h1c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>';
+const DELETE_SVG =
+  '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
 
 function buildDetailHtml(url, attDetail, notes, likes = 0) {
   let html = `<div class="detail-url"><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a></div>`;
@@ -2449,7 +2959,8 @@ function buildDetailHtml(url, attDetail, notes, likes = 0) {
     html += '<div class="detail-metrics">';
     if (attDetail?.timeOnPage) {
       const mins = Math.round(attDetail.timeOnPage / 60000);
-      if (mins > 0) html += `<span class="detail-metric"><strong>${mins}m</strong> on page</span>`;
+      if (mins > 0)
+        html += `<span class="detail-metric"><strong>${mins}m</strong> on page</span>`;
     }
     if (attDetail?.scrollDepth) {
       html += `<span class="detail-metric"><strong>${Math.round(attDetail.scrollDepth)}%</strong> scrolled</span>`;
@@ -2468,8 +2979,9 @@ function buildDetailHtml(url, attDetail, notes, likes = 0) {
     for (const n of notes.slice(0, 5)) {
       if (n.excerpt === null) continue; // skip global notes
       const raw = n.excerpt || '';
-      const text = Array.isArray(raw) ? raw.join(' ') : (raw || '');
-      if (text) html += `<div class="detail-note-item">${escapeHtml(text)}</div>`;
+      const text = Array.isArray(raw) ? raw.join(' ') : raw || '';
+      if (text)
+        html += `<div class="detail-note-item">${escapeHtml(text)}</div>`;
     }
     html += '</div>';
   }
@@ -2498,16 +3010,28 @@ async function loadExtraDetail(url) {
   for (const lst of lists) {
     const pins = allListPins[lst.slug] || [];
     const pageId = pageKey(generateSlugFromUrl(url));
-    if (pins.some(p => p.id === pageId)) {
+    if (pins.some((p) => p.id === pageId)) {
       belongedLists.push(listDisplayName(lst));
     }
   }
 
-  return { notes, snapshots, belongedLists, slug, likes, visitDates: pageEntity?.visitDates || [] };
+  return {
+    notes,
+    snapshots,
+    belongedLists,
+    slug,
+    likes,
+    visitDates: pageEntity?.visitDates || [],
+  };
 }
 
 function renderVisitDatesHtml(visitDates, cardTimestamp) {
-  const fmtDate = (ts) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const fmtDate = (ts) =>
+    new Date(ts).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
 
   if (visitDates.length > 0) {
     const parse = (yyyymmdd) => {
@@ -2534,59 +3058,83 @@ function renderVisitDatesHtml(visitDates, cardTimestamp) {
   return '';
 }
 
+const DETAIL_ICON_EDIT =
+  '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3z"/></svg>';
+const DETAIL_ICON_DELETE =
+  '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>';
+
 function renderExtraDetailHtml(extra, cardTimestamp) {
   let html = '';
 
-  // Visit dates (first/last) or card timestamp fallback
   html += renderVisitDatesHtml(extra.visitDates, cardTimestamp);
 
-  // Page note textarea (global note = excerpt is null)
-  const globalNote = extra.notes.find(n => n.excerpt === null);
-  html += `<div class="detail-section">
-    <textarea class="detail-page-note" data-note-slug="${escapeHtml(globalNote?.slug || '')}" data-page-slug="${escapeHtml(extra.slug)}" placeholder="Add a page note...">${escapeHtml(globalNote?.note || '')}</textarea>
-  </div>`;
+  const globalNote = extra.notes.find((n) => n.excerpt === null);
+  const pageNoteText = globalNote?.note || '';
+  const pageNoteSlug = globalNote?.slug || '';
+  html += `<div class="detail-section"><div class="detail-page-note-wrap" data-note-slug="${escapeHtml(pageNoteSlug)}" data-page-slug="${escapeHtml(extra.slug)}">`;
+  if (!pageNoteText && !pageNoteSlug) {
+    html += `<button class="detail-page-note-add">+ Add page note</button>`;
+  } else {
+    html += `<div class="detail-page-note-display">
+      <span class="note-body">${escapeHtml(pageNoteText)}</span>
+      <button class="detail-note-action-btn edit" title="Edit">${DETAIL_ICON_EDIT}</button>
+    </div>`;
+  }
+  html += `</div></div>`;
 
   if (extra.belongedLists.length > 0) {
-    html += '<div class="detail-section"><span class="detail-section-label">Lists:</span> ';
-    html += extra.belongedLists.map(t => `<span class="detail-list-tag">${escapeHtml(t)}</span>`).join(' ');
+    html += '<div class="detail-section">';
+    html += extra.belongedLists
+      .map((t) => `<span class="detail-list-tag">${escapeHtml(t)}</span>`)
+      .join(' ');
     html += '</div>';
   }
 
-  const allNotes = extra.notes.filter(n => !n.deleted);
-  if (allNotes.length > 0) {
-    html += `<div class="detail-section detail-notes-section" data-slug="${escapeHtml(extra.slug)}"><span class="detail-section-label">Notes:</span>`;
-    for (const n of allNotes.slice(0, 20)) {
+  const highlightNotes = extra.notes.filter(
+    (n) => !n.deleted && n.excerpt !== null,
+  );
+  if (highlightNotes.length > 0) {
+    html += `<div class="detail-section detail-notes-section" data-slug="${escapeHtml(extra.slug)}">`;
+    for (const n of highlightNotes.slice(0, 20)) {
       const noteSlug = n.slug || '';
       const noteText = n.note || '';
-      let labelHtml;
-      if (n.excerpt === null) {
-        // Global page note
-        labelHtml = `<em>Page note</em>`;
-        if (noteText) labelHtml += ` <span class="detail-note-text">${escapeHtml(noteText)}</span>`;
-      } else {
-        const rawQuote = Array.isArray(n.excerpt) ? n.excerpt.join(' ') : (n.excerpt || '');
-        const label = escapeHtml(rawQuote.substring(0, 100)) + (rawQuote.length > 100 ? '...' : '');
-        labelHtml = `"${label}"`;
-        if (noteText) labelHtml += ` <span class="detail-note-text">${escapeHtml(noteText)}</span>`;
-      }
+      const rawQuote = Array.isArray(n.excerpt)
+        ? n.excerpt.join(' ')
+        : n.excerpt || '';
+      const noteBody = noteText
+        ? `<span class="detail-note-content">${escapeHtml(noteText)}</span>`
+        : `<em>No annotation</em>`;
       html += `<div class="detail-note-entry" data-note-slug="${escapeHtml(noteSlug)}">
-        <span class="detail-note-content">${labelHtml}</span>
-        <button class="detail-note-delete" title="Delete">&times;</button>
+        <div class="detail-note-header">
+          <div class="detail-note-excerpt">${escapeHtml(rawQuote)}</div>
+          <button class="detail-note-action-btn delete" title="Delete highlight">${DETAIL_ICON_DELETE}</button>
+        </div>
+        <div class="detail-note-body">
+          ${noteBody}
+          <button class="detail-note-action-btn edit" title="Edit note">${DETAIL_ICON_EDIT}</button>
+        </div>
       </div>`;
     }
     html += '</div>';
   }
 
   if (extra.snapshots.length > 0) {
-    html += '<div class="detail-section"><span class="detail-section-label">Snapshots:</span>';
+    html += '<div class="detail-section">';
     html += `<div class="detail-snapshots" data-slug="${escapeHtml(extra.slug)}">`;
     for (const s of extra.snapshots) {
-      const date = new Date(s.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const date = new Date(s.timestamp).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
       html += `<div class="detail-snapshot-row" data-ts="${s.timestamp}">`;
       html += `<span class="detail-snapshot-time">${escapeHtml(date)}</span>`;
       html += '<span class="detail-snapshot-badges">';
-      if (s.hasMd) html += `<span class="detail-snapshot-badge md" data-ts="${s.timestamp}">MD</span>`;
-      if (s.hasHtml) html += `<span class="detail-snapshot-badge html" data-ts="${s.timestamp}">HTML</span>`;
+      if (s.hasMd)
+        html += `<span class="detail-snapshot-badge md" data-ts="${s.timestamp}">MD</span>`;
+      if (s.hasHtml)
+        html += `<span class="detail-snapshot-badge html" data-ts="${s.timestamp}">HTML</span>`;
       html += `<button class="detail-snapshot-delete" data-ts="${s.timestamp}" title="Delete snapshot">&times;</button>`;
       html += '</span>';
       html += '</div>';
@@ -2597,47 +3145,120 @@ function renderExtraDetailHtml(extra, cardTimestamp) {
   return html;
 }
 
-
 function bindNoteDeleteButtons(container) {
-  container.querySelectorAll('.detail-note-delete').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const entry = btn.closest('.detail-note-entry');
-      const section = btn.closest('.detail-notes-section');
-      const noteSlug = entry?.dataset.noteSlug;
+  container
+    .querySelectorAll('.detail-note-action-btn.delete')
+    .forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const entry = btn.closest('.detail-note-entry');
+        const section = btn.closest('.detail-notes-section');
+        const noteSlug = entry?.dataset.noteSlug;
 
-      if (!noteSlug) return;
+        if (!noteSlug) return;
 
-      try {
-        await chrome.runtime.sendMessage({
-          action: 'deleteNote',
-          noteSlug
-        });
-      } catch (err) {
-        logError('Delete note error:', err);
-        return;
-      }
+        try {
+          await chrome.runtime.sendMessage({
+            action: 'deleteNote',
+            noteSlug,
+          });
+        } catch (err) {
+          logError('Delete note error:', err);
+          return;
+        }
 
-      entry.remove();
-      // If no more notes, remove the section
-      if (section && section.querySelectorAll('.detail-note-entry').length === 0) {
-        section.remove();
-      }
+        entry.remove();
+        if (
+          section &&
+          section.querySelectorAll('.detail-note-entry').length === 0
+        ) {
+          section.remove();
+        }
+      });
     });
+
+  container
+    .querySelectorAll('.detail-note-entry .detail-note-action-btn.edit')
+    .forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const entry = btn.closest('.detail-note-entry');
+        const noteSlug = entry?.dataset.noteSlug;
+        if (!noteSlug) return;
+        openDetailNoteEditor(entry, noteSlug);
+      });
+    });
+}
+
+function openDetailNoteEditor(entry, noteSlug) {
+  const body = entry.querySelector('.detail-note-body');
+  const contentEl = body.querySelector('.detail-note-content, em');
+  const currentText =
+    contentEl?.textContent === 'No annotation'
+      ? ''
+      : contentEl?.textContent || '';
+  body.innerHTML = `<textarea class="detail-note-edit-textarea" placeholder="Add a note...">${escapeHtml(currentText)}</textarea>`;
+  const ta = body.querySelector('textarea');
+  autoResizeTextarea(ta);
+  ta.focus();
+
+  let saveTimeout = null;
+  ta.addEventListener('input', () => {
+    autoResizeTextarea(ta);
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(async () => {
+      try {
+        const resp = await sendAction({
+          action: 'updateNote',
+          noteSlug,
+          note: ta.value,
+        });
+        if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
+          entry.dataset.noteSlug = resp.noteSlug;
+          noteSlug = resp.noteSlug;
+        }
+      } catch (err) {
+        logError('[options] Note save error:', err);
+      }
+    }, 500);
+  });
+
+  ta.addEventListener('blur', () => {
+    clearTimeout(saveTimeout);
+    sendAction({ action: 'updateNote', noteSlug, note: ta.value })
+      .then((resp) => {
+        if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
+          entry.dataset.noteSlug = resp.noteSlug;
+        }
+      })
+      .catch(() => {});
+    const noteText = ta.value;
+    const noteBody = noteText
+      ? `<span class="detail-note-content">${escapeHtml(noteText)}</span>`
+      : `<em>No annotation</em>`;
+    body.innerHTML = `${noteBody}
+      <button class="detail-note-action-btn edit" title="Edit note">${DETAIL_ICON_EDIT}</button>`;
+    bindNoteDeleteButtons(
+      entry.closest('.detail-notes-section') || entry.parentElement,
+    );
   });
 }
 
 function bindSnapshotClickHandlers(container) {
-  container.querySelectorAll('.detail-snapshot-row').forEach(row => {
+  container.querySelectorAll('.detail-snapshot-row').forEach((row) => {
     row.addEventListener('dblclick', async (e) => {
       e.stopPropagation();
       const slug = row.closest('.detail-snapshots')?.dataset.slug;
       const ts = parseInt(row.dataset.ts, 10);
       if (!slug || !ts) return;
-      await chrome.runtime.sendMessage({ action: 'openSnapshot', slug, timestamp: ts });
+      await chrome.runtime.sendMessage({
+        action: 'openSnapshot',
+        slug,
+        timestamp: ts,
+      });
     });
   });
-  container.querySelectorAll('.detail-snapshot-delete').forEach(btn => {
+  container.querySelectorAll('.detail-snapshot-delete').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const row = btn.closest('.detail-snapshot-row');
@@ -2646,13 +3267,20 @@ function bindSnapshotClickHandlers(container) {
       const ts = parseInt(btn.dataset.ts, 10);
       if (!slug || !ts) return;
       try {
-        await chrome.runtime.sendMessage({ action: 'deleteSnapshot', slug, timestamp: ts });
+        await chrome.runtime.sendMessage({
+          action: 'deleteSnapshot',
+          slug,
+          timestamp: ts,
+        });
       } catch (err) {
         logError('Delete snapshot error:', err);
         return;
       }
       row.remove();
-      if (section && section.querySelectorAll('.detail-snapshot-row').length === 0) {
+      if (
+        section &&
+        section.querySelectorAll('.detail-snapshot-row').length === 0
+      ) {
         section.closest('.detail-section')?.remove();
       }
     });
@@ -2660,36 +3288,105 @@ function bindSnapshotClickHandlers(container) {
 }
 
 function bindPageNoteHandler(container, url) {
-  const textarea = container.querySelector('.detail-page-note');
-  if (!textarea) return;
+  const wrap = container.querySelector('.detail-page-note-wrap');
+  if (!wrap) return;
 
-  requestAnimationFrame(() => autoResizeTextarea(textarea));
+  const addBtn = wrap.querySelector('.detail-page-note-add');
+  if (addBtn) {
+    addBtn.addEventListener('click', () => {
+      openDetailPageNoteEditor(wrap, '', wrap.dataset.noteSlug || '', url);
+    });
+  }
+
+  const editBtn = wrap.querySelector(
+    '.detail-page-note-display .detail-note-action-btn.edit',
+  );
+  if (editBtn) {
+    editBtn.addEventListener('click', () => {
+      const bodyEl = wrap.querySelector('.note-body');
+      openDetailPageNoteEditor(
+        wrap,
+        bodyEl?.textContent || '',
+        wrap.dataset.noteSlug || '',
+        url,
+      );
+    });
+  }
+}
+
+function openDetailPageNoteEditor(wrap, text, noteSlug, url) {
+  const pageSlug = wrap.dataset.pageSlug;
+  wrap.innerHTML = `<textarea class="detail-page-note-textarea" placeholder="Add a page note...">${escapeHtml(text)}</textarea>`;
+  const ta = wrap.querySelector('textarea');
+  autoResizeTextarea(ta);
+  ta.focus();
 
   let saveTimeout = null;
-  textarea.addEventListener('input', () => {
-    autoResizeTextarea(textarea);
+  ta.addEventListener('input', () => {
+    autoResizeTextarea(ta);
     clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(async () => {
-      const note = textarea.value;
-      const noteSlug = textarea.dataset.noteSlug;
-      const pageSlug = textarea.dataset.pageSlug;
-      try {
-        if (noteSlug) {
-          const unResp = await sendAction({ action: 'updateNote', noteSlug, note });
-          if (unResp?.noteSlug && unResp.noteSlug !== noteSlug) {
-            textarea.dataset.noteSlug = unResp.noteSlug;
-          }
-        } else if (note) {
-          const resp = await sendAction({ action: 'createNote', pageSlug, url, excerpt: null, note, cssPath: null });
-          if (resp?.noteSlug) {
-            textarea.dataset.noteSlug = resp.noteSlug;
-          }
-        }
-      } catch (err) {
-        logError('[options] Page note save error:', err);
-      }
-    }, 500);
+    saveTimeout = setTimeout(
+      () => saveDetailPageNote(ta, wrap, pageSlug, url),
+      500,
+    );
   });
+
+  ta.addEventListener('blur', () => {
+    clearTimeout(saveTimeout);
+    saveDetailPageNote(ta, wrap, pageSlug, url).then(() => {
+      const noteText = ta.value;
+      const currentSlug = wrap.dataset.noteSlug || '';
+      if (!noteText && !currentSlug) {
+        wrap.innerHTML = `<button class="detail-page-note-add">+ Add page note</button>`;
+        bindPageNoteHandler(
+          wrap.closest('.detail-section').parentElement || wrap.parentElement,
+          url,
+        );
+      } else if (noteText) {
+        wrap.innerHTML = `<div class="detail-page-note-display">
+          <span class="note-body">${escapeHtml(noteText)}</span>
+          <button class="detail-note-action-btn edit" title="Edit">${DETAIL_ICON_EDIT}</button>
+        </div>`;
+        bindPageNoteHandler(
+          wrap.closest('.detail-section').parentElement || wrap.parentElement,
+          url,
+        );
+      } else {
+        wrap.innerHTML = `<button class="detail-page-note-add">+ Add page note</button>`;
+        bindPageNoteHandler(
+          wrap.closest('.detail-section').parentElement || wrap.parentElement,
+          url,
+        );
+      }
+    });
+  });
+}
+
+async function saveDetailPageNote(ta, wrap, pageSlug, url) {
+  const note = ta.value;
+  const noteSlug = wrap.dataset.noteSlug;
+  try {
+    if (noteSlug) {
+      const resp = await sendAction({ action: 'updateNote', noteSlug, note });
+      if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
+        wrap.dataset.noteSlug = resp.noteSlug;
+      }
+    } else if (note) {
+      const resp = await sendAction({
+        action: 'createNote',
+        pageSlug,
+        url,
+        excerpt: null,
+        note,
+        cssPath: null,
+      });
+      if (resp?.noteSlug) {
+        wrap.dataset.noteSlug = resp.noteSlug;
+      }
+    }
+  } catch (err) {
+    logError('[options] Page note save error:', err);
+  }
 }
 
 function attentionLevel(normalized) {
@@ -2701,23 +3398,47 @@ function attentionLevel(normalized) {
 
 function resultRowHtml(title, url, opts = {}) {
   const safeUrl = escapeHtml(url || '<unknown>');
-  const { pinned, deletable = false, attScore = 0, maxAtt = 1, attDetail = null, notes = [], timestamps = [], context = 'global', pinnedAt, pinSource, cssClass, childIds = [], parentIds = [], excludeListId, likes = 0, matchSources, hasHighlightNotes } = opts;
+  const {
+    pinned,
+    deletable = false,
+    attScore = 0,
+    maxAtt = 1,
+    attDetail = null,
+    notes = [],
+    timestamps = [],
+    context = 'global',
+    pinnedAt,
+    pinSource,
+    cssClass,
+    childIds = [],
+    parentIds = [],
+    excludeListId,
+    likes = 0,
+    matchSources,
+    hasHighlightNotes,
+  } = opts;
 
-  const lastVisit = timestamps.length > 0 ? formatTime(Math.max(...timestamps)) : '';
+  const lastVisit =
+    timestamps.length > 0 ? formatTime(Math.max(...timestamps)) : '';
   const normalized = maxAtt > 0 ? attScore / maxAtt : 0;
 
   let site = '';
   try {
     const parsed = new URL(url);
-    site = parsed.protocol === 'file:' ? 'file' : parsed.hostname.replace(/^www\./, '');
+    site =
+      parsed.protocol === 'file:'
+        ? 'file'
+        : parsed.hostname.replace(/^www\./, '');
   } catch {}
 
   const safeTitle = escapeHtml(title || site || url || '<unknown>');
 
-  const dates = [...new Set(timestamps.map(ts => new Date(ts).toISOString().slice(0, 10)))].join(',');
+  const dates = [
+    ...new Set(timestamps.map((ts) => new Date(ts).toISOString().slice(0, 10))),
+  ].join(',');
 
   const hasNotes = hasHighlightNotes === true;
-  const hasSnaps = childIds.some(id => id.startsWith(SNAPSHOT_PREFIX));
+  const hasSnaps = childIds.some((id) => id.startsWith(SNAPSHOT_PREFIX));
   const belongedListNames = [];
   for (const pid of parentIds) {
     if (!pid.startsWith(LIST_PREFIX) || isSystemList(pid)) continue;
@@ -2727,19 +3448,39 @@ function resultRowHtml(title, url, opts = {}) {
     if (name) belongedListNames.push(name);
   }
   const attLvl = attentionLevel(normalized);
-  if (url) cardDataByUrl.set(url, {
-    attDetail: attDetail ? { timeOnPage: attDetail.timeOnPage, scrollDepth: attDetail.scrollDepth, clicks: attDetail.clicks } : null,
-    timestamps,
-  });
+  if (url)
+    cardDataByUrl.set(url, {
+      attDetail: attDetail
+        ? {
+            timeOnPage: attDetail.timeOnPage,
+            scrollDepth: attDetail.scrollDepth,
+            clicks: attDetail.clicks,
+          }
+        : null,
+      timestamps,
+    });
   const attCtrlHtml = `<div class="att-ctrl${attLvl ? ' ' + attLvl : ''}" data-url="${safeUrl}" data-title="${safeTitle}"><span class="att-ctrl-dot"></span><button class="att-ctrl-btn" title="View details">···</button></div>`;
-  const listTagsHtml = belongedListNames.map(n => `<span class="card-tag card-tag-list">${escapeHtml(n)}</span>`).join('');
+  const listTagsHtml = belongedListNames
+    .map((n) => `<span class="card-tag card-tag-list">${escapeHtml(n)}</span>`)
+    .join('');
   const isLiked = likes > 0;
   const isAuto = pinSource === 'auto';
   const matchNoteHit = matchSources && matchSources.has('note');
   const matchSnapHit = matchSources && matchSources.has('snapshot');
-  const hasExtras = hasNotes || hasSnaps || isLiked || isAuto || listTagsHtml || matchNoteHit || matchSnapHit;
-  const extrasHtml = hasExtras ? `<div class="card-extras">${isAuto ? '<span class="card-tag card-tag-auto">auto</span>' : ''}${isLiked ? '<span class="card-tag card-tag-liked">liked</span>' : ''}${hasNotes ? '<span class="card-tag card-tag-note">note</span>' : ''}${hasSnaps ? '<span class="card-tag card-tag-snap">snapshot</span>' : ''}${matchNoteHit ? '<span class="card-tag card-tag-match-note">matched in note</span>' : ''}${matchSnapHit ? '<span class="card-tag card-tag-match-snap">matched in snapshot</span>' : ''}${listTagsHtml}</div>` : '';
-  const cardActionsHtml = deletable ? `<div class="card-actions"><button class="result-delete" data-delete-url="${safeUrl}" data-delete-title="${safeTitle}" title="Delete">${DELETE_SVG}</button></div>` : '';
+  const hasExtras =
+    hasNotes ||
+    hasSnaps ||
+    isLiked ||
+    isAuto ||
+    listTagsHtml ||
+    matchNoteHit ||
+    matchSnapHit;
+  const extrasHtml = hasExtras
+    ? `<div class="card-extras">${isAuto ? '<span class="card-tag card-tag-auto">auto</span>' : ''}${isLiked ? '<span class="card-tag card-tag-liked">liked</span>' : ''}${hasNotes ? '<span class="card-tag card-tag-note">note</span>' : ''}${hasSnaps ? '<span class="card-tag card-tag-snap">snapshot</span>' : ''}${matchNoteHit ? '<span class="card-tag card-tag-match-note">matched in note</span>' : ''}${matchSnapHit ? '<span class="card-tag card-tag-match-snap">matched in snapshot</span>' : ''}${listTagsHtml}</div>`
+    : '';
+  const cardActionsHtml = deletable
+    ? `<div class="card-actions"><button class="result-delete" data-delete-url="${safeUrl}" data-delete-title="${safeTitle}" title="Delete">${DELETE_SVG}</button></div>`
+    : '';
 
   return `<div class="result-item${cssClass ? ' ' + cssClass : ''}">
     <div class="result-row" data-url="${safeUrl}" data-title="${safeTitle}" data-dates="${dates}" draggable="true">
@@ -2764,9 +3505,15 @@ function bindResultDelegation(container) {
       e.stopPropagation();
       const ctrl = e.target.closest('.att-ctrl');
       if (ctrl) {
-        const { attDetail = null, timestamps = [] } = cardDataByUrl.get(ctrl.dataset.url) || {};
+        const { attDetail = null, timestamps = [] } =
+          cardDataByUrl.get(ctrl.dataset.url) || {};
         const cardTs = timestamps.length > 0 ? Math.max(...timestamps) : null;
-        openPageDetailCard(ctrl.dataset.url, ctrl.dataset.title, attDetail, cardTs);
+        openPageDetailCard(
+          ctrl.dataset.url,
+          ctrl.dataset.title,
+          attDetail,
+          cardTs,
+        );
       }
       return;
     }
@@ -2785,15 +3532,17 @@ function bindResultDelegation(container) {
       const anchorIdx = allRows.indexOf(lastClickedRow);
       const curIdx = allRows.indexOf(row);
       if (anchorIdx !== -1 && curIdx !== -1) {
-        const [lo, hi] = anchorIdx < curIdx ? [anchorIdx, curIdx] : [curIdx, anchorIdx];
-        if (!e.ctrlKey && !e.metaKey) allRows.forEach(r => r.classList.remove('selected'));
+        const [lo, hi] =
+          anchorIdx < curIdx ? [anchorIdx, curIdx] : [curIdx, anchorIdx];
+        if (!e.ctrlKey && !e.metaKey)
+          allRows.forEach((r) => r.classList.remove('selected'));
         for (let i = lo; i <= hi; i++) allRows[i].classList.add('selected');
       }
     } else if (e.ctrlKey || e.metaKey) {
       row.classList.toggle('selected');
       lastClickedRow = row;
     } else {
-      allRows.forEach(r => r.classList.remove('selected'));
+      allRows.forEach((r) => r.classList.remove('selected'));
       container._virtualScroller?.clearSelection?.();
       row.classList.add('selected');
       lastClickedRow = row;
@@ -2802,7 +3551,12 @@ function bindResultDelegation(container) {
   });
 
   container.addEventListener('dblclick', (e) => {
-    if (e.target.closest('.result-pin') || e.target.closest('.card-actions') || e.target.closest('.att-ctrl')) return;
+    if (
+      e.target.closest('.result-pin') ||
+      e.target.closest('.card-actions') ||
+      e.target.closest('.att-ctrl')
+    )
+      return;
     const item = e.target.closest('.result-item');
     if (!item) return;
     const row = item.querySelector('.result-row');
@@ -2815,15 +3569,24 @@ function bindResultDelegation(container) {
     if (!row) return;
     // Include all selected rows if the dragged row is part of a selection
     const selected = container.querySelectorAll('.result-row.selected');
-    const items = (selected.length > 0 && row.classList.contains('selected'))
-      ? [...selected].map(r => ({ url: r.dataset.url, title: r.dataset.title }))
-      : [{ url: row.dataset.url, title: row.dataset.title }];
+    const items =
+      selected.length > 0 && row.classList.contains('selected')
+        ? [...selected].map((r) => ({
+            url: r.dataset.url,
+            title: r.dataset.title,
+          }))
+        : [{ url: row.dataset.url, title: row.dataset.title }];
     e.dataTransfer.setData('text/plain', JSON.stringify({ items }));
     e.dataTransfer.effectAllowed = 'copy';
   });
 }
 
-function openPageDetailCard(url, title, attDetail = null, cardTimestamp = null) {
+function openPageDetailCard(
+  url,
+  title,
+  attDetail = null,
+  cardTimestamp = null,
+) {
   closePageDetailCard();
 
   const overlay = document.createElement('div');
@@ -2831,7 +3594,9 @@ function openPageDetailCard(url, title, attDetail = null, cardTimestamp = null) 
   overlay.className = 'page-detail-overlay';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) closePageDetailCard(); });
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closePageDetailCard();
+  });
 
   const card = document.createElement('div');
   card.className = 'page-detail-card';
@@ -2842,7 +3607,9 @@ function openPageDetailCard(url, title, attDetail = null, cardTimestamp = null) 
     </div>
     <div class="page-detail-body"><div class="page-detail-loading"><span class="spinner"></span></div></div>
   `;
-  card.querySelector('.page-detail-close').addEventListener('click', closePageDetailCard);
+  card
+    .querySelector('.page-detail-close')
+    .addEventListener('click', closePageDetailCard);
   card.querySelector('.page-detail-title').addEventListener('click', () => {
     startEditingDetailTitle(card, url);
   });
@@ -2853,23 +3620,32 @@ function openPageDetailCard(url, title, attDetail = null, cardTimestamp = null) 
 
   if (!url || url === '<unknown>') {
     const body = card.querySelector('.page-detail-body');
-    body.innerHTML = '<div style="padding:16px;color:var(--text-muted)">Page details unavailable</div>';
+    body.innerHTML =
+      '<div style="padding:16px;color:var(--text-muted)">Page details unavailable</div>';
   } else {
-    loadExtraDetail(url).then(extra => {
-      const body = card.querySelector('.page-detail-body');
-      let html = buildDetailHtml(url, attDetail, [], extra.likes || 0);
-      const extraHtml = renderExtraDetailHtml(extra, cardTimestamp);
-      body.innerHTML = html + (extraHtml ? `<div class="detail-extra">${extraHtml}</div>` : '');
-      bindNoteDeleteButtons(body);
-      bindSnapshotClickHandlers(body);
-      bindPageNoteHandler(body, url);
-    }).catch(() => {
-      const body = card.querySelector('.page-detail-body');
-      if (body) body.innerHTML = '<div style="padding:16px;color:var(--text-muted)">Failed to load page details</div>';
-    });
+    loadExtraDetail(url)
+      .then((extra) => {
+        const body = card.querySelector('.page-detail-body');
+        let html = buildDetailHtml(url, attDetail, [], extra.likes || 0);
+        const extraHtml = renderExtraDetailHtml(extra, cardTimestamp);
+        body.innerHTML =
+          html +
+          (extraHtml ? `<div class="detail-extra">${extraHtml}</div>` : '');
+        bindNoteDeleteButtons(body);
+        bindSnapshotClickHandlers(body);
+        bindPageNoteHandler(body, url);
+      })
+      .catch(() => {
+        const body = card.querySelector('.page-detail-body');
+        if (body)
+          body.innerHTML =
+            '<div style="padding:16px;color:var(--text-muted)">Failed to load page details</div>';
+      });
   }
 
-  const onEsc = (e) => { if (e.key === 'Escape') closePageDetailCard(); };
+  const onEsc = (e) => {
+    if (e.key === 'Escape') closePageDetailCard();
+  };
   overlay._escHandler = onEsc;
   document.addEventListener('keydown', onEsc);
 }
@@ -2892,7 +3668,9 @@ function startEditingDetailTitle(card, url) {
     const newTitleEl = document.createElement('div');
     newTitleEl.className = 'page-detail-title';
     newTitleEl.textContent = newTitle;
-    newTitleEl.addEventListener('click', () => startEditingDetailTitle(card, url));
+    newTitleEl.addEventListener('click', () =>
+      startEditingDetailTitle(card, url),
+    );
     input.replaceWith(newTitleEl);
 
     if (newTitle !== currentTitle) {
@@ -2918,7 +3696,8 @@ function startEditingDetailTitle(card, url) {
 function closePageDetailCard() {
   const overlay = document.getElementById('pageDetailOverlay');
   if (overlay) {
-    if (overlay._escHandler) document.removeEventListener('keydown', overlay._escHandler);
+    if (overlay._escHandler)
+      document.removeEventListener('keydown', overlay._escHandler);
     overlay.remove();
   }
 }
@@ -2998,6 +3777,15 @@ function updateMainTitle(text) {
   confirmBtn.style.display = 'none';
 }
 
+function updatePinCount(listId, count) {
+  const item = document.querySelector(
+    `.sidebar-item[data-list-id="${listId}"]`,
+  );
+  if (!item) return;
+  const el = item.querySelector('.pin-count');
+  if (el) el.textContent = count > 0 ? count : '';
+}
+
 function enterTitleEditMode(prefill, onConfirm, onCancel) {
   const titleEl = document.getElementById('mainTitle');
   const inputEl = document.getElementById('mainTitleInput');
@@ -3033,8 +3821,14 @@ function enterTitleEditMode(prefill, onConfirm, onCancel) {
   }
 
   function onKey(e) {
-    if (e.key === 'Enter') { e.preventDefault(); confirm(); }
-    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      confirm();
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      cancel();
+    }
   }
 
   function onBlur() {
@@ -3051,15 +3845,21 @@ function enterTitleEditMode(prefill, onConfirm, onCancel) {
 }
 
 function updateSidebarActive() {
-  document.querySelectorAll('.sidebar-item').forEach(item => item.classList.remove('active'));
+  document
+    .querySelectorAll('.sidebar-item')
+    .forEach((item) => item.classList.remove('active'));
   document.getElementById('exploreBtn').classList.remove('active');
   document.getElementById('recycleBinBtn').classList.remove('active');
 
   if (activeView.type === 'category') {
-    const el = document.querySelector(`.sidebar-item[data-category="${activeView.value}"]`);
+    const el = document.querySelector(
+      `.sidebar-item[data-category="${activeView.value}"]`,
+    );
     if (el) el.classList.add('active');
   } else if (activeView.type === 'list') {
-    const el = document.querySelector(`.sidebar-item[data-list-id="${activeView.id}"]`);
+    const el = document.querySelector(
+      `.sidebar-item[data-list-id="${activeView.id}"]`,
+    );
     if (el) el.classList.add('active');
   } else if (activeView.type === 'explore') {
     document.getElementById('exploreBtn').classList.add('active');
@@ -3080,7 +3880,9 @@ async function buildTreeFromManifest(treeNodes) {
     const entity = await readCacheable(key);
     if (!entity || entity.deleted) continue;
     const slug = entity.slug || entitySlug(key);
-    const children = treeNode.children?.length ? await buildTreeFromManifest(treeNode.children) : [];
+    const children = treeNode.children?.length
+      ? await buildTreeFromManifest(treeNode.children)
+      : [];
     const node = { slug, name: entity.name || slug, children };
     nodes.push(node);
   }
@@ -3107,9 +3909,13 @@ let listFoldState = {};
 
 async function loadFoldState() {
   try {
-    const { listFoldState: saved } = await chrome.storage.session.get(['listFoldState']);
+    const { listFoldState: saved } = await chrome.storage.session.get([
+      'listFoldState',
+    ]);
     if (saved) listFoldState = saved;
-  } catch (e) { /* ignore */ }
+  } catch (e) {
+    /* ignore */
+  }
 }
 
 function saveFoldState() {
@@ -3129,7 +3935,9 @@ async function renderLists() {
   const empty = document.getElementById('listsEmpty');
 
   // Remove existing list items and children containers (keep the empty placeholder)
-  listEl.querySelectorAll('.sidebar-item, .sidebar-children').forEach(el => el.remove());
+  listEl
+    .querySelectorAll('.sidebar-item, .sidebar-children')
+    .forEach((el) => el.remove());
 
   if (tree.length === 0) {
     empty.style.display = 'block';
@@ -3164,18 +3972,27 @@ function createSidebarItemDOM(node, depth) {
   item.setAttribute('role', 'button');
   item.tabIndex = 0;
   item.dataset.listId = node.slug;
-  const inset = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-item-inset')) || 10;
-  item.style.paddingLeft = (inset + depth * 16) + 'px';
+  const inset =
+    parseInt(
+      getComputedStyle(document.documentElement).getPropertyValue(
+        '--sidebar-item-inset',
+      ),
+    ) || 10;
+  item.style.paddingLeft = inset + depth * 16 + 'px';
 
   const hasChildren = node.children.length > 0;
   const expanded = listFoldState[node.slug] !== false;
 
-  const chevronSvg = '<svg viewBox="0 0 8 8"><path d="M2 1l4 3-4 3z" fill="currentColor"/></svg>';
+  const chevronSvg =
+    '<svg viewBox="0 0 8 8"><path d="M2 1l4 3-4 3z" fill="currentColor"/></svg>';
   item.innerHTML = `
-    ${hasChildren
-      ? `<button class="fold-toggle${expanded ? ' expanded' : ''}" title="${expanded ? 'Collapse' : 'Expand'}">${chevronSvg}</button>`
-      : '<span class="fold-spacer"></span>'}
+    ${
+      hasChildren
+        ? `<button class="fold-toggle${expanded ? ' expanded' : ''}" title="${expanded ? 'Collapse' : 'Expand'}">${chevronSvg}</button>`
+        : '<span class="fold-spacer"></span>'
+    }
     <span class="label">${escapeHtml(listDisplayName(node))}</span>
+    <span class="pin-count"></span>
     <button class="remove-list" title="Remove list">&times;</button>
   `;
 
@@ -3196,13 +4013,17 @@ function createSidebarItemDOM(node, depth) {
   }
 
   item.addEventListener('click', (e) => {
-    if (e.target.closest('.remove-list') || e.target.closest('.fold-toggle')) return;
+    if (e.target.closest('.remove-list') || e.target.closest('.fold-toggle'))
+      return;
     showList(node);
   });
 
   item.querySelector('.remove-list').addEventListener('click', async (e) => {
     e.stopPropagation();
-    await chrome.runtime.sendMessage({ action: 'deleteList', listId: node.slug });
+    await chrome.runtime.sendMessage({
+      action: 'deleteList',
+      listId: node.slug,
+    });
     delete allListPins[node.slug];
     renderLists();
     if (activeView.type === 'list' && activeView.id === node.slug) {
@@ -3272,9 +4093,11 @@ function bindSidebarItemDragDrop(item, node) {
   });
   item.addEventListener('dragend', () => {
     item.classList.remove('dragging');
-    document.querySelectorAll('.reorder-above, .reorder-below, .nest-target').forEach(el => {
-      el.classList.remove('reorder-above', 'reorder-below', 'nest-target');
-    });
+    document
+      .querySelectorAll('.reorder-above, .reorder-below, .nest-target')
+      .forEach((el) => {
+        el.classList.remove('reorder-above', 'reorder-below', 'nest-target');
+      });
   });
 
   let dragCounter = 0;
@@ -3321,7 +4144,12 @@ function bindSidebarItemDragDrop(item, node) {
   });
   item.addEventListener('drop', async (e) => {
     e.preventDefault();
-    item.classList.remove('drag-over', 'reorder-above', 'reorder-below', 'nest-target');
+    item.classList.remove(
+      'drag-over',
+      'reorder-above',
+      'reorder-below',
+      'nest-target',
+    );
 
     if (e.dataTransfer.types.includes('application/x-list-reorder')) {
       const draggedId = e.dataTransfer.getData('application/x-list-reorder');
@@ -3345,14 +4173,18 @@ function bindSidebarItemDragDrop(item, node) {
         const titles = {};
         for (const { url, title } of items) {
           const pinId = pageKey(generateSlugFromUrl(url));
-          if (url && !pins.some(p => p.id === pinId)) {
+          if (url && !pins.some((p) => p.id === pinId)) {
             pins.push({ id: pinId, pinnedAt: Date.now() });
             newUrls.push(url);
             if (title) titles[url] = title;
           }
         }
         if (newUrls.length > 0) {
-          const msg = { action: 'addListPins', listId: node.slug, urls: newUrls };
+          const msg = {
+            action: 'addListPins',
+            listId: node.slug,
+            urls: newUrls,
+          };
           if (Object.keys(titles).length > 0) msg.titles = titles;
           await chrome.runtime.sendMessage(msg);
           if (activeView.type === 'list' && activeView.id === node.slug) {
@@ -3372,7 +4204,6 @@ function createSidebarItem(node, depth) {
   return item;
 }
 
-
 // --- Utility ---
 function formatTime(timestamp) {
   const date = new Date(timestamp);
@@ -3391,7 +4222,7 @@ function formatTime(timestamp) {
 }
 
 // --- Event listeners: Sidebar categories ---
-document.querySelectorAll('.sidebar-item[data-category]').forEach(item => {
+document.querySelectorAll('.sidebar-item[data-category]').forEach((item) => {
   item.addEventListener('click', () => {
     showCategory(item.dataset.category);
   });
@@ -3406,7 +4237,10 @@ document.getElementById('exploreBtn').addEventListener('click', () => {
 document.getElementById('createListBtn').addEventListener('click', () => {
   // Remove any existing inline input
   const existing = document.querySelector('.inline-list-create');
-  if (existing) { existing.remove(); return; }
+  if (existing) {
+    existing.remove();
+    return;
+  }
   const listEl = document.getElementById('listsList');
   const input = document.createElement('input');
   input.className = 'inline-list-create';
@@ -3437,7 +4271,9 @@ document.getElementById('createListBtn').addEventListener('click', () => {
   });
   input.addEventListener('blur', () => {
     // Small delay to allow Enter keydown to fire before blur removes input
-    setTimeout(() => { if (document.querySelector('.inline-list-create')) input.remove(); }, 150);
+    setTimeout(() => {
+      if (document.querySelector('.inline-list-create')) input.remove();
+    }, 150);
   });
 });
 
@@ -3445,7 +4281,6 @@ document.getElementById('createListBtn').addEventListener('click', () => {
 document.getElementById('recycleBinBtn').addEventListener('click', () => {
   showRecycleBin();
 });
-
 
 // --- Marquee drag-select from results background ---
 function initMarqueeForElements(wrapper, container) {
@@ -3479,7 +4314,9 @@ function initMarqueeForElements(wrapper, container) {
     const additive = e.shiftKey || e.ctrlKey || e.metaKey;
 
     if (!additive) {
-      container.querySelectorAll('.result-row.selected').forEach(r => r.classList.remove('selected'));
+      container
+        .querySelectorAll('.result-row.selected')
+        .forEach((r) => r.classList.remove('selected'));
     }
 
     const onMouseMove = (ev) => {
@@ -3491,15 +4328,16 @@ function initMarqueeForElements(wrapper, container) {
       const minY = Math.min(startY, currentY);
       const maxY = Math.max(startY, currentY);
 
-      if (Math.abs(currentY - startY) > 3 || Math.abs(currentX - startX) > 3) didDrag = true;
+      if (Math.abs(currentY - startY) > 3 || Math.abs(currentX - startX) > 3)
+        didDrag = true;
 
       b.style.display = 'block';
       b.style.left = minX + 'px';
       b.style.top = minY + 'px';
-      b.style.width = (maxX - minX) + 'px';
-      b.style.height = (maxY - minY) + 'px';
+      b.style.width = maxX - minX + 'px';
+      b.style.height = maxY - minY + 'px';
 
-      container.querySelectorAll('.result-row').forEach(row => {
+      container.querySelectorAll('.result-row').forEach((row) => {
         const rowRect = row.getBoundingClientRect();
         const rowTop = rowRect.top - currentWrapperRect.top;
         const rowBottom = rowTop + rowRect.height;
@@ -3518,7 +4356,9 @@ function initMarqueeForElements(wrapper, container) {
       document.removeEventListener('mouseup', onMouseUp);
       syncChartHighlights();
 
-      setTimeout(() => { marqueeActive = false; }, 0);
+      setTimeout(() => {
+        marqueeActive = false;
+      }, 0);
     };
 
     document.addEventListener('mousemove', onMouseMove);
@@ -3529,12 +4369,12 @@ function initMarqueeForElements(wrapper, container) {
 // Init marquee for global results
 initMarqueeForElements(
   document.getElementById('resultsWrapper'),
-  document.getElementById('results')
+  document.getElementById('results'),
 );
 // Init marquee for list results
 initMarqueeForElements(
   document.getElementById('relatedResultsWrapper'),
-  document.getElementById('relatedResults')
+  document.getElementById('relatedResults'),
 );
 
 // --- Settings modal ---
@@ -3544,6 +4384,7 @@ document.getElementById('settingsBtn').addEventListener('click', async () => {
   updateStatistics();
   renderBlacklist();
   renderTrimRules();
+  renderShortcuts();
   // Populate debug logging checkbox from session storage
   const { debugLogging } = await chrome.storage.session.get(['debugLogging']);
   document.getElementById('debugLoggingToggle').checked = !!debugLogging;
@@ -3561,6 +4402,47 @@ document.getElementById('settingsModal').addEventListener('click', (e) => {
   }
 });
 
+// --- Settings: Keyboard Shortcuts ---
+const SHORTCUT_ORDER = [
+  'highlight-selection',
+  'capture-snapshot',
+  'like-page',
+  'dislike-page',
+];
+const SHORTCUT_LABELS = {
+  'highlight-selection': 'Highlight selected text or add a page note',
+};
+
+async function renderShortcuts() {
+  const commands = await chrome.commands.getAll();
+  const byName = Object.fromEntries(commands.map((c) => [c.name, c]));
+  const ordered = SHORTCUT_ORDER.map((n) => byName[n]).filter(Boolean);
+  const list = document.getElementById('shortcutsList');
+  list.innerHTML = '';
+  for (const cmd of ordered) {
+    const row = document.createElement('div');
+    row.className = 'shortcut-row';
+    const desc = document.createElement('span');
+    desc.className = 'shortcut-desc';
+    desc.textContent = SHORTCUT_LABELS[cmd.name] || cmd.description || cmd.name;
+    const key = document.createElement('span');
+    if (cmd.shortcut) {
+      key.className = 'shortcut-key';
+      key.textContent = cmd.shortcut;
+    } else {
+      key.className = 'shortcut-key not-set';
+      key.textContent = 'Not set';
+    }
+    row.append(desc, key);
+    list.appendChild(row);
+  }
+}
+
+document
+  .getElementById('customizeShortcutsBtn')
+  .addEventListener('click', () => {
+    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  });
 
 // --- Settings: Storage ---
 async function updateStorageStatus() {
@@ -3579,7 +4461,7 @@ async function updateStorageStatus() {
     sizeEl.textContent = '...';
     selectBtn.style.display = 'none';
     changeBtn.style.display = 'inline-block';
-    sendAction({ action: 'getDirectorySize' }).then(r => {
+    sendAction({ action: 'getDirectorySize' }).then((r) => {
       if (r?.success) sizeEl.textContent = formatBytes(r.size);
     });
   } else {
@@ -3593,7 +4475,9 @@ async function updateStorageStatus() {
 
 async function updateStatistics() {
   const result = await chrome.storage.local.get(['logBuffer']);
-  document.getElementById('bufferSize').textContent = (result.logBuffer || []).length;
+  document.getElementById('bufferSize').textContent = (
+    result.logBuffer || []
+  ).length;
 
   updateCacheSize();
 }
@@ -3610,15 +4494,13 @@ const SESSION_CACHE_KEYS = [
   { key: 'manifest:settings', label: 'Settings' },
   { key: 'manifest:name-to-id', label: 'List Name Map' },
 ];
-const LOCAL_CACHE_KEYS = [
-  { key: 'logBuffer', label: 'Log Buffer' },
-];
+const LOCAL_CACHE_KEYS = [{ key: 'logBuffer', label: 'Log Buffer' }];
 const CACHE_KEYS = [...SESSION_CACHE_KEYS, ...LOCAL_CACHE_KEYS];
 
 async function updateCacheSize() {
   const [sessionData, localData] = await Promise.all([
-    chrome.storage.session.get(SESSION_CACHE_KEYS.map(c => c.key)),
-    chrome.storage.local.get(LOCAL_CACHE_KEYS.map(c => c.key)),
+    chrome.storage.session.get(SESSION_CACHE_KEYS.map((c) => c.key)),
+    chrome.storage.local.get(LOCAL_CACHE_KEYS.map((c) => c.key)),
   ]);
   const data = { ...sessionData, ...localData };
 
@@ -3631,27 +4513,32 @@ async function updateCacheSize() {
   document.getElementById('cacheSize').textContent = formatBytes(totalBytes);
 }
 
-document.getElementById('flushBufferBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('flushBufferBtn');
-  btn.disabled = true;
-  btn.textContent = 'Flushing...';
+document
+  .getElementById('flushBufferBtn')
+  .addEventListener('click', async () => {
+    const btn = document.getElementById('flushBufferBtn');
+    btn.disabled = true;
+    btn.textContent = 'Flushing...';
 
-  try {
-    const resp = await chrome.runtime.sendMessage({ action: 'flushLogBuffer' });
-    if (resp?.success) {
-      btn.textContent = resp.remaining > 0 ? `${resp.remaining} remaining` : 'Flushed!';
-      await updateStatistics();
-    } else {
-      btn.textContent = 'Failed: ' + (resp?.error || 'unknown');
+    try {
+      const resp = await chrome.runtime.sendMessage({
+        action: 'flushLogBuffer',
+      });
+      if (resp?.success) {
+        btn.textContent =
+          resp.remaining > 0 ? `${resp.remaining} remaining` : 'Flushed!';
+        await updateStatistics();
+      } else {
+        btn.textContent = 'Failed: ' + (resp?.error || 'unknown');
+      }
+    } catch (e) {
+      btn.textContent = 'Error: ' + e.message;
     }
-  } catch (e) {
-    btn.textContent = 'Error: ' + e.message;
-  }
-  setTimeout(() => {
-    btn.disabled = false;
-    btn.textContent = 'Flush to Disk';
-  }, 2000);
-});
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = 'Flush to Disk';
+    }, 2000);
+  });
 
 document.getElementById('clearCacheBtn').addEventListener('click', async () => {
   const btn = document.getElementById('clearCacheBtn');
@@ -3660,7 +4547,7 @@ document.getElementById('clearCacheBtn').addEventListener('click', async () => {
 
   try {
     // Clear session cache keys (logBuffer stays in local — it's a transient buffer for pending log entries)
-    const sessionKeysToRemove = SESSION_CACHE_KEYS.map(c => c.key);
+    const sessionKeysToRemove = SESSION_CACHE_KEYS.map((c) => c.key);
     await chrome.storage.session.remove(sessionKeysToRemove);
 
     // Ask background to re-hydrate from settings.json
@@ -3699,7 +4586,11 @@ document.getElementById('selectDirBtn').addEventListener('click', async () => {
 
 // Change directory
 document.getElementById('changeDirBtn').addEventListener('click', async () => {
-  if (!confirm('Change storage directory?\n\nData will NOT be migrated automatically. To keep existing data, disable the extension and copy the portal-data folder to the new location before proceeding.')) {
+  if (
+    !confirm(
+      'Change storage directory?\n\nData will NOT be migrated automatically. To keep existing data, disable the extension and copy the portal-data folder to the new location before proceeding.',
+    )
+  ) {
     return;
   }
 
@@ -3720,9 +4611,14 @@ document.getElementById('changeDirBtn').addEventListener('click', async () => {
     }
 
     // Re-initialize the offscreen filesystem with the new handle
-    const initResp = await chrome.runtime.sendMessage({ action: 'initializeFilesystem' });
+    const initResp = await chrome.runtime.sendMessage({
+      action: 'initializeFilesystem',
+    });
     if (!initResp?.success) {
-      showStatus(`Directory changed but filesystem init failed: ${initResp?.error || 'unknown error'}. Try reloading the extension.`, 'warning');
+      showStatus(
+        `Directory changed but filesystem init failed: ${initResp?.error || 'unknown error'}. Try reloading the extension.`,
+        'warning',
+      );
     } else {
       showStatus(`Storage location changed to: ${result.name}`, 'success');
     }
@@ -3750,38 +4646,50 @@ function applyColorScheme(scheme) {
   } else {
     document.documentElement.removeAttribute('data-color-scheme');
   }
-  document.querySelectorAll('.color-dot').forEach(d => {
+  document.querySelectorAll('.color-dot').forEach((d) => {
     d.classList.toggle('active', d.dataset.scheme === scheme);
   });
 }
 
-document.getElementById('colorSchemePicker').addEventListener('click', async (e) => {
-  const dot = e.target.closest('.color-dot');
-  if (!dot) return;
-  const scheme = dot.dataset.scheme;
-  applyColorScheme(scheme);
-  await chrome.storage.session.set({ colorScheme: scheme });
-  await saveSettingsValue('colorScheme', scheme);
-});
+document
+  .getElementById('colorSchemePicker')
+  .addEventListener('click', async (e) => {
+    const dot = e.target.closest('.color-dot');
+    if (!dot) return;
+    const scheme = dot.dataset.scheme;
+    applyColorScheme(scheme);
+    await chrome.storage.session.set({ colorScheme: scheme });
+    await saveSettingsValue('colorScheme', scheme);
+  });
 
-document.getElementById('historyFileBatch').addEventListener('change', async () => {
-  const val = parseInt(document.getElementById('historyFileBatch').value) || 10;
-  historyState.fileBatch = Math.max(1, val);
-  document.getElementById('historyFileBatch').value = historyState.fileBatch;
-  await saveSettingsValue('historyFileBatch', historyState.fileBatch);
-  showStatus('Settings saved', 'success');
-});
+document
+  .getElementById('historyFileBatch')
+  .addEventListener('change', async () => {
+    const val =
+      parseInt(document.getElementById('historyFileBatch').value) || 10;
+    historyState.fileBatch = Math.max(1, val);
+    document.getElementById('historyFileBatch').value = historyState.fileBatch;
+    await saveSettingsValue('historyFileBatch', historyState.fileBatch);
+    showStatus('Settings saved', 'success');
+  });
 
-document.getElementById('captureSnapshotVideo').addEventListener('change', async () => {
-  await saveSettingsValue('captureSnapshotVideo', document.getElementById('captureSnapshotVideo').checked);
-  showStatus('Settings saved', 'success');
-});
+document
+  .getElementById('captureSnapshotVideo')
+  .addEventListener('change', async () => {
+    await saveSettingsValue(
+      'captureSnapshotVideo',
+      document.getElementById('captureSnapshotVideo').checked,
+    );
+    showStatus('Settings saved', 'success');
+  });
 
 // Debug logging toggle (session-stored, resets on browser restart)
-document.getElementById('debugLoggingToggle').addEventListener('change', async () => {
-  const enabled = document.getElementById('debugLoggingToggle').checked;
-  await chrome.storage.session.set({ debugLogging: enabled });
-});
+document
+  .getElementById('debugLoggingToggle')
+  .addEventListener('change', async () => {
+    const enabled = document.getElementById('debugLoggingToggle').checked;
+    await chrome.storage.session.set({ debugLogging: enabled });
+  });
 
 // Addon toggle helpers
 function setAddonOpen(bodyEl, open) {
@@ -3791,82 +4699,119 @@ function setAddonOpen(bodyEl, open) {
 
 // Sync settings
 document.getElementById('syncEnabled').addEventListener('change', () => {
-  setAddonOpen(document.getElementById('syncConfigFields'),
-    document.getElementById('syncEnabled').checked);
+  setAddonOpen(
+    document.getElementById('syncConfigFields'),
+    document.getElementById('syncEnabled').checked,
+  );
 });
 
 // Excluded Sites toggle
-document.getElementById('blacklistEnabled').addEventListener('change', async () => {
-  const enabled = document.getElementById('blacklistEnabled').checked;
-  setAddonOpen(document.getElementById('blacklistBody'), enabled);
-  await saveSettingsValue('blacklistEnabled', enabled);
-});
+document
+  .getElementById('blacklistEnabled')
+  .addEventListener('change', async () => {
+    const enabled = document.getElementById('blacklistEnabled').checked;
+    setAddonOpen(document.getElementById('blacklistBody'), enabled);
+    await saveSettingsValue('blacklistEnabled', enabled);
+  });
 
 // Title Cleanup toggle
-document.getElementById('titleCleanupEnabled').addEventListener('change', async () => {
-  const enabled = document.getElementById('titleCleanupEnabled').checked;
-  setAddonOpen(document.getElementById('titleCleanupBody'), enabled);
-  await saveSettingsValue('titleCleanupEnabled', enabled);
-});
+document
+  .getElementById('titleCleanupEnabled')
+  .addEventListener('change', async () => {
+    const enabled = document.getElementById('titleCleanupEnabled').checked;
+    setAddonOpen(document.getElementById('titleCleanupBody'), enabled);
+    await saveSettingsValue('titleCleanupEnabled', enabled);
+  });
 
 function syncShowMethodFields(method) {
-  document.getElementById('syncGithubFields').style.display = method === 'github' ? 'block' : 'none';
-  document.getElementById('syncFilesystemFields').style.display = method === 'filesystem' ? 'block' : 'none';
-  document.getElementById('syncWebdavFields').style.display = method === 'webdav' ? 'block' : 'none';
+  document.getElementById('syncGithubFields').style.display =
+    method === 'github' ? 'block' : 'none';
+  document.getElementById('syncFilesystemFields').style.display =
+    method === 'filesystem' ? 'block' : 'none';
+  document.getElementById('syncWebdavFields').style.display =
+    method === 'webdav' ? 'block' : 'none';
 }
 
 document.getElementById('syncMethod').addEventListener('change', () => {
   syncShowMethodFields(document.getElementById('syncMethod').value);
 });
 
-document.getElementById('selectSyncDirBtn').addEventListener('click', async () => {
-  try {
-    const result = await fsSyncStorage.selectSyncDirectory();
-    if (result.success) {
-      document.getElementById('syncFolderLabel').textContent = result.name;
-      document.getElementById('clearSyncDirBtn').style.display = '';
-      await saveSettingsValue('syncFolderName', result.name);
+document
+  .getElementById('selectSyncDirBtn')
+  .addEventListener('click', async () => {
+    try {
+      const result = await fsSyncStorage.selectSyncDirectory();
+      if (result.success) {
+        document.getElementById('syncFolderLabel').textContent = result.name;
+        document.getElementById('clearSyncDirBtn').style.display = '';
+        await saveSettingsValue('syncFolderName', result.name);
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError')
+        showStatus('Failed to select folder: ' + e.message, 'error');
     }
-  } catch (e) {
-    if (e.name !== 'AbortError') showStatus('Failed to select folder: ' + e.message, 'error');
-  }
-});
+  });
 
-document.getElementById('clearSyncDirBtn').addEventListener('click', async () => {
-  await sendAction({ action: 'clearSyncFolder' });
-  await saveSettingsValue('syncFolderName', '');
-  await saveSettingsValue('syncEnabled', false);
-  document.getElementById('syncEnabled').checked = false;
-  setAddonOpen(document.getElementById('syncConfigFields'), false);
-  document.getElementById('syncFolderLabel').textContent = '';
-  document.getElementById('clearSyncDirBtn').style.display = 'none';
-  document.getElementById('syncDevicesSection').style.display = 'none';
-  document.getElementById('syncStatus').textContent = '';
-});
+document
+  .getElementById('clearSyncDirBtn')
+  .addEventListener('click', async () => {
+    await sendAction({ action: 'clearSyncFolder' });
+    await saveSettingsValue('syncFolderName', '');
+    await saveSettingsValue('syncEnabled', false);
+    document.getElementById('syncEnabled').checked = false;
+    setAddonOpen(document.getElementById('syncConfigFields'), false);
+    document.getElementById('syncFolderLabel').textContent = '';
+    document.getElementById('clearSyncDirBtn').style.display = 'none';
+    document.getElementById('syncDevicesSection').style.display = 'none';
+    document.getElementById('syncStatus').textContent = '';
+  });
 
 // Save current sync settings from form fields. Returns false if validation fails.
 async function saveSyncSettings() {
   const enabled = document.getElementById('syncEnabled').checked;
   const method = document.getElementById('syncMethod').value;
-  const interval = parseInt(document.getElementById('syncIntervalMinutes').value) || 5;
-  const retention = parseInt(document.getElementById('syncRetentionDays').value) || 7;
+  const interval =
+    parseInt(document.getElementById('syncIntervalMinutes').value) || 5;
+  const retention =
+    parseInt(document.getElementById('syncRetentionDays').value) || 7;
 
   if (enabled) {
     if (method === 'github') {
       const repoUrl = document.getElementById('syncRepoUrl').value.trim();
-      if (!repoUrl) { showStatus('Repository URL is required', 'error'); return false; }
+      if (!repoUrl) {
+        showStatus('Repository URL is required', 'error');
+        return false;
+      }
       const authState = await sendAction({ action: 'getSyncAuthState' });
-      if (!authState.hasToken) { showStatus('GitHub not connected — click "Connect with GitHub" first', 'error'); return false; }
+      if (!authState.hasToken) {
+        showStatus(
+          'GitHub not connected — click "Connect with GitHub" first',
+          'error',
+        );
+        return false;
+      }
       await saveSettingsValue('syncRepoUrl', repoUrl);
     } else if (method === 'filesystem') {
       const folderName = await loadSettingsValue('syncFolderName', '');
-      if (!folderName) { showStatus('Please select a sync folder first', 'error'); return false; }
+      if (!folderName) {
+        showStatus('Please select a sync folder first', 'error');
+        return false;
+      }
     } else if (method === 'webdav') {
       const url = document.getElementById('syncWebdavUrl').value.trim();
-      if (!url) { showStatus('WebDAV URL is required', 'error'); return false; }
+      if (!url) {
+        showStatus('WebDAV URL is required', 'error');
+        return false;
+      }
       await saveSettingsValue('syncWebdavUrl', url);
-      await saveSettingsValue('syncWebdavUser', document.getElementById('syncWebdavUser').value.trim());
-      await saveSettingsValue('syncWebdavPass', document.getElementById('syncWebdavPass').value.trim());
+      await saveSettingsValue(
+        'syncWebdavUser',
+        document.getElementById('syncWebdavUser').value.trim(),
+      );
+      await saveSettingsValue(
+        'syncWebdavPass',
+        document.getElementById('syncWebdavPass').value.trim(),
+      );
     }
   }
 
@@ -3895,8 +4840,11 @@ document.getElementById('syncNowBtn').addEventListener('click', async () => {
     // Phase 1: list devices immediately so the section appears
     try {
       const devResp = await sendAction({ action: 'syncListDevices' });
-      if (devResp.devices?.length) renderSyncDevices(devResp.devices, devResp.localDeviceId, true);
-    } catch { /* best-effort */ }
+      if (devResp.devices?.length)
+        renderSyncDevices(devResp.devices, devResp.localDeviceId, true);
+    } catch {
+      /* best-effort */
+    }
 
     // Phase 2: actual push + pull
     const result = await sendAction({ action: 'syncNow' });
@@ -3906,7 +4854,8 @@ document.getElementById('syncNowBtn').addEventListener('click', async () => {
     } else if (result.error) {
       statusEl.style.color = '#c62828';
       if (result.authExpired) {
-        statusEl.textContent = 'GitHub authorization expired — please reconnect.';
+        statusEl.textContent =
+          'GitHub authorization expired — please reconnect.';
         syncShowAuthState('disconnected');
       } else if (result.disabled) {
         statusEl.textContent = `Sync disabled: ${result.error}`;
@@ -3935,7 +4884,9 @@ document.getElementById('syncCancelBtn').addEventListener('click', async () => {
   cancelBtn.textContent = 'Cancelling\u2026';
   try {
     await sendAction({ action: 'cancelSync' });
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
 });
 
 // ─── Synced Devices List ─────────────────────────────────────────────
@@ -3963,7 +4914,8 @@ function renderSyncDevices(devices, localDeviceId, syncing) {
   for (const d of devices) {
     const isLocal = d.deviceId === localDeviceId;
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px;';
+    row.style.cssText =
+      'display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px;';
 
     const id = document.createElement('span');
     id.style.cssText = 'font-family:monospace;';
@@ -3978,26 +4930,35 @@ function renderSyncDevices(devices, localDeviceId, syncing) {
     }
 
     const status = document.createElement('span');
-    status.style.cssText = 'color:var(--text-muted);margin-left:auto;margin-right:6px;white-space:nowrap;';
+    status.style.cssText =
+      'color:var(--text-muted);margin-left:auto;margin-right:6px;white-space:nowrap;';
     if (d.paused) {
       status.textContent = 'paused';
     } else if (syncing) {
       status.textContent = isLocal ? 'pushing\u2026' : 'pulling\u2026';
     } else if (isLocal) {
-      status.textContent = d.lastPushed ? `pushed ${formatTimeAgo(d.lastPushed)}` : '';
+      status.textContent = d.lastPushed
+        ? `pushed ${formatTimeAgo(d.lastPushed)}`
+        : '';
     } else {
-      status.textContent = d.lastPulled ? `pulled ${formatTimeAgo(d.lastPulled)}` : '';
+      status.textContent = d.lastPulled
+        ? `pulled ${formatTimeAgo(d.lastPulled)}`
+        : '';
     }
     row.appendChild(status);
 
     const toggleBtn = document.createElement('button');
     toggleBtn.textContent = d.paused ? '\u25b6' : '\u23f8';
     toggleBtn.title = d.paused ? 'Resume sync' : 'Pause sync';
-    toggleBtn.style.cssText = 'background:none;border:none;cursor:pointer;font-size:12px;color:var(--text-muted);padding:0 2px;line-height:1;';
+    toggleBtn.style.cssText =
+      'background:none;border:none;cursor:pointer;font-size:12px;color:var(--text-muted);padding:0 2px;line-height:1;';
     toggleBtn.addEventListener('click', async () => {
       toggleBtn.disabled = true;
       try {
-        const resp = await sendAction({ action: 'toggleSyncDevicePaused', deviceId: d.deviceId });
+        const resp = await sendAction({
+          action: 'toggleSyncDevicePaused',
+          deviceId: d.deviceId,
+        });
         d.paused = resp.paused;
         toggleBtn.textContent = d.paused ? '\u25b6' : '\u23f8';
         toggleBtn.title = d.paused ? 'Resume sync' : 'Pause sync';
@@ -4026,58 +4987,84 @@ async function refreshSyncDevices() {
 // ─── GitHub Auth UI ──────────────────────────────────────────────────
 
 function syncShowAuthState(state, detail) {
-  document.getElementById('syncAuthDisconnected').style.display = state === 'disconnected' ? '' : 'none';
-  document.getElementById('syncAuthConnected').style.display = state === 'connected' ? '' : 'none';
+  document.getElementById('syncAuthDisconnected').style.display =
+    state === 'disconnected' ? '' : 'none';
+  document.getElementById('syncAuthConnected').style.display =
+    state === 'connected' ? '' : 'none';
   if (state === 'connected' && detail) {
     document.getElementById('syncAuthDetail').textContent = detail;
   }
 }
 
-document.getElementById('syncPatSaveBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('syncPatSaveBtn');
-  const token = document.getElementById('syncPatInput').value.trim();
-  if (!token) { showStatus('Token is required', 'error'); return; }
-  btn.disabled = true;
-  btn.textContent = 'Connecting\u2026';
-  try {
-    const { login } = await fetchGitHubUser(token);
+document
+  .getElementById('syncPatSaveBtn')
+  .addEventListener('click', async () => {
+    const btn = document.getElementById('syncPatSaveBtn');
+    const token = document.getElementById('syncPatInput').value.trim();
+    if (!token) {
+      showStatus('Token is required', 'error');
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Connecting\u2026';
+    try {
+      const { login } = await fetchGitHubUser(token);
+      const remember = document.getElementById('syncRememberToken').checked;
+      await sendAction({
+        action: 'setSyncToken',
+        token,
+        remember,
+        authMethod: 'pat',
+        githubUser: login,
+      });
+      syncShowAuthState('connected', `as @${login}`);
+      document.getElementById('syncPatInput').value = '';
+    } catch (e) {
+      showStatus(`Invalid token: ${e.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Connect';
+    }
+  });
+
+document
+  .getElementById('syncDisconnectBtn')
+  .addEventListener('click', async () => {
+    await sendAction({ action: 'clearSyncToken' });
+    syncShowAuthState('disconnected');
+    document.getElementById('syncDevicesSection').style.display = 'none';
+    document.getElementById('syncDevicesList').innerHTML = '';
+    showStatus(
+      'Disconnected. <a href="https://github.com/settings/tokens" target="_blank" style="color:#1a73e8;">Manage tokens on GitHub</a>',
+      'success',
+    );
+  });
+
+document
+  .getElementById('syncRememberToken')
+  .addEventListener('change', async () => {
     const remember = document.getElementById('syncRememberToken').checked;
-    await sendAction({ action: 'setSyncToken', token, remember, authMethod: 'pat', githubUser: login });
-    syncShowAuthState('connected', `as @${login}`);
-    document.getElementById('syncPatInput').value = '';
-  } catch (e) {
-    showStatus(`Invalid token: ${e.message}`, 'error');
-  } finally {
+    await sendAction({ action: 'toggleSyncRemember', remember });
+  });
+
+document
+  .getElementById('syncCheckDevicesBtn')
+  .addEventListener('click', async () => {
+    const btn = document.getElementById('syncCheckDevicesBtn');
+    btn.disabled = true;
+    btn.textContent = 'Checking...';
+    await refreshSyncDevices();
+    btn.textContent = 'Check Devices';
     btn.disabled = false;
-    btn.textContent = 'Connect';
-  }
-});
-
-document.getElementById('syncDisconnectBtn').addEventListener('click', async () => {
-  await sendAction({ action: 'clearSyncToken' });
-  syncShowAuthState('disconnected');
-  document.getElementById('syncDevicesSection').style.display = 'none';
-  document.getElementById('syncDevicesList').innerHTML = '';
-  showStatus('Disconnected. <a href="https://github.com/settings/tokens" target="_blank" style="color:#1a73e8;">Manage tokens on GitHub</a>', 'success');
-});
-
-document.getElementById('syncRememberToken').addEventListener('change', async () => {
-  const remember = document.getElementById('syncRememberToken').checked;
-  await sendAction({ action: 'toggleSyncRemember', remember });
-});
-
-document.getElementById('syncCheckDevicesBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('syncCheckDevicesBtn');
-  btn.disabled = true;
-  btn.textContent = 'Checking...';
-  await refreshSyncDevices();
-  btn.textContent = 'Check Devices';
-  btn.disabled = false;
-});
+  });
 
 // Clear all data
 document.getElementById('clearBtn').addEventListener('click', async () => {
-  if (!confirm('WARNING: This will DELETE ALL FILES in your storage directory!\n\nThis cannot be undone. Are you absolutely sure?')) {
+  if (
+    !confirm(
+      'WARNING: This will DELETE ALL FILES in your storage directory!\n\nThis cannot be undone. Are you absolutely sure?',
+    )
+  ) {
     return;
   }
   if (!confirm('Final confirmation: Delete all history files?')) {
@@ -4102,14 +5089,19 @@ document.getElementById('clearBtn').addEventListener('click', async () => {
     let deletedCount = 0;
 
     for await (const entry of fsStorage.directoryHandle.values()) {
-      if (entry.kind === 'file' && (entry.name.endsWith('.jsonl') || entry.name === 'README.md')) {
+      if (
+        entry.kind === 'file' &&
+        (entry.name.endsWith('.jsonl') || entry.name === 'README.md')
+      ) {
         await fsStorage.removeFile(fsStorage.directoryHandle, entry.name);
         deletedCount++;
       }
     }
 
     try {
-      await fsStorage.removeFile(fsStorage.directoryHandle, 'pages', { recursive: true });
+      await fsStorage.removeFile(fsStorage.directoryHandle, 'pages', {
+        recursive: true,
+      });
       deletedCount++;
     } catch (error) {}
 
@@ -4130,43 +5122,58 @@ function showStatus(message, type) {
   const status = document.getElementById('status');
   status.textContent = message;
   status.className = `status ${type}`;
-  setTimeout(() => { status.className = 'status'; }, 5000);
+  setTimeout(() => {
+    status.className = 'status';
+  }, 5000);
 }
 
 // --- Hint tooltips ---
 {
   const float = document.getElementById('hintTipFloat');
-  document.addEventListener('mouseenter', (e) => {
-    const hint = e.target.closest('.hint-icon');
-    if (!hint) return;
-    const tip = hint.querySelector('.hint-tip');
-    if (!tip) return;
-    float.textContent = tip.textContent;
-    float.style.display = 'block';
-    float.style.visibility = 'hidden';
-    const r = hint.getBoundingClientRect();
-    let left = r.right + 6;
-    let top = r.top + r.height / 2 - float.offsetHeight / 2;
-    if (left + float.offsetWidth > window.innerWidth - 8) {
-      left = r.left - float.offsetWidth - 6;
-    }
-    top = Math.max(4, Math.min(top, window.innerHeight - float.offsetHeight - 4));
-    float.style.left = left + 'px';
-    float.style.top = top + 'px';
-    float.style.visibility = 'visible';
-  }, true);
-  document.addEventListener('mouseleave', (e) => {
-    if (e.target.closest('.hint-icon')) float.style.display = 'none';
-  }, true);
+  document.addEventListener(
+    'mouseenter',
+    (e) => {
+      const hint = e.target.closest('.hint-icon');
+      if (!hint) return;
+      const tip = hint.querySelector('.hint-tip');
+      if (!tip) return;
+      float.textContent = tip.textContent;
+      float.style.display = 'block';
+      float.style.visibility = 'hidden';
+      const r = hint.getBoundingClientRect();
+      let left = r.right + 6;
+      let top = r.top + r.height / 2 - float.offsetHeight / 2;
+      if (left + float.offsetWidth > window.innerWidth - 8) {
+        left = r.left - float.offsetWidth - 6;
+      }
+      top = Math.max(
+        4,
+        Math.min(top, window.innerHeight - float.offsetHeight - 4),
+      );
+      float.style.left = left + 'px';
+      float.style.top = top + 'px';
+      float.style.visibility = 'visible';
+    },
+    true,
+  );
+  document.addEventListener(
+    'mouseleave',
+    (e) => {
+      if (e.target.closest('.hint-icon')) float.style.display = 'none';
+    },
+    true,
+  );
 }
 
 // --- Import Bookmarks ---
 document.getElementById('bookmarkImportBtn').addEventListener('click', () => {
   document.getElementById('bookmarkImportPanel').style.display = 'block';
 });
-document.getElementById('bookmarkImportCancelBtn').addEventListener('click', () => {
-  document.getElementById('bookmarkImportPanel').style.display = 'none';
-});
+document
+  .getElementById('bookmarkImportCancelBtn')
+  .addEventListener('click', () => {
+    document.getElementById('bookmarkImportPanel').style.display = 'none';
+  });
 {
   const fileInput = document.getElementById('bookmarkFileInput');
   const treeContainer = document.getElementById('bookmarkTreeContainer');
@@ -4196,7 +5203,17 @@ document.getElementById('bookmarkImportCancelBtn').addEventListener('click', () 
     treeContainer.innerHTML = '';
     treeContainer._items = [];
     if (root.bookmarks.length > 0) {
-      const rootItem = createTreeItem({ title: '(Root bookmarks)', bookmarks: root.bookmarks, skipped: root.skipped || [], children: [], bookmarkCount: root.bookmarks.length, subfolderCount: 0 }, 0);
+      const rootItem = createTreeItem(
+        {
+          title: '(Root bookmarks)',
+          bookmarks: root.bookmarks,
+          skipped: root.skipped || [],
+          children: [],
+          bookmarkCount: root.bookmarks.length,
+          subfolderCount: 0,
+        },
+        0,
+      );
       treeContainer.appendChild(rootItem.el);
       treeContainer._items.push(rootItem);
     }
@@ -4212,11 +5229,12 @@ document.getElementById('bookmarkImportCancelBtn').addEventListener('click', () 
 
     const row = document.createElement('div');
     row.className = 'bookmark-tree-item';
-    row.style.paddingLeft = (depth * 16) + 'px';
+    row.style.paddingLeft = depth * 16 + 'px';
 
     // Toggle arrow
     const toggle = document.createElement('button');
-    toggle.className = 'bm-toggle' + (folder.children.length === 0 ? ' leaf' : '');
+    toggle.className =
+      'bm-toggle' + (folder.children.length === 0 ? ' leaf' : '');
     row.appendChild(toggle);
 
     // Checkbox
@@ -4234,8 +5252,14 @@ document.getElementById('bookmarkImportCancelBtn').addEventListener('click', () 
     const count = document.createElement('span');
     count.className = 'bm-count';
     const parts = [];
-    if (folder.bookmarkCount > 0) parts.push(`${folder.bookmarkCount} bookmark${folder.bookmarkCount !== 1 ? 's' : ''}`);
-    if (folder.subfolderCount > 0) parts.push(`${folder.subfolderCount} subfolder${folder.subfolderCount !== 1 ? 's' : ''}`);
+    if (folder.bookmarkCount > 0)
+      parts.push(
+        `${folder.bookmarkCount} bookmark${folder.bookmarkCount !== 1 ? 's' : ''}`,
+      );
+    if (folder.subfolderCount > 0)
+      parts.push(
+        `${folder.subfolderCount} subfolder${folder.subfolderCount !== 1 ? 's' : ''}`,
+      );
     count.textContent = parts.length > 0 ? `(${parts.join(', ')})` : '(empty)';
     row.appendChild(count);
 
@@ -4268,15 +5292,29 @@ document.getElementById('bookmarkImportCancelBtn').addEventListener('click', () 
       updateImportButton();
     });
 
-    function getChecked() { return cb.checked; }
-    function getIndeterminate() { return cb.indeterminate; }
-    function setChecked(val) { cb.checked = val; cb.indeterminate = false; }
-    function setIndeterminate() { cb.indeterminate = true; cb.checked = false; }
+    function getChecked() {
+      return cb.checked;
+    }
+    function getIndeterminate() {
+      return cb.indeterminate;
+    }
+    function setChecked(val) {
+      cb.checked = val;
+      cb.indeterminate = false;
+    }
+    function setIndeterminate() {
+      cb.indeterminate = true;
+      cb.checked = false;
+    }
 
     function updateFromChildren() {
       if (childItems.length === 0) return;
-      const allChecked = childItems.every(c => c.getChecked() && !c.getIndeterminate());
-      const noneChecked = childItems.every(c => !c.getChecked() && !c.getIndeterminate());
+      const allChecked = childItems.every(
+        (c) => c.getChecked() && !c.getIndeterminate(),
+      );
+      const noneChecked = childItems.every(
+        (c) => !c.getChecked() && !c.getIndeterminate(),
+      );
       if (allChecked) setChecked(true);
       else if (noneChecked) setChecked(false);
       else setIndeterminate();
@@ -4292,7 +5330,9 @@ document.getElementById('bookmarkImportCancelBtn').addEventListener('click', () 
 
     // Notify parent on change
     let onchange = null;
-    cb.addEventListener('change', () => { if (item.onchange) item.onchange(); });
+    cb.addEventListener('change', () => {
+      if (item.onchange) item.onchange();
+    });
 
     const item = {
       el: wrapper,
@@ -4301,8 +5341,12 @@ document.getElementById('bookmarkImportCancelBtn').addEventListener('click', () 
       getIndeterminate,
       setChecked,
       children: childItems,
-      get onchange() { return onchange; },
-      set onchange(fn) { onchange = fn; },
+      get onchange() {
+        return onchange;
+      },
+      set onchange(fn) {
+        onchange = fn;
+      },
     };
     return item;
   }
@@ -4315,8 +5359,10 @@ document.getElementById('bookmarkImportCancelBtn').addEventListener('click', () 
   }
 
   function updateImportButton() {
-    const items = treeContainer.querySelectorAll('.bookmark-tree-item input[type="checkbox"]');
-    const anyChecked = Array.from(items).some(cb => cb.checked);
+    const items = treeContainer.querySelectorAll(
+      '.bookmark-tree-item input[type="checkbox"]',
+    );
+    const anyChecked = Array.from(items).some((cb) => cb.checked);
     importBtn.disabled = !anyChecked;
   }
 
@@ -4340,7 +5386,7 @@ document.getElementById('bookmarkImportCancelBtn').addEventListener('click', () 
   }
 
   function collectAllChildren(items) {
-    return items.map(item => ({
+    return items.map((item) => ({
       title: item.folder.title,
       bookmarks: item.folder.bookmarks,
       skipped: item.folder.skipped || [],
@@ -4411,7 +5457,14 @@ async function saveBlacklist(list) {
   await saveSettingsValue('urlBlacklist', list);
 }
 
-function renderSettingsList({ containerId, loadFn, saveFn, renderItemHtml, emptyMessage, rerender }) {
+function renderSettingsList({
+  containerId,
+  loadFn,
+  saveFn,
+  renderItemHtml,
+  emptyMessage,
+  rerender,
+}) {
   return (async () => {
     const items = await loadFn();
     const container = document.getElementById(containerId);
@@ -4421,14 +5474,17 @@ function renderSettingsList({ containerId, loadFn, saveFn, renderItemHtml, empty
       return;
     }
 
-    container.innerHTML = items.map((item, idx) =>
-      `<div class="blacklist-entry">
+    container.innerHTML = items
+      .map(
+        (item, idx) =>
+          `<div class="blacklist-entry">
         ${renderItemHtml(item)}
         <button class="blacklist-remove" data-index="${idx}" title="Remove">&times;</button>
-      </div>`
-    ).join('');
+      </div>`,
+      )
+      .join('');
 
-    container.querySelectorAll('.blacklist-remove').forEach(btn => {
+    container.querySelectorAll('.blacklist-remove').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const current = await loadFn();
         current.splice(parseInt(btn.dataset.index), 1);
@@ -4450,22 +5506,24 @@ async function renderBlacklist() {
   });
 }
 
-document.getElementById('blacklistAddBtn').addEventListener('click', async () => {
-  const input = document.getElementById('blacklistInput');
-  const prefix = input.value.trim();
-  if (!prefix) return;
+document
+  .getElementById('blacklistAddBtn')
+  .addEventListener('click', async () => {
+    const input = document.getElementById('blacklistInput');
+    const prefix = input.value.trim();
+    if (!prefix) return;
 
-  const list = await loadBlacklist();
-  if (list.includes(prefix)) {
+    const list = await loadBlacklist();
+    if (list.includes(prefix)) {
+      input.value = '';
+      return;
+    }
+
+    list.push(prefix);
+    await saveBlacklist(list);
     input.value = '';
-    return;
-  }
-
-  list.push(prefix);
-  await saveBlacklist(list);
-  input.value = '';
-  renderBlacklist();
-});
+    renderBlacklist();
+  });
 
 document.getElementById('blacklistInput').addEventListener('keypress', (e) => {
   if (e.key === 'Enter') document.getElementById('blacklistAddBtn').click();
@@ -4475,7 +5533,7 @@ document.getElementById('blacklistInput').addEventListener('keypress', (e) => {
 const TRIM_ACTION_LABELS = {
   remove_after_pipe: 'Remove after |',
   remove_brackets: 'Remove [brackets]',
-  remove_parens: 'Remove (parens)'
+  remove_parens: 'Remove (parens)',
 };
 
 async function loadTrimRules() {
@@ -4507,7 +5565,9 @@ document.getElementById('trimAddBtn').addEventListener('click', async () => {
 
   const rules = await loadTrimRules();
   // Don't add duplicate prefix+action
-  if (rules.some(r => r.urlPrefix === prefix && r.action === actionSelect.value)) {
+  if (
+    rules.some((r) => r.urlPrefix === prefix && r.action === actionSelect.value)
+  ) {
     urlInput.value = '';
     return;
   }
@@ -4528,12 +5588,14 @@ function mergeHistoryEntry(entry, existing) {
   if (!existing || entry.timestamp > existing.timestamp) {
     // New entry wins — back-fill missing title/user_title from existing
     if (existing?.title && !entry.title) entry.title = existing.title;
-    if (existing?.user_title && !entry.user_title) entry.user_title = existing.user_title;
+    if (existing?.user_title && !entry.user_title)
+      entry.user_title = existing.user_title;
     return { entry, updated: true };
   }
   // Existing wins — patch missing title onto existing from new entry
   if (entry.title && !existing.title) existing.title = entry.title;
-  if (entry.user_title && !existing.user_title) existing.user_title = entry.user_title;
+  if (entry.user_title && !existing.user_title)
+    existing.user_title = entry.user_title;
   return { entry: existing, updated: false };
 }
 
@@ -4548,8 +5610,16 @@ chrome.runtime.onMessage.addListener((request) => {
     // New page visit — merge into historyState.byUrl and historyState.allEntries
     clearTimeout(mutationRefreshTimer);
     mutationRefreshTimer = setTimeout(async () => {
-      const todayEntries = await readCacheable('log:' + new Date().toISOString().slice(0, 10)) || [];
-      const historyBuffer = todayEntries.filter(e => (e.action === 'visit_page' || e.action === 'leave_page' || !e.action) && e.url);
+      const todayEntries =
+        (await readCacheable('log:' + new Date().toISOString().slice(0, 10))) ||
+        [];
+      const historyBuffer = todayEntries.filter(
+        (e) =>
+          (e.action === 'visit_page' ||
+            e.action === 'leave_page' ||
+            !e.action) &&
+          e.url,
+      );
       // Only process entries newer than what we've already ingested
       const watermark = historyState._mutationWatermark || 0;
       let maxTs = watermark;
@@ -4590,7 +5660,7 @@ chrome.runtime.onMessage.addListener((request) => {
     // Settings changes that need UI updates handled here if needed
   } else if (type === 'note') {
     // Note created/deleted — invalidate cached notes and refresh view
-  
+
     refreshCurrentView();
   } else if (type === 'rules') {
     // Rules changed — refresh rules panel if viewing the affected list
@@ -4621,13 +5691,19 @@ document.addEventListener('visibilitychange', async () => {
     const filesResp = await sendAction({ action: 'listHistoryFiles' });
     const allFiles = filesResp.files;
     const existingFiles = new Set(historyState.files);
-    const newFiles = allFiles.filter(f => !existingFiles.has(f));
+    const newFiles = allFiles.filter((f) => !existingFiles.has(f));
     if (newFiles.length > 0) {
       historyState.files = allFiles;
-      const batchResp = await sendAction({ action: 'loadHistoryBatch', files: newFiles });
+      const batchResp = await sendAction({
+        action: 'loadHistoryBatch',
+        files: newFiles,
+      });
       const newEntries = batchResp.entries;
       for (const item of newEntries) {
-        if (!historyState.byUrl.has(item.url) || item.timestamp > historyState.byUrl.get(item.url).timestamp) {
+        if (
+          !historyState.byUrl.has(item.url) ||
+          item.timestamp > historyState.byUrl.get(item.url).timestamp
+        ) {
           historyState.byUrl.set(item.url, item);
           historyChanged = true;
         }
@@ -4644,15 +5720,16 @@ document.addEventListener('visibilitychange', async () => {
 
 // --- Explore Search ---
 
-
 async function renderSearchPanel() {
   const container = document.getElementById('listQueryBuilder');
   container.style.display = 'block';
   const isExplore = activeView.type === 'explore';
   const placeholder = isExplore ? 'Search...' : 'Filter pins...';
 
-  const removeSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-  const filterSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
+  const removeSvg =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+  const filterSvg =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
 
   let html = '<div class="search-filters-panel" id="searchFiltersPanel">';
   if (savedSearches.length > 0) {
@@ -4679,7 +5756,7 @@ async function renderSearchPanel() {
   container.innerHTML = html;
   // Set input values via DOM property (not HTML attribute) to avoid
   // escaping issues with quotes and Chrome backdrop-filter paint bugs.
-  container.querySelectorAll('.search-row-input').forEach(input => {
+  container.querySelectorAll('.search-row-input').forEach((input) => {
     const idx = parseInt(input.dataset.index);
     if (savedSearches[idx] != null) input.value = savedSearches[idx];
   });
@@ -4704,7 +5781,8 @@ async function renderFilterPanelHtml() {
       { key: 'totalVisits', label: 'Visits' },
     ];
     const currentSort = relatedSortState.column || 'lastVisit';
-    html += '<div class="filter-section"><div class="filter-section-label">Sort by</div>';
+    html +=
+      '<div class="filter-section"><div class="filter-section-label">Sort by</div>';
     html += '<div class="sort-toggle">';
     for (const opt of sortOptions) {
       html += `<button class="sort-toggle-option${currentSort === opt.key ? ' active' : ''}" data-sort="${opt.key}">${escapeHtml(opt.label)}</button>`;
@@ -4713,9 +5791,12 @@ async function renderFilterPanelHtml() {
   }
 
   // Device bubbles
-  const deviceIds = [...new Set(historyState.allEntries.map(e => e.deviceId).filter(Boolean))].sort();
+  const deviceIds = [
+    ...new Set(historyState.allEntries.map((e) => e.deviceId).filter(Boolean)),
+  ].sort();
   if (deviceIds.length > 1) {
-    html += '<div class="filter-section"><div class="filter-section-label">Devices</div>';
+    html +=
+      '<div class="filter-section"><div class="filter-section-label">Devices</div>';
     html += '<div class="filter-bubbles">';
     for (const did of deviceIds) {
       const active = filterState.devices?.[did] === true;
@@ -4726,7 +5807,8 @@ async function renderFilterPanelHtml() {
 
   // List bubbles (explore view only, when lists exist)
   if (!isListView && listNameById.size > 0) {
-    html += '<div class="filter-section"><div class="filter-section-label">Lists</div>';
+    html +=
+      '<div class="filter-section"><div class="filter-section-label">Lists</div>';
     html += '<div class="filter-bubbles">';
     for (const [slug, name] of listNameById) {
       const active = filterState.lists?.[slug] === true;
@@ -4736,27 +5818,50 @@ async function renderFilterPanelHtml() {
   }
 
   // Time filters
-  html += '<div class="filter-section"><div class="filter-section-label">Time</div>';
+  html +=
+    '<div class="filter-section"><div class="filter-section-label">Time</div>';
   html += renderDualRangeFilter('lastSeen', 'Last seen', filterState.lastSeen);
-  html += renderDualRangeFilter('firstSeen', 'First seen', filterState.firstSeen);
+  html += renderDualRangeFilter(
+    'firstSeen',
+    'First seen',
+    filterState.firstSeen,
+  );
   html += '</div>';
 
   // Page-specific booleans
-  html += '<div class="filter-section"><div class="filter-section-label">Page properties</div>';
+  html +=
+    '<div class="filter-section"><div class="filter-section-label">Page properties</div>';
   html += '<div class="filter-checkboxes">';
-  html += renderCheckboxFilter('hasHighlights', 'Has highlights', filterState.hasHighlights);
-  html += renderCheckboxFilter('hasSnapshots', 'Has snapshots', filterState.hasSnapshots);
+  html += renderCheckboxFilter(
+    'hasHighlights',
+    'Has highlights',
+    filterState.hasHighlights,
+  );
+  html += renderCheckboxFilter(
+    'hasSnapshots',
+    'Has snapshots',
+    filterState.hasSnapshots,
+  );
   html += renderCheckboxFilter('liked', 'Liked', filterState.liked);
-  html += renderCheckboxFilter('visitedMultipleTimes', 'Visited multiple times', filterState.visitedMultipleTimes);
+  html += renderCheckboxFilter(
+    'visitedMultipleTimes',
+    'Visited multiple times',
+    filterState.visitedMultipleTimes,
+  );
   html += '</div>';
   html += '</div>';
-
 
   return html;
 }
 
 function renderDualRangeFilter(stateKey, label, state, rangeField) {
-  const field = rangeField || (stateKey === 'lastSeen' ? 'lastVisit' : stateKey === 'firstSeen' ? 'firstVisit' : 'timeOnPage');
+  const field =
+    rangeField ||
+    (stateKey === 'lastSeen'
+      ? 'lastVisit'
+      : stateKey === 'firstSeen'
+        ? 'firstVisit'
+        : 'timeOnPage');
   const cfg = getRangeConfig(field);
   const lo = state.lo !== null ? state.lo : cfg.min;
   const hi = state.hi !== null ? state.hi : cfg.max;
@@ -4792,7 +5897,7 @@ function renderCheckboxFilter(stateKey, label, value) {
 
 function bindSearchEvents(container) {
   // Saved search row inputs — edit inline
-  container.querySelectorAll('.search-row-input').forEach(input => {
+  container.querySelectorAll('.search-row-input').forEach((input) => {
     input.addEventListener('input', () => {
       const idx = parseInt(input.dataset.index);
       savedSearches[idx] = input.value;
@@ -4804,7 +5909,7 @@ function bindSearchEvents(container) {
   });
 
   // Remove buttons
-  container.querySelectorAll('.search-row-remove').forEach(btn => {
+  container.querySelectorAll('.search-row-remove').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const idx = parseInt(btn.dataset.index);
       savedSearches.splice(idx, 1);
@@ -4851,78 +5956,96 @@ function bindSearchEvents(container) {
 
 function bindFilterEvents(container) {
   // Sort toggle (list view)
-  container.querySelectorAll('.sort-toggle-option').forEach(btn => {
+  container.querySelectorAll('.sort-toggle-option').forEach((btn) => {
     btn.addEventListener('click', () => {
       const sortKey = btn.dataset.sort;
       // Toggle direction if clicking the already-active sort
       if (relatedSortState.column === sortKey) {
-        relatedSortState.direction = relatedSortState.direction === 'desc' ? 'asc' : 'desc';
+        relatedSortState.direction =
+          relatedSortState.direction === 'desc' ? 'asc' : 'desc';
       } else {
         relatedSortState.column = sortKey;
         relatedSortState.direction = sortKey === 'title' ? 'asc' : 'desc';
       }
       // Update active class
-      container.querySelectorAll('.sort-toggle-option').forEach(b => b.classList.remove('active'));
+      container
+        .querySelectorAll('.sort-toggle-option')
+        .forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       runActiveSearchPipeline();
     });
   });
 
   // Dual-range sliders
-  container.querySelectorAll('.filter-range-lo, .filter-range-hi').forEach(input => {
-    input.addEventListener('input', () => {
-      const key = input.dataset.key;
-      const rangeDiv = input.closest('.filter-range');
-      const loInput = rangeDiv.querySelector('.filter-range-lo');
-      const hiInput = rangeDiv.querySelector('.filter-range-hi');
-      let lo = parseFloat(loInput.value);
-      let hi = parseFloat(hiInput.value);
-      // Prevent crossover
-      if (lo > hi) {
-        if (input.classList.contains('filter-range-lo')) { lo = hi; loInput.value = lo; }
-        else { hi = lo; hiInput.value = hi; }
-      }
-      const field = key === 'lastSeen' ? 'lastVisit' : key === 'firstSeen' ? 'firstVisit' : 'timeOnPage';
-      const cfg = getRangeConfig(field);
-      const inverted = cfg.isDaysAgo;
-      const loPercent = ((lo - cfg.min) / (cfg.max - cfg.min)) * 100;
-      const hiPercent = 100 - ((hi - cfg.min) / (cfg.max - cfg.min)) * 100;
-      // Update fill bar
-      const fill = rangeDiv.querySelector('.qb-dual-range-fill');
-      if (fill) {
-        fill.style.left = (inverted ? hiPercent : loPercent) + '%';
-        fill.style.right = (inverted ? loPercent : hiPercent) + '%';
-      }
-      // Update labels (inverted: left=hi/older, right=lo/recent)
-      const loLabel = rangeDiv.querySelector('.qb-dual-range-lo-label');
-      const hiLabel = rangeDiv.querySelector('.qb-dual-range-hi-label');
-      if (loLabel) loLabel.textContent = inverted ? cfg.format(hi) : cfg.format(lo);
-      if (hiLabel) hiLabel.textContent = inverted ? cfg.format(lo) : cfg.format(hi);
-      // Update state: null if at boundary (= unbounded)
-      filterState[key] = {
-        lo: lo > cfg.min ? lo : null,
-        hi: hi < cfg.max ? hi : null,
-      };
-      saveFilterState();
-      runActiveSearchPipeline();
+  container
+    .querySelectorAll('.filter-range-lo, .filter-range-hi')
+    .forEach((input) => {
+      input.addEventListener('input', () => {
+        const key = input.dataset.key;
+        const rangeDiv = input.closest('.filter-range');
+        const loInput = rangeDiv.querySelector('.filter-range-lo');
+        const hiInput = rangeDiv.querySelector('.filter-range-hi');
+        let lo = parseFloat(loInput.value);
+        let hi = parseFloat(hiInput.value);
+        // Prevent crossover
+        if (lo > hi) {
+          if (input.classList.contains('filter-range-lo')) {
+            lo = hi;
+            loInput.value = lo;
+          } else {
+            hi = lo;
+            hiInput.value = hi;
+          }
+        }
+        const field =
+          key === 'lastSeen'
+            ? 'lastVisit'
+            : key === 'firstSeen'
+              ? 'firstVisit'
+              : 'timeOnPage';
+        const cfg = getRangeConfig(field);
+        const inverted = cfg.isDaysAgo;
+        const loPercent = ((lo - cfg.min) / (cfg.max - cfg.min)) * 100;
+        const hiPercent = 100 - ((hi - cfg.min) / (cfg.max - cfg.min)) * 100;
+        // Update fill bar
+        const fill = rangeDiv.querySelector('.qb-dual-range-fill');
+        if (fill) {
+          fill.style.left = (inverted ? hiPercent : loPercent) + '%';
+          fill.style.right = (inverted ? loPercent : hiPercent) + '%';
+        }
+        // Update labels (inverted: left=hi/older, right=lo/recent)
+        const loLabel = rangeDiv.querySelector('.qb-dual-range-lo-label');
+        const hiLabel = rangeDiv.querySelector('.qb-dual-range-hi-label');
+        if (loLabel)
+          loLabel.textContent = inverted ? cfg.format(hi) : cfg.format(lo);
+        if (hiLabel)
+          hiLabel.textContent = inverted ? cfg.format(lo) : cfg.format(hi);
+        // Update state: null if at boundary (= unbounded)
+        filterState[key] = {
+          lo: lo > cfg.min ? lo : null,
+          hi: hi < cfg.max ? hi : null,
+        };
+        saveFilterState();
+        runActiveSearchPipeline();
+      });
     });
-  });
 
   // Checkbox filters
-  container.querySelectorAll('.filter-checkbox input').forEach(input => {
+  container.querySelectorAll('.filter-checkbox input').forEach((input) => {
     input.addEventListener('change', () => {
       const key = input.dataset.key;
       filterState[key] = input.checked ? true : null;
       saveFilterState();
       // Update filter-toggle-btn indicator
       const btn = container.querySelector('#filterToggleBtn');
-      if (btn) btn.classList.toggle('has-filters', !isDefaultFilterState(filterState));
+      if (btn)
+        btn.classList.toggle('has-filters', !isDefaultFilterState(filterState));
       runActiveSearchPipeline();
     });
   });
 
   // Filter bubble toggles
-  container.querySelectorAll('.filter-bubble').forEach(btn => {
+  container.querySelectorAll('.filter-bubble').forEach((btn) => {
     btn.addEventListener('click', () => {
       const deviceId = btn.dataset.deviceId;
       const listSlug = btn.dataset.listSlug;
@@ -4947,12 +6070,15 @@ function bindFilterEvents(container) {
       }
       saveFilterState();
       const toggleBtn = container.querySelector('#filterToggleBtn');
-      if (toggleBtn) toggleBtn.classList.toggle('has-filters', !isDefaultFilterState(filterState));
+      if (toggleBtn)
+        toggleBtn.classList.toggle(
+          'has-filters',
+          !isDefaultFilterState(filterState),
+        );
       runActiveSearchPipeline();
     });
   });
 }
-
 
 // Entity-scan filter: scan page checkpoints instead of all history JSONL files.
 // Page entities contain materialized state (childIds, visitDates, timestamps, etc.)
@@ -4980,7 +6106,9 @@ async function runEntityScanFilter(pinnedSlugs) {
   const noteMap = new Map();
   if (allNoteRefs.size > 0) {
     const noteKeys = [...allNoteRefs];
-    const noteEntities = await Promise.all(noteKeys.map(k => readCacheable(k)));
+    const noteEntities = await Promise.all(
+      noteKeys.map((k) => readCacheable(k)),
+    );
     for (let i = 0; i < noteKeys.length; i++) {
       if (noteEntities[i]) noteMap.set(noteKeys[i], noteEntities[i]);
     }
@@ -4999,13 +6127,21 @@ async function runEntityScanFilter(pinnedSlugs) {
 
     const timestamps = page.timestamps || {};
     const deviceTimestamps = Object.values(timestamps);
-    const latestTs = deviceTimestamps.length > 0 ? Math.max(...deviceTimestamps) : (page.createdAt || now);
+    const latestTs =
+      deviceTimestamps.length > 0
+        ? Math.max(...deviceTimestamps)
+        : page.createdAt || now;
 
     const d = new Date(latestTs);
-    const day = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    const day =
+      d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
 
-    const noteRefs = (page.childIds || []).filter(id => id.startsWith(NOTE_PREFIX));
-    const notes = noteRefs.map(ref => noteMap.get(ref)).filter(n => n && !n.deleted);
+    const noteRefs = (page.childIds || []).filter((id) =>
+      id.startsWith(NOTE_PREFIX),
+    );
+    const notes = noteRefs
+      .map((ref) => noteMap.get(ref))
+      .filter((n) => n && !n.deleted);
 
     results.push({
       url: page.url,
@@ -5017,14 +6153,17 @@ async function runEntityScanFilter(pinnedSlugs) {
       attScore: attentionStrength(page),
       attDetail: page,
       notes,
-      timestamps: deviceTimestamps.length > 0 ? deviceTimestamps.sort((a, b) => b - a) : [latestTs],
+      timestamps:
+        deviceTimestamps.length > 0
+          ? deviceTimestamps.sort((a, b) => b - a)
+          : [latestTs],
       latestTs,
       deviceIds: new Set(Object.keys(timestamps)),
       childIds: page.childIds,
       parentIds: page.parentIds,
       likes: page.likes,
       createdAt: page.createdAt,
-      hasHighlightNotes: noteRefs.some(ref => {
+      hasHighlightNotes: noteRefs.some((ref) => {
         const note = noteMap.get(ref);
         return note && note.excerpt !== null && !note.deleted;
       }),
@@ -5049,7 +6188,10 @@ async function runEntityScanFilter(pinnedSlugs) {
       user_title: item.user_title,
       slug,
       timestamp: item.timestamp,
-      day: (() => { const d = new Date(item.timestamp); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); })(),
+      day: (() => {
+        const d = new Date(item.timestamp);
+        return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+      })(),
       attScore: attentionStrength(item),
       attDetail: item,
       notes: [],
@@ -5074,7 +6216,7 @@ async function runSearchFilterPipeline() {
   const allQueries = [...savedSearches];
   if (currentSearchInput.trim()) allQueries.push(currentSearchInput.trim());
 
-  if (allQueries.length > 0 && allQueries.some(q => q.trim())) {
+  if (allQueries.length > 0 && allQueries.some((q) => q.trim())) {
     // Progressive multi-phase search: Phase 0 (in-memory) renders instantly,
     // then Phase 1 (WASM JSONL), 2a (notes), 2b (snapshots) fire concurrently.
     await runProgressiveSearch(allQueries);
@@ -5096,11 +6238,13 @@ async function runSearchFilterPipeline() {
       showSearchSpinner();
       while (historyState.loadedCount < historyState.files.length) {
         await loadHistoryBatch();
-        await new Promise(r => setTimeout(r, 0));
+        await new Promise((r) => setTimeout(r, 0));
       }
       results = processHistoryForDisplay(
-        historyState.allEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
-      ).map(item => ({ ...item, relevance: 0 }));
+        historyState.allEntries.filter(
+          (item) => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)),
+        ),
+      ).map((item) => ({ ...item, relevance: 0 }));
       await enrichFromEntityStorage(results);
       await enrichForFilters(results);
     }
@@ -5108,8 +6252,10 @@ async function runSearchFilterPipeline() {
     hideSearchSpinner();
   } else {
     results = processHistoryForDisplay(
-      historyState.allEntries.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)))
-    ).map(item => ({ ...item, relevance: 0 }));
+      historyState.allEntries.filter(
+        (item) => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)),
+      ),
+    ).map((item) => ({ ...item, relevance: 0 }));
   }
 
   const relatedContainer = document.getElementById('relatedResults');
@@ -5119,18 +6265,27 @@ async function runSearchFilterPipeline() {
     return;
   }
 
-  const effectiveSort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
+  const effectiveSort = relatedSortState.column
+    ? relatedSortState
+    : { column: 'lastVisit', direction: 'desc' };
   const sorted = applySortOrder(results, effectiveSort);
-  const maxAtt = Math.max(...sorted.map(r => r.attScore), 0.1);
+  const maxAtt = Math.max(...sorted.map((r) => r.attScore), 0.1);
 
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = '';
   vs.updateData(sorted, (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
-      attScore: r.attScore, maxAtt, attDetail: r.attDetail,
-      notes: r.notes, timestamps: r.timestamps, context: 'related',
-      childIds: r.childIds, parentIds: r.parentIds, likes: r.likes, hasHighlightNotes: r.hasHighlightNotes,
-    })
+      attScore: r.attScore,
+      maxAtt,
+      attDetail: r.attDetail,
+      notes: r.notes,
+      timestamps: r.timestamps,
+      context: 'related',
+      childIds: r.childIds,
+      parentIds: r.parentIds,
+      likes: r.likes,
+      hasHighlightNotes: r.hasHighlightNotes,
+    }),
   );
 
   // When no active filters, enrich in background and refresh visible rows
@@ -5140,44 +6295,64 @@ async function runSearchFilterPipeline() {
 
   // Demand-load more history when scrolling (for all-history mode).
   // Skip when entity scan was used — all matching pages are already loaded.
-  vs.onLoadMore = entityScanUsed ? null : async () => {
-    const hasActiveFilters = !isDefaultFilterState(filterState);
-    if (hasActiveFilters) showSearchSpinner();
-    let loaded = false;
-    do {
-      const newItems = await loadHistoryBatch();
-      if (newItems.length === 0) break;
-      loaded = true;
-      if (hasActiveFilters) await new Promise(r => setTimeout(r, 0));
-      const filtered = newItems.filter(item => item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)));
-      let newResults = processHistoryForDisplay(filtered).map(item => ({ ...item, relevance: 0 }));
-      if (newResults.length > 0) {
-        if (hasActiveFilters) {
-          await enrichFromEntityStorage(newResults);
-          await enrichForFilters(newResults);
-          newResults = await applyFilters(newResults);
-        }
-        if (newResults.length > 0) {
-          const sort = relatedSortState.column ? relatedSortState : { column: 'lastVisit', direction: 'desc' };
-          vs.appendData(applySortOrder(newResults, sort));
-          if (!hasActiveFilters) {
-            enrichFromEntityStorage(newResults).then(() => vs.refreshVisible());
+  vs.onLoadMore = entityScanUsed
+    ? null
+    : async () => {
+        const hasActiveFilters = !isDefaultFilterState(filterState);
+        if (hasActiveFilters) showSearchSpinner();
+        let loaded = false;
+        do {
+          const newItems = await loadHistoryBatch();
+          if (newItems.length === 0) break;
+          loaded = true;
+          if (hasActiveFilters) await new Promise((r) => setTimeout(r, 0));
+          const filtered = newItems.filter(
+            (item) =>
+              item.url && !pinnedSlugs.has(generateSlugFromUrl(item.url)),
+          );
+          let newResults = processHistoryForDisplay(filtered).map((item) => ({
+            ...item,
+            relevance: 0,
+          }));
+          if (newResults.length > 0) {
+            if (hasActiveFilters) {
+              await enrichFromEntityStorage(newResults);
+              await enrichForFilters(newResults);
+              newResults = await applyFilters(newResults);
+            }
+            if (newResults.length > 0) {
+              const sort = relatedSortState.column
+                ? relatedSortState
+                : { column: 'lastVisit', direction: 'desc' };
+              vs.appendData(applySortOrder(newResults, sort));
+              if (!hasActiveFilters) {
+                enrichFromEntityStorage(newResults).then(() =>
+                  vs.refreshVisible(),
+                );
+              }
+              loaded = false;
+            }
           }
-          loaded = false;
-        }
-      }
-    } while (hasActiveFilters && loaded && historyState.loadedCount < historyState.files.length);
-    if (hasActiveFilters) hideSearchSpinner();
-  };
+        } while (
+          hasActiveFilters &&
+          loaded &&
+          historyState.loadedCount < historyState.files.length
+        );
+        if (hasActiveFilters) hideSearchSpinner();
+      };
 
   // Time chart for explore results (with estimated bars for unloaded files)
-  const chartData = results.map(r => ({ url: r.url, timestamp: r.timestamps?.[0] || Date.now(), attention: '' }));
+  const chartData = results.map((r) => ({
+    url: r.url,
+    timestamp: r.timestamps?.[0] || Date.now(),
+    attention: '',
+  }));
   renderTimeChartInto(
     document.getElementById('relatedChart'),
     document.getElementById('relatedChartBars'),
     chartData,
     'Explore results',
-    getEstimatedByDay()
+    getEstimatedByDay(),
   );
   const relatedChart = document.getElementById('relatedChart');
   bindChartBarClick(relatedChart, document.getElementById('relatedResults'));
@@ -5185,8 +6360,12 @@ async function runSearchFilterPipeline() {
   // Demand-load data when an unloaded date bar is clicked
   relatedChart._onDateSelect = async (activeDates) => {
     if (activeDates.size === 0) return;
-    const loadedFiles = new Set(historyState.files.slice(0, historyState.loadedCount));
-    const unloaded = [...activeDates].filter(d => !loadedFiles.has(d + '.jsonl'));
+    const loadedFiles = new Set(
+      historyState.files.slice(0, historyState.loadedCount),
+    );
+    const unloaded = [...activeDates].filter(
+      (d) => !loadedFiles.has(d + '.jsonl'),
+    );
     if (unloaded.length === 0) return;
     // Save active dates — runSearchFilterPipeline re-renders chart, destroying DOM state
     const savedDates = new Set(activeDates);
@@ -5194,7 +6373,7 @@ async function runSearchFilterPipeline() {
     await loadHistoryUntilDate(unloaded[0]);
     await runSearchFilterPipeline();
     // Restore active state on re-rendered chart bars
-    relatedChart.querySelectorAll('.chart-bar-group').forEach(g => {
+    relatedChart.querySelectorAll('.chart-bar-group').forEach((g) => {
       if (savedDates.has(g.dataset.date)) g.classList.add('active');
     });
     applyDateFilter(relatedChart, document.getElementById('relatedResults'));
@@ -5207,13 +6386,18 @@ async function openFocusPanel(url, title) {
   const overlay = document.getElementById('focusOverlay');
   const content = document.getElementById('focusContent');
 
-  content.innerHTML = '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty"><span class="spinner"></span></div></div></div>';
+  content.innerHTML =
+    '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty"><span class="spinner"></span></div></div></div>';
   overlay.classList.add('visible');
 
   try {
-    const resp = await chrome.runtime.sendMessage({ action: 'getPageRelations', url });
+    const resp = await chrome.runtime.sendMessage({
+      action: 'getPageRelations',
+      url,
+    });
     if (!resp?.success) {
-      content.innerHTML = '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">Could not load relations</div></div></div>';
+      content.innerHTML =
+        '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">Could not load relations</div></div></div>';
       return;
     }
 
@@ -5221,14 +6405,33 @@ async function openFocusPanel(url, title) {
     const seedEntry = historyState.byUrl.get(url);
     let similar = [];
     if (seedEntry) {
-      const seed = { ...seedEntry, timestamps: [seedEntry.timestamp || Date.now()], attScore: 0, attDetail: null, notes: [] };
+      const seed = {
+        ...seedEntry,
+        timestamps: [seedEntry.timestamp || Date.now()],
+        attScore: 0,
+        attDetail: null,
+        notes: [],
+      };
       const candidates = Array.from(historyState.byUrl.values())
-        .filter(i => i.url !== url)
-        .map(i => ({ ...i, timestamps: [i.timestamp || Date.now()], attScore: 0, attDetail: null, notes: [] }));
+        .filter((i) => i.url !== url)
+        .map((i) => ({
+          ...i,
+          timestamps: [i.timestamp || Date.now()],
+          attScore: 0,
+          attDetail: null,
+          notes: [],
+        }));
       similar = findRelatedPages([seed], candidates, 20);
     }
 
-    renderFocusWaterfall(content, url, title, resp.parents, resp.children, similar);
+    renderFocusWaterfall(
+      content,
+      url,
+      title,
+      resp.parents,
+      resp.children,
+      similar,
+    );
   } catch (error) {
     content.innerHTML = `<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">${escapeHtml('Error: ' + error.message)}</div></div></div>`;
   }
@@ -5238,7 +6441,8 @@ async function openListFocusPanel(listId, listName) {
   const overlay = document.getElementById('focusOverlay');
   const content = document.getElementById('focusContent');
 
-  content.innerHTML = '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty"><span class="spinner"></span></div></div></div>';
+  content.innerHTML =
+    '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty"><span class="spinner"></span></div></div></div>';
   overlay.classList.add('visible');
 
   try {
@@ -5252,18 +6456,28 @@ async function openListFocusPanel(listId, listName) {
     let html = '';
 
     // Pinned pages section
-    html += '<div class="focus-section"><div class="focus-section-label">Pinned</div><div class="focus-section-cards">';
+    html +=
+      '<div class="focus-section"><div class="focus-section-label">Pinned</div><div class="focus-section-cards">';
     if (pins.length === 0) {
       html += '<div class="focus-empty">No pinned pages</div>';
     } else {
       const maxAtt = 0.1;
       const { pinsResolved } = await resolvePinsForDisplay(pins);
-      html += pinsResolved.map(r => {
-        const title = r.user_title || r.title || '<unknown>';
-        return resultRowHtml(title, r.url, {
-          deletable: false, attScore: 0, maxAtt, timestamps: [r.pinnedAt || Date.now()], context: 'global', pinSource: r.source || null, childIds: r.childIds, parentIds: r.parentIds
-        });
-      }).join('');
+      html += pinsResolved
+        .map((r) => {
+          const title = r.user_title || r.title || '<unknown>';
+          return resultRowHtml(title, r.url, {
+            deletable: false,
+            attScore: 0,
+            maxAtt,
+            timestamps: [r.pinnedAt || Date.now()],
+            context: 'global',
+            pinSource: r.source || null,
+            childIds: r.childIds,
+            parentIds: r.parentIds,
+          });
+        })
+        .join('');
     }
     html += '</div></div>';
 
@@ -5278,49 +6492,68 @@ async function openListFocusPanel(listId, listName) {
 
 function renderFocusWaterfall(content, url, title, parents, children, similar) {
   const maxAtt = 0.1;
-  const focusOpts = { deletable: false, maxAtt, context: 'global', deletable: false };
+  const focusOpts = {
+    deletable: false,
+    maxAtt,
+    context: 'global',
+    deletable: false,
+  };
 
   function makeCard(cardUrl, cardTitle, opts = {}) {
     const hist = historyState.byUrl.get(cardUrl);
-    let resolvedTitle = cardTitle || (hist ? (hist.user_title || hist.title) : null);
+    let resolvedTitle =
+      cardTitle || (hist ? hist.user_title || hist.title : null);
     if (!resolvedTitle) {
-      try { resolvedTitle = new URL(cardUrl).hostname + new URL(cardUrl).pathname; } catch { resolvedTitle = cardUrl; }
+      try {
+        resolvedTitle = new URL(cardUrl).hostname + new URL(cardUrl).pathname;
+      } catch {
+        resolvedTitle = cardUrl;
+      }
     }
     const timestamps = hist ? [hist.timestamp || Date.now()] : [Date.now()];
     const attScore = 0;
-    return resultRowHtml(resolvedTitle, cardUrl, { ...focusOpts, attScore, timestamps, ...opts });
+    return resultRowHtml(resolvedTitle, cardUrl, {
+      ...focusOpts,
+      attScore,
+      timestamps,
+      ...opts,
+    });
   }
 
   let html = '';
 
   // Parents section
-  html += '<div class="focus-section"><div class="focus-section-label">Parents</div><div class="focus-section-cards">';
-  const hasParents = (parents.referrers.length + parents.lists.length) > 0;
+  html +=
+    '<div class="focus-section"><div class="focus-section-label">Parents</div><div class="focus-section-cards">';
+  const hasParents = parents.referrers.length + parents.lists.length > 0;
   if (!hasParents) {
     html += '<div class="focus-empty">No known parents</div>';
   } else {
-    html += parents.referrers.map(ref => makeCard(ref, null)).join('');
+    html += parents.referrers.map((ref) => makeCard(ref, null)).join('');
   }
   html += '</div></div>';
 
   // Focused page
-  html += '<div class="focus-section"><div class="focus-section-label">Focus</div><div class="focus-section-cards">';
+  html +=
+    '<div class="focus-section"><div class="focus-section-label">Focus</div><div class="focus-section-cards">';
   html += makeCard(url, title, { cssClass: 'focus-highlight' });
   html += '</div></div>';
 
   // Children section
-  html += '<div class="focus-section"><div class="focus-section-label">Children</div><div class="focus-section-cards">';
+  html +=
+    '<div class="focus-section"><div class="focus-section-label">Children</div><div class="focus-section-cards">';
   if (children.length === 0) {
     html += '<div class="focus-empty">No known children</div>';
   } else {
-    html += children.map(childUrl => makeCard(childUrl, null)).join('');
+    html += children.map((childUrl) => makeCard(childUrl, null)).join('');
   }
   html += '</div></div>';
 
   // Similar section
   if (similar.length > 0) {
-    html += '<div class="focus-section"><div class="focus-section-label">Similar</div><div class="focus-section-cards">';
-    html += similar.map(s => makeCard(s.url, s.title)).join('');
+    html +=
+      '<div class="focus-section"><div class="focus-section-label">Similar</div><div class="focus-section-cards">';
+    html += similar.map((s) => makeCard(s.url, s.title)).join('');
     html += '</div></div>';
   }
 
@@ -5357,9 +6590,14 @@ function bindFocusContentDelegation(content) {
 
   content.addEventListener('click', (e) => {
     // Skip if click was on a button or handled by result delegation
-    if (e.target.closest('.result-expand') || e.target.closest('.result-delete') ||
-        e.target.closest('.result-pin') ||
-        e.target.closest('.result-focus') || e.target.closest('.card-actions')) return;
+    if (
+      e.target.closest('.result-expand') ||
+      e.target.closest('.result-delete') ||
+      e.target.closest('.result-pin') ||
+      e.target.closest('.result-focus') ||
+      e.target.closest('.card-actions')
+    )
+      return;
 
     const row = e.target.closest('.result-row');
     if (!row) return;
@@ -5387,7 +6625,8 @@ function initSidebarResize() {
     handle.classList.add('active');
     document.body.style.userSelect = 'none';
     const onMove = (ev) => {
-      sidebar.style.width = Math.max(180, Math.min(500, startWidth + ev.clientX - startX)) + 'px';
+      sidebar.style.width =
+        Math.max(180, Math.min(500, startWidth + ev.clientX - startX)) + 'px';
       sidebar.style.minWidth = sidebar.style.width;
     };
     const onUp = () => {
@@ -5395,7 +6634,9 @@ function initSidebarResize() {
       document.body.style.userSelect = '';
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      chrome.storage.session.set({ sidebarWidth: sidebar.offsetWidth }).catch(() => {});
+      chrome.storage.session
+        .set({ sidebarWidth: sidebar.offsetWidth })
+        .catch(() => {});
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -5430,19 +6671,21 @@ async function restoreSidebarWidth() {
       sidebar.style.width = sidebarWidth + 'px';
       sidebar.style.minWidth = sidebarWidth + 'px';
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) {
+    /* ignore */
+  }
 }
 
 // ─── Onboarding ─────────────────────────────────────────────────────
 
 function showOnboarding() {
   const el = document.getElementById('onboarding');
-  el.style.display = 'flex';
+  el.style.display = 'block';
   document.querySelector('.sidebar').style.display = 'none';
 
   const dirBtn = document.getElementById('onboardingDirBtn');
   const dirStatus = document.getElementById('onboardingDirStatus');
-  const colorsSection = document.getElementById('onboardingColors');
+  const featuresSection = document.getElementById('onboardingFeatures');
   const startBtn = document.getElementById('onboardingStartBtn');
   let selectedScheme = 'amber';
 
@@ -5450,20 +6693,37 @@ function showOnboarding() {
     const result = await fsStorage.selectDirectory();
     if (result.success) {
       dirStatus.textContent = result.name;
-      colorsSection.style.display = 'block';
-      startBtn.disabled = false;
+      featuresSection.style.display = 'block';
+      const rows = featuresSection.querySelectorAll('.onboarding-feature');
+      rows.forEach((row, i) => {
+        row.style.animationDelay = `${i * 120}ms`;
+        row.classList.add('fade-in');
+      });
+      const lastRow = rows[rows.length - 1];
+      lastRow.addEventListener(
+        'animationend',
+        () => {
+          startBtn.style.display = 'block';
+          startBtn.disabled = false;
+          startBtn.classList.add('fade-in');
+          startBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        },
+        { once: true },
+      );
     }
   });
 
-  document.getElementById('onboardingColorPicker').addEventListener('click', (e) => {
-    const dot = e.target.closest('.color-dot');
-    if (!dot) return;
-    selectedScheme = dot.dataset.scheme;
-    applyColorScheme(selectedScheme);
-    el.querySelectorAll('.color-dot').forEach(d => {
-      d.classList.toggle('active', d.dataset.scheme === selectedScheme);
+  document
+    .getElementById('onboardingColorPicker')
+    .addEventListener('click', (e) => {
+      const dot = e.target.closest('.color-dot');
+      if (!dot) return;
+      selectedScheme = dot.dataset.scheme;
+      applyColorScheme(selectedScheme);
+      el.querySelectorAll('.color-dot').forEach((d) => {
+        d.classList.toggle('active', d.dataset.scheme === selectedScheme);
+      });
     });
-  });
 
   startBtn.addEventListener('click', async () => {
     startBtn.disabled = true;
@@ -5477,11 +6737,15 @@ function showOnboarding() {
 
     // Fade out onboarding, then show main UI
     el.classList.add('fade-out');
-    el.addEventListener('transitionend', async () => {
-      el.style.display = 'none';
-      document.querySelector('.sidebar').style.display = '';
-      await initializeMain();
-    }, { once: true });
+    el.addEventListener(
+      'transitionend',
+      async () => {
+        el.style.display = 'none';
+        document.querySelector('.sidebar').style.display = '';
+        await initializeMain();
+      },
+      { once: true },
+    );
   });
 }
 
@@ -5491,7 +6755,9 @@ async function initialize() {
 
   // Check if first run (no directory configured)
   try {
-    const resp = await chrome.runtime.sendMessage({ action: 'hasDirectoryHandle' });
+    const resp = await chrome.runtime.sendMessage({
+      action: 'hasDirectoryHandle',
+    });
     if (resp?.success && !resp.hasHandle) {
       showOnboarding();
       document.body.dataset.ready = 'true';
@@ -5507,20 +6773,29 @@ async function initializeMain(currentTheme) {
   if (!currentTheme) currentTheme = await applyTheme();
 
   const _t0 = performance.now();
-  const _timer = (label) => logDebug(`[init-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`);
+  const _timer = (label) =>
+    logDebug(
+      `[init-timer] ${label}: ${(performance.now() - _t0).toFixed(0)}ms`,
+    );
 
   // Check for service downtime (paused state) and show error banner if set
   try {
-    const { serviceError: svcErr } = await chrome.storage.session.get(['serviceError']);
+    const { serviceError: svcErr } = await chrome.storage.session.get([
+      'serviceError',
+    ]);
     if (svcErr) {
       showServiceErrorBanner(svcErr);
     }
   } catch {}
 
   // Verify device identity — CURRENT file must be readable
-  const deviceResp = await chrome.runtime.sendMessage({ action: 'getDeviceId' });
+  const deviceResp = await chrome.runtime.sendMessage({
+    action: 'getDeviceId',
+  });
   if (!deviceResp?.deviceId) {
-    throw new Error('Device identity unavailable — the CURRENT file may be missing or corrupted. Try reloading the extension.');
+    throw new Error(
+      'Device identity unavailable — the CURRENT file may be missing or corrupted. Try reloading the extension.',
+    );
   }
 
   // Theme select — reflects current value from applyTheme()
@@ -5534,23 +6809,32 @@ async function initializeMain(currentTheme) {
   // Load settings from filesystem
   historyState.fileBatch = await loadSettingsValue('historyFileBatch', 10);
   document.getElementById('historyFileBatch').value = historyState.fileBatch;
-  document.getElementById('captureSnapshotVideo').checked = await loadSettingsValue('captureSnapshotVideo', false);
+  document.getElementById('captureSnapshotVideo').checked =
+    await loadSettingsValue('captureSnapshotVideo', false);
 
   // Addon toggles — infer enabled state from existing data when the toggle key is new
   const blacklistEnabledRaw = await loadSettingsValue('blacklistEnabled', null);
-  const blacklistEnabled = blacklistEnabledRaw !== null
-    ? blacklistEnabledRaw
-    : (await loadSettingsValue('urlBlacklist', null)) !== null || true;
+  const blacklistEnabled =
+    blacklistEnabledRaw !== null
+      ? blacklistEnabledRaw
+      : (await loadSettingsValue('urlBlacklist', null)) !== null || true;
   document.getElementById('blacklistEnabled').checked = blacklistEnabled;
   setAddonOpen(document.getElementById('blacklistBody'), blacklistEnabled);
 
-  const titleCleanupEnabledRaw = await loadSettingsValue('titleCleanupEnabled', null);
+  const titleCleanupEnabledRaw = await loadSettingsValue(
+    'titleCleanupEnabled',
+    null,
+  );
   const titleTrimRules = await loadSettingsValue('titleTrimRules', null);
-  const titleCleanupEnabled = titleCleanupEnabledRaw !== null
-    ? titleCleanupEnabledRaw
-    : (titleTrimRules !== null && titleTrimRules.length > 0);
+  const titleCleanupEnabled =
+    titleCleanupEnabledRaw !== null
+      ? titleCleanupEnabledRaw
+      : titleTrimRules !== null && titleTrimRules.length > 0;
   document.getElementById('titleCleanupEnabled').checked = titleCleanupEnabled;
-  setAddonOpen(document.getElementById('titleCleanupBody'), titleCleanupEnabled);
+  setAddonOpen(
+    document.getElementById('titleCleanupBody'),
+    titleCleanupEnabled,
+  );
 
   // Sync settings
   const syncEnabled = await loadSettingsValue('syncEnabled', false);
@@ -5559,7 +6843,10 @@ async function initializeMain(currentTheme) {
   const syncMethod = await loadSettingsValue('syncMethod', 'github');
   document.getElementById('syncMethod').value = syncMethod;
   syncShowMethodFields(syncMethod);
-  document.getElementById('syncRepoUrl').value = await loadSettingsValue('syncRepoUrl', '');
+  document.getElementById('syncRepoUrl').value = await loadSettingsValue(
+    'syncRepoUrl',
+    '',
+  );
   // Load GitHub auth state from background (token lives in session, not settings)
   try {
     const authState = await sendAction({ action: 'getSyncAuthState' });
@@ -5569,16 +6856,34 @@ async function initializeMain(currentTheme) {
     } else {
       syncShowAuthState('disconnected');
     }
-    document.getElementById('syncRememberToken').checked = authState.rememberToken;
-  } catch { syncShowAuthState('disconnected'); }
+    document.getElementById('syncRememberToken').checked =
+      authState.rememberToken;
+  } catch {
+    syncShowAuthState('disconnected');
+  }
   const syncFolderName = await loadSettingsValue('syncFolderName', '');
   document.getElementById('syncFolderLabel').textContent = syncFolderName;
-  document.getElementById('clearSyncDirBtn').style.display = syncFolderName ? '' : 'none';
-  document.getElementById('syncWebdavUrl').value = await loadSettingsValue('syncWebdavUrl', '');
-  document.getElementById('syncWebdavUser').value = await loadSettingsValue('syncWebdavUser', '');
-  document.getElementById('syncWebdavPass').value = await loadSettingsValue('syncWebdavPass', '');
-  document.getElementById('syncIntervalMinutes').value = await loadSettingsValue('syncIntervalMinutes', 5);
-  document.getElementById('syncRetentionDays').value = await loadSettingsValue('syncRetentionDays', 7);
+  document.getElementById('clearSyncDirBtn').style.display = syncFolderName
+    ? ''
+    : 'none';
+  document.getElementById('syncWebdavUrl').value = await loadSettingsValue(
+    'syncWebdavUrl',
+    '',
+  );
+  document.getElementById('syncWebdavUser').value = await loadSettingsValue(
+    'syncWebdavUser',
+    '',
+  );
+  document.getElementById('syncWebdavPass').value = await loadSettingsValue(
+    'syncWebdavPass',
+    '',
+  );
+  document.getElementById('syncIntervalMinutes').value =
+    await loadSettingsValue('syncIntervalMinutes', 5);
+  document.getElementById('syncRetentionDays').value = await loadSettingsValue(
+    'syncRetentionDays',
+    7,
+  );
   if (syncEnabled) refreshSyncDevices();
   _timer('loadSettings');
 
@@ -5594,7 +6899,7 @@ async function initializeMain(currentTheme) {
   _timer('sidebarInit');
 
   // Render sidebar concurrently with heavy data (don't block on sidebar)
-  listsReadyPromise = renderLists().catch(err => showFatalError(err.message));
+  listsReadyPromise = renderLists().catch((err) => showFatalError(err.message));
   renderBlacklist();
   renderTrimRules();
   initRulesPanel();
@@ -5607,7 +6912,7 @@ async function initializeMain(currentTheme) {
   showExplore();
 }
 
-initialize().catch(err => showFatalError(err.message));
+initialize().catch((err) => showFatalError(err.message));
 
 function getActiveContainer() {
   return activeView.type === 'category'
@@ -5620,7 +6925,12 @@ document.addEventListener('keydown', async (e) => {
   if (e.key !== 'Delete' && e.key !== 'Backspace') return;
   // Don't intercept when typing in an input/textarea
   const tag = document.activeElement?.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+  if (
+    tag === 'INPUT' ||
+    tag === 'TEXTAREA' ||
+    document.activeElement?.isContentEditable
+  )
+    return;
 
   // Determine which container has selected rows
   const isListView = activeView.type === 'list';
@@ -5649,7 +6959,12 @@ document.addEventListener('keydown', async (e) => {
 document.addEventListener('keydown', async (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   const tag = document.activeElement?.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+  if (
+    tag === 'INPUT' ||
+    tag === 'TEXTAREA' ||
+    document.activeElement?.isContentEditable
+  )
+    return;
 
   if (e.key === 'c') {
     // Copy selected rows as readable text with angle-bracket URLs
@@ -5658,7 +6973,7 @@ document.addEventListener('keydown', async (e) => {
     if (!selected || selected.length === 0) return;
 
     e.preventDefault();
-    const lines = [...selected].map(r => {
+    const lines = [...selected].map((r) => {
       const title = (r.dataset.title || '').replace(/[<>]/g, '');
       const url = r.dataset.url || '';
       return title ? `${title} <${url}>` : `<${url}>`;
@@ -5675,7 +6990,11 @@ document.addEventListener('keydown', async (e) => {
 
     e.preventDefault();
     let text;
-    try { text = await navigator.clipboard.readText(); } catch { return; }
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      return;
+    }
     // Extract URLs from angle-bracket format: <url>
     const urls = [];
     for (const m of text.matchAll(/<([^>]+)>/g)) {
@@ -5685,7 +7004,11 @@ document.addEventListener('keydown', async (e) => {
     if (urls.length === 0) return;
 
     const listId = activeView.id;
-    await chrome.runtime.sendMessage({ action: 'addListPins', listId, urls: urls });
+    await chrome.runtime.sendMessage({
+      action: 'addListPins',
+      listId,
+      urls: urls,
+    });
     refreshPins();
   }
 
@@ -5693,9 +7016,14 @@ document.addEventListener('keydown', async (e) => {
     e.preventDefault();
     if (activeView.type === 'list') {
       relatedVirtualScroller?.selectAll();
-    } else if (activeView.type === 'explore' && searchState.results.length > 0) {
+    } else if (
+      activeView.type === 'explore' &&
+      searchState.results.length > 0
+    ) {
       if (searchState.results.length > 100) {
-        showErrorBubble('Too many results to select (limit: 100)', { suffix: '' });
+        showErrorBubble('Too many results to select (limit: 100)', {
+          suffix: '',
+        });
       } else {
         relatedVirtualScroller?.selectAll();
       }

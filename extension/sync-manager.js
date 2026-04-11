@@ -28,7 +28,15 @@ export function hashContent(str) {
 }
 
 export class SyncManager {
-  constructor({ transport, collectLocalFiles, writeRemoteFiles, loadCursors, saveCursors, loadPushState, savePushState }) {
+  constructor({
+    transport,
+    collectLocalFiles,
+    writeRemoteFiles,
+    loadCursors,
+    saveCursors,
+    loadPushState,
+    savePushState,
+  }) {
     this.transport = transport;
     this.collectLocalFiles = collectLocalFiles;
     this.writeRemoteFiles = writeRemoteFiles;
@@ -56,14 +64,15 @@ export class SyncManager {
     // First push: check for device ID collision with existing branches
     if (!oldHashes || Object.keys(oldHashes).length === 0) {
       const branches = await this.transport.listBranches();
-      if (branches.some(b => b.name === deviceId)) {
+      if (branches.some((b) => b.name === deviceId)) {
         return { pushed: false, collision: true };
       }
     }
 
     // Check if anything changed (new files, changed content, or removed files)
-    const changed = Object.keys(newHashes).length !== Object.keys(oldHashes).length
-      || Object.entries(newHashes).some(([p, h]) => oldHashes[p] !== h);
+    const changed =
+      Object.keys(newHashes).length !== Object.keys(oldHashes).length ||
+      Object.entries(newHashes).some(([p, h]) => oldHashes[p] !== h);
 
     if (!changed) return { pushed: false, fileCount: files.length };
 
@@ -78,9 +87,10 @@ export class SyncManager {
   // Returns { remoteEntries, devices, changedPeers }.
   async pull(deviceId) {
     const branches = await this.transport.listBranches();
-    const peers = branches.filter(b => b.name !== deviceId);
+    const peers = branches.filter((b) => b.name !== deviceId);
 
-    if (peers.length === 0) return { remoteEntries: [], devices: branches, changedPeers: [] };
+    if (peers.length === 0)
+      return { remoteEntries: [], devices: branches, changedPeers: [] };
 
     const cursorData = await this.loadCursors();
     const cursors = cursorData.cursors || {};
@@ -97,7 +107,7 @@ export class SyncManager {
       const oldFiles = cursor.files || {};
 
       // Find new/changed blobs
-      const changedBlobs = tree.filter(f => oldFiles[f.path] !== f.sha);
+      const changedBlobs = tree.filter((f) => oldFiles[f.path] !== f.sha);
 
       // Download changed blobs
       const downloaded = [];
@@ -107,25 +117,37 @@ export class SyncManager {
       }
 
       // Separate logs from notes
-      const logFiles = downloaded.filter(f => f.path.startsWith('data/logs/'));
-      const noteFiles = downloaded.filter(f => f.path.startsWith('data/notes/'));
+      const logFiles = downloaded.filter((f) =>
+        f.path.startsWith('data/logs/'),
+      );
+      const noteFiles = downloaded.filter((f) =>
+        f.path.startsWith('data/notes/'),
+      );
 
       // Write note files to disk
       if (noteFiles.length > 0) {
-        await this.writeRemoteFiles(noteFiles.map(f => ({ path: f.path, content: f.content })));
+        await this.writeRemoteFiles(
+          noteFiles.map((f) => ({ path: f.path, content: f.content })),
+        );
       }
 
       // Write remote log files to disk (for hydration on restart)
       if (logFiles.length > 0) {
-        await this.writeRemoteFiles(logFiles.map(f => ({ path: f.path, content: f.content })));
+        await this.writeRemoteFiles(
+          logFiles.map((f) => ({ path: f.path, content: f.content })),
+        );
       }
 
       // Parse log entries for replay
       const entries = [];
       for (const logFile of logFiles) {
-        const lines = logFile.content.split('\n').filter(l => l.trim());
+        const lines = logFile.content.split('\n').filter((l) => l.trim());
         for (const line of lines) {
-          try { entries.push(JSON.parse(line)); } catch { /* skip malformed */ }
+          try {
+            entries.push(JSON.parse(line));
+          } catch {
+            /* skip malformed */
+          }
         }
       }
 

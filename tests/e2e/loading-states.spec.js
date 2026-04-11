@@ -2,7 +2,11 @@ import { test, expect } from './fixtures.js';
 import { resetAndSeed, openOptionsPage } from './helpers.js';
 
 test.describe('Loading states', () => {
-  test('options page uses spinner instead of Loading... text', async ({ extContext, extensionId, setupDir }) => {
+  test('options page uses spinner instead of Loading... text', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
@@ -22,7 +26,11 @@ test.describe('Loading states', () => {
     await page.close();
   });
 
-  test('page detail loading uses spinner element', async ({ extContext, extensionId, setupDir }) => {
+  test('page detail loading uses spinner element', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
@@ -53,7 +61,8 @@ test.describe('Loading states', () => {
       el.className = 'spinner';
       document.body.appendChild(el);
       const style = getComputedStyle(el);
-      const hasAnimation = style.animationName !== 'none' && style.animationName !== '';
+      const hasAnimation =
+        style.animationName !== 'none' && style.animationName !== '';
       document.body.removeChild(el);
       return hasAnimation;
     });

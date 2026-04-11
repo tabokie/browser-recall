@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { renderTimeChartInto, bindChartBarClick } from '../extension/time-chart.js';
+import {
+  renderTimeChartInto,
+  bindChartBarClick,
+} from '../extension/time-chart.js';
 
 // Helper: create chart DOM structure matching options.html
 function createChartDOM() {
@@ -84,7 +87,7 @@ describe('renderTimeChartInto', () => {
     // Range should start from Jan 1 (expanded to month boundary of earliest date)
     // and go to March 28
     const allGroups = barsEl.querySelectorAll('.chart-bar-group');
-    const dates = Array.from(allGroups).map(g => g.dataset.date);
+    const dates = Array.from(allGroups).map((g) => g.dataset.date);
 
     // First date should be 2026-01-01 (month boundary of earliest estimated date)
     expect(dates[0]).toBe('2026-01-01');
@@ -92,7 +95,11 @@ describe('renderTimeChartInto', () => {
     const today = new Date().toISOString().slice(0, 10);
     expect(dates[dates.length - 1]).toBe(today);
     // Should span from Jan 1 to today
-    const expectedDays = Math.round((new Date(today + 'T00:00:00Z') - new Date('2026-01-01T00:00:00Z')) / 86400000) + 1;
+    const expectedDays =
+      Math.round(
+        (new Date(today + 'T00:00:00Z') - new Date('2026-01-01T00:00:00Z')) /
+          86400000,
+      ) + 1;
     expect(dates.length).toBe(expectedDays);
   });
 
@@ -100,14 +107,14 @@ describe('renderTimeChartInto', () => {
     // Real data: 2 visits, estimated: 20 visits
     // With estimated included, the real bar should be much shorter
     const entries = makeEntries('2026-03-10', 2);
-    const estimatedByDay = new Map([
-      ['2026-03-05', 20],
-    ]);
+    const estimatedByDay = new Map([['2026-03-05', 20]]);
 
     renderTimeChartInto(chartEl, barsEl, entries, 'Test', estimatedByDay);
 
-    const bars = barsEl.querySelectorAll('.chart-bar-group.has-data .chart-bar');
-    const heights = [...bars].map(b => parseInt(b.style.height));
+    const bars = barsEl.querySelectorAll(
+      '.chart-bar-group.has-data .chart-bar',
+    );
+    const heights = [...bars].map((b) => parseInt(b.style.height));
     // The estimated (20) bar should be taller than the real (2) bar
     expect(Math.max(...heights)).toBeGreaterThan(Math.min(...heights));
   });
@@ -127,7 +134,9 @@ describe('renderTimeChartInto', () => {
     // Mar 5 bar height should reflect real count (7), not estimated (3)
     const mar5 = barsEl.querySelector('[data-date="2026-03-05"] .chart-bar');
     const mar1 = barsEl.querySelector('[data-date="2026-03-01"] .chart-bar');
-    expect(parseInt(mar5.style.height)).toBeGreaterThan(parseInt(mar1.style.height));
+    expect(parseInt(mar5.style.height)).toBeGreaterThan(
+      parseInt(mar1.style.height),
+    );
   });
 
   it('renders chart with only estimated data (no real entries)', () => {
@@ -177,11 +186,17 @@ describe('bindChartBarClick with estimated bars', () => {
     // Click on estimated-origin bar — should become active
     const mar5Bar = barsEl.querySelector('[data-date="2026-03-05"] .chart-bar');
     mar5Bar.click();
-    expect(mar5Bar.closest('.chart-bar-group').classList.contains('active')).toBe(true);
+    expect(
+      mar5Bar.closest('.chart-bar-group').classList.contains('active'),
+    ).toBe(true);
 
     // Click on real bar — should also become active
-    const mar10Bar = barsEl.querySelector('[data-date="2026-03-10"] .chart-bar');
+    const mar10Bar = barsEl.querySelector(
+      '[data-date="2026-03-10"] .chart-bar',
+    );
     mar10Bar.click();
-    expect(mar10Bar.closest('.chart-bar-group').classList.contains('active')).toBe(true);
+    expect(
+      mar10Bar.closest('.chart-bar-group').classList.contains('active'),
+    ).toBe(true);
   });
 });

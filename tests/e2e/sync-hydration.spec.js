@@ -2,7 +2,11 @@ import { test, expect } from './fixtures.js';
 import { resetAndSeed, openHelperPage, getSlugForUrl } from './helpers.js';
 
 test.describe('Multi-device hydration', () => {
-  test('remote device log files are replayed on hydration', async ({ extContext, extensionId, setupDir }) => {
+  test('remote device log files are replayed on hydration', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const url = 'https://example.com/remote-visit';
     const slug = getSlugForUrl(url);
 
@@ -10,10 +14,17 @@ test.describe('Multi-device hydration', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
-      { path: `pages/${slug}.json`, data: {
-        slug, url, title: 'Original Title', parentIds: [], childIds: [],
-        timestamps: { 'dev-local': 500 },
-      }},
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url,
+          title: 'Original Title',
+          parentIds: [],
+          childIds: [],
+          timestamps: { 'dev-local': 500 },
+        },
+      },
       // Remote device log file: visit_page + rate_page
       {
         path: 'data/logs/dev-remote/2026-03-25.jsonl',
@@ -41,7 +52,11 @@ test.describe('Multi-device hydration', () => {
     await helper.close();
   });
 
-  test('local logBuffer replayed before remote logs', async ({ extContext, extensionId, setupDir }) => {
+  test('local logBuffer replayed before remote logs', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const url = 'https://example.com/order-test';
     const slug = getSlugForUrl(url);
 
@@ -51,32 +66,53 @@ test.describe('Multi-device hydration', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
-      { path: `pages/${slug}.json`, data: {
-        slug, url, title: 'Seeded', parentIds: [], childIds: [], timestamps: {},
-      }},
-      { path: 'data/logs/dev-remote/2026-03-25.jsonl', lines: [
-        { timestamp: 200, action: 'visit_page', url, title: 'Remote Title' },
-      ]},
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url,
+          title: 'Seeded',
+          parentIds: [],
+          childIds: [],
+          timestamps: {},
+        },
+      },
+      {
+        path: 'data/logs/dev-remote/2026-03-25.jsonl',
+        lines: [
+          { timestamp: 200, action: 'visit_page', url, title: 'Remote Title' },
+        ],
+      },
     ]);
 
     // Inject a local logBuffer entry that will be replayed in Phase 2
     const helperSetup = await openHelperPage(extContext, extensionId);
-    await helperSetup.evaluate(async ({ url }) => {
-      const result = await chrome.runtime.sendMessage({
-        action: 'setLogBufferForTest',
-        entries: [{ timestamp: 100, action: 'visit_page', url, title: 'Local Title' }],
-      });
-      if (!result?.success) throw new Error('setLogBufferForTest failed');
-      // Rehydrate to replay both local buffer + remote logs
-      const rh = await chrome.runtime.sendMessage({ action: 'rehydrateForTest', keepLogBuffer: true });
-      if (!rh?.success) throw new Error('rehydrateForTest failed');
-    }, { url });
+    await helperSetup.evaluate(
+      async ({ url }) => {
+        const result = await chrome.runtime.sendMessage({
+          action: 'setLogBufferForTest',
+          entries: [
+            { timestamp: 100, action: 'visit_page', url, title: 'Local Title' },
+          ],
+        });
+        if (!result?.success) throw new Error('setLogBufferForTest failed');
+        // Rehydrate to replay both local buffer + remote logs
+        const rh = await chrome.runtime.sendMessage({
+          action: 'rehydrateForTest',
+          keepLogBuffer: true,
+        });
+        if (!rh?.success) throw new Error('rehydrateForTest failed');
+      },
+      { url },
+    );
     await helperSetup.close();
 
     const helper = await openHelperPage(extContext, extensionId);
-    const page = await helper.evaluate(async (key) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key })
-    , 'page:' + slug);
+    const page = await helper.evaluate(
+      async (key) =>
+        chrome.runtime.sendMessage({ action: 'readCacheable', key }),
+      'page:' + slug,
+    );
 
     expect(page?.value).toBeTruthy();
     // Both devices' timestamps should be present
@@ -86,22 +122,36 @@ test.describe('Multi-device hydration', () => {
     await helper.close();
   });
 
-  test('hydration skips remote logs when sync is not enabled', async ({ extContext, extensionId, setupDir }) => {
+  test('hydration skips remote logs when sync is not enabled', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
     const url = 'https://example.com/no-sync';
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: {} },
-      { path: 'data/logs/dev-remote/2026-03-25.jsonl', lines: [
-        { timestamp: 1000, action: 'visit_page', url, title: 'Should Not Appear' },
-      ]},
+      {
+        path: 'data/logs/dev-remote/2026-03-25.jsonl',
+        lines: [
+          {
+            timestamp: 1000,
+            action: 'visit_page',
+            url,
+            title: 'Should Not Appear',
+          },
+        ],
+      },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
-    const page = await helper.evaluate(async (key) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key })
-    , 'page:' + slug);
+    const page = await helper.evaluate(
+      async (key) =>
+        chrome.runtime.sendMessage({ action: 'readCacheable', key }),
+      'page:' + slug,
+    );
 
     // Page should not exist — remote logs not replayed
     expect(page?.value).toBeFalsy();
