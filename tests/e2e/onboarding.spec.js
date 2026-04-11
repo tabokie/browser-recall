@@ -79,7 +79,7 @@ test.describe('Onboarding', () => {
       await options.waitForFunction(() => document.body.dataset.ready === 'true', { timeout: 10000 });
 
       await expect(options.locator('.onboarding-card h1')).toContainText('browser-recall');
-      await expect(options.locator('.onboarding-desc')).toContainText('local folder');
+      await expect(options.locator('.onboarding-desc')).toContainText('locally in plain text');
       // Device name input hidden (in optional section which is not visible yet)
       await expect(options.locator('#onboardingDeviceName')).not.toBeVisible();
 

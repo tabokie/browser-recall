@@ -1,6 +1,6 @@
-# Portal Extension — Architecture
+# Browser Recall — Architecture
 
-> Keep up-to-date after changes, like CODEBASE_MAP.md.
+> Keep up-to-date when functionality is added, removed, or significantly changed.
 
 ## Directory Structure
 
@@ -24,7 +24,7 @@
     orphaned.json                    #   Tracks deleted entities as entries [{ key, url? }] (recycle bin)
 ```
 
-**`data/` is public**: We surrender read permission to all potential apps outside our domain. Content inside it is generally immutable/append-only. Internal data (entities, system lists, manifests) that contain internal concepts live in separate folders (`lists/`, `pages/`, `manifest/`).
+`**data/` is public**: We surrender read permission to all potential apps outside our domain. Content inside it is generally immutable/append-only. Internal data (entities, system lists, manifests) that contain internal concepts live in separate folders (`lists/`, `pages/`, `manifest/`).
 
 **Event fields** reference only things in `data/`: URLs for pages, relative paths (`snapshots/...`, `notes/...`) for files. Internal folders are never mentioned in events.
 
@@ -156,13 +156,15 @@ Phase 2:    Replay ALL logBuffer entries via effectOf (brings session cache up-t
 
 **Idempotency strategies used per action type:**
 
-| Strategy | Actions | How |
-|---|---|---|
-| Per-device timestamp guard (`timestamps` map) | `leave_page`, `rate_page` | Additive fields (`timeOnPage +=`, `likes +=`) skip if `entry.timestamp <= timestamps[deviceId]` |
-| LWW timestamp guard (`deletedTs`) | `delete_note`, `delete_snapshot`, `delete_list` | Skip if `deletedTs >= entry.timestamp` |
-| Duplicate check before insert | `pin_to_list`, `create_snapshot`, `create_note` | `!array.includes(key)` / `!array.some(p => p.id === id)` before push |
-| Existence check (skip if exists) | `create_list` | Skip entire operation if list entity already exists |
-| Pure overwrite / LWW | `visit_page`, `rename_page`, `update_setting`, `update_list_tree`, `update_list` | Last write wins — re-applying is a no-op |
+
+| Strategy                                      | Actions                                                                          | How                                                                                             |
+| --------------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Per-device timestamp guard (`timestamps` map) | `leave_page`, `rate_page`                                                        | Additive fields (`timeOnPage +=`, `likes +=`) skip if `entry.timestamp <= timestamps[deviceId]` |
+| LWW timestamp guard (`deletedTs`)             | `delete_note`, `delete_snapshot`, `delete_list`                                  | Skip if `deletedTs >= entry.timestamp`                                                          |
+| Duplicate check before insert                 | `pin_to_list`, `create_snapshot`, `create_note`                                  | `!array.includes(key)` / `!array.some(p => p.id === id)` before push                            |
+| Existence check (skip if exists)              | `create_list`                                                                    | Skip entire operation if list entity already exists                                             |
+| Pure overwrite / LWW                          | `visit_page`, `rename_page`, `update_setting`, `update_list_tree`, `update_list` | Last write wins — re-applying is a no-op                                                        |
+
 
 **When adding a new action type to `effectOf`:** identify which strategy applies, implement the guard, and add an E2E test that seeds the entity on disk then replays the same log entry via `setLogBufferForTest` + `rehydrateForTest({ keepLogBuffer: true })`.
 
@@ -185,12 +187,14 @@ All entity creation goes through `ensurePageEntity(url, ts, title)`, which sets 
 ### Page Eligibility GC
 
 Page entities are garbage-collected when they become **ineligible**. A page is eligible if ANY of:
+
 - `parentIds` contains at least one `list:` key (pinned to a user list)
 - `childIds` contains at least one `note:` or `snapshot:` key
 - `user_title` is set and truthy
 - `likes` is set and non-zero
 
 GC triggers during replay when an action removes the last eligible criterion:
+
 - `unpin_from_list` — removes list parent; page GC'd if no other criteria
 - `delete_note` — removes note child from page; page GC'd if no other criteria
 - `delete_snapshot` — removes snapshot child from page; page GC'd if no other criteria
@@ -202,12 +206,14 @@ GC'd pages are set to `null` in replay results. `sessionWrite` stores a GC tombs
 
 Internal entity references use typed keys with a prefix indicating the entity kind:
 
-| Prefix | Meaning | File Location |
-|--------|---------|---------------|
-| `page:<slug>` | Page entity | `pages/<slug>.json` |
-| `note:<slug>` | Note entity | `data/notes/<noteSlug>.json` |
+
+| Prefix             | Meaning                                                                            | File Location                 |
+| ------------------ | ---------------------------------------------------------------------------------- | ----------------------------- |
+| `page:<slug>`      | Page entity                                                                        | `pages/<slug>.json`           |
+| `note:<slug>`      | Note entity                                                                        | `data/notes/<noteSlug>.json`  |
 | `snap:<slug>-<ts>` | Snapshot (no entity file — exists in page `childIds` and `manifest/orphaned.json`) | `data/snapshots/<slug>-<ts>/` |
-| `list:<id>` | List entity | `lists/<id>.json` |
+| `list:<id>`        | List entity                                                                        | `lists/<id>.json`             |
+
 
 Used internally in: `page.parentIds`, `page.childIds`, list pin `id` fields. Notes use `url` (raw page URL) instead of typed references.
 
@@ -231,19 +237,21 @@ Used internally in: `page.parentIds`, `page.childIds`, list pin `id` fields. Not
                                                 │     └──────────────────────┘        └─────────────────────┘
 ```
 
-| Module | Responsibility | Allowed APIs |
-|--------|---------------|-------------|
-| **background.js** | Business logic, event-sourced log, cache coordination, message dispatch | `chrome.storage.session/local`, `chrome.runtime`, `chrome.tabs`, `chrome.offscreen` |
-| **offscreen.js** | Filesystem I/O only (File System Access API needs document context) | `chrome.runtime` (port only) |
-| **content.js** | DOM interaction, scroll/time tracking, highlight rendering | `chrome.runtime.sendMessage`, `chrome.storage.session` (read workspace) |
-| **popup.js** | Current-page dashboard UI | `chrome.runtime.sendMessage`, `chrome.tabs.query` |
-| **options.js** | Full UI: search, explore, lists, settings | `chrome.runtime.sendMessage`, `chrome.storage.session` (transient UI state) |
-| **replay.js** | Pure event replay functions (no chrome APIs) | None |
-| **rule-engine.js** | Pure rule matching (keyword/smart), validation, ID generation | None |
-| **smart-rule-sandbox.js** | Sandboxed JS execution for smart rules (manifest sandbox page) | `new Function` (via unsafe-eval CSP) |
-| **utils.js** | Shared utilities, `readCacheable`, `sendAction` | `chrome.runtime.sendMessage`, `chrome.storage.session` (cache read) |
-| **entity-cache.js** | Session cache with LRU eviction | `chrome.storage.session` |
-| **filesystem-storage.js** | File System Access API wrapper | File System Access, IndexedDB |
+
+| Module                    | Responsibility                                                          | Allowed APIs                                                                        |
+| ------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **background.js**         | Business logic, event-sourced log, cache coordination, message dispatch | `chrome.storage.session/local`, `chrome.runtime`, `chrome.tabs`, `chrome.offscreen` |
+| **offscreen.js**          | Filesystem I/O only (File System Access API needs document context)     | `chrome.runtime` (port only)                                                        |
+| **content.js**            | DOM interaction, scroll/time tracking, highlight rendering              | `chrome.runtime.sendMessage`, `chrome.storage.session` (read workspace)             |
+| **popup.js**              | Current-page dashboard UI                                               | `chrome.runtime.sendMessage`, `chrome.tabs.query`                                   |
+| **options.js**            | Full UI: search, explore, lists, settings                               | `chrome.runtime.sendMessage`, `chrome.storage.session` (transient UI state)         |
+| **replay.js**             | Pure event replay functions (no chrome APIs)                            | None                                                                                |
+| **rule-engine.js**        | Pure rule matching (keyword/smart), validation, ID generation           | None                                                                                |
+| **smart-rule-sandbox.js** | Sandboxed JS execution for smart rules (manifest sandbox page)          | `new Function` (via unsafe-eval CSP)                                                |
+| **utils.js**              | Shared utilities, `readCacheable`, `sendAction`                         | `chrome.runtime.sendMessage`, `chrome.storage.session` (cache read)                 |
+| **entity-cache.js**       | Session cache with LRU eviction                                         | `chrome.storage.session`                                                            |
+| **filesystem-storage.js** | File System Access API wrapper                                          | File System Access, IndexedDB                                                       |
+
 
 ### Message Response Convention
 
@@ -253,9 +261,10 @@ All background.js message handlers return `{ success: true, ...fields }` on succ
 
 `history:<YYYY-MM-DD>` keys in session cache hold the complete list of entries for that date — both drained (on-disk JSONL) and undrained (still in logBuffer). `addLog()` appends every new entry to the appropriate date key and pins it. This makes `readCacheable('history:<today>')` the canonical way for UI pages to get today's entries.
 
-`readFs` handles `history:*` keys via offscreen `loadHistoryRange` (pure disk read, no replay — same as all other keys). During hydration, Phase 2.5 appends logBuffer entries to their `history:<date>` keys after Phase 2 entity replay. This ensures session cache has the complete view before any `readCacheable` call from UI pages.
+`readFs` handles `history:`* keys via offscreen `loadHistoryRange` (pure disk read, no replay — same as all other keys). During hydration, Phase 2.5 appends logBuffer entries to their `history:<date>` keys after Phase 2 entity replay. This ensures session cache has the complete view before any `readCacheable` call from UI pages.
 
 **Post-hydration eviction safety**: `readFs` returns disk-only data without logBuffer replay. This is safe because keys with undrained logBuffer entries are protected from eviction:
+
 - **Today's key**: pinned by hydration (Phase 1.5) and `addLog()` — never evicted.
 - **Past date keys with undrained entries**: Phase 2.5 sets their timestamp from logBuffer entries. Since undrained timestamps > `persistWatermark`, watermark-gated eviction in `entity-cache.js` won't evict them until drain completes (at which point disk is complete).
 - **Past date keys fully drained**: disk is the complete record — `readFs` returns correct data.
@@ -265,7 +274,6 @@ All background.js message handlers return `{ success: true, ...fields }` on succ
 Two invariants ensure `readCacheable('page:*')` / `readCacheable('note:*')` / etc. always return up-to-date data without replaying the logBuffer on read:
 
 1. **Dirty entities are pinned (not evictable).** Every `addLog()` call replays via `effectOf` and writes updated entities to session cache. The entity-cache LRU only evicts entries whose `timestamp <= persistWatermark`. Undrained entities have timestamps newer than the watermark, so they cannot be evicted until drain completes (at which point disk matches the session state).
-
 2. **Hydration pre-fills cache with all entities modified by logBuffer.** Phase 1.5 pre-loads page entities referenced by logBuffer from filesystem into session cache. Phase 2 then replays every logBuffer entry via `effectOf`, bringing all affected entities (pages, notes, lists, SPI, settings) up-to-date. By the time `hydrationDone` resolves and `readCacheable` becomes callable, every entity that has undrained mutations is already in session cache with the correct state.
 
 **Consequence:** `readFs` (the filesystem fallback in `readCacheable`) does NOT need to replay logBuffer entries. For any key with undrained mutations, the session cache will have the up-to-date entity. `readFs` only runs on a true cache miss — meaning no undrained mutations exist for that key, so the disk checkpoint is authoritative.
@@ -274,12 +282,14 @@ Two invariants ensure `readCacheable('page:*')` / `readCacheable('note:*')` / et
 
 Explore search uses four concurrent phases with a generation counter for cancellation:
 
-| Phase | Source | WASM fn | Concurrency |
-|-------|--------|---------|-------------|
-| 0 | In-memory `historyAllEntries` | — (JS `wordsMatchItem`) | Instant |
-| 1 | `data/logs/{device}/*.jsonl` | `searchBatch` | 3 chunks |
-| 2a | `data/notes/*.json` | `searchNotes` | 1 call |
-| 2b | `data/snapshots/*.md` (latest per slug) | `searchSnapshots` | 2 chunks |
+
+| Phase | Source                                  | WASM fn                 | Concurrency |
+| ----- | --------------------------------------- | ----------------------- | ----------- |
+| 0     | In-memory `historyAllEntries`           | — (JS `wordsMatchItem`) | Instant     |
+| 1     | `data/logs/{device}/*.jsonl`            | `searchBatch`           | 3 chunks    |
+| 2a    | `data/notes/*.json`                     | `searchNotes`           | 1 call      |
+| 2b    | `data/snapshots/*.md` (latest per slug) | `searchSnapshots`       | 2 chunks    |
+
 
 All WASM functions read files directly from `FileSystemDirectoryHandle` refs — no JS↔WASM data copying. Phase 0 renders instantly; Phases 1/2a/2b fire concurrently and merge results incrementally via `mergeSearchResults` (dedup by URL, max score, track match sources). `renderProgressiveResults` enriches, filters, re-sorts, and calls `vs.updateData` after each merge.
 
@@ -292,6 +302,7 @@ All WASM functions read files directly from `FileSystemDirectoryHandle` refs —
 ### Known Architectural Exceptions
 
 **options.js direct FileSystemStorage access** — options.js instantiates its own `FileSystemStorage` for:
+
 1. **Progressive WASM search** (`runPhase1`/`runPhase2a`/`runPhase2b`): passes `FileSystemDirectoryHandle` refs directly to WASM `searchBatch`/`searchNotes`/`searchSnapshots` for zero-copy file reads. Routing through background→offscreen would require serializing file contents across IPC boundaries.
 2. **Directory picker UI** (`selectDirectory`): the File System Access `showDirectoryPicker()` API requires user gesture in a document context — can't be proxied through background.
 3. **Settings page diagnostics** (`getDirectoryInfo`, data purge): inspects/manages the storage directory.
@@ -304,10 +315,12 @@ These bypass the background→offscreen pipeline. The tradeoff is acceptable bec
 
 Lists can have **rules** that automatically pin matching pages. Rules are event-sourced via `add_rule`, `remove_rule`, `update_rule` log actions. Two rule types:
 
-| Type | Matching | Implementation |
-|------|----------|---------------|
-| **keyword** | Substring or `/regex/` match on title/url | Pure function in `rule-engine.js` |
-| **smart** | User-written JS function `(page) => score` | Offscreen → sandbox iframe (`smart-rule-sandbox.html`, manifest `sandbox` key for `unsafe-eval` CSP) |
+
+| Type        | Matching                                   | Implementation                                                                                       |
+| ----------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| **keyword** | Substring or `/regex/` match on title/url  | Pure function in `rule-engine.js`                                                                    |
+| **smart**   | User-written JS function `(page) => score` | Offscreen → sandbox iframe (`smart-rule-sandbox.html`, manifest `sandbox` key for `unsafe-eval` CSP) |
+
 
 ### Data Model
 
@@ -322,11 +335,13 @@ For keyword rules, `matchKeywordRule` automatically checks `body` when present i
 ### Execution Flow
 
 **Batch matching** (`runRuleBatch` handler in background.js):
+
 1. Collect lists with non-empty `rules[]`
 2. For each list × entry: build `pageData` (incl. `body` from `bodyPreview`) → call `matchRules()` with offscreen-routed sandbox closure
 3. Auto-pin matching pages via `addLog({ action: 'pin_to_list' })`
 
 **Preview** (`previewRule` handler in background.js):
+
 - Dry-run matching without side effects. Uses `matchRules` with `allScores: true` to return raw scores for all entries (not just above-threshold matches).
 
 **Smart sandbox**: background → offscreen port `executeSandboxFn` → sandbox iframe `postMessage` → `new Function('page', fnSource)(pageData)` → result clamped 0-1. 5s timeout.
@@ -337,14 +352,16 @@ For keyword rules, `matchKeywordRule` automatically checks `body` when present i
 
 **Defense layers (defense-in-depth):**
 
-| Layer | Mechanism | What it prevents |
-|-------|-----------|-----------------|
+
+| Layer                 | Mechanism                                                                                                                                                                                                                                                                                                                        | What it prevents                                                                             |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | **Static validation** | `validateSmartRuleFn()` in `rule-engine.js` scans source with `\b<name>\b` word-boundary regex for 16 banned globals: `fetch`, `chrome`, `window`, `document`, `navigator`, `globalThis`, `eval`, `Function`, `setTimeout`, `setInterval`, `WebSocket`, `Worker`, `localStorage`, `sessionStorage`, `indexedDB`, `importScripts` | Network access, DOM manipulation, extension API access, dynamic code generation, timer abuse |
-| **Size limit** | Max 10KB source (`MAX_FN_SOURCE_BYTES`) | Resource exhaustion via oversized payloads |
-| **Manifest sandbox** | `smart-rule-sandbox.html` declared in manifest `"sandbox"` key — runs in a unique origin with no extension API access | Even if validation is bypassed, `chrome.*` APIs are unavailable |
-| **Iframe isolation** | Sandbox loaded as hidden `<iframe>` inside offscreen document, communicates only via `postMessage` | No direct access to offscreen or background globals |
-| **Execution timeout** | 5-second timeout in `executeSandbox()` (`offscreen.js`) | Infinite loops, long-running computations |
-| **Output clamping** | Return value coerced to number in 0–1 range | No data exfiltration via return value |
+| **Size limit**        | Max 10KB source (`MAX_FN_SOURCE_BYTES`)                                                                                                                                                                                                                                                                                          | Resource exhaustion via oversized payloads                                                   |
+| **Manifest sandbox**  | `smart-rule-sandbox.html` declared in manifest `"sandbox"` key — runs in a unique origin with no extension API access                                                                                                                                                                                                            | Even if validation is bypassed, `chrome.`* APIs are unavailable                              |
+| **Iframe isolation**  | Sandbox loaded as hidden `<iframe>` inside offscreen document, communicates only via `postMessage`                                                                                                                                                                                                                               | No direct access to offscreen or background globals                                          |
+| **Execution timeout** | 5-second timeout in `executeSandbox()` (`offscreen.js`)                                                                                                                                                                                                                                                                          | Infinite loops, long-running computations                                                    |
+| **Output clamping**   | Return value coerced to number in 0–1 range                                                                                                                                                                                                                                                                                      | No data exfiltration via return value                                                        |
+
 
 **Known gaps in static validation.** The word-boundary regex approach has inherent limitations:
 
@@ -356,7 +373,7 @@ For keyword rules, `matchKeywordRule` automatically checks `body` when present i
 
 ### UI (Options Page)
 
-Rules section is a collapsible glass panel inside `#listLayout`, between the header and `#listQueryBuilder`. Hidden for system lists (`system/*`). Shows rule count badge and Run button when rules exist.
+Rules section is a collapsible glass panel inside `#listLayout`, between the header and `#listQueryBuilder`. Hidden for system lists (`system/`*). Shows rule count badge and Run button when rules exist.
 
 - **Rendering**: `renderRulesSection(listId, rules)` shows/hides section + count badge; `renderRulesList()` renders entries with type badges (keyword=orange, smart=green) + remove buttons following `blacklist-entry` pattern.
 - **Inline add form**: type toggle switches between keyword (pattern + field checkboxes) and smart (description + function textarea). Saves via `sendAction('addRule', ...)` with `{ type, config: {...} }` shape.
@@ -374,17 +391,20 @@ This design exists because of the event-sourced architecture. The JSONL history 
 
 ### What Each Deletion Does
 
-**`delete_note` (replay.js):**
+`**delete_note` (replay.js):**
+
 1. Unlinks `note:<slug>` from each parent page's `childIds`
 2. Adds `note:<slug>` to `manifest/orphaned.json`
 3. File `data/notes/<slug>.json` stays on disk
 
-**`delete_snapshot` (replay.js):**
+`**delete_snapshot` (replay.js):**
+
 1. Unlinks `snap:<slug>-<ts>` from each parent page's `childIds`
 2. Adds `snap:<slug>-<ts>` to `manifest/orphaned.json`
 3. Snapshot directory `data/snapshots/<slug>-<ts>/` stays on disk
 
-**`delete_list` (replay.js):**
+`**delete_list` (replay.js):**
+
 1. Removes list from `manifest:list-order` tree via `removeFromTree` (promotes children to parent level)
 2. Removes `list:<id>` from `parentIds` of all pinned pages
 3. Adds `list:<id>` to `manifest/orphaned.json`
@@ -392,7 +412,8 @@ This design exists because of the event-sourced architecture. The JSONL history 
 5. File `lists/<id>.json` stays on disk
 6. Non-cascading — only the target list is deleted; children stay in tree
 
-**`replace_note` (replay.js):**
+`**replace_note` (replay.js):**
+
 1. Derives parent page from old note's `url` field, unlinks old `note:<old-slug>` from page's `childIds`
 2. Links new `note:<new-slug>` to the same page's `childIds`
 3. Transfers list pins: finds lists via `findListsWithPin`, replaces old note ID with new note ID in each list's `pins` array
@@ -416,14 +437,17 @@ Currently, `loadNote()` in filesystem-storage.js returns `null` for missing file
 
 ### Scope: What Can and Cannot Be Deleted
 
-| Entity | Deletion supported | Log action | Notes |
-|--------|-------------------|------------|-------|
-| Note | Yes | `delete_note` | Unlinks from parent page `childIds` |
-| Snapshot | Yes | `delete_snapshot` | Unlinks from parent page `childIds`; no entity file (key-only) |
-| List | Yes | `delete_list` | Unlinks from all pinned pages, removes from sidebar, cascades to descendants |
-| Page | Automatic (GC) | — | Pages are GC'd during replay when they become ineligible (see Page Eligibility GC) |
+
+| Entity   | Deletion supported | Log action        | Notes                                                                              |
+| -------- | ------------------ | ----------------- | ---------------------------------------------------------------------------------- |
+| Note     | Yes                | `delete_note`     | Unlinks from parent page `childIds`                                                |
+| Snapshot | Yes                | `delete_snapshot` | Unlinks from parent page `childIds`; no entity file (key-only)                     |
+| List     | Yes                | `delete_list`     | Unlinks from all pinned pages, removes from sidebar, cascades to descendants       |
+| Page     | Automatic (GC)     | —                 | Pages are GC'd during replay when they become ineligible (see Page Eligibility GC) |
+
 
 **options.js direct chrome.storage.local** — Two call sites remain:
+
 1. **Progressive search Phase 1** (`runPhase1`): reads undrained logBuffer entries to search separately from on-disk JSONL (see "Progressive Search Architecture" above).
 2. **Settings diagnostics** (`updateStatistics`, `updateCacheTable`): read logBuffer to display byte sizes and entry counts in the cache inspector UI.
 
@@ -476,6 +500,7 @@ filesystem-storage.js (File System Access API)
 ### Remote Entry Replay
 
 Remote entries use `effectOf` + `sessionWrite` — same replay pipeline as local entries — but do NOT:
+
 - Append to local logBuffer (persisted in their own device-specific files)
 - Drain to local JSONL (would duplicate)
 - Update `history:<date>` session keys (remote visits stay out of local timeline)
@@ -487,6 +512,7 @@ Remote entries DO update entity state (pages, lists, notes, manifests) via sessi
 ### Hydration with Multi-Device Logs
 
 On startup, when `syncEnabled`:
+
 1. Normal hydration (Phase 1 → 2) runs first (local entities + logBuffer)
 2. `loadRemoteLogEntries(localDeviceId)` via offscreen scans all `data/logs/*/` directories, excludes local device
 3. Each peer's entries replayed via `replayRemoteEntries(entries, peerDeviceId)`
@@ -494,11 +520,13 @@ On startup, when `syncEnabled`:
 ### Sync Manifests
 
 **Push state** (`manifest/sync-push-state.json`):
+
 ```json
 { "files": { "data/logs/dev1/2026-03-20.jsonl": "hash", ... } }
 ```
 
 **Cursors** (`manifest/sync-cursors.json`):
+
 ```json
 { "cursors": { "peer-id": { "treeSha": "abc", "files": { "path": "blobSha" } } } }
 ```
@@ -506,6 +534,7 @@ On startup, when `syncEnabled`:
 ### Error Handling
 
 `performSync()` classifies errors:
+
 - **Auth errors** (401/403) and **not-found** (404): permanent — disables alarm, sets `{ disabled: true }` in sync status. Options UI shows red "disabled" message.
 - **Transient errors** (5xx, network): keeps retrying via alarm. Options UI shows red "will retry" message.
 
@@ -514,8 +543,29 @@ Transport layer (`_request`) retries transient errors with exponential backoff (
 ### Settings
 
 Sync settings stored in `manifest/settings.json` alongside other extension settings:
+
 - `syncEnabled` (boolean): master toggle
 - `syncRepoUrl` (string): GitHub repo URL (parsed via `parseRepoUrl`)
 - `syncToken` (string): GitHub personal access token
 - `syncIntervalMinutes` (number, default 5): alarm interval
 - `syncRetentionDays` (number, default 7): log files older than this excluded from push
+
+## Verified Invariants (Property-Based Tests)
+
+Property-based tests (`tests/replay-properties.test.js`) generate random event sequences via `fast-check` and verify that the replay engine preserves these structural invariants regardless of event content or ordering:
+
+| ID | Invariant | Layer |
+|----|-----------|-------|
+| P1 | **Idempotency** — replaying any log entry twice against the same state produces no additive change (per-device timestamp guards prevent double-counting) | Vitest |
+| P2 | **Referential integrity** — page `childIds` point to entities that exist or are orphaned; page `parentIds` pointing to `list:*` correspond to lists with matching pins; `name-to-id` paths all resolve to non-deleted lists; orphaned entries have `deleted: true` | Vitest |
+| P3 | **Checkpoint equivalence** — splitting an event sequence at any point K, replaying [0..K) to produce checkpoints, then replaying [K..N) on top, produces the same final state as replaying all N events from scratch | Vitest |
+| P4 | **Multi-device convergence** — all permutations of a cross-device event sequence produce the same final state for LWW-governed fields (`deleted`, `deletedTs`, `timestamps`) and manifest consistency (`name-to-id`, `list-order` tree) | Vitest |
+| P5 | **Monotonic timestamps** — `entity.timestamps[device]` never decreases across sequential replay | Vitest |
+| P6 | **Three-way consistency** — every non-deleted list entity appears in both `manifest:name-to-id` and `manifest:list-order` tree; every `name-to-id` entry points to a non-deleted list; every non-system tree node points to a non-deleted list | Vitest |
+| P7 | **Sidebar list count** — sidebar item count equals the number of non-deleted, non-system list entities | E2E |
+| P8 | **List pin count** — clicking a list shows exactly as many pinned rows as the entity's `pins` array | E2E |
+| P9 | **Recycle bin consistency** — `manifest:orphaned` entry count matches the background-reported orphan count, and each orphaned entity is marked `deleted: true` | E2E |
+| P10 | **History ordering** — explore view displays history entries sorted newest-first by timestamp | E2E |
+
+When adding new `effectOf` action branches or modifying entity relationships, run `npm test -- tests/replay-properties.test.js` to verify these invariants still hold under randomized input.
+

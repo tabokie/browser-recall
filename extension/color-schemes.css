@@ -166,6 +166,59 @@ html[data-theme="dark"][data-color-scheme="mono"] {
   --tok-comment: #555555;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   MONO: widget active-state overrides
+   In mono mode the accent IS the text colour, so soft tints are
+   nearly invisible.  Invert bg/fg for a clear selected state.
+   Variables already flip between light (#1A1A1A) and dark (#E8E8E8)
+   so one selector set covers both modes.
+   ═══════════════════════════════════════════════════════════════ */
+
+[data-color-scheme="mono"] .filter-bubble.active {
+  background: var(--accent-primary);
+  color: var(--accent-on-primary);
+  border-color: var(--accent-primary);
+  box-shadow: none;
+}
+[data-color-scheme="mono"] .filter-bubble.active:hover {
+  background: var(--accent-primary-hover);
+}
+
+[data-color-scheme="mono"] .sidebar-item.active {
+  background: var(--accent-primary);
+  color: var(--accent-on-primary);
+  box-shadow: none;
+}
+[data-color-scheme="mono"] .sidebar-item.active .icon {
+  color: var(--accent-on-primary);
+}
+
+[data-color-scheme="mono"] .sort-toggle-option.active {
+  background: var(--accent-primary);
+  color: var(--accent-on-primary);
+  border-color: var(--accent-primary);
+  box-shadow: none;
+}
+
+[data-color-scheme="mono"] .filter-toggle-btn.active {
+  background: var(--accent-primary);
+  color: var(--accent-on-primary);
+  border-color: var(--accent-primary);
+  box-shadow: none;
+}
+
+[data-color-scheme="mono"] .recycle-btn.active {
+  background: var(--accent-primary);
+  color: var(--accent-on-primary);
+  border-color: var(--accent-primary);
+}
+
+[data-color-scheme="mono"] .rule-type-option.active {
+  background: var(--accent-primary);
+  color: var(--accent-on-primary);
+  box-shadow: none;
+}
+
 /* ── Rose dark ── */
 html[data-theme="dark"][data-color-scheme="rose"] {
   --bg-base: #1e1212;

@@ -328,7 +328,7 @@ async function renderListChips() {
   let displayLists;
   if (!frozenChipOrder) {
     // First render: pinned lists first, then fill remaining slots with active lists
-    const remaining = Math.max(0, 15 - containsPage.length);
+    const remaining = Math.max(0, 10 - containsPage.length);
     displayLists = [...containsPage, ...othersRanked.slice(0, remaining).map(r => r.list)];
     frozenChipOrder = displayLists.map(l => l.slug);
   } else {

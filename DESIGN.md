@@ -1,41 +1,80 @@
-# Design
+# Browser Recall — Design
+
+## Vision
+
+Browser Recall is a personal knowledge system that captures everything you do in the browser — intent, data, and attention — and makes it searchable. It is a memory extension, not a bookmarking tool.
 
 ## Portals
 
-Portals are where we interact with external data sources. E.g. browsing webpages, chatting with LLMs, reading documents.
+Portals are where we interact with external data sources: browsing webpages, chatting with LLMs, reading documents. There are three types of information embedded in an interaction:
 
-There are three types of information embeded in an interaction:
+- **User Intent** — search keywords, prompts, navigation decisions
+- **External Data** — the content itself
+- **User Attention** — engagement patterns, scroll depth, time on page, highlights, clicks
 
-- User Intent (search keywords, prompts)
-- External Data
-- User Attention (engagement pattern, highlights)
+The system keeps records of intent and attention to the finest detail possible, and optionally archives external material based on its quality (+rarity, +uniqueness, -reproducibility).
 
-The system should keep records of user intent and attention to the finest details possible, and optionally archive external material based on its quality (e.g. +rarity, +uniqueness, -reproducibility).
+Beyond being an external memory, the history of interactions (timeline and lineage) can:
 
-In addition to being an external memory, the history of interactions (timeline and lineage) can be used to:
-- reconstruct thought process or explore alternative reasoning paths.
-- deduce cognitive preference or bias, valuable for information discovery.
-- categorize information based on context (activity patterns, e.g. work, research), not content.
+- Reconstruct thought processes or explore alternative reasoning paths.
+- Deduce cognitive preference or bias, valuable for information discovery.
+- Categorize information based on context (activity patterns — work, research, leisure), not content.
 
-Some portals support lineage tracking natively (e.g. hyperlinks), for those that don't, we use temporal proximity as a heuristic, and potentially use SLMs to rate the confidence.
-
-[It could be difficult to cover all platforms and apps. Needs at least (1) web browser integration, (2) importing text and extracting timestamps automatically, (3) PDF read and annotation.]
+Some portals support lineage tracking natively (hyperlinks). For those that don't, we use temporal proximity as a heuristic.
 
 ## Notes and Ideas
 
-Notes and ideas are a special type of data that have no explicit intent or attention. Or rather, they are the intent/attention incarnated. They are recorded in the same timeline as portal interactions.
+Notes and ideas are a special type of data with no explicit intent or attention — they *are* the intent/attention incarnated. They are recorded in the same timeline as portal interactions, making them first-class citizens alongside browsing history.
 
-Compared to portals, there are special opportunities and challenges in tracking the lineage of notes and ideas.
+Compared to portals, notes have special opportunities: they capture the user's synthesis of information, which is often more valuable than the raw source material. Notes are immutable — editing creates a new entity via `replace_note`, preserving the full change history in the JSONL log.
 
-Some portals have native support for tracking lineage (e.g. hyperlinks), 
+## Search Over Graphs
 
-## Use Only Search
+The system intentionally avoids displaying information as a graph. Graphs carry an opinion (stronger than alternatives) that intrudes on how the user thinks. Branching structures are taxing on working memory and notoriously hard to navigate.
 
-The system intentionally avoids displaying information as graph. Graph carries an opinion (stronger that alternatives) that intrudes how user thinks. Graph with its branching is taxing on working memory and is notoriously hard to navigate.
+Instead, the system displays sorted lists — like a search engine, but private. With private data, we have multiple ranking algorithms to choose from: content relevance, temporal context, lineage distance, and attention weight. The user can mix all of them.
 
-Instead, the system chooses to display in sorted lists, like a good old search query. And search is the primary UI to get information. Compared to public searches, the private search has multiple ranking algorithms to choose from. That includes content, context, lineage, attention. User can mix all of them on a palette-like interface.
+Each search query can be **pinned** to become a **materialized view** (a "list"). Users can selectively save results and subscribe to changes when new information matches the original query. Rules automate this: keyword rules match by pattern, smart rules by user-defined JS functions.
 
-Each search queries can be pinned to become a materialized view, a topic. And user can selectively pin and save search results. User can also review or subscribe changes when a new information is added to system and matches the original query.
+## File-System-First Architecture
 
-Categorization is a type of deterministic search that pins all results. System offers many such builtin searches.
+All data is stored as human-readable files on the user's local machine:
 
+- **JSONL event logs** (`data/logs/<device>/YYYY-MM-DD.jsonl`) — source of truth
+- **Entity checkpoints** (`pages/`, `lists/`, `notes/`) — derived state, rebuildable from logs
+- **Snapshots** (`data/snapshots/`) — self-contained HTML and markdown archives
+
+No cloud, no database, no export step. The data directory is a portable, inspectable archive that other tools can read. The `data/` folder is explicitly public (immutable/append-only); internal structures (`pages/`, `lists/`, `manifest/`) are private derived state.
+
+This design means the extension is an event-sourced system. The JSONL log is the authoritative record. Entity files are caches that can be rebuilt by full replay. This gives us:
+
+- **Audit trail**: every mutation is a log entry with a timestamp and device ID.
+- **Multi-device merge**: each device appends to its own log. Sync = exchanging log files.
+- **Disaster recovery**: replay from logs reconstructs the full state.
+
+## Entity Model
+
+Not every visited page becomes an entity. Page entities are created only by explicit user actions: capturing a snapshot, creating a note, pinning to a list, renaming, or rating. Passive visits exist only as JSONL history entries. This keeps the entity store lean — only pages the user has expressed interest in.
+
+Entities reference each other via typed keys (`page:<slug>`, `note:<slug>`, `snap:<slug>-<ts>`, `list:<id>`). Events never use typed references — they use raw URLs and relative paths. The replay layer (`effectOf`) translates between the two representations.
+
+## Deletion Model
+
+Deletion is logical, not physical. Deleting a note, list, or snapshot unlinks it from the entity graph and adds its key to the orphaned manifest. The underlying file stays on disk. This preserves replay idempotency — the JSONL history can reference any entity that ever existed, and replaying history always produces consistent state.
+
+A separate permanent-delete operation (accessible via the recycle bin UI) removes files from disk after the user explicitly confirms.
+
+## Attention as a First-Class Signal
+
+Attention data (scroll depth, time on page, click count, text selections) is accumulated by the content script and reported on page leave. This makes attention a rich per-visit signal, not just a binary "visited" flag. Search ranking uses attention weight alongside content relevance, giving heavily-studied pages higher prominence than drive-by visits.
+
+## Privacy Model
+
+All data stays on the user's machine. There is no telemetry, no analytics, no server. Optional multi-device sync uses the user's own GitHub repository as a transport layer — each device pushes to its own branch, and pulls from peers. The extension never has access to any third-party server.
+
+## Technology Choices
+
+- **Vanilla JavaScript** — no frameworks, no build step for the extension itself. Minimizes bundle size and startup time. The options page, popup, and content script are plain HTML/JS.
+- **Rust/WASM** — search engine compiled to WebAssembly for performance. Reads JSONL files directly from `FileSystemDirectoryHandle` refs — zero JS-WASM data copying.
+- **Chrome MV3** — service worker for business logic, offscreen document for filesystem I/O (File System Access API needs a document context).
+- **Event sourcing** — JSONL logs as source of truth, entity files as derived checkpoints. Chosen for auditability, multi-device merge simplicity, and disaster recovery.

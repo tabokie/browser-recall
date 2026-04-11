@@ -1,6 +1,6 @@
-# Portal Extension — Codebase Map
+# Browser Recall — Codebase Map
 
-> Auto-generated reference. When functionality is added/changed, update this file.
+> Reference document. Update when functionality is added, removed, or significantly changed.
 
 ## File Index
 
@@ -355,7 +355,9 @@ Lists                 ← section label
 ## Build & Test
 - **Build WASM**: `npm run build` → `wasm-pack build --target web --out-dir extension/pkg`
 - **Run tests**: `npm test` → `vitest run`
-- **Test files**: `tests/utils.test.js`, `tests/search-helpers.test.js`, `tests/replay.test.js`, `tests/log-buffer.test.js`, `tests/persistence.test.js`, `tests/cache-staleness.test.js`, `tests/highlight-helpers.test.js`, `tests/virtual-scroller.test.js`, `tests/progressive-loading.test.js`, `tests/message-routing.test.js`, `tests/mutation-refresh.test.js`, `tests/referrer-focus.test.js`, `tests/attention-utils.test.js`, `tests/auto-blocks.test.js`, `tests/state-preservation.test.js`, `tests/read-cacheable.test.js`, `tests/sync-transport-github.test.js`, `tests/sync-manager.test.js`, `tests/logger.test.js`, `tests/downtime.test.js`
+- **Test files**: `tests/utils.test.js`, `tests/search-helpers.test.js`, `tests/replay.test.js`, `tests/log-buffer.test.js`, `tests/persistence.test.js`, `tests/cache-staleness.test.js`, `tests/highlight-helpers.test.js`, `tests/virtual-scroller.test.js`, `tests/progressive-loading.test.js`, `tests/message-routing.test.js`, `tests/mutation-refresh.test.js`, `tests/referrer-focus.test.js`, `tests/attention-utils.test.js`, `tests/auto-blocks.test.js`, `tests/state-preservation.test.js`, `tests/read-cacheable.test.js`, `tests/sync-transport-github.test.js`, `tests/sync-manager.test.js`, `tests/logger.test.js`, `tests/downtime.test.js`, `tests/replay-properties.test.js` (property-based P1–P6)
+- **Property test infrastructure**: `tests/arbitrary-events.mjs` — fast-check arbitraries generating random event sequences for all 22 action types; shared by Vitest and E2E property tests
+- **E2E property tests**: `tests/e2e/property-invariants.spec.js` — generative E2E tests P7–P10 (sidebar list count, pin count, recycle bin, history ordering) using seeded PRNG scenarios
 - **Migration scripts**: `scripts/migrate-keys-and-notes.js` (atoms→pages, highlights→notes), `scripts/migrate-quote-to-excerpt.js` (quote→excerpt field rename), `scripts/migrate-shallow-refs.js` (parents→parentIds, children→childIds, referrer→referrerId, urls→ids, pins url→id, parent.json→shallow-page.json), `scripts/fix-raw-refs.js` (converts remaining raw URLs/{url,title} objects to typed refs, backfills shallow-page.json); `scripts/migrate-auto-to-hubs.mjs` (removes auto-list infrastructure, renames Gateways→Hubs with function rule, derives pins from rule)
 - **Backfill scripts**: `scripts/backfill-page-titles.mjs` (fills missing page titles from logs), `scripts/backfill-created-at.mjs` (sets `createdAt` on page entities from earliest log timestamp per URL, falls back to `visitDates`)
 - **Replay/verify scripts**: `scripts/replay-verify.mjs` (replays full history from `data/logs/<device>/*.jsonl` subdirectories, loads deviceName from settings for context, compares replay output against disk checkpoints)

@@ -27,6 +27,7 @@
   "devDependencies": {
     "@leeoniya/ufuzzy": "^1.0.19",
     "@playwright/test": "^1.58.2",
+    "fast-check": "^4.6.0",
     "flexsearch": "^0.8.212",
     "jsdom": "^28.0.0",
     "minisearch": "^7.2.0",

@@ -1,174 +1,85 @@
-# Portal Extension
+# Browser Recall
 
-A Chrome extension for tracking and searching your browsing history with external data sources (webpages, documents, etc.). Built with **file-system-first architecture** - your data is always stored in human-readable files on your local machine.
+A Chrome extension that captures your browsing history, attention patterns, highlights, notes, and snapshots into human-readable files on your local machine. Your data never leaves your computer.
 
-## 🌟 Key Features
+## Key Features
 
-- **📁 File System Storage**: Human-readable JSONL files, no export needed
-- **🔍 Smart Search**: WASM-powered search with multiple ranking algorithms
-- **👁️ Attention Tracking**: Scroll, time, highlights, clicks
-- **🎯 Intent Capture**: Search queries, navigation patterns
-- **🔒 Privacy-First**: All data stays on your machine
+- **File System Storage** — JSONL files on disk, no export needed, readable by any tool
+- **Smart Search** — WASM-powered search across history, notes, and snapshots with multiple ranking algorithms
+- **Attention Tracking** — scroll depth, time on page, highlights, clicks
+- **Notes & Highlights** — inline text highlights extracted as first-class note entities
+- **Lists** — curated collections with keyword and smart rule auto-pinning
+- **Snapshots** — self-contained HTML archives of any page (via Save Page WE)
+- **Multi-Device Sync** — optional sync via your own GitHub repository
+- **Privacy-First** — all data stays on your machine, no telemetry, no server
 
-## Architecture
-
-Chrome MV3 extension with event-sourced storage. Background service worker holds business logic; offscreen document handles filesystem I/O only.
-
-- **Rust/WASM Core** (`src/lib.rs`): Search engine, ranking algorithms
-- **Chrome Extension** (`extension/`):
-  - `background.js`: Service worker — all message routing, business logic, write buffer
-  - `offscreen.js`: Filesystem I/O worker (port-only, minimal)
-  - `content.js`: Page capture, attention tracking, highlights
-  - `popup.html/js`: Quick search + page actions
-  - `options.html/js`: Dashboard, explore view, settings
-  - `replay.js`: Shared replay module for idempotent log replay
-  - `filesystem-storage.js`: File System Access API wrapper
-
-**Storage**: Event-sourced JSONL logs (`history/YYYY-MM-DD.jsonl`) are source of truth. Entity checkpoints (`pages/`, `lists/`, `notes/`) are derived state. Cache hierarchy: `chrome.storage.session` (hot) → `chrome.storage.local` (log buffer) → filesystem (cold).
-
-**Data Flow**:
-1. Content script captures → Background worker creates log entries → Offscreen flushes to filesystem
-2. Options/Popup reads entity checkpoints + replays recent log entries
-
-## Features
-
-### Current Implementation
-
-- ✅ **History Tracking**: Automatically captures page visits with:
-  - URL and title
-  - Timestamp
-  - User intent (search queries, input fields)
-  - Page content (text extraction)
-  - Attention patterns (scroll depth, time on page, highlights, clicks)
-
-- ✅ **Search Engine**: WASM-powered with content and attention ranking
-
-- ✅ **User Interface**:
-  - Popup for quick search and page actions
-  - Options page with dashboard, explore view, and settings
-
-- ✅ **Notes**: Highlights extracted as first-class note entities
-
-- ✅ **Lists**: Curated collections with query-builder explore views
-
-- ✅ **Lineage Tracking**: Parent/child page relationships, referrer graphs
-
-## Setup
+## Quick Start
 
 ### Prerequisites
 
 - [Rust](https://rustup.rs/) (latest stable)
 - [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/)
-- Node.js (for package scripts, optional)
+- Node.js 18+
 
-### Build
+### Build & Load
 
-1. **Build the WASM module:**
-   ```bash
-   wasm-pack build --target web --out-dir extension/pkg
-   ```
-
-   Or use npm:
-   ```bash
-   npm run build
-   ```
-
-2. **Load the extension in Chrome:**
-   - Open `chrome://extensions/`
-   - Enable "Developer mode"
-   - Click "Load unpacked"
-   - Select the `extension` directory
-
-3. **Configure storage location:**
-   - Extension will open options page automatically
-   - Click "Select Directory"
-   - Choose where to store your data (e.g., `~/portal-data/`)
-   - Grant permission
-
-### Development
-
-Watch mode for automatic rebuilds:
 ```bash
-wasm-pack build --target web --out-dir extension/pkg --dev --watch
+npm install
+npm run build
 ```
 
-Or:
-```bash
-npm run watch
-```
+Then load the extension in Chrome:
 
-## Usage
+1. Open `chrome://extensions/`
+2. Enable "Developer mode"
+3. Click "Load unpacked" and select the `extension/` directory
+4. Click "Select Directory" in the options page to choose your data folder
 
-### Capturing Interactions
+See [DEVELOPMENT.md](./DEVELOPMENT.md) for detailed setup, testing, and debugging instructions.
 
-1. **Browse normally**: The extension automatically tracks your page visits
-2. **Data is written immediately** to your selected directory as JSONL files
-3. **No export needed**: Files are always up-to-date
+## Architecture
 
-### Searching
+Chrome MV3 extension with event-sourced storage. The JSONL log is the source of truth; entity files are derived checkpoints.
 
-1. Click the extension icon for quick search
-2. Use the options page explore view for advanced query-builder filtering
+- **background.js** — service worker, business logic hub, event-sourced log buffer
+- **offscreen.js** — filesystem I/O via File System Access API (port-only)
+- **content.js** — page capture, attention tracking, highlights
+- **popup.js** — quick search and page actions per tab
+- **options.js** — dashboard with explore view, lists, settings
+- **replay.js** — idempotent event replay (pure, no Chrome APIs)
+- **src/lib.rs** — Rust search engine compiled to WASM
 
-## Project Structure
+Data flow: content script captures -> background creates log entries -> offscreen flushes to filesystem. UI pages read entity checkpoints and replay recent log entries.
 
-```
-.
-├── src/
-│   └── lib.rs                # Rust/WASM core (search engine)
-├── extension/
-│   ├── manifest.json         # Chrome MV3 manifest
-│   ├── background.js         # Service worker (business logic, message routing)
-│   ├── content.js            # Page capture, attention, highlights
-│   ├── offscreen.js/html     # Filesystem I/O worker
-│   ├── popup.html/js         # Quick search UI
-│   ├── options.html/js       # Dashboard, explore, settings
-│   ├── replay.js             # Event-sourced log replay
-│   ├── utils.js              # Shared utilities
-│   ├── filesystem-storage.js # File System Access API wrapper
-│   ├── entity-cache.js       # Entity caching
-│   ├── search-helpers.js     # Search utilities
-│   ├── qb-tree.js            # Query builder trees
-│   ├── virtual-scroller.js   # Virtual scrolling
-│   ├── savepage/             # SavePage WE integration (HTML snapshots)
-│   └── pkg/                  # Generated WASM output
-├── scripts/                  # Data migration scripts
-├── tests/                    # Vitest test suite
-├── Cargo.toml                # Rust dependencies
-├── package.json              # Build scripts
-└── DESIGN.md                 # System design document
-```
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full technical deep-dive.
+
+## Documentation
+
+
+| Document                             | Description                                      |
+| ------------------------------------ | ------------------------------------------------ |
+| [DESIGN.md](./DESIGN.md)             | Product philosophy and design rationale          |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Entity storage, caching, replay, sync, deletion  |
+| [CODEBASE_MAP.md](./CODEBASE_MAP.md) | File index, message routing, feature-to-code map |
+| [DEVELOPMENT.md](./DEVELOPMENT.md)   | Building, testing, debugging, migration scripts  |
+| [PRIVACY.md](./PRIVACY.md)           | Privacy policy                                   |
+
 
 ## Technology Stack
 
-- **Rust**: Core logic, search algorithms, data structures
-- **WebAssembly**: Compile Rust to run in browser
-- **Chrome Extension API**: Browser integration, storage, tabs
-- **File System Access API**: Direct filesystem access for data storage
-- **Offscreen Documents**: Background filesystem I/O in MV3
-- **Vanilla JavaScript**: UI and extension logic (no frameworks for minimal size)
+- **Rust / WebAssembly** — search engine with ranking algorithms
+- **Chrome Extension MV3** — service worker, offscreen documents, tabs, storage APIs
+- **File System Access API** — direct filesystem read/write from the browser
+- **Vanilla JavaScript** — no frameworks, minimal extension size
+- **Playwright + Vitest** — E2E and unit test suites
 
 ## Browser Support
 
-**File System Access API required**:
-- ✅ Chrome 86+
-- ✅ Edge 86+
-- ❌ Firefox (not yet supported)
-- ❌ Safari (not yet supported)
+Requires File System Access API:
 
-## Design Philosophy
-
-Based on [DESIGN.md](./DESIGN.md):
-
-- **Capture everything**: Intent, data, and attention at finest detail
-- **Search, don't graph**: Lists over graphs to reduce cognitive load
-- **Context over content**: Categorize by activity patterns, not just content
-- **Lineage tracking**: Build thought process maps
-- **Privacy-first**: All data stored locally
-
-## Contributing
-
-This is a personal project, but suggestions and ideas are welcome!
+- Chrome 86+
+- Edge 86+
+- Firefox and Safari are not supported (no File System Access API)
 
 ## License
 

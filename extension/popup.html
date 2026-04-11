@@ -498,23 +498,6 @@
       gap: 4px;
     }
 
-    .open-settings-btn {
-      background: none;
-      border: none;
-      cursor: pointer;
-      color: var(--text-muted);
-      padding: 2px;
-      display: flex;
-      align-items: center;
-      border-radius: 50%;
-      transition: color 0.15s, background 0.15s;
-    }
-
-    .open-settings-btn:hover {
-      color: var(--accent-primary);
-      background: var(--accent-primary-soft);
-    }
-
     .workspace-bar {
       display: flex;
       flex-direction: column;
@@ -524,12 +507,44 @@
     }
 
     .workspace-header {
-      display: flex;
-      justify-content: center;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
       align-items: center;
+      column-gap: 12px;
+    }
+
+    .home-btn {
+      grid-column: 3;
+      justify-self: center;
+      background: var(--bg-warm-tint);
+      border: 1px solid var(--border-glass);
+      border-radius: 50%;
+      cursor: pointer;
+      color: var(--text-muted);
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: var(--highlight-top), var(--highlight-edge);
+      transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .home-btn svg path {
+      transition: fill 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .home-btn:hover {
+      color: var(--text-secondary);
+    }
+
+    .home-btn:hover svg path {
+      fill: currentColor;
     }
 
     .tri-toggle {
+      grid-column: 2;
       display: flex;
       gap: 3px;
       background: var(--bg-warm-tint);
@@ -770,6 +785,9 @@
           <div class="tri-toggle-zone center" role="button" tabindex="0" data-mode="default">Default</div>
           <div class="tri-toggle-zone right" role="button" tabindex="0" data-mode="private">Private</div>
         </div>
+        <button class="home-btn" id="openSettingsBtn" title="Open main page">
+          <svg viewBox="0 0 16 16" width="15" height="15"><path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" d="M8 2L2 7.5V13.25c0 .41.34.75.75.75H6.25V9.75h3.5V14h3.5c.41 0 .75-.34.75-.75V7.5L8 2z"/></svg>
+        </button>
       </div>
       <div class="workspace-config" id="workspaceConfig" style="display: none;">
         <div class="workspace-list-label">Tag pages with:</div>
@@ -813,11 +831,8 @@
     </div>
 
     <div class="shortcut-bar">
-      <div class="shortcut-bar-item"><span class="shortcut-hint">Alt+H</span> Highlight</div>
+      <div class="shortcut-bar-item"><span class="shortcut-hint">Alt+H</span> Note / Highlight</div>
       <div class="shortcut-bar-item"><span class="shortcut-hint">Alt+S</span> Snapshot</div>
-      <button class="open-settings-btn" id="openSettingsBtn" title="Open main page">
-        <svg viewBox="0 0 16 16" width="12" height="12"><path fill="currentColor" d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06z"/></svg>
-      </button>
     </div>
   </div>
 
