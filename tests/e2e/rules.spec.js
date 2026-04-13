@@ -455,7 +455,7 @@ test.describe('Rule operations', () => {
     expect(entity.value.rules[0].config.fnSource).toBe(
       'return page.title.length > 10 ? 1 : 0;',
     );
-    expect(entity.value.rules[0].id).toMatch(/^rule-s-/);
+    expect(entity.value.rules[0].id).toMatch(/^rule-f-/);
     await page.close();
   });
 
@@ -482,7 +482,7 @@ test.describe('Rule operations', () => {
           pins: [],
           rules: [
             {
-              id: 'rule-s-test-0001',
+              id: 'rule-f-test-0001',
               type: 'function',
               config: {
                 description: 'pages with long titles',
@@ -565,7 +565,7 @@ test.describe('Rule operations', () => {
           pins: [],
           rules: [
             {
-              id: 'rule-s-hubs-0001',
+              id: 'rule-f-hubs-0001',
               type: 'function',
               config: {
                 description: 'Hub and landing pages',
@@ -703,7 +703,7 @@ test.describe('Rule operations', () => {
           pins: [],
           rules: [
             {
-              id: 'rule-s-hubs-0001',
+              id: 'rule-f-hubs-0001',
               type: 'function',
               config: {
                 description: 'Hub and landing pages',
@@ -774,6 +774,19 @@ test.describe('Rule operations', () => {
 });
 
 test.describe('Rules UI', () => {
+  // Open the inbox panel (rules are inside it, hidden by default).
+  // Idempotent: does nothing if panel is already visible.
+  async function openInboxPanel(options) {
+    const btn = options.locator('#inboxToggleBtn');
+    await expect(btn).toBeVisible({ timeout: 5000 });
+    const panel = options.locator('#inboxPanel');
+    const isVisible = await panel.isVisible();
+    if (!isVisible) {
+      await btn.click();
+      await expect(panel).toBeVisible({ timeout: 3000 });
+    }
+  }
+
   test('rules section visible when viewing a list with rules', async ({
     extContext,
     extensionId,
@@ -825,7 +838,8 @@ test.describe('Rules UI', () => {
     await expect(inboxBtn).toBeVisible({ timeout: 5000 });
     await expect(inboxBtn).toHaveClass(/has-rules/);
 
-    // Rule entry should be visible
+    // Open inbox panel and check rule entry
+    await openInboxPanel(options);
     const ruleEntry = options.locator('.rule-entry');
     await expect(ruleEntry).toBeVisible();
     await expect(ruleEntry.locator('.rule-type-badge')).toHaveText('keyword');
@@ -872,6 +886,7 @@ test.describe('Rules UI', () => {
     await waitForListView(options);
 
     // Click add button → inline edit row appears
+    await openInboxPanel(options);
     await options.locator('#rulesAddBtn').click();
     await expect(options.locator('.rule-entry.rule-editing')).toBeVisible();
 
@@ -941,6 +956,7 @@ test.describe('Rules UI', () => {
     await waitForListView(options);
 
     // Open edit row and type something
+    await openInboxPanel(options);
     await options.locator('#rulesAddBtn').click();
     await expect(options.locator('.rule-entry.rule-editing')).toBeVisible();
     await options.locator('.rule-edit-input').fill('github');
@@ -1002,6 +1018,7 @@ test.describe('Rules UI', () => {
     await waitForListView(options);
 
     // Open edit row, type, press Enter
+    await openInboxPanel(options);
     await options.locator('#rulesAddBtn').click();
     await options.locator('.rule-edit-input').fill('github');
     await options.locator('.rule-edit-input').press('Enter');
@@ -1075,6 +1092,7 @@ test.describe('Rules UI', () => {
     await waitForListView(options);
 
     // Expand rules section
+    await openInboxPanel(options);
     // Should have one rule entry
     await expect(options.locator('.rule-entry')).toHaveCount(1);
 
@@ -1237,6 +1255,7 @@ test.describe('Rules UI', () => {
     await waitForListView(options);
 
     // Open add form
+    await openInboxPanel(options);
     await options.locator('#rulesAddBtn').click();
 
     // Default: keyword — fn textarea hidden
@@ -1327,6 +1346,7 @@ test.describe('Rules UI', () => {
     await waitForListView(options);
 
     // Open add form
+    await openInboxPanel(options);
     await options.locator('#rulesAddBtn').click();
 
     // Type a pattern that matches 2 of 3 entries (matches in fetched body)
@@ -1402,7 +1422,8 @@ test.describe('Rules UI', () => {
     await waitForListView(options);
 
     // Open form, switch to function
-    await options.locator('#rulesHeader').click();
+    await openInboxPanel(options);
+    await openInboxPanel(options);
     await options.locator('#rulesAddBtn').click();
     await options.locator('.rule-type-option[data-type="function"]').click();
 
@@ -1512,6 +1533,7 @@ test.describe('Rules UI', () => {
     await waitForListView(options);
 
     // Open add form
+    await openInboxPanel(options);
     await options.locator('#rulesAddBtn').click();
 
     // Type a pattern that matches the GitHub pin (in body text)
@@ -1554,7 +1576,7 @@ test.describe('Rules UI', () => {
           pins: [],
           rules: [
             {
-              id: 'rule-s-test-0001',
+              id: 'rule-f-test-0001',
               type: 'function',
               config: { description: 'Long titles', fnSource },
               createdAt: now,
@@ -1576,6 +1598,7 @@ test.describe('Rules UI', () => {
     await waitForListView(options);
 
     // In display mode: function body should be hidden
+    await openInboxPanel(options);
     const ruleEntry = options.locator('.rule-entry');
     await expect(ruleEntry).toBeVisible({ timeout: 5000 });
     await expect(ruleEntry.locator('.rule-type-badge')).toHaveText('function');
@@ -1630,6 +1653,7 @@ test.describe('Rules UI', () => {
     await waitForListView(options);
 
     // Open add form and switch to function type
+    await openInboxPanel(options);
     await options.locator('#rulesAddBtn').click();
     await options.locator('.rule-type-option[data-type="function"]').click();
 
@@ -1678,6 +1702,7 @@ test.describe('Rules UI', () => {
     await waitForListView(options);
 
     // Open add form and switch to function type
+    await openInboxPanel(options);
     await options.locator('#rulesAddBtn').click();
     await options.locator('.rule-type-option[data-type="function"]').click();
 
@@ -1734,6 +1759,7 @@ test.describe('Rules UI', () => {
     await waitForListView(options);
 
     // Open add form and switch to function type
+    await openInboxPanel(options);
     await options.locator('#rulesAddBtn').click();
     await options.locator('.rule-type-option[data-type="function"]').click();
 

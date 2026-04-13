@@ -125,6 +125,24 @@ test.describe('Onboarding', () => {
     });
   });
 
+  test('popup shows setup-required state when no directory is configured', async ({
+    extContext,
+    extensionId,
+  }) => {
+    await withoutDirectory(extContext, extensionId, async () => {
+      const popup = await extContext.newPage();
+      await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+
+      await expect(popup.locator('#setup-required')).toBeVisible({
+        timeout: 10000,
+      });
+      await expect(popup.locator('#loading')).not.toBeVisible();
+      await expect(popup.locator('#setupRequiredBtn')).toBeVisible();
+
+      await popup.close();
+    });
+  });
+
   test('onboarding card shows expected content', async ({
     extContext,
     extensionId,

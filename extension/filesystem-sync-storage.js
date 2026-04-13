@@ -27,6 +27,12 @@ export class FileSystemSyncStorage {
   // --- Sync directory handle methods ---
 
   async selectSyncDirectory() {
+    if (typeof window.showDirectoryPicker !== 'function') {
+      return {
+        success: false,
+        error: 'not-supported',
+      };
+    }
     try {
       this.syncDirectoryHandle = await window.showDirectoryPicker({
         mode: 'readwrite',

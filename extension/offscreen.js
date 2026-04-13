@@ -488,6 +488,125 @@ async function handleClearSyncDirectory() {
   return { success: true };
 }
 
+// ─── Request Handlers: Import from Directory ────────────────────────
+
+async function handleImportFromDirectory(request) {
+  const { localDeviceId } = request;
+
+  // Load import directory handle from IndexedDB
+  const db = await fsStorage.initDB();
+  const importHandle = await new Promise((resolve, reject) => {
+    const tx = db.transaction([fsStorage.storeName], 'readonly');
+    const store = tx.objectStore(fsStorage.storeName);
+    const req = store.get('importDirectory');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+
+  if (!importHandle) {
+    throw new Error('No import directory handle found');
+  }
+
+  // OPFS handles (used in tests) don't support queryPermission.
+  // Real handles from showDirectoryPicker always have 'granted' status.
+  if (importHandle.queryPermission) {
+    const perm = await importHandle.queryPermission({ mode: 'read' });
+    if (perm !== 'granted') {
+      throw new Error('Import directory permission denied');
+    }
+  }
+
+  const stats = { logFiles: 0, noteFiles: 0, snapshotFiles: 0 };
+  const entriesByDevice = [];
+
+  let dataDir;
+  try {
+    dataDir = await importHandle.getDirectoryHandle('data');
+  } catch (e) {
+    if (e.name !== 'NotFoundError') throw e;
+    // No data directory at all — nothing to import
+    return { success: true, entriesByDevice, stats };
+  }
+
+  // Helper: copy all files from a subdirectory to local data dir
+  async function copySubdir(subdir, ext, statKey) {
+    try {
+      const srcDir = await dataDir.getDirectoryHandle(subdir);
+      for await (const entry of srcDir.values()) {
+        if (entry.kind !== 'file' || (ext && !entry.name.endsWith(ext)))
+          continue;
+        const file = await entry.getFile();
+        const content = await file.text();
+        const fh = await fsStorage.resolveFile(`data/${subdir}/${entry.name}`, {
+          create: true,
+        });
+        const writable = await fh.createWritable();
+        await writable.write(content);
+        await writable.close();
+        stats[statKey]++;
+      }
+    } catch (e) {
+      if (e.name !== 'NotFoundError') throw e;
+    }
+  }
+
+  // 1. Copy log files and parse entries
+  try {
+    const logsDir = await dataDir.getDirectoryHandle('logs');
+    for await (const deviceEntry of logsDir.values()) {
+      if (deviceEntry.kind !== 'directory') continue;
+      if (deviceEntry.name === localDeviceId) continue;
+      const deviceDir = await logsDir.getDirectoryHandle(deviceEntry.name);
+      const deviceEntries = [];
+      for await (const fileEntry of deviceDir.values()) {
+        if (fileEntry.kind !== 'file' || !fileEntry.name.endsWith('.jsonl'))
+          continue;
+        const file = await fileEntry.getFile();
+        const content = await file.text();
+        // Write to local data directory
+        const path = `data/logs/${deviceEntry.name}/${fileEntry.name}`;
+        const fh = await fsStorage.resolveFile(path, { create: true });
+        const writable = await fh.createWritable();
+        await writable.write(content);
+        await writable.close();
+        stats.logFiles++;
+        // Parse JSONL entries
+        for (const line of content.split('\n')) {
+          if (!line.trim()) continue;
+          try {
+            deviceEntries.push(JSON.parse(line));
+          } catch {
+            /* skip malformed lines */
+          }
+        }
+      }
+      if (deviceEntries.length > 0) {
+        entriesByDevice.push({
+          deviceId: deviceEntry.name,
+          entries: deviceEntries,
+        });
+      }
+    }
+  } catch (e) {
+    if (e.name !== 'NotFoundError') throw e;
+  }
+
+  // 2. Copy notes and snapshots
+  await copySubdir('notes', '.json', 'noteFiles');
+  await copySubdir('snapshots', null, 'snapshotFiles');
+
+  // 3. Clean up import handle from IndexedDB
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([fsStorage.storeName], 'readwrite');
+    const store = tx.objectStore(fsStorage.storeName);
+    const req = store.delete('importDirectory');
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+
+  return { success: true, entriesByDevice, stats };
+}
+
 // ─── Request Handlers: Test ──────────────────────────────────────────
 
 async function handleSetTestDirectory() {
@@ -550,6 +669,53 @@ async function handleSeedTestData(request) {
     }
   }
   fsStorage.clearCache();
+  return { success: true };
+}
+
+async function handleSeedImportDirectory(request) {
+  // Create an OPFS directory to simulate an external portal-data directory.
+  // Seeds it with test files and stores the handle as 'importDirectory' in IndexedDB.
+  const opfsRoot = await navigator.storage.getDirectory();
+  try {
+    await opfsRoot.removeEntry('portal-import-test', { recursive: true });
+  } catch {}
+  const importDir = await opfsRoot.getDirectoryHandle('portal-import-test', {
+    create: true,
+  });
+
+  // Resolve directory segments and write files (same format as seedTestData)
+  for (const file of request.files) {
+    const segments = file.path.split('/');
+    let current = importDir;
+    for (let i = 0; i < segments.length - 1; i++) {
+      current = await current.getDirectoryHandle(segments[i], { create: true });
+    }
+    const fh = await current.getFileHandle(segments[segments.length - 1], {
+      create: true,
+    });
+    const writable = await fh.createWritable();
+    if (file.lines) {
+      for (const line of file.lines) {
+        await writable.write(JSON.stringify(line) + '\n');
+      }
+    } else if (file.data) {
+      await writable.write(JSON.stringify(file.data));
+    } else {
+      await writable.write(file.content || '');
+    }
+    await writable.close();
+  }
+
+  // Store handle in IndexedDB for importFromDirectory to find
+  const db = await fsStorage.initDB();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([fsStorage.storeName], 'readwrite');
+    const store = tx.objectStore(fsStorage.storeName);
+    const req = store.put(importDir, 'importDirectory');
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+
   return { success: true };
 }
 
@@ -673,6 +839,9 @@ async function handleRequest(request) {
         return await handleSyncFsRemoveFile(request);
       case 'clearSyncDirectory':
         return await handleClearSyncDirectory();
+      // Import
+      case 'importFromDirectory':
+        return await handleImportFromDirectory(request);
       // Test
       case 'setTestDirectory':
         return await handleSetTestDirectory();
@@ -680,6 +849,8 @@ async function handleRequest(request) {
         return await handleResetDirectory();
       case 'seedTestData':
         return await handleSeedTestData(request);
+      case 'seedImportDirectory':
+        return await handleSeedImportDirectory(request);
       // Sandbox
       case 'executeSandboxFn':
         return await handleExecuteSandboxFn(request);

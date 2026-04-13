@@ -1,0 +1,29 @@
+- We need to support importing from directory, i.e. import and consolidate data from another device that has been copied to current device manually.
+- You should install the necessary tools
+- continue, I installed it
+- Run nvm.sh
+- resume, I installed playwright.
+- Fix tests, pre-existing or not
+- Figure out why WASM build stucks. Fix it and run tests
+- You should use `setproxy` in my ~/.zshrc to speed up download
+- resume
+- Does the CI pipeline Unit Test builds WASM pkg?
+- Then unit tests wouldn't work would it? The pkg is missing
+- Sure
+- There is a problem with onboarding. When I install the extension in Orion browser, the onboard doesn't automatically open. That is fine. But I expect when I open the popup, it points me to the options onboard page (right now it just spin infinitely). And I expect when I open options, it shows the onboarding (right now it shows a normal main page just with unconfigured storage).
+- Nothing has changed. The two issues I said are still the same.
+- I don't understand. Is it a simple flag in storage.local? If the flag is unset, we show onboarding. Why is there a timeout involved?
+- There're a few issues with onboarding in Orion browser:
+
+SyntaxError: Unexpected identifier 'index'. Expected '(' to start an 'if' condition. options.html:43
+
+When I click "Choose Directory":
+
+Unhandled Promise Rejection: TypeError: window.showDirectoryPicker is not a function. (In 'window.showDirectoryPicker({
+        mode: 'readwrite',
+        startIn: 'documents',
+      })', 'window.showDirectoryPicker' is undefined...
+options.js 6804
+- /finish
+- Let's review the diffs more carefully, look for over complications that could be improved
+- go ahead

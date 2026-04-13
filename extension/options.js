@@ -4576,6 +4576,11 @@ document.getElementById('selectDirBtn').addEventListener('click', async () => {
       // Reload data for main view
       resetHistory();
       showCategory(activeView.type === 'category' ? activeView.value : 'all');
+    } else if (result.error === 'not-supported') {
+      showStatus(
+        'Directory access requires Chrome or Edge — not supported in this browser.',
+        'error',
+      );
     } else if (result.error !== 'User cancelled') {
       showStatus(`Error: ${result.error}`, 'error');
     }
@@ -4602,7 +4607,12 @@ document.getElementById('changeDirBtn').addEventListener('click', async () => {
     const result = await fsStorage.selectDirectory();
 
     if (!result.success) {
-      if (result.error !== 'User cancelled') {
+      if (result.error === 'not-supported') {
+        showStatus(
+          'Directory access requires Chrome or Edge — not supported in this browser.',
+          'error',
+        );
+      } else if (result.error !== 'User cancelled') {
         showStatus(`Error: ${result.error}`, 'error');
       }
       changeDirBtn.disabled = false;
@@ -4745,6 +4755,11 @@ document
         document.getElementById('syncFolderLabel').textContent = result.name;
         document.getElementById('clearSyncDirBtn').style.display = '';
         await saveSettingsValue('syncFolderName', result.name);
+      } else if (result.error === 'not-supported') {
+        showStatus(
+          'Directory access requires Chrome or Edge — not supported in this browser.',
+          'error',
+        );
       }
     } catch (e) {
       if (e.name !== 'AbortError')
@@ -5444,6 +5459,123 @@ document
     });
   });
 }
+
+// ─── Import Directory ────────────────────────────────────────────────
+document.getElementById('directoryImportBtn').addEventListener('click', () => {
+  document.getElementById('directoryImportPanel').style.display = 'block';
+});
+
+document
+  .getElementById('directoryImportCancelBtn')
+  .addEventListener('click', () => {
+    document.getElementById('directoryImportPanel').style.display = 'none';
+    document.getElementById('directoryImportProgress').textContent = '';
+  });
+
+document
+  .getElementById('directoryImportStartBtn')
+  .addEventListener('click', async () => {
+    const startBtn = document.getElementById('directoryImportStartBtn');
+    const progressEl = document.getElementById('directoryImportProgress');
+
+    if (typeof window.showDirectoryPicker !== 'function') {
+      progressEl.textContent =
+        'Directory access requires Chrome or Edge. Orion/Safari is not supported.';
+      return;
+    }
+
+    let dirHandle;
+    try {
+      dirHandle = await window.showDirectoryPicker({
+        mode: 'read',
+        startIn: 'documents',
+      });
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      progressEl.textContent = 'Error: ' + e.message;
+      return;
+    }
+
+    // Validate: check CURRENT file exists
+    try {
+      const currentFh = await dirHandle.getFileHandle('CURRENT');
+      const currentFile = await currentFh.getFile();
+      const deviceId = (await currentFile.text()).trim();
+      if (!deviceId) throw new Error('empty');
+    } catch {
+      progressEl.textContent =
+        'Invalid directory: missing or empty CURRENT file.';
+      return;
+    }
+
+    // Validate: check data/logs/ exists
+    try {
+      const dataDir = await dirHandle.getDirectoryHandle('data');
+      await dataDir.getDirectoryHandle('logs');
+    } catch {
+      progressEl.textContent = 'Invalid directory: missing data/logs/ folder.';
+      return;
+    }
+
+    // Store handle in IndexedDB for offscreen to read
+    try {
+      const db = await fsStorage.initDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction([fsStorage.storeName], 'readwrite');
+        const store = tx.objectStore(fsStorage.storeName);
+        const req = store.put(dirHandle, 'importDirectory');
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    } catch (e) {
+      progressEl.textContent = 'Failed to store directory handle: ' + e.message;
+      return;
+    }
+
+    startBtn.disabled = true;
+    startBtn.textContent = 'Importing...';
+    progressEl.textContent = 'Starting import...';
+
+    const port = chrome.runtime.connect({ name: 'import-directory' });
+    port.postMessage({ action: 'importDirectory' });
+
+    port.onMessage.addListener((msg) => {
+      if (msg.type === 'progress') {
+        progressEl.textContent = msg.text;
+      } else if (msg.type === 'done') {
+        const parts = [];
+        if (msg.entriesReplayed > 0)
+          parts.push(
+            `${msg.entriesReplayed} entries from ${msg.deviceCount} device${msg.deviceCount !== 1 ? 's' : ''}`,
+          );
+        if (msg.noteFiles > 0)
+          parts.push(`${msg.noteFiles} note${msg.noteFiles !== 1 ? 's' : ''}`);
+        if (msg.snapshotFiles > 0)
+          parts.push(
+            `${msg.snapshotFiles} snapshot${msg.snapshotFiles !== 1 ? 's' : ''}`,
+          );
+        progressEl.textContent = parts.length
+          ? 'Imported ' + parts.join(', ') + '.'
+          : 'No new data to import.';
+        startBtn.textContent = 'Select & Import';
+        startBtn.disabled = false;
+        // Refresh history view
+        resetHistory();
+        showCategory(activeView.type === 'category' ? activeView.value : 'all');
+      } else if (msg.type === 'error') {
+        progressEl.textContent = 'Import failed: ' + msg.message;
+        startBtn.textContent = 'Select & Import';
+        startBtn.disabled = false;
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      if (startBtn.textContent === 'Importing...') {
+        startBtn.textContent = 'Select & Import';
+        startBtn.disabled = false;
+      }
+    });
+  });
 
 // --- URL Blacklist ---
 const DEFAULT_BLACKLIST = ['chrome://', 'edge://'];
@@ -6691,7 +6823,14 @@ function showOnboarding() {
 
   dirBtn.addEventListener('click', async () => {
     const result = await fsStorage.selectDirectory();
+    if (result.error === 'not-supported') {
+      dirStatus.style.color = 'var(--accent-red, #c62828)';
+      dirStatus.textContent =
+        'Directory access requires Chrome or Edge. Orion/Safari is not supported.';
+      return;
+    }
     if (result.success) {
+      dirStatus.style.color = '';
       dirStatus.textContent = result.name;
       featuresSection.style.display = 'block';
       const rows = featuresSection.querySelectorAll('.onboarding-feature');
@@ -6753,17 +6892,14 @@ async function initialize() {
   // Apply theme before any rendering to minimize flash
   const currentTheme = await applyTheme();
 
-  // Check if first run (no directory configured)
-  try {
-    const resp = await chrome.runtime.sendMessage({
-      action: 'hasDirectoryHandle',
-    });
-    if (resp?.success && !resp.hasHandle) {
-      showOnboarding();
-      document.body.dataset.ready = 'true';
-      return;
-    }
-  } catch {}
+  const { directoryConfigured } = await chrome.storage.local.get([
+    'directoryConfigured',
+  ]);
+  if (!directoryConfigured) {
+    showOnboarding();
+    document.body.dataset.ready = 'true';
+    return;
+  }
 
   await initializeMain(currentTheme);
 }

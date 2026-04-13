@@ -202,7 +202,7 @@ test.describe('Dark mode', () => {
         .getPropertyValue('--bg-base')
         .trim(),
     );
-    expect(bgBase).toBe('#F8F0E6');
+    expect(bgBase.toLowerCase()).toBe('#f8f0e6');
     await options.close();
   });
 
@@ -239,7 +239,7 @@ test.describe('Dark mode', () => {
         .getPropertyValue('--bg-base')
         .trim(),
     );
-    expect(bgBase).toBe('#F8F0E6');
+    expect(bgBase.toLowerCase()).toBe('#f8f0e6');
     await options.close();
   });
 });

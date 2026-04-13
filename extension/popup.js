@@ -40,6 +40,16 @@ function showFatalError(message) {
 }
 
 let _errorBubbleTimer = null;
+
+function showSetupRequired() {
+  document.getElementById('loading').style.display = 'none';
+  const el = document.getElementById('setup-required');
+  el.style.display = 'block';
+  document.getElementById('setupRequiredBtn').addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
+  });
+}
+
 function showErrorBubble(message) {
   let bubble = document.getElementById('errorBubble');
   if (!bubble) {
@@ -1160,6 +1170,15 @@ async function handleBlacklist(tab) {
 // Initialize popup
 async function initPopup() {
   await applyTheme();
+
+  const { directoryConfigured } = await chrome.storage.local.get([
+    'directoryConfigured',
+  ]);
+  if (!directoryConfigured) {
+    showSetupRequired();
+    return;
+  }
+
   await verifyDeviceIdentity();
   const tab = await resolveActiveTab();
   if (!tab) return;

@@ -236,14 +236,14 @@ test.describe('Page detail visit dates and notes', () => {
     await options.waitForSelector('.detail-notes-section', { timeout: 5000 });
 
     const noteEntries = options.locator('.detail-note-entry');
-    await expect(noteEntries).toHaveCount(2);
+    await expect(noteEntries).toHaveCount(1);
 
-    // Global note should show "Page note" label
-    const notesSection = options.locator('.detail-notes-section');
-    await expect(notesSection).toContainText('Page note');
-    await expect(notesSection).toContainText('Overall page summary');
+    // Global page note appears in the page note area (not in notes section)
+    const pageNoteEl = options.locator('.detail-page-note-display .note-body');
+    await expect(pageNoteEl).toContainText('Overall page summary');
 
     // Highlight note should show excerpt
+    const notesSection = options.locator('.detail-notes-section');
     await expect(notesSection).toContainText('Important finding');
 
     await options.close();

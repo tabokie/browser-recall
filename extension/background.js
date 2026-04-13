@@ -949,6 +949,9 @@ async function hydrateCache() {
   }
 
   logDebug('Cache hydrated');
+  // Mark the extension as configured so popup/options can detect onboarding state
+  // without going through the background or offscreen.
+  await chrome.storage.local.set({ directoryConfigured: true });
 }
 
 // Generate device name on first run — writes CURRENT file and creates log directory.
@@ -3207,6 +3210,7 @@ async function handleClearDirectoryHandleForTest() {
     action: 'clearDirectoryHandleForTest',
   });
   localDeviceId = null;
+  await chrome.storage.local.remove('directoryConfigured');
   return resp;
 }
 
@@ -3261,6 +3265,13 @@ async function handleRehydrateForTest(request) {
 async function handleSeedTestData(request) {
   return await requestOffscreen({
     action: 'seedTestData',
+    files: request.files,
+  });
+}
+
+async function handleSeedImportDirectory(request) {
+  return await requestOffscreen({
+    action: 'seedImportDirectory',
     files: request.files,
   });
 }
@@ -3517,6 +3528,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         case 'seedTestData':
           sendResponse(await handleSeedTestData(request));
           break;
+        case 'seedImportDirectory':
+          sendResponse(await handleSeedImportDirectory(request));
+          break;
         case 'simulatePreHydrationForTest':
           sendResponse(handleSimulatePreHydrationForTest());
           break;
@@ -3680,6 +3694,90 @@ chrome.runtime.onConnect.addListener((port) => {
     if (!aborted) {
       notifyMutation('lists');
       port.postMessage({ type: 'done', listCount, bookmarkCount, failures });
+    }
+  });
+});
+
+// ─── Import Directory (port-based for progress streaming) ────────────
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'import-directory') return;
+
+  let aborted = false;
+  port.onDisconnect.addListener(() => {
+    aborted = true;
+  });
+
+  port.onMessage.addListener(async (msg) => {
+    if (msg.action !== 'importDirectory') return;
+
+    try {
+      port.postMessage({
+        type: 'progress',
+        text: 'Copying files from import directory...',
+      });
+
+      const localId = await getDeviceId();
+      const resp = await requestOffscreen({
+        action: 'importFromDirectory',
+        localDeviceId: localId,
+      });
+
+      if (!resp?.success) {
+        port.postMessage({
+          type: 'error',
+          message: resp?.error || 'Import failed',
+        });
+        return;
+      }
+
+      if (aborted) return;
+
+      const { entriesByDevice, stats } = resp;
+
+      // Replay entries per device
+      let entriesReplayed = 0;
+      let deviceIndex = 0;
+      const deviceCount = entriesByDevice.length;
+
+      for (const { deviceId: peerId, entries } of entriesByDevice) {
+        if (aborted) return;
+        deviceIndex++;
+        port.postMessage({
+          type: 'progress',
+          text: `Replaying device ${deviceIndex}/${deviceCount} (${entries.length} entries)...`,
+        });
+        await replayRemoteEntries(entries, peerId);
+        entriesReplayed += entries.length;
+      }
+
+      if (aborted) return;
+
+      // Register imported devices in session storage
+      const now = Date.now();
+      const oldDevices = await _loadSyncDevices();
+      const oldMap = {};
+      for (const d of oldDevices) oldMap[d.deviceId] = d;
+      for (const { deviceId: peerId } of entriesByDevice) {
+        if (!oldMap[peerId]) {
+          oldDevices.push({ deviceId: peerId, lastPulled: now });
+        } else {
+          oldMap[peerId].lastPulled = now;
+        }
+      }
+      await chrome.storage.session.set({ [SYNC_DEVICES_KEY]: oldDevices });
+
+      notifyMutation('history');
+
+      port.postMessage({
+        type: 'done',
+        entriesReplayed,
+        deviceCount,
+        logFiles: stats.logFiles,
+        noteFiles: stats.noteFiles,
+        snapshotFiles: stats.snapshotFiles,
+      });
+    } catch (e) {
+      port.postMessage({ type: 'error', message: e.message });
     }
   });
 });

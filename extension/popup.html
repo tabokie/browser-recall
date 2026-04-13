@@ -864,6 +864,25 @@
       .blacklisted-hint a:hover {
         text-decoration: underline;
       }
+
+      .setup-required {
+        text-align: center;
+        padding: 32px 24px;
+        color: var(--text-secondary);
+      }
+
+      .setup-required-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 8px;
+      }
+
+      .setup-required-hint {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-bottom: 16px;
+      }
     </style>
     <link rel="stylesheet" href="dark-theme.css" />
     <link rel="stylesheet" href="color-schemes.css" />
@@ -871,6 +890,20 @@
   <body>
     <div id="loading" class="popup-shell loading">
       <span class="spinner"></span>
+    </div>
+
+    <div
+      id="setup-required"
+      class="popup-shell setup-required"
+      style="display: none"
+    >
+      <div class="setup-required-title">Setup Required</div>
+      <div class="setup-required-hint">
+        Configure storage to start using Browser Recall.
+      </div>
+      <button class="capture-once-btn" id="setupRequiredBtn">
+        Open Settings
+      </button>
     </div>
 
     <div id="blacklisted" class="popup-shell blacklisted" style="display: none">

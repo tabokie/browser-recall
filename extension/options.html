@@ -4367,6 +4367,12 @@
                 <button id="bookmarkImportBtn" class="btn btn-secondary btn-sm">
                   Import Bookmarks
                 </button>
+                <button
+                  id="directoryImportBtn"
+                  class="btn btn-secondary btn-sm"
+                >
+                  Import Directory
+                </button>
                 <button id="clearBtn" class="btn btn-danger btn-sm">
                   Delete
                   <span
@@ -4414,6 +4420,25 @@
                 </div>
                 <div id="importProgress" class="import-progress"></div>
                 <div id="importFailures" class="import-failures"></div>
+              </div>
+              <!-- Import directory expandable (hidden until Import Directory clicked) -->
+              <div id="directoryImportPanel" style="display: none">
+                <p class="import-progress" style="margin: 8px 0">
+                  Select a portal-data directory copied from another device to
+                  import its history, notes, and snapshots.
+                </p>
+                <div class="modal-btn-group">
+                  <button id="directoryImportStartBtn" class="btn btn-primary">
+                    Select &amp; Import
+                  </button>
+                  <button
+                    id="directoryImportCancelBtn"
+                    class="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <div id="directoryImportProgress" class="import-progress"></div>
               </div>
               <div class="data-row">
                 <span class="data-label"

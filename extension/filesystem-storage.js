@@ -38,6 +38,12 @@ class FileSystemStorage {
 
   // Request user to select directory
   async selectDirectory() {
+    if (typeof window.showDirectoryPicker !== 'function') {
+      return {
+        success: false,
+        error: 'not-supported',
+      };
+    }
     try {
       // Request directory access
       this.directoryHandle = await window.showDirectoryPicker({
