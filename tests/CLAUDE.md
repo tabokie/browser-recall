@@ -96,4 +96,21 @@ npm run manual:case <name>  # loads seeds/<name>.mjs
 npm run manual:onboarding   # first-run experience
 ```
 
+Real browser filesystem reproduction:
+
+```bash
+REAL_FS_BROWSER=brave REAL_FS_PICKER=manual REAL_FS_IDLE_MS=180000 \
+  npx playwright test tests/e2e/fs-permission-real-browser.spec.js
+```
+
+Notes:
+- Uses a real temp directory on disk and the browser's native directory picker.
+- `REAL_FS_BROWSER` supports `brave` and `edge`.
+- `REAL_FS_PICKER=manual` is the fallback when macOS blocks `osascript` key injection.
+- `REAL_FS_IDLE_MS` controls how long the test waits between activity phases when the repro does not happen immediately.
+- Recent Brave repros can fail right after onboarding on the initial probe, before the long idle wait.
+- `REAL_FS_STORAGE_DIR` overrides the picked directory path.
+- `REAL_FS_KEEP_STORAGE=1` preserves an existing storage directory instead of wiping it.
+- `REAL_FS_KEEP_BROWSER_OPEN_ON_FAILURE=1` leaves the browser open after a failing run for manual inspection.
+
 Closing the browser prints a data diff (changed pages, notes, lists, new log entries). Seed cases live in `seeds/` (gitignored). Each `.mjs` file exports `{ events, entities, deviceId, settings }`.
