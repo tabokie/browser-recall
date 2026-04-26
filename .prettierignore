@@ -1,7 +1,9 @@
 demos/
-extension/pkg/
-extension/vendor/
-extension/savepage/
+apps/extension/pkg/
+apps/extension/vendor/
+apps/extension/savepage/
+apps/desktop/src-tauri/gen/
+apps/desktop/ui/vendor/
 node_modules/
 target/
 dist/

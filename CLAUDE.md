@@ -100,6 +100,6 @@ All fatal conditions (session quota, local quota, offscreen crash, FS permission
 
 - **prettier** — JS/JSON formatting: `npm run fmt` (write), `npm run fmt:check` (CI)
 - **rustfmt** — Rust formatting: `cargo fmt`, `cargo fmt -- --check` (CI)
-- **clippy** — Rust lints: `cargo clippy --target wasm32-unknown-unknown -- -D warnings`
+- **clippy** — Rust lints: `cargo clippy --workspace --all-targets -- -D warnings`
 - **knip** — unused files/exports/deps: `npx knip --include files,exports,duplicates`
-- **jscpd** — duplicated code blocks: `npx jscpd extension/ --min-lines 5 --min-tokens 50`
+- **jscpd** — duplicated code blocks: `npx jscpd apps/extension/ --min-lines 5 --min-tokens 50`

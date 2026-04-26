@@ -290,7 +290,7 @@ test.describe('Snapshot slug meta tag', () => {
     );
     expect(urlResp.success).toBe(true);
 
-    // Fetch blob URL content from within the extension origin (same-origin as offscreen)
+    // Fetch blob URL content from within the extension origin.
     const html = await helper.evaluate(async (url) => {
       const resp = await fetch(url);
       return resp.text();

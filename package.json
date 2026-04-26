@@ -1,20 +1,28 @@
 {
-  "name": "portal-extension",
+  "name": "browser-recall",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "description": "Chrome extension for tracking and searching browsing history",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "build:wasm": "wasm-pack build --target web --out-dir extension/pkg",
-    "build": "npm run build:wasm",
-    "watch": "wasm-pack build --target web --out-dir extension/pkg --dev",
-    "dev": "npm run watch",
+    "build": "npm run build:extension && npm run build --workspace @browser-recall/desktop",
+    "build:extension": "node scripts/stage-app-assets.mjs extension",
+    "build:desktop-ui": "node scripts/stage-app-assets.mjs desktop-ui",
+    "watch": "node -e \"console.log('No root watch step is required for the extension')\"",
+    "dev": "npm run build:extension && node -e \"console.log('Load dist/extension in Chrome, or run npm run dev:desktop for the Tauri shell')\"",
+    "dev:desktop": "npm run dev --workspace @browser-recall/desktop",
     "test": "vitest run",
+    "test:integration": "vitest run tests/integration",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:visual": "npm run build:desktop-ui && playwright test tests/e2e/desktop-visual.spec.js",
     "manual": "node scripts/manual-test-browser.mjs",
     "manual:seed": "node scripts/manual-test-browser.mjs --seed",
     "manual:case": "node scripts/manual-test-browser.mjs --case",
-    "manual:onboarding": "node scripts/manual-test-browser.mjs --onboarding",
     "replay:verify": "node scripts/replay-verify.mjs",
     "fmt": "prettier --write .",
     "fmt:check": "prettier --check ."
@@ -22,7 +30,6 @@
   "keywords": [
     "chrome-extension",
     "rust",
-    "wasm",
     "knowledge-management"
   ],
   "author": "",
@@ -35,6 +42,7 @@
     "jsdom": "^28.0.0",
     "minisearch": "^7.2.0",
     "prettier": "^3.8.2",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "ws": "^8.18.1"
   }
 }

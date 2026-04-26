@@ -3,15 +3,11 @@
 ## Prerequisites
 
 - [Rust](https://rustup.rs/) (latest stable)
-- [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/)
 - Node.js 18+ (for npm scripts, test runners)
 
 ```bash
 # Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Install wasm-pack
-curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
 # Install Node dependencies
 npm install
@@ -19,61 +15,85 @@ npm install
 
 ## Building
 
-### WASM Module
-
-The Rust search engine in `src/lib.rs` compiles to WebAssembly via wasm-pack. Output goes to `extension/pkg/`.
+Use one command for a complete local build:
 
 ```bash
-# Production build (optimized, smaller)
 npm run build
-
-# Development build (faster compilation, larger output, debug symbols)
-npm run dev
 ```
 
-Under the hood these run:
+This is the canonical build command. It builds every artifact needed for manual install and testing:
+
+- `dist/extension/` — the self-contained Chrome extension to load from `chrome://extensions/` with "Load unpacked". This is the directory Chrome must use; do not load `apps/extension/` directly.
+- `dist/extension-firefox/` — the Firefox WebExtension variant. It uses the same code but stages a Firefox background module script manifest instead of Chrome's service worker manifest.
+- `dist/desktop-ui/` — the staged desktop web UI consumed by Tauri. This is an intermediate build artifact, not something to install directly.
+- `target/release/browser-recall-desktop` — the raw desktop executable produced by Cargo/Tauri.
+- `target/release/bundle/macos/Browser Recall.app` — the macOS app bundle to launch manually after a release build.
+
+On non-macOS platforms, Tauri writes platform-specific desktop bundle output under `target/release/bundle/`.
+
+The canonical build intentionally does not create a DMG/installer. Installer packaging is a release-only step because macOS may open installer UI during DMG creation.
+
+### Specialized Builds
+
+These commands exist for focused development only. Prefer `npm run build` when preparing artifacts for manual testing.
 
 ```bash
-wasm-pack build --target web --out-dir extension/pkg          # production
-wasm-pack build --target web --out-dir extension/pkg --dev    # development
+npm run build:extension                         # stage dist/extension/ and dist/extension-firefox/
+npm run build:desktop-ui                        # only stage dist/desktop-ui/
+npm run build --workspace @browser-recall/desktop      # build the desktop app bundle
+npm run build:dmg --workspace @browser-recall/desktop  # release-only DMG packaging
 ```
 
 ### Extension Icons
 
-Place PNG icons in `extension/icons/`:
+Place PNG icons in `apps/extension/icons/`:
 
 - `icon16.png` (16x16)
 - `icon48.png` (48x48)
 - `icon128.png` (128x128)
 
-See `extension/icons/README.md` for details.
+See `apps/extension/icons/README.md` for details.
 
 ## Loading the Extension
 
 1. Open Chrome and go to `chrome://extensions/`
 2. Enable "Developer mode" (toggle in top right)
 3. Click "Load unpacked"
-4. Select the `extension/` directory
+4. Select the `dist/extension/` directory
 5. The extension appears in your toolbar
+
+For Firefox development, open `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on", and select `dist/extension-firefox/manifest.json`.
+
+You can also validate and launch the Firefox build with Mozilla's `web-ext`:
+
+```bash
+npx web-ext lint --source-dir dist/extension-firefox
+npx web-ext run --source-dir dist/extension-firefox --firefox /path/to/firefox
+```
 
 ### First Run
 
-The extension opens the options page automatically. Click "Select Directory" to choose where to store data (e.g., `~/portal-data/`). Grant the filesystem permission when prompted.
+1. Start Browser Recall Desktop with `npm run dev:desktop`
+2. Load `dist/extension/` as an unpacked extension
+3. Open the extension popup and click `Refresh`
+4. Approve the connection dialog in the desktop app
+
+The extension options page is only a stub. The main UI runs in the desktop app window.
 
 ### After Code Changes
 
-- **Rust changes**: Rebuild WASM (`npm run build`), then reload the extension at `chrome://extensions/`
-- **JavaScript/HTML changes**: Just reload the extension (click the refresh icon at `chrome://extensions/`)
+- **Extension JavaScript/HTML changes**: Reload the extension at `chrome://extensions/`
+- **Desktop/Rust changes**: Rebuild or rerun the relevant Rust target, then restart that process
 
 ## Testing
 
 ### Unit Tests (Vitest)
 
-~600 tests covering pure logic: replay, search helpers, rule engine, utilities, sync, caching.
+~600 tests covering pure logic: search helpers, rule engine, utilities, sync, caching.
 
 ```bash
 npm test                           # run all unit tests
-npx vitest run tests/replay.test.js  # run a specific file
+npx vitest run tests/unit/utils.test.js   # run a specific file
 npx vitest                         # watch mode
 ```
 
@@ -107,25 +127,24 @@ npx playwright install chromium
 
 ### Manual Testing
 
-Launch a temporary Chrome instance with the extension loaded in isolated OPFS storage. Nothing touches your personal browser profile.
+Launch a temporary daemon and Chrome profile with the staged extension loaded. Nothing touches your personal browser profile.
 
 ```bash
 npm run manual              # blank state
 npm run manual:seed         # pre-seeded with 3 pages, 1 note
 npm run manual:case <name>  # loads seeds/<name>.mjs
-npm run manual:onboarding   # first-run onboarding flow
 ```
 
 Closing the browser prints a data diff showing everything that changed during the session.
 
-Seed cases live in `seeds/` (gitignored). Each `.mjs` file exports a function returning `{ events, entities, deviceId, settings }`. The seed builder (`tests/seed-builder.mjs`) converts event arrays to filesystem-ready file arrays.
+Seed cases live in `seeds/` (gitignored). Each `.mjs` file exports a function returning `{ events, entities, deviceId, settings }`. The seed builder (`scripts/lib/seed-builder.mjs`) is a manual-tool helper, not part of automated correctness coverage.
 
 ## Debugging
 
+- **Desktop app**: run `npm run dev:desktop` and watch the Tauri / Rust logs in that terminal
 - **Background service worker**: `chrome://extensions/` -> extension details -> "Inspect views: service worker"
 - **Content script**: Open DevTools on any webpage and check the console
 - **Popup**: Right-click the extension icon -> "Inspect popup"
-- **Offscreen document**: `chrome://extensions/` -> extension details -> look for "Inspect views: offscreen.html"
 - **Debug logging**: Enable in Settings -> Advanced -> Debug logging. Logs go to the service worker console via `logDebug()`.
 
 ## Formatting
@@ -141,8 +160,8 @@ cargo fmt -- --check     # check Rust formatting (CI mode)
 
 ```bash
 npx knip --include files,exports,duplicates   # unused files/exports/deps
-npx jscpd extension/ --min-lines 5 --min-tokens 50  # duplicated code blocks
-cargo clippy --target wasm32-unknown-unknown -- -D warnings  # Rust lints
+npx jscpd apps/extension/ --min-lines 5 --min-tokens 50  # duplicated code blocks
+cargo clippy --workspace --all-targets -- -D warnings        # Rust lints
 ```
 
 ## Replay Verification
@@ -169,25 +188,25 @@ Diff results are classified into three categories:
 
 ```
 .
-├── src/lib.rs              # Rust/WASM search engine
-├── extension/              # Loadable Chrome extension
+├── apps/desktop/
+│   ├── src-tauri/          # Tauri shell and desktop bridge
+│   └── ui/                 # Main Browser Recall interface
+├── apps/extension/         # Chrome connector extension
 │   ├── manifest.json       # MV3 manifest
-│   ├── background.js       # Service worker (business logic hub)
-│   ├── offscreen.js        # Filesystem I/O worker (port-only)
+│   ├── background.js       # Connector service worker
+│   ├── connector/          # Pairing, WS bridge, event buffer
 │   ├── content.js          # Page capture, attention tracking
-│   ├── popup.html/js       # Quick search + page actions
-│   ├── options.html/js     # Dashboard, explore, lists, settings
-│   ├── replay.js           # Event-sourced log replay (pure)
-│   ├── rule-engine.js      # Rule matching (pure)
-│   ├── filesystem-storage.js  # File System Access API wrapper
-│   ├── entity-cache.js     # Session cache with LRU eviction
-│   ├── sync-manager.js     # Sync orchestration (injected deps)
-│   ├── savepage/           # Save Page WE fork (HTML snapshots)
-│   └── pkg/                # Generated WASM output
+│   ├── popup.html/js       # Popup dashboard
+│   ├── options-stub.html/js # Opens the desktop app
+│   └── savepage/           # Save Page WE fork (HTML snapshots)
+├── crates/daemon/          # Pairing, storage, search, sync transport
+├── crates/replay/          # Pure event replay + entity effects
+├── crates/search/src/lib.rs # Native search crate
+├── packages/core/          # Shared JS modules during desktop split
 ├── tests/
 │   ├── *.test.js           # Vitest unit tests
 │   ├── e2e/                # Playwright E2E specs
-│   ├── seed-builder.mjs    # Test data builder
+│   ├── lib/seed-builder.mjs # Manual seed-data builder
 │   └── fixtures/           # Test data files
 ├── scripts/                # Manual test browser + replay verification
 ├── seeds/                  # Manual test seed cases (gitignored)
@@ -195,4 +214,3 @@ Diff results are classified into three categories:
 ├── Cargo.toml              # Rust dependencies
 └── package.json            # npm scripts and dev dependencies
 ```
-

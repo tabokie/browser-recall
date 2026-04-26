@@ -1,0 +1,86 @@
+const BUFFER_STORAGE_KEYS = {
+  queue: 'desktopEventBuffer',
+  pendingEvents: 'desktopPendingEvents',
+  pendingBytes: 'desktopPendingBytes',
+  refuseMode: 'desktopRefuseMode',
+};
+
+const MAX_BUFFER_BYTES = 8 * 1024 * 1024;
+const encoder = new TextEncoder();
+
+let loaded = false;
+let queue = [];
+let refuseMode = false;
+
+function itemSize(item) {
+  return encoder.encode(JSON.stringify(item)).length;
+}
+
+export function bufferedMessageSize(message) {
+  return itemSize(message);
+}
+
+function queueSize(items = queue) {
+  return items.reduce((total, item) => total + itemSize(item), 0);
+}
+
+async function ensureLoaded() {
+  if (loaded) return;
+  const stored = await chrome.storage.local.get(
+    Object.values(BUFFER_STORAGE_KEYS),
+  );
+  queue = stored[BUFFER_STORAGE_KEYS.queue] || [];
+  refuseMode = Boolean(stored[BUFFER_STORAGE_KEYS.refuseMode]);
+  loaded = true;
+}
+
+async function persist() {
+  const pendingBytes = queueSize();
+  if (pendingBytes < MAX_BUFFER_BYTES) {
+    refuseMode = false;
+  }
+  await chrome.storage.local.set({
+    [BUFFER_STORAGE_KEYS.queue]: queue,
+    [BUFFER_STORAGE_KEYS.pendingEvents]: queue.length,
+    [BUFFER_STORAGE_KEYS.pendingBytes]: pendingBytes,
+    [BUFFER_STORAGE_KEYS.refuseMode]: refuseMode,
+  });
+}
+
+export async function enqueueBufferedMessage(message) {
+  await ensureLoaded();
+  const nextBytes = queueSize() + itemSize(message);
+  if (nextBytes > MAX_BUFFER_BYTES) {
+    refuseMode = true;
+    await persist();
+    const error = new Error('Desktop buffer full');
+    error.code = 'buffer_full';
+    throw error;
+  }
+  queue.push(message);
+  await persist();
+  return bufferStats();
+}
+
+export async function peekBufferedMessage() {
+  await ensureLoaded();
+  return queue[0] || null;
+}
+
+export async function shiftBufferedMessage() {
+  await ensureLoaded();
+  if (queue.length > 0) {
+    queue.shift();
+    await persist();
+  }
+  return bufferStats();
+}
+
+export async function bufferStats() {
+  await ensureLoaded();
+  return {
+    pendingEvents: queue.length,
+    pendingBytes: queueSize(),
+    refuseMode,
+  };
+}

@@ -7,9 +7,9 @@
 //   npm run manual:seed       # pre-seeded with 3 pages, 1 note
 //
 // HOW IT WORKS:
-//   1. Launches Chromium with a temp profile + the extension loaded in OPFS test storage.
+//   1. Starts a temporary daemon and launches Chromium with a temp profile.
 //      Nothing touches your personal browser data.
-//   2. Seeds data via buildSeedFiles (tests/seed-builder.mjs) → seedTestData → rehydrate.
+//   2. Seeds data via scripts/lib/seed-builder.mjs → seedTestData → rehydrate.
 //   3. Captures initial state snapshot (pages, notes, lists, log entries).
 //   4. Opens the options page. You interact with the browser manually.
 //   5. When you close the browser window, captures final state and prints a diff.
@@ -38,16 +38,27 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { buildSeedFiles } from '../tests/seed-builder.mjs';
+import { buildSeedFiles } from './lib/seed-builder.mjs';
+import {
+  cleanupTestExtensionDir,
+  createTestExtensionDir,
+} from '../tests/fixtures/test-extension.mjs';
+import {
+  startDaemon,
+  waitForDesktopConnector,
+} from './lib/desktop-test-runtime.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const extPath = path.join(__dirname, '../extension');
+const extPath = createTestExtensionDir('browser-recall-manual-extension-');
 const seedsDir = path.join(__dirname, '../seeds');
 const seed = process.argv.includes('--seed');
-const onboarding = process.argv.includes('--onboarding');
 // --case <name> loads seeds/<name>.mjs
 const caseIdx = process.argv.indexOf('--case');
 const seedCase = caseIdx >= 0 ? process.argv[caseIdx + 1] : null;
+
+process.on('exit', () => {
+  cleanupTestExtensionDir(extPath);
+});
 
 // --- State dump: read all entities via the extension's message API ---
 
@@ -247,6 +258,7 @@ function printDiff(before, after) {
 
 // --- Main ---
 
+const daemon = await startDaemon();
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-manual-'));
 console.log(`Temp profile: ${userDataDir}`);
 
@@ -286,27 +298,20 @@ for (let attempt = 0; attempt < 3; attempt++) {
 }
 console.log(`Extension loaded: ${extensionId}`);
 
-// Wait for onInstalled handler to finish (it may auto-open options.html).
+// Wait for onInstalled handler to finish (it may auto-open the options stub).
 await new Promise((r) => setTimeout(r, 1000));
-// Close any auto-opened options pages to avoid navigation races.
+// Close any auto-opened options stub pages to avoid navigation races.
 for (const p of ctx.pages()) {
-  if (p.url().includes('options.html')) await p.close();
+  if (p.url().includes('options-stub.html')) await p.close();
 }
 
-// Point extension at OPFS test directory.
 const setupPage = await ctx.newPage();
 await setupPage.goto(`chrome-extension://${extensionId}/test-helper.html`);
 await setupPage.waitForFunction(
   () => typeof chrome !== 'undefined' && chrome.runtime,
 );
 
-const dirResult = await setupPage.evaluate(() =>
-  chrome.runtime.sendMessage({ action: 'setTestDirectory' }),
-);
-if (!dirResult?.success) {
-  console.error('setTestDirectory failed:', dirResult);
-  process.exit(1);
-}
+await waitForDesktopConnector(ctx, extensionId);
 
 const resetResult = await setupPage.evaluate(() =>
   chrome.runtime.sendMessage({ action: 'resetForTest' }),
@@ -314,13 +319,6 @@ const resetResult = await setupPage.evaluate(() =>
 if (!resetResult?.success) {
   console.error('resetForTest failed:', resetResult);
   process.exit(1);
-}
-
-if (onboarding) {
-  await setupPage.evaluate(() =>
-    chrome.runtime.sendMessage({ action: 'clearDirectoryHandleForTest' }),
-  );
-  console.log('Directory handle cleared — onboarding will appear.');
 }
 
 if (seed) {
@@ -470,12 +468,14 @@ for (const p of ctx.pages()) {
   if (p.url() === 'about:blank') await p.close();
 }
 
-// Open options page.
+// Open the shipped extension stub page.
 const optionsPage = await ctx.newPage();
-await optionsPage.goto(`chrome-extension://${extensionId}/options.html`);
+await optionsPage.goto(`chrome-extension://${extensionId}/options-stub.html`);
 
 console.log('\nBrowser ready for manual testing.');
-console.log(`  Options: chrome-extension://${extensionId}/options.html`);
+console.log(
+  `  Options stub: chrome-extension://${extensionId}/options-stub.html`,
+);
 console.log(`  Popup:   chrome-extension://${extensionId}/popup.html`);
 console.log('Close the browser window when done.\n');
 
@@ -530,6 +530,7 @@ if (finalState) {
 // Cleanup
 console.log('Cleaning up...');
 await ctx.close().catch(() => {});
+await daemon.stop();
 try {
   fs.rmSync(userDataDir, { recursive: true, force: true });
 } catch (e) {

@@ -1,0 +1,62 @@
+const openButton = document.getElementById('openApp');
+const fallback = document.getElementById('notRunning');
+const shortcutsList = document.getElementById('shortcutsList');
+const customizeShortcuts = document.getElementById('customizeShortcuts');
+
+const SHORTCUT_ORDER = [
+  'highlight-selection',
+  'capture-snapshot',
+  'like-page',
+  'dislike-page',
+];
+
+const SHORTCUT_LABELS = {
+  'highlight-selection': 'Highlight selected text or add a page note',
+};
+
+openButton.addEventListener('click', () => {
+  fallback.hidden = true;
+  window.open('browser-recall://open');
+  window.setTimeout(() => {
+    if (document.visibilityState === 'visible') {
+      fallback.hidden = false;
+    }
+  }, 1200);
+});
+
+async function renderShortcuts() {
+  const commands = await chrome.commands.getAll();
+  const byName = Object.fromEntries(
+    commands.map((command) => [command.name, command]),
+  );
+  const ordered = SHORTCUT_ORDER.map((name) => byName[name]).filter(Boolean);
+  shortcutsList.innerHTML = '';
+  for (const command of ordered) {
+    const row = document.createElement('div');
+    row.className = 'shortcut-row';
+
+    const desc = document.createElement('span');
+    desc.className = 'shortcut-desc';
+    desc.textContent =
+      SHORTCUT_LABELS[command.name] || command.description || command.name;
+
+    const key = document.createElement('span');
+    key.className = command.shortcut ? 'shortcut-key' : 'shortcut-key not-set';
+    key.textContent = command.shortcut || 'Not set';
+
+    row.append(desc, key);
+    shortcutsList.appendChild(row);
+  }
+}
+
+customizeShortcuts.addEventListener('click', () => {
+  const url =
+    globalThis.browserRecallWebExtension?.engine === 'firefox'
+      ? 'about:addons'
+      : 'chrome://extensions/shortcuts';
+  chrome.tabs.create({ url });
+});
+
+renderShortcuts().catch((error) => {
+  shortcutsList.textContent = `Could not load shortcuts: ${error.message}`;
+});

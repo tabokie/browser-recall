@@ -1,0 +1,32 @@
+[package]
+name = "browser-recall-daemon"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "browser-recall-daemon"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+browser-recall = { path = "../search" }
+browser-recall-replay = { path = "../replay" }
+chrono = "0.4"
+futures-util = "0.3"
+hostname = "0.4"
+rand = "0.8"
+regex = "1.11"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rquickjs = "0.11"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.44", features = ["full"] }
+tokio-tungstenite = "0.24"
+tracing = "0.1"
+url = "2.5"
+
+[dev-dependencies]
+tempfile = "3.18"

@@ -1,20 +1,23 @@
 {
   "entry": [
-    "extension/background.js",
-    "extension/content.js",
-    "extension/offscreen.js",
-    "extension/popup.js",
-    "extension/options.js",
-    "extension/savepage/content.js",
-    "extension/savepage/content-frame.js",
-    "extension/savepage/content-fontface.js",
-    "extension/savepage/content-fontface-intercept.js",
-    "extension/savepage/shadowloader.js",
-    "extension/fn-rule-sandbox.js",
-    "extension/snapshot-viewer.js",
-    "extension/port-contract.js",
+    "apps/extension/background.js",
+    "apps/extension/content.js",
+    "apps/extension/popup.js",
+    "apps/extension/options-stub.js",
+    "apps/extension/savepage/content.js",
+    "apps/extension/savepage/content-frame.js",
+    "apps/extension/savepage/content-fontface.js",
+    "apps/extension/savepage/content-fontface-intercept.js",
+    "apps/extension/savepage/shadowloader.js",
+    "apps/extension/snapshot-viewer.js",
+    "apps/desktop/ui/index.js",
     "tests/**/*.test.js"
   ],
-  "project": ["extension/**/*.js", "tests/**/*.js"],
-  "ignore": ["extension/pkg/**"]
+  "project": [
+    "apps/extension/**/*.js",
+    "apps/desktop/ui/**/*.js",
+    "packages/**/*.js",
+    "tests/**/*.js"
+  ],
+  "ignore": []
 }

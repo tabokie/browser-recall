@@ -1,0 +1,319 @@
+{
+  "version": 2,
+  "messages": {
+    "connector_to_daemon": {
+      "pair_request": {
+        "required": ["type", "browserId", "browserName", "extensionId"],
+        "properties": {
+          "type": "string",
+          "browserId": "string",
+          "browserName": "string",
+          "extensionId": "string"
+        }
+      },
+      "auth": {
+        "required": ["type", "token"],
+        "properties": {
+          "type": "string",
+          "token": "string"
+        }
+      },
+      "ping": {
+        "required": ["type"],
+        "properties": {
+          "type": "string"
+        }
+      },
+      "get_status": {
+        "required": ["type"],
+        "properties": {
+          "type": "string"
+        }
+      },
+      "get_page_info": {
+        "required": ["type", "slug"],
+        "properties": {
+          "type": "string",
+          "slug": "string"
+        }
+      },
+      "get_snapshot_html": {
+        "required": ["type", "slug", "ts"],
+        "properties": {
+          "type": "string",
+          "slug": "string",
+          "ts": "number"
+        }
+      },
+      "get_entity": {
+        "required": ["type", "key"],
+        "properties": {
+          "type": "string",
+          "key": "string"
+        }
+      },
+      "get_popup_lists": {
+        "required": ["type"],
+        "properties": {
+          "type": "string"
+        }
+      },
+      "event": {
+        "required": ["type", "entry", "source"],
+        "properties": {
+          "type": "string",
+          "entry": "object",
+          "source": "string",
+          "bufferDepth": "number",
+          "bufferBytes": "number"
+        }
+      },
+      "run_rule_batch": {
+        "required": ["type", "listIds", "entries"],
+        "properties": {
+          "type": "string",
+          "listIds": "array",
+          "entries": "array"
+        }
+      },
+      "preview_rule": {
+        "required": ["type", "rule", "entries"],
+        "properties": {
+          "type": "string",
+          "rule": "object",
+          "entries": "array"
+        }
+      },
+      "search_history": {
+        "required": ["type", "query"],
+        "properties": {
+          "type": "string",
+          "query": "string",
+          "limit": "number"
+        }
+      },
+      "search_notes": {
+        "required": ["type", "query"],
+        "properties": {
+          "type": "string",
+          "query": "string",
+          "limit": "number"
+        }
+      },
+      "search_snapshots": {
+        "required": ["type", "query"],
+        "properties": {
+          "type": "string",
+          "query": "string",
+          "limit": "number"
+        }
+      },
+      "note": {
+        "required": ["type", "slug", "excerpt", "note", "url", "ts", "source"],
+        "properties": {
+          "type": "string",
+          "slug": "string",
+          "excerpt": "string",
+          "note": "string",
+          "cssPath": ["string", "null"],
+          "oldSlug": "string",
+          "url": "string",
+          "title": "string",
+          "ts": "number",
+          "source": "string",
+          "bufferDepth": "number",
+          "bufferBytes": "number"
+        }
+      },
+      "snapshot": {
+        "required": ["type", "slug", "ts", "url", "html", "source"],
+        "properties": {
+          "type": "string",
+          "slug": "string",
+          "ts": "number",
+          "url": "string",
+          "title": "string",
+          "markdown": "string",
+          "html": "string",
+          "source": "string",
+          "bufferDepth": "number",
+          "bufferBytes": "number"
+        }
+      }
+    },
+    "daemon_to_connector": {
+      "pair_pending": {
+        "required": ["type", "requestId"],
+        "properties": {
+          "type": "string",
+          "requestId": "string"
+        }
+      },
+      "pair_approved": {
+        "required": ["type", "token", "deviceId"],
+        "properties": {
+          "type": "string",
+          "token": "string",
+          "deviceId": "string"
+        }
+      },
+      "pair_denied": {
+        "required": ["type"],
+        "properties": {
+          "type": "string"
+        }
+      },
+      "auth_ok": {
+        "required": ["type"],
+        "properties": {
+          "type": "string"
+        }
+      },
+      "auth_fail": {
+        "required": ["type", "reason"],
+        "properties": {
+          "type": "string",
+          "reason": "string"
+        }
+      },
+      "pong": {
+        "required": ["type"],
+        "properties": {
+          "type": "string"
+        }
+      },
+      "ack": {
+        "required": ["type", "ackedAt", "bufferDepth", "lastDrainedAt"],
+        "properties": {
+          "type": "string",
+          "ackedAt": "number",
+          "bufferDepth": "number",
+          "lastDrainedAt": "number"
+        }
+      },
+      "status": {
+        "required": [
+          "type",
+          "connectedBrowsers",
+          "bufferDepth",
+          "bufferBytes",
+          "daemonBufferDepth",
+          "lastDrainedAt",
+          "dataFolder",
+          "deviceId"
+        ],
+        "properties": {
+          "type": "string",
+          "connectedBrowsers": "array",
+          "bufferDepth": "number",
+          "bufferBytes": "number",
+          "daemonBufferDepth": "number",
+          "lastDrainedAt": ["number", "null"],
+          "dataFolder": "string",
+          "deviceId": "string"
+        }
+      },
+      "change": {
+        "required": ["type", "mutations"],
+        "properties": {
+          "type": "string",
+          "mutations": "array"
+        }
+      },
+      "page_info_result": {
+        "required": ["type", "success", "slug"],
+        "properties": {
+          "type": "string",
+          "success": "boolean",
+          "slug": "string",
+          "entry": "object",
+          "notes": "array",
+          "snapshots": "array",
+          "error": "string"
+        }
+      },
+      "snapshot_html_result": {
+        "required": ["type", "success"],
+        "properties": {
+          "type": "string",
+          "success": "boolean",
+          "html": "string",
+          "error": "string"
+        }
+      },
+      "entity_result": {
+        "required": ["type", "success", "key"],
+        "properties": {
+          "type": "string",
+          "success": "boolean",
+          "key": "string",
+          "entity": ["object", "null"],
+          "error": "string"
+        }
+      },
+      "popup_lists_result": {
+        "required": ["type", "success"],
+        "properties": {
+          "type": "string",
+          "success": "boolean",
+          "lists": "array",
+          "error": "string"
+        }
+      },
+      "rule_batch_result": {
+        "required": ["type", "success"],
+        "properties": {
+          "type": "string",
+          "success": "boolean",
+          "results": "array",
+          "error": "string"
+        }
+      },
+      "preview_rule_result": {
+        "required": ["type", "success"],
+        "properties": {
+          "type": "string",
+          "success": "boolean",
+          "results": "array",
+          "error": "string"
+        }
+      },
+      "search_history_result": {
+        "required": ["type", "success"],
+        "properties": {
+          "type": "string",
+          "success": "boolean",
+          "results": "array",
+          "error": "string"
+        }
+      },
+      "search_notes_result": {
+        "required": ["type", "success"],
+        "properties": {
+          "type": "string",
+          "success": "boolean",
+          "results": "array",
+          "error": "string"
+        }
+      },
+      "search_snapshots_result": {
+        "required": ["type", "success"],
+        "properties": {
+          "type": "string",
+          "success": "boolean",
+          "results": "array",
+          "error": "string"
+        }
+      },
+      "error": {
+        "required": ["type", "error", "code", "message"],
+        "properties": {
+          "type": "string",
+          "error": "string",
+          "code": "string",
+          "message": "string"
+        }
+      }
+    }
+  }
+}

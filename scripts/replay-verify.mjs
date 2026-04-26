@@ -2,29 +2,23 @@
 /**
  * Replay-verify: replay full JSONL history from scratch using effectOf,
  * persist replayed state to a temp directory, then diff against existing
- * checkpoints in ~/portal-data.
+ * checkpoints in ~/browser-data.
  *
  * Usage: node scripts/replay-verify.mjs [--write <dir>] [--verbose]
- *   --write <dir>  Write replayed entities to <dir> (default: /tmp/portal-replay)
+ *   --write <dir>  Write replayed entities to <dir> (default: /tmp/browser-replay)
  *   --verbose      Print detailed per-entity diffs (default: summary only)
  */
 
-import {
-  readFileSync,
-  readdirSync,
-  writeFileSync,
-  mkdirSync,
-  existsSync,
-} from 'fs';
+import { readFileSync, readdirSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
-import { effectOf, defaultEntity } from '../extension/replay.js';
-import { generateSlugFromUrl } from '../extension/utils.js';
+import { generateSlugFromUrl } from '../apps/extension/utils.js';
+import { replayStore } from './lib/replay-store.mjs';
 
-const DATA_DIR = join(process.env.HOME, 'portal-data');
+const DATA_DIR = join(process.env.HOME, 'browser-data');
 const LOGS_DIR = join(DATA_DIR, 'data', 'logs');
 
 // Parse args
-let outputDir = '/tmp/portal-replay';
+let outputDir = '/tmp/browser-replay';
 let verbose = false;
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
@@ -156,43 +150,28 @@ if (normFixedNames || normFixedNulls || normFixedCreate) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Replay all entries through effectOf, accumulating state in a Map
+// 2. Replay all entries through the production Rust engine
 // ---------------------------------------------------------------------------
 console.log('Replaying...');
-const store = new Map();
-function loadFromDisk(key) {
-  if (key.startsWith('note:')) {
-    const slug = key.slice('note:'.length);
-    const p = join(DATA_DIR, 'data', 'notes', `${slug}.json`);
-    if (existsSync(p)) {
-      try {
-        return JSON.parse(readFileSync(p, 'utf-8'));
-      } catch {
-        return null;
-      }
-    }
-  }
-  return null;
-}
-const load = async (key) => store.get(key) ?? loadFromDisk(key) ?? null;
-
-for (let i = 0; i < allEntries.length; i++) {
-  const entry = allEntries[i];
-  const deviceId = entry._deviceId;
-  delete entry._deviceId;
-  try {
-    const result = await effectOf(entry, load, { deviceId });
-    for (const [key, value] of Object.entries(result)) {
-      store.set(key, value);
-    }
-  } catch (e) {
-    console.warn(
-      `  ERROR replaying entry ${i} (ts=${entry.timestamp}, action=${entry.action}): ${e.message}`,
-    );
+const baseStore = {};
+const notesDir = join(DATA_DIR, 'data', 'notes');
+if (existsSync(notesDir)) {
+  for (const file of readdirSync(notesDir)) {
+    if (!file.endsWith('.json')) continue;
+    const slug = file.slice(0, -'.json'.length);
+    try {
+      baseStore[`note:${slug}`] = JSON.parse(
+        readFileSync(join(notesDir, file), 'utf-8'),
+      );
+    } catch {}
   }
 }
-
-console.log(`  ${store.size} keys in replayed store`);
+const steps = allEntries.map((entry) => {
+  const { _deviceId, ...rest } = entry;
+  return { entry: rest, device_id: _deviceId };
+});
+const store = replayStore({ baseStore, steps });
+console.log(`  ${Object.keys(store).length} keys in replayed store`);
 
 // ---------------------------------------------------------------------------
 // 3. Write replayed state to output dir
@@ -203,7 +182,7 @@ mkdirSync(join(outputDir, 'data', 'notes'), { recursive: true });
 mkdirSync(join(outputDir, 'lists', 'system'), { recursive: true });
 mkdirSync(join(outputDir, 'manifest'), { recursive: true });
 
-for (const [key, value] of store) {
+for (const [key, value] of Object.entries(store)) {
   if (value === null) continue;
   if (value.deleted) continue; // Deleted entities have no disk file
   let path;

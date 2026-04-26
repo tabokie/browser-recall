@@ -13,14 +13,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
         with:
-          targets: wasm32-unknown-unknown
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
+  test-rust:
+    name: Rust Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - run: cargo test --workspace
+
+  test-desktop-visual:
+    name: Desktop Visual Regression
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
@@ -29,9 +47,9 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run build:wasm
+      - run: npx playwright install chromium
 
-      - run: npm test
+      - run: npm run test:visual
 
   lint-js:
     name: Lint & Format (JS)
@@ -53,7 +71,7 @@ jobs:
         run: npx knip --include files,exports,duplicates
 
       - name: Check duplicated code (jscpd)
-        run: npx jscpd extension/ --min-lines 5 --min-tokens 50
+        run: npx jscpd apps/extension/ --min-lines 5 --min-tokens 50
 
   lint-rust:
     name: Lint & Format (Rust)
@@ -64,7 +82,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-          targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
 
@@ -72,21 +89,4 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Clippy
-        run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
-
-  build-wasm:
-    name: Build WASM
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      - run: npm run build:wasm
+        run: cargo clippy --workspace --all-targets -- -D warnings

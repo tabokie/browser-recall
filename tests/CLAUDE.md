@@ -2,60 +2,34 @@
 
 ## Running Tests
 
-- **Unit tests**: `npm test` (vitest, ~600 tests). Config: `vitest.config.js`, files: `tests/**/*.test.js`.
-- **E2E tests**: `npx playwright test` (~349 tests). Config: `playwright.config.js`, files: `tests/e2e/*.spec.js`. Single worker, chromium channel, 30s per-test timeout.
+- **Unit tests**: `npm test` (vitest). Config: `vitest.config.js`, files: `tests/**/*.test.js`.
+- **E2E tests**: `npx playwright test`. Config: `playwright.config.js`, files: `tests/e2e/*.spec.js`. Single worker, chromium channel, 30s per-test timeout.
 - The two suites are independent — run either without the other.
 
 ## E2E Infrastructure
 
 ### Fixtures (`tests/e2e/fixtures.js`)
 
-Worker-scoped: `extContext` (persistent browser context with extension loaded), `extensionId`, `setupDir` (OPFS-backed test directory via `setTestDirectory`).
+Worker-scoped: `daemon` (real Rust daemon process started before the browser), `extContext` (persistent browser context with the production extension loaded), `extensionId`, `setupDir` (daemon data directory path after the connector is fully paired).
 
 ### Helpers (`tests/e2e/helpers.js`)
 
 - `resetAndSeed(extContext, extensionId, files)` — full reset + optional seed data
-- `openOptionsPage(extContext, extensionId)` — waits for `data-ready` attribute
 - `openHelperPage(extContext, extensionId)` — blank extension page for `sendMessage`
 - `getSlugForUrl(page, url)` — pure function, no browser needed
-- `waitForListView(page, listName)` — waits for sidebar click + list rendering
 - `waitForVisitRecorded(helper, page, url, referrer)` — polls for page entity, falls back to `reportPage`
 
 ### Test Actions (background.js message handlers)
 
-- `resetForTest` — wipe + rehydrate; resets `localDeviceId = null`
+- `resetForTest` — wipe daemon data + clear extension-local state, then rehydrate; resets `localDeviceId = null`
 - `rehydrateForTest` — rehydrate without wipe; pass `keepLogBuffer: true` to preserve injected logBuffer
-- `simulatePreHydrationForTest` — sets `localDeviceId = null` to simulate the pre-hydration window
-- `pauseServiceForTest` — calls `pauseService(code, message)` for testing downtime UI
-- `seedTestData` — relay to offscreen file writes
+- `setLogBufferForTest` — injects pending extension buffer entries for daemon-backed hydration coverage
+- `getLogBufferForTest` — reports pending extension buffer length/watermark
+- `seedTestData` — writes raw files into the daemon data dir through the daemon's test-control WebSocket
 
-### Seed Builder (`tests/seed-builder.mjs`)
+### Seed Builder
 
-`buildSeedFiles(events, { deviceId, checkpointProgress, settings, entities })` produces file arrays for `seedTestData`. All events go to JSONL; `checkpointProgress` controls which also produce entity checkpoint files. `entities` provides pre-existing data (note content, etc.) that replay expects to find.
-
-## Property-Based Tests
-
-Randomized/property tests use [fast-check](https://github.com/dubzzz/fast-check) to generate arbitrary event sequences and verify structural invariants.
-
-### Arbitraries (`tests/arbitrary-events.mjs`)
-
-Shared event-sequence generators used by both Vitest and E2E tests. `arbEventSequence(minLen, maxLen)` produces a random array of log entries covering all 22 replay action types. Stateful tracking during generation ensures referential consistency (e.g., only deleting notes that were created, deduplicating `create_list` events per `owner/name`).
-
-Key exports: `arbEventSequence`, `URL_POOL`, `LIST_NAMES`, `DEVICES`.
-
-### Vitest Properties (`tests/replay-properties.test.js`)
-
-Tests P1–P6 (idempotency, referential integrity, checkpoint equivalence, multi-device convergence, monotonic timestamps, three-way consistency). Runs the `effectOf` replay engine directly in Node with an in-memory store.
-
-Run: `npm test -- tests/replay-properties.test.js`
-
-### E2E Properties (`tests/e2e/property-invariants.spec.js`)
-
-Tests P7–P10 (sidebar list count, pin count, recycle bin, history ordering). Uses a seeded PRNG to generate scenarios, builds seed files via `seed-builder.mjs`, loads them into the real extension, and asserts UI state. Three deterministic seeds per invariant.
-
-Run: `npx playwright test tests/e2e/property-invariants.spec.js`
-
-See ARCHITECTURE.md "Verified Invariants" for the full catalogue.
+`scripts/lib/seed-builder.mjs` produces file arrays for `seedTestData`. It is a convenience helper for daemon-backed test/manual seeding, not an automated correctness target.
 
 ## Gotchas
 
@@ -63,7 +37,7 @@ See ARCHITECTURE.md "Verified Invariants" for the full catalogue.
 
 **No `waitForTimeout`**: Use `waitForSelector`, `waitForFunction`, or Playwright auto-polling instead.
 
-`**sendMessage` only reaches background.** Offscreen uses port channel only. Use background-routed actions in test assertions.
+`**sendMessage` only reaches background.** E2E tests seed and reset through background-routed test actions, but the actual persistence path is the real daemon and the production connector RPC.
 
 **Chrome infra errors**: Kill all Chrome processes before retrying: `pkill -9 -f 'Google Chrome'`
 
@@ -72,8 +46,6 @@ See ARCHITECTURE.md "Verified Invariants" for the full catalogue.
 **Playwright `keyboard.press('Meta+key')` is unreliable** in headless Chrome on macOS — Chrome consumes Meta+key combinations for native shortcuts before page `keydown` fires. Use `page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, bubbles: true })))` instead.
 
 `**searchResults` mutation race**: Background mutation notifications can reset `searchResults` to `[]` mid-operation. Use `data-search-count` attribute on `#relatedResults` to poll for result count. Perform blur + keyboard dispatch in a single `evaluate()` call to minimize the race window.
-
-**Offscreen restart loses OPFS handle**: After `killOffscreenForTest` or any offscreen crash/restart, the new offscreen document starts fresh. `resetForTest` must call `setTestDirectory` before `resetDirectory` to re-establish it.
 
 `**resetForTest` must reset ALL module-level state**: The SW process survives across tests. Missing resets (e.g., `localDeviceId = null`) cause stale state to leak between tests, hiding startup-only bugs. When adding new module-level mutable state to background.js, add a matching reset line in `resetForTest` and `rehydrateForTest`.
 
@@ -89,28 +61,4 @@ See ARCHITECTURE.md "Verified Invariants" for the full catalogue.
 
 Launch a temporary Chrome with the extension for manual testing — nothing touches your personal browser profile.
 
-```bash
-npm run manual              # blank state
-npm run manual:seed         # pre-seeded with 3 pages + 1 note
-npm run manual:case <name>  # loads seeds/<name>.mjs
-npm run manual:onboarding   # first-run experience
-```
-
-Real browser filesystem reproduction:
-
-```bash
-REAL_FS_BROWSER=brave REAL_FS_PICKER=manual REAL_FS_IDLE_MS=180000 \
-  npx playwright test tests/e2e/fs-permission-real-browser.spec.js
-```
-
-Notes:
-- Uses a real temp directory on disk and the browser's native directory picker.
-- `REAL_FS_BROWSER` supports `brave` and `edge`.
-- `REAL_FS_PICKER=manual` is the fallback when macOS blocks `osascript` key injection.
-- `REAL_FS_IDLE_MS` controls how long the test waits between activity phases when the repro does not happen immediately.
-- Recent Brave repros can fail right after onboarding on the initial probe, before the long idle wait.
-- `REAL_FS_STORAGE_DIR` overrides the picked directory path.
-- `REAL_FS_KEEP_STORAGE=1` preserves an existing storage directory instead of wiping it.
-- `REAL_FS_KEEP_BROWSER_OPEN_ON_FAILURE=1` leaves the browser open after a failing run for manual inspection.
-
-Closing the browser prints a data diff (changed pages, notes, lists, new log entries). Seed cases live in `seeds/` (gitignored). Each `.mjs` file exports `{ events, entities, deviceId, settings }`.
+Manual browser workflows are currently secondary to the daemon-backed Playwright path. Prefer `npx playwright test` for reproducible coverage.

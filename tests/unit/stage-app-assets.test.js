@@ -1,0 +1,158 @@
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import {
+  cleanupStagedAssets,
+  stageExtensionAssets,
+  stageFirefoxExtensionAssets,
+} from '../../scripts/stage-app-assets.mjs';
+
+const stagedDirs = [];
+
+afterEach(() => {
+  while (stagedDirs.length > 0) {
+    cleanupStagedAssets(stagedDirs.pop());
+  }
+});
+
+describe('extension staged assets', () => {
+  it('stages popup entity helpers into the loadable extension bundle', async () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
+    stagedDirs.push(outDir);
+    stageExtensionAssets(outDir);
+
+    const popupSource = readFileSync(join(outDir, 'popup.js'), 'utf8');
+    expect(popupSource).toMatch(
+      /import\s+\{\s*pageKey\s*\}\s+from\s+['"]\.\/entity-types\.js['"]/,
+    );
+    expect(popupSource).not.toContain('../../packages/core/');
+
+    const entityTypes = await import(
+      pathToFileURL(join(outDir, 'entity-types.js')).href
+    );
+    expect(entityTypes.listKey('reading')).toBe('list:reading');
+    expect(entityTypes.pageKey('article')).toBe('page:article');
+  });
+
+  it('keeps shared CSS imports valid in the staged extension bundle', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
+    stagedDirs.push(outDir);
+    stageExtensionAssets(outDir);
+
+    const sharedCss = readFileSync(join(outDir, 'shared.css'), 'utf8');
+    expect(sharedCss.startsWith("@import url('./core/shared.css');")).toBe(
+      true,
+    );
+    expect(sharedCss).not.toContain('../../packages/core/');
+  });
+
+  it('stages the popup without the connected desktop shell card', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
+    stagedDirs.push(outDir);
+    stageExtensionAssets(outDir);
+
+    const popupHtml = readFileSync(join(outDir, 'popup.html'), 'utf8');
+    expect(popupHtml).not.toContain('Desktop Shell');
+    expect(popupHtml).not.toContain('Setup Required');
+    expect(popupHtml).not.toContain('Connection');
+    expect(popupHtml).toContain('id="setupDesktopConnectBtn"');
+    expect(popupHtml).toContain('DESKTOP OFFLINE');
+    expect(popupHtml).toContain(
+      'Start Browser Recall Desktop to resume live capture.',
+    );
+    expect(popupHtml).toContain('Check Again');
+    expect(popupHtml).not.toContain('Pair with desktop');
+    expect(popupHtml).not.toContain('Try to reconnect');
+  });
+
+  it('keeps unsupported-page popup fallback visible', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
+    stagedDirs.push(outDir);
+    stageExtensionAssets(outDir);
+
+    const popupSource = readFileSync(join(outDir, 'popup.js'), 'utf8');
+    expect(popupSource).toContain('function showUnavailablePage');
+    expect(popupSource).toContain(
+      "showUnavailablePage('Not available for this page')",
+    );
+  });
+
+  it('moves shortcut management into the extension options page', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
+    stagedDirs.push(outDir);
+    stageExtensionAssets(outDir);
+
+    const popupHtml = readFileSync(join(outDir, 'popup.html'), 'utf8');
+    const optionsHtml = readFileSync(join(outDir, 'options-stub.html'), 'utf8');
+    const optionsSource = readFileSync(join(outDir, 'options-stub.js'), 'utf8');
+
+    expect(popupHtml).not.toContain('shortcut-bar');
+    expect(optionsHtml).toContain('Keyboard Shortcuts');
+    expect(optionsHtml).toContain('id="customizeShortcuts"');
+    expect(optionsSource).toContain('chrome.commands.getAll()');
+    expect(optionsSource).toContain('chrome://extensions/shortcuts');
+  });
+
+  it('uses the desktop app icon and no legacy down-state icons', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
+    stagedDirs.push(outDir);
+    stageExtensionAssets(outDir);
+
+    const desktopIcon = readFileSync(
+      join(process.cwd(), 'apps/desktop/src-tauri/icons/icon.png'),
+    );
+    const extensionIcon = readFileSync(join(outDir, 'icons/icon128.png'));
+    expect(extensionIcon.equals(desktopIcon)).toBe(true);
+    expect(existsSync(join(outDir, 'icons/icon128-down.png'))).toBe(false);
+  });
+
+  it('stages browser API shim before first-party extension entry points', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
+    stagedDirs.push(outDir);
+    stageExtensionAssets(outDir);
+
+    const manifest = JSON.parse(readFileSync(join(outDir, 'manifest.json')));
+    expect(manifest.background).toEqual({
+      service_worker: 'background.js',
+      type: 'module',
+    });
+    expect(manifest.content_scripts[0].js).toEqual([
+      'browser-api.js',
+      'content.js',
+    ]);
+    expect(manifest.content_scripts[1].js).toEqual([
+      'browser-api.js',
+      'savepage/content-fontface.js',
+    ]);
+    expect(readFileSync(join(outDir, 'popup.html'), 'utf8')).toContain(
+      '<script src="browser-api.js"></script>',
+    );
+    expect(readFileSync(join(outDir, 'background.js'), 'utf8')).toContain(
+      "import './browser-api.js';",
+    );
+  });
+
+  it('can stage a Firefox manifest with background module scripts', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-firefox-test-'));
+    stagedDirs.push(outDir);
+    stageFirefoxExtensionAssets(outDir);
+
+    const manifest = JSON.parse(readFileSync(join(outDir, 'manifest.json')));
+    expect(manifest.background).toEqual({
+      scripts: ['browser-api.js', 'background.js'],
+      type: 'module',
+    });
+    expect(manifest.background.service_worker).toBeUndefined();
+    expect(manifest.browser_specific_settings.gecko.id).toBe(
+      'browser-recall@example.invalid',
+    );
+    expect(
+      manifest.browser_specific_settings.gecko.data_collection_permissions,
+    ).toEqual({
+      required: ['none'],
+    });
+  });
+});

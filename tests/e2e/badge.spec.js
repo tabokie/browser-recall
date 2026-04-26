@@ -467,7 +467,8 @@ test.describe('Extension badge', () => {
 
     // The reported URL (from content script) should match the tab URL
     // If they differ, the popup will generate a wrong slug
-    const { generateSlugFromUrl } = await import('../../extension/utils.js');
+    const { generateSlugFromUrl } =
+      await import('../../apps/extension/utils.js');
     const effectiveUrl = tabInfo.reportedUrl || tabInfo.tabUrl;
     const popupSlug = generateSlugFromUrl(effectiveUrl);
     const badgeSlug = generateSlugFromUrl(tabInfo.tabUrl);

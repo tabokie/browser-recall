@@ -1,0 +1,21 @@
+{
+  "name": "@browser-recall/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./attention-utils": "./attention-utils.js",
+    "./color-scheme-map": "./color-scheme-map.js",
+    "./entity-types": "./entity-types.js",
+    "./highlight-helpers": "./highlight-helpers.js",
+    "./logger": "./logger.js",
+    "./rule-engine": "./rule-engine.js",
+    "./search-helpers": "./search-helpers.js",
+    "./search-runtime": "./search-runtime.js",
+    "./theme": "./theme.js",
+    "./time-chart": "./time-chart.js",
+    "./utils": "./utils.js",
+    "./virtual-scroller": "./virtual-scroller.js"
+  }
+}

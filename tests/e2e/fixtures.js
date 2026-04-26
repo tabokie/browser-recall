@@ -3,9 +3,15 @@ import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import {
+  cleanupTestExtensionDir,
+  createTestExtensionDir,
+} from '../fixtures/test-extension.mjs';
+import {
+  startDaemon,
+  waitForDesktopConnector,
+  waitForExtensionId,
+} from '../../scripts/lib/desktop-test-runtime.mjs';
 
 function timer(label) {
   const t0 = performance.now();
@@ -14,15 +20,32 @@ function timer(label) {
 }
 
 export const test = base.extend({
-  extContext: [
+  daemon: [
     async ({}, use) => {
-      const extPath = path.join(__dirname, '../../extension');
+      const done = timer('daemon startup');
+      const daemon = await startDaemon();
+      done();
+      try {
+        await use(daemon);
+      } finally {
+        const stopDone = timer('daemon teardown');
+        await daemon.stop();
+        stopDone();
+      }
+    },
+    { scope: 'worker' },
+  ],
+
+  extContext: [
+    async ({ daemon }, use) => {
+      void daemon;
+      const extPath = createTestExtensionDir('browser-recall-test-extension-');
       const userDataDirs = [];
 
       async function launchAndVerify() {
         const done = timer('browser launch');
         const userDataDir = fs.mkdtempSync(
-          path.join(os.tmpdir(), 'portal-test-'),
+          path.join(os.tmpdir(), 'browser-recall-test-'),
         );
         userDataDirs.push(userDataDir);
         const ctx = await chromium.launchPersistentContext(userDataDir, {
@@ -39,10 +62,8 @@ export const test = base.extend({
         // Chrome can crash moments later when the extension service worker
         // and renderer interact.
         try {
-          let [sw] = ctx.serviceWorkers();
-          if (!sw)
-            sw = await ctx.waitForEvent('serviceworker', { timeout: 5000 });
-          const extId = sw.url().split('/')[2];
+          const extId = await waitForExtensionId(ctx);
+          ctx._browserRecallExtensionId = extId;
           const probe = await ctx.newPage();
           await probe.goto(`chrome-extension://${extId}/test-helper.html`, {
             timeout: 5000,
@@ -76,6 +97,7 @@ export const test = base.extend({
       await use(context);
       const done = timer('browser teardown');
       await context.close();
+      cleanupTestExtensionDir(extPath);
       for (const dir of userDataDirs) {
         fs.rmSync(dir, { recursive: true, force: true });
       }
@@ -87,9 +109,9 @@ export const test = base.extend({
   extensionId: [
     async ({ extContext }, use) => {
       const done = timer('find service worker');
-      let [sw] = extContext.serviceWorkers();
-      if (!sw) sw = await extContext.waitForEvent('serviceworker');
-      const id = sw.url().split('/')[2];
+      const id =
+        extContext._browserRecallExtensionId ||
+        (await waitForExtensionId(extContext));
       done();
       await use(id);
     },
@@ -97,35 +119,11 @@ export const test = base.extend({
   ],
 
   setupDir: [
-    async ({ extContext, extensionId }, use) => {
-      const testHelperUrl = `chrome-extension://${extensionId}/test-helper.html`;
-
-      async function trySetTestDirectory() {
-        const page = await extContext.newPage();
-        try {
-          await page.goto(testHelperUrl);
-          await page.waitForFunction(
-            () => typeof chrome !== 'undefined' && chrome.runtime,
-          );
-          const result = await page.evaluate(() =>
-            chrome.runtime.sendMessage({ action: 'setTestDirectory' }),
-          );
-          await page.close();
-          return result;
-        } catch (e) {
-          await page.close().catch(() => {});
-          throw e;
-        }
-      }
-
-      let done = timer('setupDir: setTestDirectory');
-      const result = await trySetTestDirectory();
-      if (!result?.success) {
-        throw new Error(`setTestDirectory failed: ${JSON.stringify(result)}`);
-      }
+    async ({ daemon, extContext, extensionId }, use) => {
+      const done = timer('setupDir: wait for desktop connector');
+      await waitForDesktopConnector(extContext, extensionId, daemon.port);
       done();
-
-      await use('opfs://portal-test');
+      await use(daemon.dataDir);
     },
     { scope: 'worker' },
   ],

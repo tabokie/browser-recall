@@ -1,0 +1,1939 @@
+mod config;
+mod logging;
+mod login_item;
+mod search;
+
+use browser_recall_daemon::commands::{
+    add_list_pins, add_rule as command_add_rule, create_note as command_create_note,
+    delete_list as command_delete_list, delete_note as command_delete_note,
+    delete_snapshot as command_delete_snapshot, import_bookmarks, import_history,
+    list_history_files, list_paired_browsers, load_all_pages_payload, load_history_batch,
+    load_page_notes_payload, load_page_snapshot_payload, page_relations_payload,
+    pair_browser_revoke, permanent_delete_keys, preview_rule_payload, read_cacheable,
+    remove_rule as command_remove_rule, rename_page as command_rename_page,
+    restore_list as command_restore_list, restore_note as command_restore_note,
+    restore_snapshot as command_restore_snapshot, save_list_meta, save_settings_key,
+    search_history as command_search_history, search_notes as command_search_notes,
+    search_snapshots as command_search_snapshots, submit_event, toggle_list_pin,
+    update_list_tree as command_update_list_tree, update_note as command_update_note,
+    BookmarkImportNode, HistoryImportEntry,
+};
+use browser_recall_daemon::pairing::{
+    ApprovalFuture, PairingApprover, PairingDecision, PairingRequest,
+};
+use browser_recall_daemon::protocol::{
+    DaemonMessage, MutationPayload, RuleBatchEntry, RulePayload,
+};
+use browser_recall_daemon::search::{
+    search_history_in_data_dir, search_notes_in_data_dir, search_snapshots_in_data_dir,
+    HistorySearchHit, NoteSearchHit, SnapshotSearchHit,
+};
+use browser_recall_daemon::storage::Storage;
+use browser_recall_daemon::sync::{
+    background_worker_loop, sync_device_entries_json, SyncBackgroundOutcome, SyncController,
+    SyncError,
+};
+use browser_recall_daemon::ws_server::{
+    start_server, ConnectionStatus, ServerHandle, ServerSnapshot, ServerStartOptions,
+};
+use browser_recall_daemon::{ConfigStore, DaemonConfig};
+use search::SearchRequest;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tauri::menu::{MenuBuilder, MenuItem, MenuItemBuilder};
+use tauri::tray::TrayIconBuilder;
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+};
+use tauri_plugin_deep_link::DeepLinkExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_opener::OpenerExt;
+use tokio::sync::Notify;
+use tracing::{info, warn};
+
+const TRAY_ID: &str = "browser-recall";
+const BRIDGE_RUNTIME_MESSAGE_EVENT: &str = "bridge-runtime-message";
+const BRIDGE_STORAGE_CHANGE_EVENT: &str = "bridge-storage-change";
+const NORMAL_WINDOW_WIDTH: f64 = 1120.0;
+const NORMAL_WINDOW_HEIGHT: f64 = 760.0;
+
+#[derive(Clone)]
+struct ShellState {
+    snapshot: ServerSnapshot,
+    data_dir: String,
+    log_dir: String,
+    login_item_supported: bool,
+    launch_at_login: bool,
+    debug_logging: bool,
+    setup_complete: bool,
+    route: Option<String>,
+    error: Option<String>,
+}
+
+struct DesktopState {
+    _server: Mutex<Option<ServerHandle>>,
+    config_store: ConfigStore,
+    shell: Mutex<ShellState>,
+    sync: SyncController,
+    storage_bridge: Mutex<StorageBridgeState>,
+    status_item: MenuItem<tauri::Wry>,
+    logging: logging::LoggingHandle,
+    quit_requested: Mutex<bool>,
+}
+
+#[derive(Default)]
+struct StorageBridgeState {
+    session: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ShellSettingsUpdate {
+    launch_at_login: bool,
+    debug_logging: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenPathRequest {
+    kind: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeStorageGetRequest {
+    area_name: String,
+    keys: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeStorageSetRequest {
+    area_name: String,
+    source_id: Option<String>,
+    items: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeStorageRemoveRequest {
+    area_name: String,
+    source_id: Option<String>,
+    keys: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeStorageClearRequest {
+    area_name: String,
+    source_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeStorageBroadcastRequest {
+    area_name: String,
+    source_id: Option<String>,
+    changes: Value,
+}
+
+fn pairing_approver(app: AppHandle) -> PairingApprover {
+    std::sync::Arc::new(move |request: PairingRequest| -> ApprovalFuture {
+        let app = app.clone();
+        Box::pin(async move {
+            let message = format!(
+                "Browser: {} (extension ID: {})",
+                request.browser_name, request.extension_id
+            );
+            let approved = app
+                .dialog()
+                .message(message)
+                .title("Allow connection?")
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "Allow".to_string(),
+                    "Deny".to_string(),
+                ))
+                .blocking_show();
+
+            if approved {
+                PairingDecision::Approve
+            } else {
+                PairingDecision::Deny
+            }
+        })
+    })
+}
+
+fn create_tray(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
+    let open = MenuItemBuilder::with_id("open", "Open Browser Recall").build(app)?;
+    let status = MenuItemBuilder::with_id("status", "Status: ◌ Connecting").build(app)?;
+    let logs = MenuItemBuilder::with_id("logs", "View Logs").build(app)?;
+    let settings = MenuItemBuilder::with_id("settings", "Settings…").build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "Quit Browser Recall").build(app)?;
+    let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
+    let menu = MenuBuilder::new(app)
+        .item(&open)
+        .item(&status)
+        .item(&logs)
+        .item(&settings)
+        .separator()
+        .item(&quit)
+        .build()?;
+
+    TrayIconBuilder::with_id(TRAY_ID)
+        .icon(tray_icon)
+        .menu(&menu)
+        .tooltip("Browser Recall")
+        .show_menu_on_left_click(true)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "open" => {
+                update_shell_state(app, |state| state.route = Some("open".to_string()));
+                show_main_window(app);
+            }
+            "settings" => {
+                update_shell_state(app, |state| {
+                    state.route = Some("settings".to_string());
+                });
+                show_main_window(app);
+            }
+            "logs" => {
+                if let Some(state) = app.try_state::<DesktopState>() {
+                    let log_dir = state
+                        .shell
+                        .lock()
+                        .expect("shell state poisoned")
+                        .log_dir
+                        .clone();
+                    if let Err(error) = app.opener().open_path(log_dir, None::<&str>) {
+                        warn!(%error, "failed to open log directory");
+                    }
+                }
+            }
+            "quit" => {
+                if let Some(state) = app.try_state::<DesktopState>() {
+                    *state.quit_requested.lock().expect("quit state poisoned") = true;
+                }
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .build(app)?;
+    Ok(status)
+}
+
+fn set_dock_visible(app: &AppHandle, visible: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(error) = app.set_dock_visibility(visible) {
+            warn!(%error, visible, "failed to update dock visibility");
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, visible);
+    }
+}
+
+fn show_main_window(app: &AppHandle) {
+    set_dock_visible(app, true);
+    let window = match app.get_webview_window("main") {
+        Some(window) => window,
+        None => match create_main_window(app) {
+            Ok(window) => window,
+            Err(error) => {
+                warn!(%error, "failed to create main window");
+                return;
+            }
+        },
+    };
+
+    restore_normal_webview_window_frame(&window);
+    let _ = window.show();
+    let _ = window.set_focus();
+    apply_shell_state(app);
+}
+
+fn close_main_window(app: &AppHandle) {
+    set_dock_visible(app, false);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.destroy();
+    }
+}
+
+fn restore_normal_webview_window_frame(window: &WebviewWindow) {
+    if window.is_fullscreen().unwrap_or(false) {
+        let _ = window.set_fullscreen(false);
+    }
+    let _ = window.set_size(LogicalSize::new(NORMAL_WINDOW_WIDTH, NORMAL_WINDOW_HEIGHT));
+    let _ = window.center();
+}
+
+fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .expect("main window config missing");
+    WebviewWindowBuilder::from_config(app, config)?.build()
+}
+
+#[derive(Serialize)]
+struct UiModel {
+    status_kind: &'static str,
+    headline: String,
+    detail: String,
+    endpoint: String,
+    browsers: Vec<String>,
+    data_dir: String,
+    log_dir: String,
+    device_id: String,
+    launch_at_login: bool,
+    debug_logging: bool,
+    setup_complete: bool,
+    route: Option<String>,
+}
+
+impl UiModel {
+    fn from_state(state: &ShellState) -> Self {
+        let endpoint = format!("ws://127.0.0.1:{}", state.snapshot.port);
+        let paused_error = state
+            .snapshot
+            .last_error
+            .clone()
+            .or_else(|| state.error.clone());
+        if state.snapshot.status == ConnectionStatus::Paused || paused_error.is_some() {
+            return Self {
+                status_kind: "error",
+                headline: "Browser Recall paused".to_string(),
+                detail: paused_error.unwrap_or_else(|| {
+                    "A daemon task failed. Resume it from Settings after fixing the underlying issue."
+                        .to_string()
+                }),
+                endpoint,
+                browsers: state.snapshot.connected_browsers.clone(),
+                data_dir: state.data_dir.clone(),
+                log_dir: state.log_dir.clone(),
+                device_id: state.snapshot.device_id.clone(),
+                launch_at_login: state.launch_at_login,
+                debug_logging: state.debug_logging,
+                setup_complete: state.setup_complete,
+                route: state.route.clone(),
+            };
+        }
+
+        let (status_kind, headline, detail) = match state.snapshot.status {
+            ConnectionStatus::Connected => {
+                let headline = format!(
+                    "Connected: {}",
+                    describe_connected_browsers(&state.snapshot.connected_browsers)
+                );
+                let detail =
+                    "The connector is authenticated and holding a localhost session.".to_string();
+                ("connected", headline, detail)
+            }
+            ConnectionStatus::Paused => (
+                "error",
+                "Browser Recall paused".to_string(),
+                "A daemon task failed. Resume it from Settings after fixing the underlying issue."
+                    .to_string(),
+            ),
+            ConnectionStatus::Waiting => (
+                "waiting",
+                "Waiting for browser connection".to_string(),
+                "Keep the app running while the extension pairs over localhost.".to_string(),
+            ),
+        };
+
+        Self {
+            status_kind,
+            headline,
+            detail,
+            endpoint,
+            browsers: state.snapshot.connected_browsers.clone(),
+            data_dir: state.data_dir.clone(),
+            log_dir: state.log_dir.clone(),
+            device_id: state.snapshot.device_id.clone(),
+            launch_at_login: state.launch_at_login,
+            debug_logging: state.debug_logging,
+            setup_complete: state.setup_complete,
+            route: state.route.clone(),
+        }
+    }
+}
+
+fn describe_connected_browsers(browsers: &[String]) -> String {
+    match browsers {
+        [] => "No browser".to_string(),
+        [only] => only.clone(),
+        [first, rest @ ..] => format!("{first} + {} more", rest.len()),
+    }
+}
+
+fn tray_status_text(model: &UiModel) -> String {
+    match model.status_kind {
+        "connected" => format!("Status: ● Running ({})", model.headline),
+        "error" => "Status: ✕ Error".to_string(),
+        _ => "Status: ◌ Connecting".to_string(),
+    }
+}
+
+fn apply_shell_state(app: &AppHandle) {
+    let Some(state) = app.try_state::<DesktopState>() else {
+        return;
+    };
+    let shell = state.shell.lock().expect("shell state poisoned").clone();
+    let model = UiModel::from_state(&shell);
+    let _ = state.status_item.set_text(tray_status_text(&model));
+
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_title(None::<&str>);
+    }
+
+    if let Some(window) = app.get_webview_window("main") {
+        let title = if model.status_kind == "connected" {
+            format!("Browser Recall - {}", model.headline)
+        } else if model.status_kind == "error" {
+            "Browser Recall - Error".to_string()
+        } else {
+            "Browser Recall".to_string()
+        };
+        let _ = window.set_title(&title);
+        if let Ok(payload) = serde_json::to_string(&model) {
+            let script = format!(
+                "window.__BR_STATE__ = {payload}; if (window.__renderBrowserRecall) window.__renderBrowserRecall();"
+            );
+            let _ = window.eval(&script);
+        }
+    }
+
+    if model.route.is_some() {
+        let mut shell = state.shell.lock().expect("shell state poisoned");
+        shell.route = None;
+    }
+}
+
+fn update_shell_state<F>(app: &AppHandle, mutator: F)
+where
+    F: FnOnce(&mut ShellState),
+{
+    let state = app.state::<DesktopState>();
+    {
+        let mut shell = state.shell.lock().expect("shell state poisoned");
+        mutator(&mut shell);
+    }
+    apply_shell_state(app);
+}
+
+#[tauri::command]
+fn update_shell_settings(app: AppHandle, payload: ShellSettingsUpdate) -> Result<(), String> {
+    if payload.launch_at_login && !login_item::is_supported() {
+        return Err("Launch at login is unavailable on this OS".to_string());
+    }
+
+    let desired_log_level = if payload.debug_logging {
+        "debug".to_string()
+    } else {
+        "info".to_string()
+    };
+
+    {
+        let state = app.state::<DesktopState>();
+        let mut config = state
+            .config_store
+            .load_or_create()
+            .map_err(|error| error.to_string())?;
+        config.launch_at_login = payload.launch_at_login;
+        config.log_level = desired_log_level.clone();
+
+        state
+            .logging
+            .set_level(&desired_log_level)
+            .map_err(|error| error.to_string())?;
+        login_item::sync_login_item(payload.launch_at_login).map_err(|error| error.to_string())?;
+        state
+            .config_store
+            .save(&config)
+            .map_err(|error| error.to_string())?;
+    }
+
+    update_shell_state(&app, |state| {
+        state.launch_at_login = payload.launch_at_login;
+        state.debug_logging = payload.debug_logging;
+        state.route = Some("settings".to_string());
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn resume_shell_service(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<DesktopState>();
+    let server = state._server.lock().expect("server state poisoned");
+    let server = server
+        .as_ref()
+        .ok_or_else(|| "Browser Recall daemon is not running".to_string())?;
+    tauri::async_runtime::block_on(server.resume());
+    update_shell_state(&app, |state| state.route = Some("settings".to_string()));
+    Ok(())
+}
+
+#[tauri::command]
+fn open_shell_path(app: AppHandle, request: OpenPathRequest) -> Result<(), String> {
+    let path = {
+        let state = app.state::<DesktopState>();
+        let shell = state.shell.lock().expect("shell state poisoned");
+        match request.kind.as_str() {
+            "data" => shell.data_dir.clone(),
+            "logs" => shell.log_dir.clone(),
+            other => return Err(format!("unknown path kind: {other}")),
+        }
+    };
+
+    app.opener()
+        .open_path(path, None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn bridge_storage_get(app: AppHandle, request: BridgeStorageGetRequest) -> Result<Value, String> {
+    match request.area_name.as_str() {
+        "session" => {
+            let state = app.state::<DesktopState>();
+            let storage = state
+                .storage_bridge
+                .lock()
+                .expect("storage bridge state poisoned");
+            Ok(Value::Object(session_bridge_snapshot(
+                &storage,
+                request.keys.as_deref(),
+            )))
+        }
+        other => Err(format!("unsupported storage area: {other}")),
+    }
+}
+
+#[tauri::command]
+fn bridge_storage_set(app: AppHandle, request: BridgeStorageSetRequest) -> Result<Value, String> {
+    let changes = match request.area_name.as_str() {
+        "session" => {
+            let state = app.state::<DesktopState>();
+            let mut storage = state
+                .storage_bridge
+                .lock()
+                .expect("storage bridge state poisoned");
+            session_bridge_set(&mut storage, request.items)
+        }
+        other => return Err(format!("unsupported storage area: {other}")),
+    };
+    emit_storage_change_message(
+        &app,
+        &request.area_name,
+        request.source_id.as_deref(),
+        changes.clone(),
+    );
+    Ok(Value::Object(changes))
+}
+
+#[tauri::command]
+fn bridge_storage_remove(
+    app: AppHandle,
+    request: BridgeStorageRemoveRequest,
+) -> Result<Value, String> {
+    let changes = match request.area_name.as_str() {
+        "session" => {
+            let state = app.state::<DesktopState>();
+            let mut storage = state
+                .storage_bridge
+                .lock()
+                .expect("storage bridge state poisoned");
+            session_bridge_remove(&mut storage, &request.keys)
+        }
+        other => return Err(format!("unsupported storage area: {other}")),
+    };
+    emit_storage_change_message(
+        &app,
+        &request.area_name,
+        request.source_id.as_deref(),
+        changes.clone(),
+    );
+    Ok(Value::Object(changes))
+}
+
+#[tauri::command]
+fn bridge_storage_clear(
+    app: AppHandle,
+    request: BridgeStorageClearRequest,
+) -> Result<Value, String> {
+    let changes = match request.area_name.as_str() {
+        "session" => {
+            let state = app.state::<DesktopState>();
+            let mut storage = state
+                .storage_bridge
+                .lock()
+                .expect("storage bridge state poisoned");
+            session_bridge_clear(&mut storage)
+        }
+        other => return Err(format!("unsupported storage area: {other}")),
+    };
+    emit_storage_change_message(
+        &app,
+        &request.area_name,
+        request.source_id.as_deref(),
+        changes.clone(),
+    );
+    Ok(Value::Object(changes))
+}
+
+#[tauri::command]
+fn bridge_storage_broadcast(
+    app: AppHandle,
+    request: BridgeStorageBroadcastRequest,
+) -> Result<(), String> {
+    let Value::Object(changes) = request.changes else {
+        return Err("bridge storage broadcast requires object changes".to_string());
+    };
+    emit_storage_change_message(
+        &app,
+        &request.area_name,
+        request.source_id.as_deref(),
+        changes,
+    );
+    Ok(())
+}
+
+fn shell_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let state = app.state::<DesktopState>();
+    let shell = state.shell.lock().expect("shell state poisoned");
+    Ok(PathBuf::from(shell.data_dir.clone()))
+}
+
+fn shell_setup_complete(app: &AppHandle) -> bool {
+    let state = app.state::<DesktopState>();
+    let shell = state.shell.lock().expect("shell state poisoned");
+    shell.setup_complete
+}
+
+fn shell_snapshot(app: &AppHandle) -> ServerSnapshot {
+    let state = app.state::<DesktopState>();
+    let shell = state.shell.lock().expect("shell state poisoned");
+    shell.snapshot.clone()
+}
+
+fn storage_for_app(app: &AppHandle) -> Result<Storage, String> {
+    Ok(Storage::new(shell_data_dir(app)?))
+}
+
+fn shell_device_id(app: &AppHandle) -> String {
+    shell_snapshot(app).device_id
+}
+
+fn inactive_server_snapshot(config: &DaemonConfig) -> ServerSnapshot {
+    ServerSnapshot {
+        port: 0,
+        device_id: config.device_id.clone(),
+        status: ConnectionStatus::Waiting,
+        connected_browsers: Vec::new(),
+        last_error: None,
+        last_error_code: None,
+    }
+}
+
+fn spawn_server_watchers(
+    app: AppHandle,
+    mut snapshot_rx: tokio::sync::watch::Receiver<ServerSnapshot>,
+    mut change_rx: tokio::sync::broadcast::Receiver<DaemonMessage>,
+) {
+    tauri::async_runtime::spawn({
+        let app = app.clone();
+        async move {
+            loop {
+                if snapshot_rx.changed().await.is_err() {
+                    break;
+                }
+                let snapshot = snapshot_rx.borrow().clone();
+                update_shell_state(&app, |state| state.snapshot = snapshot);
+            }
+        }
+    });
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match change_rx.recv().await {
+                Ok(DaemonMessage::Change { mutations }) => {
+                    emit_protocol_mutations(&app, &mutations);
+                }
+                Ok(_) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+async fn start_shell_server(app: &AppHandle) -> Result<ServerSnapshot, String> {
+    let config_store = {
+        let state = app.state::<DesktopState>();
+        if state
+            ._server
+            .lock()
+            .expect("server state poisoned")
+            .is_some()
+        {
+            return Ok(shell_snapshot(app));
+        }
+        state.config_store.clone()
+    };
+    let config = config_store
+        .load_or_create()
+        .map_err(|error| error.to_string())?;
+    if !config.setup_complete {
+        return Err("Browser Recall setup is not complete".to_string());
+    }
+
+    let server = start_server(ServerStartOptions::phase1_defaults(
+        config_store,
+        pairing_approver(app.clone()),
+    ))
+    .await
+    .map_err(|error| error.to_string())?;
+    let snapshot_rx = server.subscribe();
+    let change_rx = server.subscribe_changes();
+    let snapshot = snapshot_rx.borrow().clone();
+
+    {
+        let state = app.state::<DesktopState>();
+        let mut server_slot = state._server.lock().expect("server state poisoned");
+        *server_slot = Some(server);
+    }
+
+    update_shell_state(app, |state| {
+        state.snapshot = snapshot.clone();
+        state.data_dir = config.data_dir.display().to_string();
+        state.setup_complete = true;
+    });
+    spawn_server_watchers(app.clone(), snapshot_rx, change_rx);
+    Ok(snapshot)
+}
+
+fn emit_runtime_message(app: &AppHandle, payload: Value) {
+    let _ = app.emit(BRIDGE_RUNTIME_MESSAGE_EVENT, payload);
+}
+
+fn emit_storage_change_message(
+    app: &AppHandle,
+    area_name: &str,
+    source_id: Option<&str>,
+    changes: Map<String, Value>,
+) {
+    if changes.is_empty() {
+        return;
+    }
+    let _ = app.emit(
+        BRIDGE_STORAGE_CHANGE_EVENT,
+        json!({
+            "areaName": area_name,
+            "sourceId": source_id,
+            "changes": changes,
+        }),
+    );
+}
+
+fn emit_protocol_mutation(app: &AppHandle, mutation: &MutationPayload) {
+    let Ok(Value::Object(mut payload)) = serde_json::to_value(mutation) else {
+        return;
+    };
+    payload.insert("action".to_string(), Value::String("mutation".to_string()));
+    emit_runtime_message(app, Value::Object(payload));
+}
+
+fn emit_protocol_mutations(app: &AppHandle, mutations: &[MutationPayload]) {
+    for mutation in mutations {
+        emit_protocol_mutation(app, mutation);
+    }
+}
+
+fn session_bridge_snapshot(
+    state: &StorageBridgeState,
+    keys: Option<&[String]>,
+) -> Map<String, Value> {
+    match keys {
+        Some(keys) => keys
+            .iter()
+            .filter_map(|key| {
+                state
+                    .session
+                    .get(key)
+                    .cloned()
+                    .map(|value| (key.clone(), value))
+            })
+            .collect(),
+        None => state
+            .session
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+    }
+}
+
+fn session_bridge_set(
+    state: &mut StorageBridgeState,
+    items: BTreeMap<String, Value>,
+) -> Map<String, Value> {
+    let mut changes = Map::new();
+    for (key, value) in items {
+        let old_value = state.session.insert(key.clone(), value.clone());
+        if old_value.as_ref() == Some(&value) {
+            continue;
+        }
+        changes.insert(
+            key,
+            json!({
+                "oldValue": old_value,
+                "newValue": value,
+            }),
+        );
+    }
+    changes
+}
+
+fn session_bridge_remove(state: &mut StorageBridgeState, keys: &[String]) -> Map<String, Value> {
+    let mut changes = Map::new();
+    for key in keys {
+        let old_value = state.session.remove(key);
+        if old_value.is_none() {
+            continue;
+        }
+        changes.insert(
+            key.clone(),
+            json!({
+                "oldValue": old_value,
+                "newValue": Value::Null,
+            }),
+        );
+    }
+    changes
+}
+
+fn session_bridge_clear(state: &mut StorageBridgeState) -> Map<String, Value> {
+    let keys = state.session.keys().cloned().collect::<Vec<_>>();
+    session_bridge_remove(state, &keys)
+}
+
+fn request_sync_worker(app: &AppHandle) {
+    let state = app.state::<DesktopState>();
+    state.sync.request_worker();
+}
+
+fn emit_mutation_internal(
+    app: &AppHandle,
+    mutation_type: &str,
+    detail: Value,
+    schedule_sync: bool,
+) {
+    let mut payload = detail.as_object().cloned().unwrap_or_default();
+    payload.insert("action".to_string(), Value::String("mutation".to_string()));
+    payload.insert("type".to_string(), Value::String(mutation_type.to_string()));
+    emit_runtime_message(app, Value::Object(payload));
+    if schedule_sync {
+        request_sync_worker(app);
+    }
+}
+
+fn emit_mutation(app: &AppHandle, mutation_type: &str, detail: Value) {
+    emit_mutation_internal(app, mutation_type, detail, true);
+}
+
+fn emit_passive_mutation(app: &AppHandle, mutation_type: &str, detail: Value) {
+    emit_mutation_internal(app, mutation_type, detail, false);
+}
+
+fn emit_sync_refresh_mutations(app: &AppHandle) {
+    for mutation_type in [
+        "history", "note", "snapshot", "lists", "orphaned", "settings",
+    ] {
+        emit_passive_mutation(app, mutation_type, json!({}));
+    }
+}
+
+async fn run_background_sync_once(app: AppHandle) {
+    let storage = match storage_for_app(&app) {
+        Ok(storage) => storage,
+        Err(error) => {
+            warn!(%error, "failed to access storage for background sync");
+            return;
+        }
+    };
+
+    let state = app.state::<DesktopState>();
+    match state.sync.run_background_once(&storage).await {
+        Ok(SyncBackgroundOutcome::Refreshed) => {
+            emit_sync_refresh_mutations(&app);
+        }
+        Ok(SyncBackgroundOutcome::Idle) => {}
+        Err(SyncError::AuthExpired(message)) => {
+            warn!(%message, "background sync auth expired");
+        }
+        Err(SyncError::Message(message)) if message == "Cancelled" => {}
+        Err(SyncError::RateLimited { .. }) => {}
+        Err(SyncError::Message(message)) => {
+            warn!(%message, "background sync failed");
+        }
+    }
+}
+
+#[tauri::command]
+async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> {
+    let action = request
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "bridge action missing `action`".to_string())?;
+    let storage = storage_for_app(&app)?;
+    let snapshot = shell_snapshot(&app);
+    let device_id = shell_device_id(&app);
+    let setup_complete = shell_setup_complete(&app);
+
+    let response = match action {
+        "getDeviceId" => json!({
+            "success": true,
+            "deviceId": if setup_complete {
+                Value::String(snapshot.device_id.clone())
+            } else {
+                Value::Null
+            },
+            "setupComplete": setup_complete,
+        }),
+        "getDesktopConnectorState" => {
+            if !setup_complete {
+                return Ok(json!({
+                    "success": true,
+                    "state": "setup_required",
+                    "port": null,
+                    "deviceId": null,
+                    "hasToken": false,
+                    "pendingEvents": 0,
+                    "pendingBytes": 0,
+                    "refuseMode": false,
+                    "lastError": null,
+                    "lastErrorCode": null,
+                    "lastDrainedAt": null,
+                    "dataFolder": null,
+                    "daemonBufferDepth": 0,
+                }));
+            }
+            let state = if snapshot.status == ConnectionStatus::Paused {
+                "paused"
+            } else {
+                "connected"
+            };
+            json!({
+                "success": true,
+                "state": state,
+                "port": snapshot.port,
+                "deviceId": snapshot.device_id,
+                "hasToken": true,
+                "pendingEvents": 0,
+                "pendingBytes": 0,
+                "refuseMode": false,
+                "lastError": snapshot.last_error,
+                "lastErrorCode": snapshot.last_error_code,
+                "lastDrainedAt": null,
+                "dataFolder": storage.root().to_string_lossy().to_string(),
+                "daemonBufferDepth": 0,
+            })
+        }
+        "triggerDesktopPairing" => {
+            if !setup_complete {
+                return Ok(json!({
+                    "success": true,
+                    "state": "setup_required",
+                    "port": null,
+                    "deviceId": null,
+                    "hasToken": false,
+                    "pendingEvents": 0,
+                    "pendingBytes": 0,
+                    "refuseMode": false,
+                    "lastError": null,
+                    "lastErrorCode": null,
+                    "lastDrainedAt": null,
+                    "dataFolder": null,
+                    "daemonBufferDepth": 0,
+                }));
+            }
+            let state = if snapshot.status == ConnectionStatus::Paused {
+                "paused"
+            } else {
+                "connected"
+            };
+            json!({
+                "success": true,
+                "state": state,
+                "port": snapshot.port,
+                "deviceId": snapshot.device_id,
+                "hasToken": true,
+                "pendingEvents": 0,
+                "pendingBytes": 0,
+                "refuseMode": false,
+                "lastError": snapshot.last_error,
+                "lastErrorCode": snapshot.last_error_code,
+                "lastDrainedAt": null,
+                "dataFolder": storage.root().to_string_lossy().to_string(),
+                "daemonBufferDepth": 0,
+            })
+        }
+        "getDesktopShellState" => {
+            let state = app.state::<DesktopState>();
+            let shell = state.shell.lock().expect("shell state poisoned");
+            let connected = snapshot
+                .connected_browsers
+                .iter()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>();
+            let paired_browsers = list_paired_browsers(&state.config_store)?
+                .into_iter()
+                .map(|connector| {
+                    json!({
+                        "browserId": connector.browser_id,
+                        "browserName": connector.browser_name.clone(),
+                        "browserProfile": connector.browser_profile,
+                        "extensionId": connector.extension_id,
+                        "approvedAt": connector.approved_at,
+                        "lastSeen": connector.last_seen,
+                        "connected": connected.contains(&connector.browser_name),
+                    })
+                })
+                .collect::<Vec<_>>();
+            json!({
+                "success": true,
+                "loginItemSupported": shell.login_item_supported,
+                "launchAtLogin": shell.launch_at_login,
+                "debugLogging": shell.debug_logging,
+                "setupComplete": shell.setup_complete,
+                "dataDir": shell.data_dir,
+                "pairedBrowsers": paired_browsers,
+            })
+        }
+        "startWindowDrag" => {
+            let window = app
+                .get_webview_window("main")
+                .ok_or_else(|| "main window is unavailable".to_string())?;
+            window.start_dragging().map_err(|error| error.to_string())?;
+            json!({ "success": true })
+        }
+        "toggleWindowFullscreen" => {
+            let window = app
+                .get_webview_window("main")
+                .ok_or_else(|| "main window is unavailable".to_string())?;
+            let fullscreen = window.is_fullscreen().map_err(|error| error.to_string())?;
+            window
+                .set_fullscreen(!fullscreen)
+                .map_err(|error| error.to_string())?;
+            json!({ "success": true, "fullscreen": !fullscreen })
+        }
+        "openExternalUrl" => {
+            let url = request
+                .get("url")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "openExternalUrl missing url".to_string())?;
+            app.opener()
+                .open_url(url.to_string(), None::<&str>)
+                .map_err(|error| error.to_string())?;
+            json!({ "success": true })
+        }
+        "chooseDesktopDataFolder" => {
+            if app
+                .state::<DesktopState>()
+                ._server
+                .lock()
+                .expect("server state poisoned")
+                .is_some()
+            {
+                return Err("The data folder can only be changed before setup starts.".to_string());
+            }
+            let folder = app
+                .dialog()
+                .file()
+                .set_title("Choose Browser Recall Data Folder")
+                .blocking_pick_folder();
+            let Some(folder) = folder else {
+                return Ok(json!({
+                    "success": true,
+                    "cancelled": true,
+                }));
+            };
+            let data_dir = folder.into_path().map_err(|error| error.to_string())?;
+            std::fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
+
+            let config_store = app.state::<DesktopState>().config_store.clone();
+            let mut config = config_store
+                .load_or_create()
+                .map_err(|error| error.to_string())?;
+            config.data_dir = data_dir.clone();
+            config.setup_complete = false;
+            config_store
+                .save(&config)
+                .map_err(|error| error.to_string())?;
+            drop(config);
+
+            update_shell_state(&app, |state| {
+                state.data_dir = data_dir.display().to_string();
+                state.setup_complete = false;
+            });
+            json!({
+                "success": true,
+                "cancelled": false,
+                "dataFolder": data_dir.to_string_lossy().to_string(),
+            })
+        }
+        "completeDesktopSetup" => {
+            let config_store = app.state::<DesktopState>().config_store.clone();
+            let mut config = config_store
+                .load_or_create()
+                .map_err(|error| error.to_string())?;
+            if config.data_dir.as_os_str().is_empty() {
+                return Err("Choose a data folder before starting Browser Recall.".to_string());
+            }
+            let launch_at_login = request
+                .get("launchAtLogin")
+                .and_then(Value::as_bool)
+                .unwrap_or(config.launch_at_login);
+            if launch_at_login && !login_item::is_supported() {
+                return Err("Launch at login is unavailable on this OS".to_string());
+            }
+            config.setup_complete = true;
+            config.launch_at_login = launch_at_login;
+            login_item::sync_login_item(launch_at_login).map_err(|error| error.to_string())?;
+            config_store
+                .save(&config)
+                .map_err(|error| error.to_string())?;
+            update_shell_state(&app, |state| {
+                state.data_dir = config.data_dir.display().to_string();
+                state.setup_complete = true;
+                state.launch_at_login = launch_at_login;
+            });
+            let snapshot = start_shell_server(&app).await?;
+            app.state::<DesktopState>().sync.request_worker();
+
+            json!({
+                "success": true,
+                "dataFolder": config.data_dir.to_string_lossy().to_string(),
+                "deviceId": snapshot.device_id,
+                "port": snapshot.port,
+            })
+        }
+        "updateDesktopShellSettings" => {
+            let launch_at_login = request
+                .get("launchAtLogin")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| "updateDesktopShellSettings missing launchAtLogin".to_string())?;
+            let debug_logging = request
+                .get("debugLogging")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| "updateDesktopShellSettings missing debugLogging".to_string())?;
+            update_shell_settings(
+                app.clone(),
+                ShellSettingsUpdate {
+                    launch_at_login,
+                    debug_logging,
+                },
+            )?;
+            json!({ "success": true })
+        }
+        "revokePairedBrowser" => {
+            let browser_id = request
+                .get("browserId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "revokePairedBrowser missing browserId".to_string())?;
+            let extension_id = request
+                .get("extensionId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "revokePairedBrowser missing extensionId".to_string())?;
+            let state = app.state::<DesktopState>();
+            let _ = pair_browser_revoke(&state.config_store, browser_id, extension_id)?;
+            json!({ "success": true })
+        }
+        "getDirectoryInfo" => {
+            if !setup_complete {
+                return Ok(json!({
+                    "success": true,
+                    "info": null,
+                }));
+            }
+            let data_folder = storage.root().to_string_lossy().to_string();
+            let name = storage
+                .root()
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(str::to_string)
+                .unwrap_or(data_folder);
+            json!({
+                "success": true,
+                "info": {
+                    "name": name,
+                    "hasPermission": true,
+                }
+            })
+        }
+        "getDirectorySize" => json!({
+            "success": true,
+            "size": storage.directory_size().await.map_err(|error| error.to_string())?,
+        }),
+        "readCacheable" => {
+            let key = request
+                .get("key")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "readCacheable missing key".to_string())?;
+            let include_deleted = request
+                .get("includeDeleted")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let value = read_cacheable(&storage, key, include_deleted).await?;
+            json!({
+                "success": true,
+                "value": value,
+            })
+        }
+        "saveSettingsKey" => {
+            let key = request
+                .get("key")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "saveSettingsKey missing key".to_string())?;
+            let value = request
+                .get("value")
+                .cloned()
+                .ok_or_else(|| "saveSettingsKey missing value".to_string())?;
+            save_settings_key(&storage, &device_id, key, value).await?;
+            emit_mutation(&app, "settings", json!({ "key": key }));
+            json!({ "success": true })
+        }
+        "submitEvent" | "submit_event" => {
+            let entry = request
+                .get("entry")
+                .cloned()
+                .ok_or_else(|| "submit_event missing entry".to_string())?;
+            let response = submit_event(&storage, &device_id, entry).await?;
+            emit_mutation(&app, "history", json!({}));
+            response
+        }
+        "listHistoryFiles" => {
+            let include_sizes = request
+                .get("includeSizes")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let (files, sizes) = list_history_files(&storage, include_sizes).await?;
+            json!({
+                "success": true,
+                "files": files,
+                "sizes": sizes,
+            })
+        }
+        "loadHistoryBatch" => {
+            let files = request
+                .get("files")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "loadHistoryBatch missing files".to_string())?
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            let entries = load_history_batch(&storage, &files).await?;
+            json!({
+                "success": true,
+                "entries": entries,
+            })
+        }
+        "searchHistory" => {
+            let query = request
+                .get("query")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "searchHistory missing query".to_string())?;
+            let results = command_search_history(&storage, query)?;
+            json!({
+                "success": true,
+                "results": results,
+            })
+        }
+        "searchNotes" => {
+            let query = request
+                .get("query")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "searchNotes missing query".to_string())?;
+            let results = command_search_notes(&storage, query)?;
+            json!({
+                "success": true,
+                "results": results,
+            })
+        }
+        "searchSnapshots" => {
+            let query = request
+                .get("query")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "searchSnapshots missing query".to_string())?;
+            let results = command_search_snapshots(&storage, query)?;
+            json!({
+                "success": true,
+                "results": results,
+            })
+        }
+        "loadPageNotes" => {
+            let slug = request
+                .get("slug")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "loadPageNotes missing slug".to_string())?;
+            json!({
+                "success": true,
+                "notes": load_page_notes_payload(&storage, slug).await?,
+            })
+        }
+        "listSnapshots" => {
+            let slug = request
+                .get("slug")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "listSnapshots missing slug".to_string())?;
+            json!({
+                "success": true,
+                "snapshots": load_page_snapshot_payload(&storage, slug).await?,
+            })
+        }
+        "getSnapshotHtml" => {
+            let slug = request
+                .get("slug")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "getSnapshotHtml missing slug".to_string())?;
+            let timestamp = request
+                .get("timestamp")
+                .or_else(|| request.get("ts"))
+                .and_then(Value::as_i64)
+                .ok_or_else(|| "getSnapshotHtml missing timestamp".to_string())?;
+            let html =
+                browser_recall_daemon::commands::get_snapshot_html(&storage, slug, timestamp)
+                    .await?;
+            match html {
+                Some(html) => json!({
+                    "success": true,
+                    "html": html,
+                }),
+                None => json!({
+                    "success": false,
+                    "error": "Not found",
+                }),
+            }
+        }
+        "loadAllPages" => json!({
+            "success": true,
+            "pages": load_all_pages_payload(&storage).await?,
+        }),
+        "getPageRelations" => {
+            let url = request
+                .get("url")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "getPageRelations missing url".to_string())?;
+            let payload = page_relations_payload(&storage, url).await?;
+            json!({
+                "success": true,
+                "parents": payload["parents"].clone(),
+                "children": payload["children"].clone(),
+            })
+        }
+        "createNote" => {
+            let response = command_create_note(&storage, &device_id, &request).await?;
+            emit_mutation(
+                &app,
+                "note",
+                json!({
+                    "pageSlug": response.get("pageSlug").cloned().unwrap_or(Value::Null),
+                    "noteSlug": response.get("noteSlug").cloned().unwrap_or(Value::Null),
+                }),
+            );
+            response
+        }
+        "deleteNote" => {
+            let note_slug = request
+                .get("noteSlug")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "deleteNote missing noteSlug".to_string())?;
+            command_delete_note(&storage, &device_id, note_slug).await?;
+            emit_mutation(&app, "note", json!({ "noteSlug": note_slug }));
+            emit_mutation(&app, "orphaned", json!({}));
+            json!({ "success": true })
+        }
+        "updateNote" => {
+            let old_note_slug = request
+                .get("noteSlug")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "updateNote missing noteSlug".to_string())?;
+            let note_value = request
+                .get("note")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "updateNote missing note".to_string())?;
+            let response =
+                command_update_note(&storage, &device_id, old_note_slug, note_value).await?;
+            if response.get("oldNoteSlug").is_some() {
+                emit_mutation(
+                    &app,
+                    "note",
+                    json!({
+                        "noteSlug": response.get("noteSlug").cloned().unwrap_or(Value::Null),
+                        "oldNoteSlug": old_note_slug,
+                    }),
+                );
+            }
+            response
+        }
+        "toggleListPin" => {
+            let list_id = request
+                .get("listId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "toggleListPin missing listId".to_string())?;
+            let response = toggle_list_pin(&storage, &device_id, &request).await?;
+            emit_mutation(&app, "pins", json!({ "listId": list_id }));
+            response
+        }
+        "addListPins" => {
+            let list_id = request
+                .get("listId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "addListPins missing listId".to_string())?;
+            add_list_pins(&storage, &device_id, &request).await?;
+            emit_mutation(&app, "pins", json!({ "listId": list_id }));
+            json!({ "success": true })
+        }
+        "saveListMeta" => {
+            let response = save_list_meta(&storage, &device_id, &request).await?;
+            emit_mutation(&app, "lists", json!({}));
+            response
+        }
+        "importBookmarks" => {
+            let tree = serde_json::from_value::<Vec<BookmarkImportNode>>(
+                request
+                    .get("tree")
+                    .cloned()
+                    .ok_or_else(|| "importBookmarks missing tree".to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            let (list_count, bookmark_count, failures) =
+                import_bookmarks(&storage, &device_id, tree).await?;
+            emit_mutation(&app, "lists", json!({}));
+            json!({
+                "success": true,
+                "listCount": list_count,
+                "bookmarkCount": bookmark_count,
+                "failures": failures,
+            })
+        }
+        "importHistory" => {
+            let entries = serde_json::from_value::<Vec<HistoryImportEntry>>(
+                request
+                    .get("entries")
+                    .cloned()
+                    .ok_or_else(|| "importHistory missing entries".to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            let (page_count, visit_count, skipped_count) =
+                import_history(&storage, &device_id, entries).await?;
+            emit_mutation(&app, "history", json!({}));
+            json!({
+                "success": true,
+                "pageCount": page_count,
+                "visitCount": visit_count,
+                "skippedCount": skipped_count,
+            })
+        }
+        "deleteList" => {
+            let list_id = request
+                .get("listId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "deleteList missing listId".to_string())?;
+            command_delete_list(&storage, &device_id, list_id).await?;
+            emit_mutation(&app, "lists", json!({}));
+            emit_mutation(&app, "orphaned", json!({}));
+            json!({ "success": true })
+        }
+        "updateListTree" => {
+            let tree = serde_json::from_value(
+                request
+                    .get("tree")
+                    .cloned()
+                    .ok_or_else(|| "updateListTree missing tree".to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            command_update_list_tree(&storage, &device_id, tree).await?;
+            emit_mutation(&app, "lists", json!({}));
+            json!({ "success": true })
+        }
+        "restoreNote" => {
+            let note_slug = request
+                .get("noteSlug")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "restoreNote missing noteSlug".to_string())?;
+            command_restore_note(&storage, &device_id, note_slug).await?;
+            emit_mutation(&app, "orphaned", json!({}));
+            emit_mutation(&app, "note", json!({ "noteSlug": note_slug }));
+            json!({ "success": true })
+        }
+        "restoreSnapshot" => {
+            let snapshot_stem = request
+                .get("snapSlug")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "restoreSnapshot missing snapSlug".to_string())?;
+            let page_slug = command_restore_snapshot(&storage, &device_id, snapshot_stem).await?;
+            emit_mutation(&app, "orphaned", json!({}));
+            emit_mutation(&app, "snapshot", json!({ "slug": page_slug }));
+            json!({ "success": true })
+        }
+        "restoreList" => {
+            let list_id = request
+                .get("listId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "restoreList missing listId".to_string())?;
+            command_restore_list(&storage, &device_id, list_id).await?;
+            emit_mutation(&app, "orphaned", json!({}));
+            emit_mutation(&app, "lists", json!({}));
+            json!({ "success": true })
+        }
+        "permanentDeleteAll" => {
+            let keys = storage
+                .load_orphaned()
+                .await
+                .map_err(|error| error.to_string())?
+                .unwrap_or_default()
+                .entries
+                .into_iter()
+                .map(|entry| entry.key)
+                .collect::<Vec<_>>();
+            let deleted_keys = permanent_delete_keys(&storage, &keys).await?;
+            emit_mutation(&app, "note", json!({}));
+            emit_mutation(&app, "snapshot", json!({}));
+            emit_mutation(&app, "lists", json!({}));
+            emit_mutation(&app, "orphaned", json!({}));
+            json!({
+                "success": true,
+                "deletedKeys": deleted_keys,
+            })
+        }
+        "openSnapshot" => {
+            let slug = request
+                .get("slug")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "openSnapshot missing slug".to_string())?;
+            let timestamp = request
+                .get("timestamp")
+                .or_else(|| request.get("ts"))
+                .and_then(Value::as_i64)
+                .ok_or_else(|| "openSnapshot missing timestamp".to_string())?;
+            let snapshot_path = storage.snapshot_html_file_path(slug, timestamp);
+            if !snapshot_path.exists() {
+                return Err("Snapshot not found".to_string());
+            }
+            app.opener()
+                .open_path(snapshot_path.to_string_lossy().to_string(), None::<&str>)
+                .map_err(|error| error.to_string())?;
+            json!({ "success": true })
+        }
+        "deleteSnapshot" => {
+            let slug = request
+                .get("slug")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "deleteSnapshot missing slug".to_string())?;
+            let timestamp = request
+                .get("timestamp")
+                .or_else(|| request.get("ts"))
+                .and_then(Value::as_i64)
+                .ok_or_else(|| "deleteSnapshot missing timestamp".to_string())?;
+            command_delete_snapshot(&storage, &device_id, slug, timestamp).await?;
+            emit_mutation(&app, "snapshot", json!({ "slug": slug }));
+            emit_mutation(&app, "orphaned", json!({}));
+            json!({ "success": true })
+        }
+        "clearAllData" => {
+            let deleted_count = storage
+                .clear_all_data(&device_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            emit_mutation(&app, "note", json!({}));
+            emit_mutation(&app, "snapshot", json!({}));
+            emit_mutation(&app, "lists", json!({}));
+            emit_mutation(&app, "orphaned", json!({}));
+            emit_mutation(&app, "settings", json!({}));
+            json!({
+                "success": true,
+                "deletedCount": deleted_count,
+            })
+        }
+        "previewRule" => {
+            let rule = serde_json::from_value::<RulePayload>(
+                request
+                    .get("rule")
+                    .cloned()
+                    .ok_or_else(|| "previewRule missing rule".to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            let entries = serde_json::from_value::<Vec<RuleBatchEntry>>(
+                request
+                    .get("entries")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Array(Vec::new())),
+            )
+            .map_err(|error| error.to_string())?;
+            preview_rule_payload(rule, entries)?
+        }
+        "addRule" => {
+            let list_id = request
+                .get("listId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "addRule missing listId".to_string())?;
+            let rule = serde_json::from_value::<RulePayload>(
+                request
+                    .get("rule")
+                    .cloned()
+                    .ok_or_else(|| "addRule missing rule".to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            let response = command_add_rule(&storage, &device_id, list_id, rule).await?;
+            if response.get("success").and_then(Value::as_bool) == Some(true) {
+                emit_mutation(&app, "rules", json!({ "listId": list_id }));
+            }
+            response
+        }
+        "removeRule" => {
+            let list_id = request
+                .get("listId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "removeRule missing listId".to_string())?;
+            let rule_id = request
+                .get("ruleId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "removeRule missing ruleId".to_string())?;
+            command_remove_rule(&storage, &device_id, list_id, rule_id).await?;
+            emit_mutation(&app, "rules", json!({ "listId": list_id }));
+            json!({ "success": true })
+        }
+        "reportPage" => {
+            if let Some(user_title) = request.get("user_title").and_then(Value::as_str) {
+                let url = request
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "reportPage missing url".to_string())?;
+                command_rename_page(&storage, &device_id, url, user_title).await?;
+                emit_mutation(&app, "history", json!({ "url": url }));
+            }
+            json!({ "success": true })
+        }
+        "resumeService" => {
+            let state = app.state::<DesktopState>();
+            let server = state._server.lock().expect("server state poisoned");
+            let server = server
+                .as_ref()
+                .ok_or_else(|| "Browser Recall daemon is not running".to_string())?;
+            tauri::async_runtime::block_on(server.resume());
+            update_shell_state(&app, |state| state.route = Some("settings".to_string()));
+            json!({ "success": true })
+        }
+        "getSyncDevices" => {
+            let state = app.state::<DesktopState>();
+            json!({
+                "success": true,
+                "devices": state.sync.device_entries_json(),
+                "localDeviceId": device_id,
+            })
+        }
+        "syncListDevices" => {
+            let state = app.state::<DesktopState>();
+            match state.sync.refresh_devices(&storage).await {
+                Ok(devices) => json!({
+                    "success": true,
+                    "devices": sync_device_entries_json(&devices),
+                    "localDeviceId": device_id,
+                }),
+                Err(error) => json!({
+                    "success": true,
+                    "devices": [],
+                    "localDeviceId": device_id,
+                    "error": error,
+                }),
+            }
+        }
+        "toggleSyncDevicePaused" => {
+            let target = request
+                .get("deviceId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "toggleSyncDevicePaused missing deviceId".to_string())?;
+            let state = app.state::<DesktopState>();
+            let paused = state.sync.toggle_device_paused(target)?;
+            json!({
+                "success": true,
+                "paused": paused,
+            })
+        }
+        "updateSyncSettings"
+        | "clearSyncFolder"
+        | "hydrateCache"
+        | "initializeFilesystem"
+        | "flushLogBuffer" => {
+            let state = app.state::<DesktopState>();
+            state.sync.settings_changed(&storage).await?;
+            json!({ "success": true })
+        }
+        "cancelSync" => {
+            let state = app.state::<DesktopState>();
+            state.sync.cancel();
+            json!({ "success": true })
+        }
+        "clearSyncToken" => {
+            let state = app.state::<DesktopState>();
+            state.sync.clear_token()?;
+            json!({ "success": true })
+        }
+        "toggleSyncRemember" => {
+            let remember = request
+                .get("remember")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let state = app.state::<DesktopState>();
+            state.sync.toggle_remember(remember)?;
+            json!({ "success": true })
+        }
+        "syncNow" => {
+            let state = app.state::<DesktopState>();
+            let response = state.sync.sync_now_response(&storage).await;
+            if response
+                .get("entriesReplayed")
+                .and_then(Value::as_u64)
+                .is_some_and(|count| count > 0)
+            {
+                emit_sync_refresh_mutations(&app);
+            }
+            response
+        }
+        "setSyncToken" => {
+            let token = request
+                .get("token")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "setSyncToken missing token".to_string())?;
+            let remember = request
+                .get("remember")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let state = app.state::<DesktopState>();
+            let github_user = state.sync.set_token(token, remember).await?;
+            json!({
+                "success": true,
+                "githubUser": github_user,
+            })
+        }
+        "getSyncAuthState" => {
+            let state = app.state::<DesktopState>();
+            state.sync.auth_state_json()
+        }
+        "deleteSyncDevice" => {
+            let target = request
+                .get("deviceId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "deleteSyncDevice missing deviceId".to_string())?;
+            let state = app.state::<DesktopState>();
+            state.sync.delete_device(&storage, target).await?;
+            json!({ "success": true })
+        }
+        other => json!({
+            "success": false,
+            "error": format!("unsupported desktop bridge action: {other}"),
+        }),
+    };
+
+    Ok(response)
+}
+
+#[tauri::command]
+fn search_history(app: AppHandle, request: SearchRequest) -> Result<serde_json::Value, String> {
+    let data_dir = shell_data_dir(&app)?;
+    let hits: Vec<HistorySearchHit> =
+        search_history_in_data_dir(&data_dir, &request.query, request.limit)
+            .map_err(|error| error.to_string())?;
+    serde_json::to_value(hits).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn search_notes(app: AppHandle, request: SearchRequest) -> Result<serde_json::Value, String> {
+    let data_dir = shell_data_dir(&app)?;
+    let hits: Vec<NoteSearchHit> =
+        search_notes_in_data_dir(&data_dir, &request.query, request.limit)
+            .map_err(|error| error.to_string())?;
+    serde_json::to_value(hits).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn search_snapshots(app: AppHandle, request: SearchRequest) -> Result<serde_json::Value, String> {
+    let data_dir = shell_data_dir(&app)?;
+    let hits: Vec<SnapshotSearchHit> =
+        search_snapshots_in_data_dir(&data_dir, &request.query, request.limit)
+            .map_err(|error| error.to_string())?;
+    serde_json::to_value(hits).map_err(|error| error.to_string())
+}
+
+fn parse_deep_link_route(url: &str) -> Option<String> {
+    let route = url
+        .strip_prefix("browser-recall://")?
+        .trim_start_matches('/');
+    if route.is_empty() {
+        None
+    } else {
+        Some(route.to_string())
+    }
+}
+
+fn configure_deep_links(app: &AppHandle) {
+    if let Err(error) = app.deep_link().register("browser-recall") {
+        warn!(%error, "failed to register deep-link scheme");
+    }
+    app.deep_link().on_open_url({
+        let app = app.clone();
+        move |event| {
+            let route = event
+                .urls()
+                .into_iter()
+                .find_map(|url| parse_deep_link_route(url.as_ref()));
+            if let Some(route) = route {
+                info!(route, "received deep link");
+                update_shell_state(&app, |state| state.route = Some(route));
+                show_main_window(&app);
+            }
+        }
+    });
+
+    if let Ok(Some(urls)) = app.deep_link().get_current() {
+        if let Some(route) = urls
+            .into_iter()
+            .find_map(|url| parse_deep_link_route(url.as_ref()))
+        {
+            info!(route, "restored launch deep link");
+            update_shell_state(app, |state| state.route = Some(route));
+            show_main_window(app);
+        }
+    }
+}
+
+fn main() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
+        .invoke_handler(tauri::generate_handler![
+            bridge_action,
+            update_shell_settings,
+            resume_shell_service,
+            open_shell_path,
+            search_history,
+            search_notes,
+            search_snapshots,
+            bridge_storage_get,
+            bridge_storage_set,
+            bridge_storage_remove,
+            bridge_storage_clear,
+            bridge_storage_broadcast
+        ])
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+            let bootstrap = config::bootstrap(&app_handle)?;
+            let logging = logging::init(&bootstrap.log_dir, &bootstrap.config.log_level)?;
+            info!(
+                data_dir = %bootstrap.config.data_dir.display(),
+                log_dir = %bootstrap.log_dir.display(),
+                "starting browser recall desktop shell"
+            );
+
+            let (server_handle, initial_snapshot, watcher_bundle) =
+                if bootstrap.config.setup_complete {
+                    let server = tauri::async_runtime::block_on(start_server(
+                        ServerStartOptions::phase1_defaults(
+                            bootstrap.config_store.clone(),
+                            pairing_approver(app_handle.clone()),
+                        ),
+                    ))
+                    .expect("failed to start phase 1 Browser Recall daemon");
+                    let snapshot_rx = server.subscribe();
+                    let change_rx = server.subscribe_changes();
+                    let initial_snapshot = snapshot_rx.borrow().clone();
+                    (
+                        Some(server),
+                        initial_snapshot,
+                        Some((snapshot_rx, change_rx)),
+                    )
+                } else {
+                    (None, inactive_server_snapshot(&bootstrap.config), None)
+                };
+            let status_item = create_tray(app.handle())?;
+            let sync_notify = Arc::new(Notify::new());
+            app.manage(DesktopState {
+                _server: Mutex::new(server_handle),
+                config_store: bootstrap.config_store.clone(),
+                shell: Mutex::new(ShellState {
+                    snapshot: initial_snapshot,
+                    data_dir: bootstrap.config.data_dir.display().to_string(),
+                    log_dir: bootstrap.log_dir.display().to_string(),
+                    login_item_supported: login_item::is_supported(),
+                    launch_at_login: bootstrap.config.launch_at_login,
+                    debug_logging: bootstrap.config.log_level == "debug",
+                    setup_complete: bootstrap.config.setup_complete,
+                    route: None,
+                    error: None,
+                }),
+                sync: SyncController::new(
+                    bootstrap.config_store.clone(),
+                    &bootstrap.config,
+                    bootstrap.config.device_id.clone(),
+                    sync_notify.clone(),
+                ),
+                storage_bridge: Mutex::new(StorageBridgeState::default()),
+                status_item,
+                logging,
+                quit_requested: Mutex::new(false),
+            });
+            apply_shell_state(app.handle());
+            if let Some((snapshot_rx, change_rx)) = watcher_bundle {
+                spawn_server_watchers(app.handle().clone(), snapshot_rx, change_rx);
+            }
+            let sync_notify = app.state::<DesktopState>().sync.worker_notify();
+            tauri::async_runtime::spawn(background_worker_loop(sync_notify, {
+                let app = app.handle().clone();
+                move || {
+                    let app = app.clone();
+                    async move {
+                        run_background_sync_once(app).await;
+                    }
+                }
+            }));
+            configure_deep_links(app.handle());
+            if bootstrap.config.setup_complete {
+                app.state::<DesktopState>().sync.request_worker();
+            }
+            show_main_window(app.handle());
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let app = window.app_handle().clone();
+                close_main_window(&app);
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building Browser Recall desktop shell")
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                let quit_requested = app
+                    .try_state::<DesktopState>()
+                    .map(|state| *state.quit_requested.lock().expect("quit state poisoned"))
+                    .unwrap_or(false);
+                if !quit_requested {
+                    api.prevent_exit();
+                }
+            }
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => {
+                show_main_window(app);
+            }
+            _ => {}
+        });
+}

@@ -6,25 +6,34 @@ function timer(label) {
 
 // Reset extension state and seed fresh data for a test.
 export async function resetAndSeed(extContext, extensionId, files) {
-  let done = timer('resetAndSeed: open helper page');
-  const page = await extContext.newPage();
-  await page.goto(`chrome-extension://${extensionId}/test-helper.html`);
-  await page.waitForFunction(
-    () => typeof chrome !== 'undefined' && chrome.runtime,
-  );
-  done();
+  let page;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let done = timer('resetAndSeed: open helper page');
+    page = await extContext.newPage();
+    await page.goto(`chrome-extension://${extensionId}/test-helper.html`);
+    await page.waitForFunction(
+      () => typeof chrome !== 'undefined' && chrome.runtime,
+    );
+    done();
 
-  done = timer('resetAndSeed: resetForTest');
-  const resetResult = await page.evaluate(() =>
-    chrome.runtime.sendMessage({ action: 'resetForTest' }),
-  );
-  if (!resetResult?.success) {
-    throw new Error(`resetForTest failed: ${JSON.stringify(resetResult)}`);
+    done = timer('resetAndSeed: resetForTest');
+    const resetResult = await page.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'resetForTest' }),
+    );
+    if (resetResult?.success) {
+      done();
+      break;
+    }
+
+    await page.close().catch(() => {});
+    if (attempt >= 2) {
+      throw new Error(`resetForTest failed: ${JSON.stringify(resetResult)}`);
+    }
+    await new Promise((r) => setTimeout(r, 100));
   }
-  done();
 
   if (files?.length > 0) {
-    done = timer('resetAndSeed: seedTestData');
+    let done = timer('resetAndSeed: seedTestData');
     const seedResult = await page.evaluate(
       (f) => chrome.runtime.sendMessage({ action: 'seedTestData', files: f }),
       files,
@@ -46,7 +55,7 @@ export async function resetAndSeed(extContext, extensionId, files) {
     done();
   }
 
-  done = timer('resetAndSeed: close helper page');
+  const done = timer('resetAndSeed: close helper page');
   await page.close();
   done();
 }
@@ -61,39 +70,6 @@ export async function openHelperPage(extContext, extensionId) {
   );
   done();
   return page;
-}
-
-// Open the full options page and wait for initialize() + showExplore() to complete.
-// The options page sets document.body.dataset.ready='true' when done.
-export async function openOptionsPage(extContext, extensionId) {
-  let done = timer('openOptionsPage (goto)');
-  const page = await extContext.newPage();
-  page.on('console', (msg) => {
-    const text = msg.text();
-    if (text.includes('-timer]')) console.log(text);
-  });
-  await page.goto(`chrome-extension://${extensionId}/options.html`);
-  done();
-
-  done = timer('openOptionsPage (wait ready)');
-  await page.waitForFunction(() => document.body.dataset.ready === 'true', {
-    timeout: 10000,
-  });
-  done();
-
-  return page;
-}
-
-// Wait for the list view to finish rendering after a sidebar click.
-// showList() renders #listLayout visible and populates #relatedResults.
-export async function waitForListView(page) {
-  await page.waitForFunction(
-    () => {
-      const layout = document.getElementById('listLayout');
-      return layout && layout.style.display !== 'none';
-    },
-    { timeout: 10000 },
-  );
 }
 
 // Compute the slug that the extension generates for a URL.

@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Option E - Thermal Receipt</title>
+    <style>
+      :root {
+        --paper: #f7f4ea;
+        --ink: #171713;
+        --muted: #77746a;
+        --rule: rgba(23, 23, 19, 0.22);
+        --soft: rgba(23, 23, 19, 0.055);
+        --hot: #ff2d20;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #d8d8d2;
+        color: var(--ink);
+        font:
+          12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas,
+          "Liberation Mono", monospace;
+      }
+
+      .demo {
+        width: min(420px, calc(100vw - 32px));
+      }
+
+      .label {
+        margin: 0 0 12px;
+        color: #4b4b45;
+        font: 11px/1 ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .receipt {
+        background: var(--paper);
+        border: 1px solid rgba(0, 0, 0, 0.18);
+        padding: 14px 16px;
+      }
+
+      .tear {
+        height: 8px;
+        margin: -14px -16px 13px;
+        border-bottom: 1px dashed var(--rule);
+        background:
+          radial-gradient(circle at 4px 0, #d8d8d2 0 3px, transparent 3px)
+          0 0 / 12px 8px repeat-x;
+      }
+
+      .head {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        align-items: start;
+        padding-bottom: 12px;
+        border-bottom: 1px dashed var(--rule);
+      }
+
+      .brand {
+        font-weight: 900;
+        letter-spacing: 0.16em;
+      }
+
+      .sub {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 10px;
+        letter-spacing: 0.04em;
+      }
+
+      .rec-key {
+        min-width: 76px;
+        border: 1px solid var(--ink);
+        padding: 6px 7px;
+        text-align: center;
+        cursor: pointer;
+        background: transparent;
+        color: var(--ink);
+        font: inherit;
+        font-weight: 900;
+        letter-spacing: 0.1em;
+      }
+
+      .rec-key::before {
+        content: "";
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: 6px;
+        border-radius: 50%;
+        background: var(--hot);
+        vertical-align: 1px;
+      }
+
+      .page {
+        padding: 12px 0;
+        border-bottom: 1px dashed var(--rule);
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 54px minmax(0, 1fr);
+        gap: 10px;
+        min-height: 20px;
+      }
+
+      .k {
+        color: var(--muted);
+        font-size: 10px;
+        letter-spacing: 0.08em;
+      }
+
+      .v {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .title {
+        font-weight: 900;
+      }
+
+      .section {
+        padding: 11px 0;
+        border-bottom: 1px dashed var(--rule);
+      }
+
+      .section:last-child {
+        border-bottom: 0;
+      }
+
+      .section-title {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+
+      .chip {
+        border: 1px solid var(--rule);
+        padding: 3px 6px;
+        background: transparent;
+      }
+
+      .chip.on {
+        border-color: var(--ink);
+        background: var(--ink);
+        color: var(--paper);
+      }
+
+      .note {
+        border-left: 3px solid var(--hot);
+        padding: 0 0 0 8px;
+        margin-bottom: 8px;
+      }
+
+      .quote {
+        color: var(--muted);
+      }
+
+      .snap {
+        display: grid;
+        grid-template-columns: 1fr auto auto auto;
+        gap: 8px;
+        padding: 3px 0;
+        border-top: 1px dotted rgba(23, 23, 19, 0.16);
+      }
+
+      .snap:first-of-type {
+        border-top: 0;
+      }
+
+      .tag {
+        font-weight: 900;
+      }
+
+      .primary {
+        width: 100%;
+        margin-top: 8px;
+        border: 1px solid var(--ink);
+        background: var(--ink);
+        color: var(--paper);
+        padding: 8px;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 900;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="demo">
+      <div class="label">Option E / thermal receipt</div>
+      <section class="receipt">
+        <div class="tear"></div>
+        <header class="head">
+          <div>
+            <div class="brand">BROWSER RECALL</div>
+            <div class="sub">LOCAL MEMORY PRINTER 04.26.26 14:32</div>
+          </div>
+          <button class="rec-key">REC</button>
+        </header>
+
+        <section class="page">
+          <div class="row">
+            <div class="k">PAGE</div>
+            <div class="v title">Attention Is All You Need</div>
+          </div>
+          <div class="row">
+            <div class="k">URL</div>
+            <div class="v">arxiv.org/abs/1706.03762</div>
+          </div>
+          <div class="row">
+            <div class="k">VISIT</div>
+            <div class="v">first Mar 13 / last Apr 26</div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-title"><span>Lists</span><span>03</span></div>
+          <div class="chips">
+            <span class="chip on">research</span>
+            <span class="chip">transformers</span>
+            <span class="chip">paper queue</span>
+            <span class="chip">+</span>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-title"><span>Notes</span><span>02</span></div>
+          <div class="note">
+            <div class="quote">&gt; Scaled dot-product attention...</div>
+            <div>Compare diagram with my encoder notes.</div>
+          </div>
+          <div class="note">
+            <div class="quote">&gt; Multi-head attention allows...</div>
+            <div>Useful citation for retrieval chapter.</div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-title"><span>Snapshots</span><span>log</span></div>
+          <div class="snap"><span>APR 26 14:24</span><span class="tag">HTML</span><span class="tag">MD</span><span>x</span></div>
+          <div class="snap"><span>APR 24 09:10</span><span class="tag">HTML</span><span></span><span>x</span></div>
+          <button class="primary">Capture</button>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

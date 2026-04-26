@@ -1,11 +1,12 @@
 # Browser Recall
 
-A Chrome extension that captures your browsing history, attention patterns, highlights, notes, and snapshots into human-readable files on your local machine. Your data never leaves your computer.
+Browser Recall is a desktop-first browsing memory app: a Tauri desktop app and daemon own the data, UI, and sync, while the Chrome extension acts as a connector for capture and popup actions.
 
 ## Key Features
 
-- **File System Storage** — JSONL files on disk, no export needed, readable by any tool
-- **Smart Search** — WASM-powered search across history, notes, and snapshots with multiple ranking algorithms
+- **Desktop-First UI** — timeline, search, lists, recycle bin, settings, and sync live in the desktop app
+- **Local File Storage** — JSONL and JSON checkpoints on disk, readable by any tool
+- **Smart Search** — local search across history, notes, and snapshots
 - **Attention Tracking** — scroll depth, time on page, highlights, clicks
 - **Notes & Highlights** — inline text highlights extracted as first-class note entities
 - **Lists** — curated collections with keyword and function rule auto-pinning
@@ -18,38 +19,47 @@ A Chrome extension that captures your browsing history, attention patterns, high
 ### Prerequisites
 
 - [Rust](https://rustup.rs/) (latest stable)
-- [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/)
 - Node.js 18+
 
 ### Build & Load
 
 ```bash
 npm install
-npm run build
+```
+
+Start the desktop app:
+
+```bash
+npm run dev:desktop
 ```
 
 Then load the extension in Chrome:
 
 1. Open `chrome://extensions/`
 2. Enable "Developer mode"
-3. Click "Load unpacked" and select the `extension/` directory
-4. Click "Select Directory" in the options page to choose your data folder
+3. Run `npm run build:extension`
+4. Click "Load unpacked" and select the `dist/extension/` directory
+5. Open the popup and use `Refresh`
+6. Approve the native connection prompt in Browser Recall Desktop
+
+`npm run build:extension` also stages a Firefox development build at `dist/extension-firefox/`. Load it from `about:debugging#/runtime/this-firefox` with "Load Temporary Add-on" and select its `manifest.json`.
+
+The extension's options page is now only a stub that opens the desktop app. The main product UI is in `apps/desktop/ui/`.
+
+`Launch at login` currently targets macOS only, with a macOS 13+ baseline. The
+project does not carry legacy `LSSharedFileList` support.
 
 See [DEVELOPMENT.md](./DEVELOPMENT.md) for detailed setup, testing, and debugging instructions.
 
 ## Architecture
 
-Chrome MV3 extension with event-sourced storage. The JSONL log is the source of truth; entity files are derived checkpoints.
+The desktop app owns the main UI, local storage directory, daemon lifecycle, and GitHub sync. The connector extension owns capture, popup actions, pairing, and event buffering when the desktop app is temporarily unavailable.
 
-- **background.js** — service worker, business logic hub, event-sourced log buffer
-- **offscreen.js** — filesystem I/O via File System Access API (port-only)
-- **content.js** — page capture, attention tracking, highlights
-- **popup.js** — quick search and page actions per tab
-- **options.js** — dashboard with explore view, lists, settings
-- **replay.js** — idempotent event replay (pure, no Chrome APIs)
-- **src/lib.rs** — Rust search engine compiled to WASM
-
-Data flow: content script captures -> background creates log entries -> offscreen flushes to filesystem. UI pages read entity checkpoints and replay recent log entries.
+- `apps/desktop/src-tauri/` — Tauri shell, deep links, tray, pairing approval, desktop bridge commands
+- `apps/desktop/ui/` — main Browser Recall interface
+- `crates/daemon/` — pairing, storage, WebSocket bridge, search, sync transport
+- `apps/extension/` — WebExtension connector: Chrome service worker or Firefox background module script, popup, content capture, `connector/` bridge
+- `crates/replay/` — pure event replay and entity effects
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full technical deep-dive.
 
@@ -67,19 +77,20 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full technical deep-dive.
 
 ## Technology Stack
 
-- **Rust / WebAssembly** — search engine with ranking algorithms
-- **Chrome Extension MV3** — service worker, offscreen documents, tabs, storage APIs
-- **File System Access API** — direct filesystem read/write from the browser
+- **Rust + JavaScript** — replay, daemon, and local search logic
+- **Chrome Extension MV3** — connector, popup, content capture
+- **Tauri + Tokio** — desktop shell and local daemon runtime
 - **Vanilla JavaScript** — no frameworks, minimal extension size
 - **Playwright + Vitest** — E2E and unit test suites
 
 ## Browser Support
 
-Requires File System Access API:
+The connector targets Chromium browsers with MV3 support:
 
-- Chrome 86+
-- Edge 86+
-- Firefox and Safari are not supported (no File System Access API)
+- Chrome
+- Edge
+
+The desktop app is required for normal use.
 
 ## License
 
