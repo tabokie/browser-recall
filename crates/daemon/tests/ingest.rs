@@ -2,7 +2,7 @@ mod support;
 
 use browser_recall_daemon::protocol::{ConnectorMessage, DaemonMessage};
 use browser_recall_daemon::ws_server::start_server;
-use browser_recall_daemon::{ConfigStore, CurrentDeviceRecord};
+use browser_recall_daemon::ConfigStore;
 use browser_recall_replay::generate_slug_from_url;
 use futures_util::SinkExt;
 use serde_json::json;
@@ -152,7 +152,7 @@ async fn event_ingest_rejects_missing_source_metadata() {
 }
 
 #[tokio::test]
-async fn startup_writes_current_device_record() {
+async fn startup_keeps_device_id_in_config() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
     let handle = start_server(test_server_options(config_store.clone()))
@@ -163,19 +163,15 @@ async fn startup_writes_current_device_record() {
         .load()
         .expect("config load")
         .expect("config exists");
-    let current_raw = tokio::fs::read_to_string(
-        config
-            .data_dir
-            .join("data")
-            .join("logs")
-            .join(&config.device_id)
-            .join("CURRENT"),
-    )
-    .await
-    .expect("CURRENT exists");
-    let current: CurrentDeviceRecord = serde_json::from_str(&current_raw).expect("CURRENT json");
-    assert_eq!(current.device_id, config.device_id);
-    assert!(!current.hostname.trim().is_empty());
+    assert!(!config.device_id.trim().is_empty());
+    assert!(!config.data_dir.join("CURRENT").exists());
+    assert!(!config
+        .data_dir
+        .join("data")
+        .join("logs")
+        .join(&config.device_id)
+        .join("CURRENT")
+        .exists());
 
     handle.shutdown().await;
 }
@@ -240,7 +236,7 @@ async fn snapshot_ingest_persists_html_and_appends_log() {
 }
 
 #[tokio::test]
-async fn set_device_id_rewrites_current_device_record() {
+async fn set_device_id_rewrites_config_only() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());
     let handle = start_server(test_server_options(config_store.clone()))
@@ -274,27 +270,24 @@ async fn set_device_id_rewrites_current_device_record() {
         other => panic!("expected set device response, got {other:?}"),
     }
 
-    let current_raw = tokio::fs::read_to_string(
-        data_dir
-            .join("data")
-            .join("logs")
-            .join(new_device_id)
-            .join("CURRENT"),
-    )
-    .await
-    .expect("new CURRENT exists");
-    let current: CurrentDeviceRecord =
-        serde_json::from_str(&current_raw).expect("new CURRENT json");
-    assert_eq!(current.device_id, new_device_id);
-    assert!(tokio::fs::metadata(
-        data_dir
-            .join("data")
-            .join("logs")
-            .join(old_device_id)
-            .join("CURRENT"),
-    )
-    .await
-    .is_err());
+    let config = config_store
+        .load()
+        .expect("config load")
+        .expect("config exists");
+    assert_eq!(config.device_id, new_device_id);
+    assert!(!data_dir.join("CURRENT").exists());
+    assert!(!data_dir
+        .join("data")
+        .join("logs")
+        .join(new_device_id)
+        .join("CURRENT")
+        .exists());
+    assert!(!data_dir
+        .join("data")
+        .join("logs")
+        .join(old_device_id)
+        .join("CURRENT")
+        .exists());
 
     handle.shutdown().await;
 }

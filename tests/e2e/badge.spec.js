@@ -287,7 +287,6 @@ test.describe('Extension badge', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       {
         path: `pages/${slug}.json`,
@@ -411,7 +410,6 @@ test.describe('Extension badge', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       {
         path: `pages/${slug}.json`,

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '../..');
-const DAEMON_PORTS = [28471, 28472, 28473];
+export const DAEMON_PORTS = [39471, 39472, 39473];
 
 export async function startDaemon() {
   const configDir = fs.mkdtempSync(

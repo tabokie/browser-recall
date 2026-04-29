@@ -9,6 +9,8 @@ import {
   stageExtensionAssets,
   stageFirefoxExtensionAssets,
 } from '../../scripts/stage-app-assets.mjs';
+import { DAEMON_PORTS } from '../../scripts/lib/desktop-test-runtime.mjs';
+import { createTestExtensionDir } from '../fixtures/test-extension.mjs';
 
 const stagedDirs = [];
 
@@ -154,5 +156,21 @@ describe('extension staged assets', () => {
     ).toEqual({
       required: ['none'],
     });
+  });
+
+  it('pins E2E test extensions to non-production daemon ports', () => {
+    const outDir = createTestExtensionDir(
+      'browser-recall-stage-test-extension-',
+    );
+    stagedDirs.push(outDir);
+
+    const connectorSource = readFileSync(
+      join(outDir, 'connector', 'ws-client.js'),
+      'utf8',
+    );
+    expect(connectorSource).toContain(
+      `globalThis.__BROWSER_RECALL_CONNECTOR_PORTS = ${JSON.stringify(DAEMON_PORTS)};`,
+    );
+    expect(DAEMON_PORTS).not.toContain(28471);
   });
 });

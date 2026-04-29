@@ -53,11 +53,17 @@ function showFatalError(message) {
   overlay
     .querySelector('#fatalReloadBtn')
     .addEventListener('click', () => chrome.runtime.reload());
+  revealPopup();
 }
 
 let _errorBubbleTimer = null;
 
-function showSetupRequired(connector = {}) {
+function revealPopup() {
+  document.documentElement.style.opacity = '';
+}
+
+function showSetupRequired(connector = {}, options = {}) {
+  const { reveal = true } = options;
   document.getElementById('loading').style.display = 'none';
   document.getElementById('blacklisted').style.display = 'none';
   document.getElementById('dashboard').style.display = 'none';
@@ -76,6 +82,7 @@ function showSetupRequired(connector = {}) {
       openDesktopApp();
     });
   }
+  if (reveal) revealPopup();
 }
 
 function showUnavailablePage(message = 'Not available for this page') {
@@ -85,6 +92,7 @@ function showUnavailablePage(message = 'Not available for this page') {
   document.getElementById('setup-required').style.display = 'none';
   document.getElementById('blacklisted').style.display = 'none';
   document.getElementById('dashboard').style.display = 'none';
+  revealPopup();
 }
 
 function openDesktopApp(route = 'open') {
@@ -1271,6 +1279,7 @@ function showDashboardUI() {
   document.getElementById('blacklisted').style.display = 'none';
   document.getElementById('dashboard').style.display = 'flex';
   document.getElementById('dashboardContent').style.display = 'block';
+  revealPopup();
 
   requestAnimationFrame(() => {
     document
@@ -1382,6 +1391,7 @@ async function handlePrivateMode(tab) {
   content.remove();
   document.getElementById('loading').style.display = 'none';
   document.getElementById('dashboard').style.display = 'flex';
+  revealPopup();
   return true;
 }
 
@@ -1400,6 +1410,7 @@ async function handleBlacklist(tab) {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('blacklistedUrl').textContent = tab.url;
   document.getElementById('blacklisted').style.display = 'block';
+  revealPopup();
   document
     .getElementById('blacklistSettingsLink')
     .addEventListener('click', () => {
@@ -1467,7 +1478,7 @@ async function loadConnectedDashboard(connector) {
 
 async function initPopup() {
   await applyTheme();
-  showSetupRequired({ state: 'connecting' });
+  showSetupRequired({ state: 'connecting' }, { reveal: false });
   const connector = await refreshDesktopConnectorState();
   if (connector?.state !== 'connected' || !connector?.deviceId) {
     showSetupRequired(connector || { state: 'offline' });

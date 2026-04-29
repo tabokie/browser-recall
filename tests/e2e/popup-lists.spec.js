@@ -13,7 +13,6 @@ test.describe('Popup list chip behavior', () => {
     const now = Date.now();
     // Seed 3 lists with different pinnedAt timestamps
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       {
         path: 'manifest/list-order.json',
@@ -163,7 +162,6 @@ test.describe('Popup list chip behavior', () => {
   }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
       {
         path: 'manifest/list-order.json',

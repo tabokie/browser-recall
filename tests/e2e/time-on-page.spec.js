@@ -24,7 +24,6 @@ test('timeOnPage reports foreground delta, not cumulative time since load', asyn
     body: '<h1>Time Test</h1>',
   });
   await resetAndSeed(extContext, extensionId, [
-    { path: 'CURRENT', content: 'test-device' },
     { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
   ]);
   const testUrl = localServer.url('/time-test');

@@ -19,6 +19,16 @@ async function waitFor(predicate, timeoutMs = 1500, stepMs = 25) {
   throw new Error('condition not met before timeout');
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function listenerStore() {
   const listeners = [];
   return {
@@ -149,6 +159,12 @@ describe('popup desktop state rendering', () => {
     await import('../../apps/extension/popup.js');
 
     await waitFor(
+      () =>
+        chrome.runtime.sendMessage.mock.calls.some(
+          ([request]) => request.action === 'getPageSummary',
+        ),
+    );
+    await waitFor(
       () => document.getElementById('setup-required').style.display === 'block',
     );
 
@@ -206,6 +222,63 @@ describe('popup desktop state rendering', () => {
     );
     expect(document.getElementById('setupRequiredMeta').textContent).toContain(
       'Last port failures: 28471: connect_error, 28472: connect_timeout.',
+    );
+  });
+
+  it('keeps the popup hidden until connected page details finish loading', async () => {
+    const tab = {
+      id: 44,
+      url: 'https://example.com/slow-popup-summary',
+      title: 'Tab Title Before Desktop',
+    };
+    const pageSummary = deferred();
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: { title: tab.title },
+        readCacheable: { success: true, value: null },
+        getPageSummary: () => pageSummary.promise,
+        getPopupLists: { success: true, lists: [] },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+    await waitFor(() =>
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'getPageSummary',
+      ),
+    );
+
+    expect(document.documentElement.style.opacity).toBe('0');
+    expect(document.getElementById('dashboard').style.display).toBe('none');
+
+    pageSummary.resolve({
+      success: true,
+      page: {
+        slug: 'slow-popup-summary',
+        url: tab.url,
+        title: 'Desktop Title',
+        visitDates: [],
+      },
+      notes: [],
+      snapshots: [],
+      lists: [],
+    });
+
+    await waitFor(
+      () => document.getElementById('dashboard').style.display === 'flex',
+    );
+    expect(document.documentElement.style.opacity).toBe('');
+    expect(document.getElementById('pageTitle').textContent).toBe(
+      'Desktop Title',
     );
   });
 });

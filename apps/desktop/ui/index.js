@@ -43,6 +43,10 @@ import {
 } from './entity-types.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
+
+function revealApp() {
+  document.documentElement.style.opacity = '';
+}
 // parseBookmarkHtml imported dynamically inside the block below
 
 // ─── Utility ─────────────────────────────────────────────────────────
@@ -2327,6 +2331,7 @@ async function showExplore() {
       `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
   }
   document.body.dataset.ready = 'true';
+  revealApp();
 }
 
 // Incremental refresh after pin toggle — preserves scroll position and search state.
@@ -7521,6 +7526,7 @@ async function initialize() {
     showOnboarding();
     await updateStorageStatus();
     document.body.dataset.ready = 'true';
+    revealApp();
     return;
   }
 
@@ -7547,13 +7553,13 @@ async function initializeMain(currentTheme) {
     }
   } catch {}
 
-  // Verify device identity — CURRENT file must be readable
+  // Verify device identity from daemon app config.
   const deviceResp = await chrome.runtime.sendMessage({
     action: 'getDeviceId',
   });
   if (!deviceResp?.deviceId) {
     throw new Error(
-      'Device identity unavailable — the CURRENT file may be missing or corrupted. Try reloading the extension.',
+      'Device identity unavailable. Try restarting Browser Recall.',
     );
   }
 
@@ -7654,6 +7660,7 @@ async function initializeMain(currentTheme) {
 
 initialize().catch((err) => {
   document.body.dataset.ready = 'true';
+  revealApp();
   showFatalError(err.message);
 });
 

@@ -16,7 +16,6 @@ test.describe('Tab reported URL tracking', () => {
     localServer,
   }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'test-device' },
       { path: 'manifest/settings.json', data: { trimRules: [] } },
     ]);
 

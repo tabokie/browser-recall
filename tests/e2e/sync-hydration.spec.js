@@ -12,7 +12,6 @@ test.describe('Multi-device hydration', () => {
 
     // Seed: local device + page entity + remote device log with visit + rate
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `pages/${slug}.json`,
@@ -64,7 +63,6 @@ test.describe('Multi-device hydration', () => {
     // Local logBuffer is replayed in Phase 2, remote log files in Phase 3.
     // Both should enrich the same entity with per-device timestamps.
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `pages/${slug}.json`,
@@ -131,7 +129,6 @@ test.describe('Multi-device hydration', () => {
     const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: {} },
       {
         path: 'data/logs/dev-remote/2026-03-25.jsonl',

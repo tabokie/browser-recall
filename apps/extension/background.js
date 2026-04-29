@@ -63,8 +63,8 @@ const LOG_BUFFER_MAX_SIZE = 2000; // max entries before forced eviction
 // In-memory Map of URL → visitDates (YYYYMMDD[]) from history:recent (past days).
 // Populated during hydration, immutable until next browser restart.
 let recentUrls = new Map();
+let lastLogTimestamp = 0;
 
-const DESKTOP_MIRRORED_AT_FIELD = '_desktopMirroredAt';
 const CONNECTOR_LAST_DRAINED_AT_KEY = 'connectorLastDrainedAt';
 const CONNECTOR_STORAGE_KEYS = [
   'connectorState',
@@ -90,15 +90,15 @@ const NORMAL_ICON_PATHS = {
 // Used by popup to avoid slug mismatch when tab.url drifts (SPA pushState, etc.).
 const tabReportedUrls = new Map();
 
-// Device name for this instance — always set (generated on first run, stored in settings).
-// Use getDeviceId() instead of reading directly — it lazy-loads from CURRENT file on cache miss.
+// Device ID for this instance. The daemon owns it in app config; the extension
+// mirrors it locally after connector status responses.
 let localDeviceId = null;
 
 // Service error state: null = healthy, { code, message, timestamp } = paused.
 // Error codes: 'session_quota', 'local_quota', 'desktop_buffer_full'.
 let serviceError = null;
 
-// Lazy getter: returns localDeviceId, loading from CURRENT file if null.
+// Lazy getter: returns localDeviceId, asking the daemon connector on cache miss.
 // Handles both startup race (message before hydrateCache) and SW wakeup (no hydrateCache).
 async function getDeviceId() {
   if (localDeviceId) return localDeviceId;
@@ -206,6 +206,21 @@ function syncDesktopConnectorPauseState(connector) {
   }
 }
 
+async function nextLogTimestamp() {
+  await ensureLogBuffer();
+  const now = Date.now();
+  const floor = Math.max(lastLogTimestamp, logBufferWatermark);
+  const timestamp = now > floor ? now : floor + 1;
+  lastLogTimestamp = timestamp;
+  return timestamp;
+}
+
+function observeLogTimestamp(timestamp) {
+  if (Number.isFinite(timestamp) && timestamp > lastLogTimestamp) {
+    lastLogTimestamp = timestamp;
+  }
+}
+
 function isDesktopConnectorAvailable(connector) {
   return (
     connector?.state === 'connected' &&
@@ -303,8 +318,6 @@ async function mirrorEntryToDesktop(entry) {
   if (!(await shouldMirrorEntryToDesktop(entry))) return;
   try {
     const stats = await enqueueDesktopEvent(entry);
-    entry[DESKTOP_MIRRORED_AT_FIELD] = Date.now();
-    await persistLogBuffer();
     syncDesktopConnectorPauseState(stats);
   } catch (error) {
     if (error.code === 'buffer_full') {
@@ -491,20 +504,22 @@ async function mirrorSnapshotToDesktop(snapshot) {
       connector.pendingEvents > 0
     )
   ) {
-    return;
+    return false;
   }
   try {
     const stats = await enqueueDesktopSnapshot(snapshot);
     syncDesktopConnectorPauseState(stats);
+    return true;
   } catch (error) {
     if (error.code === 'buffer_full') {
       pauseService(
         'desktop_buffer_full',
         'Browser Recall Desktop buffer full — start the desktop app or wait for the queue to drain.',
       );
-      return;
+      return false;
     }
     logDebug('[desktop] snapshot mirror failed:', error.message);
+    return false;
   }
 }
 
@@ -518,20 +533,22 @@ async function mirrorNoteToDesktop(note) {
       connector.pendingEvents > 0
     )
   ) {
-    return;
+    return false;
   }
   try {
     const stats = await enqueueDesktopNote(note);
     syncDesktopConnectorPauseState(stats);
+    return true;
   } catch (error) {
     if (error.code === 'buffer_full') {
       pauseService(
         'desktop_buffer_full',
         'Browser Recall Desktop buffer full — start the desktop app or wait for the queue to drain.',
       );
-      return;
+      return false;
     }
     logDebug('[desktop] note mirror failed:', error.message);
+    return false;
   }
 }
 
@@ -601,10 +618,10 @@ async function ensureLogBuffer() {
     CONNECTOR_LAST_DRAINED_AT_KEY,
   ]);
   const persistedWatermark = stored[CONNECTOR_LAST_DRAINED_AT_KEY] || 0;
-  const restored = (stored.logBuffer || []).filter((entry) => {
-    const mirroredAt = entry?.[DESKTOP_MIRRORED_AT_FIELD] || 0;
-    return mirroredAt === 0 || mirroredAt > persistedWatermark;
-  });
+  const restored = (stored.logBuffer || []).filter(
+    (entry) => (entry?.timestamp || 0) > persistedWatermark,
+  );
+  for (const entry of restored) observeLogTimestamp(entry?.timestamp);
   logBuffer = restored;
   logBufferWatermark = Math.max(logBufferWatermark, persistedWatermark);
   if (restored.length !== (stored.logBuffer || []).length) {
@@ -656,13 +673,10 @@ async function drainNow() {
 
 async function applyDesktopPersistedWatermark(watermark) {
   await ensureLogBuffer();
-  const next = logBuffer.filter((entry) => {
-    const mirroredAt = entry?.[DESKTOP_MIRRORED_AT_FIELD] || 0;
-    return mirroredAt === 0 || mirroredAt > watermark;
-  });
+  logBufferWatermark = Math.max(logBufferWatermark, watermark);
+  const next = logBuffer.filter((entry) => (entry?.timestamp || 0) > watermark);
   if (next.length === logBuffer.length) return;
   logBuffer = next;
-  logBufferWatermark = Math.max(logBufferWatermark, watermark);
   await persistLogBuffer();
 }
 
@@ -693,13 +707,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 // High-level: append to logBuffer and mirror to the daemon.
 // Serialized via logBuffer lock so concurrent calls see each other's cache writes.
-async function addLog(entry, options = {}) {
+async function addLog(entry) {
   if (isServicePaused()) {
     throw new Error(`Service paused [${serviceError.code}]`);
   }
   let effects = {};
   await withLock('logBuffer', async () => {
     await ensureLogBuffer();
+    observeLogTimestamp(entry.timestamp);
     logBuffer.push(entry);
     if (logBuffer.length > LOG_BUFFER_MAX_SIZE) {
       logBuffer = logBuffer.filter((e) => e.timestamp > logBufferWatermark);
@@ -710,17 +725,19 @@ async function addLog(entry, options = {}) {
     await persistLogBuffer();
   });
   scheduleDrainNotify();
-  if (!options.skipDesktopMirror) {
-    await mirrorEntryToDesktop(entry);
-    void refreshBadgesForEntry(entry);
-  }
+  await mirrorEntryToDesktop(entry);
+  void refreshBadgesForEntry(entry);
   return effects;
 }
 
 // Build a visit_page log entry. Title omitted when absent (slow-loading pages).
 // checkpoint: true forces page entity creation (used by explicit user capture of blacklisted URLs).
-function buildVisitPageEntry(url, title, referrerUrl, { checkpoint } = {}) {
-  const entry = { timestamp: Date.now(), action: 'visit_page', url };
+async function buildVisitPageEntry(url, title, referrerUrl, { checkpoint } = {}) {
+  const entry = {
+    timestamp: await nextLogTimestamp(),
+    action: 'visit_page',
+    url,
+  };
   if (title) entry.title = title;
   if (referrerUrl) entry.referrerUrl = referrerUrl;
   if (checkpoint) entry.checkpoint = true;
@@ -728,8 +745,12 @@ function buildVisitPageEntry(url, title, referrerUrl, { checkpoint } = {}) {
 }
 
 // Build a leave_page log entry with attention data.
-function buildLeavePageEntry(url, title, scrollDepth, timeOnPage) {
-  const entry = { timestamp: Date.now(), action: 'leave_page', url };
+async function buildLeavePageEntry(url, title, scrollDepth, timeOnPage) {
+  const entry = {
+    timestamp: await nextLogTimestamp(),
+    action: 'leave_page',
+    url,
+  };
   if (title) entry.title = title;
   if (scrollDepth !== undefined && scrollDepth !== null)
     entry.scrollDepth = scrollDepth;
@@ -784,7 +805,7 @@ async function createListAndResolveId({ listOwner, name, parentListId }) {
   );
 
   const createEntry = {
-    timestamp: Date.now(),
+    timestamp: await nextLogTimestamp(),
     action: 'create_list',
     listOwner,
     name,
@@ -1167,14 +1188,14 @@ async function ensureDefaultLists() {
     );
     if (userLists.length === 0) {
       await addLog({
-        timestamp: Date.now(),
+        timestamp: await nextLogTimestamp(),
         action: 'create_list',
         listOwner: 'system',
         listId: 'hubs',
         name: 'Hubs',
       });
       await addLog({
-        timestamp: Date.now(),
+        timestamp: await nextLogTimestamp(),
         action: 'add_rule',
         listOwner: 'system',
         name: 'Hubs',
@@ -1214,7 +1235,7 @@ async function evaluateSmartRulesForVisit(url, title) {
   try {
     const desktopResp = await requestRuleBatch(listIds, [
       {
-        timestamp: Date.now(),
+        timestamp: await nextLogTimestamp(),
         action: 'visit_page',
         url,
         title,
@@ -1229,21 +1250,8 @@ async function evaluateSmartRulesForVisit(url, title) {
   }
 }
 
-async function applyDesktopRuleBatchLocally(results) {
-  for (const hit of results || []) {
-    const listInfo = await getListEventFields(hit.listId);
-    if (!listInfo) continue;
-    const pinEntry = {
-      timestamp: hit.pinnedAt || Date.now(),
-      action: 'pin_to_list',
-      name: listInfo.name,
-      listOwner: listInfo.listOwner,
-      items: [hit.url],
-      source: 'auto',
-    };
-    if (hit.title) pinEntry.titles = { [hit.url]: hit.title };
-    await addLog(pinEntry, { skipDesktopMirror: true });
-  }
+function applyDesktopRuleBatchLocally(results) {
+  if ((results || []).length > 0) notifyMutation('pins', {});
 }
 
 // ─── Title Trimming ───────────────────────────────────────────────────
@@ -1556,17 +1564,7 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
     if (!markdown && !html) {
       throw new Error('Capture failed: page returned no content');
     }
-    // Single create_snapshot event; entity creation and child linking are
-    // handled by the daemon replay pipeline.
-    const snapEntry = {
-      timestamp,
-      action: 'create_snapshot',
-      url,
-      path: `snapshots/${slug}-${timestamp}`,
-    };
-    if (title) snapEntry.title = title;
-    await addLog(snapEntry, { skipDesktopMirror: true });
-    await mirrorSnapshotToDesktop({
+    const queued = await mirrorSnapshotToDesktop({
       slug,
       ts: timestamp,
       url,
@@ -1574,6 +1572,9 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
       markdown,
       html: html || '',
     });
+    if (!queued) {
+      throw new Error('Desktop snapshot queue unavailable');
+    }
     void refreshBadgesForUrls([url]);
     notifyMutation('snapshot', { slug });
   } finally {
@@ -1586,22 +1587,11 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
 async function handleContextMenuHighlight(url, title, selectionText, tabId) {
   const slug = generateSlugFromUrl(url);
 
-  const timestamp = Date.now();
+  const timestamp = await nextLogTimestamp();
   const noteSlug = generateNoteSlug(timestamp, selectionText);
 
   // create_note ensures the daemon replay pipeline can create/link the page.
-  const noteEntry = {
-    timestamp,
-    action: 'create_note',
-    url,
-    path: `notes/${noteSlug}.json`,
-    excerpt: selectionText,
-    note: '',
-    cssPath: null,
-  };
-  if (title) noteEntry.title = title;
-  await addLog(noteEntry, { skipDesktopMirror: true });
-  await mirrorNoteToDesktop({
+  const queued = await mirrorNoteToDesktop({
     slug: noteSlug,
     excerpt: selectionText,
     note: '',
@@ -1610,6 +1600,9 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
     title,
     ts: timestamp,
   });
+  if (!queued) {
+    throw new Error('Desktop note queue unavailable');
+  }
   void refreshBadgesForUrls([url]);
 
   notifyMutation('note', { pageSlug: slug, noteSlug });
@@ -1697,7 +1690,7 @@ chrome.commands.onCommand.addListener(async (command) => {
       .catch(() => {});
     try {
       const slug = generateSlugFromUrl(tab.url);
-      const timestamp = Date.now();
+      const timestamp = await nextLogTimestamp();
       await captureAndLog(tab.id, slug, timestamp, tab.url, tab.title);
       chrome.tabs
         .sendMessage(tab.id, { action: 'hideCaptureSpinner' })
@@ -1731,7 +1724,7 @@ chrome.commands.onCommand.addListener(async (command) => {
     const delta = command === 'like-page' ? 1 : -1;
     try {
       const rateEntry = {
-        timestamp: Date.now(),
+        timestamp: await nextLogTimestamp(),
         action: 'rate_page',
         url: tab.url,
         likes: delta,
@@ -1853,7 +1846,7 @@ async function handleCaptureCurrentPageFromPopup() {
     });
     if (!tab) return { success: false, error: 'No active tab' };
     const slug = generateSlugFromUrl(tab.url);
-    const timestamp = Date.now();
+    const timestamp = await nextLogTimestamp();
     await captureAndLog(tab.id, slug, timestamp, tab.url, tab.title);
     return { success: true, timestamp };
   } catch (error) {
@@ -1932,7 +1925,7 @@ async function handleReportPage(request, sender) {
       }
 
       const title = request.title ? await trimTitle(request.title, url) : '';
-      const entry = buildVisitPageEntry(url, title, referrerUrl, {
+      const entry = await buildVisitPageEntry(url, title, referrerUrl, {
         checkpoint: request.bypassBlacklist,
       });
       await addLog(entry);
@@ -1944,7 +1937,7 @@ async function handleReportPage(request, sender) {
       notifyMutation('history', { url });
     } else if (request.isLeaving) {
       const title = request.title ? await trimTitle(request.title, url) : null;
-      const entry = buildLeavePageEntry(
+      const entry = await buildLeavePageEntry(
         url,
         title,
         request.scrollDepth,
@@ -1954,7 +1947,7 @@ async function handleReportPage(request, sender) {
       drainNow();
     } else if (request.user_title !== undefined) {
       await addLog({
-        timestamp: Date.now(),
+        timestamp: await nextLogTimestamp(),
         action: 'rename_page',
         url,
         user_title: request.user_title,
@@ -2319,7 +2312,7 @@ async function handleSaveSettingsKey(request) {
     JSON.stringify(settings[request.key]) !== JSON.stringify(request.value)
   ) {
     await addLog({
-      timestamp: Date.now(),
+      timestamp: await nextLogTimestamp(),
       action: 'update_setting',
       key: request.key,
       value: request.value,
@@ -2336,7 +2329,7 @@ async function handleSaveSettingsKey(request) {
 
 async function handleCreateNote(request, sender) {
   const pageSlug = request.pageSlug;
-  const timestamp = Date.now();
+  const timestamp = await nextLogTimestamp();
   const noteSlug = generateNoteSlug(timestamp, request.excerpt);
 
   const cnPageEntity = await readCacheable(pageKey(pageSlug));
@@ -2345,19 +2338,8 @@ async function handleCreateNote(request, sender) {
     return { success: false, error: 'Cannot determine page URL for note' };
   }
 
-  const cnNoteEntry = {
-    timestamp,
-    action: 'create_note',
-    url: pageUrl,
-    path: `notes/${noteSlug}.json`,
-    excerpt: request.excerpt,
-    note: request.note || '',
-    cssPath: request.cssPath || null,
-  };
   const cnTitle = cnPageEntity?.title || sender?.tab?.title;
-  if (cnTitle) cnNoteEntry.title = cnTitle;
-  await addLog(cnNoteEntry, { skipDesktopMirror: true });
-  await mirrorNoteToDesktop({
+  const queued = await mirrorNoteToDesktop({
     slug: noteSlug,
     excerpt: request.excerpt,
     note: request.note || '',
@@ -2366,6 +2348,9 @@ async function handleCreateNote(request, sender) {
     title: cnTitle || null,
     ts: timestamp,
   });
+  if (!queued) {
+    throw new Error('Desktop note queue unavailable');
+  }
   void refreshBadgesForUrls([pageUrl]);
 
   const notesResp = await handleLoadPageNotes({ slug: pageSlug });
@@ -2378,7 +2363,7 @@ async function handleDeleteNote(request) {
   const noteEntity = await readCacheable(noteKey(noteSlug), true);
   const dnPageUrl = noteEntity?.url || null;
   const dnEntry = {
-    timestamp: Date.now(),
+    timestamp: await nextLogTimestamp(),
     action: 'delete_note',
     path: `notes/${noteSlug}.json`,
   };
@@ -2391,7 +2376,7 @@ async function handleDeleteNote(request) {
 
 async function handleUpdateNote(request) {
   const oldNoteSlug = request.noteSlug;
-  const unTimestamp = Date.now();
+  const unTimestamp = await nextLogTimestamp();
   const oldNoteData = await readCacheable(noteKey(oldNoteSlug), true);
   if (!oldNoteData) {
     return { success: false, error: 'Note not found' };
@@ -2403,27 +2388,10 @@ async function handleUpdateNote(request) {
 
   const newNoteSlug = generateNoteSlug(unTimestamp, oldNoteData.excerpt || '');
   const unNoteUrl = oldNoteData.url || null;
-  const newNoteData = {
-    slug: newNoteSlug,
-    excerpt: oldNoteData.excerpt || null,
-    note: request.note,
-    cssPath: oldNoteData.cssPath || null,
-    url: unNoteUrl,
-  };
 
-  const replaceEntry = {
-    timestamp: unTimestamp,
-    action: 'replace_note',
-    path: `notes/${newNoteSlug}.json`,
-    oldPath: `notes/${oldNoteSlug}.json`,
-    excerpt: newNoteData.excerpt,
-    note: request.note,
-    cssPath: newNoteData.cssPath,
-  };
-  if (unNoteUrl) replaceEntry.url = unNoteUrl;
-  await addLog(replaceEntry, { skipDesktopMirror: true });
+  let queued = false;
   if (unNoteUrl) {
-    await mirrorNoteToDesktop({
+    queued = await mirrorNoteToDesktop({
       slug: newNoteSlug,
       oldSlug: oldNoteSlug,
       excerpt: oldNoteData.excerpt || '',
@@ -2433,6 +2401,9 @@ async function handleUpdateNote(request) {
       title: null,
       ts: unTimestamp,
     });
+  }
+  if (!queued) {
+    throw new Error('Desktop note queue unavailable');
   }
 
   notifyMutation('note', { noteSlug: newNoteSlug, oldNoteSlug });
@@ -2466,7 +2437,7 @@ async function handleToggleListPin(request) {
     const isPinned = pins.some((p) => p.id === pinKey);
 
     const pinLogEntry = {
-      timestamp: Date.now(),
+      timestamp: await nextLogTimestamp(),
       action: isPinned ? 'unpin_from_list' : 'pin_to_list',
       name: pn.name,
       listOwner: pn.listOwner,
@@ -2497,7 +2468,7 @@ async function handleAddListPins(request) {
       }
     }
     const pinEntry = {
-      timestamp: Date.now(),
+      timestamp: await nextLogTimestamp(),
       action: 'pin_to_list',
       name: pn.name,
       listOwner: pn.listOwner,
@@ -2535,7 +2506,7 @@ async function handleSaveListMeta(request) {
     }
   } else if (pn) {
     const entry = {
-      timestamp: Date.now(),
+      timestamp: await nextLogTimestamp(),
       action: 'update_list',
       name: pn.name,
       listOwner: pn.listOwner,
@@ -2557,7 +2528,7 @@ async function handleDeleteList(request) {
   const pnDel = await getListEventFields(request.listId);
   if (!pnDel) return { success: false, error: 'List not found in name-to-id' };
   await addLog({
-    timestamp: Date.now(),
+    timestamp: await nextLogTimestamp(),
     action: 'delete_list',
     name: pnDel.name,
     listOwner: pnDel.listOwner,
@@ -2569,7 +2540,7 @@ async function handleDeleteList(request) {
 
 async function handleUpdateListTree(request) {
   await addLog({
-    timestamp: Date.now(),
+    timestamp: await nextLogTimestamp(),
     action: 'update_list_tree',
     tree: request.tree,
   });
@@ -2588,7 +2559,7 @@ async function handleRestoreNote(request) {
   const rnNoteData = await readCacheable(noteKey(noteSlug), true);
   const rnPageUrl = noteOrphanEntry?.url || rnNoteData?.url || null;
   const rnEntry = {
-    timestamp: Date.now(),
+    timestamp: await nextLogTimestamp(),
     action: 'restore_note',
     path: `notes/${noteSlug}.json`,
   };
@@ -2617,7 +2588,7 @@ async function handleRestoreSnapshot(request) {
     return { success: false, error: 'Cannot determine page URL for snapshot' };
   }
   const restoreEntry = {
-    timestamp: Date.now(),
+    timestamp: await nextLogTimestamp(),
     action: 'restore_snapshot',
     url: rsPageUrl,
     path: `snapshots/${snapStem}`,
@@ -2634,7 +2605,7 @@ async function handleRestoreList(request) {
   const name = entity?.name || listId;
   const owner = entity?.owner || (await getDeviceId());
   await addLog({
-    timestamp: Date.now(),
+    timestamp: await nextLogTimestamp(),
     action: 'restore_list',
     name,
     listOwner: owner,
@@ -2729,7 +2700,7 @@ async function handleDeleteSnapshot(request) {
   if (!page?.url)
     return { success: false, error: 'Page entity not found for snapshot' };
   const deleteEntry = {
-    timestamp: Date.now(),
+    timestamp: await nextLogTimestamp(),
     action: 'delete_snapshot',
     url: page.url,
     path: `snapshots/${slug}-${snapTimestamp}`,
@@ -2786,7 +2757,7 @@ async function handleAddRule(request) {
   }
 
   await addLog({
-    timestamp: Date.now(),
+    timestamp: await nextLogTimestamp(),
     action: 'add_rule',
     name: listInfo.name,
     listOwner: listInfo.listOwner,
@@ -2802,7 +2773,7 @@ async function handleRemoveRule(request) {
   if (!listInfo) return { success: false, error: 'List not found' };
 
   await addLog({
-    timestamp: Date.now(),
+    timestamp: await nextLogTimestamp(),
     action: 'remove_rule',
     name: listInfo.name,
     listOwner: listInfo.listOwner,
@@ -2818,7 +2789,7 @@ async function handleUpdateRule(request) {
   if (!listInfo) return { success: false, error: 'List not found' };
 
   await addLog({
-    timestamp: Date.now(),
+    timestamp: await nextLogTimestamp(),
     action: 'update_rule',
     name: listInfo.name,
     listOwner: listInfo.listOwner,
@@ -2992,15 +2963,16 @@ async function handleRehydrateForTest(request) {
   return { success: true };
 }
 
-function currentFileDeviceId(files) {
-  const current = (files || []).find((file) => file?.path === 'CURRENT');
-  if (typeof current?.content !== 'string') return null;
-  const deviceId = current.content.trim();
-  return deviceId || null;
+function seedDeviceId(files) {
+  for (const file of files || []) {
+    const match = file?.path?.match(/^data\/logs\/([^/]+)\//);
+    if (match?.[1]) return match[1];
+  }
+  return null;
 }
 
 function serializeTestSeedFile(file) {
-  if (!file?.path || file.path === 'CURRENT') return null;
+  if (!file?.path) return null;
   if (typeof file.content === 'string') {
     return { path: file.path, content: file.content };
   }
@@ -3020,7 +2992,7 @@ function serializeTestSeedFile(file) {
 }
 
 async function handleSeedTestData(request) {
-  const deviceId = currentFileDeviceId(request.files);
+  const deviceId = request.deviceId || seedDeviceId(request.files);
   if (deviceId) {
     const setDeviceResp = await requestDesktopSetDeviceId(deviceId);
     if (!setDeviceResp?.success) return setDeviceResp;

@@ -1,7 +1,4 @@
-use crate::config::{
-    random_string, remove_current_device, write_current_device, ApprovedConnector, ConfigStore,
-    Token,
-};
+use crate::config::{random_string, ApprovedConnector, ConfigStore, Token};
 use crate::pairing::{with_timeout, PairingApprover, PairingDecision, PairingRequest};
 use crate::protocol::{
     ConnectorMessage, DaemonMessage, DirectoryInfoPayload, HistorySearchResult, MutationPayload,
@@ -227,7 +224,6 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
     let mut config = options.config_store.load_or_create()?;
     let storage = Storage::new(config.data_dir.clone());
     storage.ensure_layout(&config.device_id).await?;
-    write_current_device(&config.data_dir, &config.device_id)?;
     let (listener, port) = bind_first_available(&options.port_candidates).await?;
     config.last_port = Some(port);
     options.config_store.save(&config)?;
@@ -1085,13 +1081,14 @@ async fn ingest_typed_entry(
 
         let mutations = build_mutations(&entry, &raw_entry, &effects);
         let acked_at = current_timestamp_millis();
+        let last_drained_at = entry.timestamp();
         let mut ingest = shared.ingest_status.lock().await;
-        ingest.last_drained_at = Some(acked_at);
+        ingest.last_drained_at = Some(last_drained_at);
         Ok(IngestSuccess {
             ack: DaemonMessage::Ack {
                 acked_at,
                 buffer_depth: ingest.buffer_depth.saturating_sub(1),
-                last_drained_at: acked_at,
+                last_drained_at,
             },
             mutations,
         })
@@ -2073,19 +2070,12 @@ async fn set_device_id_internal(
     shared: &SharedState,
     device_id: String,
 ) -> Result<(), WsServerError> {
-    let (data_dir, previous_device_id) = {
+    {
         let mut config = shared.config.lock().await;
-        let previous_device_id = config.device_id.clone();
         config.device_id = device_id.clone();
-        let data_dir = config.data_dir.clone();
         shared.config_store.save(&config)?;
-        (data_dir, previous_device_id)
-    };
-    shared.storage.ensure_layout(&device_id).await?;
-    write_current_device(&data_dir, &device_id)?;
-    if previous_device_id != device_id {
-        remove_current_device(&data_dir, &previous_device_id)?;
     }
+    shared.storage.ensure_layout(&device_id).await?;
     {
         let mut snapshot = shared.snapshot.write().await;
         snapshot.device_id = device_id;

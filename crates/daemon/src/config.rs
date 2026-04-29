@@ -40,13 +40,6 @@ pub struct SyncDeviceRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CurrentDeviceRecord {
-    #[serde(rename = "deviceId")]
-    pub device_id: String,
-    pub hostname: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DaemonConfig {
     pub device_id: String,
     pub data_dir: PathBuf,
@@ -319,134 +312,13 @@ pub fn current_hostname() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-pub fn current_file_path(data_dir: &Path, device_id: &str) -> PathBuf {
-    data_dir
-        .join("data")
-        .join("logs")
-        .join(device_id)
-        .join("CURRENT")
-}
-
-fn legacy_current_file_path(data_dir: &Path) -> PathBuf {
-    data_dir.join("CURRENT")
-}
-
-pub fn write_current_device(
-    data_dir: &Path,
-    device_id: &str,
-) -> std::io::Result<CurrentDeviceRecord> {
-    let record = CurrentDeviceRecord {
-        device_id: device_id.to_string(),
-        hostname: current_hostname(),
-    };
-    let path = current_file_path(data_dir, device_id);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let payload = serde_json::to_string_pretty(&record).map_err(invalid_data)?;
-    fs::write(path, payload)?;
-    Ok(record)
-}
-
-pub fn remove_current_device(data_dir: &Path, device_id: &str) -> std::io::Result<()> {
-    let path = current_file_path(data_dir, device_id);
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-pub fn detect_current_device(data_dir: &Path) -> std::io::Result<Option<CurrentDeviceRecord>> {
-    let logs_root = data_dir.join("data").join("logs");
-    let entries = match fs::read_dir(&logs_root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return detect_legacy_current_device(data_dir);
-        }
-        Err(error) => return Err(error),
-    };
-
-    let local_hostname = current_hostname();
-    let mut records = Vec::new();
-
-    for entry in entries {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        let current_path = entry.path().join("CURRENT");
-        if !current_path.exists() {
-            continue;
-        }
-        let raw = fs::read_to_string(current_path)?;
-        let record = serde_json::from_str::<CurrentDeviceRecord>(&raw).map_err(invalid_data)?;
-        records.push(record);
-    }
-
-    if records.is_empty() {
-        return detect_legacy_current_device(data_dir);
-    }
-
-    if let Some(record) = records
-        .iter()
-        .find(|record| record.hostname == local_hostname)
-        .cloned()
-    {
-        return Ok(Some(record));
-    }
-
-    if records.len() == 1 {
-        return Ok(records.into_iter().next());
-    }
-
-    Ok(None)
-}
-
-fn detect_legacy_current_device(data_dir: &Path) -> std::io::Result<Option<CurrentDeviceRecord>> {
-    let legacy_path = legacy_current_file_path(data_dir);
-    let raw = match fs::read_to_string(legacy_path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-
-    if let Ok(record) = serde_json::from_str::<CurrentDeviceRecord>(trimmed) {
-        return Ok(Some(record));
-    }
-
-    Ok(Some(CurrentDeviceRecord {
-        device_id: trimmed.to_string(),
-        hostname: current_hostname(),
-    }))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        current_file_path, current_hostname, default_device_id, detect_current_device,
-        device_id_from_hostname, device_id_from_os_parts, remove_current_device,
-        stable_device_suffix, write_current_device, CurrentDeviceRecord, DaemonConfig,
+        default_device_id, device_id_from_hostname, device_id_from_os_parts, stable_device_suffix,
+        DaemonConfig,
     };
-    use std::fs;
     use tempfile::tempdir;
-
-    #[test]
-    fn current_device_round_trips() {
-        let dir = tempdir().expect("tempdir");
-        let record = write_current_device(dir.path(), "device-a").expect("write current");
-        assert_eq!(record.device_id, "device-a");
-        assert!(!record.hostname.is_empty());
-
-        let detected = detect_current_device(dir.path())
-            .expect("detect current")
-            .expect("current exists");
-        assert_eq!(detected, record);
-    }
 
     #[test]
     fn new_default_uses_os_derived_device_id() {
@@ -479,86 +351,5 @@ mod tests {
             device_id_from_os_parts("東京", Some("machine-id-123")),
             format!("desktop-{suffix}")
         );
-    }
-
-    #[test]
-    fn current_device_prefers_same_hostname() {
-        let dir = tempdir().expect("tempdir");
-        let local_hostname = current_hostname();
-
-        let remote_path = current_file_path(dir.path(), "remote-device");
-        fs::create_dir_all(remote_path.parent().expect("remote parent")).expect("remote dirs");
-        fs::write(
-            &remote_path,
-            serde_json::to_string_pretty(&CurrentDeviceRecord {
-                device_id: "remote-device".to_string(),
-                hostname: "other-machine".to_string(),
-            })
-            .expect("remote json"),
-        )
-        .expect("write remote current");
-
-        let local_record = CurrentDeviceRecord {
-            device_id: "local-device".to_string(),
-            hostname: local_hostname,
-        };
-        let local_path = current_file_path(dir.path(), "local-device");
-        fs::create_dir_all(local_path.parent().expect("local parent")).expect("local dirs");
-        fs::write(
-            &local_path,
-            serde_json::to_string_pretty(&local_record).expect("local json"),
-        )
-        .expect("write local current");
-
-        let detected = detect_current_device(dir.path())
-            .expect("detect current")
-            .expect("current exists");
-        assert_eq!(detected, local_record);
-    }
-
-    #[test]
-    fn remove_current_device_ignores_missing_file() {
-        let dir = tempdir().expect("tempdir");
-        remove_current_device(dir.path(), "missing-device").expect("remove missing current");
-    }
-
-    #[test]
-    fn detect_current_device_from_legacy_root_current_text() {
-        let dir = tempdir().expect("tempdir");
-        let logs_dir = dir.path().join("data").join("logs").join("legacy-device");
-        fs::create_dir_all(logs_dir).expect("logs dir");
-        fs::write(dir.path().join("CURRENT"), "legacy-device\n").expect("write legacy current");
-
-        let detected = detect_current_device(dir.path())
-            .expect("detect current")
-            .expect("current exists");
-        assert_eq!(detected.device_id, "legacy-device");
-        assert_eq!(detected.hostname, current_hostname());
-    }
-
-    #[test]
-    fn detect_current_device_from_legacy_root_current_json() {
-        let dir = tempdir().expect("tempdir");
-        let record = CurrentDeviceRecord {
-            device_id: "legacy-json-device".to_string(),
-            hostname: "old-host".to_string(),
-        };
-        fs::create_dir_all(
-            dir.path()
-                .join("data")
-                .join("logs")
-                .join("legacy-json-device"),
-        )
-        .expect("logs dir");
-        fs::write(
-            dir.path().join("CURRENT"),
-            serde_json::to_string_pretty(&record).expect("record json"),
-        )
-        .expect("write legacy current");
-
-        let detected = detect_current_device(dir.path())
-            .expect("detect current")
-            .expect("current exists");
-        assert_eq!(detected, record);
     }
 }

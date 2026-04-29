@@ -24,7 +24,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const slug = getSlugForUrl(PAGE_URL);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `pages/${slug}.json`,
@@ -71,7 +70,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const slug = getSlugForUrl(PAGE_URL);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `pages/${slug}.json`,
@@ -112,7 +110,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const slug = getSlugForUrl(PAGE_URL);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `pages/${slug}.json`,
@@ -174,7 +171,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const newNoteB = 'note-edit-b';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `pages/${slug}.json`,
@@ -275,7 +271,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const noteSlug = 'note-lww-restore';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `pages/${slug}.json`,
@@ -347,7 +342,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const noteSlug = 'note-lww-delete';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `pages/${slug}.json`,
@@ -426,7 +420,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const listName = 'Restore List';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `lists/${listId}.json`,
@@ -501,7 +494,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const listName = 'Delete List';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `lists/${listId}.json`,
@@ -585,7 +577,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const listName = 'Pin Target';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `pages/${slug}.json`,
@@ -670,7 +661,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const listName = 'Three Way';
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `pages/${slug}.json`,
@@ -769,7 +759,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     setupDir,
   }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       { path: 'manifest/list-order.json', data: { timestamps: {}, tree: [] } },
       {
@@ -841,7 +830,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     // Device B (remote) also emits create_list for Hubs with same stable id.
     // After hydration, only one Hubs should exist.
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: 'manifest/list-order.json',
@@ -916,7 +904,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     setupDir,
   }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: 'lists/aa.json',
@@ -1017,7 +1004,6 @@ test.describe('Sync conflicts — multi-device hydration', () => {
     const slug = getSlugForUrl(PAGE_URL);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'CURRENT', content: 'dev-local' },
       { path: 'manifest/settings.json', data: { syncEnabled: true } },
       {
         path: `pages/${slug}.json`,

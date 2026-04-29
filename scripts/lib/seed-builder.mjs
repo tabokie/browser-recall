@@ -23,7 +23,6 @@ export async function buildSeedFiles(
   });
 
   const files = [];
-  files.push({ path: 'CURRENT', content: deviceId });
 
   const replaySettings = store['manifest:settings'];
   const mergedSettings = { ...(replaySettings || {}), ...(settings || {}) };

@@ -24,7 +24,6 @@ export async function applyTheme() {
   } else {
     document.documentElement.removeAttribute('data-color-scheme');
   }
-  document.documentElement.style.opacity = '';
   return effective;
 }
 

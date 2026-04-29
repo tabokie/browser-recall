@@ -8,7 +8,7 @@ import {
 } from './event-buffer.js';
 import { logDebug } from '../logger.js';
 
-const PORTS = [28471, 28472, 28473];
+const DEFAULT_PORTS = [28471, 28472, 28473];
 const STORAGE_KEYS = {
   deviceId: 'connectorDeviceId',
   port: 'connectorDaemonPort',
@@ -24,7 +24,7 @@ const STORAGE_KEYS = {
 const RECONNECT_ALARM_NAME = 'browserRecallConnectorReconnect';
 const MANUAL_RECONNECT_DEADLINE_MS = 15_000;
 const RECONNECT_DELAY_MS = 15_000;
-const SOCKET_OPEN_TIMEOUT_MS = 3000;
+const SOCKET_OPEN_TIMEOUT_MS = 5000;
 const BRIDGE_REQUEST_TIMEOUT_MS = 1500;
 const TERMINAL_STATES = new Set([
   'connected',
@@ -284,8 +284,22 @@ async function candidatePorts({ storedOnly = false } = {}) {
   if (storedOnly) {
     return hasPreferred ? [preferred] : [];
   }
-  if (!hasPreferred) return PORTS;
-  return [preferred, ...PORTS.filter((port) => port !== preferred)];
+  const override = configuredPortOverride();
+  const ports = override || DEFAULT_PORTS;
+  if (!hasPreferred) return ports;
+  if (override && !ports.includes(preferred)) return ports;
+  return [preferred, ...ports.filter((port) => port !== preferred)];
+}
+
+function configuredPortOverride() {
+  const override = globalThis.__BROWSER_RECALL_CONNECTOR_PORTS;
+  if (Array.isArray(override)) {
+    const ports = override.filter(
+      (port) => Number.isInteger(port) && port > 0 && port < 65536,
+    );
+    if (ports.length > 0) return ports;
+  }
+  return null;
 }
 
 function openSocket(port) {

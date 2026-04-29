@@ -9,8 +9,7 @@ pub mod sync;
 pub mod ws_server;
 
 pub use config::{
-    current_hostname, detect_current_device, remove_current_device, write_current_device,
-    ApprovedConnector, ConfigStore, CurrentDeviceRecord, DaemonConfig, SyncDeviceRecord, Token,
+    current_hostname, ApprovedConnector, ConfigStore, DaemonConfig, SyncDeviceRecord, Token,
 };
 pub use pairing::{ApprovalFuture, PairingApprover, PairingDecision, PairingRequest};
 pub use ws_server::{

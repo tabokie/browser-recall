@@ -1,4 +1,12 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -173,6 +181,10 @@ class BrowserLikeWebSocket {
   }
 
   addEventListener(type, handler, options = {}) {
+    if (type === 'open' && this.socket.readyState === NodeWebSocket.OPEN) {
+      setTimeout(() => handler(), 0);
+      return;
+    }
     const wrapped = (...args) => {
       if (type === 'message') {
         const data = args[0].toString();
@@ -258,6 +270,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
   let originalChrome;
   let originalNavigator;
   let originalSetTimeout;
+  let originalConnectorPorts;
 
   beforeAll(() => {
     const build = spawnSync(
@@ -277,6 +290,11 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(build.status).toBe(0);
   });
 
+  beforeEach(() => {
+    originalConnectorPorts = globalThis.__BROWSER_RECALL_CONNECTOR_PORTS;
+    globalThis.__BROWSER_RECALL_CONNECTOR_PORTS = TEST_PORTS;
+  });
+
   afterEach(async () => {
     for (const child of childProcesses.splice(0)) {
       child.kill('SIGINT');
@@ -287,6 +305,11 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     vi.resetModules();
     globalThis.WebSocket = originalWebSocket;
     globalThis.chrome = originalChrome;
+    if (originalConnectorPorts === undefined) {
+      delete globalThis.__BROWSER_RECALL_CONNECTOR_PORTS;
+    } else {
+      globalThis.__BROWSER_RECALL_CONNECTOR_PORTS = originalConnectorPorts;
+    }
     if (originalNavigator === undefined) {
       delete globalThis.navigator;
     } else {
@@ -982,7 +1005,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     originalSetTimeout = globalThis.setTimeout;
 
     const { chrome, store } = createChromeMock();
-    store.connectorDaemonPort = 38472;
+    store.connectorDaemonPort = 28471;
     globalThis.chrome = chrome;
     globalThis.WebSocket = RefusingWebSocket;
     Object.defineProperty(globalThis, 'navigator', {
@@ -1008,6 +1031,13 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(state.lastDiagnostic.failures).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ port: 38472, code: 'connect_error' }),
+      ]),
+    );
+    expect(RefusingWebSocket.urls).not.toEqual(
+      expect.arrayContaining([
+        'ws://127.0.0.1:28471',
+        'ws://127.0.0.1:28472',
+        'ws://127.0.0.1:28473',
       ]),
     );
   });

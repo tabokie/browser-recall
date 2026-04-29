@@ -174,6 +174,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     const ack = await nextMessage(socket);
     expect(ack.type).toBe('ack');
     expect(ack.bufferDepth).toBe(0);
+    expect(ack.lastDrainedAt).toBe(1710000000000);
 
     socket.send(JSON.stringify({ type: 'get_status' }));
     const status = await nextMessage(socket);
@@ -183,7 +184,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       bufferDepth: 0,
       dataFolder: path.join(dir, 'portal-data'),
     });
-    expect(status.lastDrainedAt).toBeTypeOf('number');
+    expect(status.lastDrainedAt).toBe(1710000000000);
 
     const pagesDir = path.join(dir, 'portal-data', 'pages');
     const pageFiles = await import('node:fs/promises').then((fs) =>
