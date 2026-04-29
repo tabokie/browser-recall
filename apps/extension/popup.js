@@ -62,6 +62,13 @@ function revealPopup() {
   document.documentElement.style.opacity = '';
 }
 
+function revealSetupIfStillWaiting() {
+  if (document.documentElement.style.opacity !== '0') return;
+  if (document.getElementById('setup-required')?.style.display === 'block') {
+    revealPopup();
+  }
+}
+
 function showSetupRequired(connector = {}, options = {}) {
   const { reveal = true } = options;
   document.getElementById('loading').style.display = 'none';
@@ -1479,13 +1486,20 @@ async function loadConnectedDashboard(connector) {
 async function initPopup() {
   await applyTheme();
   showSetupRequired({ state: 'connecting' }, { reveal: false });
-  const connector = await refreshDesktopConnectorState();
-  if (connector?.state !== 'connected' || !connector?.deviceId) {
-    showSetupRequired(connector || { state: 'offline' });
-    return;
-  }
+  const revealTimer = setTimeout(revealSetupIfStillWaiting, 250);
+  try {
+    const connector = await refreshDesktopConnectorState();
+    clearTimeout(revealTimer);
+    if (connector?.state !== 'connected' || !connector?.deviceId) {
+      showSetupRequired(connector || { state: 'offline' });
+      return;
+    }
 
-  await loadConnectedDashboard(connector);
+    await loadConnectedDashboard(connector);
+  } catch (error) {
+    clearTimeout(revealTimer);
+    throw error;
+  }
 }
 initPopup().catch((err) => showFatalError(err.message));
 

@@ -2,14 +2,53 @@ mod support;
 
 use browser_recall_daemon::protocol::{ConnectorMessage, DaemonMessage};
 use browser_recall_daemon::ws_server::start_server;
-use browser_recall_daemon::ConfigStore;
+use browser_recall_daemon::{ApprovedConnector, ConfigStore, Token};
 use browser_recall_replay::generate_slug_from_url;
 use futures_util::SinkExt;
 use serde_json::json;
 use tempfile::tempdir;
+use tokio::time::{sleep, Duration};
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
-use support::{next_text_message, paired_socket, test_server_options};
+use support::{next_text_message, pair_once, paired_socket, test_server_options, TestSocket};
+
+fn approved_connector(browser_id: &str, token: &str) -> ApprovedConnector {
+    ApprovedConnector {
+        browser_id: browser_id.into(),
+        browser_name: "Chrome".into(),
+        extension_id: "abcdefghijklmnop".into(),
+        browser_profile: Some("Default profile".into()),
+        token: Token(token.into()),
+        approved_at: 1_710_000_000,
+        last_seen_at: Some(1_710_000_000),
+    }
+}
+
+async fn authenticated_socket(port: u16, token: &str) -> TestSocket {
+    let mut request = format!("ws://127.0.0.1:{port}/")
+        .into_client_request()
+        .expect("request");
+    request.headers_mut().insert(
+        "Origin",
+        "chrome-extension://abcdefghijklmnop".parse().unwrap(),
+    );
+    let (mut socket, _) = connect_async(request).await.expect("ws connect");
+    socket
+        .send(Message::Text(
+            serde_json::to_string(&ConnectorMessage::Auth {
+                token: token.into(),
+            })
+            .expect("auth json"),
+        ))
+        .await
+        .expect("send auth");
+    let auth = next_text_message(&mut socket).await;
+    let auth: DaemonMessage = serde_json::from_str(&auth).expect("auth response json");
+    assert!(matches!(auth, DaemonMessage::AuthOk));
+    socket
+}
 
 async fn read_log_files(log_dir: &std::path::Path) -> Vec<String> {
     let mut entries = tokio::fs::read_dir(log_dir).await.expect("log dir exists");
@@ -92,6 +131,116 @@ async fn event_ingest_persists_page_and_reports_status() {
         .expect("page exists");
     assert!(page_raw.contains("\"title\": \"Example\""));
     assert!(page_raw.contains("\"url\": \"https://example.com/page\""));
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn active_connectors_are_tracked_by_connector_identity() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let mut config = config_store.load_or_create().expect("config");
+    config
+        .connectors
+        .push(approved_connector("old-browser-install", "old-token"));
+    config
+        .connectors
+        .push(approved_connector("new-browser-install", "new-token"));
+    config_store.save(&config).expect("save config");
+
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+    let mut socket = authenticated_socket(handle.port(), "new-token").await;
+
+    let snapshot = handle.snapshot().await;
+    assert_eq!(snapshot.connected_browsers, vec!["Chrome"]);
+    assert_eq!(snapshot.connected_connectors.len(), 1);
+    assert_eq!(
+        snapshot.connected_connectors[0].browser_id,
+        "new-browser-install"
+    );
+
+    let revoked = handle
+        .control_handle()
+        .revoke_connector("new-browser-install", "abcdefghijklmnop")
+        .await
+        .expect("revoke active connector");
+    assert!(revoked);
+    let config = config_store.load_or_create().expect("reload config");
+    assert!(config.connectors.is_empty());
+    let snapshot = handle.snapshot().await;
+    assert!(snapshot.connected_browsers.is_empty());
+    assert!(snapshot.connected_connectors.is_empty());
+
+    let revoked = next_text_message(&mut socket).await;
+    let revoked: DaemonMessage = serde_json::from_str(&revoked).expect("revoked auth response");
+    match revoked {
+        DaemonMessage::AuthFail { reason } => assert_eq!(reason, "token_revoked"),
+        other => panic!("expected revoked auth failure, got {other:?}"),
+    }
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn duplicate_connections_for_same_connector_stay_connected_until_last_socket_closes() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let mut config = config_store.load_or_create().expect("config");
+    config
+        .connectors
+        .push(approved_connector("browser-install", "shared-token"));
+    config_store.save(&config).expect("save config");
+
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+    let mut first = authenticated_socket(handle.port(), "shared-token").await;
+    let mut second = authenticated_socket(handle.port(), "shared-token").await;
+
+    let snapshot = handle.snapshot().await;
+    assert_eq!(snapshot.connected_connectors.len(), 1);
+    assert_eq!(snapshot.connected_connectors[0].browser_id, "browser-install");
+
+    first.close(None).await.expect("close first socket");
+    sleep(Duration::from_millis(100)).await;
+    let snapshot = handle.snapshot().await;
+    assert_eq!(snapshot.connected_connectors.len(), 1);
+    assert_eq!(snapshot.connected_connectors[0].browser_id, "browser-install");
+
+    second.close(None).await.expect("close second socket");
+    for _ in 0..40 {
+        if handle.snapshot().await.connected_connectors.is_empty() {
+            handle.shutdown().await;
+            return;
+        }
+        sleep(Duration::from_millis(25)).await;
+    }
+    let snapshot = handle.snapshot().await;
+    handle.shutdown().await;
+    assert!(snapshot.connected_connectors.is_empty());
+}
+
+#[tokio::test]
+async fn pairing_prunes_inactive_connectors() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let mut config = config_store.load_or_create().expect("config");
+    config
+        .connectors
+        .push(approved_connector("old-browser-install", "old-token"));
+    config_store.save(&config).expect("save config");
+
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+    let token = pair_once(handle.port()).await;
+
+    let config = config_store.load_or_create().expect("reload config");
+    assert_eq!(config.connectors.len(), 1);
+    assert_eq!(config.connectors[0].browser_id, "browser-install-1");
+    assert_eq!(config.connectors[0].token.0, token);
 
     handle.shutdown().await;
 }
@@ -1530,8 +1679,8 @@ async fn replay_failure_pauses_daemon_and_rejects_followup_events() {
 
     let snapshot = handle.snapshot().await;
     assert_eq!(
-        snapshot.status,
-        browser_recall_daemon::ConnectionStatus::Paused
+        snapshot.service_status,
+        browser_recall_daemon::ServiceStatus::Paused
     );
     assert_eq!(snapshot.last_error_code.as_deref(), Some("replay_error"));
 
@@ -1572,9 +1721,10 @@ async fn replay_failure_pauses_daemon_and_rejects_followup_events() {
 
     let resumed_snapshot = handle.snapshot().await;
     assert_eq!(
-        resumed_snapshot.status,
-        browser_recall_daemon::ConnectionStatus::Connected
+        resumed_snapshot.service_status,
+        browser_recall_daemon::ServiceStatus::Running
     );
+    assert_eq!(resumed_snapshot.connected_browsers, vec!["Chrome"]);
     assert_eq!(resumed_snapshot.last_error, None);
     assert_eq!(resumed_snapshot.last_error_code, None);
 

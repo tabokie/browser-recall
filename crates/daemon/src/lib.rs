@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod config;
+pub mod connectors;
 pub mod pairing;
 pub mod protocol;
 pub mod rules;
@@ -13,5 +14,6 @@ pub use config::{
 };
 pub use pairing::{ApprovalFuture, PairingApprover, PairingDecision, PairingRequest};
 pub use ws_server::{
-    ConnectionStatus, ServerHandle, ServerSnapshot, ServerStartOptions, WsServerError,
+    ConnectedConnector, ServerHandle, ServerSnapshot, ServerStartOptions, ServiceStatus,
+    WsServerError,
 };

@@ -158,11 +158,10 @@ describe('popup desktop state rendering', () => {
 
     await import('../../apps/extension/popup.js');
 
-    await waitFor(
-      () =>
-        chrome.runtime.sendMessage.mock.calls.some(
-          ([request]) => request.action === 'getPageSummary',
-        ),
+    await waitFor(() =>
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'getPageSummary',
+      ),
     );
     await waitFor(
       () => document.getElementById('setup-required').style.display === 'block',
@@ -223,6 +222,39 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('setupRequiredMeta').textContent).toContain(
       'Last port failures: 28471: connect_error, 28472: connect_timeout.',
     );
+  });
+
+  it('reveals the offline shell while desktop state probing is still pending', async () => {
+    const tab = {
+      id: 45,
+      url: 'https://example.com/offline-pending',
+      title: 'Offline Pending',
+    };
+    const connectorState = deferred();
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: () => connectorState.promise,
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.documentElement.style.opacity === '');
+    expect(document.getElementById('setup-required').style.display).toBe(
+      'block',
+    );
+    expect(document.getElementById('dashboard').style.display).toBe('none');
+    expect(document.getElementById('setupRequiredTitle').textContent).toBe(
+      'Desktop Offline',
+    );
+
+    connectorState.resolve({
+      success: true,
+      state: 'offline',
+      hasToken: true,
+    });
   });
 
   it('keeps the popup hidden until connected page details finish loading', async () => {

@@ -235,6 +235,46 @@ fn paired_browser_commands_list_and_revoke_connectors() {
     assert!(paired.is_empty());
 }
 
+#[test]
+fn paired_browser_list_orders_recent_tokens_first() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let mut config = config_store.load_or_create().expect("config");
+    config.connectors.push(ApprovedConnector {
+        browser_id: "old".into(),
+        browser_name: "Chrome".into(),
+        extension_id: "abcdefghijklmnop".into(),
+        browser_profile: Some("Default profile".into()),
+        token: Token("old-token".into()),
+        approved_at: 1_710_000_000,
+        last_seen_at: Some(1_710_000_100),
+    });
+    config.connectors.push(ApprovedConnector {
+        browser_id: "new".into(),
+        browser_name: "Chrome".into(),
+        extension_id: "abcdefghijklmnop".into(),
+        browser_profile: Some("Default profile".into()),
+        token: Token("new-token".into()),
+        approved_at: 1_710_000_001,
+        last_seen_at: Some(1_710_000_200),
+    });
+    config.connectors.push(ApprovedConnector {
+        browser_id: "never-seen".into(),
+        browser_name: "Brave".into(),
+        extension_id: "abcdefghijklmnop".into(),
+        browser_profile: Some("Default profile".into()),
+        token: Token("never-seen-token".into()),
+        approved_at: 1_710_000_300,
+        last_seen_at: None,
+    });
+    config_store.save(&config).expect("save config");
+
+    let paired = list_paired_browsers(&config_store).expect("list paired browsers");
+    assert_eq!(paired[0].browser_id, "new");
+    assert_eq!(paired[1].browser_id, "old");
+    assert_eq!(paired[2].browser_id, "never-seen");
+}
+
 #[tokio::test]
 async fn migrated_note_and_list_commands_replay_entities() {
     let dir = tempdir().expect("tempdir");

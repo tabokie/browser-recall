@@ -166,20 +166,10 @@ chrome.storage.session.setAccessLevel({
 let hydrationDone = Promise.resolve();
 
 async function handleGetDesktopConnectorState() {
-  await initConnectorBridge().catch((error) => {
+  const connector = await getConnectorBridgeState();
+  void initConnectorBridge().catch((error) => {
     logDebug('[connector] state refresh init failed:', error.message);
   });
-  let connector = await getConnectorBridgeState();
-  if (
-    connector.state !== 'connected' &&
-    connector.hasToken &&
-    !connector.refuseMode
-  ) {
-    await connectDesktopBridge().catch((error) => {
-      logDebug('[connector] state refresh reconnect failed:', error.message);
-    });
-    connector = await getConnectorBridgeState();
-  }
   syncDesktopConnectorPauseState(connector);
   await applyDesktopConnectorBadge(connector);
   return { success: true, ...connector };
@@ -732,7 +722,12 @@ async function addLog(entry) {
 
 // Build a visit_page log entry. Title omitted when absent (slow-loading pages).
 // checkpoint: true forces page entity creation (used by explicit user capture of blacklisted URLs).
-async function buildVisitPageEntry(url, title, referrerUrl, { checkpoint } = {}) {
+async function buildVisitPageEntry(
+  url,
+  title,
+  referrerUrl,
+  { checkpoint } = {},
+) {
   const entry = {
     timestamp: await nextLogTimestamp(),
     action: 'visit_page',

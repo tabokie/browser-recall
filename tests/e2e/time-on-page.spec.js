@@ -55,13 +55,25 @@ test('timeOnPage reports foreground delta, not cumulative time since load', asyn
   await page.evaluate(() => document.dispatchEvent(new Event('freeze')));
   await page.waitForTimeout(300);
 
-  // Read leave_page entries for the test URL
+  // Read leave_page entries for the test URL through the daemon-backed cache.
   const helper = await openHelperPage(extContext, extensionId);
   const leaveEntries = await helper.evaluate(async (url) => {
-    const today = new Date().toISOString().slice(0, 10);
-    const data = await chrome.storage.session.get(['log:' + today]);
-    const entries = data['log:' + today] || [];
-    return entries.filter((e) => e.url === url && e.action === 'leave_page');
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const key = 'log:' + today;
+    for (let i = 0; i < 40; i++) {
+      const resp = await chrome.runtime.sendMessage({
+        action: 'readCacheable',
+        key,
+      });
+      const entries = resp?.value || [];
+      const matches = entries.filter(
+        (e) => e.url === url && e.action === 'leave_page',
+      );
+      if (matches.length >= 2) return matches;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return [];
   }, testUrl);
   await helper.close();
 

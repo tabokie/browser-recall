@@ -1,3 +1,4 @@
+use crate::connectors::{current_local_day_start_unix, prune_inactive_connectors};
 use crate::search::{
     search_history_in_data_dir, search_notes_in_data_dir, search_snapshots_in_data_dir,
 };
@@ -984,7 +985,7 @@ pub fn list_paired_browsers(
     let config = config_store
         .load_or_create()
         .map_err(|error| error.to_string())?;
-    Ok(config
+    let mut connectors = config
         .connectors
         .into_iter()
         .map(|connector| PairedBrowserInfo {
@@ -995,7 +996,18 @@ pub fn list_paired_browsers(
             approved_at: Some((connector.approved_at as i64) * 1000),
             last_seen: connector.last_seen_at.map(|value| (value as i64) * 1000),
         })
-        .collect())
+        .collect::<Vec<_>>();
+    connectors.sort_by(|left, right| {
+        right
+            .last_seen
+            .cmp(&left.last_seen)
+            .then_with(|| right.approved_at.cmp(&left.approved_at))
+            .then_with(|| left.browser_name.cmp(&right.browser_name))
+            .then_with(|| left.browser_profile.cmp(&right.browser_profile))
+            .then_with(|| left.browser_id.cmp(&right.browser_id))
+            .then_with(|| left.extension_id.cmp(&right.extension_id))
+    });
+    Ok(connectors)
 }
 
 pub fn pair_browser_revoke(
@@ -1010,6 +1022,11 @@ pub fn pair_browser_revoke(
     config.connectors.retain(|connector| {
         !(connector.browser_id == browser_id && connector.extension_id == extension_id)
     });
+    prune_inactive_connectors(
+        &mut config.connectors,
+        &HashSet::new(),
+        current_local_day_start_unix(),
+    );
     if config.connectors.len() != before {
         config_store
             .save(&config)

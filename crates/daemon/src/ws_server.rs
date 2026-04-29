@@ -1,4 +1,7 @@
 use crate::config::{random_string, ApprovedConnector, ConfigStore, Token};
+use crate::connectors::{
+    connector_key, current_local_day_start_unix, prune_inactive_connectors, ConnectorKey,
+};
 use crate::pairing::{with_timeout, PairingApprover, PairingDecision, PairingRequest};
 use crate::protocol::{
     ConnectorMessage, DaemonMessage, DirectoryInfoPayload, HistorySearchResult, MutationPayload,
@@ -20,7 +23,7 @@ use browser_recall_replay::{
 };
 use futures_util::{FutureExt, SinkExt, StreamExt};
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::panic::AssertUnwindSafe;
 use std::path::Component;
@@ -74,9 +77,8 @@ impl From<serde_json::Error> for WsServerError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConnectionStatus {
-    Waiting,
-    Connected,
+pub enum ServiceStatus {
+    Running,
     Paused,
 }
 
@@ -107,11 +109,25 @@ enum ServiceState {
 }
 
 #[derive(Debug, Clone)]
+pub struct ConnectedConnector {
+    pub browser_id: String,
+    pub browser_name: String,
+    pub extension_id: String,
+}
+
+impl ConnectedConnector {
+    fn key(&self) -> (&str, &str) {
+        (&self.browser_id, &self.extension_id)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ServerSnapshot {
     pub port: u16,
     pub device_id: String,
-    pub status: ConnectionStatus,
+    pub service_status: ServiceStatus,
     pub connected_browsers: Vec<String>,
+    pub connected_connectors: Vec<ConnectedConnector>,
     pub last_error: Option<String>,
     pub last_error_code: Option<String>,
 }
@@ -122,6 +138,7 @@ struct SharedState {
     snapshot_tx: watch::Sender<ServerSnapshot>,
     change_tx: broadcast::Sender<BroadcastEnvelope>,
     change_message_tx: broadcast::Sender<DaemonMessage>,
+    revoke_tx: broadcast::Sender<ConnectorKey>,
     config_store: ConfigStore,
     config: Arc<Mutex<crate::config::DaemonConfig>>,
     storage: Storage,
@@ -131,7 +148,7 @@ struct SharedState {
     approver: PairingApprover,
     pair_timeout: Duration,
     test_control_enabled: bool,
-    connected_browsers: Arc<Mutex<HashSet<String>>>,
+    active_connections: Arc<Mutex<HashMap<u64, ConnectedConnector>>>,
     next_connection_id: Arc<AtomicU64>,
 }
 
@@ -188,6 +205,12 @@ impl ServerHandle {
         self.shared.change_message_tx.subscribe()
     }
 
+    pub fn control_handle(&self) -> ServerControlHandle {
+        ServerControlHandle {
+            shared: self.shared.clone(),
+        }
+    }
+
     pub async fn resume(&self) {
         resume_service(&self.shared).await;
     }
@@ -197,6 +220,21 @@ impl ServerHandle {
             let _ = tx.send(());
         }
         let _ = self.task.await;
+    }
+}
+
+#[derive(Clone)]
+pub struct ServerControlHandle {
+    shared: SharedState,
+}
+
+impl ServerControlHandle {
+    pub async fn revoke_connector(
+        &self,
+        browser_id: &str,
+        extension_id: &str,
+    ) -> Result<bool, WsServerError> {
+        revoke_connector(&self.shared, browser_id, extension_id).await
     }
 }
 
@@ -231,19 +269,22 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
     let snapshot = ServerSnapshot {
         port,
         device_id: config.device_id.clone(),
-        status: ConnectionStatus::Waiting,
+        service_status: ServiceStatus::Running,
         connected_browsers: Vec::new(),
+        connected_connectors: Vec::new(),
         last_error: None,
         last_error_code: None,
     };
     let (snapshot_tx, _) = watch::channel(snapshot.clone());
     let (change_tx, _) = broadcast::channel(128);
     let (change_message_tx, _) = broadcast::channel(128);
+    let (revoke_tx, _) = broadcast::channel(128);
     let shared = SharedState {
         snapshot: Arc::new(RwLock::new(snapshot)),
         snapshot_tx,
         change_tx,
         change_message_tx,
+        revoke_tx,
         config_store: options.config_store.clone(),
         config: Arc::new(Mutex::new(config)),
         storage,
@@ -253,7 +294,7 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
         approver: options.approver,
         pair_timeout: options.pair_timeout,
         test_control_enabled: options.test_control_enabled,
-        connected_browsers: Arc::new(Mutex::new(HashSet::new())),
+        active_connections: Arc::new(Mutex::new(HashMap::new())),
         next_connection_id: Arc::new(AtomicU64::new(1)),
     };
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
@@ -355,11 +396,35 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
     let (mut write, mut read) = ws_stream.split();
     let connection_id = shared.next_connection_id.fetch_add(1, Ordering::Relaxed);
     let mut change_rx = shared.change_tx.subscribe();
-    let mut connected_name = None::<String>;
+    let mut revoke_rx = shared.revoke_tx.subscribe();
+    let mut connected_connector = None::<ConnectedConnector>;
     let mut authenticated = false;
 
     loop {
         let message = tokio::select! {
+            revoked = revoke_rx.recv(), if authenticated => {
+                match revoked {
+                    Ok(key) => {
+                        let revoked_key = (key.0.as_str(), key.1.as_str());
+                        if connected_connector
+                            .as_ref()
+                            .is_some_and(|connector| connector.key() == revoked_key)
+                        {
+                            send_json(
+                                &mut write,
+                                &DaemonMessage::AuthFail {
+                                    reason: "token_revoked".into(),
+                                },
+                            )
+                            .await?;
+                            break;
+                        }
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => continue,
+                }
+            }
             change = change_rx.recv(), if authenticated => {
                 match change {
                     Ok(envelope) => {
@@ -390,6 +455,20 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 continue;
             }
         };
+        if authenticated && message_requires_current_connector_auth(&incoming) {
+            if let Some(connector) = connected_connector.as_ref() {
+                if !connector_is_approved(&shared, connector).await {
+                    send_json(
+                        &mut write,
+                        &DaemonMessage::AuthFail {
+                            reason: "token_revoked".into(),
+                        },
+                    )
+                    .await?;
+                    break;
+                }
+            }
+        }
         match incoming {
             ConnectorMessage::Ping => {
                 send_json(&mut write, &DaemonMessage::Pong).await?;
@@ -641,29 +720,29 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     let config = shared.config.lock().await;
                     config.connectors.iter().find_map(|connector| {
                         (connector.token.0 == token).then(|| {
-                            (
-                                connector.browser_name.clone(),
-                                connector.browser_id.clone(),
-                                connector.extension_id.clone(),
-                            )
+                            ConnectedConnector {
+                                browser_id: connector.browser_id.clone(),
+                                browser_name: connector.browser_name.clone(),
+                                extension_id: connector.extension_id.clone(),
+                            }
                         })
                     })
                 };
 
-                if let Some((browser_name, browser_id, extension_id)) = maybe_browser {
+                if let Some(active_connector) = maybe_browser {
                     {
                         let mut config = shared.config.lock().await;
                         if let Some(connector) = config.connectors.iter_mut().find(|connector| {
-                            connector.browser_id == browser_id
-                                && connector.extension_id == extension_id
+                            connector.browser_id == active_connector.browser_id
+                                && connector.extension_id == active_connector.extension_id
                         }) {
                             connector.last_seen_at = Some(unix_timestamp());
                             let _ = shared.config_store.save(&config);
                         }
                     }
-                    connected_name = Some(browser_name.clone());
+                    connected_connector = Some(active_connector.clone());
                     authenticated = true;
-                    set_connected(&shared, browser_name, true).await;
+                    set_connected(&shared, connection_id, active_connector, true).await;
                     info!("connector authenticated");
                     send_json(&mut write, &DaemonMessage::AuthOk).await?;
                 } else {
@@ -710,6 +789,11 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 match decision {
                     PairingDecision::Approve => {
                         let token = Token(random_string(32));
+                        let now = unix_timestamp();
+                        let active = {
+                            let active_connections = shared.active_connections.lock().await;
+                            active_connector_keys(&active_connections)
+                        };
                         let device_id = {
                             let mut config = shared.config.lock().await;
                             upsert_connector(
@@ -720,16 +804,26 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                                     extension_id: request.extension_id.clone(),
                                     browser_profile: request.browser_profile.clone(),
                                     token: token.clone(),
-                                    approved_at: unix_timestamp(),
-                                    last_seen_at: Some(unix_timestamp()),
+                                    approved_at: now,
+                                    last_seen_at: Some(now),
                                 },
+                            );
+                            prune_inactive_connectors(
+                                &mut config.connectors,
+                                &active,
+                                current_local_day_start_unix(),
                             );
                             shared.config_store.save(&config)?;
                             config.device_id.clone()
                         };
-                        connected_name = Some(request.browser_name.clone());
+                        let connector = ConnectedConnector {
+                            browser_id: request.browser_id.clone(),
+                            browser_name: request.browser_name.clone(),
+                            extension_id: request.extension_id.clone(),
+                        };
+                        connected_connector = Some(connector.clone());
                         authenticated = true;
-                        set_connected(&shared, request.browser_name, true).await;
+                        set_connected(&shared, connection_id, connector, true).await;
                         info!("pairing approved");
                         send_json(
                             &mut write,
@@ -913,8 +1007,8 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
         }
     }
 
-    if let Some(browser_name) = connected_name {
-        set_connected(&shared, browser_name, false).await;
+    if let Some(connector) = connected_connector {
+        set_connected(&shared, connection_id, connector, false).await;
     }
     Ok(())
 }
@@ -941,6 +1035,60 @@ fn is_allowed_origin(origin: Option<&str>, test_control_enabled: bool) -> bool {
                     if value.starts_with("http://127.0.0.1")
                         || value.starts_with("http://localhost")
             ))
+}
+
+fn message_requires_current_connector_auth(message: &ConnectorMessage) -> bool {
+    !matches!(
+        message,
+        ConnectorMessage::Ping
+            | ConnectorMessage::Auth { .. }
+            | ConnectorMessage::PairRequest { .. }
+            | ConnectorMessage::TestResetData
+            | ConnectorMessage::TestSeedData { .. }
+    )
+}
+
+async fn connector_is_approved(shared: &SharedState, active: &ConnectedConnector) -> bool {
+    let config = shared.config.lock().await;
+    config.connectors.iter().any(|connector| {
+        connector.browser_id == active.browser_id && connector.extension_id == active.extension_id
+    })
+}
+
+fn connected_snapshot_fields(
+    active_connections: &HashMap<u64, ConnectedConnector>,
+) -> (Vec<String>, Vec<ConnectedConnector>) {
+    let mut unique_connectors = HashMap::<ConnectorKey, ConnectedConnector>::new();
+    for connector in active_connections.values() {
+        unique_connectors.insert(
+            connector_key(&connector.browser_id, &connector.extension_id),
+            connector.clone(),
+        );
+    }
+    let mut connected_connectors = unique_connectors.into_values().collect::<Vec<_>>();
+    connected_connectors.sort_by(|left, right| {
+        left.browser_name
+            .cmp(&right.browser_name)
+            .then_with(|| left.browser_id.cmp(&right.browser_id))
+            .then_with(|| left.extension_id.cmp(&right.extension_id))
+    });
+    let mut connected_browsers = connected_connectors
+        .iter()
+        .map(|connector| connector.browser_name.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    connected_browsers.sort();
+    (connected_browsers, connected_connectors)
+}
+
+fn active_connector_keys(
+    active_connections: &HashMap<u64, ConnectedConnector>,
+) -> HashSet<ConnectorKey> {
+    active_connections
+        .values()
+        .map(|connector| connector_key(&connector.browser_id, &connector.extension_id))
+        .collect()
 }
 
 fn upsert_connector(connectors: &mut Vec<ApprovedConnector>, candidate: ApprovedConnector) {
@@ -2485,28 +2633,30 @@ fn test_control_disabled_error() -> DaemonMessage {
     }
 }
 
-async fn set_connected(shared: &SharedState, browser_name: String, connected: bool) {
-    let mut browsers = shared.connected_browsers.lock().await;
+async fn set_connected(
+    shared: &SharedState,
+    connection_id: u64,
+    connector: ConnectedConnector,
+    connected: bool,
+) {
+    let mut active_connections = shared.active_connections.lock().await;
     if connected {
-        browsers.insert(browser_name);
+        active_connections.insert(connection_id, connector);
     } else {
-        browsers.remove(&browser_name);
+        active_connections.remove(&connection_id);
     }
-    let no_connected_browsers = browsers.is_empty();
-    let paused = {
+    let no_connected_browsers = active_connections.is_empty();
+    let running = {
         let service_state = shared.service_state.read().await;
-        matches!(*service_state, ServiceState::Paused { .. })
+        matches!(*service_state, ServiceState::Running)
     };
     let mut snapshot = shared.snapshot.write().await;
-    let mut connected_browsers = browsers.iter().cloned().collect::<Vec<_>>();
-    connected_browsers.sort();
+    let (connected_browsers, connected_connectors) =
+        connected_snapshot_fields(&active_connections);
     snapshot.connected_browsers = connected_browsers;
-    if !paused {
-        snapshot.status = if snapshot.connected_browsers.is_empty() {
-            ConnectionStatus::Waiting
-        } else {
-            ConnectionStatus::Connected
-        };
+    snapshot.connected_connectors = connected_connectors;
+    if running {
+        snapshot.service_status = ServiceStatus::Running;
         snapshot.last_error = None;
         snapshot.last_error_code = None;
     }
@@ -2516,6 +2666,58 @@ async fn set_connected(shared: &SharedState, browser_name: String, connected: bo
         let mut connector = shared.connector_buffer_status.lock().await;
         *connector = ConnectorBufferStatus::default();
     }
+}
+
+async fn revoke_connector(
+    shared: &SharedState,
+    browser_id: &str,
+    extension_id: &str,
+) -> Result<bool, WsServerError> {
+    let active = {
+        let active_connections = shared.active_connections.lock().await;
+        active_connector_keys(&active_connections)
+    };
+    let changed = {
+        let mut config = shared.config.lock().await;
+        let before = config.connectors.len();
+        config.connectors.retain(|connector| {
+            !(connector.browser_id == browser_id && connector.extension_id == extension_id)
+        });
+        prune_inactive_connectors(
+            &mut config.connectors,
+            &active,
+            current_local_day_start_unix(),
+        );
+        let changed = config.connectors.len() != before;
+        if changed {
+            shared.config_store.save(&config)?;
+        }
+        changed
+    };
+
+    if changed {
+        let _ = shared
+            .revoke_tx
+            .send(connector_key(browser_id, extension_id));
+        let mut active_connections = shared.active_connections.lock().await;
+        active_connections.retain(|_, connector| {
+            !(connector.browser_id == browser_id && connector.extension_id == extension_id)
+        });
+        let no_connected_browsers = active_connections.is_empty();
+        let (connected_browsers, connected_connectors) =
+            connected_snapshot_fields(&active_connections);
+        let mut snapshot = shared.snapshot.write().await;
+        snapshot.connected_browsers = connected_browsers;
+        snapshot.connected_connectors = connected_connectors;
+        let _ = shared.snapshot_tx.send(snapshot.clone());
+        drop(snapshot);
+        if no_connected_browsers {
+            let mut connector = shared.connector_buffer_status.lock().await;
+            *connector = ConnectorBufferStatus::default();
+        }
+    }
+
+    Ok(changed)
 }
 
 async fn pause_service(shared: &SharedState, code: ErrorCode, reason: impl Into<String>) {
@@ -2528,7 +2730,7 @@ async fn pause_service(shared: &SharedState, code: ErrorCode, reason: impl Into<
         };
     }
     let mut snapshot = shared.snapshot.write().await;
-    snapshot.status = ConnectionStatus::Paused;
+    snapshot.service_status = ServiceStatus::Paused;
     snapshot.last_error = Some(reason);
     snapshot.last_error_code = Some(code.as_str().to_string());
     let _ = shared.snapshot_tx.send(snapshot.clone());
@@ -2543,20 +2745,15 @@ async fn resume_service(shared: &SharedState) {
         *service_state = ServiceState::Running;
     }
 
-    let connected_browsers = {
-        let browsers = shared.connected_browsers.lock().await;
-        let mut connected_browsers = browsers.iter().cloned().collect::<Vec<_>>();
-        connected_browsers.sort();
-        connected_browsers
+    let (connected_browsers, connected_connectors) = {
+        let active_connections = shared.active_connections.lock().await;
+        connected_snapshot_fields(&active_connections)
     };
 
     let mut snapshot = shared.snapshot.write().await;
     snapshot.connected_browsers = connected_browsers;
-    snapshot.status = if snapshot.connected_browsers.is_empty() {
-        ConnectionStatus::Waiting
-    } else {
-        ConnectionStatus::Connected
-    };
+    snapshot.connected_connectors = connected_connectors;
+    snapshot.service_status = ServiceStatus::Running;
     snapshot.last_error = None;
     snapshot.last_error_code = None;
     let _ = shared.snapshot_tx.send(snapshot.clone());

@@ -34,7 +34,7 @@ use browser_recall_daemon::sync::{
     SyncError,
 };
 use browser_recall_daemon::ws_server::{
-    start_server, ConnectionStatus, ServerHandle, ServerSnapshot, ServerStartOptions,
+    start_server, ServerHandle, ServerSnapshot, ServerStartOptions, ServiceStatus,
 };
 use browser_recall_daemon::{ConfigStore, DaemonConfig};
 use search::SearchRequest;
@@ -167,11 +167,11 @@ fn pairing_approver(app: AppHandle) -> PairingApprover {
 }
 
 fn create_tray(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
-    let open = MenuItemBuilder::with_id("open", "Open Browser Recall").build(app)?;
-    let status = MenuItemBuilder::with_id("status", "Status: ◌ Connecting").build(app)?;
-    let logs = MenuItemBuilder::with_id("logs", "View Logs").build(app)?;
+    let open = MenuItemBuilder::with_id("open", "Open").build(app)?;
+    let status = MenuItemBuilder::with_id("status", "No browsers connected").build(app)?;
+    let logs = MenuItemBuilder::with_id("logs", "Logs").build(app)?;
     let settings = MenuItemBuilder::with_id("settings", "Settings…").build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", "Quit Browser Recall").build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
     let menu = MenuBuilder::new(app)
         .item(&open)
@@ -284,9 +284,8 @@ fn create_main_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 
 #[derive(Serialize)]
 struct UiModel {
-    status_kind: &'static str,
-    headline: String,
-    detail: String,
+    is_paused: bool,
+    error: Option<String>,
     endpoint: String,
     browsers: Vec<String>,
     data_dir: String,
@@ -306,53 +305,12 @@ impl UiModel {
             .last_error
             .clone()
             .or_else(|| state.error.clone());
-        if state.snapshot.status == ConnectionStatus::Paused || paused_error.is_some() {
-            return Self {
-                status_kind: "error",
-                headline: "Browser Recall paused".to_string(),
-                detail: paused_error.unwrap_or_else(|| {
-                    "A daemon task failed. Resume it from Settings after fixing the underlying issue."
-                        .to_string()
-                }),
-                endpoint,
-                browsers: state.snapshot.connected_browsers.clone(),
-                data_dir: state.data_dir.clone(),
-                log_dir: state.log_dir.clone(),
-                device_id: state.snapshot.device_id.clone(),
-                launch_at_login: state.launch_at_login,
-                debug_logging: state.debug_logging,
-                setup_complete: state.setup_complete,
-                route: state.route.clone(),
-            };
-        }
-
-        let (status_kind, headline, detail) = match state.snapshot.status {
-            ConnectionStatus::Connected => {
-                let headline = format!(
-                    "Connected: {}",
-                    describe_connected_browsers(&state.snapshot.connected_browsers)
-                );
-                let detail =
-                    "The connector is authenticated and holding a localhost session.".to_string();
-                ("connected", headline, detail)
-            }
-            ConnectionStatus::Paused => (
-                "error",
-                "Browser Recall paused".to_string(),
-                "A daemon task failed. Resume it from Settings after fixing the underlying issue."
-                    .to_string(),
-            ),
-            ConnectionStatus::Waiting => (
-                "waiting",
-                "Waiting for browser connection".to_string(),
-                "Keep the app running while the extension pairs over localhost.".to_string(),
-            ),
-        };
+        let is_paused =
+            state.snapshot.service_status == ServiceStatus::Paused || paused_error.is_some();
 
         Self {
-            status_kind,
-            headline,
-            detail,
+            is_paused,
+            error: paused_error,
             endpoint,
             browsers: state.snapshot.connected_browsers.clone(),
             data_dir: state.data_dir.clone(),
@@ -375,10 +333,27 @@ fn describe_connected_browsers(browsers: &[String]) -> String {
 }
 
 fn tray_status_text(model: &UiModel) -> String {
-    match model.status_kind {
-        "connected" => format!("Status: ● Running ({})", model.headline),
-        "error" => "Status: ✕ Error".to_string(),
-        _ => "Status: ◌ Connecting".to_string(),
+    if model.is_paused {
+        return "Error".to_string();
+    }
+
+    match model.browsers.len() {
+        0 => "No browsers connected".to_string(),
+        1 => "1 browser connected".to_string(),
+        count => format!("{count} browsers connected"),
+    }
+}
+
+fn window_title(model: &UiModel) -> String {
+    if model.is_paused {
+        "Browser Recall - Error".to_string()
+    } else if model.browsers.is_empty() {
+        "Browser Recall".to_string()
+    } else {
+        format!(
+            "Browser Recall - Connected: {}",
+            describe_connected_browsers(&model.browsers)
+        )
     }
 }
 
@@ -395,14 +370,7 @@ fn apply_shell_state(app: &AppHandle) {
     }
 
     if let Some(window) = app.get_webview_window("main") {
-        let title = if model.status_kind == "connected" {
-            format!("Browser Recall - {}", model.headline)
-        } else if model.status_kind == "error" {
-            "Browser Recall - Error".to_string()
-        } else {
-            "Browser Recall".to_string()
-        };
-        let _ = window.set_title(&title);
+        let _ = window.set_title(&window_title(&model));
         if let Ok(payload) = serde_json::to_string(&model) {
             let script = format!(
                 "window.__BR_STATE__ = {payload}; if (window.__renderBrowserRecall) window.__renderBrowserRecall();"
@@ -635,8 +603,9 @@ fn inactive_server_snapshot(config: &DaemonConfig) -> ServerSnapshot {
     ServerSnapshot {
         port: 0,
         device_id: config.device_id.clone(),
-        status: ConnectionStatus::Waiting,
+        service_status: ServiceStatus::Running,
         connected_browsers: Vec::new(),
+        connected_connectors: Vec::new(),
         last_error: None,
         last_error_code: None,
     }
@@ -923,7 +892,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                     "daemonBufferDepth": 0,
                 }));
             }
-            let state = if snapshot.status == ConnectionStatus::Paused {
+            let state = if snapshot.service_status == ServiceStatus::Paused {
                 "paused"
             } else {
                 "connected"
@@ -962,7 +931,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                     "daemonBufferDepth": 0,
                 }));
             }
-            let state = if snapshot.status == ConnectionStatus::Paused {
+            let state = if snapshot.service_status == ServiceStatus::Paused {
                 "paused"
             } else {
                 "connected"
@@ -987,13 +956,31 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             let state = app.state::<DesktopState>();
             let shell = state.shell.lock().expect("shell state poisoned");
             let connected = snapshot
-                .connected_browsers
+                .connected_connectors
                 .iter()
-                .cloned()
+                .map(|connector| (connector.browser_id.clone(), connector.extension_id.clone()))
                 .collect::<std::collections::BTreeSet<_>>();
-            let paired_browsers = list_paired_browsers(&state.config_store)?
+            let mut paired_browsers = list_paired_browsers(&state.config_store)?
                 .into_iter()
                 .map(|connector| {
+                    let connected = connected
+                        .contains(&(connector.browser_id.clone(), connector.extension_id.clone()));
+                    (connected, connector)
+                })
+                .collect::<Vec<_>>();
+            paired_browsers.sort_by(|(left_connected, left), (right_connected, right)| {
+                right_connected
+                    .cmp(left_connected)
+                    .then_with(|| right.last_seen.cmp(&left.last_seen))
+                    .then_with(|| right.approved_at.cmp(&left.approved_at))
+                    .then_with(|| left.browser_name.cmp(&right.browser_name))
+                    .then_with(|| left.browser_profile.cmp(&right.browser_profile))
+                    .then_with(|| left.browser_id.cmp(&right.browser_id))
+                    .then_with(|| left.extension_id.cmp(&right.extension_id))
+            });
+            let paired_browsers = paired_browsers
+                .into_iter()
+                .map(|(connected, connector)| {
                     json!({
                         "browserId": connector.browser_id,
                         "browserName": connector.browser_name.clone(),
@@ -1001,7 +988,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                         "extensionId": connector.extension_id,
                         "approvedAt": connector.approved_at,
                         "lastSeen": connector.last_seen,
-                        "connected": connected.contains(&connector.browser_name),
+                        "connected": connected,
                     })
                 })
                 .collect::<Vec<_>>();
@@ -1151,7 +1138,22 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .and_then(Value::as_str)
                 .ok_or_else(|| "revokePairedBrowser missing extensionId".to_string())?;
             let state = app.state::<DesktopState>();
-            let _ = pair_browser_revoke(&state.config_store, browser_id, extension_id)?;
+            let server = {
+                state
+                    ._server
+                    .lock()
+                    .expect("server state poisoned")
+                    .as_ref()
+                    .map(ServerHandle::control_handle)
+            };
+            if let Some(server) = server {
+                let _ = server
+                    .revoke_connector(browser_id, extension_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+            } else {
+                let _ = pair_browser_revoke(&state.config_store, browser_id, extension_id)?;
+            }
             json!({ "success": true })
         }
         "getDirectoryInfo" => {
