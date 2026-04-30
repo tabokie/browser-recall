@@ -1,0 +1,14 @@
+- I am trying to use the extension in Orion browser. But the extension popup shows up blank (all black), the options page works fine. The console says "Failed to load resource: The operation couldn’t be completed. (Orion.SchemeHandlerError error 2.)"
+- Cool. It's working, I was loading the wrong directory before. It's just that the browser name being sent is "Chrome" not "Orion". Is this a limitation of Orion's emulation of chrome environment?
+- Output is
+> navigator.userAgent
+< "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+> navigator.userAgentData?.brands
+< [{brand: "Not_A Brand", version: "24"}, {brand: "Chromium", version: "146"}, {brand: "Google Chrome", version: "146"}] (3)
+
+Are there other ways to check?
+- okay let's move on. One issue is new with Orion. The tray icon does show a dot for special pages, but when I open the popup, the dot disappears, and doesn't reappar unless I reload the page.
+- The issue is still there
+- I guess there is something wrong with Orion's extension reload. I have to reinstall to use the latest version. So let's try the version before the last edit if it makes thing simpler.
+- Good it works. Now let's fix the popup UI. There shouldn't be nested scroll window for annotations and snapshots list.
+- Rename `./prompts/STAGING.txt` to `./prompts/YYYYMMDD_hhmmss.txt`. Look at Git diffs thoroughly, including the changes not from current session. Make a commit summarizing the diffs succinctly. Sign it with "Co-Authored-By: GPT-5.5 Codex <noreply@openai.com>".

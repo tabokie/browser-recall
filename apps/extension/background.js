@@ -171,7 +171,9 @@ async function handleGetDesktopConnectorState() {
     logDebug('[connector] state refresh init failed:', error.message);
   });
   syncDesktopConnectorPauseState(connector);
-  await applyDesktopConnectorBadge(connector);
+  if (!(await applyDesktopConnectorBadge(connector))) {
+    await refreshActiveTabBadge();
+  }
   return { success: true, ...connector };
 }
 
@@ -179,7 +181,9 @@ async function handleConnectDesktopBridge() {
   const refreshed = await connectDesktopBridge();
   const connector = refreshed || (await getConnectorBridgeState());
   syncDesktopConnectorPauseState(connector);
-  await applyDesktopConnectorBadge(connector);
+  if (!(await applyDesktopConnectorBadge(connector))) {
+    await refreshActiveTabBadge();
+  }
   return { success: true, ...connector };
 }
 
@@ -248,10 +252,9 @@ async function applyDesktopConnectorBadge(connector, tabId = undefined) {
       title: 'Browser Recall',
       ...(tabId !== undefined ? { tabId } : {}),
     });
-    await chrome.action.setBadgeText({
-      text: '',
-      ...(tabId !== undefined ? { tabId } : {}),
-    });
+    if (tabId !== undefined) {
+      await chrome.action.setBadgeText({ text: '', tabId });
+    }
     return false;
   }
 
@@ -682,12 +685,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     getConnectorBridgeState()
       .then(async (connector) => {
         syncDesktopConnectorPauseState(connector);
-        await applyDesktopConnectorBadge(connector);
-        const [tab] = await chrome.tabs.query({
-          active: true,
-          lastFocusedWindow: true,
-        });
-        if (tab?.id > 0) await updateBadgeForTab(tab.id, tab.url);
+        if (!(await applyDesktopConnectorBadge(connector))) {
+          await refreshActiveTabBadge();
+        }
       })
       .catch((error) => {
         logDebug('[connector] badge refresh failed:', error.message);
@@ -1282,13 +1282,13 @@ async function updateBadgeForTab(tabId, url) {
     if (await applyDesktopConnectorBadge(connector, tabId)) return;
 
     if (!url || !url.startsWith('http')) {
-      chrome.action.setBadgeText({ text: '', tabId });
+      await chrome.action.setBadgeText({ text: '', tabId });
       return;
     }
     const slug = generateSlugFromUrl(url);
     const page = await readCacheable(pageKey(slug));
     if (!page) {
-      chrome.action.setBadgeText({ text: '', tabId });
+      await chrome.action.setBadgeText({ text: '', tabId });
       return;
     }
     const hasNotes = page.childIds?.some(
@@ -1296,13 +1296,13 @@ async function updateBadgeForTab(tabId, url) {
     );
     const hasLists = page.parentIds?.some((id) => id.startsWith(LIST_PREFIX));
     if (!hasNotes && !hasLists) {
-      chrome.action.setBadgeText({ text: '', tabId });
+      await chrome.action.setBadgeText({ text: '', tabId });
       return;
     }
     const color =
       hasNotes && hasLists ? '#9C27B0' : hasNotes ? '#4A90D9' : '#4CAF50';
-    chrome.action.setBadgeBackgroundColor({ color, tabId });
-    chrome.action.setBadgeText({ text: ' ', tabId });
+    await chrome.action.setBadgeBackgroundColor({ color, tabId });
+    await chrome.action.setBadgeText({ text: ' ', tabId });
   } catch (e) {
     // Non-critical — don't break navigation for a badge update failure.
   }
@@ -1342,6 +1342,20 @@ async function refreshBadgesForUrls(urls) {
     });
     if (tab?.id > 0) {
       updateBadgeForTab(tab.id, tab.url);
+    }
+  } catch (error) {
+    logDebug('[badge] active-tab badge refresh failed:', error.message);
+  }
+}
+
+async function refreshActiveTabBadge() {
+  try {
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      lastFocusedWindow: true,
+    });
+    if (tab?.id > 0) {
+      await updateBadgeForTab(tab.id, tab.url);
     }
   } catch (error) {
     logDebug('[badge] active-tab badge refresh failed:', error.message);
