@@ -1505,7 +1505,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .into_iter()
                 .map(|entry| entry.key)
                 .collect::<Vec<_>>();
-            let deleted_keys = permanent_delete_keys(&storage, &keys).await?;
+            let deleted_keys = permanent_delete_keys(&storage, &device_id, &keys).await?;
             emit_mutation(&app, "note", json!({}));
             emit_mutation(&app, "snapshot", json!({}));
             emit_mutation(&app, "lists", json!({}));

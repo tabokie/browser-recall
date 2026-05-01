@@ -1,3 +1,4 @@
+use crate::commands::permanent_delete_candidates;
 use crate::config::{random_string, ApprovedConnector, ConfigStore, Token};
 use crate::connectors::{
     connector_key, current_local_day_start_unix, prune_inactive_connectors, ConnectorKey,
@@ -33,13 +34,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, oneshot, watch, Mutex, RwLock};
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
-use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{accept_hdr_async_with_config, tungstenite::protocol::WebSocketConfig};
 use tracing::{info, warn};
 
 const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 const CONNECTOR_SOURCE_EXTENSION: &str = "extension";
+const UNAUTHENTICATED_IDLE_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug)]
 pub enum WsServerError {
@@ -367,7 +368,6 @@ async fn bind_first_available(candidates: &[u16]) -> Result<(TcpListener, u16), 
 async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(), WsServerError> {
     let origin_slot = Arc::new(std::sync::Mutex::new(None::<String>));
     let origin_slot_clone = origin_slot.clone();
-    let test_control_enabled = shared.test_control_enabled;
     let ws_stream = accept_hdr_async_with_config(
         stream,
         move |request: &Request, response: Response| {
@@ -377,10 +377,6 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 .and_then(|value| value.to_str().ok())
                 .map(|value| value.to_string());
             *origin_slot_clone.lock().expect("origin mutex poisoned") = origin.clone();
-            if !is_allowed_origin(origin.as_deref(), test_control_enabled) {
-                let response = http_error(StatusCode::FORBIDDEN, "forbidden origin");
-                return Err(response);
-            }
             Ok(response)
         },
         Some(websocket_config()),
@@ -444,6 +440,10 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     Some(Ok(_)) => continue,
                     Some(Err(error)) => return Err(WsServerError::Handshake(error.to_string())),
                 }
+            }
+            _ = tokio::time::sleep(UNAUTHENTICATED_IDLE_TIMEOUT), if !authenticated => {
+                send_json(&mut write, &unauthorized_error()).await?;
+                break;
             }
         };
 
@@ -719,12 +719,10 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 let maybe_browser = {
                     let config = shared.config.lock().await;
                     config.connectors.iter().find_map(|connector| {
-                        (connector.token.0 == token).then(|| {
-                            ConnectedConnector {
-                                browser_id: connector.browser_id.clone(),
-                                browser_name: connector.browser_name.clone(),
-                                extension_id: connector.extension_id.clone(),
-                            }
+                        (connector.token.0 == token).then(|| ConnectedConnector {
+                            browser_id: connector.browser_id.clone(),
+                            browser_name: connector.browser_name.clone(),
+                            extension_id: connector.extension_id.clone(),
                         })
                     })
                 };
@@ -1011,30 +1009,6 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
         set_connected(&shared, connection_id, connector, false).await;
     }
     Ok(())
-}
-
-fn http_error(
-    status: StatusCode,
-    body: &str,
-) -> tokio_tungstenite::tungstenite::http::Response<Option<String>> {
-    let mut response = tokio_tungstenite::tungstenite::http::Response::new(Some(body.to_string()));
-    *response.status_mut() = status;
-    response.headers_mut().insert(
-        "content-type",
-        HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
-    response
-}
-
-fn is_allowed_origin(origin: Option<&str>, test_control_enabled: bool) -> bool {
-    matches!(origin, Some(value) if value.starts_with("chrome-extension://"))
-        || (test_control_enabled
-            && matches!(
-                origin,
-                Some(value)
-                    if value.starts_with("http://127.0.0.1")
-                        || value.starts_with("http://localhost")
-            ))
 }
 
 fn message_requires_current_connector_auth(message: &ConnectorMessage) -> bool {
@@ -1734,6 +1708,20 @@ fn build_mutations(
                 ..mutation("snapshot")
             });
         }
+        LogEntry::PermanentDelete { keys, .. } => {
+            if keys.iter().any(|key| key.starts_with("note:")) {
+                mutations.push(mutation("note"));
+            }
+            if keys.iter().any(|key| key.starts_with("snapshot:")) {
+                mutations.push(mutation("snapshot"));
+            }
+            if keys
+                .iter()
+                .any(|key| key.starts_with("list:") || key.starts_with("page:"))
+            {
+                mutations.push(mutation("lists"));
+            }
+        }
     }
 
     if effects.contains_key("manifest:orphaned") {
@@ -2392,32 +2380,16 @@ async fn handle_permanent_delete(
     shared: &SharedState,
     keys: Vec<String>,
 ) -> Result<DaemonMessage, WsServerError> {
-    let mut deleted_keys = Vec::new();
-    for key in &keys {
-        if key.starts_with("note:") || key.starts_with("list:") || key.starts_with("page:") {
-            shared.storage.delete_entity(key).await?;
-            deleted_keys.push(key.clone());
-            continue;
-        }
-
-        if let Some(snapshot_stem) = key.strip_prefix("snapshot:") {
-            if let Some((slug, timestamp)) = split_snapshot_stem(snapshot_stem) {
-                shared.storage.delete_snapshot(&slug, timestamp).await?;
-                deleted_keys.push(key.clone());
-            }
-        }
+    let deleted_keys = permanent_delete_candidates(&keys);
+    if !deleted_keys.is_empty() {
+        let raw = json!({
+            "timestamp": current_timestamp_millis(),
+            "action": "permanent_delete",
+            "keys": deleted_keys.clone(),
+        });
+        let parsed: LogEntry = serde_json::from_value(raw.clone())?;
+        ingest_typed_entry(shared, parsed, raw).await?;
     }
-
-    let deleted_key_set: HashSet<&str> = deleted_keys.iter().map(String::as_str).collect();
-    let mut orphaned = shared
-        .storage
-        .load_orphaned()
-        .await?
-        .unwrap_or_else(browser_recall_replay::entities::OrphanedManifest::new);
-    orphaned
-        .entries
-        .retain(|entry| !deleted_key_set.contains(entry.key.as_str()));
-    shared.storage.save_orphaned(&orphaned).await?;
 
     Ok(DaemonMessage::PermanentDeleteResult {
         success: true,
@@ -2493,10 +2465,12 @@ async fn load_page_info_parts(
                 continue;
             };
             let snapshots_dir = shared.storage.root().join("data").join("snapshots");
+            let has_md = snapshots_dir.join(format!("{snapshot_stem}.md")).exists();
+            let has_html = snapshots_dir.join(format!("{snapshot_stem}.html")).exists();
             snapshots.push(PopupSnapshotResult {
                 timestamp,
-                has_md: snapshots_dir.join(format!("{snapshot_stem}.md")).exists(),
-                has_html: snapshots_dir.join(format!("{snapshot_stem}.html")).exists(),
+                has_md,
+                has_html,
             });
         }
     }
@@ -2581,13 +2555,6 @@ fn collect_list_ids(nodes: &[TreeNode], out: &mut Vec<String>) {
     }
 }
 
-fn split_snapshot_stem(snapshot_stem: &str) -> Option<(String, i64)> {
-    let last_dash = snapshot_stem.rfind('-')?;
-    let slug = snapshot_stem[..last_dash].to_string();
-    let timestamp = snapshot_stem[last_dash + 1..].parse::<i64>().ok()?;
-    Some((slug, timestamp))
-}
-
 fn websocket_config() -> WebSocketConfig {
     WebSocketConfig {
         max_message_size: Some(MAX_WEBSOCKET_MESSAGE_BYTES),
@@ -2641,6 +2608,13 @@ async fn set_connected(
 ) {
     let mut active_connections = shared.active_connections.lock().await;
     if connected {
+        let replacement_browser_id = connector.browser_id.clone();
+        let replacement_extension_id = connector.extension_id.clone();
+        active_connections.retain(|existing_id, existing_connector| {
+            *existing_id == connection_id
+                || existing_connector.browser_id != replacement_browser_id
+                || existing_connector.extension_id != replacement_extension_id
+        });
         active_connections.insert(connection_id, connector);
     } else {
         active_connections.remove(&connection_id);
@@ -2651,8 +2625,7 @@ async fn set_connected(
         matches!(*service_state, ServiceState::Running)
     };
     let mut snapshot = shared.snapshot.write().await;
-    let (connected_browsers, connected_connectors) =
-        connected_snapshot_fields(&active_connections);
+    let (connected_browsers, connected_connectors) = connected_snapshot_fields(&active_connections);
     snapshot.connected_browsers = connected_browsers;
     snapshot.connected_connectors = connected_connectors;
     if running {

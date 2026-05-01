@@ -201,13 +201,19 @@ async fn duplicate_connections_for_same_connector_stay_connected_until_last_sock
 
     let snapshot = handle.snapshot().await;
     assert_eq!(snapshot.connected_connectors.len(), 1);
-    assert_eq!(snapshot.connected_connectors[0].browser_id, "browser-install");
+    assert_eq!(
+        snapshot.connected_connectors[0].browser_id,
+        "browser-install"
+    );
 
     first.close(None).await.expect("close first socket");
     sleep(Duration::from_millis(100)).await;
     let snapshot = handle.snapshot().await;
     assert_eq!(snapshot.connected_connectors.len(), 1);
-    assert_eq!(snapshot.connected_connectors[0].browser_id, "browser-install");
+    assert_eq!(
+        snapshot.connected_connectors[0].browser_id,
+        "browser-install"
+    );
 
     second.close(None).await.expect("close second socket");
     for _ in 0..40 {

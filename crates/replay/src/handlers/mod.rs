@@ -1,5 +1,6 @@
 pub(crate) mod lists;
 pub(crate) mod notes;
+pub(crate) mod permanent;
 pub(crate) mod rules;
 pub(crate) mod settings;
 pub(crate) mod snapshots;
@@ -13,6 +14,7 @@ pub(crate) use notes::{
     handle_create_note, handle_delete_note, handle_replace_note, handle_restore_note,
     CreateNoteRequest, ReplaceNoteRequest,
 };
+pub(crate) use permanent::handle_permanent_delete;
 pub(crate) use rules::{handle_add_rule, handle_remove_rule, handle_update_rule};
 pub(crate) use settings::handle_update_setting;
 pub(crate) use snapshots::{

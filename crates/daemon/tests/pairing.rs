@@ -69,6 +69,154 @@ async fn fresh_pairing_persists_token() {
 }
 
 #[tokio::test]
+async fn firefox_extension_origin_can_pair() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let mut request = format!("ws://127.0.0.1:{}/", handle.port())
+        .into_client_request()
+        .expect("request");
+    request.headers_mut().insert(
+        "Origin",
+        "moz-extension://12345678-1234-1234-1234-123456789abc"
+            .parse()
+            .unwrap(),
+    );
+    let (mut socket, _) = connect_async(request).await.expect("ws connect");
+
+    let pair_request = serde_json::to_string(&ConnectorMessage::PairRequest {
+        browser_id: "firefox-install-1".into(),
+        browser_name: "Firefox".into(),
+        extension_id: "12345678-1234-1234-1234-123456789abc".into(),
+        browser_profile: Some("Default profile".into()),
+    })
+    .expect("serialize pair request");
+    socket
+        .send(Message::Text(pair_request))
+        .await
+        .expect("send pair request");
+
+    let pending = next_text_message(&mut socket).await;
+    let approved = next_text_message(&mut socket).await;
+
+    let pending: DaemonMessage = serde_json::from_str(&pending).expect("pending json");
+    let approved: DaemonMessage = serde_json::from_str(&approved).expect("approved json");
+    assert!(matches!(pending, DaemonMessage::PairPending { .. }));
+    assert!(matches!(approved, DaemonMessage::PairApproved { .. }));
+
+    let saved = config_store.load_or_create().expect("config reload");
+    assert_eq!(saved.connectors.len(), 1);
+    assert_eq!(saved.connectors[0].browser_name, "Firefox");
+    assert_eq!(
+        saved.connectors[0].extension_id,
+        "12345678-1234-1234-1234-123456789abc"
+    );
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn fresh_pair_replaces_same_connector_active_socket() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let mut first = connect_pair_socket(handle.port(), "Firefox").await;
+    let mut second = connect_pair_socket(handle.port(), "Firefox").await;
+
+    let snapshot = handle.snapshot().await;
+    assert_eq!(snapshot.connected_connectors.len(), 1);
+    assert_eq!(snapshot.connected_connectors[0].browser_name, "Firefox");
+
+    second.close(None).await.expect("close second socket");
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if handle.snapshot().await.connected_connectors.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("replacement socket disconnect clears connected state");
+
+    first.close(None).await.expect("close first socket");
+    handle.shutdown().await;
+}
+
+async fn connect_pair_socket(port: u16, browser_name: &str) -> support::TestSocket {
+    let mut request = format!("ws://127.0.0.1:{port}/")
+        .into_client_request()
+        .expect("request");
+    request.headers_mut().insert(
+        "Origin",
+        "moz-extension://12345678-1234-1234-1234-123456789abc"
+            .parse()
+            .unwrap(),
+    );
+    let (mut socket, _) = connect_async(request).await.expect("ws connect");
+    let pair_request = serde_json::to_string(&ConnectorMessage::PairRequest {
+        browser_id: "firefox-install-1".into(),
+        browser_name: browser_name.into(),
+        extension_id: "12345678-1234-1234-1234-123456789abc".into(),
+        browser_profile: Some("Default profile".into()),
+    })
+    .expect("serialize pair request");
+    socket
+        .send(Message::Text(pair_request))
+        .await
+        .expect("send pair request");
+    let pending = next_text_message(&mut socket).await;
+    let approved = next_text_message(&mut socket).await;
+    let pending: DaemonMessage = serde_json::from_str(&pending).expect("pending json");
+    let approved: DaemonMessage = serde_json::from_str(&approved).expect("approved json");
+    assert!(matches!(pending, DaemonMessage::PairPending { .. }));
+    assert!(matches!(approved, DaemonMessage::PairApproved { .. }));
+    socket
+}
+
+#[tokio::test]
+async fn untrusted_origin_gets_protocol_error_after_websocket_upgrade() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let mut request = format!("ws://127.0.0.1:{}/", handle.port())
+        .into_client_request()
+        .expect("request");
+    request
+        .headers_mut()
+        .insert("Origin", "https://example.test".parse().unwrap());
+    let (mut socket, _) = connect_async(request).await.expect("ws connect");
+
+    socket
+        .send(Message::Text(
+            serde_json::to_string(&ConnectorMessage::GetStatus).expect("status request"),
+        ))
+        .await
+        .expect("send status");
+
+    let response = next_text_message(&mut socket).await;
+    let response: DaemonMessage = serde_json::from_str(&response).expect("error json");
+    match response {
+        DaemonMessage::Error { error, code, .. } => {
+            assert_eq!(error, "unauthorized");
+            assert_eq!(code, "auth_required");
+        }
+        other => panic!("expected auth_required error, got {other:?}"),
+    }
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
 async fn auth_with_cached_token_succeeds() {
     let dir = tempdir().expect("tempdir");
     let config_store = ConfigStore::new(dir.path());

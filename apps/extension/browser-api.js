@@ -7,11 +7,11 @@
     throw new Error('Browser Recall requires the WebExtension API');
   }
 
-  if (nativeChrome) {
+  if (nativeChrome && !nativeBrowser) {
     globalScope.browser = nativeBrowser || nativeChrome;
     globalScope.browserRecallWebExtension = {
       api: nativeChrome,
-      engine: nativeBrowser ? 'chromium-browser-alias' : 'chromium',
+      engine: 'chromium',
     };
     return;
   }
@@ -22,30 +22,53 @@
     return function callbackCompatibleMethod(...args) {
       const callback =
         typeof args[args.length - 1] === 'function' ? args.pop() : null;
-      try {
-        const result = method.apply(target, args);
-        if (callback && result?.then) {
-          result.then(
-            (value) => callback(value),
-            (error) => {
-              console.error(
-                `[browser-api] ${methodName} failed:`,
-                error?.message || error,
-              );
-              callback(undefined);
-            },
-          );
-        }
-        return result;
-      } catch (error) {
+      const handleError = (error, reject) => {
+        console.error(
+          `[browser-api] ${methodName} failed:`,
+          error?.message || error,
+        );
         if (callback) callback(undefined);
-        throw error;
+        if (reject) reject(error);
+      };
+
+      if (method.length <= args.length) {
+        try {
+          const result = method.apply(target, args);
+          if (callback && result?.then) {
+            result.then(
+              (value) => callback(value),
+              (error) => handleError(error),
+            );
+          } else if (callback) {
+            callback(result);
+          }
+          return result?.then ? result : Promise.resolve(result);
+        } catch (error) {
+          handleError(error);
+          return Promise.reject(error);
+        }
       }
+
+      return new Promise((resolve, reject) => {
+        const finish = (value) => {
+          if (callback) callback(value);
+          resolve(value);
+        };
+        try {
+          const result = method.apply(target, [...args, finish]);
+          if (result?.then) {
+            result.then(finish, (error) => handleError(error, reject));
+          } else if (result !== undefined) {
+            finish(result);
+          }
+        } catch (error) {
+          handleError(error, reject);
+        }
+      });
     };
   }
 
-  function wrapStorageArea(area, fallbackArea) {
-    const target = area || fallbackArea;
+  function wrapStorageArea(target) {
     if (!target) return target;
     return {
       ...target,
@@ -60,13 +83,44 @@
     };
   }
 
+  function detectEngine() {
+    const userAgent = globalScope.navigator?.userAgent || '';
+    if (/\bFirefox\//.test(userAgent)) return 'firefox';
+    return 'chromium';
+  }
+
   function wrapObject(target, methodNames) {
     if (!target) return target;
     const wrapped = { ...target };
+    if ('id' in target) wrapped.id = target.id;
     for (const methodName of methodNames) {
       wrapped[methodName] = callbackify(target, methodName);
     }
     return wrapped;
+  }
+
+  function extensionResourceUrl(resourcePath = '') {
+    const normalized = String(resourcePath).replace(/^\/+/, '');
+    const locationHref =
+      globalScope.location?.href || globalScope.window?.location?.href || '';
+    try {
+      const locationUrl = new URL(locationHref);
+      if (
+        locationUrl.protocol === 'moz-extension:' ||
+        locationUrl.protocol === 'chrome-extension:' ||
+        locationUrl.protocol === 'safari-web-extension:'
+      ) {
+        const origin =
+          locationUrl.origin && locationUrl.origin !== 'null'
+            ? locationUrl.origin
+            : `${locationUrl.protocol}//${locationUrl.host}`;
+        return `${origin}/${normalized}`;
+      }
+    } catch {}
+    if (rawApi.runtime?.id) {
+      return `chrome-extension://${rawApi.runtime.id}/${normalized}`;
+    }
+    return normalized;
   }
 
   const storage = rawApi.storage
@@ -74,9 +128,27 @@
         ...rawApi.storage,
         local: wrapStorageArea(rawApi.storage.local),
         sync: wrapStorageArea(rawApi.storage.sync),
-        session: wrapStorageArea(rawApi.storage.session, rawApi.storage.local),
+        session: wrapStorageArea(rawApi.storage.session),
       }
     : rawApi.storage;
+
+  const runtime = wrapObject(rawApi.runtime, [
+    'getPlatformInfo',
+    'openOptionsPage',
+    'sendMessage',
+  ]);
+  if (runtime && typeof rawApi.runtime?.getManifest === 'function') {
+    runtime.getManifest = rawApi.runtime.getManifest.bind(rawApi.runtime);
+  }
+  if (runtime && typeof rawApi.runtime?.reload === 'function') {
+    runtime.reload = rawApi.runtime.reload.bind(rawApi.runtime);
+  }
+  if (runtime && typeof rawApi.runtime?.getURL === 'function') {
+    runtime.getURL = rawApi.runtime.getURL.bind(rawApi.runtime);
+  }
+  if (runtime && typeof runtime.getURL !== 'function') {
+    runtime.getURL = extensionResourceUrl;
+  }
 
   const api = {
     ...rawApi,
@@ -90,13 +162,7 @@
     ]),
     commands: wrapObject(rawApi.commands, ['getAll']),
     contextMenus: rawApi.contextMenus || rawApi.menus,
-    runtime: wrapObject(rawApi.runtime, [
-      'getManifest',
-      'getPlatformInfo',
-      'openOptionsPage',
-      'reload',
-      'sendMessage',
-    ]),
+    runtime,
     scripting: wrapObject(rawApi.scripting, ['executeScript']),
     storage,
     tabs: wrapObject(rawApi.tabs, [
@@ -112,6 +178,6 @@
   globalScope.browser = nativeBrowser || api;
   globalScope.browserRecallWebExtension = {
     api,
-    engine: nativeBrowser && !nativeChrome ? 'firefox' : 'chromium',
+    engine: detectEngine(),
   };
 })(globalThis);

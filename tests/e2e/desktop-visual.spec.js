@@ -28,6 +28,8 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
   const now = Date.now();
   const productResearchUrl = 'https://example.com/product-research';
   const productResearchSlug = generateSlugFromUrl(productResearchUrl);
+  const deletedSnapshotUrl = 'https://example.com/deleted-snapshot';
+  const deletedSnapshotSlug = generateSlugFromUrl(deletedSnapshotUrl);
   const settings = {
     colorScheme,
     historyFileBatch: 10,
@@ -95,6 +97,65 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
     },
     local: {},
   };
+  if (options.includeRecycleBin) {
+    base.session['manifest:orphaned'] = {
+      timestamp: now,
+      entries: [
+        {
+          key: 'note:deleted-note',
+          url: 'https://example.com/deleted-note',
+          deletedAt: now - 4000,
+        },
+        {
+          key: 'note:replaced-note',
+          url: 'https://example.com/replaced-note',
+          deletedAt: now - 3000,
+        },
+        {
+          key: 'list:deleted-list',
+          deletedAt: now - 2000,
+        },
+        {
+          key: `snapshot:${deletedSnapshotSlug}-${now - 1000}`,
+          url: deletedSnapshotUrl,
+          deletedAt: now - 1000,
+        },
+      ],
+    };
+    base.session['note:deleted-note'] = {
+      slug: 'deleted-note',
+      url: 'https://example.com/deleted-note',
+      excerpt: 'Deleted highlight',
+      note: 'Deleted note body',
+      deleted: true,
+      deletedTs: now - 4000,
+    };
+    base.session['note:replaced-note'] = {
+      slug: 'replaced-note',
+      url: 'https://example.com/replaced-note',
+      excerpt: 'Replaced highlight',
+      note: 'Replaced note body',
+      deleted: true,
+      deletedTs: now - 3000,
+      deletionReason: 'replaced',
+      replacedBy: 'note:new-note',
+    };
+    base.session['list:deleted-list'] = {
+      slug: 'deleted-list',
+      name: 'Deleted list',
+      pins: [],
+      deleted: true,
+      deletedTs: now - 2000,
+    };
+    base.session[`page:${deletedSnapshotSlug}`] = {
+      slug: deletedSnapshotSlug,
+      url: deletedSnapshotUrl,
+      title: 'Deleted snapshot page',
+      parentIds: [],
+      childIds: [],
+      visitDates: [],
+    };
+  }
   if (options.includeDetailListMembership) {
     const researchListKey = listKey('research');
     const productResearchPageKey = pageKey(productResearchSlug);
@@ -170,7 +231,7 @@ async function serveDesktopUi(use) {
 async function installDesktopBridgeMock(page, options = {}) {
   const seed = desktopVisualSeed(options.colorScheme || 'amber', options);
   await page.addInitScript(
-    ({ seed, setupComplete, pairedBrowsers }) => {
+    ({ seed, setupComplete, pairedBrowsers, deleteSnapshotFails }) => {
       const listeners = new Map();
       const stores = {
         session: new Map(Object.entries(seed.session)),
@@ -286,6 +347,9 @@ async function installDesktopBridgeMock(page, options = {}) {
           stores.session.set(key, entries);
         },
         emitRuntimeMessage,
+        recycleBinKeys() {
+          return clone(stores.session.get('manifest:orphaned'))?.entries || [];
+        },
       };
 
       async function bridgeAction(request = {}) {
@@ -354,6 +418,34 @@ async function installDesktopBridgeMock(page, options = {}) {
                 clone(stores.session.get(`detailSnapshots:${request.slug}`)) ||
                 [],
             };
+          case 'deleteSnapshot':
+            if (deleteSnapshotFails) {
+              return {
+                success: false,
+                error: 'delete failed in visual harness',
+              };
+            }
+            stores.session.set(
+              `detailSnapshots:${request.slug}`,
+              (stores.session.get(`detailSnapshots:${request.slug}`) || [])
+                .filter((snapshot) => snapshot.timestamp !== request.timestamp)
+                .map(clone),
+            );
+            return { success: true };
+          case 'permanentDeleteAll': {
+            const orphaned = stores.session.get('manifest:orphaned') || {
+              entries: [],
+            };
+            const deletedKeys = (orphaned.entries || []).map(
+              (entry) => entry.key,
+            );
+            for (const key of deletedKeys) stores.session.delete(key);
+            stores.session.set('manifest:orphaned', {
+              timestamp: Date.now(),
+              entries: [],
+            });
+            return { success: true, deletedKeys };
+          }
           case 'getDirectorySize':
             return { success: true, size: 4096 };
           case 'readCacheable':
@@ -408,6 +500,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       seed,
       setupComplete: options.setupComplete ?? true,
       pairedBrowsers: options.pairedBrowsers || [],
+      deleteSnapshotFails: Boolean(options.deleteSnapshotFails),
     },
   );
 }
@@ -569,6 +662,83 @@ test.describe('desktop visual regression', () => {
         'highlights',
         'snapshots',
       ]);
+    });
+  });
+
+  test('page detail keeps snapshot visible when backend delete fails', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        includeDetailListMembership: true,
+        deleteSnapshotFails: true,
+      });
+
+      const row = page.locator(
+        '.result-row[data-url="https://example.com/product-research"]',
+      );
+      await row.hover();
+      await row.locator('.att-ctrl-btn').click({ force: true });
+
+      const snapshotRow = page.locator('.detail-snapshot-row');
+      await expect(snapshotRow).toBeVisible();
+      await page.locator('.detail-snapshot-delete').click();
+
+      await expect(snapshotRow).toBeVisible();
+    });
+  });
+
+  test('recycle bin count matches the restorable item list', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        includeRecycleBin: true,
+      });
+
+      await expect(page.locator('#recycleBinCount')).toHaveText('3');
+      await page.locator('#recycleBinBtn').click();
+
+      await expect(page.locator('.recycle-card')).toHaveCount(3);
+      await expect(page.locator('.recycle-card-key')).toHaveText([
+        'note:deleted-note',
+        'list:deleted-list',
+        /^snapshot:/,
+      ]);
+      await expect(page.getByText('note:replaced-note')).toHaveCount(0);
+      await expect(page.locator('#recycleBinCount')).toHaveText('3');
+    });
+  });
+
+  test('empty recycle bin immediately clears the count and rendered list', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        includeRecycleBin: true,
+      });
+
+      await page.locator('#recycleBinBtn').click();
+      await expect(page.locator('.recycle-card')).toHaveCount(3);
+      await expect(page.locator('#recycleBinCount')).toHaveText('3');
+
+      await page.locator('.empty-bin-btn').click();
+
+      await expect(page.locator('.recycle-card')).toHaveCount(0);
+      await expect(page.locator('#recycleBinEmpty')).toBeVisible();
+      await expect(page.locator('#recycleBinCount')).toHaveText('');
+      await expect(page.locator('#recycleBinBtn')).toBeHidden();
+      await expect
+        .poll(() =>
+          page.evaluate(() => window.__desktopVisualHarness.recycleBinKeys()),
+        )
+        .toEqual([]);
     });
   });
 

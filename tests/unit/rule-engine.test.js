@@ -149,7 +149,7 @@ describe('validateRuleConfig', () => {
 });
 
 // ---------------------------------------------------------------------------
-// validateSmartRuleFn
+// validateFnRuleSource
 // ---------------------------------------------------------------------------
 
 describe('validateFnRuleSource', () => {

@@ -1284,6 +1284,61 @@ async fn restore_snapshot_relinks_child_on_page() {
 }
 
 #[tokio::test]
+async fn permanent_delete_removes_entities_and_orphan_entries() {
+    let mut orphaned = OrphanedManifest::new();
+    orphaned.entries = vec![
+        OrphanedEntry {
+            key: "note:n1".to_string(),
+            url: Some("https://a.com".to_string()),
+        },
+        OrphanedEntry {
+            key: "snapshot:page-a-1000".to_string(),
+            url: Some("https://a.com".to_string()),
+        },
+        OrphanedEntry {
+            key: "note:keep".to_string(),
+            url: Some("https://b.com".to_string()),
+        },
+    ];
+
+    let mut store = BTreeMap::new();
+    store.insert(
+        "note:n1".to_string(),
+        Entity::Note(note("n1", "https://a.com")),
+    );
+    store.insert("manifest:orphaned".to_string(), Entity::Orphaned(orphaned));
+
+    let result = effect_of(
+        LogEntry::PermanentDelete {
+            timestamp: 200,
+            keys: vec!["note:n1".to_string(), "snapshot:page-a-1000".to_string()],
+        },
+        load_from(store),
+        context(),
+    )
+    .await
+    .expect("permanent delete replay succeeds");
+
+    assert!(result.get("note:n1").expect("note delete").is_delete());
+    assert!(result
+        .get("snapshot:page-a-1000")
+        .expect("snapshot delete")
+        .is_delete());
+    let orphaned = result
+        .get("manifest:orphaned")
+        .and_then(EntityEffect::as_orphaned)
+        .expect("orphaned updated");
+    assert_eq!(
+        orphaned.entries,
+        vec![OrphanedEntry {
+            key: "note:keep".to_string(),
+            url: Some("https://b.com".to_string()),
+        }]
+    );
+    assert_eq!(orphaned.timestamps.get("test-device"), Some(&200));
+}
+
+#[tokio::test]
 async fn update_setting_persists_dynamic_value_with_timestamp() {
     let result = effect_of(
         LogEntry::UpdateSetting {

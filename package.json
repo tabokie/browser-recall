@@ -19,6 +19,7 @@
     "test:integration": "vitest run tests/integration",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:firefox:smoke": "playwright test --config playwright.smoke.config.js tests/smoke/firefox-extension.spec.js",
     "test:visual": "npm run build:desktop-ui && playwright test tests/e2e/desktop-visual.spec.js",
     "manual": "node scripts/manual-test-browser.mjs",
     "manual:seed": "node scripts/manual-test-browser.mjs --seed",

@@ -1,14 +1,16 @@
 use browser_recall_daemon::commands::{
     add_rule, create_note, delete_note, import_history, list_history_files, list_paired_browsers,
     load_history_batch, load_page_notes_payload, load_page_snapshot_payload, pair_browser_revoke,
-    preview_rule_payload, read_cacheable, remove_rule, rename_page, replay_entry, restore_note,
-    save_list_meta, save_settings_key, submit_event, toggle_list_pin, update_note,
-    HistoryImportEntry,
+    permanent_delete_keys, preview_rule_payload, read_cacheable, remove_rule, rename_page,
+    replay_entry, restore_note, save_list_meta, save_settings_key, submit_event, toggle_list_pin,
+    update_note, HistoryImportEntry,
 };
 use browser_recall_daemon::protocol::{RuleBatchEntry, RulePayload};
 use browser_recall_daemon::storage::Storage;
 use browser_recall_daemon::{ApprovedConnector, ConfigStore, Token};
-use browser_recall_replay::entities::ListEntity;
+use browser_recall_replay::entities::{
+    ListEntity, ListOrderManifest, NameToIdManifest, PageEntity, PinEntity, TreeNode,
+};
 use browser_recall_replay::{generate_slug_from_url, LogEntry};
 use std::collections::BTreeMap;
 use tempfile::tempdir;
@@ -114,12 +116,13 @@ async fn note_and_snapshot_payloads_reflect_storage_state() {
     .await
     .expect("create note");
 
+    let slug = generate_slug_from_url("https://example.com/page").expect("slug");
     storage
-        .save_snapshot_html("example-com-page", 1_710_000_200_000, "<html></html>")
+        .save_snapshot_html(&slug, 1_710_000_200_000, "<html></html>")
         .await
         .expect("save html");
     storage
-        .save_snapshot_markdown("example-com-page", 1_710_000_200_000, "snapshot markdown")
+        .save_snapshot_markdown(&slug, 1_710_000_200_000, "snapshot markdown")
         .await
         .expect("save markdown");
     replay_entry(
@@ -128,14 +131,13 @@ async fn note_and_snapshot_payloads_reflect_storage_state() {
         LogEntry::CreateSnapshot {
             timestamp: 1_710_000_200_000,
             url: "https://example.com/page".to_string(),
-            path: "snapshots/example-com-page-1710000200000".to_string(),
+            path: format!("snapshots/{slug}-1710000200000"),
             title: Some("Example Page".to_string()),
         },
     )
     .await
     .expect("create snapshot");
 
-    let slug = generate_slug_from_url("https://example.com/page").expect("slug");
     let notes = load_page_notes_payload(&storage, &slug)
         .await
         .expect("load notes");
@@ -161,6 +163,176 @@ async fn note_and_snapshot_payloads_reflect_storage_state() {
             .and_then(|value| value.as_bool()),
         Some(true)
     );
+
+    tokio::fs::remove_file(
+        dir.path()
+            .join("data")
+            .join("snapshots")
+            .join(format!("{slug}-1710000200000.html")),
+    )
+    .await
+    .expect("remove html backing file");
+    tokio::fs::remove_file(
+        dir.path()
+            .join("data")
+            .join("snapshots")
+            .join(format!("{slug}-1710000200000.md")),
+    )
+    .await
+    .expect("remove markdown backing file");
+
+    let snapshots = load_page_snapshot_payload(&storage, &slug)
+        .await
+        .expect("reload snapshots with missing files");
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(
+        snapshots[0].get("hasMd").and_then(|value| value.as_bool()),
+        Some(false)
+    );
+    assert_eq!(
+        snapshots[0]
+            .get("hasHtml")
+            .and_then(|value| value.as_bool()),
+        Some(false)
+    );
+
+    storage
+        .delete_snapshot(&slug, 1_710_000_200_000)
+        .await
+        .expect("delete snapshot metadata");
+
+    let snapshots = load_page_snapshot_payload(&storage, &slug)
+        .await
+        .expect("reload snapshots");
+    assert!(
+        snapshots.is_empty(),
+        "snapshot payload should disappear after deleting the missing-file item"
+    );
+
+    let page = storage
+        .load_page(&slug)
+        .await
+        .expect("load page")
+        .expect("page exists");
+    assert!(
+        !page
+            .child_ids
+            .contains(&format!("snapshot:{slug}-1710000200000")),
+        "deleting snapshot files should remove the page child ref"
+    );
+}
+
+#[tokio::test]
+async fn permanent_delete_repairs_note_and_list_relationship_metadata() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+
+    let mut page = PageEntity::new("page-a".to_string());
+    page.url = Some("https://example.com/page-a".to_string());
+    page.child_ids = vec!["note:n1".to_string()];
+    page.parent_ids = vec!["list:reading".to_string()];
+    storage.save_page("page-a", &page).await.expect("save page");
+
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::CreateNote {
+            timestamp: 1_710_000_000_000,
+            url: "https://example.com/page-a".to_string(),
+            path: "notes/n1.json".to_string(),
+            title: Some("Page A".to_string()),
+            excerpt: Some("highlight".to_string()),
+            note: Some("note body".to_string()),
+            css_path: None,
+        },
+    )
+    .await
+    .expect("create note");
+
+    let mut list = ListEntity::new("reading".to_string());
+    list.name = "Reading".to_string();
+    list.owner = Some("device-a".to_string());
+    list.pins = vec![
+        PinEntity {
+            id: "page:page-a".to_string(),
+            pinned_at: 1,
+            source: Some("manual".to_string()),
+        },
+        PinEntity {
+            id: "note:n1".to_string(),
+            pinned_at: 2,
+            source: Some("manual".to_string()),
+        },
+    ];
+    storage
+        .save_list("reading", &list)
+        .await
+        .expect("save list");
+    storage
+        .save_name_to_id(&NameToIdManifest {
+            timestamps: Default::default(),
+            paths: BTreeMap::from([("device-a/Reading".to_string(), "reading".to_string())]),
+        })
+        .await
+        .expect("save name map");
+    storage
+        .save_list_order(&ListOrderManifest {
+            timestamps: Default::default(),
+            tree: vec![TreeNode {
+                id: "list:reading".to_string(),
+                children: Vec::new(),
+            }],
+        })
+        .await
+        .expect("save list order");
+
+    let deleted = permanent_delete_keys(&storage, "device-a", &["note:n1".to_string()])
+        .await
+        .expect("permanent delete note");
+    assert_eq!(deleted, vec!["note:n1".to_string()]);
+    let page = storage
+        .load_page("page-a")
+        .await
+        .expect("load page")
+        .expect("page remains through list membership");
+    assert!(!page.child_ids.contains(&"note:n1".to_string()));
+    let list = storage
+        .load_list("reading")
+        .await
+        .expect("load list")
+        .expect("list remains");
+    assert!(!list.pins.iter().any(|pin| pin.id == "note:n1"));
+
+    let deleted = permanent_delete_keys(&storage, "device-a", &["list:reading".to_string()])
+        .await
+        .expect("permanent delete list");
+    assert_eq!(deleted, vec!["list:reading".to_string()]);
+    assert!(storage
+        .load_list("reading")
+        .await
+        .expect("load list")
+        .is_none());
+    assert!(storage
+        .load_page("page-a")
+        .await
+        .expect("load page")
+        .is_none());
+    let name_map = storage
+        .load_name_to_id()
+        .await
+        .expect("load name map")
+        .expect("name map exists");
+    assert!(!name_map.paths.values().any(|value| value == "reading"));
+    let order = storage
+        .load_list_order()
+        .await
+        .expect("load list order")
+        .expect("list order exists");
+    assert!(!order.tree.iter().any(|node| node.id == "list:reading"));
 }
 
 #[tokio::test]

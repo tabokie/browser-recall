@@ -6,40 +6,24 @@ import {
   peekBufferedMessage,
   shiftBufferedMessage,
 } from './event-buffer.js';
+import {
+  CONNECTOR_STATES,
+  CONNECTOR_STATE_STORAGE_KEYS,
+  CONNECTOR_STORAGE_KEYS as STORAGE_KEYS,
+  connectorStateFromStorage,
+  isManualReadyConnectorState,
+  isProbeReadyConnectorState,
+  isTerminalConnectorState,
+} from './state.js';
 import { logDebug } from '../logger.js';
 
 const DEFAULT_PORTS = [28471, 28472, 28473];
-const STORAGE_KEYS = {
-  deviceId: 'connectorDeviceId',
-  port: 'connectorDaemonPort',
-  state: 'connectorState',
-  token: 'connectorAuthToken',
-  lastError: 'connectorLastError',
-  lastErrorCode: 'connectorLastErrorCode',
-  lastDrainedAt: 'connectorLastDrainedAt',
-  dataFolder: 'connectorDataFolder',
-  daemonBufferDepth: 'connectorDaemonBufferDepth',
-  lastDiagnostic: 'connectorLastDiagnostic',
-};
 const RECONNECT_ALARM_NAME = 'browserRecallConnectorReconnect';
 const MANUAL_RECONNECT_DEADLINE_MS = 15_000;
 const RECONNECT_DELAY_MS = 15_000;
 const SOCKET_OPEN_TIMEOUT_MS = 5000;
 const BRIDGE_REQUEST_TIMEOUT_MS = 1500;
-const TERMINAL_STATES = new Set([
-  'connected',
-  'paused',
-  'pair_pending',
-  'pair_denied',
-  'auth_failed',
-  'offline',
-]);
-const MANUAL_READY_STATES = new Set([
-  'connected',
-  'paused',
-  'pair_pending',
-  'pair_denied',
-]);
+const STATE_PROBE_TIMEOUT_MS = 2500;
 
 let currentSocket = null;
 let reconnectTimer = null;
@@ -49,6 +33,55 @@ let pendingRequest = null;
 let bridgeRequestQueue = Promise.resolve();
 let started = false;
 let alarmListenerInstalled = false;
+let connectorStorageCache = {};
+let connectorStatsCache = {};
+const connectorStateListeners = new Set();
+
+function cachedConnectorState() {
+  return connectorStateFromStorage(connectorStorageCache, connectorStatsCache);
+}
+
+function notifyConnectorStateListeners() {
+  const state = cachedConnectorState();
+  for (const listener of [...connectorStateListeners]) {
+    try {
+      listener(state);
+    } catch (error) {
+      logDebug('[connector] state listener failed:', error.message);
+    }
+  }
+}
+
+export function subscribeConnectorBridgeState(listener) {
+  connectorStateListeners.add(listener);
+  return () => connectorStateListeners.delete(listener);
+}
+
+function mergeConnectorStorageCache(patch) {
+  let changed = false;
+  for (const [key, value] of Object.entries(patch || {})) {
+    if (!CONNECTOR_STATE_STORAGE_KEYS.includes(key)) continue;
+    if (Object.is(connectorStorageCache[key], value)) continue;
+    connectorStorageCache[key] = value;
+    changed = true;
+  }
+  if (changed) notifyConnectorStateListeners();
+}
+
+function removeConnectorStorageCache(keys) {
+  let changed = false;
+  for (const key of Array.isArray(keys) ? keys : [keys]) {
+    if (!CONNECTOR_STATE_STORAGE_KEYS.includes(key)) continue;
+    delete connectorStorageCache[key];
+    changed = true;
+  }
+  if (changed) notifyConnectorStateListeners();
+}
+
+function updateConnectorStatsCache(stats) {
+  connectorStatsCache = stats || {};
+  notifyConnectorStateListeners();
+}
 
 function installReconnectAlarmListener() {
   if (alarmListenerInstalled || !chrome.alarms?.onAlarm?.addListener) return;
@@ -61,6 +94,7 @@ function installReconnectAlarmListener() {
 }
 
 async function writeState(patch) {
+  mergeConnectorStorageCache(patch);
   await chrome.storage.local.set(patch);
 }
 
@@ -71,6 +105,7 @@ async function syncBufferStats() {
     desktopPendingBytes: stats.pendingBytes,
     desktopRefuseMode: stats.refuseMode,
   });
+  updateConnectorStatsCache(stats);
   return stats;
 }
 
@@ -93,6 +128,7 @@ async function setDiagnostic(code, details = {}) {
 }
 
 async function clearDiagnostic() {
+  removeConnectorStorageCache(STORAGE_KEYS.lastDiagnostic);
   await chrome.storage.local.remove(STORAGE_KEYS.lastDiagnostic);
 }
 
@@ -130,10 +166,6 @@ function socketReadyStateName(socket) {
     default:
       return 'missing';
   }
-}
-
-function terminalConnectorState(state) {
-  return TERMINAL_STATES.has(state);
 }
 
 async function waitForConnectorState(predicate, timeoutMs = 1500) {
@@ -200,6 +232,29 @@ function hasAuthenticatedOpenSocket() {
   return (
     currentSocket?._authenticated && currentSocket.readyState === WebSocket.OPEN
   );
+}
+
+async function refreshAuthenticatedSocketStatus({
+  diagnosticCode,
+  logMessage,
+  awaitFlush,
+}) {
+  if (!hasAuthenticatedOpenSocket()) return false;
+  clearReconnect();
+  if (pendingRequest) return true;
+  const status = await requestStatus().catch(async (error) => {
+    await setDiagnostic(diagnosticCode, {
+      message: error.message,
+      code: error.code || null,
+    });
+    logDebug(logMessage, error.message);
+    return null;
+  });
+  if (!status) return false;
+  const flush = flushBufferedMessages();
+  if (awaitFlush) await flush;
+  else void flush;
+  return true;
 }
 
 function requiredString(value) {
@@ -347,7 +402,9 @@ async function connect(options = {}) {
 
   connectPromise = (async () => {
     await syncBufferStats();
-    await setState(started ? 'connecting' : 'starting');
+    await setState(
+      started ? CONNECTOR_STATES.CONNECTING : CONNECTOR_STATES.STARTING,
+    );
 
     const ports = await candidatePorts(options);
     logDebug('[connector] connect start', {
@@ -386,7 +443,7 @@ async function connect(options = {}) {
     }
 
     await setDiagnostic('no_ports_reachable', { ports, failures });
-    await setState('offline');
+    await setState(CONNECTOR_STATES.OFFLINE);
     scheduleReconnect(RECONNECT_DELAY_MS);
   })();
 
@@ -404,7 +461,7 @@ async function markSocketAuthenticated(socket, { source, storagePatch = {} }) {
     await writeState(storagePatch);
   }
   socket._authenticated = true;
-  await setState('connected', {
+  await setState(CONNECTOR_STATES.CONNECTED, {
     [STORAGE_KEYS.lastError]: null,
     [STORAGE_KEYS.lastErrorCode]: null,
   });
@@ -426,7 +483,7 @@ function attachSocket(socket) {
       pendingRequest = null;
       if (payload.type === 'error') {
         if (payload.error === 'paused') {
-          await setState('paused', {
+          await setState(CONNECTOR_STATES.PAUSED, {
             [STORAGE_KEYS.lastError]:
               payload.message || 'Browser Recall is paused',
             [STORAGE_KEYS.lastErrorCode]: payload.code || 'paused',
@@ -458,30 +515,39 @@ function attachSocket(socket) {
         await markSocketAuthenticated(socket, { source: 'auth' });
         break;
       case 'pair_pending':
-        await setState('pair_pending');
+        await setState(CONNECTOR_STATES.PAIR_PENDING);
         break;
       case 'auth_fail':
         await setDiagnostic('auth_fail', {
           reason: payload.reason || null,
         });
-        socket._closeState = 'auth_failed';
+        socket._closeState = CONNECTOR_STATES.AUTH_FAILED;
         socket._reconnectDelayMs = 250;
+        removeConnectorStorageCache([STORAGE_KEYS.token]);
         await chrome.storage.local.remove([STORAGE_KEYS.token]);
         socket.close();
         break;
       case 'pair_denied':
         await setDiagnostic('pair_denied');
-        socket._closeState = 'pair_denied';
+        socket._closeState = CONNECTOR_STATES.PAIR_DENIED;
         socket._reconnectDelayMs = 30_000;
         socket.close();
         break;
       case 'error':
         if (payload.error === 'paused') {
-          await setState('paused', {
+          await setState(CONNECTOR_STATES.PAUSED, {
             [STORAGE_KEYS.lastError]:
               payload.message || 'Browser Recall is paused',
             [STORAGE_KEYS.lastErrorCode]: payload.code || 'paused',
           });
+        } else {
+          await setDiagnostic(payload.code || payload.error || 'daemon_error', {
+            message: payload.message || payload.error || 'Daemon error',
+            error: payload.error || null,
+          });
+          socket._closeState = CONNECTOR_STATES.OFFLINE;
+          socket._reconnectDelayMs = RECONNECT_DELAY_MS;
+          socket.close();
         }
         break;
       case 'pong':
@@ -520,7 +586,7 @@ function attachSocket(socket) {
           state: 'authenticated_socket_closed',
           readyState: socketReadyStateName(socket),
         });
-        await setState('connecting');
+        await setState(CONNECTOR_STATES.CONNECTING);
         void connect({ storedOnly: true });
         return;
       }
@@ -528,7 +594,7 @@ function attachSocket(socket) {
         state: 'unauthenticated_socket_closed',
         readyState: socketReadyStateName(socket),
       });
-      await setState('offline');
+      await setState(CONNECTOR_STATES.OFFLINE);
       scheduleReconnect(RECONNECT_DELAY_MS);
     },
     { once: true },
@@ -681,7 +747,7 @@ async function flushBufferedMessages() {
         });
       } catch (error) {
         if (error.code === 'replay_error' || error.code === 'fs_error') {
-          await setState('paused', {
+          await setState(CONNECTOR_STATES.PAUSED, {
             [STORAGE_KEYS.lastError]: error.message,
             [STORAGE_KEYS.lastErrorCode]: error.code,
           });
@@ -738,33 +804,76 @@ export async function initConnectorBridge() {
     return;
   }
   started = true;
-  await setState('starting');
+  await setState(CONNECTOR_STATES.STARTING);
   await connect();
 }
 
-export async function connectDesktopBridge() {
-  if (hasAuthenticatedOpenSocket()) {
-    clearReconnect();
-    if (pendingRequest) return getConnectorBridgeState();
-    const status = await requestStatus().catch(async (error) => {
-      await setDiagnostic('manual_status_failed', {
-        message: error.message,
-        code: error.code || null,
-      });
-      logDebug('[connector] manual status refresh failed:', error.message);
-      return null;
-    });
-    if (status) {
-      await flushBufferedMessages();
-      return getConnectorBridgeState();
+export async function refreshConnectorBridgeState(
+  timeoutMs = STATE_PROBE_TIMEOUT_MS,
+) {
+  installReconnectAlarmListener();
+
+  if (
+    await refreshAuthenticatedSocketStatus({
+      diagnosticCode: 'state_probe_status_failed',
+      logMessage: '[connector] state probe status refresh failed:',
+      awaitFlush: false,
+    })
+  ) {
+    return getConnectorBridgeState();
+  }
+
+  if (
+    currentSocket &&
+    (currentSocket.readyState === WebSocket.CLOSED ||
+      currentSocket.readyState === WebSocket.CLOSING)
+  ) {
+    currentSocket = null;
+  }
+
+  if (!started) {
+    started = true;
+    await setState(CONNECTOR_STATES.STARTING);
+    await connect();
+  } else if (connectPromise) {
+    await connectPromise;
+  } else if (!currentSocket) {
+    await connect();
+  }
+
+  return waitForConnectorState((candidate) => {
+    if (
+      candidate.state === CONNECTOR_STATES.CONNECTED &&
+      candidate.deviceId &&
+      !candidate.refuseMode
+    ) {
+      return true;
     }
+    if (candidate.state === CONNECTOR_STATES.OFFLINE) {
+      return !currentSocket && !connectPromise;
+    }
+    return isProbeReadyConnectorState(candidate.state);
+  }, timeoutMs);
+}
+
+export async function connectDesktopBridge() {
+  if (
+    await refreshAuthenticatedSocketStatus({
+      diagnosticCode: 'manual_status_failed',
+      logMessage: '[connector] manual status refresh failed:',
+      awaitFlush: true,
+    })
+  ) {
+    return getConnectorBridgeState();
+  }
+  if (hasAuthenticatedOpenSocket()) {
     if (currentSocket) {
       await closeSocketForReconnect(currentSocket);
     }
   }
 
   clearReconnect();
-  await setState('connecting');
+  await setState(CONNECTOR_STATES.CONNECTING);
 
   if (currentSocket) await closeSocketForReconnect(currentSocket);
   if (!started) started = true;
@@ -779,9 +888,9 @@ export async function connectDesktopBridge() {
     });
     await connect();
     const state = await waitForConnectorState((candidate) =>
-      terminalConnectorState(candidate.state),
+      isTerminalConnectorState(candidate.state),
     );
-    if (MANUAL_READY_STATES.has(state.state)) {
+    if (isManualReadyConnectorState(state.state)) {
       return state;
     }
     logDebug('[connector] manual reconnect retry', {
@@ -789,11 +898,11 @@ export async function connectDesktopBridge() {
       state: state.state,
       diagnostic: state.lastDiagnostic?.code || null,
     });
-    if (currentSocket && !MANUAL_READY_STATES.has(state.state)) {
+    if (currentSocket && !isManualReadyConnectorState(state.state)) {
       await closeSocketForReconnect(currentSocket);
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
-    await setState('connecting');
+    await setState(CONNECTOR_STATES.CONNECTING);
   }
   const finalState = await getConnectorBridgeState();
   const finalDiagnostic = finalState.lastDiagnostic || {};
@@ -806,7 +915,7 @@ export async function connectDesktopBridge() {
       : [],
     ports: Array.isArray(finalDiagnostic.ports) ? finalDiagnostic.ports : [],
   });
-  await setState('offline');
+  await setState(CONNECTOR_STATES.OFFLINE);
   return getConnectorBridgeState();
 }
 
@@ -863,28 +972,11 @@ export async function enqueueDesktopNote(note) {
 }
 
 export async function getConnectorBridgeState() {
-  const stats = await syncBufferStats();
-  const stored = await chrome.storage.local.get([
-    ...Object.values(STORAGE_KEYS),
-    'desktopPendingEvents',
-    'desktopPendingBytes',
-    'desktopRefuseMode',
-  ]);
-  return {
-    state: stored[STORAGE_KEYS.state] || 'offline',
-    port: stored[STORAGE_KEYS.port] || null,
-    deviceId: stored[STORAGE_KEYS.deviceId] || null,
-    hasToken: Boolean(stored[STORAGE_KEYS.token]),
-    pendingEvents: stored.desktopPendingEvents ?? stats.pendingEvents,
-    pendingBytes: stored.desktopPendingBytes ?? stats.pendingBytes,
-    refuseMode: Boolean(stored.desktopRefuseMode ?? stats.refuseMode),
-    lastError: stored[STORAGE_KEYS.lastError] || null,
-    lastErrorCode: stored[STORAGE_KEYS.lastErrorCode] || null,
-    lastDrainedAt: stored[STORAGE_KEYS.lastDrainedAt] || null,
-    dataFolder: stored[STORAGE_KEYS.dataFolder] || null,
-    daemonBufferDepth: stored[STORAGE_KEYS.daemonBufferDepth] ?? null,
-    lastDiagnostic: stored[STORAGE_KEYS.lastDiagnostic] || null,
-  };
+  const stats = await bufferStats();
+  const stored = await chrome.storage.local.get(CONNECTOR_STATE_STORAGE_KEYS);
+  connectorStatsCache = stats || {};
+  connectorStorageCache = { ...connectorStorageCache, ...stored };
+  return cachedConnectorState();
 }
 
 export async function requestDesktopRuleBatch(listIds, entries) {

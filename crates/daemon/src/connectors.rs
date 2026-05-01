@@ -31,8 +31,12 @@ pub fn prune_inactive_connectors(
 ) -> usize {
     let before = connectors.len();
     connectors.retain(|connector| {
-        active_keys.contains(&connector_key(&connector.browser_id, &connector.extension_id))
-            || connector.last_seen_at.is_some_and(|last_seen| last_seen >= cutoff)
+        active_keys.contains(&connector_key(
+            &connector.browser_id,
+            &connector.extension_id,
+        )) || connector
+            .last_seen_at
+            .is_some_and(|last_seen| last_seen >= cutoff)
     });
     before - connectors.len()
 }
@@ -79,7 +83,10 @@ mod tests {
         ];
         let active = HashSet::from([connector_key("connected-old", "ext")]);
 
-        assert_eq!(prune_inactive_connectors(&mut connectors, &active, cutoff), 1);
+        assert_eq!(
+            prune_inactive_connectors(&mut connectors, &active, cutoff),
+            1
+        );
         assert_eq!(connectors.len(), 2);
         assert!(connectors
             .iter()

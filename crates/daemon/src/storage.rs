@@ -1,6 +1,6 @@
 use browser_recall_replay::entities::{
     Entity, ListEntity, ListOrderManifest, NameToIdManifest, NoteEntity, OrphanedManifest,
-    PageEntity, SettingsEntity,
+    PageEntity, SettingsEntity, TreeNode,
 };
 use browser_recall_replay::EntityEffect;
 use chrono::{Local, TimeZone};
@@ -319,12 +319,21 @@ impl Storage {
             return Ok(());
         }
         if let Some(slug) = key.strip_prefix("note:") {
+            self.remove_note_references(slug).await?;
             remove_if_exists(self.note_path(slug)).await?;
             self.cache_remove(key);
             return Ok(());
         }
         if let Some(slug) = key.strip_prefix("list:") {
+            self.remove_list_references(slug).await?;
             remove_if_exists(self.list_path(slug)).await?;
+            self.cache_remove(key);
+            return Ok(());
+        }
+        if let Some(snapshot_stem) = key.strip_prefix("snapshot:") {
+            if let Some((slug, timestamp)) = split_snapshot_stem(snapshot_stem) {
+                self.delete_snapshot(&slug, timestamp).await?;
+            }
             self.cache_remove(key);
             return Ok(());
         }
@@ -399,6 +408,8 @@ impl Storage {
     pub async fn delete_snapshot(&self, slug: &str, timestamp: i64) -> io::Result<()> {
         remove_if_exists(self.snapshot_html_path(slug, timestamp)).await?;
         remove_if_exists(self.snapshot_markdown_path(slug, timestamp)).await?;
+        let snapshot_key = format!("snapshot:{slug}-{timestamp}");
+        self.remove_page_child_references(&snapshot_key).await?;
         Ok(())
     }
 
@@ -655,6 +666,99 @@ impl Storage {
         Ok(result)
     }
 
+    pub async fn load_all_lists(&self) -> io::Result<BTreeMap<String, ListEntity>> {
+        let lists_dir = self.root().join("lists");
+        let mut result = BTreeMap::new();
+        let mut entries = match fs::read_dir(&lists_dir).await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(result),
+            Err(error) => return Err(error),
+        };
+
+        while let Some(entry) = entries.next_entry().await? {
+            if !entry.file_type().await?.is_file() {
+                continue;
+            }
+            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            let Some(slug) = name.strip_suffix(".json").map(str::to_string) else {
+                continue;
+            };
+            let raw = fs::read_to_string(entry.path()).await?;
+            let list: ListEntity = serde_json::from_str(&raw).map_err(invalid_data)?;
+            result.insert(slug, list);
+        }
+
+        Ok(result)
+    }
+
+    async fn remove_note_references(&self, slug: &str) -> io::Result<()> {
+        let note_key = format!("note:{slug}");
+        self.remove_page_child_references(&note_key).await?;
+
+        for (list_slug, mut list) in self.load_all_lists().await? {
+            let original_len = list.pins.len();
+            list.pins.retain(|pin| pin.id != note_key);
+            if list.pins.len() != original_len {
+                self.save_list(&list_slug, &list).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn remove_list_references(&self, slug: &str) -> io::Result<()> {
+        let list_key = format!("list:{slug}");
+
+        if let Some(mut order) = self.load_list_order().await? {
+            let original_tree = order.tree.clone();
+            order.tree = remove_list_from_tree(&order.tree, &list_key);
+            if order.tree != original_tree {
+                self.save_list_order(&order).await?;
+            }
+        }
+
+        if let Some(mut name_map) = self.load_name_to_id().await? {
+            let original_len = name_map.paths.len();
+            name_map.paths.retain(|_, value| value != slug);
+            if name_map.paths.len() != original_len {
+                self.save_name_to_id(&name_map).await?;
+            }
+        }
+
+        for (page_slug, mut page) in self.load_all_pages().await? {
+            let original_len = page.parent_ids.len();
+            page.parent_ids.retain(|parent| parent != &list_key);
+            if page.parent_ids.len() != original_len {
+                self.save_or_delete_page(&page_slug, page).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn remove_page_child_references(&self, child_key: &str) -> io::Result<()> {
+        for (page_slug, mut page) in self.load_all_pages().await? {
+            let original_len = page.child_ids.len();
+            page.child_ids.retain(|child| child != child_key);
+            if page.child_ids.len() != original_len {
+                self.save_or_delete_page(&page_slug, page).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn save_or_delete_page(&self, slug: &str, page: PageEntity) -> io::Result<()> {
+        if page_retains_user_state(&page) {
+            self.save_page(slug, &page).await
+        } else {
+            remove_if_exists(self.page_path(slug)).await?;
+            self.cache_remove(&format!("page:{slug}"));
+            Ok(())
+        }
+    }
+
     fn page_path(&self, slug: &str) -> PathBuf {
         self.root().join("pages").join(format!("{slug}.json"))
     }
@@ -756,6 +860,33 @@ async fn remove_if_exists(path: PathBuf) -> io::Result<()> {
     }
 }
 
+fn page_retains_user_state(page: &PageEntity) -> bool {
+    page.parent_ids.iter().any(|id| id.starts_with("list:"))
+        || page
+            .child_ids
+            .iter()
+            .any(|id| id.starts_with("note:") || id.starts_with("snapshot:"))
+        || page
+            .user_title
+            .as_deref()
+            .is_some_and(|title| !title.is_empty())
+        || page.likes.unwrap_or(0) != 0
+}
+
+fn remove_list_from_tree(tree: &[TreeNode], list_key: &str) -> Vec<TreeNode> {
+    let mut result = Vec::new();
+    for node in tree {
+        if node.id == list_key {
+            result.extend(node.children.clone());
+            continue;
+        }
+        let mut node = node.clone();
+        node.children = remove_list_from_tree(&node.children, list_key);
+        result.push(node);
+    }
+    result
+}
+
 async fn remove_path(path: PathBuf) -> io::Result<usize> {
     let metadata = match fs::metadata(&path).await {
         Ok(metadata) => metadata,
@@ -779,6 +910,12 @@ async fn remove_path(path: PathBuf) -> io::Result<usize> {
     }
 
     Ok(0)
+}
+
+fn split_snapshot_stem(snapshot_stem: &str) -> Option<(String, i64)> {
+    let (slug, timestamp) = snapshot_stem.rsplit_once('-')?;
+    let timestamp = timestamp.parse::<i64>().ok()?;
+    Some((slug.to_string(), timestamp))
 }
 
 async fn load_json<T>(path: PathBuf) -> io::Result<Option<T>>

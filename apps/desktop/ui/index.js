@@ -1436,6 +1436,9 @@ function showRecycleBinLayout() {
 
 // --- Recycle Bin ---
 
+let recycleBinRenderSeq = 0;
+let recycleBinBadgeSeq = 0;
+
 async function readOrphanedManifestFresh() {
   const resp = await sendAction({
     action: 'readCacheable',
@@ -1475,10 +1478,15 @@ async function loadRecycleBinEntries() {
 }
 
 async function showRecycleBin() {
+  const renderSeq = ++recycleBinRenderSeq;
   activeView = { type: 'recycle-bin' };
   updateSidebarActive();
   updateMainTitle('Recycle Bin');
   showRecycleBinLayout();
+
+  const itemsEl = document.getElementById('recycleBinItems');
+  const emptyEl = document.getElementById('recycleBinEmpty');
+  const headerEl = document.querySelector('.recycle-bin-header');
 
   let entries = [];
   try {
@@ -1488,9 +1496,9 @@ async function showRecycleBin() {
       suffix: '',
     });
   }
-  const itemsEl = document.getElementById('recycleBinItems');
-  const emptyEl = document.getElementById('recycleBinEmpty');
-  const headerEl = document.querySelector('.recycle-bin-header');
+  if (renderSeq !== recycleBinRenderSeq || activeView.type !== 'recycle-bin') {
+    return;
+  }
   itemsEl.innerHTML = '';
 
   if (entries.length === 0) {
@@ -1519,8 +1527,20 @@ async function showRecycleBin() {
           key: pageKey(pageSlug),
           includeDeleted: true,
         });
+        if (
+          renderSeq !== recycleBinRenderSeq ||
+          activeView.type !== 'recycle-bin'
+        ) {
+          return;
+        }
         displayName = `${pageResp?.value?.title || pageSlug} — ${new Date(ts).toLocaleString()}`;
       } catch {
+        if (
+          renderSeq !== recycleBinRenderSeq ||
+          activeView.type !== 'recycle-bin'
+        ) {
+          return;
+        }
         displayName = `${pageSlug} — ${new Date(ts).toLocaleString()}`;
       }
     } else {
@@ -1530,6 +1550,12 @@ async function showRecycleBin() {
           key,
           includeDeleted: true,
         });
+        if (
+          renderSeq !== recycleBinRenderSeq ||
+          activeView.type !== 'recycle-bin'
+        ) {
+          return;
+        }
         const entity = resp?.value;
         if (entity) {
           if (key.startsWith(NOTE_PREFIX)) {
@@ -1555,6 +1581,9 @@ async function showRecycleBin() {
           }
         }
       } catch {}
+    }
+    if (renderSeq !== recycleBinRenderSeq || activeView.type !== 'recycle-bin') {
+      return;
     }
 
     const card = document.createElement('div');
@@ -1600,15 +1629,35 @@ async function showRecycleBin() {
   const newBtn = emptyBtn.cloneNode(true);
   emptyBtn.parentNode.replaceChild(newBtn, emptyBtn);
   newBtn.addEventListener('click', async () => {
-    await sendAction({ action: 'permanentDeleteAll' });
+    newBtn.disabled = true;
+    try {
+      await sendAction({ action: 'permanentDeleteAll' });
+      recycleBinRenderSeq++;
+      itemsEl.innerHTML = '';
+      emptyEl.style.display = '';
+      headerEl.style.display = 'none';
+      const btn = document.getElementById('recycleBinBtn');
+      const badge = document.getElementById('recycleBinCount');
+      badge.textContent = '';
+      btn.style.display = 'none';
+      await updateRecycleBinBadge();
+      if (activeView.type === 'recycle-bin') await showRecycleBin();
+    } catch (error) {
+      newBtn.disabled = false;
+      showErrorBubble(`Failed to empty recycle bin: ${error.message}`, {
+        suffix: '',
+      });
+    }
   });
 }
 
 async function updateRecycleBinBadge() {
+  const badgeSeq = ++recycleBinBadgeSeq;
   const entries = await loadRecycleBinEntries().catch((error) => {
     logDebug('Recycle bin badge refresh failed:', error.message);
     return [];
   });
+  if (badgeSeq !== recycleBinBadgeSeq) return;
   const count = entries.length;
   const btn = document.getElementById('recycleBinBtn');
   const badge = document.getElementById('recycleBinCount');
@@ -3727,7 +3776,7 @@ function bindSnapshotClickHandlers(container) {
       const ts = parseInt(btn.dataset.ts, 10);
       if (!slug || !ts) return;
       try {
-        await chrome.runtime.sendMessage({
+        await sendAction({
           action: 'deleteSnapshot',
           slug,
           timestamp: ts,

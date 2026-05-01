@@ -9,7 +9,13 @@
  *   --verbose      Print detailed per-entity diffs (default: summary only)
  */
 
-import { readFileSync, readdirSync, mkdirSync, existsSync } from 'fs';
+import {
+  readFileSync,
+  readdirSync,
+  mkdirSync,
+  existsSync,
+  writeFileSync,
+} from 'fs';
 import { join } from 'path';
 import { generateSlugFromUrl } from '../apps/extension/utils.js';
 import { replayStore } from './lib/replay-store.mjs';
@@ -270,7 +276,8 @@ function classifyFieldDiff(field, replayed, existing, entityKey) {
   // timestamps: replay {} vs disk undefined → schema gap
   if (
     field === 'timestamps' &&
-    deepEqual(replayed, {}) &&
+    typeof replayed === 'object' &&
+    replayed !== null &&
     existing === undefined
   )
     return 'schema-gap';
@@ -363,6 +370,14 @@ function classifyFieldDiff(field, replayed, existing, entityKey) {
     if (allReferrers) return 'timing-drift';
   }
 
+  // Pin array order is not a replayed user operation. Treat exact same pin
+  // membership/metadata with different array order as benign drift.
+  if (field === 'pins' && Array.isArray(replayed) && Array.isArray(existing)) {
+    const byId = (pins) =>
+      [...pins].sort((left, right) => (left.id || '').localeCompare(right.id || ''));
+    if (deepEqual(byId(replayed), byId(existing))) return 'timing-drift';
+  }
+
   // scrollDepth/timeOnPage: replay undefined, disk has numeric value →
   // leave_page processed before entity existed in replay
   if (
@@ -438,7 +453,7 @@ entityPaths.set('manifest:name-to-id', 'manifest/list-name-to-id.json');
 entityPaths.set('manifest:list-order', 'manifest/list-order.json');
 
 // Collect all keys (union of replayed + existing)
-const allKeys = new Set([...store.keys(), ...entityPaths.keys()]);
+const allKeys = new Set([...Object.keys(store), ...entityPaths.keys()]);
 
 let matchCount = 0;
 let replayOnlyCount = 0;
@@ -454,7 +469,7 @@ const existingOnlyKeys = [];
 for (const key of [...allKeys].sort()) {
   if (key.startsWith('snapshot:')) continue;
 
-  const raw = store.get(key) ?? null;
+  const raw = store[key] ?? null;
   const replayed = raw && raw.deleted ? null : raw;
   const existingPath = entityPaths.get(key);
   const existing = existingPath ? loadExisting(existingPath) : null;

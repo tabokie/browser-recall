@@ -458,6 +458,59 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       html: '<html><body>popup snapshot body</body></html>',
     });
 
+    rmSync(
+      path.join(
+        dir,
+        'portal-data',
+        'data',
+        'snapshots',
+        'popup-page-1710000001200.html',
+      ),
+    );
+    rmSync(
+      path.join(
+        dir,
+        'portal-data',
+        'data',
+        'snapshots',
+        'popup-page-1710000001200.md',
+      ),
+    );
+
+    socket.send(JSON.stringify({ type: 'get_page_info', slug }));
+    const staleSnapshotInfo = await nextMessage(socket);
+    expect(staleSnapshotInfo).toMatchObject({
+      type: 'page_info_result',
+      success: true,
+      slug,
+    });
+    expect(staleSnapshotInfo.snapshots).toEqual([
+      { timestamp: 1710000001200, hasMd: false, hasHtml: false },
+    ]);
+
+    socket.send(
+      JSON.stringify({
+        type: 'event',
+        source: 'extension',
+        entry: {
+          timestamp: 1710000001300,
+          action: 'delete_snapshot',
+          url: 'https://example.com/popup',
+          path: 'snapshots/popup-page-1710000001200',
+        },
+      }),
+    );
+    expect((await nextMessage(socket)).type).toBe('ack');
+
+    socket.send(JSON.stringify({ type: 'get_page_info', slug }));
+    const cleanedSnapshotInfo = await nextMessage(socket);
+    expect(cleanedSnapshotInfo).toMatchObject({
+      type: 'page_info_result',
+      success: true,
+      slug,
+    });
+    expect(cleanedSnapshotInfo.snapshots || []).toEqual([]);
+
     socket.send(
       JSON.stringify({
         type: 'get_entity',

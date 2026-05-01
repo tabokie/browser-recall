@@ -1,5 +1,5 @@
 const openButton = document.getElementById('openApp');
-const fallback = document.getElementById('notRunning');
+const notRunningNotice = document.getElementById('notRunning');
 const shortcutsList = document.getElementById('shortcutsList');
 const customizeShortcuts = document.getElementById('customizeShortcuts');
 
@@ -10,16 +10,18 @@ const SHORTCUT_ORDER = [
   'dislike-page',
 ];
 
+import { getBrowserCapabilities } from './browser-capabilities.js';
+
 const SHORTCUT_LABELS = {
   'highlight-selection': 'Highlight selected text or add a page note',
 };
 
 openButton.addEventListener('click', () => {
-  fallback.hidden = true;
+  notRunningNotice.hidden = true;
   window.open('browser-recall://open');
   window.setTimeout(() => {
     if (document.visibilityState === 'visible') {
-      fallback.hidden = false;
+      notRunningNotice.hidden = false;
     }
   }, 1200);
 });
@@ -50,8 +52,9 @@ async function renderShortcuts() {
 }
 
 customizeShortcuts.addEventListener('click', () => {
+  const capabilities = getBrowserCapabilities();
   const url =
-    globalThis.browserRecallWebExtension?.engine === 'firefox'
+    capabilities.engine === 'firefox'
       ? 'about:addons'
       : 'chrome://extensions/shortcuts';
   chrome.tabs.create({ url });

@@ -70,7 +70,7 @@ describe('extension staged assets', () => {
     expect(popupHtml).not.toContain('Try to reconnect');
   });
 
-  it('keeps unsupported-page popup fallback visible', () => {
+  it('keeps the unsupported-page popup message visible', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
     stagedDirs.push(outDir);
     stageExtensionAssets(outDir);
@@ -98,7 +98,7 @@ describe('extension staged assets', () => {
     expect(optionsSource).toContain('chrome://extensions/shortcuts');
   });
 
-  it('uses the desktop app icon and no legacy down-state icons', () => {
+  it('uses the desktop app icon and no removed down-state icons', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
     stagedDirs.push(outDir);
     stageExtensionAssets(outDir);
@@ -150,6 +150,21 @@ describe('extension staged assets', () => {
     expect(manifest.background.service_worker).toBeUndefined();
     expect(manifest.browser_specific_settings.gecko.id).toBe(
       'browser-recall@example.invalid',
+    );
+    expect(manifest.content_security_policy.extension_pages).toContain(
+      'connect-src',
+    );
+    expect(manifest.content_security_policy.extension_pages).toContain(
+      'ws://127.0.0.1:*',
+    );
+    expect(manifest.content_security_policy.extension_pages).not.toContain(
+      'ws://localhost:*',
+    );
+    expect(manifest.content_security_policy.extension_pages).not.toContain(
+      'http://127.0.0.1:*',
+    );
+    expect(manifest.content_security_policy.extension_pages).not.toContain(
+      'http://localhost:*',
     );
     expect(
       manifest.browser_specific_settings.gecko.data_collection_permissions,

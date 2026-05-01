@@ -1,0 +1,1222 @@
+import { test, expect } from '@playwright/test';
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import vm from 'node:vm';
+import { JSDOM } from 'jsdom';
+
+import {
+  cleanupStagedAssets,
+  stageFirefoxExtensionAssets,
+} from '../../scripts/stage-app-assets.mjs';
+
+const FIREFOX_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0';
+const NON_FIREFOX_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15';
+
+function navigatorWithUserAgent(base, userAgent) {
+  return Object.create(base || {}, {
+    userAgent: {
+      configurable: true,
+      value: userAgent,
+    },
+  });
+}
+
+function createEvent() {
+  const listeners = new Set();
+  return {
+    addListener(listener) {
+      listeners.add(listener);
+    },
+    removeListener(listener) {
+      listeners.delete(listener);
+    },
+    hasListener(listener) {
+      return listeners.has(listener);
+    },
+    listenerCount() {
+      return listeners.size;
+    },
+    async dispatch(...args) {
+      const results = [];
+      for (const listener of [...listeners]) {
+        results.push(await listener(...args));
+      }
+      return results;
+    },
+    listeners,
+  };
+}
+
+function normalizeStorageKeys(keys, data) {
+  if (keys == null) return Object.keys(data);
+  if (Array.isArray(keys)) return keys;
+  if (typeof keys === 'string') return [keys];
+  if (typeof keys === 'object') return Object.keys(keys);
+  return [];
+}
+
+function createStorageArea(areaName, storageChanged, seed = {}) {
+  const data = { ...seed };
+  return {
+    _data: data,
+    async get(keys) {
+      const result = {};
+      if (keys && typeof keys === 'object' && !Array.isArray(keys)) {
+        Object.assign(result, keys);
+      }
+      for (const key of normalizeStorageKeys(keys, data)) {
+        if (Object.prototype.hasOwnProperty.call(data, key)) {
+          result[key] = data[key];
+        }
+      }
+      return result;
+    },
+    async set(patch) {
+      const changes = {};
+      for (const [key, newValue] of Object.entries(patch || {})) {
+        const oldValue = data[key];
+        if (Object.is(oldValue, newValue)) continue;
+        data[key] = newValue;
+        changes[key] = { oldValue, newValue };
+      }
+      if (Object.keys(changes).length > 0) {
+        await storageChanged.dispatch(changes, areaName);
+      }
+    },
+    async remove(keys) {
+      const changes = {};
+      for (const key of Array.isArray(keys) ? keys : [keys]) {
+        if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
+        changes[key] = { oldValue: data[key], newValue: undefined };
+        delete data[key];
+      }
+      if (Object.keys(changes).length > 0) {
+        await storageChanged.dispatch(changes, areaName);
+      }
+    },
+    async clear() {
+      const changes = {};
+      for (const [key, oldValue] of Object.entries(data)) {
+        changes[key] = { oldValue, newValue: undefined };
+        delete data[key];
+      }
+      if (Object.keys(changes).length > 0) {
+        await storageChanged.dispatch(changes, areaName);
+      }
+    },
+  };
+}
+
+function createFirefoxWebExtensionApi({ sendMessage, onSendMessage } = {}) {
+  const storageChanged = createEvent();
+  const runtimeMessage = createEvent();
+  const runtimeInstalled = createEvent();
+  const runtimeStartup = createEvent();
+
+  const storage = {
+    onChanged: storageChanged,
+    local: null,
+    session: null,
+    sync: null,
+  };
+  storage.local = createStorageArea('local', storageChanged);
+  storage.session = createStorageArea('session', storageChanged);
+  storage.sync = createStorageArea('sync', storageChanged);
+  const badgeState = {
+    global: { text: '', color: '#000000', title: '', icon: null },
+    tabs: new Map(),
+  };
+
+  function assertFirefoxArgs(methodName, args, expectedLength) {
+    if (args.length !== expectedLength) {
+      throw new TypeError(
+        `${methodName} expected ${expectedLength} argument(s), got ${args.length}`,
+      );
+    }
+  }
+
+  function badgeTarget(details = {}) {
+    if (details.tabId == null) return badgeState.global;
+    if (!badgeState.tabs.has(details.tabId)) {
+      badgeState.tabs.set(details.tabId, { ...badgeState.global });
+    }
+    return badgeState.tabs.get(details.tabId);
+  }
+
+  const runtimeSendMessage =
+    sendMessage ||
+    (async (message, sender = {}) => {
+      onSendMessage?.(message);
+      for (const listener of [...runtimeMessage.listeners]) {
+        let settled = false;
+        let callbackResponse;
+        const callbackPromise = new Promise((resolve) => {
+          const sendResponse = (response) => {
+            settled = true;
+            callbackResponse = response;
+            resolve(response);
+          };
+          const result = listener(message, sender, sendResponse);
+          if (result === true) return;
+          if (result?.then) {
+            result.then(resolve, resolve);
+            return;
+          }
+          resolve(settled ? callbackResponse : undefined);
+        });
+        const response = await callbackPromise;
+        if (response !== undefined || settled) return response;
+      }
+      return undefined;
+    });
+
+  const browserApi = {
+    badgeState,
+    action: {
+      async setBadgeBackgroundColor(details) {
+        assertFirefoxArgs('setBadgeBackgroundColor', arguments, 1);
+        badgeTarget(details).color = details.color;
+      },
+      async setBadgeText(details) {
+        assertFirefoxArgs('setBadgeText', arguments, 1);
+        badgeTarget(details).text = details.text;
+      },
+      async setIcon(details) {
+        assertFirefoxArgs('setIcon', arguments, 1);
+        badgeTarget(details).icon = details.imageData || details.path || null;
+      },
+      async setTitle(details) {
+        assertFirefoxArgs('setTitle', arguments, 1);
+        badgeTarget(details).title = details.title;
+      },
+      async getBadgeBackgroundColor(details = {}) {
+        assertFirefoxArgs('getBadgeBackgroundColor', arguments, 1);
+        return badgeTarget(details).color;
+      },
+      async getBadgeText(details = {}) {
+        assertFirefoxArgs('getBadgeText', arguments, 1);
+        return badgeTarget(details).text;
+      },
+    },
+    alarms: {
+      onAlarm: createEvent(),
+      async clear() {
+        return true;
+      },
+      async create() {},
+    },
+    commands: {
+      onCommand: createEvent(),
+      async getAll() {
+        return [];
+      },
+    },
+    contextMenus: {
+      onClicked: createEvent(),
+      async create() {},
+    },
+    runtime: {
+      onInstalled: runtimeInstalled,
+      onMessage: runtimeMessage,
+      onStartup: runtimeStartup,
+      async getBrowserInfo() {
+        return { name: 'Firefox', vendor: 'Mozilla' };
+      },
+      getManifest() {
+        return { manifest_version: 3, name: 'browser-recall' };
+      },
+      getURL(resourcePath) {
+        return `moz-extension://browser-recall.invalid/${resourcePath}`;
+      },
+      async openOptionsPage() {},
+      reload() {},
+      sendMessage: runtimeSendMessage,
+    },
+    scripting: {
+      async executeScript() {
+        return [];
+      },
+    },
+    storage,
+    tabs: {
+      onActivated: createEvent(),
+      onRemoved: createEvent(),
+      async create({ url } = {}) {
+        return { id: 99, url };
+      },
+      async get(tabId) {
+        return { id: tabId, url: 'https://example.test/', title: 'Example' };
+      },
+      async query() {
+        return [];
+      },
+      async sendMessage() {
+        return {};
+      },
+      async update(tabId, patch = {}) {
+        return { id: tabId, ...patch };
+      },
+    },
+    webNavigation: {
+      onCommitted: createEvent(),
+      onCreatedNavigationTarget: createEvent(),
+    },
+  };
+
+  return {
+    browserApi,
+    chromeCompat: {
+      storage: {
+        local: {},
+        session: {},
+        sync: {},
+      },
+    },
+    events: {
+      runtimeInstalled,
+      runtimeMessage,
+      runtimeStartup,
+      storageChanged,
+    },
+    storage,
+    badgeState,
+  };
+}
+
+function createOrionCallbackWebExtensionApi({
+  tab,
+  responses,
+  runtimeId = 'orion-extension@example.invalid',
+} = {}) {
+  const runtimeMessage = createEvent();
+  const storageChanged = createEvent();
+  const storageData = {
+    connectorState: 'connected',
+    connectorDeviceId: 'orion-device',
+    connectorAuthToken: 'token',
+    desktopPendingEvents: 0,
+    desktopPendingBytes: 0,
+    desktopRefuseMode: false,
+  };
+
+  function callbackLater(value, callback) {
+    if (typeof callback === 'function') queueMicrotask(() => callback(value));
+    return undefined;
+  }
+
+  function storageGet(keys, callback) {
+    const result = {};
+    for (const key of normalizeStorageKeys(keys, storageData)) {
+      if (Object.prototype.hasOwnProperty.call(storageData, key)) {
+        result[key] = storageData[key];
+      }
+    }
+    return callbackLater(result, callback);
+  }
+
+  return {
+    action: {
+      setBadgeBackgroundColor(_, callback) {
+        return callbackLater(undefined, callback);
+      },
+      setBadgeText(_, callback) {
+        return callbackLater(undefined, callback);
+      },
+      setIcon(_, callback) {
+        return callbackLater(undefined, callback);
+      },
+      setTitle(_, callback) {
+        return callbackLater(undefined, callback);
+      },
+    },
+    alarms: {
+      onAlarm: createEvent(),
+      clear(callback) {
+        return callbackLater(true, callback);
+      },
+      create(_, callback) {
+        return callbackLater(undefined, callback);
+      },
+    },
+    commands: {
+      onCommand: createEvent(),
+      getAll(callback) {
+        return callbackLater([], callback);
+      },
+    },
+    contextMenus: {
+      onClicked: createEvent(),
+      create(_, callback) {
+        return callbackLater(undefined, callback);
+      },
+    },
+    runtime: {
+      ...(runtimeId ? { id: runtimeId } : {}),
+      onInstalled: createEvent(),
+      onMessage: runtimeMessage,
+      onStartup: createEvent(),
+      getBrowserInfo(callback) {
+        return callbackLater({ name: 'Orion' }, callback);
+      },
+      getManifest() {
+        return {
+          manifest_version: 3,
+          name: 'browser-recall',
+          browser_specific_settings: {
+            gecko: { id: 'browser-recall@example.invalid' },
+          },
+        };
+      },
+      reload() {},
+      sendMessage(message, callback) {
+        const handler = responses[message?.action];
+        const value = handler
+          ? typeof handler === 'function'
+            ? handler(message)
+            : handler
+          : { success: true };
+        if (value?.__delayMs) {
+          setTimeout(() => callback?.(value.response), value.__delayMs);
+          return undefined;
+        }
+        return callbackLater(value, callback);
+      },
+    },
+    storage: {
+      onChanged: storageChanged,
+      local: {
+        _data: storageData,
+        get: storageGet,
+        set(values, callback) {
+          Object.assign(storageData, values || {});
+          return callbackLater(undefined, callback);
+        },
+        remove(keys, callback) {
+          for (const key of Array.isArray(keys) ? keys : [keys]) {
+            delete storageData[key];
+          }
+          return callbackLater(undefined, callback);
+        },
+      },
+      session: {
+        get(_, callback) {
+          return callbackLater({}, callback);
+        },
+        set(_, callback) {
+          return callbackLater(undefined, callback);
+        },
+        remove(_, callback) {
+          return callbackLater(undefined, callback);
+        },
+        clear(callback) {
+          return callbackLater(undefined, callback);
+        },
+      },
+    },
+    tabs: {
+      onActivated: createEvent(),
+      onCreated: createEvent(),
+      onRemoved: createEvent(),
+      query(_, callback) {
+        return callbackLater([tab], callback);
+      },
+      get(tabId, callback) {
+        return callbackLater({ ...tab, id: tabId }, callback);
+      },
+      sendMessage(_, __, callback) {
+        return callbackLater({ success: true }, callback);
+      },
+      create({ url } = {}, callback) {
+        return callbackLater({ id: 99, url }, callback);
+      },
+      update(tabId, patch = {}, callback) {
+        return callbackLater({ id: tabId, ...patch }, callback);
+      },
+    },
+    webNavigation: {
+      onCommitted: createEvent(),
+      onCreatedNavigationTarget: createEvent(),
+    },
+  };
+}
+
+class FailingWebSocket {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+
+  constructor(url) {
+    this.url = url;
+    this.readyState = FailingWebSocket.CONNECTING;
+    this.listeners = new Map();
+    queueMicrotask(() => {
+      this.readyState = FailingWebSocket.CLOSED;
+      this.#emit('error', {});
+      this.#emit('close', {});
+    });
+  }
+
+  addEventListener(type, listener) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type).add(listener);
+  }
+
+  removeEventListener(type, listener) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  send() {}
+
+  close() {
+    this.readyState = FailingWebSocket.CLOSED;
+    this.#emit('close', {});
+  }
+
+  #emit(type, event) {
+    for (const listener of this.listeners.get(type) || []) {
+      listener(event);
+    }
+  }
+}
+
+class SuccessfulWebSocket {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+
+  constructor(url) {
+    this.url = url;
+    this.readyState = SuccessfulWebSocket.CONNECTING;
+    this.listeners = new Map();
+    queueMicrotask(() => {
+      this.readyState = SuccessfulWebSocket.OPEN;
+      this.#emit('open', {});
+    });
+  }
+
+  addEventListener(type, listener) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type).add(listener);
+  }
+
+  removeEventListener(type, listener) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  send(raw) {
+    const payload = JSON.parse(raw);
+    if (payload.type === 'auth') {
+      queueMicrotask(() =>
+        this.#emit('message', {
+          data: JSON.stringify({ type: 'auth_ok' }),
+        }),
+      );
+      return;
+    }
+    if (payload.type === 'get_status') {
+      queueMicrotask(() =>
+        this.#emit('message', {
+          data: JSON.stringify({
+            type: 'status',
+            deviceId: 'firefox-device',
+            bufferDepth: 0,
+            lastDrainedAt: Date.now(),
+          }),
+        }),
+      );
+      return;
+    }
+    if (payload.type === 'get_entity') {
+      const entity = payload.key?.startsWith('page:')
+        ? {
+            url: 'https://example.test/marked',
+            childIds: ['note:smoke'],
+            parentIds: [],
+          }
+        : null;
+      queueMicrotask(() =>
+        this.#emit('message', {
+          data: JSON.stringify({
+            type: 'entity_result',
+            success: true,
+            key: payload.key,
+            entity,
+          }),
+        }),
+      );
+      return;
+    }
+    if (payload.type === 'list_history_files') {
+      queueMicrotask(() =>
+        this.#emit('message', {
+          data: JSON.stringify({
+            type: 'history_files_result',
+            success: true,
+            files: [],
+            sizes: {},
+          }),
+        }),
+      );
+      return;
+    }
+    if (payload.type === 'load_history_batch') {
+      queueMicrotask(() =>
+        this.#emit('message', {
+          data: JSON.stringify({
+            type: 'history_batch_result',
+            success: true,
+            entries: [],
+          }),
+        }),
+      );
+      return;
+    }
+    queueMicrotask(() =>
+      this.#emit('message', {
+        data: JSON.stringify({
+          type: 'ack',
+          bufferDepth: 0,
+          lastDrainedAt: Date.now(),
+        }),
+      }),
+    );
+  }
+
+  close() {
+    this.readyState = SuccessfulWebSocket.CLOSED;
+    this.#emit('close', {});
+  }
+
+  #emit(type, event) {
+    for (const listener of this.listeners.get(type) || []) {
+      listener(event);
+    }
+  }
+}
+
+class FakeOffscreenCanvas {
+  constructor(width, height) {
+    this.width = width;
+    this.height = height;
+  }
+
+  getContext() {
+    return {
+      beginPath() {},
+      arc() {},
+      clearRect() {},
+      fill() {},
+      lineTo() {},
+      moveTo() {},
+      stroke() {},
+      getImageData: () => ({
+        width: this.width,
+        height: this.height,
+        data: new Uint8ClampedArray(this.width * this.height * 4),
+      }),
+    };
+  }
+}
+
+async function withStagedFirefoxExtension(run) {
+  const outDir = mkdtempSync(
+    path.join(tmpdir(), 'browser-recall-firefox-e2e-'),
+  );
+  stageFirefoxExtensionAssets(outDir);
+  writeFileSync(path.join(outDir, 'package.json'), '{"type":"module"}\n');
+  try {
+    return await run(outDir);
+  } finally {
+    cleanupStagedAssets(outDir);
+  }
+}
+
+async function withPatchedGlobals(patch, run) {
+  const previous = new Map();
+  for (const [key, value] of Object.entries(patch)) {
+    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, {
+      configurable: true,
+      writable: true,
+      value,
+    });
+  }
+  try {
+    return await run();
+  } finally {
+    for (const key of Object.keys(patch)) {
+      const descriptor = previous.get(key);
+      if (descriptor) {
+        Object.defineProperty(globalThis, key, descriptor);
+      } else {
+        delete globalThis[key];
+      }
+    }
+  }
+}
+
+async function waitFor(predicate, label) {
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+}
+
+test.describe('Firefox extension smoke', () => {
+  test('staged background boots with Firefox-shaped WebExtension APIs', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const api = createFirefoxWebExtensionApi();
+      const timers = new Set();
+      const nativeSetTimeout = globalThis.setTimeout;
+      const unrefSetTimeout = (callback, ms, ...args) => {
+        const timer = nativeSetTimeout(callback, ms, ...args);
+        timer.unref?.();
+        timers.add(timer);
+        return timer;
+      };
+
+      await withPatchedGlobals(
+        {
+          browser: api.browserApi,
+          chrome: api.chromeCompat,
+          navigator: navigatorWithUserAgent(
+            globalThis.navigator,
+            FIREFOX_USER_AGENT,
+          ),
+          WebSocket: FailingWebSocket,
+          setTimeout: unrefSetTimeout,
+        },
+        async () => {
+          await import(pathToFileURL(path.join(outDir, 'background.js')).href);
+
+          await waitFor(
+            () => api.storage.local._data.connectorState === 'offline',
+            'background connector offline state',
+          );
+          await waitFor(
+            () => api.browserApi.badgeState.global.text === '!',
+            'global offline badge text',
+          );
+
+          expect(globalThis.browserRecallWebExtension.engine).toBe('firefox');
+          expect(typeof globalThis.chrome.storage.session.setAccessLevel).toBe(
+            'function',
+          );
+          expect(api.events.runtimeMessage.listenerCount()).toBeGreaterThan(0);
+          expect(api.browserApi.tabs.onRemoved.listenerCount()).toBeGreaterThan(
+            0,
+          );
+          expect(api.browserApi.webNavigation.onCommitted.listenerCount()).toBe(
+            1,
+          );
+        },
+      );
+
+      for (const timer of timers) clearTimeout(timer);
+    });
+  });
+
+  test('staged popup opens to the desktop-offline state without fatal errors', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const html = readFileSync(path.join(outDir, 'popup.html'), 'utf8');
+      const dom = new JSDOM(html, {
+        url: 'moz-extension://browser-recall.invalid/popup.html',
+        pretendToBeVisual: true,
+      });
+      dom.window.matchMedia = () => ({
+        matches: false,
+        addEventListener() {},
+        removeEventListener() {},
+      });
+      dom.window.open = () => {};
+      dom.window.close = () => {};
+
+      const api = createFirefoxWebExtensionApi({
+        async sendMessage(message) {
+          if (message?.action === 'getDesktopConnectorState') {
+            return {
+              success: true,
+              state: 'offline',
+              hasToken: false,
+              pendingEvents: 0,
+              pendingBytes: 0,
+            };
+          }
+          return { success: true };
+        },
+      });
+
+      await withPatchedGlobals(
+        {
+          window: dom.window,
+          document: dom.window.document,
+          HTMLElement: dom.window.HTMLElement,
+          Node: dom.window.Node,
+          navigator: navigatorWithUserAgent(
+            dom.window.navigator,
+            FIREFOX_USER_AGENT,
+          ),
+          browser: api.browserApi,
+          chrome: api.chromeCompat,
+        },
+        async () => {
+          const shim = readFileSync(
+            path.join(outDir, 'browser-api.js'),
+            'utf8',
+          );
+          vm.runInThisContext(shim, {
+            filename: path.join(outDir, 'browser-api.js'),
+          });
+
+          await import(pathToFileURL(path.join(outDir, 'popup.js')).href);
+
+          await waitFor(
+            () =>
+              dom.window.document.getElementById('setup-required').style
+                .display === 'block',
+            'popup setup-required state',
+          );
+
+          expect(
+            dom.window.document.body.textContent.includes(
+              'Storage Unavailable',
+            ),
+          ).toBe(false);
+          expect(
+            dom.window.document.getElementById('setupRequiredTitle')
+              .textContent,
+          ).toMatch(/DESKTOP OFFLINE|Desktop Offline/);
+          expect(globalThis.browserRecallWebExtension.engine).toBe('firefox');
+          expect(typeof globalThis.chrome.storage.session.setAccessLevel).toBe(
+            'function',
+          );
+        },
+      );
+
+      dom.window.close();
+    });
+  });
+
+  test('staged background applies Firefox page marker icon without extension resource fetches', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const api = createFirefoxWebExtensionApi();
+      const activeTab = {
+        id: 31,
+        url: 'https://example.test/marked',
+        title: 'Marked Page',
+      };
+      Object.assign(api.storage.local._data, {
+        connectorAuthToken: 'test-token',
+        connectorDaemonPort: 28471,
+      });
+      api.browserApi.tabs.query = async () => [activeTab];
+      api.browserApi.tabs.get = async () => activeTab;
+
+      const fetchCalls = [];
+      const timers = new Set();
+      const nativeSetTimeout = globalThis.setTimeout;
+      const unrefSetTimeout = (callback, ms, ...args) => {
+        const timer = nativeSetTimeout(callback, ms, ...args);
+        timer.unref?.();
+        timers.add(timer);
+        return timer;
+      };
+
+      await withPatchedGlobals(
+        {
+          browser: api.browserApi,
+          chrome: api.chromeCompat,
+          navigator: navigatorWithUserAgent(
+            globalThis.navigator,
+            FIREFOX_USER_AGENT,
+          ),
+          WebSocket: SuccessfulWebSocket,
+          OffscreenCanvas: FakeOffscreenCanvas,
+          fetch: async (url) => {
+            fetchCalls.push(url);
+            throw new Error('scheme handler failed');
+          },
+          setTimeout: unrefSetTimeout,
+        },
+        async () => {
+          await import(pathToFileURL(path.join(outDir, 'background.js')).href);
+
+          await waitFor(
+            () => api.storage.local._data.connectorState === 'connected',
+            'background connector connected state',
+          );
+
+          await api.browserApi.webNavigation.onCommitted.dispatch({
+            tabId: activeTab.id,
+            url: activeTab.url,
+            transitionType: 'link',
+          });
+
+          await waitFor(
+            () =>
+              api.browserApi.badgeState.tabs.get(activeTab.id)?.icon?.[16]
+                ?.width === 16,
+            'tab page marker icon',
+          );
+
+          expect(fetchCalls).toEqual([]);
+          expect(api.browserApi.badgeState.tabs.get(activeTab.id).text).toBe(
+            '',
+          );
+        },
+      );
+
+      for (const timer of timers) clearTimeout(timer);
+    });
+  });
+
+  test('staged background reports successful snapshot capture without bubbling badge refresh errors', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const mutationMessages = [];
+      const api = createFirefoxWebExtensionApi({
+        onSendMessage(message) {
+          if (message?.action === 'mutation') mutationMessages.push(message);
+        },
+      });
+      const activeTab = {
+        id: 11,
+        url: 'https://example.test/capture',
+        title: 'Capture Page',
+      };
+      Object.assign(api.storage.local._data, {
+        connectorAuthToken: 'test-token',
+        connectorDaemonPort: 28471,
+      });
+      api.browserApi.tabs.query = async () => [activeTab];
+      api.browserApi.tabs.get = async () => activeTab;
+      api.browserApi.tabs.sendMessage = async (tabId, message) => {
+        if (message?.action === 'isPdfPage') return { isPdf: false };
+        if (message?.action === 'extractMarkdown') {
+          return { markdown: 'captured markdown' };
+        }
+        return { success: true };
+      };
+      api.browserApi.scripting.executeScript = async ({ files }) => {
+        if (files?.includes('savepage/content.js')) {
+          queueMicrotask(() => {
+            void api.events.runtimeMessage.dispatch(
+              {
+                type: 'savepageDone',
+                html: '<html><body>captured html</body></html>',
+              },
+              { tab: activeTab },
+            );
+          });
+        }
+        return [];
+      };
+
+      const timers = new Set();
+      const nativeSetTimeout = globalThis.setTimeout;
+      const unrefSetTimeout = (callback, ms, ...args) => {
+        const timer = nativeSetTimeout(callback, ms, ...args);
+        timer.unref?.();
+        timers.add(timer);
+        return timer;
+      };
+
+      await withPatchedGlobals(
+        {
+          browser: api.browserApi,
+          chrome: api.chromeCompat,
+          navigator: navigatorWithUserAgent(
+            globalThis.navigator,
+            FIREFOX_USER_AGENT,
+          ),
+          WebSocket: SuccessfulWebSocket,
+          setTimeout: unrefSetTimeout,
+        },
+        async () => {
+          await import(pathToFileURL(path.join(outDir, 'background.js')).href);
+
+          await waitFor(
+            () => api.storage.local._data.connectorState === 'connected',
+            'background connector connected state',
+          );
+
+          const response = await api.browserApi.runtime.sendMessage({
+            action: 'captureCurrentPageFromPopup',
+          });
+
+          expect(response).toMatchObject({ success: true });
+          expect(response.timestamp).toEqual(expect.any(Number));
+          expect(mutationMessages).toContainEqual(
+            expect.objectContaining({
+              action: 'mutation',
+              type: 'snapshot',
+            }),
+          );
+        },
+      );
+
+      for (const timer of timers) clearTimeout(timer);
+    });
+  });
+
+  test('staged popup loads connected dashboard when runtime.getURL is missing', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const html = readFileSync(path.join(outDir, 'popup.html'), 'utf8');
+      const dom = new JSDOM(html, {
+        url: 'moz-extension://browser-recall.invalid/popup.html',
+        pretendToBeVisual: true,
+      });
+      dom.window.matchMedia = () => ({
+        matches: false,
+        addEventListener() {},
+        removeEventListener() {},
+      });
+      dom.window.open = () => {};
+      dom.window.close = () => {};
+
+      const activeTab = {
+        id: 12,
+        url: 'https://example.test/orion',
+        title: 'Orion Page',
+      };
+      const api = createFirefoxWebExtensionApi({
+        async sendMessage(message) {
+          switch (message?.action) {
+            case 'getDesktopConnectorState':
+              return {
+                success: true,
+                state: 'connected',
+                deviceId: 'orion-device',
+                hasToken: true,
+              };
+            case 'getReportedUrl':
+              return { success: true, url: activeTab.url };
+            case 'trimTitle':
+              return { title: activeTab.title };
+            case 'getPageSummary':
+              return {
+                success: true,
+                page: {
+                  slug: 'orion-page',
+                  url: activeTab.url,
+                  title: activeTab.title,
+                  visitDates: [],
+                },
+                notes: [],
+                snapshots: [],
+                lists: [],
+              };
+            case 'getPopupLists':
+              return { success: true, lists: [] };
+            default:
+              return { success: true };
+          }
+        },
+      });
+      delete api.browserApi.runtime.getURL;
+      api.browserApi.tabs.query = async () => [activeTab];
+
+      await withPatchedGlobals(
+        {
+          window: dom.window,
+          document: dom.window.document,
+          HTMLElement: dom.window.HTMLElement,
+          Node: dom.window.Node,
+          navigator: navigatorWithUserAgent(
+            dom.window.navigator,
+            NON_FIREFOX_USER_AGENT,
+          ),
+          browser: api.browserApi,
+          chrome: api.chromeCompat,
+        },
+        async () => {
+          const shim = readFileSync(
+            path.join(outDir, 'browser-api.js'),
+            'utf8',
+          );
+          vm.runInThisContext(shim, {
+            filename: path.join(outDir, 'browser-api.js'),
+          });
+
+          await import(pathToFileURL(path.join(outDir, 'popup.js')).href);
+
+          await waitFor(
+            () =>
+              dom.window.document.getElementById('dashboard').style.display ===
+              'flex',
+            'connected dashboard',
+          );
+
+          expect(
+            dom.window.document.body.textContent.includes(
+              'Storage Unavailable',
+            ),
+          ).toBe(false);
+          expect(
+            dom.window.document.getElementById('pageTitle').textContent,
+          ).toBe('Orion Page');
+          expect(globalThis.browserRecallWebExtension.engine).toBe('chromium');
+          expect(typeof globalThis.chrome.runtime.getURL).toBe('function');
+        },
+      );
+
+      dom.window.close();
+    });
+  });
+
+  test('staged popup uses cached connected state with Orion callback-style APIs', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const html = readFileSync(path.join(outDir, 'popup.html'), 'utf8');
+      const dom = new JSDOM(html, {
+        url: 'moz-extension://browser-recall.invalid/popup.html',
+        pretendToBeVisual: true,
+      });
+      dom.window.matchMedia = () => ({
+        matches: false,
+        addEventListener() {},
+        removeEventListener() {},
+      });
+      dom.window.open = () => {};
+      dom.window.close = () => {};
+
+      const activeTab = {
+        id: 13,
+        url: 'https://example.test/orion-callback',
+        title: 'Orion Callback Page',
+      };
+      const actions = [];
+      const api = createOrionCallbackWebExtensionApi({
+        tab: activeTab,
+        responses: {
+          getDesktopConnectorState: () => {
+            actions.push('getDesktopConnectorState');
+            return {
+              __delayMs: 1000,
+              response: {
+                success: true,
+                state: 'connected',
+                deviceId: 'orion-device',
+                hasToken: true,
+              },
+            };
+          },
+          getReportedUrl: { success: true, url: activeTab.url },
+          trimTitle: { title: activeTab.title },
+          getPageSummary: {
+            success: true,
+            page: {
+              slug: 'orion-callback-page',
+              url: activeTab.url,
+              title: activeTab.title,
+              visitDates: [],
+            },
+            notes: [],
+            snapshots: [],
+            lists: [],
+          },
+          getPopupLists: { success: true, lists: [] },
+        },
+      });
+
+      await withPatchedGlobals(
+        {
+          window: dom.window,
+          document: dom.window.document,
+          HTMLElement: dom.window.HTMLElement,
+          Node: dom.window.Node,
+          navigator: navigatorWithUserAgent(
+            dom.window.navigator,
+            NON_FIREFOX_USER_AGENT,
+          ),
+          browser: api,
+          chrome: {},
+        },
+        async () => {
+          const shim = readFileSync(
+            path.join(outDir, 'browser-api.js'),
+            'utf8',
+          );
+          vm.runInThisContext(shim, {
+            filename: path.join(outDir, 'browser-api.js'),
+          });
+
+          const startedAt = Date.now();
+          await import(pathToFileURL(path.join(outDir, 'popup.js')).href);
+
+          await waitFor(
+            () =>
+              dom.window.document.getElementById('dashboard').style.display ===
+              'flex',
+            'Orion callback dashboard',
+          );
+
+          expect(Date.now() - startedAt).toBeLessThan(250);
+          expect(actions).toContain('getDesktopConnectorState');
+          expect(
+            dom.window.document.getElementById('pageTitle').textContent,
+          ).toBe('Orion Callback Page');
+          expect(globalThis.browserRecallWebExtension.engine).toBe('chromium');
+        },
+      );
+
+      dom.window.close();
+    });
+  });
+
+  test('staged background connects with Orion callback-style APIs', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const activeTab = {
+        id: 14,
+        url: 'https://example.test/orion-connect',
+        title: 'Orion Connect Page',
+      };
+      const api = createOrionCallbackWebExtensionApi({
+        tab: activeTab,
+        responses: {},
+      });
+      const timers = new Set();
+      const nativeSetTimeout = globalThis.setTimeout;
+      const unrefSetTimeout = (callback, ms, ...args) => {
+        const timer = nativeSetTimeout(callback, ms, ...args);
+        timer.unref?.();
+        timers.add(timer);
+        return timer;
+      };
+
+      await withPatchedGlobals(
+        {
+          browser: api,
+          chrome: {},
+          navigator: navigatorWithUserAgent(
+            globalThis.navigator,
+            NON_FIREFOX_USER_AGENT,
+          ),
+          WebSocket: SuccessfulWebSocket,
+          OffscreenCanvas: FakeOffscreenCanvas,
+          setTimeout: unrefSetTimeout,
+        },
+        async () => {
+          await import(pathToFileURL(path.join(outDir, 'background.js')).href);
+
+          await waitFor(
+            () => api.storage.local._data.connectorState === 'connected',
+            'Orion background connector state',
+          );
+          expect(api.storage.local._data.connectorAuthToken).toBeTruthy();
+          expect(globalThis.chrome.runtime.id).toBe(
+            'orion-extension@example.invalid',
+          );
+        },
+      );
+
+      for (const timer of timers) clearTimeout(timer);
+    });
+  });
+});

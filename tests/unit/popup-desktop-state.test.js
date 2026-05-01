@@ -120,6 +120,7 @@ function installChromeMock({ tab, responses }) {
 
 describe('popup desktop state rendering', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.resetModules();
     delete globalThis.chrome;
     delete globalThis.window;
@@ -130,7 +131,7 @@ describe('popup desktop state rendering', () => {
     delete globalThis.getComputedStyle;
   });
 
-  it('does not render fallback page details when desktop summary metadata fails', async () => {
+  it('does not render synthetic page details when desktop summary metadata fails', async () => {
     const tab = {
       id: 42,
       url: 'https://example.com/popup-broken-summary',
@@ -169,12 +170,26 @@ describe('popup desktop state rendering', () => {
 
     expect(document.getElementById('dashboard').style.display).toBe('none');
     expect(document.getElementById('setupRequiredTitle').textContent).toBe(
-      'Desktop Offline',
+      'Page Data Unavailable',
+    );
+    expect(document.getElementById('setupRequiredMeta').textContent).toContain(
+      'Desktop popup page summary failed',
+    );
+    expect(document.getElementById('setupDiagnostic').textContent).toContain(
+      'reason: popup-page-summary-failed',
+    );
+    expect(document.getElementById('setupDiagnostic').textContent).toContain(
+      'connector: connected',
     );
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       action: 'getPageSummary',
       url: tab.url,
     });
+    expect(
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'getExtensionDiagnostics',
+      ),
+    ).toBe(false);
   });
 
   it('shows connector diagnostics while desktop is not connected', async () => {
@@ -214,14 +229,63 @@ describe('popup desktop state rendering', () => {
       'Desktop Offline',
     );
     expect(document.getElementById('setupRequiredMeta').textContent).toContain(
-      'Desktop approved, but not reachable.',
+      'Desktop approved, but connection failed.',
     );
     expect(document.getElementById('setupRequiredMeta').textContent).toContain(
-      'Last check: desktop did not become reachable in 15s.',
+      'Last check: desktop connection did not succeed in 15s.',
     );
     expect(document.getElementById('setupRequiredMeta').textContent).toContain(
       'Last port failures: 28471: connect_error, 28472: connect_timeout.',
     );
+  });
+
+  it('renders current tab details when desktop has no page entry yet', async () => {
+    const tab = {
+      id: 46,
+      url: 'https://example.com/page-not-drained-yet',
+      title: 'Page Not Drained Yet',
+    };
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: { title: tab.title },
+        readCacheable: { success: true, value: null },
+        getPageSummary: {
+          success: true,
+          url: tab.url,
+          page: null,
+          notes: [],
+          snapshots: [],
+          lists: [],
+        },
+        getPopupLists: { success: true, lists: [] },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () =>
+        document.getElementById('dashboard').style.display === 'flex',
+    );
+
+    expect(document.getElementById('setup-required').style.display).toBe(
+      'none',
+    );
+    expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
+    expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
+    expect(document.getElementById('visitsLikesSection').style.display).toBe(
+      'none',
+    );
+    expect(document.getElementById('setupDiagnostic').textContent).toBe('');
   });
 
   it('reveals the offline shell while desktop state probing is still pending', async () => {
@@ -257,7 +321,7 @@ describe('popup desktop state rendering', () => {
     });
   });
 
-  it('keeps the popup hidden until connected page details finish loading', async () => {
+  it('reveals the page header while connected page details are still loading', async () => {
     const tab = {
       id: 44,
       url: 'https://example.com/slow-popup-summary',
@@ -289,8 +353,15 @@ describe('popup desktop state rendering', () => {
       ),
     );
 
-    expect(document.documentElement.style.opacity).toBe('0');
-    expect(document.getElementById('dashboard').style.display).toBe('none');
+    expect(document.documentElement.style.opacity).toBe('');
+    expect(document.getElementById('dashboard').style.display).toBe('flex');
+    expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
+    expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
+    expect(document.getElementById('listSection').style.display).toBe('none');
+    expect(document.getElementById('notesSection').style.display).toBe('none');
+    expect(document.getElementById('snapshotSection').style.display).toBe(
+      'none',
+    );
 
     pageSummary.resolve({
       success: true,
@@ -312,5 +383,7 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('pageTitle').textContent).toBe(
       'Desktop Title',
     );
+    expect(document.getElementById('notesSection').style.display).toBe('');
+    expect(document.getElementById('snapshotSection').style.display).toBe('');
   });
 });

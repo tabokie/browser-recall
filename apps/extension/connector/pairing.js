@@ -14,13 +14,14 @@ export async function ensureBrowserInstallId() {
 }
 
 export async function detectBrowserName() {
-  const agent = navigator.userAgent || '';
+  const agent = globalThis.navigator?.userAgent || '';
   if (navigator.brave?.isBrave) {
     try {
       if (await navigator.brave.isBrave()) return 'Brave';
     } catch {}
   }
   if (agent.includes('Brave')) return 'Brave';
+  if (agent.includes('Firefox/')) return 'Firefox';
   if (agent.includes('Edg/')) return 'Edge';
   if (agent.includes('Arc/')) return 'Arc';
   if (agent.includes('Chrome/')) return 'Chrome';
@@ -32,11 +33,15 @@ export function detectBrowserProfile() {
 }
 
 export async function buildPairRequest() {
+  const extensionId = chrome.runtime.id || globalThis.browser?.runtime?.id;
+  if (!extensionId) {
+    throw new Error('Browser extension ID is unavailable');
+  }
   return {
     type: 'pair_request',
     browserId: await ensureBrowserInstallId(),
     browserName: await detectBrowserName(),
     browserProfile: detectBrowserProfile(),
-    extensionId: chrome.runtime.id,
+    extensionId,
   };
 }

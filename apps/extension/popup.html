@@ -219,6 +219,10 @@
         padding: 2px 8px;
       }
 
+      #snapshotSection.is-empty .section-action {
+        margin-top: 0;
+      }
+
       .snapshot-list {
         display: flex;
         flex-direction: column;
@@ -332,28 +336,35 @@
         margin-bottom: 6px;
       }
 
+      #notesSection.is-empty .page-note-wrap {
+        margin-bottom: 0;
+      }
+
       .page-note-add {
-        background: none;
-        border: 1px solid var(--border-glass);
+        width: 100%;
+        background: transparent;
+        border: 1px solid var(--text-primary);
         border-radius: 2px;
-        padding: 5px 9px;
+        min-height: 34px;
+        padding: 8px;
         cursor: pointer;
-        font-size: 10px;
-        font-weight: 800;
         font-family: var(--font-body);
-        letter-spacing: 0.02em;
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.12em;
         box-shadow: none;
-        color: var(--text-secondary);
+        color: var(--text-primary);
+        text-align: center;
+        text-transform: uppercase;
+        text-indent: -0.45em;
         transition:
-          border-color 0.16s var(--ease-smooth),
-          color 0.16s var(--ease-smooth),
-          background 0.16s var(--ease-smooth);
+          background 0.16s var(--ease-smooth),
+          color 0.16s var(--ease-smooth);
       }
 
       .page-note-add:hover {
-        background: var(--bg-warm-hover);
-        border-color: var(--border-hover);
-        color: var(--text-primary);
+        background: var(--text-primary);
+        color: var(--bg-base);
       }
 
       .page-note-display {
@@ -943,8 +954,20 @@
         font-size: 11px;
         line-height: 1.45;
         min-height: calc(11px * 1.45 * 2);
-        max-height: calc(11px * 1.45 * 4);
-        overflow: hidden;
+        overflow-wrap: anywhere;
+        white-space: normal;
+      }
+
+      .setup-diagnostic {
+        display: none;
+        margin-top: 10px;
+        padding-top: 9px;
+        border-top: 1px solid var(--border-section);
+        color: var(--text-muted);
+        font-size: 10px;
+        line-height: 1.55;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
       }
 
       .setup-actions {
@@ -1046,6 +1069,7 @@
         <div class="setup-required-meta" id="setupRequiredMeta">
           Start Browser Recall Desktop to resume live capture.
         </div>
+        <div class="setup-diagnostic" id="setupDiagnostic"></div>
         <div class="setup-actions">
           <button class="setup-action-btn primary" id="setupRequiredBtn">
             Open Desktop
@@ -1096,7 +1120,7 @@
           <div class="attention-grid" id="attentionGrid"></div>
         </div>
 
-        <div class="section">
+        <div class="section" id="listSection" style="display: none">
           <div class="label-row">
             <span>Lists</span><span id="listCount">00</span>
           </div>
@@ -1105,14 +1129,14 @@
           </div>
         </div>
 
-        <div class="section">
+        <div class="section" id="notesSection" style="display: none">
           <div class="notes-scroll">
             <div class="page-note-wrap" id="pageNoteWrap"></div>
             <div class="highlight-list" id="highlightList"></div>
           </div>
         </div>
 
-        <div class="section">
+        <div class="section" id="snapshotSection" style="display: none">
           <div class="snapshot-list" id="snapshotList"></div>
           <button class="section-action" id="captureBtn">CAPTURE FRAME</button>
         </div>

@@ -14,7 +14,7 @@
   ],
   "host_permissions": ["<all_urls>"],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://127.0.0.1:*"
   },
   "background": {
     "service_worker": "background.js",

@@ -1149,6 +1149,92 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.connectorState).toBe('connected');
   }, 30_000);
 
+  it('waits for a fresh Firefox pair approval during a state probe', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-firefox-state-probe-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Firefox/125.0' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+    store.connectorState = 'offline';
+
+    const state = await wsClient.refreshConnectorBridgeState();
+
+    expect(state.state).toBe('connected');
+    expect(state.deviceId).toBeTruthy();
+    expect(state.hasToken).toBe(true);
+    expect(store.connectorState).toBe('connected');
+    expect(store.connectorAuthToken).toBeTruthy();
+  }, 30_000);
+
+  it('does not return stale offline while Firefox pair approval is in flight', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-firefox-stale-offline-probe-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    BrowserLikeWebSocket.delayMessageMs = 250;
+    BrowserLikeWebSocket.delayMessagePredicate = (data) =>
+      data.includes('"pair_approved"');
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Firefox/125.0' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await wsClient.initConnectorBridge();
+    store.connectorState = 'offline';
+
+    const state = await wsClient.refreshConnectorBridgeState(1000);
+
+    expect(state.state).toBe('connected');
+    expect(state.deviceId).toBeTruthy();
+    expect(store.connectorState).toBe('connected');
+    expect(store.connectorAuthToken).toBeTruthy();
+  }, 30_000);
+
   it('replaces a stale authenticated socket when manual status refresh fails', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-stale-auth-socket-'),

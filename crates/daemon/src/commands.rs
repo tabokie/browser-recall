@@ -7,7 +7,7 @@ use crate::{
     protocol::{RuleBatchEntry, RulePayload},
     rules::{preview_rule, validate_rule, PageData, RuleSpec},
 };
-use browser_recall_replay::entities::{Entity, OrphanedManifest, TreeNode};
+use browser_recall_replay::entities::{Entity, TreeNode};
 use browser_recall_replay::{
     effect_of, generate_slug_from_url, Context as ReplayContext, LogEntry, RuleInput,
 };
@@ -157,10 +157,12 @@ pub async fn load_page_snapshot_payload(
             let Ok(timestamp) = snapshot_stem[last_dash + 1..].parse::<i64>() else {
                 continue;
             };
+            let has_md = snapshots_dir.join(format!("{snapshot_stem}.md")).exists();
+            let has_html = snapshots_dir.join(format!("{snapshot_stem}.html")).exists();
             snapshots.push(json!({
                 "timestamp": timestamp,
-                "hasMd": snapshots_dir.join(format!("{snapshot_stem}.md")).exists(),
-                "hasHtml": snapshots_dir.join(format!("{snapshot_stem}.html")).exists(),
+                "hasMd": has_md,
+                "hasHtml": has_html,
             }));
         }
     }
@@ -941,42 +943,37 @@ pub async fn delete_snapshot(
 
 pub async fn permanent_delete_keys(
     storage: &Storage,
+    device_id: &str,
     keys: &[String],
 ) -> Result<Vec<String>, String> {
-    let mut deleted_keys = Vec::new();
-    for key in keys {
-        if key.starts_with("note:") || key.starts_with("list:") || key.starts_with("page:") {
-            storage
-                .delete_entity(key)
-                .await
-                .map_err(|error| error.to_string())?;
-            deleted_keys.push(key.clone());
-        } else if let Some(snapshot_stem) = key.strip_prefix("snapshot:") {
-            if let Some((slug, timestamp)) = split_snapshot_stem(snapshot_stem) {
-                storage
-                    .delete_snapshot(&slug, timestamp)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                deleted_keys.push(key.clone());
-            }
-        }
+    let deleted_keys = permanent_delete_candidates(keys);
+    if deleted_keys.is_empty() {
+        return Ok(deleted_keys);
     }
-
-    let deleted_key_set = deleted_keys.iter().collect::<HashSet<_>>();
-    let mut orphaned = storage
-        .load_orphaned()
-        .await
-        .map_err(|error| error.to_string())?
-        .unwrap_or_else(OrphanedManifest::new);
-    orphaned
-        .entries
-        .retain(|entry| !deleted_key_set.contains(&entry.key));
-    storage
-        .save_orphaned(&orphaned)
-        .await
-        .map_err(|error| error.to_string())?;
-
+    replay_entry(
+        storage,
+        device_id,
+        LogEntry::PermanentDelete {
+            timestamp: chrono::Local::now().timestamp_millis(),
+            keys: deleted_keys.clone(),
+        },
+    )
+    .await?;
     Ok(deleted_keys)
+}
+
+pub fn permanent_delete_candidates(keys: &[String]) -> Vec<String> {
+    keys.iter()
+        .filter(|key| is_permanent_delete_candidate(key))
+        .cloned()
+        .collect()
+}
+
+fn is_permanent_delete_candidate(key: &str) -> bool {
+    key.starts_with("note:")
+        || key.starts_with("list:")
+        || key.starts_with("page:")
+        || key.starts_with("snapshot:")
 }
 
 pub fn list_paired_browsers(

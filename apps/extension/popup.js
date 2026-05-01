@@ -2,12 +2,17 @@
 import {
   generateSlugFromUrl,
   readCacheable,
-  sendAction,
   escapeHtml,
 } from './utils.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
 import { pageKey } from './entity-types.js';
+import {
+  hasConnectorStateStorageChange,
+  readCachedConnectorState,
+  requestConnectorBridgeConnect,
+  requestConnectorState,
+} from './connector/state.js';
 
 let currentSlug = '';
 let currentNotes = [];
@@ -22,21 +27,6 @@ let _noteSaveTimeout = null;
 let desktopConnectInFlight = false;
 let dashboardGeneration = 0;
 let dashboardLoadInFlight = null;
-
-const CONNECTOR_STORAGE_KEYS = [
-  'connectorState',
-  'connectorDaemonPort',
-  'connectorDeviceId',
-  'connectorAuthToken',
-  'connectorLastError',
-  'connectorLastErrorCode',
-  'connectorLastDrainedAt',
-  'connectorDataFolder',
-  'connectorDaemonBufferDepth',
-  'desktopPendingEvents',
-  'desktopPendingBytes',
-  'desktopRefuseMode',
-];
 
 // ─── Error UI ────────────────────────────────────────────────────────
 
@@ -74,6 +64,7 @@ function showSetupRequired(connector = {}, options = {}) {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('blacklisted').style.display = 'none';
   document.getElementById('dashboard').style.display = 'none';
+  clearSetupDiagnostic();
   const el = document.getElementById('setup-required');
   el.style.display = 'block';
   applyDesktopConnectorUi(connector);
@@ -97,6 +88,7 @@ function showUnavailablePage(message = 'Not available for this page') {
   loading.textContent = message;
   loading.style.display = 'flex';
   document.getElementById('setup-required').style.display = 'none';
+  clearSetupDiagnostic();
   document.getElementById('blacklisted').style.display = 'none';
   document.getElementById('dashboard').style.display = 'none';
   revealPopup();
@@ -156,8 +148,8 @@ function formatConnectorDiagnostic(diagnostic) {
     case 'no_ports_reachable': {
       const summary = formatPortFailures(diagnostic.failures);
       return summary
-        ? `Last check: no desktop port reachable (${summary}).`
-        : 'Last check: no desktop port reachable.';
+        ? `Last check: no usable desktop connection (${summary}).`
+        : 'Last check: no usable desktop connection.';
     }
     case 'manual_reconnect_exhausted': {
       const seconds = diagnostic.elapsedMs
@@ -169,7 +161,7 @@ function formatConnectorDiagnostic(diagnostic) {
         : diagnostic.lastDiagnostic
           ? ` Last diagnostic: ${diagnostic.lastDiagnostic}.`
           : '';
-      return `Last check: desktop did not become reachable in ${seconds}.${reason}`;
+      return `Last check: desktop connection did not succeed in ${seconds}.${reason}`;
     }
     case 'manual_status_failed':
       return diagnostic.message
@@ -188,6 +180,7 @@ function formatConnectorDiagnostic(diagnostic) {
         ? `Last check: authenticated, but status failed (${diagnostic.message}).`
         : 'Last check: authenticated, but status failed.';
     default:
+      if (diagnostic.message) return `Last check: ${diagnostic.message}`;
       return `Last check: ${diagnostic.code.replaceAll('_', ' ')}.`;
   }
 }
@@ -268,7 +261,7 @@ function formatDesktopConnectorState(connector = {}) {
         status: 'Desktop Offline',
         meta: appendConnectorDiagnostic(
           connector.hasToken
-            ? 'Desktop approved, but not reachable.'
+            ? 'Desktop approved, but connection failed.'
             : 'Start Browser Recall Desktop to resume live capture.',
           connector,
         ),
@@ -287,7 +280,7 @@ function formatDesktopConnectorState(connector = {}) {
         status: 'Desktop Offline',
         meta: connector.hasToken
           ? appendConnectorDiagnostic(
-              'Desktop approved, but not reachable.',
+              'Desktop approved, but connection failed.',
               connector,
             )
           : appendConnectorDiagnostic(
@@ -345,17 +338,111 @@ function showDesktopUnavailable(
     meta.textContent = 'Start Browser Recall Desktop to resume live capture.';
 }
 
+function showDesktopDataUnavailable(
+  message = 'Desktop page data unavailable.',
+  diagnostic = null,
+) {
+  showSetupRequired({ state: 'connected' });
+  const title = document.getElementById('setupRequiredTitle');
+  if (title) title.textContent = 'Page Data Unavailable';
+  const meta = document.getElementById('setupRequiredMeta');
+  if (meta) meta.textContent = message;
+  renderSetupDiagnostic(diagnostic);
+}
+
+function clearSetupDiagnostic() {
+  const el = document.getElementById('setupDiagnostic');
+  if (!el) return;
+  el.style.display = 'none';
+  el.textContent = '';
+}
+
+function renderSetupDiagnostic(diagnostic) {
+  const el = document.getElementById('setupDiagnostic');
+  if (!el) return;
+  const text = formatSetupDiagnostic(diagnostic);
+  if (!text) {
+    clearSetupDiagnostic();
+    return;
+  }
+  el.textContent = text;
+  el.style.display = 'block';
+}
+
+function formatSetupDiagnostic(diagnostic) {
+  if (!diagnostic) return '';
+  const lines = [];
+  if (diagnostic.reason) lines.push(`reason: ${diagnostic.reason}`);
+  if (diagnostic.url) lines.push(`url: ${diagnostic.url}`);
+  if (diagnostic.summary) {
+    lines.push(`success: ${diagnostic.summary.success ? 'yes' : 'no'}`);
+    lines.push(`hasPage: ${diagnostic.summary.page ? 'yes' : 'no'}`);
+    if (diagnostic.summary.error)
+      lines.push(`summaryError: ${diagnostic.summary.error}`);
+  }
+  if (diagnostic.connector) {
+    lines.push(`connector: ${diagnostic.connector.state || 'unknown'}`);
+    lines.push(`deviceId: ${diagnostic.connector.deviceId || 'none'}`);
+    lines.push(`pendingEvents: ${diagnostic.connector.pendingEvents ?? 0}`);
+    lines.push(`pendingBytes: ${diagnostic.connector.pendingBytes ?? 0}`);
+    if (diagnostic.connector.lastError)
+      lines.push(`connectorError: ${diagnostic.connector.lastError}`);
+  }
+  if (diagnostic.error) lines.push(`error: ${diagnostic.error}`);
+  return lines.join('\n');
+}
+
+function showSection(id) {
+  const section = document.getElementById(id);
+  if (section) section.style.display = '';
+}
+
+function hideSection(id) {
+  const section = document.getElementById(id);
+  if (section) section.style.display = 'none';
+}
+
+function resetDashboardSections() {
+  for (const id of [
+    'visitsLikesSection',
+    'listSection',
+    'notesSection',
+    'snapshotSection',
+  ]) {
+    hideSection(id);
+    document.getElementById(id)?.classList.remove('is-empty');
+  }
+  const attention = document.getElementById('attentionGrid');
+  if (attention) attention.innerHTML = '';
+  const listChips = document.getElementById('listChips');
+  if (listChips) listChips.innerHTML = '';
+  const listCount = document.getElementById('listCount');
+  if (listCount) listCount.textContent = '00';
+  const pageNote = document.getElementById('pageNoteWrap');
+  if (pageNote) pageNote.innerHTML = '';
+  const highlights = document.getElementById('highlightList');
+  if (highlights) highlights.innerHTML = '';
+  const annotationCount = document.getElementById('annotationCount');
+  if (annotationCount) annotationCount.textContent = '00';
+  const snapshots = document.getElementById('snapshotList');
+  if (snapshots) snapshots.innerHTML = '';
+  const snapshotCount = document.getElementById('snapshotCount');
+  if (snapshotCount) snapshotCount.textContent = '00';
+}
+
 async function refreshDesktopConnectorState() {
   try {
-    const connector = await sendAction({
-      action: 'getDesktopConnectorState',
-    });
+    const connector = await requestConnectorState();
     applyDesktopConnectorUi(connector);
     return connector;
   } catch (error) {
     showDesktopConnectorError(error.message || 'Desktop bridge unavailable.');
     return null;
   }
+}
+
+async function getCachedDesktopConnectorState() {
+  return readCachedConnectorState();
 }
 
 function setupRequiredVisible() {
@@ -375,14 +462,21 @@ async function loadDashboardIfConnected(connector) {
   return true;
 }
 
+function refreshDesktopConnectorStateInBackground() {
+  void (async () => {
+    const connector = await refreshDesktopConnectorState();
+    await loadDashboardIfConnected(connector);
+  })().catch((error) => {
+    logDebug('[popup] background connector refresh failed:', error.message);
+  });
+}
+
 async function connectDesktopBridge() {
   if (desktopConnectInFlight) return;
   desktopConnectInFlight = true;
   applyDesktopConnectorUi({ state: 'connecting' });
   try {
-    const connector = await sendAction({
-      action: 'connectDesktopBridge',
-    });
+    const connector = await requestConnectorBridgeConnect();
     applyDesktopConnectorUi(connector);
   } catch (error) {
     showDesktopConnectorError(error.message || 'Failed to refresh.');
@@ -397,12 +491,16 @@ async function connectDesktopBridge() {
 function renderSnapshots(snapshots) {
   const container = document.getElementById('snapshotList');
   const count = document.getElementById('snapshotCount');
+  const section = document.getElementById('snapshotSection');
   if (count)
     count.textContent = String(snapshots?.length || 0).padStart(2, '0');
   if (!snapshots || snapshots.length === 0) {
     container.innerHTML = '';
+    section?.classList.add('is-empty');
+    showSection('snapshotSection');
     return;
   }
+  section?.classList.remove('is-empty');
 
   container.innerHTML = snapshots
     .map(
@@ -444,6 +542,7 @@ function renderSnapshots(snapshots) {
       });
     });
   });
+  showSection('snapshotSection');
 }
 
 // Render attention section (flat fields on history entry)
@@ -484,9 +583,9 @@ function renderVisitsAndLikes(entry) {
 
   if (items.length > 0) {
     container.innerHTML = items.join('');
-    section.style.display = '';
+    showSection('visitsLikesSection');
   } else {
-    section.style.display = 'none';
+    hideSection('visitsLikesSection');
   }
 }
 
@@ -520,6 +619,7 @@ function renderPageNoteWrap(globalNote) {
 }
 
 function openPageNoteEditor(wrap, text, slug) {
+  document.getElementById('notesSection')?.classList.remove('is-empty');
   wrap.innerHTML = `<textarea class="page-note-edit-textarea" placeholder="Add a page note...">${escapeHtml(text)}</textarea>`;
   const ta = wrap.querySelector('textarea');
   ta.dataset.noteSlug = slug;
@@ -592,17 +692,21 @@ function renderNotes(notes) {
     _noteSaveTimeout = null;
   }
   const container = document.getElementById('highlightList');
+  const section = document.getElementById('notesSection');
   currentNotes = notes || [];
 
   const globalNote = currentNotes.find((n) => n.excerpt === null);
   renderPageNoteWrap(globalNote);
 
   const textNotes = currentNotes.filter((n) => n.excerpt !== null);
+  const hasPageNote = Boolean(globalNote?.note || globalNote?.slug);
+  section?.classList.toggle('is-empty', !hasPageNote && textNotes.length === 0);
   const count = document.getElementById('annotationCount');
   if (count) count.textContent = String(textNotes.length).padStart(2, '0');
 
   if (textNotes.length === 0) {
     container.innerHTML = '';
+    showSection('notesSection');
     return;
   }
 
@@ -632,6 +736,7 @@ function renderNotes(notes) {
     .join('');
 
   bindHighlightActions(container);
+  showSection('notesSection');
 }
 
 function bindHighlightActions(container) {
@@ -705,7 +810,7 @@ function openHighlightNoteEditor(item, note) {
 
 // Lists — pin current page to lists
 async function loadLists() {
-  if (currentPageSummary?.lists?.length > 0) {
+  if (Array.isArray(currentPageSummary?.lists)) {
     return currentPageSummary.lists;
   }
 
@@ -839,6 +944,7 @@ async function renderListChips() {
     e.stopPropagation();
     openListPicker(lists, allPins);
   });
+  showSection('listSection');
 }
 
 async function toggleListPin(listId) {
@@ -1207,20 +1313,26 @@ async function resolvePageIdentity(tab) {
   if (tab.url.startsWith(viewerPrefix)) {
     slug = new URL(tab.url).searchParams.get('slug') || '';
   } else {
-    slug = generateSlugFromUrl(tab.url);
+    slug = generateSlugFromUrl(effectiveUrl);
   }
   return { slug, url: effectiveUrl, title };
 }
 
+function pageSummaryFallback(tab, slug, summary = {}) {
+  const url = summary.url || currentUrl || tab._effectiveUrl || tab.url;
+  return {
+    slug,
+    url,
+    title: currentTitle || tab.title || '<unknown>',
+    visitDates: [],
+    childIds: [],
+    parentIds: [],
+  };
+}
+
 async function fetchAndRenderPageData(tab, slug) {
   const generation = dashboardGeneration;
-  // Build a fallback entry from tab info
-  currentEntry = {
-    timestamp: Date.now(),
-    url: tab.url,
-    title: tab.title || null,
-    slug,
-  };
+  currentEntry = null;
 
   try {
     logDebug(`[popup] Fetching page summary for url=${currentUrl || tab.url}`);
@@ -1231,22 +1343,21 @@ async function fetchAndRenderPageData(tab, slug) {
     if (generation !== dashboardGeneration) return false;
     logDebug('[popup] getPageSummary response:', summary);
 
-    if (summary && summary.success) {
-      currentPageSummary = summary;
-      if (summary.page) {
-        currentEntry = summary.page;
-        currentTitle =
-          summary.page.user_title ||
-          summary.page.title ||
-          tab.title ||
-          '<unknown>';
-        document.getElementById('pageTitle').textContent = currentTitle;
-        if (summary.page.url) {
-          currentUrl = summary.page.url;
-          document.getElementById('pageUrl').textContent = summary.page.url;
-        }
+    if (summary?.success) {
+      const page = summary.page || pageSummaryFallback(tab, slug, summary);
+      currentPageSummary = { ...summary, page };
+      currentEntry = page;
+      currentTitle =
+        page.user_title ||
+        page.title ||
+        tab.title ||
+        '<unknown>';
+      document.getElementById('pageTitle').textContent = currentTitle;
+      if (page.url) {
+        currentUrl = page.url;
+        document.getElementById('pageUrl').textContent = page.url;
       }
-      renderVisitsAndLikes(summary.page);
+      renderVisitsAndLikes(page);
       renderSnapshots(summary.snapshots);
       renderNotes(summary.notes);
       logDebug(
@@ -1254,15 +1365,39 @@ async function fetchAndRenderPageData(tab, slug) {
       );
     } else {
       logDebug('[popup] getPageSummary returned failure:', summary);
-      await refreshDesktopConnectorState();
-      showDesktopUnavailable('Browser Recall Desktop is offline.');
+      const connector = await refreshDesktopConnectorState();
+      if (connector?.state === 'connected' && connector?.deviceId) {
+        showDesktopDataUnavailable(
+          summary?.error || 'Desktop page summary failed.',
+          {
+            reason: 'popup-page-summary-failed',
+            summary,
+            connector,
+            url: currentUrl || tab.url,
+          },
+        );
+      } else {
+        showSetupRequired(connector || { state: 'offline', hasToken: true });
+      }
       return false;
     }
   } catch (error) {
     if (generation !== dashboardGeneration) return false;
     logError('[popup] Could not load page summary:', error);
-    await refreshDesktopConnectorState();
-    showDesktopUnavailable('Browser Recall Desktop is offline.');
+    const connector = await refreshDesktopConnectorState();
+    if (connector?.state === 'connected' && connector?.deviceId) {
+      showDesktopDataUnavailable(
+        error.message || 'Desktop page summary failed.',
+        {
+          reason: 'popup-page-summary-error',
+          error: error.message || String(error),
+          connector,
+          url: currentUrl || tab.url,
+        },
+      );
+    } else {
+      showSetupRequired(connector || { state: 'offline', hasToken: true });
+    }
     return false;
   }
   return true;
@@ -1284,12 +1419,18 @@ async function refreshCurrentPageSummary() {
 function showDashboardUI() {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('blacklisted').style.display = 'none';
+  document.getElementById('setup-required').style.display = 'none';
   document.getElementById('dashboard').style.display = 'flex';
   document.getElementById('dashboardContent').style.display = 'block';
   revealPopup();
 
-  requestAnimationFrame(() => {
-    document
+  const frame =
+    globalThis.requestAnimationFrame ||
+    globalThis.window?.requestAnimationFrame ||
+    ((callback) => setTimeout(callback, 0));
+  const doc = document;
+  frame(() => {
+    doc
       .querySelectorAll(
         '.page-note-edit-textarea, .highlight-note-edit-textarea',
       )
@@ -1341,13 +1482,15 @@ async function showDashboard(tab) {
   currentSlug = slug;
   document.getElementById('pageTitle').textContent = title;
   document.getElementById('pageUrl').textContent = url;
+  resetDashboardSections();
+  showDashboardUI();
+  void renderRecordingBar();
+  scheduleDelayedTitleCheck(tab, tab.title || '');
 
   const updated = await fetchAndRenderPageData(tab, slug);
   if (!updated || generation !== dashboardGeneration) return;
-  await Promise.all([renderListChips(), renderRecordingBar()]);
+  await renderListChips();
   if (generation !== dashboardGeneration) return;
-  showDashboardUI();
-  scheduleDelayedTitleCheck(tab, tab.title || '');
 }
 
 // ─── Init phases ─────────────────────────────────────────────────────
@@ -1488,6 +1631,26 @@ async function initPopup() {
   showSetupRequired({ state: 'connecting' }, { reveal: false });
   const revealTimer = setTimeout(revealSetupIfStillWaiting, 250);
   try {
+    const cachedConnector = await getCachedDesktopConnectorState();
+    if (
+      cachedConnector?.state === 'connected' &&
+      cachedConnector.deviceId &&
+      !cachedConnector.refuseMode
+    ) {
+      clearTimeout(revealTimer);
+      void refreshDesktopConnectorState().catch((error) => {
+        logDebug('[popup] background connector refresh failed:', error.message);
+      });
+      await loadConnectedDashboard(cachedConnector);
+      return;
+    }
+    if (cachedConnector && cachedConnector.state !== 'starting') {
+      clearTimeout(revealTimer);
+      showSetupRequired(cachedConnector);
+      refreshDesktopConnectorStateInBackground();
+      return;
+    }
+
     const connector = await refreshDesktopConnectorState();
     clearTimeout(revealTimer);
     if (connector?.state !== 'connected' || !connector?.deviceId) {
@@ -1505,9 +1668,13 @@ initPopup().catch((err) => showFatalError(err.message));
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local') return;
-  if (!CONNECTOR_STORAGE_KEYS.some((key) => key in changes)) return;
+  if (!hasConnectorStateStorageChange(changes)) return;
   void (async () => {
-    const connector = await refreshDesktopConnectorState();
+    const connector = setupRequiredVisible()
+      ? await refreshDesktopConnectorState()
+      : await getCachedDesktopConnectorState();
+    if (!connector) return;
+    applyDesktopConnectorUi(connector);
     if (setupRequiredVisible()) {
       await loadDashboardIfConnected(connector);
     }

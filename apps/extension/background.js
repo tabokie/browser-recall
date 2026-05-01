@@ -11,6 +11,8 @@ import { validateRuleConfig, validateFnRuleSource } from './rule-engine.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { SCHEME_HEX } from './color-scheme-map.js';
 import { logDebug, logError } from './logger.js';
+import { createBadgeController } from './badge-controller.js';
+import { getBrowserCapabilities } from './browser-capabilities.js';
 import {
   enqueueDesktopEvent,
   enqueueDesktopNote,
@@ -18,6 +20,8 @@ import {
   getConnectorBridgeState,
   flushDesktopBuffer,
   initConnectorBridge,
+  refreshConnectorBridgeState,
+  subscribeConnectorBridgeState,
   requestDesktopHistorySearch,
   requestDesktopHistoryFiles,
   requestDesktopHistoryBatch,
@@ -59,6 +63,9 @@ logDebug('Background script loading...');
 const DRAIN_INTERVAL_MS = 5000; // 5 seconds — data is safe in chrome.storage.local until drained
 const HISTORY_RECENT_DAYS = 7; // days of past history to cache for multi-day checks
 const LOG_BUFFER_MAX_SIZE = 2000; // max entries before forced eviction
+const CONNECTOR_STATE_REFRESH_TIMEOUT_MS = 1000;
+const LOG_BUFFER_STORAGE_TIMEOUT_MS = 2500;
+const BROWSER_CAPABILITIES = getBrowserCapabilities();
 
 // In-memory Map of URL → visitDates (YYYYMMDD[]) from history:recent (past days).
 // Populated during hydration, immutable until next browser restart.
@@ -66,20 +73,6 @@ let recentUrls = new Map();
 let lastLogTimestamp = 0;
 
 const CONNECTOR_LAST_DRAINED_AT_KEY = 'connectorLastDrainedAt';
-const CONNECTOR_STORAGE_KEYS = [
-  'connectorState',
-  'connectorDaemonPort',
-  'connectorDeviceId',
-  'connectorAuthToken',
-  'connectorLastError',
-  'connectorLastErrorCode',
-  'connectorLastDrainedAt',
-  'connectorDataFolder',
-  'connectorDaemonBufferDepth',
-  'desktopPendingEvents',
-  'desktopPendingBytes',
-  'desktopRefuseMode',
-];
 const NORMAL_ICON_PATHS = {
   16: 'icons/icon16.png',
   48: 'icons/icon48.png',
@@ -115,16 +108,18 @@ async function getDeviceId() {
 
 function pauseService(code, message) {
   serviceError = { code, message, timestamp: Date.now() };
-  chrome.action.setIcon({ path: NORMAL_ICON_PATHS });
-  chrome.action.setBadgeBackgroundColor({ color: '#B85040' });
-  chrome.action.setBadgeText({ text: '!' });
+  badgeController
+    .setServicePaused({ title: message })
+    .catch((error) => logDebug('[badge] service pause failed:', error.message));
   chrome.storage.session.set({ serviceError }).catch(() => {});
   logError(`Service paused: [${code}] ${message}`);
 }
 
 function resumeService() {
   serviceError = null;
-  chrome.action.setIcon({ path: NORMAL_ICON_PATHS });
+  badgeController
+    .setServiceActive()
+    .catch((error) => logDebug('[badge] service resume failed:', error.message));
   chrome.storage.session.remove(['serviceError']).catch(() => {});
   logDebug('Service resumed');
 }
@@ -164,26 +159,53 @@ chrome.storage.session.setAccessLevel({
 
 // Resolves when hydrateCache() completes (or immediately if no hydration needed).
 let hydrationDone = Promise.resolve();
+const badgeController = createBadgeController({
+  capabilities: BROWSER_CAPABILITIES,
+  logDebug,
+  normalIconPaths: NORMAL_ICON_PATHS,
+  syncDesktopConnectorPauseState,
+  readCacheable,
+  generateSlugFromUrl,
+  pageKey,
+  notePrefix: NOTE_PREFIX,
+  snapshotPrefix: SNAPSHOT_PREFIX,
+  listPrefix: LIST_PREFIX,
+  getBadgeAccentColor,
+});
 
 async function handleGetDesktopConnectorState() {
-  const connector = await getConnectorBridgeState();
-  void initConnectorBridge().catch((error) => {
-    logDebug('[connector] state refresh init failed:', error.message);
-  });
+  const refreshed = await refreshDesktopConnectorStateProbe();
+  const connector = refreshed || (await getConnectorBridgeState());
   syncDesktopConnectorPauseState(connector);
-  if (!(await applyDesktopConnectorBadge(connector))) {
-    await refreshActiveTabBadge();
-  }
+  badgeController.scheduleConnectorBadgeRefresh(connector);
   return { success: true, ...connector };
+}
+
+async function refreshDesktopConnectorStateProbe() {
+  let timer;
+  try {
+    return await Promise.race([
+      refreshConnectorBridgeState(),
+      new Promise((resolve) => {
+        timer = setTimeout(
+          () => resolve(null),
+          CONNECTOR_STATE_REFRESH_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } catch (error) {
+    logDebug('[connector] state refresh failed:', error.message);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function handleConnectDesktopBridge() {
   const refreshed = await connectDesktopBridge();
   const connector = refreshed || (await getConnectorBridgeState());
   syncDesktopConnectorPauseState(connector);
-  if (!(await applyDesktopConnectorBadge(connector))) {
-    await refreshActiveTabBadge();
-  }
+  badgeController.scheduleConnectorBadgeRefresh(connector);
   return { success: true, ...connector };
 }
 
@@ -213,64 +235,6 @@ function observeLogTimestamp(timestamp) {
   if (Number.isFinite(timestamp) && timestamp > lastLogTimestamp) {
     lastLogTimestamp = timestamp;
   }
-}
-
-function isDesktopConnectorAvailable(connector) {
-  return (
-    connector?.state === 'connected' &&
-    Boolean(connector.deviceId) &&
-    !connector.refuseMode
-  );
-}
-
-function desktopConnectorBadgeTitle(connector = {}) {
-  if (connector.refuseMode) return 'Browser Recall Desktop queue is full';
-  if (connector.lastError) return connector.lastError;
-  switch (connector.state) {
-    case 'connected':
-      return 'Browser Recall Desktop connected';
-    case 'pair_pending':
-      return 'Browser Recall Desktop approval pending';
-    case 'pair_denied':
-      return 'Browser Recall Desktop approval denied';
-    case 'auth_failed':
-      return 'Browser Recall Desktop token rejected';
-    case 'paused':
-      return 'Browser Recall Desktop is paused';
-    case 'connecting':
-    case 'starting':
-      return 'Looking for Browser Recall Desktop';
-    case 'offline':
-    default:
-      return 'Browser Recall Desktop is offline';
-  }
-}
-
-async function applyDesktopConnectorBadge(connector, tabId = undefined) {
-  if (isDesktopConnectorAvailable(connector)) {
-    await chrome.action.setTitle({
-      title: 'Browser Recall',
-      ...(tabId !== undefined ? { tabId } : {}),
-    });
-    if (tabId !== undefined) {
-      await chrome.action.setBadgeText({ text: '', tabId });
-    }
-    return false;
-  }
-
-  await chrome.action.setTitle({
-    title: desktopConnectorBadgeTitle(connector),
-    ...(tabId !== undefined ? { tabId } : {}),
-  });
-  await chrome.action.setBadgeBackgroundColor({
-    color: '#B85040',
-    ...(tabId !== undefined ? { tabId } : {}),
-  });
-  await chrome.action.setBadgeText({
-    text: '!',
-    ...(tabId !== undefined ? { tabId } : {}),
-  });
-  return true;
 }
 
 async function shouldMirrorEntryToDesktop(entry) {
@@ -604,12 +568,43 @@ function notifyMutation(type, detail) {
 let logBuffer = null; // null = not yet restored from storage.local
 let logBufferWatermark = 0; // last drain watermark — entries ≤ this are safely on disk
 
+function storageTimeoutError(operation) {
+  const error = new Error(
+    `${operation} timed out after ${LOG_BUFFER_STORAGE_TIMEOUT_MS}ms`,
+  );
+  error.code = 'storage_timeout';
+  return error;
+}
+
+function storageTimeout(operation) {
+  return new Promise((_, reject) => {
+    setTimeout(
+      () => reject(storageTimeoutError(operation)),
+      LOG_BUFFER_STORAGE_TIMEOUT_MS,
+    );
+  });
+}
+
+function isQuotaError(error) {
+  return (
+    error?.message?.includes('QUOTA_BYTES') || error?.message?.includes('quota')
+  );
+}
+
 async function ensureLogBuffer() {
   if (logBuffer !== null) return;
-  const stored = await chrome.storage.local.get([
-    'logBuffer',
-    CONNECTOR_LAST_DRAINED_AT_KEY,
-  ]);
+  let stored;
+  try {
+    stored = await Promise.race([
+      chrome.storage.local.get(['logBuffer', CONNECTOR_LAST_DRAINED_AT_KEY]),
+      storageTimeout('logBuffer restore'),
+    ]);
+  } catch (error) {
+    if (error.code !== 'storage_timeout') throw error;
+    logDebug('[logBuffer] restore timed out; continuing with memory queue');
+    logBuffer = [];
+    return;
+  }
   const persistedWatermark = stored[CONNECTOR_LAST_DRAINED_AT_KEY] || 0;
   const restored = (stored.logBuffer || []).filter(
     (entry) => (entry?.timestamp || 0) > persistedWatermark,
@@ -628,10 +623,33 @@ async function ensureLogBuffer() {
 }
 
 async function persistLogBuffer() {
+  let timedOut = false;
+  const writePromise = chrome.storage.local
+    .set({ logBuffer })
+    .catch((error) => {
+      if (timedOut) {
+        logDebug('[logBuffer] deferred persist failed:', error.message);
+      }
+      throw error;
+    });
   try {
-    await chrome.storage.local.set({ logBuffer });
+    await Promise.race([
+      writePromise,
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          timedOut = true;
+          reject(storageTimeoutError('logBuffer persist'));
+        }, LOG_BUFFER_STORAGE_TIMEOUT_MS);
+      }),
+    ]);
+    return true;
   } catch (e) {
-    if (e.message?.includes('QUOTA_BYTES') || e.message?.includes('quota')) {
+    if (e.code === 'storage_timeout') {
+      writePromise.catch(() => {});
+      logDebug('[logBuffer] persist timed out; keeping in-memory queue');
+      return false;
+    }
+    if (isQuotaError(e)) {
       pauseService(
         'local_quota',
         `Local storage full — logBuffer has ${logBuffer.length} undrained entries. Drain may be stuck.`,
@@ -681,19 +699,36 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       logDebug('[connector] log buffer prune failed:', error.message);
     });
   }
-  if (CONNECTOR_STORAGE_KEYS.some((key) => key in changes)) {
-    getConnectorBridgeState()
-      .then(async (connector) => {
-        syncDesktopConnectorPauseState(connector);
-        if (!(await applyDesktopConnectorBadge(connector))) {
-          await refreshActiveTabBadge();
-        }
-      })
-      .catch((error) => {
-        logDebug('[connector] badge refresh failed:', error.message);
-      });
-  }
 });
+
+subscribeConnectorBridgeState((connector) => {
+  syncDesktopConnectorPauseState(connector);
+  badgeController.scheduleConnectorBadgeRefresh(connector);
+});
+
+async function applyCachedConnectorBadge(reason) {
+  const connector = await getConnectorBridgeState();
+  syncDesktopConnectorPauseState(connector);
+  await badgeController.setConnectorState(connector);
+}
+
+function startConnectorBridge(reason) {
+  void (async () => {
+    try {
+      await applyCachedConnectorBadge(reason);
+    } catch (error) {
+      logDebug(
+        `[connector] cached badge apply failed on ${reason}:`,
+        error.message,
+      );
+    }
+    try {
+      await initConnectorBridge();
+    } catch (error) {
+      logDebug(`[connector] startup on ${reason} failed:`, error.message);
+    }
+  })();
+}
 
 // High-level: append to logBuffer and mirror to the daemon.
 // Serialized via logBuffer lock so concurrent calls see each other's cache writes.
@@ -716,7 +751,7 @@ async function addLog(entry) {
   });
   scheduleDrainNotify();
   await mirrorEntryToDesktop(entry);
-  void refreshBadgesForEntry(entry);
+  badgeController.refreshBadgesForEntry(entry);
   return effects;
 }
 
@@ -1220,10 +1255,10 @@ async function ensureDefaultLists() {
   }
 }
 
-// ─── Smart-Rule Auto-Pin on Visit ────────────────────────────────────
+// ─── Rule Auto-Pin on Visit ──────────────────────────────────────────
 // Evaluate all lists with rules against a visited page and auto-pin matches.
 
-async function evaluateSmartRulesForVisit(url, title) {
+async function evaluateRulesForVisit(url, title) {
   const listKeys = await getAllListKeys();
   const listIds = listKeys.map((key) => entitySlug(key));
   if (listIds.length === 0) return;
@@ -1241,7 +1276,7 @@ async function evaluateSmartRulesForVisit(url, title) {
     }
     await applyDesktopRuleBatchLocally(desktopResp.results || []);
   } catch (error) {
-    logDebug('[rules] smart-rule visit batch failed:', error.message);
+    logDebug('[rules] visit batch failed:', error.message);
   }
 }
 
@@ -1271,110 +1306,17 @@ async function trimTitle(rawTitle, url) {
   return title.trim();
 }
 
-// ─── Badge indicator ─────────────────────────────────────────────────
-// Show a colored dot on the extension icon when the current page has data.
-// Blue = notes/snapshots, Green = in lists, Purple = both.
-
-async function updateBadgeForTab(tabId, url) {
-  try {
-    const connector = await getConnectorBridgeState();
-    syncDesktopConnectorPauseState(connector);
-    if (await applyDesktopConnectorBadge(connector, tabId)) return;
-
-    if (!url || !url.startsWith('http')) {
-      await chrome.action.setBadgeText({ text: '', tabId });
-      return;
-    }
-    const slug = generateSlugFromUrl(url);
-    const page = await readCacheable(pageKey(slug));
-    if (!page) {
-      await chrome.action.setBadgeText({ text: '', tabId });
-      return;
-    }
-    const hasNotes = page.childIds?.some(
-      (c) => c.startsWith(NOTE_PREFIX) || c.startsWith(SNAPSHOT_PREFIX),
-    );
-    const hasLists = page.parentIds?.some((id) => id.startsWith(LIST_PREFIX));
-    if (!hasNotes && !hasLists) {
-      await chrome.action.setBadgeText({ text: '', tabId });
-      return;
-    }
-    const color =
-      hasNotes && hasLists ? '#9C27B0' : hasNotes ? '#4A90D9' : '#4CAF50';
-    await chrome.action.setBadgeBackgroundColor({ color, tabId });
-    await chrome.action.setBadgeText({ text: ' ', tabId });
-  } catch (e) {
-    // Non-critical — don't break navigation for a badge update failure.
-  }
-}
-
-function collectBadgeUrlsFromEntry(entry) {
-  const urls = new Set();
-  if (entry?.url?.startsWith('http')) {
-    urls.add(entry.url);
-  }
-  for (const item of entry?.items || []) {
-    if (typeof item === 'string' && item.startsWith('http')) {
-      urls.add(item);
-    }
-  }
-  return [...urls];
-}
-
-async function refreshBadgesForUrls(urls) {
-  if (urls.length > 0) {
-    try {
-      const tabs = await chrome.tabs.query({ url: urls });
-      for (const tab of tabs) {
-        if (tab?.id > 0) {
-          updateBadgeForTab(tab.id, tab.url);
-        }
-      }
-    } catch (error) {
-      logDebug('[badge] badge query failed:', error.message);
-    }
-  }
-
-  try {
-    const [tab] = await chrome.tabs.query({
-      active: true,
-      lastFocusedWindow: true,
-    });
-    if (tab?.id > 0) {
-      updateBadgeForTab(tab.id, tab.url);
-    }
-  } catch (error) {
-    logDebug('[badge] active-tab badge refresh failed:', error.message);
-  }
-}
-
-async function refreshActiveTabBadge() {
-  try {
-    const [tab] = await chrome.tabs.query({
-      active: true,
-      lastFocusedWindow: true,
-    });
-    if (tab?.id > 0) {
-      await updateBadgeForTab(tab.id, tab.url);
-    }
-  } catch (error) {
-    logDebug('[badge] active-tab badge refresh failed:', error.message);
-  }
-}
-
-function refreshBadgesForEntry(entry) {
-  const urls = collectBadgeUrlsFromEntry(entry);
-  if (urls.length === 0) return;
-  void refreshBadgesForUrls(urls);
-}
-
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   try {
     const tab = await chrome.tabs.get(tabId);
-    updateBadgeForTab(tabId, tab.url);
+    badgeController.updateBadgeForTab(tabId, tab.url);
   } catch (e) {
     /* tab may have been closed */
   }
+});
+
+chrome.tabs.onCreated?.addListener?.((tab) => {
+  badgeController.clearNewTabBadge(tab);
 });
 
 // ─── Supplementary referrer detection ─────────────────────────────────
@@ -1394,7 +1336,7 @@ const getReferrer = (() => {
       details.transitionType === 'link' && previousUrl ? previousUrl : null;
     tabUrls.set(details.tabId, details.url);
     committed.set(details.tabId, referrer);
-    updateBadgeForTab(details.tabId, details.url);
+    badgeController.updateBadgeForTab(details.tabId, details.url);
     // Wake up any pending getReferrer() call
     const waiter = waiters.get(details.tabId);
     if (waiter) {
@@ -1457,25 +1399,19 @@ chrome.runtime.onInstalled.addListener(async () => {
   await ensureLogBuffer();
   logDebug('Connector buffer initialized');
 
-  initConnectorBridge().catch((error) => {
-    logDebug('[connector] startup on install failed:', error.message);
-  });
+  startConnectorBridge('install');
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await ensureLogBuffer();
   logDebug('Extension started');
 
-  initConnectorBridge().catch((error) => {
-    logDebug('[connector] startup on browser start failed:', error.message);
-  });
+  startConnectorBridge('browser start');
 });
 
 // ─── Save Page WE Integration ─────────────────────────────────────────
 initSavepageBridge();
-initConnectorBridge().catch((error) => {
-  logDebug('[connector] background boot failed:', error.message);
-});
+startConnectorBridge('background boot');
 
 // ─── List Event Fields ───────────────────────────────────────────────
 // Resolve a list internal ID to { name, listOwner } for event emission.
@@ -1512,38 +1448,16 @@ async function getBadgeAccentColor() {
   return SCHEME_HEX[colorScheme] || SCHEME_HEX.amber;
 }
 
-// Spinner badge for snapshot capture — animated dot sequence on extension icon
-let spinnerInterval = null;
 async function startSpinnerBadge(tabId) {
-  if (spinnerInterval) {
-    clearInterval(spinnerInterval);
-    spinnerInterval = null;
-  }
-  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-  let i = 0;
-  chrome.action.setBadgeBackgroundColor({
-    color: await getBadgeAccentColor(),
-    tabId,
-  });
-  chrome.action.setBadgeText({ text: frames[0], tabId });
-  spinnerInterval = setInterval(() => {
-    i = (i + 1) % frames.length;
-    chrome.action
-      .setBadgeText({ text: frames[i], tabId })
-      .catch((e) => logDebug('[spinner] badge update failed:', e.message));
-  }, 100);
+  await badgeController.startSpinnerBadge(tabId);
 }
 async function stopSpinnerBadge(tabId) {
-  if (spinnerInterval) {
-    clearInterval(spinnerInterval);
-    spinnerInterval = null;
-  }
   try {
     const tab = await chrome.tabs.get(tabId);
-    await updateBadgeForTab(tabId, tab.url);
+    await badgeController.stopSpinnerBadge(tabId, tab.url);
   } catch {
-    chrome.action
-      .setBadgeText({ text: '', tabId })
+    badgeController
+      .stopSpinnerBadge(tabId)
       .catch((e) => logDebug('[spinner] badge clear failed:', e.message));
   }
 }
@@ -1584,7 +1498,7 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
     if (!queued) {
       throw new Error('Desktop snapshot queue unavailable');
     }
-    void refreshBadgesForUrls([url]);
+    void badgeController.refreshBadgesForUrls([url]);
     notifyMutation('snapshot', { slug });
   } finally {
     stopSpinnerBadge(tabId);
@@ -1612,7 +1526,7 @@ async function handleContextMenuHighlight(url, title, selectionText, tabId) {
   if (!queued) {
     throw new Error('Desktop note queue unavailable');
   }
-  void refreshBadgesForUrls([url]);
+  void badgeController.refreshBadgesForUrls([url]);
 
   notifyMutation('note', { pageSlug: slug, noteSlug });
 
@@ -1800,7 +1714,9 @@ async function handleGetPageSummary(request) {
     if (!desktopResp?.success) {
       return {
         success: false,
-        error: desktopResp?.error || 'Desktop popup page summary failed',
+        error:
+          desktopResp?.error ||
+          `Desktop returned ${desktopResp?.type || 'an empty response'} without page summary data`,
       };
     }
     return {
@@ -1939,8 +1855,8 @@ async function handleReportPage(request, sender) {
       });
       await addLog(entry);
 
-      evaluateSmartRulesForVisit(url, title).catch((err) => {
-        logDebug('Smart-rule auto-pin error:', err.message);
+      evaluateRulesForVisit(url, title).catch((err) => {
+        logDebug('Rule auto-pin error:', err.message);
       });
 
       notifyMutation('history', { url });
@@ -2360,7 +2276,7 @@ async function handleCreateNote(request, sender) {
   if (!queued) {
     throw new Error('Desktop note queue unavailable');
   }
-  void refreshBadgesForUrls([pageUrl]);
+  void badgeController.refreshBadgesForUrls([pageUrl]);
 
   const notesResp = await handleLoadPageNotes({ slug: pageSlug });
   notifyMutation('note', { pageSlug, noteSlug });
@@ -2581,15 +2497,14 @@ async function handleRestoreNote(request) {
 
 async function handleRestoreSnapshot(request) {
   const snapStem = request.snapSlug;
+  const lastDash = snapStem.lastIndexOf('-');
+  const pageSlug = lastDash >= 0 ? snapStem.slice(0, lastDash) : snapStem;
   const rsOrphaned = await readCacheable('manifest:orphaned');
   const snapOrphanEntry = (rsOrphaned?.entries || []).find(
     (e) => e.key === snapshotKey(snapStem),
   );
   let rsPageUrl = snapOrphanEntry?.url || null;
-  let pageSlug;
   if (!rsPageUrl) {
-    const lastDash = snapStem.lastIndexOf('-');
-    pageSlug = snapStem.slice(0, lastDash);
     const page = await readCacheable(pageKey(pageSlug));
     rsPageUrl = page?.url || null;
   }
@@ -3027,9 +2942,19 @@ async function handleGetLogBufferForTest() {
 
 // ─── Message Dispatch ────────────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
   // Skip Save Page WE messages (they use `type` field, handled by separate listener)
   if (request.type && !request.action) return false;
+
+  const usePromiseResponse = BROWSER_CAPABILITIES.supportsPromiseOnMessage;
+  let resolveResponse;
+  const responsePromise = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const sendResponse = (response) => {
+    resolveResponse(response);
+    if (!usePromiseResponse) rawSendResponse(response);
+  };
 
   (async () => {
     try {
@@ -3234,5 +3159,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
   })();
 
+  if (usePromiseResponse) return responsePromise;
   return true;
 });

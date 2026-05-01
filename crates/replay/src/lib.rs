@@ -9,10 +9,11 @@ use entities::{
 use handlers::{
     handle_add_rule, handle_create_list, handle_create_note, handle_create_snapshot,
     handle_delete_list, handle_delete_note, handle_delete_snapshot, handle_leave_page,
-    handle_pin_to_list, handle_rate_page, handle_remove_rule, handle_rename_page,
-    handle_replace_note, handle_restore_list, handle_restore_note, handle_restore_snapshot,
-    handle_unpin_from_list, handle_update_list, handle_update_list_tree, handle_update_rule,
-    handle_update_setting, handle_visit_page, CreateNoteRequest, ReplaceNoteRequest,
+    handle_permanent_delete, handle_pin_to_list, handle_rate_page, handle_remove_rule,
+    handle_rename_page, handle_replace_note, handle_restore_list, handle_restore_note,
+    handle_restore_snapshot, handle_unpin_from_list, handle_update_list, handle_update_list_tree,
+    handle_update_rule, handle_update_setting, handle_visit_page, CreateNoteRequest,
+    ReplaceNoteRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -289,6 +290,10 @@ pub enum LogEntry {
         url: String,
         path: String,
     },
+    PermanentDelete {
+        timestamp: i64,
+        keys: Vec<String>,
+    },
 }
 
 impl LogEntry {
@@ -315,7 +320,8 @@ impl LogEntry {
             | Self::ReplaceNote { timestamp, .. }
             | Self::CreateSnapshot { timestamp, .. }
             | Self::DeleteSnapshot { timestamp, .. }
-            | Self::RestoreSnapshot { timestamp, .. } => *timestamp,
+            | Self::RestoreSnapshot { timestamp, .. }
+            | Self::PermanentDelete { timestamp, .. } => *timestamp,
         }
     }
 }
@@ -586,6 +592,9 @@ where
             url,
             path,
         } => handle_restore_snapshot(timestamp, &url, &path, &load, &context).await,
+        LogEntry::PermanentDelete { timestamp, keys } => {
+            handle_permanent_delete(timestamp, &keys, &load, &context).await
+        }
     }
 }
 
