@@ -4,6 +4,15 @@ import { logDebug } from './logger.js';
 /** Max words of page body text captured for rule matching. Duplicated in content.js (non-module). */
 export const BODY_WORD_LIMIT = 200;
 
+export const INTERNAL_URL_PREFIXES = ['chrome://', 'edge://', 'about:'];
+export const DEFAULT_URL_BLACKLIST = [...INTERNAL_URL_PREFIXES];
+
+export function isInternalBrowserUrl(url) {
+  return INTERNAL_URL_PREFIXES.some((prefix) =>
+    String(url || '').startsWith(prefix),
+  );
+}
+
 // Unified cache read: session cache → background readCacheable fallback.
 // Keys use entity key format: 'manifest:settings', 'manifest:orphaned', 'list:reading', etc.
 export async function readCacheable(key, includeDeleted = false) {

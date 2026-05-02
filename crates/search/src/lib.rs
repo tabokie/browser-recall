@@ -102,7 +102,12 @@ impl SearchEngine {
 
         match algorithm {
             RankingAlgorithm::Content => {
-                results.sort_by(|left, right| right.score.total_cmp(&left.score));
+                results.sort_by(|left, right| {
+                    right
+                        .score
+                        .total_cmp(&left.score)
+                        .then_with(|| right.timestamp.cmp(&left.timestamp))
+                });
             }
         }
 

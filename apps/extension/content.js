@@ -854,9 +854,15 @@ function initContentScript() {
 
   // ─── Page Reporting ───────────────────────────────────────────────────
 
+  // Must match INTERNAL_URL_PREFIXES in utils.js (can't import — content scripts are non-module).
+  const internalUrlPrefixes = ['chrome://', 'edge://', 'about:'];
+
   function report(delta) {
     const url = window.location.href;
-    if (url.startsWith('chrome://') || url.startsWith('chrome-extension://'))
+    if (
+      internalUrlPrefixes.some((prefix) => url.startsWith(prefix)) ||
+      url.startsWith('chrome-extension://')
+    )
       return;
     chrome.runtime
       .sendMessage({ action: 'reportPage', url, ...delta })

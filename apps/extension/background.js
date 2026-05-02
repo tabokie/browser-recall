@@ -6,6 +6,8 @@ import {
   generateSlugFromUrl,
   generateNoteSlug,
   dateKeyFromTimestamp,
+  DEFAULT_URL_BLACKLIST,
+  isInternalBrowserUrl,
 } from './utils.js';
 import { validateRuleConfig, validateFnRuleSource } from './rule-engine.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
@@ -119,7 +121,9 @@ function resumeService() {
   serviceError = null;
   badgeController
     .setServiceActive()
-    .catch((error) => logDebug('[badge] service resume failed:', error.message));
+    .catch((error) =>
+      logDebug('[badge] service resume failed:', error.message),
+    );
   chrome.storage.session.remove(['serviceError']).catch(() => {});
   logDebug('Service resumed');
 }
@@ -1600,7 +1604,7 @@ chrome.commands.onCommand.addListener(async (command) => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (
     !tab ||
-    tab.url.startsWith('chrome://') ||
+    isInternalBrowserUrl(tab.url) ||
     tab.url.startsWith('chrome-extension://')
   ) {
     logDebug('[background] Command ignored: no suitable tab');
@@ -1803,14 +1807,13 @@ async function handleReportPage(request, sender) {
       return { success: true };
     }
 
-    // Check blacklist (skip when feature is toggled off, but always block chrome:// and edge://)
+    // Check blacklist (skip when feature is toggled off, but always block browser-internal URLs)
     const rpSettings = (await readCacheable('manifest:settings')) || {};
     const blacklistEnabled = rpSettings.blacklistEnabled !== false;
     const urlBlacklist = rpSettings.urlBlacklist;
-    const builtinBlacklist = ['chrome://', 'edge://'];
     const blacklist = blacklistEnabled
-      ? (urlBlacklist ?? builtinBlacklist)
-      : builtinBlacklist;
+      ? (urlBlacklist ?? DEFAULT_URL_BLACKLIST)
+      : DEFAULT_URL_BLACKLIST;
     if (
       !request.bypassBlacklist &&
       blacklist.some((prefix) => url.startsWith(prefix))

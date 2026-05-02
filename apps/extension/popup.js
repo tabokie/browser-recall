@@ -3,6 +3,8 @@ import {
   generateSlugFromUrl,
   readCacheable,
   escapeHtml,
+  DEFAULT_URL_BLACKLIST,
+  isInternalBrowserUrl,
 } from './utils.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
@@ -1347,11 +1349,7 @@ async function fetchAndRenderPageData(tab, slug) {
       const page = summary.page || pageSummaryFallback(tab, slug, summary);
       currentPageSummary = { ...summary, page };
       currentEntry = page;
-      currentTitle =
-        page.user_title ||
-        page.title ||
-        tab.title ||
-        '<unknown>';
+      currentTitle = page.user_title || page.title || tab.title || '<unknown>';
       document.getElementById('pageTitle').textContent = currentTitle;
       if (page.url) {
         currentUrl = page.url;
@@ -1510,7 +1508,7 @@ async function resolveActiveTab() {
   if (
     !tab ||
     !tab.url ||
-    tab.url.startsWith('chrome://') ||
+    isInternalBrowserUrl(tab.url) ||
     (tab.url.startsWith('chrome-extension://') && !isSnapshotViewer)
   ) {
     showUnavailablePage('Not available for this page');
@@ -1550,7 +1548,7 @@ async function handleBlacklist(tab) {
   const pageSlug = generateSlugFromUrl(effectiveUrl);
   const hasVisitHistory = !!(await readCacheable(pageKey(pageSlug)));
   const settings = await readCacheable('manifest:settings');
-  const blacklist = settings?.urlBlacklist ?? ['chrome://', 'edge://'];
+  const blacklist = settings?.urlBlacklist ?? DEFAULT_URL_BLACKLIST;
   if (
     hasVisitHistory ||
     !blacklist.some((prefix) => tab.url.startsWith(prefix))

@@ -92,6 +92,27 @@ describe('search runtime compatibility module', () => {
     );
   });
 
+  it('sorts equal-score search results by timestamp descending', async () => {
+    const engine = new SearchEngine();
+
+    const older = new HistoryEntry('https://example.com/older', 'Needle');
+    older.timestamp = BigInt(10);
+    older.setContent('');
+
+    const newer = new HistoryEntry('https://example.com/newer', 'Needle');
+    newer.timestamp = BigInt(20);
+    newer.setContent('');
+
+    engine.addEntry(older);
+    engine.addEntry(newer);
+
+    const results = await engine.search('"needle"');
+    expect(results.map((result) => result.url)).toEqual([
+      'https://example.com/newer',
+      'https://example.com/older',
+    ]);
+  });
+
   it('searchBatch deduplicates URLs and loads page markdown content', async () => {
     const historyDir = new FakeDirectoryHandle({
       '2026-04-18.jsonl': new FakeFileHandle(

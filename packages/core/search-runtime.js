@@ -205,7 +205,11 @@ function buildSearchResults(entries, query) {
       score: contentScore(entry, words),
     }));
 
-  results.sort((left, right) => right.score - left.score);
+  results.sort(
+    (left, right) =>
+      right.score - left.score ||
+      (right.timestamp || 0) - (left.timestamp || 0),
+  );
   return results;
 }
 

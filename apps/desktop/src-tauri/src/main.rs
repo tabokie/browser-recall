@@ -170,7 +170,7 @@ fn create_tray(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
     let open = MenuItemBuilder::with_id("open", "Open").build(app)?;
     let status = MenuItemBuilder::with_id("status", "No browsers connected").build(app)?;
     let logs = MenuItemBuilder::with_id("logs", "Logs").build(app)?;
-    let settings = MenuItemBuilder::with_id("settings", "Settings…").build(app)?;
+    let settings = MenuItemBuilder::with_id("settings", "Settings").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
     let menu = MenuBuilder::new(app)
@@ -324,14 +324,6 @@ impl UiModel {
     }
 }
 
-fn describe_connected_browsers(browsers: &[String]) -> String {
-    match browsers {
-        [] => "No browser".to_string(),
-        [only] => only.clone(),
-        [first, rest @ ..] => format!("{first} + {} more", rest.len()),
-    }
-}
-
 fn tray_status_text(model: &UiModel) -> String {
     if model.is_paused {
         return "Error".to_string();
@@ -347,13 +339,41 @@ fn tray_status_text(model: &UiModel) -> String {
 fn window_title(model: &UiModel) -> String {
     if model.is_paused {
         "Browser Recall - Error".to_string()
-    } else if model.browsers.is_empty() {
-        "Browser Recall".to_string()
     } else {
-        format!(
-            "Browser Recall - Connected: {}",
-            describe_connected_browsers(&model.browsers)
-        )
+        "Browser Recall".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ui_model(is_paused: bool, browsers: Vec<String>) -> UiModel {
+        UiModel {
+            is_paused,
+            error: None,
+            endpoint: "ws://127.0.0.1:0".to_string(),
+            browsers,
+            data_dir: String::new(),
+            log_dir: String::new(),
+            device_id: "test-device".to_string(),
+            launch_at_login: false,
+            debug_logging: false,
+            setup_complete: true,
+            route: None,
+        }
+    }
+
+    #[test]
+    fn window_title_is_plain_when_connected() {
+        let model = ui_model(false, vec!["Firefox".to_string()]);
+        assert_eq!(window_title(&model), "Browser Recall");
+    }
+
+    #[test]
+    fn window_title_keeps_error_state() {
+        let model = ui_model(true, vec!["Firefox".to_string()]);
+        assert_eq!(window_title(&model), "Browser Recall - Error");
     }
 }
 

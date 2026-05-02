@@ -1,0 +1,41 @@
+- Let's fix some issues:
+1. add about: (firefox) and chrome:// to the default blacklist
+2. in a large list view, sometimes when I scroll to the end, the scroll flickers up-and-down rapidly for a while
+3. I cannot edit list name by clicking on the list title bar anymore
+4. the search filter's device filter doesn't seem to work
+5. when I use an exact keyword search, I presume the search results all have equal relevance score? When they have equal scores, they should be sorted by time descending.
+
+For all of these issues, first try to reproduce E2E to verify if it's a real issue, then conduct the fixes
+- The virtual scroller issue still occurs sometimes. The scroll can not reach the end (the last item is partially visible). But it can eventually if I retry a few times.
+- The flickering still occurs when this issue reproduces, and it can recover after I scroll a few more times. So I'm not sure if it's a height calculation problem which sounds deterministic.
+- In the tray menu, rename from "Settings..." to "Settings". In the dock icon menu, show a plain "Browser Recall" instead of "Browser Recall - Connected .."
+- Review this session. What else is missing? What could be improved or simplified?
+- Go ahead, fix all of them
+- Will this fix the slight flickiness when I scroll? The page sometimes doesn't smoothly to the scroll and sometimes jitters up-and-down a bit
+- Improve it without sacrificing the visuals (i.e. don't use fixed height rows)
+- The jitters are still very noticable when I scroll down slowly. Can we fix it thoroughly?
+- There are still jitters. And when I open the desktop fresh, the explore page is already scrolled to the bottom
+- Jitter is not improved in noticable ways
+- Seems better, even though the scroll is not as smooth as a native scroll. Also, for list view the scroll still starts out at the bottom
+- Let's me confirm, are you saying we currently load the full page by scrolling all the way to the bottom, and then reset to the start? Doesn't that complete defeat the point of having a virtual scroller at all?
+- go
+- Did you try to improve the smoothness further?
+- Does increasing the buffer area complicate the offset computation significantly? Or is it simply one variable change?
+- Before we do that, I want you to review the prior changes. Some of those didn't directly contribute to the jitter fix. Are they still necessary, and can they be simplified?
+- fix them
+- good. Increase the buffer size significantly, what is the memory overhead for e.g. 250 buffer?
+- You should make the test reference the buffer variable to exercise the path reliably. So that we don't need to go through this again if the variable is changed in the future
+- good. Another minor UI issue: the page detail "..." button on the right of the row when hovered, is positioned awkwardly. It is too off-right and touched the right boundary of the row.
+- Noh, it's now too left as to overlap with the time field. I think we either need to use a narrow button (frameless and no fill), or use a "..." that's rotated 90 degree.
+- Could you make the dots slightly larger and use the same color as the attention dot so that it appears as morphing between two shapes? Also, the row content can align closer to the right because we don't have the wide button
+- (1) inset should be smaller, identical to the left inset for the title text. (2) The color is not the same as the attention dot. (3) the "..." dot is not getting larger the way I see it.
+- I meant to increase the dot size without increasing the entire button footprint. Your previous change made the button not center aligned anymore
+- The alignment and the sizing is good now. But the button still looks unpolished and a little out of place. What do you think?
+- Could you draw me a quick static html demo into ./demos to illustrate different options?
+- Let's change to horizontal native icon, but figure out how to make it exactly aligned to the attention dot
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- For the second issue, my idea is we only load more when we reach near the end of the buffer, so that within one buffer the scroll is smooth without extra computations. Is this relevent to your comment?
+- Fix both issues
+- good. What else is missing? Is there anything that can be improved or simplified?
+- Fix the important ones
+- Rename `./prompts/STAGING.txt` to `./prompts/YYYYMMDD_hhmmss.txt`. Look at Git diffs thoroughly, including the changes not from current session. Make a commit summarizing the diffs succinctly. Sign it with "Co-Authored-By: GPT-5.5 Codex <noreply@openai.com>".

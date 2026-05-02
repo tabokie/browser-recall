@@ -463,6 +463,7 @@
         height: 100vh;
         padding-right: 12px;
         overflow-y: auto;
+        overflow-anchor: none;
       }
 
       .main-header {
@@ -691,6 +692,7 @@
         cursor: default;
         user-select: none;
         flex: 1;
+        overflow-anchor: none;
       }
 
       .select-band {
@@ -707,6 +709,7 @@
         z-index: 1;
         min-width: 0;
         padding: 0 var(--results-padding) var(--results-gap);
+        overflow-anchor: none;
       }
 
       .result-item {
@@ -714,6 +717,7 @@
         border: 1px solid var(--border-glass);
         border-radius: var(--radius-lg);
         padding: 10px 14px;
+        overflow-anchor: none;
         box-shadow:
           var(--shadow-float), var(--highlight-top), var(--highlight-edge),
           var(--glass-inset);
@@ -882,12 +886,14 @@
 
       /* ── Attention dot control ── */
       .att-ctrl {
+        --att-ctrl-color: var(--text-muted);
+        --att-ctrl-opacity: 0.12;
         position: relative;
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 16px;
-        height: 16px;
+        width: 18px;
+        height: 18px;
         flex-shrink: 0;
         align-self: center;
         cursor: pointer;
@@ -898,7 +904,7 @@
         width: 7px;
         height: 7px;
         border-radius: 50%;
-        background: var(--accent-primary);
+        background: var(--att-ctrl-color);
         transition:
           opacity 0.12s,
           transform 0.12s;
@@ -907,44 +913,53 @@
       }
 
       .att-ctrl .att-ctrl-dot {
-        opacity: 0.12;
-        background: var(--text-muted);
+        opacity: var(--att-ctrl-opacity);
       }
-      .att-ctrl.low .att-ctrl-dot {
-        opacity: 0.25;
-        background: var(--accent-primary);
+      .att-ctrl.low {
+        --att-ctrl-color: var(--accent-primary);
+        --att-ctrl-opacity: 0.25;
       }
-      .att-ctrl.med .att-ctrl-dot {
-        opacity: 0.6;
-        background: var(--accent-primary);
+      .att-ctrl.med {
+        --att-ctrl-color: var(--accent-primary);
+        --att-ctrl-opacity: 0.6;
+      }
+      .att-ctrl.high {
+        --att-ctrl-color: var(--accent-primary);
+        --att-ctrl-opacity: 1;
       }
       .att-ctrl.high .att-ctrl-dot {
-        opacity: 1;
-        background: var(--accent-primary);
         box-shadow: 0 0 4px var(--accent-primary-glow);
       }
 
       .att-ctrl-btn {
         position: absolute;
-        left: 0;
+        right: 0;
         top: 50%;
-        transform: translateY(-50%);
+        width: 18px;
         height: 18px;
-        padding: 0 7px;
-        border: 1px solid var(--border-glass);
-        border-radius: var(--radius-pill);
-        background: var(--bg-surface);
-        font-size: 10px;
-        font-weight: 700;
-        color: var(--text-secondary);
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--att-ctrl-color);
         white-space: nowrap;
         cursor: pointer;
         opacity: 0;
         pointer-events: none;
         transition:
           opacity 0.12s,
-          background 0.12s;
-        box-shadow: var(--shadow-float);
+          color 0.12s;
+        transform: translateY(-50%);
+      }
+
+      .att-ctrl-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        font-size: 19px;
+        font-weight: 700;
+        line-height: 1;
       }
 
       .att-ctrl:hover .att-ctrl-dot {
@@ -953,7 +968,7 @@
       }
 
       .att-ctrl:hover .att-ctrl-btn {
-        opacity: 1;
+        opacity: var(--att-ctrl-opacity);
         pointer-events: auto;
       }
 
@@ -2418,6 +2433,7 @@
         position: relative;
         cursor: default;
         user-select: none;
+        overflow-anchor: none;
       }
 
       .detail-lineage {

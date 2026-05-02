@@ -16,6 +16,7 @@ import {
   sendAction,
   escapeHtml,
   BODY_WORD_LIMIT,
+  DEFAULT_URL_BLACKLIST,
 } from './utils.js';
 import { matchKeywordRule } from './rule-engine.js';
 import { attentionStrength, aggregateAttention } from './attention-utils.js';
@@ -43,6 +44,10 @@ import {
 } from './entity-types.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
+
+if ('scrollRestoration' in history) {
+  history.scrollRestoration = 'manual';
+}
 
 function revealApp() {
   document.documentElement.style.opacity = '';
@@ -82,13 +87,18 @@ function canScrollInDirection(el, axis, delta) {
   return el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
 }
 
-function applyWheelDelta(el, axis, delta) {
-  if (!el || delta === 0) return;
-  if (axis === 'y') {
-    el.scrollTop += delta;
-  } else {
-    el.scrollLeft += delta;
+function resetMainScroll() {
+  const main = document.querySelector('.main');
+  if (main) main.scrollTop = 0;
+}
+
+function consumeRelatedTopReset() {
+  const shouldReset = resetRelatedScrollOnNextRender;
+  if (shouldReset) {
+    resetMainScroll();
+    resetRelatedScrollOnNextRender = false;
   }
+  return shouldReset;
 }
 
 function wheelDeltaPixels(event, axis) {
@@ -112,14 +122,10 @@ function preventDesktopOverscroll(event) {
   const scrollableY = wantsY ? scrollableForAxis(event.target, 'y') : null;
   const canScrollX = wantsX && canScrollInDirection(scrollableX, 'x', deltaX);
   const canScrollY = wantsY && canScrollInDirection(scrollableY, 'y', deltaY);
-  const blockedX = wantsX && !canScrollX;
-  const blockedY = wantsY && !canScrollY;
 
-  if (!blockedX && !blockedY) return;
+  if (canScrollX || canScrollY) return;
 
   event.preventDefault();
-  if (canScrollX) applyWheelDelta(scrollableX, 'x', deltaX);
-  if (canScrollY) applyWheelDelta(scrollableY, 'y', deltaY);
 }
 
 document.addEventListener('wheel', preventDesktopOverscroll, {
@@ -432,6 +438,7 @@ function bindWindowDragRegions() {
     'textarea',
     '[contenteditable="true"]',
     '[role="button"]',
+    '.main-title',
     '.color-dot',
   ].join(',');
   const dragWindow = () => {
@@ -764,6 +771,7 @@ const searchState = {
   resultIndex: new Map(), // url → index into results[] for O(1) dedup in mergeSearchResults
   pendingPhases: 0, // count of in-flight phases — spinner shown while > 0
 };
+let resetRelatedScrollOnNextRender = false;
 
 function prepareRelatedChartDateFilter(contextKey) {
   const chartEl = document.getElementById('relatedChart');
@@ -823,6 +831,10 @@ function mergeSearchResults(newResults, source, gen) {
         existing.createdAt = r.createdAt;
       if (!existing.matchSources) existing.matchSources = new Set();
       existing.matchSources.add(source);
+      if (r.deviceIds) {
+        if (!existing.deviceIds) existing.deviceIds = new Set();
+        for (const id of r.deviceIds) existing.deviceIds.add(id);
+      }
     } else {
       const entry = {
         url: r.url,
@@ -837,6 +849,7 @@ function mergeSearchResults(newResults, source, gen) {
         notes: r.notes || [],
         timestamps: r.timestamps || [r.timestamp || Date.now()],
         latestTs: r.timestamp || Date.now(),
+        deviceIds: r.deviceIds,
         matchSources: new Set([source]),
       };
       searchState.resultIndex.set(r.url, searchState.results.length);
@@ -867,8 +880,13 @@ async function renderProgressiveResults(gen) {
 
   const relatedContainer = document.getElementById('relatedResults');
   // Show "No results" when all phases are done and nothing matched
-  if (results.length === 0 && searchState.pendingPhases <= 0) {
-    relatedContainer.innerHTML = '<div class="no-results">No results</div>';
+  if (results.length === 0) {
+    const vs = getOrCreateRelatedScroller();
+    vs._headerHtml =
+      searchState.pendingPhases <= 0
+        ? '<div class="no-results">No results</div>'
+        : '';
+    vs.updateData([], () => '');
     document.getElementById('relatedChart').classList.remove('visible');
     return;
   }
@@ -928,7 +946,10 @@ function hideSearchSpinner() {
 function phaseComplete(gen) {
   if (gen !== searchState.generation) return;
   searchState.pendingPhases--;
-  if (searchState.pendingPhases <= 0) hideSearchSpinner();
+  if (searchState.pendingPhases <= 0) {
+    hideSearchSpinner();
+    void renderProgressiveResults(gen);
+  }
 }
 
 function buildDesktopHistoryResults(results) {
@@ -1099,6 +1120,8 @@ async function runProgressiveSearch(allQueries) {
   const gen = ++searchState.generation;
   searchState.results = [];
   searchState.resultIndex.clear();
+  searchState.pendingPhases = 3;
+  showSearchSpinner();
   const query = allQueries.join(' ');
 
   // Phase 0: instant in-memory matching with fuzzy support for unquoted words
@@ -1133,8 +1156,6 @@ async function runProgressiveSearch(allQueries) {
   await renderProgressiveResults(gen);
 
   // Fire Phase 1, 2a, 2b concurrently (with per-type concurrency limits)
-  searchState.pendingPhases = 3;
-  showSearchSpinner();
   runPhase1(query, gen);
   runPhase2a(query, gen);
   runPhase2b(query, gen);
@@ -1582,7 +1603,10 @@ async function showRecycleBin() {
         }
       } catch {}
     }
-    if (renderSeq !== recycleBinRenderSeq || activeView.type !== 'recycle-bin') {
+    if (
+      renderSeq !== recycleBinRenderSeq ||
+      activeView.type !== 'recycle-bin'
+    ) {
       return;
     }
 
@@ -1766,8 +1790,9 @@ async function applyFilters(results) {
     .map(([k]) => k);
   return results.filter((item) => {
     // Device filter: when bubbles are active, only show items from at least one enabled device
-    if (enabledDevices.length > 0 && item.deviceIds) {
-      if (!enabledDevices.some((d) => item.deviceIds.has(d))) return false;
+    if (enabledDevices.length > 0) {
+      if (!item.deviceIds || !enabledDevices.some((d) => item.deviceIds.has(d)))
+        return false;
     }
     // List filter: when list bubbles active, only show items belonging to at least one enabled list
     if (enabledLists.length > 0) {
@@ -1958,9 +1983,9 @@ function applySortOrder(items, sortState) {
         av = a.score || 0;
         bv = b.score || 0;
         if (av !== bv) return dir * (av - bv);
-        av = a.createdAt || a._minTs || Infinity;
-        bv = b.createdAt || b._minTs || Infinity;
-        return av - bv;
+        av = a._maxTs || a.latestTs || a.timestamp || 0;
+        bv = b._maxTs || b.latestTs || b.timestamp || 0;
+        return bv - av;
       default:
         return 0;
     }
@@ -2366,6 +2391,8 @@ async function showExplore() {
   updateMainTitle('Explore');
 
   showListLayout();
+  resetMainScroll();
+  resetRelatedScrollOnNextRender = true;
   renderListSkeleton();
 
   try {
@@ -2417,10 +2444,10 @@ async function showList(list) {
   updateSidebarActive();
   updateMainTitle(displayName);
 
-  // Enable double-click rename on title
+  // Enable click rename on list title
   const titleEl = document.getElementById('mainTitle');
-  function attachDblClick(currentName) {
-    titleEl.ondblclick = () => {
+  function attachTitleClick(currentName) {
+    titleEl.onclick = () => {
       enterTitleEditMode(
         currentName,
         async (newName) => {
@@ -2433,17 +2460,19 @@ async function showList(list) {
           await renderLists();
           activeView.name = newName;
           updateMainTitle(newName);
-          attachDblClick(newName);
+          attachTitleClick(newName);
         },
         () => {
           updateMainTitle(currentName);
-          attachDblClick(currentName);
+          attachTitleClick(currentName);
         },
       );
     };
   }
-  attachDblClick(displayName);
+  attachTitleClick(displayName);
   showListLayout();
+  resetMainScroll();
+  resetRelatedScrollOnNextRender = true;
   renderListSkeleton();
 
   try {
@@ -3146,7 +3175,7 @@ async function renderListPinView(allPins, listId) {
   listPinsData = allPins;
   listPinsListId = listId;
   await renderSearchPanel();
-  runListPinFilter();
+  await runListPinFilter();
 }
 
 // Run the active view's search pipeline (debounced for explore, immediate for list)
@@ -3190,6 +3219,7 @@ function renderFilteredPins(pins, listId, searchQuery) {
   const relatedContainer = document.getElementById('relatedResults');
 
   if (pins.length === 0) {
+    consumeRelatedTopReset();
     relatedContainer.innerHTML = searchQuery.trim()
       ? '<div class="no-results">No matching pins</div>'
       : '<div class="no-results">No pinned pages</div>';
@@ -3206,7 +3236,8 @@ function renderFilteredPins(pins, listId, searchQuery) {
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = '';
   vs.onLoadMore = null; // Clear stale explore demand-loader
-  vs.updateData(sorted, (r) =>
+  const renderAtTop = consumeRelatedTopReset();
+  const renderRow = (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
       pinned: true,
       attScore: r.attScore,
@@ -3222,8 +3253,12 @@ function renderFilteredPins(pins, listId, searchQuery) {
       excludeListId: listId,
       likes: r.likes,
       hasHighlightNotes: r.hasHighlightNotes,
-    }),
-  );
+    });
+  if (renderAtTop) {
+    vs.updateDataAtTop(sorted, renderRow);
+  } else {
+    vs.updateData(sorted, renderRow);
+  }
   bindPinClicks(relatedContainer, listId);
 
   // Time chart for pins
@@ -3256,7 +3291,7 @@ async function renderListSearchFilters() {
 
   await loadFilterState();
   await renderSearchPanel();
-  runSearchFilterPipeline();
+  await runSearchFilterPipeline();
 }
 
 // Convert raw history entries to display entries with date-boundary dedup.
@@ -3405,6 +3440,19 @@ async function enrichForFilters(entries) {
       if (notes.length > 0) entry.notes = notes;
     }
     if (page.parentIds) entry.parentIds = page.parentIds;
+    if (page.timestamps && Object.keys(page.timestamps).length > 0) {
+      entry.deviceIds = new Set(Object.keys(page.timestamps));
+      const tsValues = Object.values(page.timestamps).filter(
+        (ts) => typeof ts === 'number',
+      );
+      if (tsValues.length > 0) {
+        entry.timestamps = tsValues.sort((a, b) => b - a);
+        entry.latestTs = entry.timestamps[0];
+        entry.timestamp = entry.latestTs;
+        delete entry._maxTs;
+        delete entry._minTs;
+      }
+    }
     if (entry.visitCount === undefined) {
       if (!visitCountMap) {
         visitCountMap = new Map();
@@ -3968,7 +4016,7 @@ function resultRowHtml(title, url, opts = {}) {
         : null,
       timestamps,
     });
-  const attCtrlHtml = `<div class="att-ctrl${attLvl ? ' ' + attLvl : ''}" data-url="${safeUrl}" data-title="${safeTitle}"><span class="att-ctrl-dot"></span><button class="att-ctrl-btn" title="View details">···</button></div>`;
+  const attCtrlHtml = `<div class="att-ctrl${attLvl ? ' ' + attLvl : ''}" data-url="${safeUrl}" data-title="${safeTitle}"><span class="att-ctrl-dot"></span><button class="att-ctrl-btn" title="View details"><span class="att-ctrl-icon" aria-hidden="true">⋯</span></button></div>`;
   const listTagsHtml = belongedListNames
     .map((n) => `<span class="card-tag card-tag-list">${escapeHtml(n)}</span>`)
     .join('');
@@ -4348,6 +4396,7 @@ function updateMainTitle(text) {
   titleEl.textContent = text;
   titleEl.style.display = '';
   titleEl.ondblclick = null;
+  titleEl.onclick = null;
   inputEl.style.display = 'none';
   confirmBtn.style.display = 'none';
 }
@@ -6193,11 +6242,9 @@ document
 }
 
 // --- URL Blacklist ---
-const DEFAULT_BLACKLIST = ['chrome://', 'edge://'];
-
 async function loadBlacklist() {
   const list = await loadSettingsValue('urlBlacklist', null);
-  return list ?? [...DEFAULT_BLACKLIST];
+  return list ?? [...DEFAULT_URL_BLACKLIST];
 }
 
 async function saveBlacklist(list) {
@@ -7085,6 +7132,7 @@ async function runSearchFilterPipeline() {
 
   const relatedContainer = document.getElementById('relatedResults');
   if (results.length === 0) {
+    consumeRelatedTopReset();
     relatedContainer.innerHTML = '<div class="no-results">No results</div>';
     document.getElementById('relatedChart').classList.remove('visible');
     return;
@@ -7098,7 +7146,8 @@ async function runSearchFilterPipeline() {
 
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = '';
-  vs.updateData(sorted, (r) =>
+  const renderAtTop = consumeRelatedTopReset();
+  const renderRow = (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
       attScore: r.attScore,
       maxAtt,
@@ -7110,8 +7159,12 @@ async function runSearchFilterPipeline() {
       parentIds: r.parentIds,
       likes: r.likes,
       hasHighlightNotes: r.hasHighlightNotes,
-    }),
-  );
+    });
+  if (renderAtTop) {
+    vs.updateDataAtTop(sorted, renderRow);
+  } else {
+    vs.updateData(sorted, renderRow);
+  }
 
   // When no active filters, enrich in background and refresh visible rows
   if (!hasActiveFilters) {

@@ -6,7 +6,11 @@
  * scroller's data is empty.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { VirtualScroller } from '../../packages/core/virtual-scroller.js';
+import {
+  VIRTUAL_SCROLLER_BUFFER,
+  VIRTUAL_SCROLLER_LOAD_MORE_THRESHOLD,
+  VirtualScroller,
+} from '../../packages/core/virtual-scroller.js';
 
 // ---------------------------------------------------------------------------
 // Minimal DOM mocks — just enough for VirtualScroller
@@ -25,6 +29,10 @@ function mockElement(tag, opts = {}) {
     addEventListener(evt, fn) {
       if (!el._listeners[evt]) el._listeners[evt] = [];
       el._listeners[evt].push(fn);
+    },
+    appendChild() {},
+    insertAdjacentHTML(_position, html) {
+      el.innerHTML += html;
     },
     getBoundingClientRect() {
       return { top: el._top };
@@ -113,11 +121,13 @@ describe('VirtualScroller', () => {
 
   describe('expanded detail survives scroll', () => {
     it('scroll-triggered re-render does not destroy expanded detail in rendered range', () => {
-      // 100 items, rowHeight=48, viewport=600 → ~13 visible + 20 buffer each side
-      const items = Array.from({ length: 100 }, (_, i) => ({
-        id: i,
-        url: `https://example.com/${i}`,
-      }));
+      const items = Array.from(
+        { length: VIRTUAL_SCROLLER_BUFFER * 2 },
+        (_, i) => ({
+          id: i,
+          url: `https://example.com/${i}`,
+        }),
+      );
       vs.setData(
         items,
         (item) =>
@@ -142,10 +152,14 @@ describe('VirtualScroller', () => {
     });
 
     it('re-render is allowed once expanded item scrolls out of new range', () => {
-      const items = Array.from({ length: 200 }, (_, i) => ({
-        id: i,
-        url: `https://example.com/${i}`,
-      }));
+      const scrollRows = Math.max(VIRTUAL_SCROLLER_BUFFER * 2, 20);
+      const items = Array.from(
+        { length: scrollRows + VIRTUAL_SCROLLER_BUFFER + 50 },
+        (_, i) => ({
+          id: i,
+          url: `https://example.com/${i}`,
+        }),
+      );
       vs.setData(items, (item) => `<div>${item.id}</div>`);
 
       // Expand item 5
@@ -153,9 +167,9 @@ describe('VirtualScroller', () => {
       vs._expandedExtraH = 300;
 
       // Scroll far down so item 5 is well outside the new rendered range
-      scrollEl.scrollTop = 150 * vs.rowHeight;
+      scrollEl.scrollTop = scrollRows * vs.rowHeight;
       // Simulate container scrolling up out of view (getBoundingClientRect)
-      containerEl._top = -(150 * vs.rowHeight);
+      containerEl._top = -(scrollRows * vs.rowHeight);
       vs._render(false);
 
       // Item 5 is no longer in view — re-render should proceed normally
@@ -220,6 +234,31 @@ describe('VirtualScroller', () => {
 
       expect(containerEl.style.paddingBottom).toBe(paddingBefore);
     });
+
+    it('computes expansion extra height from the measured collapsed row height', () => {
+      const url = 'https://example.com/measured-row';
+      vs.setData([{ id: 1, url }], (item) => `<div>${item.id}</div>`);
+      vs._setMeasuredHeight(0, url, 72);
+
+      const item = {
+        offsetHeight: 120,
+        getBoundingClientRect: () => ({ height: 120 }),
+        closest: () => item,
+        querySelector: (selector) => {
+          if (selector === '.result-row') return { dataset: { url } };
+          if (selector === '.result-detail.open') return {};
+          return null;
+        },
+      };
+      const openDetail = { closest: () => item };
+      containerEl.querySelector = (selector) =>
+        selector === '.result-detail.open' ? openDetail : null;
+
+      vs.onExpandToggle();
+
+      expect(vs._expandedIdx).toBe(0);
+      expect(vs._expandedExtraH).toBe(48);
+    });
   });
 
   describe('normal rendering', () => {
@@ -240,6 +279,285 @@ describe('VirtualScroller', () => {
       vs._render(false); // same scroll position → same range
 
       expect(containerEl.innerHTML).toBe(htmlAfterSet);
+    });
+
+    it('does not load more on initial render just because the render buffer is large', () => {
+      let calls = 0;
+      vs.onLoadMore = () => {
+        calls += 1;
+      };
+
+      const itemCount = VIRTUAL_SCROLLER_BUFFER * 2;
+      const items = Array.from({ length: itemCount }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
+      vs.setData(items, (item) => `<div>${item.id}</div>`);
+
+      expect(calls).toBe(0);
+    });
+
+    it('does not re-enter load-more while a previous load is pending', async () => {
+      expect(vs.loadMoreThreshold).toBe(VIRTUAL_SCROLLER_LOAD_MORE_THRESHOLD);
+      const visibleRows = Math.ceil(scrollEl.clientHeight / vs.rowHeight);
+      const itemCount =
+        VIRTUAL_SCROLLER_LOAD_MORE_THRESHOLD * 4 + visibleRows + 20;
+      const triggerRows =
+        itemCount - VIRTUAL_SCROLLER_LOAD_MORE_THRESHOLD - visibleRows + 2;
+      const items = Array.from({ length: itemCount }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
+      vs.setData(items, (item) => `<div>${item.id}</div>`);
+
+      let resolveLoad;
+      let calls = 0;
+      vs.onLoadMore = () => {
+        calls += 1;
+        return new Promise((resolve) => {
+          resolveLoad = resolve;
+        });
+      };
+
+      containerEl._top = -((triggerRows - 10) * vs.rowHeight);
+      vs._render(false);
+      expect(calls).toBe(0);
+
+      containerEl._top = -(triggerRows * vs.rowHeight);
+      vs._render(false);
+      containerEl._top = -((triggerRows + 1) * vs.rowHeight);
+      vs._render(false);
+
+      expect(calls).toBe(1);
+      resolveLoad();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      containerEl._top = -((triggerRows + 2) * vs.rowHeight);
+      vs._render(false);
+
+      expect(calls).toBe(2);
+    });
+
+    it('calibrates row height upward from rendered result item size', () => {
+      const previousQuerySelectorAll = containerEl.querySelectorAll;
+      containerEl.querySelectorAll = (selector) => {
+        if (selector !== '.result-item') return [];
+        return [
+          {
+            offsetHeight: 64,
+            getBoundingClientRect: () => ({ height: 64 }),
+            querySelector: (selector) =>
+              selector === '.result-row'
+                ? { dataset: { url: 'https://example.com/0' } }
+                : null,
+          },
+        ];
+      };
+      globalThis.getComputedStyle = (element) => {
+        if (element?.offsetHeight === 64) {
+          return {
+            marginTop: '8px',
+            marginBottom: '0px',
+            paddingBottom: '0px',
+          };
+        }
+        return { paddingBottom: '0px' };
+      };
+
+      const items = Array.from({ length: 20 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
+      vs.setData(items, (item) => `<div>${item.id}</div>`);
+
+      expect(vs.rowHeight).toBe(72);
+      containerEl.querySelectorAll = previousQuerySelectorAll;
+    });
+
+    it('keeps the unseen-row estimate stable after initial calibration', () => {
+      let measuredHeight = 64;
+      containerEl.querySelectorAll = (selector) => {
+        if (selector !== '.result-item') return [];
+        return [
+          {
+            offsetHeight: measuredHeight,
+            getBoundingClientRect: () => ({ height: measuredHeight }),
+            querySelector: (selector) =>
+              selector === '.result-row'
+                ? {
+                    dataset: { url: `https://example.com/${measuredHeight}` },
+                    classList: { contains: () => false },
+                  }
+                : null,
+          },
+        ];
+      };
+      globalThis.getComputedStyle = () => ({
+        marginTop: '8px',
+        marginBottom: '0px',
+        paddingBottom: '0px',
+      });
+
+      const items = Array.from({ length: 100 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
+      vs.setData(items, (item) => `<div>${item.id}</div>`);
+      expect(vs.rowHeight).toBe(72);
+
+      measuredHeight = 120;
+      vs.renderedRange = { start: -1, end: -1 };
+      vs._render(false);
+
+      expect(vs.rowHeight).toBe(72);
+      expect(vs._heightByKey.get('https://example.com/120')).toBe(128);
+    });
+
+    it('resets calibrated row height when data is replaced', () => {
+      vs.rowHeight = 72;
+
+      vs.setData(
+        [{ id: 1, url: 'https://example.com/1' }],
+        (item) => `<div>${item.id}</div>`,
+      );
+
+      expect(vs.rowHeight).toBe(vs.baseRowHeight);
+    });
+
+    it('schedules a render after appending data', () => {
+      let rafCallback = null;
+      globalThis.requestAnimationFrame = (fn) => {
+        rafCallback = fn;
+        return 1;
+      };
+      const items = Array.from({ length: 20 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
+      vs.setData(items, (item) => `<div>${item.id}</div>`);
+      const originalRange = { ...vs.renderedRange };
+
+      vs.appendData([{ id: 21, url: 'https://example.com/21' }]);
+
+      expect(vs.renderedRange).toEqual({ start: -1, end: -1 });
+      expect(typeof rafCallback).toBe('function');
+      rafCallback();
+      expect(vs.renderedRange.start).toBe(originalRange.start);
+      expect(vs.renderedRange.end).toBeGreaterThan(originalRange.end);
+    });
+
+    it('uses cached variable row heights for spacer offsets', () => {
+      const items = Array.from({ length: 5 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
+      vs.setData(items, (item) => `<div>${item.id}</div>`);
+      vs._setMeasuredHeight(0, 'https://example.com/0', 100);
+      vs._setMeasuredHeight(1, 'https://example.com/1', 80);
+
+      expect(vs._heightForIndex(0)).toBe(100);
+      expect(vs._heightForIndex(1)).toBe(80);
+      expect(vs._offsetForIndex(2)).toBe(180);
+      expect(vs._rangeForViewport(120, 60).end).toBeGreaterThanOrEqual(2);
+    });
+
+    it('does not scan every preceding row to range a large list', () => {
+      const itemCount = 50_000;
+      const items = Array.from({ length: itemCount }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
+      vs.setData(items, (item) => `<div>${item.id}</div>`);
+      vs._setMeasuredHeight(10_000, 'https://example.com/10000', 80);
+      vs._setMeasuredHeight(40_000, 'https://example.com/40000', 64);
+
+      const originalHeightForIndex = vs._heightForIndex.bind(vs);
+      let heightLookups = 0;
+      vs._heightForIndex = (index) => {
+        heightLookups += 1;
+        return originalHeightForIndex(index);
+      };
+
+      const range = vs._rangeForViewport(49_000 * vs.rowHeight, 600);
+
+      expect(range.start).toBeGreaterThan(48_000);
+      expect(heightLookups).toBeLessThan(100);
+    });
+
+    it('does not compensate scrollTop during normal scroll renders', () => {
+      let rowTop = 140;
+      const row = {
+        dataset: { url: 'https://example.com/anchor' },
+        classList: { contains: () => false },
+        closest: () => ({
+          getBoundingClientRect: () => ({ top: rowTop }),
+        }),
+      };
+      const item = {
+        parentNode: true,
+        remove() {},
+        getBoundingClientRect: () => ({ top: 140, bottom: 188, height: 48 }),
+        querySelector: (selector) => (selector === '.result-row' ? row : null),
+      };
+      containerEl.querySelector = (selector) =>
+        selector === '.result-item' ? item : null;
+      containerEl.querySelectorAll = (selector) => {
+        if (selector === '.result-item') return [item];
+        if (selector === '.result-row') return [row];
+        return [];
+      };
+      const items = Array.from({ length: 100 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
+      vs.setData(items, (item) => `<div>${item.id}</div>`);
+      scrollEl.scrollTop = 500;
+      containerEl._top = -(60 * vs.rowHeight);
+      rowTop = 112;
+
+      vs._render(false);
+
+      expect(scrollEl.scrollTop).toBe(500);
+    });
+
+    it('keeps the bottom anchored after appending variable-height rows', () => {
+      let rafCallback = null;
+      globalThis.requestAnimationFrame = (fn) => {
+        rafCallback = fn;
+        return 1;
+      };
+      const items = Array.from({ length: 20 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
+      vs.setData(items, (item) => `<div>${item.id}</div>`);
+      scrollEl.clientHeight = 600;
+      scrollEl.scrollHeight = 1000;
+      scrollEl.scrollTop = 400;
+
+      vs.appendData([{ id: 21, url: 'https://example.com/21' }]);
+      scrollEl.scrollHeight = 1300;
+      rafCallback();
+
+      expect(scrollEl.scrollTop).toBe(700);
+    });
+
+    it('coalesces scroll renders to one animation frame', () => {
+      const callbacks = [];
+      globalThis.requestAnimationFrame = (fn) => {
+        callbacks.push(fn);
+        return callbacks.length;
+      };
+
+      const scrollHandler = scrollEl._listeners['scroll'][0];
+      scrollHandler();
+      scrollHandler();
+
+      expect(callbacks).toHaveLength(1);
+      callbacks[0]();
+      scrollHandler();
+      expect(callbacks).toHaveLength(2);
     });
   });
 });
