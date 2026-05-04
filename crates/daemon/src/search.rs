@@ -36,8 +36,8 @@ pub fn search_history_in_data_dir(
         return Ok(Vec::new());
     }
 
-    let logs_root = data_dir.join("data").join("logs");
-    let pages_dir = data_dir.join("pages");
+    let logs_root = data_dir.join("logs");
+    let pages_dir = data_dir.join("views").join("pages");
     if !logs_root.exists() {
         return Ok(Vec::new());
     }
@@ -85,7 +85,7 @@ pub fn search_notes_in_data_dir(
         return Ok(Vec::new());
     }
 
-    let notes_dir = data_dir.join("data").join("notes");
+    let notes_dir = data_dir.join("objects").join("notes");
     let hits = search_notes(&notes_dir, query)?
         .into_iter()
         .map(|hit| NoteSearchHit {
@@ -105,7 +105,7 @@ pub fn search_snapshots_in_data_dir(
         return Ok(Vec::new());
     }
 
-    let snapshots_dir = data_dir.join("data").join("snapshots");
+    let snapshots_dir = data_dir.join("objects").join("snapshots");
     if !snapshots_dir.exists() {
         return Ok(Vec::new());
     }
@@ -157,11 +157,26 @@ fn list_jsonl_files(dir: &Path) -> io::Result<Vec<String>> {
 
 fn list_snapshot_files(dir: &Path) -> io::Result<Vec<String>> {
     let mut files_by_stem: HashMap<String, String> = HashMap::new();
+    collect_snapshot_files(dir, dir, &mut files_by_stem)?;
+    let mut files: Vec<_> = files_by_stem.into_values().collect();
+    files.sort();
+    Ok(files)
+}
+
+fn collect_snapshot_files(
+    root: &Path,
+    dir: &Path,
+    files_by_stem: &mut HashMap<String, String>,
+) -> io::Result<()> {
     for entry in fs::read_dir(dir)? {
         let Ok(entry) = entry else {
             continue;
         };
         let path = entry.path();
+        if path.is_dir() {
+            collect_snapshot_files(root, &path, files_by_stem)?;
+            continue;
+        }
         if !path.is_file() {
             continue;
         }
@@ -175,16 +190,15 @@ fn list_snapshot_files(dir: &Path) -> io::Result<Vec<String>> {
             .strip_suffix(".md")
             .or_else(|| name.strip_suffix(".html"))
             .unwrap_or(name);
+        let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy();
         match files_by_stem.get(stem) {
             Some(existing) if existing.ends_with(".md") => {}
             _ => {
-                files_by_stem.insert(stem.to_string(), name.to_string());
+                files_by_stem.insert(stem.to_string(), relative.to_string());
             }
         }
     }
-    let mut files: Vec<_> = files_by_stem.into_values().collect();
-    files.sort();
-    Ok(files)
+    Ok(())
 }
 
 fn merge_history_hit(existing: &mut HistorySearchHit, next: HistorySearchHit) {
@@ -221,10 +235,10 @@ mod tests {
     fn search_history_in_data_dir_merges_devices_and_applies_limit() {
         let temp_dir = tempdir().unwrap();
         let data_dir = temp_dir.path();
-        let device_a = data_dir.join("data/logs/device-a");
-        let device_b = data_dir.join("data/logs/device-b");
-        let page_a = data_dir.join("pages/example-article");
-        let page_b = data_dir.join("pages/second-article");
+        let device_a = data_dir.join("logs/device-a");
+        let device_b = data_dir.join("logs/device-b");
+        let page_a = data_dir.join("views/pages/example-article");
+        let page_b = data_dir.join("views/pages/second-article");
         fs::create_dir_all(&device_a).unwrap();
         fs::create_dir_all(&device_b).unwrap();
         fs::create_dir_all(&page_a).unwrap();
@@ -265,7 +279,7 @@ mod tests {
         fs::write(page_a.join("100.md"), "banana body match").unwrap();
         fs::write(page_b.join("100.md"), "banana second match").unwrap();
 
-        let hits = search_history_in_data_dir(data_dir, "banana", Some(1)).unwrap();
+        let hits = search_history_in_data_dir(data_dir, "Article", Some(1)).unwrap();
 
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].url, "https://example.com/article");
@@ -275,7 +289,7 @@ mod tests {
     #[test]
     fn search_notes_in_data_dir_reads_note_directory() {
         let temp_dir = tempdir().unwrap();
-        let notes_dir = temp_dir.path().join("data/notes");
+        let notes_dir = temp_dir.path().join("objects/notes");
         fs::create_dir_all(&notes_dir).unwrap();
         fs::write(
             notes_dir.join("note-a.json"),
@@ -302,7 +316,7 @@ mod tests {
     #[test]
     fn search_snapshots_in_data_dir_reads_snapshot_directory() {
         let temp_dir = tempdir().unwrap();
-        let snapshots_dir = temp_dir.path().join("data/snapshots");
+        let snapshots_dir = temp_dir.path().join("objects/snapshots/aa");
         fs::create_dir_all(&snapshots_dir).unwrap();
         fs::write(
             snapshots_dir.join("my-page-1709251200000.md"),
@@ -323,7 +337,7 @@ mod tests {
     #[test]
     fn search_snapshots_in_data_dir_falls_back_to_html_files() {
         let temp_dir = tempdir().unwrap();
-        let snapshots_dir = temp_dir.path().join("data/snapshots");
+        let snapshots_dir = temp_dir.path().join("objects/snapshots/aa");
         fs::create_dir_all(&snapshots_dir).unwrap();
         fs::write(
             snapshots_dir.join("my-page-1709251200000.html"),

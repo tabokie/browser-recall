@@ -2,17 +2,16 @@
 // Bookmark-manager style UI with sidebar navigation, search, and settings modal
 import { HistoryEntry, SearchEngine } from './search-runtime.js';
 import {
-  mergeBufferIntoHistory,
-  getBufferContentMap,
+  getQueueContentMap,
   buildHistoryForEngine,
-  extractHistoryBuffer,
+  extractHistoryQueue,
 } from './search-helpers.js';
 import {
   generateSlugFromUrl,
   generateSlugFromTitle,
   loadSettingsValue,
   saveSettingsValue,
-  readCacheable,
+  readDesktopValue,
   sendAction,
   escapeHtml,
   BODY_WORD_LIMIT,
@@ -599,7 +598,7 @@ const cardDataByUrl = new Map(); // url → { attDetail, timestamps } for detail
 const listNameById = new Map(); // listId → display name, populated by renderLists()
 let listsReadyPromise = Promise.resolve();
 let marqueeActive = false; // suppress click during marquee drag
-let bufferContentMap = {}; // slug → markdown from write buffer (small, kept in memory)
+let queueContentMap = {}; // slug -> markdown from pending queue entries
 let draggedSidebarListId = null;
 let desktopPairInFlight = false;
 let onboardingSelectedScheme = 'amber';
@@ -979,7 +978,7 @@ async function buildSnapshotSearchResults(matches) {
   const slugs = (matches || []).map((match) => match.slug).filter(Boolean);
   if (slugs.length === 0) return [];
   const pages = await Promise.all(
-    slugs.map((slug) => readCacheable(pageKey(slug))),
+    slugs.map((slug) => readDesktopValue(pageKey(slug))),
   );
   const now = Date.now();
   const results = [];
@@ -998,20 +997,21 @@ async function buildSnapshotSearchResults(matches) {
   return results;
 }
 
-// Phase 1: daemon-backed history search plus in-memory buffer search.
+// Phase 1: daemon-backed history search plus pending connector queue search.
 async function runPhase1(query, gen) {
   try {
-    // Dirty data: search logBuffer entries in JS
-    const { logBuffer = [] } = await chrome.storage.local.get(['logBuffer']);
-    const historyBuffer = extractHistoryBuffer(logBuffer);
-    bufferContentMap = getBufferContentMap(historyBuffer);
-    if (historyBuffer.length > 0) {
+    const { desktopCommandBuffer = [] } = await chrome.storage.local.get([
+      'desktopCommandBuffer',
+    ]);
+    const pendingHistoryEntries = extractHistoryQueue(desktopCommandBuffer);
+    queueContentMap = getQueueContentMap(pendingHistoryEntries);
+    if (pendingHistoryEntries.length > 0) {
       const engine = new SearchEngine();
       buildHistoryForEngine(
         HistoryEntry,
         engine,
-        historyBuffer,
-        bufferContentMap,
+        pendingHistoryEntries,
+        queueContentMap,
       );
       const bufferResults = await engine.search(query, 0);
       mergeSearchResults(bufferResults, 'history', gen);
@@ -1178,7 +1178,7 @@ async function initHistoryFiles() {
     logDebug('History file list unavailable:', error.message);
   }
 
-  bufferContentMap = {};
+  queueContentMap = {};
 }
 
 async function loadHistoryEntriesForDate(dateStr) {
@@ -1280,7 +1280,7 @@ function resetHistory() {
   cachedFieldRanges = null;
   allListPins = {};
 
-  bufferContentMap = {};
+  queueContentMap = {};
   searchState.generation++; // invalidate any in-flight progressive search
   searchState.results = [];
   searchState.pendingPhases = 0;
@@ -1366,8 +1366,7 @@ function resolvePageRef(refId, pageSnap, noteSnap) {
   return null;
 }
 
-// Load page entities for a set of pins.
-// Session cache first, filesystem fallback for page: slugs not in session.
+// Load page entities for a set of pins from Desktop.
 async function loadPinContext(pins) {
   const pagePinSlugs = [];
   const notePinSlugs = [];
@@ -1375,40 +1374,22 @@ async function loadPinContext(pins) {
     if (p.id?.startsWith(PAGE_PREFIX)) pagePinSlugs.push(entitySlug(p.id));
     else if (p.id?.startsWith(NOTE_PREFIX)) notePinSlugs.push(entitySlug(p.id));
   }
-  const sessionKeys = [
-    ...pagePinSlugs.map((s) => pageKey(s)),
-    ...notePinSlugs.map((s) => noteKey(s)),
-  ];
-  const sessionBatch =
-    sessionKeys.length > 0 ? await chrome.storage.session.get(sessionKeys) : {};
   const pageSnap = new Map();
-  const missingSlugs = [];
-  for (const slug of pagePinSlugs) {
-    const page = sessionBatch[pageKey(slug)];
-    if (page) pageSnap.set(slug, page);
-    else missingSlugs.push(slug);
-  }
-  if (missingSlugs.length > 0) {
+  if (pagePinSlugs.length > 0) {
     const pages = await Promise.all(
-      missingSlugs.map((s) => readCacheable(pageKey(s))),
+      pagePinSlugs.map((s) => readDesktopValue(pageKey(s))),
     );
-    for (let i = 0; i < missingSlugs.length; i++) {
-      if (pages[i]) pageSnap.set(missingSlugs[i], pages[i]);
+    for (let i = 0; i < pagePinSlugs.length; i++) {
+      if (pages[i]) pageSnap.set(pagePinSlugs[i], pages[i]);
     }
   }
   const noteSnap = new Map();
-  const missingNoteSlugs = [];
-  for (const slug of notePinSlugs) {
-    const note = sessionBatch[noteKey(slug)];
-    if (note) noteSnap.set(slug, note);
-    else missingNoteSlugs.push(slug);
-  }
-  if (missingNoteSlugs.length > 0) {
+  if (notePinSlugs.length > 0) {
     const notes = await Promise.all(
-      missingNoteSlugs.map((s) => readCacheable(noteKey(s))),
+      notePinSlugs.map((s) => readDesktopValue(noteKey(s))),
     );
-    for (let i = 0; i < missingNoteSlugs.length; i++) {
-      if (notes[i]) noteSnap.set(missingNoteSlugs[i], notes[i]);
+    for (let i = 0; i < notePinSlugs.length; i++) {
+      if (notes[i]) noteSnap.set(notePinSlugs[i], notes[i]);
     }
   }
   return { pageSnap, noteSnap };
@@ -1462,7 +1443,7 @@ let recycleBinBadgeSeq = 0;
 
 async function readOrphanedManifestFresh() {
   const resp = await sendAction({
-    action: 'readCacheable',
+    action: 'readDesktopValue',
     key: 'manifest:orphaned',
     includeDeleted: true,
   });
@@ -1476,7 +1457,7 @@ async function isRestorableRecycleEntry(entry) {
 
   try {
     const resp = await sendAction({
-      action: 'readCacheable',
+      action: 'readDesktopValue',
       key,
       includeDeleted: true,
     });
@@ -1544,7 +1525,7 @@ async function showRecycleBin() {
       // Try to load page entity for a human title
       try {
         const pageResp = await sendAction({
-          action: 'readCacheable',
+          action: 'readDesktopValue',
           key: pageKey(pageSlug),
           includeDeleted: true,
         });
@@ -1567,7 +1548,7 @@ async function showRecycleBin() {
     } else {
       try {
         const resp = await sendAction({
-          action: 'readCacheable',
+          action: 'readDesktopValue',
           key,
           includeDeleted: true,
         });
@@ -2417,7 +2398,7 @@ async function refreshPins() {
   } else if (activeView.type === 'list') {
     const listId = activeView.id;
     if (!allListPins[listId]) {
-      const entity = await readCacheable(listKey(listId));
+      const entity = await readDesktopValue(listKey(listId));
       allListPins[listId] = entity?.pins || [];
     }
     const pins = allListPins[listId];
@@ -2481,7 +2462,7 @@ async function showList(list) {
     await loadFilterState();
 
     // Always fetch pins from entity storage
-    const listEntity = await readCacheable(listKey(listId));
+    const listEntity = await readDesktopValue(listKey(listId));
     allListPins[listId] = listEntity?.pins || [];
     const pins = allListPins[listId];
     updatePinCount(listId, pins.length);
@@ -2515,8 +2496,7 @@ async function showList(list) {
 function ruleDescription(rule) {
   const c = rule.config || {};
   if (rule.type === 'keyword') {
-    const fields = c.fields || ['title', 'url'];
-    return `${c.pattern || ''} (${fields.join(', ')})`;
+    return c.pattern || '';
   } else if (rule.type === 'function') {
     return c.description || '(custom function)';
   }
@@ -2580,6 +2560,7 @@ function renderRulesList(listId, rules) {
       const ruleId = entry.dataset.ruleId;
       try {
         await sendAction({ action: 'removeRule', listId, ruleId });
+        await refreshRulesForActiveList();
       } catch (err) {
         showErrorBubble('Failed to remove rule: ' + err.message);
       }
@@ -2590,7 +2571,7 @@ function renderRulesList(listId, rules) {
 async function refreshRulesForActiveList() {
   if (activeView.type !== 'list') return;
   const listId = activeView.id;
-  const listEntity = await readCacheable(listKey(listId));
+  const listEntity = await readDesktopValue(listKey(listId));
   renderRulesSection(listId, listEntity?.rules || []);
 }
 
@@ -2690,7 +2671,7 @@ function buildRuleFromEditRow() {
     return {
       rule: {
         type: 'keyword',
-        config: { pattern: inputVal, fields: ['title', 'url'] },
+        config: { pattern: inputVal },
       },
     };
   } else if (activeType === 'function') {
@@ -2947,7 +2928,7 @@ async function runPreviewAgainstHistory(rule, signal) {
     const d = new Date(today);
     d.setDate(d.getDate() - dayOffset);
     const dateKey = d.toISOString().slice(0, 10);
-    const dayEntries = (await readCacheable('log:' + dateKey)) || [];
+    const dayEntries = (await readDesktopValue('log:' + dateKey)) || [];
     const visits = dayEntries
       .filter(
         (e) =>
@@ -3013,10 +2994,10 @@ async function runPreviewAgainstPins(rule, listId, signal) {
   const pinMeta = collectPinnedPreviewEntries();
 
   if (pinMeta.length === 0) {
-    const listEntity = await readCacheable(listKey(listId));
+    const listEntity = await readDesktopValue(listKey(listId));
     for (const pin of listEntity?.pins || []) {
       if (signal?.aborted) break;
-      const page = await readCacheable(pin.id);
+      const page = await readDesktopValue(pin.id);
       if (!page?.url) continue;
       const title = page.user_title || page.title || '';
       if (!title) continue;
@@ -3349,7 +3330,7 @@ async function enrichFromEntityStorage(entries) {
   const allSlugs = [...new Set(entries.map((r) => r.slug).filter(Boolean))];
   if (allSlugs.length === 0) return;
   const loaded = await Promise.all(
-    allSlugs.map((s) => readCacheable(pageKey(s))),
+    allSlugs.map((s) => readDesktopValue(pageKey(s))),
   );
   const pages = {};
   for (let i = 0; i < allSlugs.length; i++) {
@@ -3369,7 +3350,7 @@ async function enrichFromEntityStorage(entries) {
   if (allNoteRefs.size > 0) {
     const noteKeys = [...allNoteRefs];
     const noteEntities = await Promise.all(
-      noteKeys.map((k) => readCacheable(k)),
+      noteKeys.map((k) => readDesktopValue(k)),
     );
     for (let i = 0; i < noteKeys.length; i++) {
       if (noteEntities[i]) noteMap.set(noteKeys[i], noteEntities[i]);
@@ -3402,7 +3383,9 @@ async function enrichFromEntityStorage(entries) {
 async function enrichForFilters(entries) {
   const slugs = [...new Set(entries.map((r) => r.slug).filter(Boolean))];
   if (slugs.length === 0) return;
-  const loaded = await Promise.all(slugs.map((s) => readCacheable(pageKey(s))));
+  const loaded = await Promise.all(
+    slugs.map((s) => readDesktopValue(pageKey(s))),
+  );
   const pages = {};
   for (let i = 0; i < slugs.length; i++) {
     if (loaded[i]) pages[slugs[i]] = loaded[i];
@@ -3420,7 +3403,7 @@ async function enrichForFilters(entries) {
   if (allNoteRefs.size > 0) {
     const noteKeys = [...allNoteRefs];
     const noteEntities = await Promise.all(
-      noteKeys.map((k) => readCacheable(k)),
+      noteKeys.map((k) => readDesktopValue(k)),
     );
     for (let i = 0; i < noteKeys.length; i++) {
       if (noteEntities[i]) noteMap.set(noteKeys[i], noteEntities[i]);
@@ -3557,7 +3540,7 @@ async function loadExtraDetail(url) {
   const snapshots = snapResp.snapshots || [];
 
   // Load page entity for likes
-  const pageEntity = await readCacheable(pageKey(slug));
+  const pageEntity = await readDesktopValue(pageKey(slug));
   const likes = pageEntity?.likes || 0;
 
   // Page entities materialize list membership via parentIds.
@@ -3568,7 +3551,7 @@ async function loadExtraDetail(url) {
     if (!parentId.startsWith(LIST_PREFIX) || isSystemList(parentId)) continue;
     const listSlug = entitySlug(parentId);
     const list =
-      knownLists.get(listSlug) || (await readCacheable(listKey(listSlug)));
+      knownLists.get(listSlug) || (await readDesktopValue(listKey(listSlug)));
     if (list && !list.deleted) belongedLists.push(listDisplayName(list));
   }
 
@@ -4239,7 +4222,7 @@ function startEditingDetailTitle(card, url) {
 
     if (newTitle !== currentTitle) {
       try {
-        await sendAction({ action: 'reportPage', url, user_title: newTitle });
+        await sendAction({ action: 'renamePage', url, userTitle: newTitle });
       } catch (err) {
         logError('[options] Failed to save user title:', err);
       }
@@ -4280,7 +4263,7 @@ async function openPageDetailFromRoute(url) {
     await showExplore();
   }
   const slug = generateSlugFromUrl(url);
-  const page = await readCacheable(pageKey(slug), true).catch(() => null);
+  const page = await readDesktopValue(pageKey(slug), true).catch(() => null);
   const title = page?.user_title || page?.title || url;
   const timestamps = Object.values(page?.timestamps || {});
   const cardTimestamp = timestamps.length > 0 ? Math.max(...timestamps) : null;
@@ -4494,14 +4477,14 @@ function updateSidebarActive() {
 
 // --- Lists (pinned searches) ---
 async function loadListTree() {
-  const order = await readCacheable('manifest:list-order');
+  const order = await readDesktopValue('manifest:list-order');
   return buildTreeFromManifest(order?.tree || []);
 }
 async function buildTreeFromManifest(treeNodes) {
   const nodes = [];
   for (const treeNode of treeNodes) {
     const key = treeNode.id;
-    const entity = await readCacheable(key);
+    const entity = await readDesktopValue(key);
     if (!entity || entity.deleted) continue;
     const slug = entity.slug || entitySlug(key);
     const children = treeNode.children?.length
@@ -4803,7 +4786,7 @@ function bindSidebarItemDragDrop(item, node) {
       const rect = item.getBoundingClientRect();
       const relY = (e.clientY - rect.top) / rect.height;
 
-      const order = await readCacheable('manifest:list-order');
+      const order = await readDesktopValue('manifest:list-order');
       const tree = JSON.parse(JSON.stringify(order?.tree || []));
       await handleSidebarDrop(draggedId, node.slug, relY, tree);
     } else {
@@ -4815,13 +4798,13 @@ function bindSidebarItemDragDrop(item, node) {
         if (!allListPins[node.slug]) allListPins[node.slug] = [];
         const pins = allListPins[node.slug];
         const newUrls = [];
-        const titles = {};
+        const titles = [];
         for (const { url, title } of items) {
           const pinId = pageKey(generateSlugFromUrl(url));
           if (url && !pins.some((p) => p.id === pinId)) {
             pins.push({ id: pinId, pinnedAt: Date.now() });
             newUrls.push(url);
-            if (title) titles[url] = title;
+            titles.push(title || null);
           }
         }
         if (newUrls.length > 0) {
@@ -4830,7 +4813,7 @@ function bindSidebarItemDragDrop(item, node) {
             listId: node.slug,
             urls: newUrls,
           };
-          if (Object.keys(titles).length > 0) msg.titles = titles;
+          if (titles.some(Boolean)) msg.titles = titles;
           await chrome.runtime.sendMessage(msg);
           if (activeView.type === 'list' && activeView.id === node.slug) {
             showList(node);
@@ -4900,7 +4883,7 @@ document.getElementById('createListBtn').addEventListener('click', () => {
     // Create list via saveListMeta (appends to tree end)
     await sendAction({ action: 'saveListMeta', name });
     // Move new list to first position in tree
-    const order = await readCacheable('manifest:list-order');
+    const order = await readDesktopValue('manifest:list-order');
     const rawTree = order?.tree || [];
     if (rawTree.length > 1) {
       const last = rawTree[rawTree.length - 1];
@@ -5208,9 +5191,9 @@ async function updateStorageStatus() {
 }
 
 async function updateStatistics() {
-  const result = await chrome.storage.local.get(['logBuffer']);
+  const result = await chrome.storage.local.get(['desktopCommandBuffer']);
   document.getElementById('bufferSize').textContent = (
-    result.logBuffer || []
+    result.desktopCommandBuffer || []
   ).length;
 
   updateCacheSize();
@@ -5223,12 +5206,11 @@ function formatBytes(bytes) {
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
-// Session-cached keys live in chrome.storage.session; logBuffer lives in chrome.storage.local
-const SESSION_CACHE_KEYS = [
-  { key: 'manifest:settings', label: 'Settings' },
-  { key: 'manifest:name-to-id', label: 'List Name Map' },
+// Desktop owns entity reads; only the connector queue remains in extension storage.
+const SESSION_CACHE_KEYS = [];
+const LOCAL_CACHE_KEYS = [
+  { key: 'desktopCommandBuffer', label: 'Connector Write Queue' },
 ];
-const LOCAL_CACHE_KEYS = [{ key: 'logBuffer', label: 'Log Buffer' }];
 const CACHE_KEYS = [...SESSION_CACHE_KEYS, ...LOCAL_CACHE_KEYS];
 
 async function updateCacheSize() {
@@ -5256,7 +5238,7 @@ document
 
     try {
       const resp = await chrome.runtime.sendMessage({
-        action: 'flushLogBuffer',
+        action: 'flushDesktopQueue',
       });
       if (resp?.success) {
         btn.textContent =
@@ -5280,12 +5262,10 @@ document.getElementById('clearCacheBtn').addEventListener('click', async () => {
   btn.textContent = 'Reloading...';
 
   try {
-    // Clear session cache keys (logBuffer stays in local — it's a transient buffer for pending log entries)
     const sessionKeysToRemove = SESSION_CACHE_KEYS.map((c) => c.key);
     await chrome.storage.session.remove(sessionKeysToRemove);
 
-    // Ask background to re-hydrate from settings.json
-    await chrome.runtime.sendMessage({ action: 'hydrateCache' });
+    await chrome.runtime.sendMessage({ action: 'flushDesktopQueue' });
 
     // Reload the page to reflect new data
     location.reload();
@@ -5329,6 +5309,7 @@ document.getElementById('selectDirBtn').addEventListener('click', async () => {
 document.getElementById('themeSelect').addEventListener('change', async () => {
   const theme = document.getElementById('themeSelect').value;
   await chrome.storage.session.set({ theme });
+  await saveSettingsValue('theme', theme);
   await applyTheme();
 });
 
@@ -6432,7 +6413,7 @@ chrome.runtime.onMessage.addListener((request) => {
         logDebug('history mutation log refresh failed:', error.message);
         return;
       }
-      const historyBuffer = todayEntries.filter(
+      const historyEntries = todayEntries.filter(
         (e) =>
           (e.action === 'visit_page' ||
             e.action === 'leave_page' ||
@@ -6443,7 +6424,7 @@ chrome.runtime.onMessage.addListener((request) => {
       const watermark = historyState._mutationWatermark || 0;
       let maxTs = watermark;
       let changed = false;
-      for (const entry of historyBuffer) {
+      for (const entry of historyEntries) {
         if (entry.timestamp <= watermark) continue;
         if (entry.timestamp > maxTs) maxTs = entry.timestamp;
         const existing = historyState.byUrl.get(entry.url);
@@ -6457,7 +6438,7 @@ chrome.runtime.onMessage.addListener((request) => {
       historyState._mutationWatermark = maxTs;
       if (changed) {
         cachedFieldRanges = null;
-        bufferContentMap = getBufferContentMap(historyBuffer);
+        queueContentMap = getQueueContentMap(historyEntries);
         if (activeView.type === 'explore' || activeView.type === 'list') {
           runSearchFilterPipeline();
         } else {
@@ -6493,7 +6474,7 @@ chrome.runtime.onMessage.addListener((request) => {
     updateRecycleBinBadge();
     if (activeView.type === 'recycle-bin') showRecycleBin();
   }
-  // highlight, snapshot: session cache is already updated by background
+  // highlight, snapshot: Desktop-backed reads are refreshed on demand
 });
 
 // --- Visibility change: invalidate stale caches when tab regains focus ---
@@ -6979,7 +6960,7 @@ async function runEntityScanFilter(pinnedSlugs) {
   if (allNoteRefs.size > 0) {
     const noteKeys = [...allNoteRefs];
     const noteEntities = await Promise.all(
-      noteKeys.map((k) => readCacheable(k)),
+      noteKeys.map((k) => readDesktopValue(k)),
     );
     for (let i = 0; i < noteKeys.length; i++) {
       if (noteEntities[i]) noteMap.set(noteKeys[i], noteEntities[i]);
@@ -7046,7 +7027,7 @@ async function runEntityScanFilter(pinnedSlugs) {
     });
   }
 
-  // Merge pages from logBuffer / already-loaded history that may not be on disk yet
+  // Merge pages from pending queue / already-loaded history that may not be on disk yet
   for (const item of historyState.allEntries) {
     if (!item.url) continue;
     const slug = item.slug || generateSlugFromUrl(item.url);
@@ -7327,7 +7308,7 @@ async function openListFocusPanel(listId, listName) {
   try {
     let pins = allListPins[listId];
     if (!pins) {
-      const fpEntity = await readCacheable(listKey(listId));
+      const fpEntity = await readDesktopValue(listKey(listId));
       pins = fpEntity?.pins || [];
       allListPins[listId] = pins;
     }
@@ -7619,7 +7600,7 @@ function showOnboarding() {
 async function initialize() {
   bindWindowDragRegions();
   // Apply theme before any rendering to minimize flash
-  const currentTheme = await applyTheme();
+  let currentTheme = await applyTheme();
 
   const deviceResp = await chrome.runtime.sendMessage({
     action: 'getDeviceId',
@@ -7631,6 +7612,10 @@ async function initialize() {
     revealApp();
     return;
   }
+
+  const persistedTheme = await loadSettingsValue('theme', 'system');
+  await chrome.storage.session.set({ theme: persistedTheme });
+  currentTheme = await applyTheme();
 
   await initializeMain(currentTheme);
 }

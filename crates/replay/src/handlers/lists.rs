@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::future::Future;
 
 use crate::{
@@ -15,8 +15,8 @@ pub(crate) async fn handle_pin_to_list<L, Fut>(
     timestamp: i64,
     name: &str,
     list_owner: &str,
-    items: &[String],
-    titles: Option<&BTreeMap<String, String>>,
+    urls: &[String],
+    titles: Option<&Vec<Option<String>>>,
     source: Option<&str>,
     load: &L,
     context: &Context,
@@ -26,6 +26,13 @@ where
     Fut: Future<Output = Option<Entity>>,
 {
     let mut result = EntityMap::new();
+    if let Some(values) = titles {
+        if values.len() != urls.len() {
+            return Err(ReplayError::InvalidEntry(
+                "pin_to_list titles length must match urls length".to_string(),
+            ));
+        }
+    }
     let Some(list_key) = resolve_list_key(&mut result, load, name, list_owner).await? else {
         return Ok(result);
     };
@@ -33,14 +40,16 @@ where
         return Ok(result);
     };
 
-    for item in items {
+    for (index, item) in urls.iter().enumerate() {
         if item.is_empty() {
             continue;
         }
-        let pin_id = if item.starts_with("notes/") {
+        let pin_id = if item.starts_with("objects/notes/") {
             format!("{NOTE_PREFIX}{}", note_slug_from_path(item))
         } else {
-            let title = titles.and_then(|map| map.get(item)).map(String::as_str);
+            let title = titles
+                .and_then(|values| values.get(index))
+                .and_then(Option::as_deref);
             let (page_key, page) =
                 ensure_page_in_result(&mut result, load, item, timestamp, title, context).await?;
             let mut page = page;
@@ -67,7 +76,7 @@ pub(crate) async fn handle_unpin_from_list<L, Fut>(
     timestamp: i64,
     name: &str,
     list_owner: &str,
-    items: &[String],
+    urls: &[String],
     load: &L,
     context: &Context,
 ) -> Result<EntityMap, ReplayError>
@@ -84,11 +93,11 @@ where
     };
 
     let mut remove_ids = HashSet::new();
-    for item in items {
+    for item in urls {
         if item.is_empty() {
             continue;
         }
-        let pin_id = if item.starts_with("notes/") {
+        let pin_id = if item.starts_with("objects/notes/") {
             format!("{NOTE_PREFIX}{}", note_slug_from_path(item))
         } else {
             format!("{PAGE_PREFIX}{}", crate::generate_slug_from_url(item)?)

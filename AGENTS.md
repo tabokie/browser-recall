@@ -1,0 +1,90 @@
+# Browser Recall — Agent Guide
+
+Project name: **browser-recall** (display name "Browser Recall"). Version 1.0 targets Chrome Web Store public launch.
+
+## Essential Reading
+
+- [ARCHITECTURE.md](./ARCHITECTURE.md) — desktop-first topology, storage, replay, sync, deletion
+- [DESIGN.md](./DESIGN.md) — product philosophy and design rationale
+- [CODEBASE_MAP.md](./CODEBASE_MAP.md) — file index, message routing, feature-to-code map
+- [DEVELOPMENT.md](./DEVELOPMENT.md) — building, testing, debugging
+
+## Core Principles
+
+**No silent fallbacks or defaults.** Always get the true information regardless of cost. If a daemon cache misses, fall through to disk through the coordinated storage path. Silent fallbacks hide bugs and cause data corruption.
+
+**Desktop is the authority.** Persistent storage, replay, search, sync, rule policy, title cleanup, blacklist policy, and auto-pin synthesis belong to the daemon/desktop side. The extension is a connector for capture, current-page popup actions, pairing, and short-lived command buffering.
+
+**No extension-side migration or persistent preference storage.** On schema changes, migrate the persistent data at `~/browser-data` first, then upgrade code to handle only the new format. Extension persistence is limited to connector/pairing/short-lived queue state; product settings live in `views/manifest/settings.json` through daemon commands.
+
+**Every replay branch must be idempotent.** Applying the same log entry twice against a state that already reflects it must produce the same result.
+
+## Storage And Replay
+
+- Data layout is `logs/`, `objects/`, and `views/`; see [ARCHITECTURE.md](./ARCHITECTURE.md) for exact paths.
+- Logs are authoritative. Checkpoints in `views/` are replay-derived and rebuildable.
+- Page checkpoints are selective: persist only pages with durable user state, meaning list parent, note/snapshot child, user title, or rating.
+- Replay-derived checkpoint policy must live in the Rust replay crate; daemon persistence and verification should call the same function instead of duplicating policy in JS or daemon code.
+- Log records use the strict Rust replay schema. Command-only fields such as rule body previews, checkpoint hints, legacy `items`, rule `fields`, and `case_sensitive` must not reach JSONL.
+- `pin_to_list` and `unpin_from_list` use `urls`; `pin_to_list.titles`, when present, is an index-aligned array with the same length as `urls`.
+- Snapshot payload blobs are stored as sidecar files under `objects/snapshots/<shard>/`; large snapshot HTML must not pass through `chrome.storage.local`.
+- Replay verification is Rust-owned: `cargo run -q -p browser-recall-replay --bin replay-verify --`.
+
+## Daemon Runtime
+
+- Writes are serialized in the daemon command/runtime layer: reserve checkpoint-worker capacity, append canonical logs, apply replay effects to the in-memory projection, then enqueue ordered checkpoint persistence.
+- Reads use the latest daemon projection cache and fall through to disk on coordinated cache misses.
+- `views/manifest/replay-progress.json` records per-device durable replay progress so startup can replay acknowledged log entries that reached JSONL before async checkpoints flushed.
+- On shutdown or destructive storage operations, flush or coordinate checkpoint work so stale async checkpoint writes cannot resurrect deleted data.
+- Shared replay overlay logic belongs in `crates/daemon/src/runtime.rs`; avoid duplicating “apply a batch then read from the evolving projection” logic.
+
+## Connector Extension
+
+- The extension sends semantic daemon commands (`reportVisit`, `reportLeave`, `createNote`, etc.), not raw replay log records.
+- The connector command buffer is a short-lived availability bridge, not a second durable write model. Keep it out of replay schema decisions.
+- Popup and badge reads should ask the daemon for current data when opened/refreshed; do not maintain product entity caches in the extension.
+- Content scripts run in an isolated world. Page-world History API overrides require an injected page-world bridge; DOM events cross worlds but JS property overrides do not.
+- Content scripts and `chrome.scripting.executeScript` do not work on `blob:` URLs. Use an extension viewer page instead.
+- Extension page CSP blocks inline scripts and remote imports. Always use external local JS files.
+
+## Rules And Search
+
+- Keyword rules are title-only and always case-insensitive. Their config is exactly `{ pattern }`; they do not carry field selectors and never match URL or body preview text.
+- Rule previews may inspect command-only page data, but persisted rules and logs must remain canonical.
+- Search queries and result enrichment should read through daemon/desktop APIs, not direct extension-local persistence.
+
+## Refactoring Lessons
+
+- After bulk renames, grep for the old term, alternate casing, comments, string literals, tests, and docs.
+- Format changes require non-empty test data for every consumer. When changing a structure's shape, grep for all readers and verify each has coverage with non-empty data.
+- Multi-line objects evade single-line transforms; verify multi-line schema and payload construction separately.
+- Avoid compatibility paths after an intentional schema migration. Migrate the data, then remove fallback readers/writers so drift is visible.
+- When a verifier validates production behavior, keep the verifier on the production implementation rather than porting policy into another language.
+
+## CSS Lessons
+
+- Use CSS pseudo-element shapes instead of text characters for small icons; text glyphs render inconsistently across fonts/colors.
+- Match container size to visual element size for seamless edges.
+- Avoid unnecessary `flex: 1` chains when content should be content-sized.
+- Put static skeleton HTML in markup rather than relying on JS. Module scripts are deferred.
+- `justify-content: flex-end` plus horizontal overflow can make content unreachable; use explicit scroll positioning after render.
+
+## Virtual Scroller
+
+- `innerHTML` replacement destroys DOM state. Do not force full re-render from callbacks that modify DOM state; adjust padding or targeted rows.
+- Use `getBoundingClientRect()` differences for offsets, not `offsetTop` relative to a positioned ancestor.
+- Preserve CSS base padding by reading computed styles and adding virtual padding to it.
+
+## Workflow Preferences
+
+- Bug fixes are test-first: write the failing test, confirm it fails, apply the fix, confirm it passes.
+- Prefer E2E tests for user-facing behavior. Use unit tests when a behavior cannot be isolated in E2E or when guarding architecture invariants.
+- When functionality is added, removed, or significantly changed, update both [CODEBASE_MAP.md](./CODEBASE_MAP.md) and [ARCHITECTURE.md](./ARCHITECTURE.md).
+
+## Formatting And Lint Tools
+
+- JS/JSON formatting: `npm run fmt` or `npm run fmt:check`
+- Rust formatting: `cargo fmt` or `cargo fmt -- --check`
+- Rust lint: `cargo clippy --workspace --all-targets -- -D warnings`
+- Unused files/exports/deps: `npx knip --include files,exports,duplicates`
+- Duplicate JS blocks: `npx jscpd apps/extension/ --min-lines 5 --min-tokens 50`

@@ -9,7 +9,7 @@ test.describe('Tab reported URL tracking', () => {
     });
   });
 
-  test('getReportedUrl returns URL from content script report, survives pushState', async ({
+  test('getReportedUrl follows query-changing pushState reports', async ({
     extContext,
     extensionId,
     setupDir,
@@ -32,7 +32,7 @@ test.describe('Tab reported URL tracking', () => {
     await helper.evaluate(async (key) => {
       for (let i = 0; i < 30; i++) {
         const r = await chrome.runtime.sendMessage({
-          action: 'readCacheable',
+          action: 'readDesktopValue',
           key,
         });
         if (r?.value?.timestamps) return;
@@ -58,21 +58,23 @@ test.describe('Tab reported URL tracking', () => {
     expect(reportedResp.success).toBe(true);
     expect(reportedResp.url).toBe(originalUrl);
 
-    // Simulate SPA URL change via pushState (like YouTube adding &pp=)
+    // Simulate SPA URL change via pushState (like YouTube changing watch/search params)
     const modifiedUrl = originalUrl + '?extra=param&pp=abc';
     await page.evaluate((newUrl) => {
       history.pushState({}, '', newUrl);
     }, modifiedUrl);
 
-    // getReportedUrl should still return the ORIGINAL URL, not the pushState'd one
-    const afterPushResp = await helper.evaluate(async (tid) => {
-      return chrome.runtime.sendMessage({
-        action: 'getReportedUrl',
-        tabId: tid,
-      });
-    }, tabId);
-    expect(afterPushResp.success).toBe(true);
-    expect(afterPushResp.url).toBe(originalUrl);
+    await expect
+      .poll(async () => {
+        const response = await helper.evaluate(async (tid) => {
+          return chrome.runtime.sendMessage({
+            action: 'getReportedUrl',
+            tabId: tid,
+          });
+        }, tabId);
+        return response.url;
+      })
+      .toBe(modifiedUrl);
 
     await page.close();
     await helper.close();

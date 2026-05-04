@@ -118,6 +118,70 @@ test.describe('Extension badge', () => {
     await helper.close();
   });
 
+  test('keeps the page marker after the content script records the initial visit', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/listed-after-report', {
+      title: 'Listed After Report',
+      body: '<p>In a list after visit report</p>',
+    });
+    const url = localServer.url('/listed-after-report');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url,
+          title: 'Listed After Report',
+          childIds: [],
+          parentIds: ['list:my-list'],
+          timestamps: { dev1: 1 },
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+
+    const helper = await openHelperPage(extContext, extensionId);
+    await helper.evaluate(async (pageKey) => {
+      for (let i = 0; i < 30; i++) {
+        const resp = await chrome.runtime.sendMessage({
+          action: 'readDesktopValue',
+          key: pageKey,
+        });
+        if (
+          resp?.value?.timestamps &&
+          Object.keys(resp.value.timestamps).length > 1
+        ) {
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }, `page:${slug}`);
+
+    const badge = await helper.evaluate(async (pageUrl) => {
+      const tabs = await chrome.tabs.query({ url: pageUrl });
+      if (!tabs.length) return { text: '', color: '' };
+      const tabId = tabs[0].id;
+      const text = await chrome.action.getBadgeText({ tabId });
+      const color = await chrome.action.getBadgeBackgroundColor({ tabId });
+      return { text, color };
+    }, url);
+
+    expect(badge.text).toBe(' ');
+    expect(badge.color).toEqual([76, 175, 80, 255]);
+
+    await page.close();
+    await helper.close();
+  });
+
   test('shows purple dot for page with both notes and lists', async ({
     extContext,
     extensionId,

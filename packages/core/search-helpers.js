@@ -1,36 +1,46 @@
 // Extracted search helpers — pure functions testable without browser APIs
 
 /**
- * Extract visit entries from the logBuffer.
- * The logBuffer contains entries of different types: visits (action: 'visit_page')
- * and mutations (other action values). This returns only visit entries.
+ * Extract visit entries from the extension's pending Desktop command queue.
+ * The queue stores connector items shaped as { kind: 'command', action, request }.
  */
-export function extractHistoryBuffer(logBuffer) {
-  return logBuffer.filter(
-    (e) => !e.action || e.action === 'visit_page' || e.action === 'leave_page',
-  );
+export function extractHistoryQueue(desktopCommandQueue) {
+  return desktopCommandQueue
+    .map((item) => {
+      if (item?.kind === 'command' && item.action === 'reportVisit') {
+        return { action: 'visit_page', ...item.request };
+      }
+      if (item?.kind === 'command' && item.action === 'reportLeave') {
+        return { action: 'leave_page', ...item.request };
+      }
+      return null;
+    })
+    .filter(Boolean)
+    .filter(
+      (e) =>
+        !e.action || e.action === 'visit_page' || e.action === 'leave_page',
+    );
 }
 
 /**
- * Merge log buffer visit entries into the history entries array, deduplicating
+ * Merge pending visit entries into the history entries array, deduplicating
  * by URL (last-write-wins).
  *
  * Mutates and returns { entries }.
  */
-export function mergeBufferIntoHistory(entries, buffer) {
+export function mergeQueueIntoHistory(entries, queueEntries) {
   const indexByUrl = new Map();
   entries.forEach((entry, i) => {
     indexByUrl.set(entry.url, i);
   });
 
-  for (const bufEntry of buffer) {
-    // Log buffer entries are flat (url, title, timestamp, slug, etc.)
-    const existingIdx = indexByUrl.get(bufEntry.url);
+  for (const queueEntry of queueEntries) {
+    const existingIdx = indexByUrl.get(queueEntry.url);
     if (existingIdx !== undefined) {
-      entries[existingIdx] = bufEntry;
+      entries[existingIdx] = queueEntry;
     } else {
-      indexByUrl.set(bufEntry.url, entries.length);
-      entries.push(bufEntry);
+      indexByUrl.set(queueEntry.url, entries.length);
+      entries.push(queueEntry);
     }
   }
 
@@ -39,11 +49,12 @@ export function mergeBufferIntoHistory(entries, buffer) {
 }
 
 /**
- * Get buffer content map: slug → markdown for entries in the log buffer.
+ * Get queue content map: slug → markdown for entries in the pending queue.
  * In the event-sourced model, content is on disk (referenced by mdPath).
  * This returns an empty map — content is not inline in log entries.
  */
-export function getBufferContentMap(buffer) {
+export function getQueueContentMap(queueEntries) {
+  void queueEntries;
   return {};
 }
 

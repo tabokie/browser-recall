@@ -24,7 +24,6 @@
     "manual": "node scripts/manual-test-browser.mjs",
     "manual:seed": "node scripts/manual-test-browser.mjs --seed",
     "manual:case": "node scripts/manual-test-browser.mjs --case",
-    "replay:verify": "node scripts/replay-verify.mjs",
     "fmt": "prettier --write .",
     "fmt:check": "prettier --check ."
   },

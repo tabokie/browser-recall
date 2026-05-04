@@ -338,6 +338,7 @@ dependencies = [
  "rquickjs",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-tungstenite",
@@ -374,6 +375,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "url",
 ]

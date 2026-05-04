@@ -1,9 +1,7 @@
 // Popup — current-page dashboard
 import {
   generateSlugFromUrl,
-  readCacheable,
   escapeHtml,
-  DEFAULT_URL_BLACKLIST,
   isInternalBrowserUrl,
 } from './utils.js';
 import { logDebug, logError } from './logger.js';
@@ -102,6 +100,13 @@ function openDesktopApp(route = 'open') {
 }
 
 function showErrorBubble(message) {
+  let displayMessage = message;
+  if (/extension context invalidated/i.test(String(message || ''))) {
+    displayMessage =
+      'Extension context invalidated. Please refresh the page and try again.';
+  } else {
+    displayMessage = message + ' — please reload the extension.';
+  }
   let bubble = document.getElementById('errorBubble');
   if (!bubble) {
     bubble = document.createElement('div');
@@ -110,7 +115,7 @@ function showErrorBubble(message) {
       'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(180,30,30,0.92);color:#fff;font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:6px 14px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:360px;text-align:center;';
     document.body.appendChild(bubble);
   }
-  bubble.textContent = message + ' — please reload the extension.';
+  bubble.textContent = displayMessage;
   bubble.style.opacity = '1';
   clearTimeout(_errorBubbleTimer);
   _errorBubbleTimer = setTimeout(() => {
@@ -385,7 +390,7 @@ function formatSetupDiagnostic(diagnostic) {
   if (diagnostic.connector) {
     lines.push(`connector: ${diagnostic.connector.state || 'unknown'}`);
     lines.push(`deviceId: ${diagnostic.connector.deviceId || 'none'}`);
-    lines.push(`pendingEvents: ${diagnostic.connector.pendingEvents ?? 0}`);
+    lines.push(`pendingCommands: ${diagnostic.connector.pendingCommands ?? 0}`);
     lines.push(`pendingBytes: ${diagnostic.connector.pendingBytes ?? 0}`);
     if (diagnostic.connector.lastError)
       lines.push(`connectorError: ${diagnostic.connector.lastError}`);
@@ -812,10 +817,6 @@ function openHighlightNoteEditor(item, note) {
 
 // Lists — pin current page to lists
 async function loadLists() {
-  if (Array.isArray(currentPageSummary?.lists)) {
-    return currentPageSummary.lists;
-  }
-
   for (const waitMs of [0, 80, 200]) {
     if (waitMs > 0) await delay(waitMs);
     try {
@@ -954,6 +955,7 @@ async function toggleListPin(listId) {
     action: 'toggleListPin',
     listId,
     url: currentUrl,
+    title: currentTitle || currentTab?.title || '',
   });
   await refreshCurrentPageSummary();
 }
@@ -1158,7 +1160,7 @@ document
       reattachDashboardContent();
       const url = currentTab._effectiveUrl || currentTab.url;
       await chrome.runtime.sendMessage({
-        action: 'reportPage',
+        action: 'recordPageActivity',
         url,
         title: currentTab.title || null,
         slug: generateSlugFromUrl(url),
@@ -1205,7 +1207,7 @@ function startEditingTitle() {
       currentEntry.user_title = newTitle;
       try {
         await chrome.runtime.sendMessage({
-          action: 'reportPage',
+          action: 'recordPageActivity',
           url: currentEntry.url,
           user_title: newTitle,
         });
@@ -1260,20 +1262,30 @@ document.getElementById('captureBtn').addEventListener('click', async () => {
       await refreshCurrentPageSummary();
     } else {
       logDebug('[popup] Capture failed:', resp);
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      if (tab)
-        chrome.tabs
-          .sendMessage(tab.id, {
-            action: 'showErrorNotification',
-            message: resp?.error || 'Capture failed',
-          })
-          .catch(() => {});
+      if (/extension context invalidated/i.test(resp?.error || '')) {
+        showErrorBubble(resp.error);
+      } else {
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+        if (tab)
+          chrome.tabs
+            .sendMessage(tab.id, {
+              action: 'showErrorNotification',
+              message: resp?.error || 'Capture failed',
+            })
+            .catch(() => {});
+      }
     }
   } catch (error) {
     logError('[popup] Capture error:', error);
+    if (/extension context invalidated/i.test(error.message || '')) {
+      showErrorBubble(error.message);
+      btn.disabled = false;
+      btn.textContent = 'CAPTURE FRAME';
+      return;
+    }
     const [tab] = await chrome.tabs
       .query({ active: true, currentWindow: true })
       .catch(() => []);
@@ -1320,6 +1332,20 @@ async function resolvePageIdentity(tab) {
   return { slug, url: effectiveUrl, title };
 }
 
+async function trimDisplayTitle(title, url) {
+  const fallback = title || '<unknown>';
+  try {
+    const resp = await chrome.runtime.sendMessage({
+      action: 'trimTitle',
+      title: fallback,
+      url,
+    });
+    return resp?.title || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function pageSummaryFallback(tab, slug, summary = {}) {
   const url = summary.url || currentUrl || tab._effectiveUrl || tab.url;
   return {
@@ -1349,7 +1375,12 @@ async function fetchAndRenderPageData(tab, slug) {
       const page = summary.page || pageSummaryFallback(tab, slug, summary);
       currentPageSummary = { ...summary, page };
       currentEntry = page;
-      currentTitle = page.user_title || page.title || tab.title || '<unknown>';
+      currentTitle = page.user_title
+        ? page.user_title
+        : await trimDisplayTitle(
+            page.title || tab.title || '<unknown>',
+            page.url || currentUrl || tab.url,
+          );
       document.getElementById('pageTitle').textContent = currentTitle;
       if (page.url) {
         currentUrl = page.url;
@@ -1454,7 +1485,7 @@ function scheduleDelayedTitleCheck(tab, initialTitle) {
 
       titleEl.textContent = freshTitle;
       await chrome.runtime.sendMessage({
-        action: 'reportPage',
+        action: 'recordPageActivity',
         url: tab.url,
         title: freshTitle,
       });
@@ -1545,15 +1576,14 @@ async function handlePrivateMode(tab) {
 
 async function handleBlacklist(tab) {
   const effectiveUrl = tab._effectiveUrl || tab.url;
-  const pageSlug = generateSlugFromUrl(effectiveUrl);
-  const hasVisitHistory = !!(await readCacheable(pageKey(pageSlug)));
-  const settings = await readCacheable('manifest:settings');
-  const blacklist = settings?.urlBlacklist ?? DEFAULT_URL_BLACKLIST;
-  if (
-    hasVisitHistory ||
-    !blacklist.some((prefix) => tab.url.startsWith(prefix))
-  )
-    return false;
+  const response = await chrome.runtime.sendMessage({
+    action: 'getPopupAccessState',
+    url: effectiveUrl,
+  });
+  if (response?.success === false) {
+    throw new Error(response.error || 'Desktop popup access check failed');
+  }
+  if (!response?.blacklisted || response?.hasVisitHistory) return false;
 
   document.getElementById('loading').style.display = 'none';
   document.getElementById('blacklistedUrl').textContent = tab.url;
@@ -1575,7 +1605,7 @@ async function handleBlacklist(tab) {
       try {
         const slug = generateSlugFromUrl(effectiveUrl);
         await chrome.runtime.sendMessage({
-          action: 'reportPage',
+          action: 'recordPageActivity',
           url: effectiveUrl,
           title: tab.title || null,
           slug,
@@ -1677,14 +1707,4 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       await loadDashboardIfConnected(connector);
     }
   })();
-});
-
-// Listen for popup-relevant mutations from background to keep popup in sync
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.action !== 'mutation' || !currentSlug) return false;
-  if (!['note', 'pins', 'snapshot', 'history', 'lists'].includes(msg.type)) {
-    return false;
-  }
-  void refreshCurrentPageSummary().catch(() => {});
-  return false;
 });

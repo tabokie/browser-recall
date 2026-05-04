@@ -1,4 +1,4 @@
-use crate::commands::permanent_delete_candidates;
+use crate::commands::{self, permanent_delete_candidates};
 use crate::config::{random_string, ApprovedConnector, ConfigStore, Token};
 use crate::connectors::{
     connector_key, current_local_day_start_unix, prune_inactive_connectors, ConnectorKey,
@@ -8,20 +8,22 @@ use crate::protocol::{
     ConnectorMessage, DaemonMessage, DirectoryInfoPayload, HistorySearchResult, MutationPayload,
     NoteSearchResult, PopupAttentionResult, PopupListResult, PopupNoteResult, PopupPageInfoEntry,
     PopupPinResult, PopupSnapshotResult, PreviewRuleHit, RuleBatchEntry, RuleBatchHit,
-    RuleMatchResult, RulePayload, SnapshotSearchResult, SyncFilePayload, TestSeedFilePayload,
+    RuleMatchResult, RulePayload, SnapshotSearchResult, TestSeedFilePayload,
 };
 use crate::rules::{
     list_matches_page, match_list_rules_strict, page_data_from_raw_entry, preview_rule,
     validate_rule, PageData, RuleSpec,
 };
+use crate::runtime::{effect_with_overlay, EntityMapView};
 use crate::search::{
     search_history_in_data_dir, search_notes_in_data_dir, search_snapshots_in_data_dir,
 };
 use crate::storage::Storage;
 use browser_recall_replay::entities::{Entity, ListOrderManifest, TreeNode};
 use browser_recall_replay::{
-    effect_of, generate_slug_from_url, Context as ReplayContext, EntityEffect, LogEntry,
+    generate_slug_from_url, Context as ReplayContext, EntityEffect, LogEntry,
 };
+use chrono::{Local, TimeZone};
 use futures_util::{FutureExt, SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -38,9 +40,10 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{accept_hdr_async_with_config, tungstenite::protocol::WebSocketConfig};
 use tracing::{info, warn};
 
-const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 const CONNECTOR_SOURCE_EXTENSION: &str = "extension";
 const UNAUTHENTICATED_IDLE_TIMEOUT: Duration = Duration::from_secs(3);
+const DEFAULT_URL_BLACKLIST: &[&str] = &["chrome://", "edge://", "about:"];
 
 #[derive(Debug)]
 pub enum WsServerError {
@@ -137,7 +140,6 @@ pub struct ServerSnapshot {
 struct SharedState {
     snapshot: Arc<RwLock<ServerSnapshot>>,
     snapshot_tx: watch::Sender<ServerSnapshot>,
-    change_tx: broadcast::Sender<BroadcastEnvelope>,
     change_message_tx: broadcast::Sender<DaemonMessage>,
     revoke_tx: broadcast::Sender<ConnectorKey>,
     config_store: ConfigStore,
@@ -163,12 +165,6 @@ struct IngestStatus {
 struct ConnectorBufferStatus {
     buffer_depth: usize,
     buffer_bytes: usize,
-}
-
-#[derive(Debug, Clone)]
-struct BroadcastEnvelope {
-    origin_connection_id: u64,
-    message: DaemonMessage,
 }
 
 #[derive(Debug, Clone)]
@@ -206,6 +202,10 @@ impl ServerHandle {
         self.shared.change_message_tx.subscribe()
     }
 
+    pub fn storage(&self) -> Storage {
+        self.shared.storage.clone()
+    }
+
     pub fn control_handle(&self) -> ServerControlHandle {
         ServerControlHandle {
             shared: self.shared.clone(),
@@ -217,10 +217,12 @@ impl ServerHandle {
     }
 
     pub async fn shutdown(mut self) {
+        let storage = self.shared.storage.clone();
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
         let _ = self.task.await;
+        let _ = storage.flush_checkpoints().await;
     }
 }
 
@@ -236,6 +238,14 @@ impl ServerControlHandle {
         extension_id: &str,
     ) -> Result<bool, WsServerError> {
         revoke_connector(&self.shared, browser_id, extension_id).await
+    }
+
+    pub fn storage(&self) -> Storage {
+        self.shared.storage.clone()
+    }
+
+    pub async fn run_command(&self, action: &str, request: Value) -> Result<Value, WsServerError> {
+        run_command_authority(&self.shared, action, request).await
     }
 }
 
@@ -263,6 +273,9 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
     let mut config = options.config_store.load_or_create()?;
     let storage = Storage::new(config.data_dir.clone());
     storage.ensure_layout(&config.device_id).await?;
+    commands::recover_checkpoint_tail(&storage)
+        .await
+        .map_err(WsServerError::Ingest)?;
     let (listener, port) = bind_first_available(&options.port_candidates).await?;
     config.last_port = Some(port);
     options.config_store.save(&config)?;
@@ -277,13 +290,11 @@ pub async fn start_server(options: ServerStartOptions) -> Result<ServerHandle, W
         last_error_code: None,
     };
     let (snapshot_tx, _) = watch::channel(snapshot.clone());
-    let (change_tx, _) = broadcast::channel(128);
     let (change_message_tx, _) = broadcast::channel(128);
     let (revoke_tx, _) = broadcast::channel(128);
     let shared = SharedState {
         snapshot: Arc::new(RwLock::new(snapshot)),
         snapshot_tx,
-        change_tx,
         change_message_tx,
         revoke_tx,
         config_store: options.config_store.clone(),
@@ -391,8 +402,8 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
     );
     let (mut write, mut read) = ws_stream.split();
     let connection_id = shared.next_connection_id.fetch_add(1, Ordering::Relaxed);
-    let mut change_rx = shared.change_tx.subscribe();
     let mut revoke_rx = shared.revoke_tx.subscribe();
+    let mut change_rx = shared.change_message_tx.subscribe();
     let mut connected_connector = None::<ConnectedConnector>;
     let mut authenticated = false;
 
@@ -421,12 +432,10 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     Err(broadcast::error::RecvError::Closed) => continue,
                 }
             }
-            change = change_rx.recv(), if authenticated => {
-                match change {
-                    Ok(envelope) => {
-                        if envelope.origin_connection_id != connection_id {
-                            send_json(&mut write, &envelope.message).await?;
-                        }
+            changed = change_rx.recv(), if authenticated => {
+                match changed {
+                    Ok(message) => {
+                        send_json(&mut write, &message).await?;
                         continue;
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -505,54 +514,6 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 }
                 send_json(&mut write, &handle_clear_all_data(&shared).await).await?;
             }
-            ConnectorMessage::LoadSyncManifest { key } => {
-                if !authenticated {
-                    send_json(&mut write, &unauthorized_error()).await?;
-                    continue;
-                }
-                send_json(&mut write, &handle_load_sync_manifest(&shared, key).await).await?;
-            }
-            ConnectorMessage::SaveSyncManifest { key, data } => {
-                if let Some(message) = paused_error(&shared).await {
-                    send_json(&mut write, &message).await?;
-                    continue;
-                }
-                if !authenticated {
-                    send_json(&mut write, &unauthorized_error()).await?;
-                    continue;
-                }
-                send_json(
-                    &mut write,
-                    &handle_save_sync_manifest(&shared, key, data).await,
-                )
-                .await?;
-            }
-            ConnectorMessage::CollectSyncFiles {
-                device_id,
-                retention_days,
-            } => {
-                if !authenticated {
-                    send_json(&mut write, &unauthorized_error()).await?;
-                    continue;
-                }
-                send_json(
-                    &mut write,
-                    &handle_collect_sync_files(&shared, device_id, retention_days.unwrap_or(7))
-                        .await,
-                )
-                .await?;
-            }
-            ConnectorMessage::WriteSyncFiles { files } => {
-                if let Some(message) = paused_error(&shared).await {
-                    send_json(&mut write, &message).await?;
-                    continue;
-                }
-                if !authenticated {
-                    send_json(&mut write, &unauthorized_error()).await?;
-                    continue;
-                }
-                send_json(&mut write, &handle_write_sync_files(&shared, files).await).await?;
-            }
             ConnectorMessage::ReplayRemoteEntries { device_id, entries } => {
                 if let Some(message) = paused_error(&shared).await {
                     send_json(&mut write, &message).await?;
@@ -565,7 +526,7 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                 match handle_replay_remote_entries(&shared, device_id, entries).await {
                     Ok((result, mutations)) => {
                         send_json(&mut write, &result).await?;
-                        broadcast_mutations(&shared, u64::MAX, mutations);
+                        broadcast_mutations(&shared, mutations);
                     }
                     Err(error) => {
                         send_json(
@@ -675,6 +636,50 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     continue;
                 }
                 send_json(&mut write, &handle_get_popup_lists(&shared).await).await?;
+            }
+            ConnectorMessage::RunCommand {
+                action,
+                request,
+                buffer_depth,
+                buffer_bytes,
+            } => {
+                if let Some(message) = paused_error(&shared).await {
+                    send_json(&mut write, &message).await?;
+                    continue;
+                }
+                if !authenticated {
+                    send_json(&mut write, &unauthorized_error()).await?;
+                    continue;
+                }
+                match run_command_authority(&shared, &action, request).await {
+                    Ok(response) => {
+                        record_connector_buffer(&shared, buffer_depth, buffer_bytes).await;
+                        let success = response
+                            .get("success")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(true);
+                        send_json(
+                            &mut write,
+                            &DaemonMessage::CommandResult {
+                                success,
+                                response: Some(response),
+                                error: None,
+                            },
+                        )
+                        .await?;
+                    }
+                    Err(error) => {
+                        send_json(
+                            &mut write,
+                            &DaemonMessage::CommandResult {
+                                success: false,
+                                response: None,
+                                error: Some(error.to_string()),
+                            },
+                        )
+                        .await?;
+                    }
+                }
             }
             ConnectorMessage::SearchHistory { query, limit } => {
                 if !authenticated {
@@ -866,7 +871,7 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     Ok(IngestSuccess { ack, mutations }) => {
                         record_connector_buffer(&shared, buffer_depth, buffer_bytes).await;
                         send_json(&mut write, &ack).await?;
-                        broadcast_mutations(&shared, connection_id, mutations);
+                        broadcast_mutations(&shared, mutations);
                     }
                     Err(error) => {
                         warn!(error = %error, "event ingest failed");
@@ -948,7 +953,7 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     Ok(IngestSuccess { ack, mutations }) => {
                         record_connector_buffer(&shared, buffer_depth, buffer_bytes).await;
                         send_json(&mut write, &ack).await?;
-                        broadcast_mutations(&shared, connection_id, mutations);
+                        broadcast_mutations(&shared, mutations);
                     }
                     Err(error) => {
                         warn!(error = %error, "snapshot ingest failed");
@@ -990,7 +995,7 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     Ok(IngestSuccess { ack, mutations }) => {
                         record_connector_buffer(&shared, buffer_depth, buffer_bytes).await;
                         send_json(&mut write, &ack).await?;
-                        broadcast_mutations(&shared, connection_id, mutations);
+                        broadcast_mutations(&shared, mutations);
                     }
                     Err(error) => {
                         warn!(error = %error, "note ingest failed");
@@ -1110,7 +1115,7 @@ async fn ingest_snapshot(
         "timestamp": ts,
         "action": "create_snapshot",
         "url": url,
-        "path": format!("snapshots/{slug}-{ts}"),
+        "path": shared.storage.snapshot_sidecar_relative_path(&slug, ts),
         "title": title,
     });
     let parsed: LogEntry = serde_json::from_value(entry.clone())?;
@@ -1129,17 +1134,28 @@ async fn ingest_note(
     title: Option<String>,
     ts: i64,
 ) -> Result<IngestSuccess, WsServerError> {
-    let entry = json!({
+    let mut entry = json!({
         "timestamp": ts,
         "action": if old_slug.is_some() { "replace_note" } else { "create_note" },
         "url": url,
-        "path": format!("notes/{slug}.json"),
-        "oldPath": old_slug.as_ref().map(|value| format!("notes/{value}.json")),
+        "path": format!("objects/notes/{slug}.json"),
         "excerpt": excerpt,
         "note": note,
         "cssPath": css_path,
-        "title": title,
     });
+    if let Some(old_slug) = old_slug {
+        if let Some(object) = entry.as_object_mut() {
+            object.insert(
+                "oldPath".to_string(),
+                Value::String(format!("objects/notes/{old_slug}.json")),
+            );
+        }
+    } else if let Some(object) = entry.as_object_mut() {
+        object.insert(
+            "title".to_string(),
+            title.map(Value::String).unwrap_or(Value::Null),
+        );
+    }
     let parsed: LogEntry = serde_json::from_value(entry.clone())?;
     ingest_typed_entry(shared, parsed, entry).await
 }
@@ -1155,51 +1171,61 @@ async fn ingest_typed_entry(
     }
 
     let outcome = async {
-        let device_id = {
-            let config = shared.config.lock().await;
-            config.device_id.clone()
-        };
-        let replay_context = ReplayContext {
-            device_id: device_id.clone(),
-        };
-        let mut effects = effect_with_overlay(
-            entry.clone(),
-            &shared.storage,
-            &EntityMapView::default(),
-            &replay_context,
-        )
-        .await
-        .map_err(|error| WsServerError::Ingest(error.to_string()))?;
-        let synthetic_entries =
-            synthesize_auto_pin_entries(&entry, &raw_entry, &shared.storage, &effects, &device_id)
-                .await
-                .map_err(|error| WsServerError::Ingest(error.to_string()))?;
-
-        for synthetic in &synthetic_entries {
-            let next_effects = effect_with_overlay(
-                synthetic.parsed.clone(),
+        let effects = {
+            let _guard = shared.storage.write_guard().await;
+            if matches!(entry, LogEntry::PermanentDelete { .. }) {
+                shared.storage.flush_checkpoints().await?;
+            }
+            let device_id = {
+                let config = shared.config.lock().await;
+                config.device_id.clone()
+            };
+            let replay_context = ReplayContext {
+                device_id: device_id.clone(),
+            };
+            let mut effects = effect_with_overlay(
+                entry.clone(),
                 &shared.storage,
-                &effects,
+                &EntityMapView::default(),
                 &replay_context,
             )
             .await
             .map_err(|error| WsServerError::Ingest(error.to_string()))?;
-            effects.extend(next_effects);
-        }
+            let synthetic_entries = synthesize_auto_pin_entries(
+                &entry,
+                &raw_entry,
+                &shared.storage,
+                &effects,
+                &device_id,
+            )
+            .await
+            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
 
-        for (key, effect) in &effects {
-            shared.storage.apply_effect(key, effect).await?;
-        }
-        shared
-            .storage
-            .append_log_entry(&device_id, entry.timestamp(), &raw_entry)
-            .await?;
-        for synthetic in &synthetic_entries {
-            shared
-                .storage
-                .append_log_entry(&device_id, synthetic.parsed.timestamp(), &synthetic.raw)
-                .await?;
-        }
+            for synthetic in &synthetic_entries {
+                let next_effects = effect_with_overlay(
+                    synthetic.parsed.clone(),
+                    &shared.storage,
+                    &effects,
+                    &replay_context,
+                )
+                .await
+                .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+                effects.extend(next_effects);
+            }
+
+            let mut entries = Vec::with_capacity(synthetic_entries.len() + 1);
+            entries.push((entry.clone(), raw_entry.clone()));
+            entries.extend(
+                synthetic_entries
+                    .iter()
+                    .map(|synthetic| (synthetic.parsed.clone(), synthetic.raw.clone())),
+            );
+            commands::commit_effects_locked(&shared.storage, &device_id, &entries, effects.clone())
+                .await
+                .map_err(WsServerError::Ingest)?;
+
+            effects
+        };
 
         let mutations = build_mutations(&entry, &raw_entry, &effects);
         let acked_at = current_timestamp_millis();
@@ -1220,35 +1246,6 @@ async fn ingest_typed_entry(
     let mut ingest = shared.ingest_status.lock().await;
     ingest.buffer_depth = ingest.buffer_depth.saturating_sub(1);
     outcome
-}
-
-type EntityMapView = std::collections::BTreeMap<String, EntityEffect>;
-
-async fn effect_with_overlay(
-    entry: LogEntry,
-    storage: &Storage,
-    overlay: &EntityMapView,
-    context: &ReplayContext,
-) -> Result<EntityMapView, browser_recall_replay::ReplayError> {
-    effect_of(
-        entry,
-        |key| {
-            let key = key.to_string();
-            let overlay_effect = overlay.get(&key).cloned();
-            let storage = storage.clone();
-            async move {
-                if let Some(effect) = overlay_effect {
-                    return match effect {
-                        EntityEffect::Upsert(entity) => Some(entity),
-                        EntityEffect::Delete => None,
-                    };
-                }
-                storage.load_entity(&key).await.ok().flatten()
-            }
-        },
-        context.clone(),
-    )
-    .await
 }
 
 async fn synthesize_auto_pin_entries(
@@ -1343,24 +1340,25 @@ fn build_auto_pin_entry(
     raw.insert("name".to_string(), Value::from(list_name.to_string()));
     raw.insert("listOwner".to_string(), Value::from(list_owner.to_string()));
     raw.insert(
-        "items".to_string(),
+        "urls".to_string(),
         Value::Array(vec![Value::from(url.to_string())]),
     );
     raw.insert("source".to_string(), Value::from("auto"));
     if let Some(title) = title.filter(|value| !value.is_empty()) {
-        let mut titles = serde_json::Map::new();
-        titles.insert(url.to_string(), Value::from(title.to_string()));
-        raw.insert("titles".to_string(), Value::Object(titles));
+        raw.insert(
+            "titles".to_string(),
+            Value::Array(vec![Value::from(title.to_string())]),
+        );
     }
 
     let parsed = LogEntry::PinToList {
         timestamp,
         name: list_name.to_string(),
         list_owner: list_owner.to_string(),
-        items: vec![url.to_string()],
+        urls: vec![url.to_string()],
         titles: title
             .filter(|value| !value.is_empty())
-            .map(|value| std::collections::BTreeMap::from([(url.to_string(), value.to_string())])),
+            .map(|value| vec![Some(value.to_string())]),
         source: Some("auto".to_string()),
     };
     SyntheticLogEntry {
@@ -1374,105 +1372,99 @@ async fn run_rule_batch(
     list_ids: Vec<String>,
     entries: Vec<RuleBatchEntry>,
 ) -> Result<DaemonMessage, WsServerError> {
-    let device_id = {
-        let config = shared.config.lock().await;
-        config.device_id.clone()
-    };
-    let replay_context = ReplayContext {
-        device_id: device_id.clone(),
-    };
-    let mut overlay = EntityMapView::default();
-    let mut log_entries = Vec::new();
-    let mut results = Vec::new();
-
-    for list_id in list_ids {
-        let list_key = format!("list:{list_id}");
-        let Some(Entity::List(list)) =
-            load_entity_with_overlay(&shared.storage, &overlay, &list_key).await
-        else {
-            continue;
+    let results = {
+        let _guard = shared.storage.write_guard().await;
+        let device_id = {
+            let config = shared.config.lock().await;
+            config.device_id.clone()
         };
-        if list.deleted || list.rules.is_empty() {
-            continue;
-        }
+        let replay_context = ReplayContext {
+            device_id: device_id.clone(),
+        };
+        let mut overlay = EntityMapView::default();
+        let mut log_entries = Vec::new();
+        let mut results = Vec::new();
 
-        for entry in &entries {
-            let page_data = page_data_from_batch_entry(entry);
-            let matches = match match_list_rules_strict(&list, &page_data) {
-                Ok(matches) => matches,
-                Err(error) => {
-                    return Ok(DaemonMessage::RuleBatchResult {
-                        success: false,
-                        results: Vec::new(),
-                        error: Some(error),
-                    });
-                }
+        for list_id in list_ids {
+            let list_key = format!("list:{list_id}");
+            let Some(Entity::List(list)) =
+                load_entity_with_overlay(&shared.storage, &overlay, &list_key).await
+            else {
+                continue;
             };
-            if matches.is_empty() {
+            if list.deleted || list.rules.is_empty() {
                 continue;
             }
 
-            let page_key = format!(
-                "page:{}",
-                generate_slug_from_url(&entry.url)
-                    .map_err(|error| WsServerError::Ingest(error.to_string()))?
-            );
-            let current_list =
-                match load_entity_with_overlay(&shared.storage, &overlay, &list_key).await {
-                    Some(Entity::List(list)) => list,
-                    _ => continue,
+            for entry in &entries {
+                let page_data = page_data_from_batch_entry(entry);
+                let matches = match match_list_rules_strict(&list, &page_data) {
+                    Ok(matches) => matches,
+                    Err(error) => {
+                        return Ok(DaemonMessage::RuleBatchResult {
+                            success: false,
+                            results: Vec::new(),
+                            error: Some(error),
+                        });
+                    }
                 };
-            if current_list.pins.iter().any(|pin| pin.id == page_key) {
-                continue;
+                if matches.is_empty() {
+                    continue;
+                }
+
+                let page_key = format!(
+                    "page:{}",
+                    generate_slug_from_url(&entry.url)
+                        .map_err(|error| WsServerError::Ingest(error.to_string()))?
+                );
+                let current_list =
+                    match load_entity_with_overlay(&shared.storage, &overlay, &list_key).await {
+                        Some(Entity::List(list)) => list,
+                        _ => continue,
+                    };
+                if current_list.pins.iter().any(|pin| pin.id == page_key) {
+                    continue;
+                }
+
+                let pinned_at = current_timestamp_millis();
+                let synthetic = build_auto_pin_entry(
+                    pinned_at,
+                    &entry.url,
+                    entry.title.as_deref(),
+                    &current_list.name,
+                    current_list.owner.as_deref().unwrap_or(&device_id),
+                );
+                let next_effects = effect_with_overlay(
+                    synthetic.parsed.clone(),
+                    &shared.storage,
+                    &overlay,
+                    &replay_context,
+                )
+                .await
+                .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+                overlay.extend(next_effects);
+                log_entries.push((synthetic.parsed, synthetic.raw));
+                results.push(RuleBatchHit {
+                    list_id: list_id.clone(),
+                    url: entry.url.clone(),
+                    title: entry.title.clone(),
+                    matches: matches
+                        .into_iter()
+                        .map(|item| RuleMatchResult {
+                            rule_id: item.rule_id,
+                            r#match: item.r#match,
+                        })
+                        .collect(),
+                    pinned_at,
+                });
             }
-
-            let pinned_at = current_timestamp_millis();
-            let synthetic = build_auto_pin_entry(
-                pinned_at,
-                &entry.url,
-                entry.title.as_deref(),
-                &current_list.name,
-                current_list.owner.as_deref().unwrap_or(&device_id),
-            );
-            let next_effects = effect_with_overlay(
-                synthetic.parsed.clone(),
-                &shared.storage,
-                &overlay,
-                &replay_context,
-            )
-            .await
-            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
-            overlay.extend(next_effects);
-            log_entries.push(synthetic.raw);
-            results.push(RuleBatchHit {
-                list_id: list_id.clone(),
-                url: entry.url.clone(),
-                title: entry.title.clone(),
-                matches: matches
-                    .into_iter()
-                    .map(|item| RuleMatchResult {
-                        rule_id: item.rule_id,
-                        r#match: item.r#match,
-                    })
-                    .collect(),
-                pinned_at,
-            });
         }
-    }
 
-    for (key, effect) in &overlay {
-        shared.storage.apply_effect(key, effect).await?;
-    }
-    for raw in &log_entries {
-        let timestamp = raw
-            .get("timestamp")
-            .and_then(Value::as_i64)
-            .unwrap_or_else(current_timestamp_millis);
-        shared
-            .storage
-            .append_log_entry(&device_id, timestamp, raw)
-            .await?;
-    }
+        commands::commit_effects_locked(&shared.storage, &device_id, &log_entries, overlay)
+            .await
+            .map_err(WsServerError::Ingest)?;
+        results
+    };
 
     Ok(DaemonMessage::RuleBatchResult {
         success: true,
@@ -1552,19 +1544,742 @@ async fn record_connector_buffer(
     status.buffer_bytes = buffer_bytes.unwrap_or(0);
 }
 
-fn broadcast_mutations(
+fn settings_bool(settings: Option<&Entity>, key: &str) -> Option<bool> {
+    let Some(Entity::Settings(settings)) = settings else {
+        return None;
+    };
+    settings.values.get(key).and_then(Value::as_bool)
+}
+
+fn settings_array<'a>(settings: Option<&'a Entity>, key: &str) -> Option<&'a Vec<Value>> {
+    let Some(Entity::Settings(settings)) = settings else {
+        return None;
+    };
+    settings.values.get(key).and_then(Value::as_array)
+}
+
+fn strip_balanced_segments(input: &str, open: char, close: char) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut depth = 0usize;
+    for ch in input.chars() {
+        if ch == open {
+            depth += 1;
+            output.push(' ');
+        } else if ch == close && depth > 0 {
+            depth -= 1;
+            output.push(' ');
+        } else if depth == 0 {
+            output.push(ch);
+        }
+    }
+    output
+}
+
+fn trim_title_from_settings(settings: Option<&Entity>, raw_title: &str, url: &str) -> String {
+    let mut title = raw_title.to_string();
+    if settings_bool(settings, "titleCleanupEnabled") == Some(false) {
+        return title.trim().to_string();
+    }
+    for rule in settings_array(settings, "titleTrimRules")
+        .into_iter()
+        .flatten()
+    {
+        let prefix = rule.get("urlPrefix").and_then(Value::as_str).unwrap_or("");
+        if prefix.is_empty() || !url.starts_with(prefix) {
+            continue;
+        }
+        match rule.get("action").and_then(Value::as_str).unwrap_or("") {
+            "remove_after_pipe" => {
+                if let Some(index) = title.find('|').filter(|index| *index > 0) {
+                    title.truncate(index);
+                }
+            }
+            "remove_brackets" => title = strip_balanced_segments(&title, '[', ']'),
+            "remove_parens" => title = strip_balanced_segments(&title, '(', ')'),
+            _ => {}
+        }
+    }
+    title.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn blacklist_prefixes(settings: Option<&Entity>) -> Vec<String> {
+    if settings_bool(settings, "blacklistEnabled") == Some(false) {
+        return DEFAULT_URL_BLACKLIST
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+    }
+    settings_array(settings, "urlBlacklist")
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .filter(|values| !values.is_empty())
+        .unwrap_or_else(|| {
+            DEFAULT_URL_BLACKLIST
+                .iter()
+                .map(|value| value.to_string())
+                .collect()
+        })
+}
+
+async fn should_record_visit(
+    storage: &Storage,
+    settings: Option<&Entity>,
+    url: &str,
+    timestamp: i64,
+    bypass_blacklist: bool,
+) -> Result<bool, WsServerError> {
+    if bypass_blacklist {
+        return Ok(true);
+    }
+    if !blacklist_prefixes(settings)
+        .iter()
+        .any(|prefix| url.starts_with(prefix))
+    {
+        return Ok(true);
+    }
+
+    let date_file = format!("{}.jsonl", date_key_from_timestamp(timestamp));
+    let entries = storage.load_history_batch(&[date_file]).await?;
+    if entries.iter().any(|entry| {
+        entry
+            .get("url")
+            .and_then(Value::as_str)
+            .map(|entry_url| entry_url == url)
+            .unwrap_or(false)
+    }) {
+        return Ok(true);
+    }
+
+    let slug =
+        generate_slug_from_url(url).map_err(|error| WsServerError::Ingest(error.to_string()))?;
+    Ok(storage
+        .load_entity(&format!("page:{slug}"))
+        .await?
+        .is_some())
+}
+
+async fn commit_report_entry(
     shared: &SharedState,
-    origin_connection_id: u64,
-    mutations: Vec<MutationPayload>,
-) {
+    entry: LogEntry,
+    raw_entry: Value,
+) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
+    let device_id = {
+        let config = shared.config.lock().await;
+        config.device_id.clone()
+    };
+    let replay_context = ReplayContext {
+        device_id: device_id.clone(),
+    };
+    let mut effects = effect_with_overlay(
+        entry.clone(),
+        &shared.storage,
+        &EntityMapView::default(),
+        &replay_context,
+    )
+    .await
+    .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+    let synthetic_entries =
+        synthesize_auto_pin_entries(&entry, &raw_entry, &shared.storage, &effects, &device_id)
+            .await
+            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+    for synthetic in &synthetic_entries {
+        let next_effects = effect_with_overlay(
+            synthetic.parsed.clone(),
+            &shared.storage,
+            &effects,
+            &replay_context,
+        )
+        .await
+        .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+        effects.extend(next_effects);
+    }
+
+    let mut entries = Vec::with_capacity(synthetic_entries.len() + 1);
+    entries.push((entry.clone(), raw_entry.clone()));
+    entries.extend(
+        synthetic_entries
+            .iter()
+            .map(|synthetic| (synthetic.parsed.clone(), synthetic.raw.clone())),
+    );
+    commands::commit_effects_locked(&shared.storage, &device_id, &entries, effects.clone())
+        .await
+        .map_err(WsServerError::Ingest)?;
+
+    Ok((
+        json!({ "success": true, "timestamp": entry.timestamp() }),
+        build_mutations(&entry, &raw_entry, &effects),
+    ))
+}
+
+async fn report_visit_command(
+    shared: &SharedState,
+    request: &Value,
+) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
+    let _guard = shared.storage.write_guard().await;
+    let url = request
+        .get("url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| WsServerError::Ingest("reportVisit missing url".into()))?;
+    let timestamp = request
+        .get("timestamp")
+        .or_else(|| request.get("observedAt"))
+        .and_then(Value::as_i64)
+        .unwrap_or_else(current_timestamp_millis);
+    let settings = shared.storage.load_entity("manifest:settings").await?;
+    if !should_record_visit(
+        &shared.storage,
+        settings.as_ref(),
+        url,
+        timestamp,
+        request
+            .get("bypassBlacklist")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    )
+    .await?
+    {
+        return Ok((
+            json!({ "success": true, "skipped": true, "timestamp": timestamp }),
+            Vec::new(),
+        ));
+    }
+
+    let title = request
+        .get("title")
+        .and_then(Value::as_str)
+        .map(|title| trim_title_from_settings(settings.as_ref(), title, url))
+        .filter(|title| !title.is_empty());
+    let mut referrer_url = request
+        .get("referrer")
+        .or_else(|| request.get("referrerUrl"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if let Some(referrer) = &referrer_url {
+        if generate_slug_from_url(referrer).ok() == generate_slug_from_url(url).ok() {
+            referrer_url = None;
+        }
+    }
+
+    let entry = LogEntry::VisitPage {
+        timestamp,
+        url: url.to_string(),
+        title,
+        referrer_url,
+    };
+    let mut raw_entry =
+        serde_json::to_value(&entry).map_err(|error| WsServerError::Ingest(error.to_string()))?;
+    if let Some(body_preview) = request.get("bodyPreview").and_then(Value::as_str) {
+        if let Some(object) = raw_entry.as_object_mut() {
+            object.insert(
+                "bodyPreview".to_string(),
+                Value::String(body_preview.to_string()),
+            );
+        }
+    }
+    commit_report_entry(shared, entry, raw_entry).await
+}
+
+async fn report_leave_command(
+    shared: &SharedState,
+    request: &Value,
+) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
+    let _guard = shared.storage.write_guard().await;
+    let url = request
+        .get("url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| WsServerError::Ingest("reportLeave missing url".into()))?;
+    let timestamp = request
+        .get("timestamp")
+        .or_else(|| request.get("observedAt"))
+        .and_then(Value::as_i64)
+        .unwrap_or_else(current_timestamp_millis);
+    let settings = shared.storage.load_entity("manifest:settings").await?;
+    let title = request
+        .get("title")
+        .and_then(Value::as_str)
+        .map(|title| trim_title_from_settings(settings.as_ref(), title, url))
+        .filter(|title| !title.is_empty());
+    let entry = LogEntry::LeavePage {
+        timestamp,
+        url: url.to_string(),
+        title,
+        scroll_depth: request.get("scrollDepth").and_then(Value::as_i64),
+        time_on_page: request.get("timeOnPage").and_then(Value::as_i64),
+    };
+    let raw_entry =
+        serde_json::to_value(&entry).map_err(|error| WsServerError::Ingest(error.to_string()))?;
+    commit_report_entry(shared, entry, raw_entry).await
+}
+
+async fn trim_title_command(
+    shared: &SharedState,
+    request: &Value,
+) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
+    let title = request.get("title").and_then(Value::as_str).unwrap_or("");
+    let url = request.get("url").and_then(Value::as_str).unwrap_or("");
+    let settings = shared.storage.load_entity("manifest:settings").await?;
+    Ok((
+        json!({
+            "success": true,
+            "title": trim_title_from_settings(settings.as_ref(), title, url),
+        }),
+        Vec::new(),
+    ))
+}
+
+async fn popup_access_state_command(
+    shared: &SharedState,
+    request: &Value,
+) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
+    let url = request
+        .get("url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| WsServerError::Ingest("getPopupAccessState missing url".into()))?;
+    let settings = shared.storage.load_entity("manifest:settings").await?;
+    let blacklisted_by_policy = blacklist_prefixes(settings.as_ref())
+        .iter()
+        .any(|prefix| url.starts_with(prefix));
+    let slug =
+        generate_slug_from_url(url).map_err(|error| WsServerError::Ingest(error.to_string()))?;
+    let has_visit_history = shared
+        .storage
+        .load_entity(&format!("page:{slug}"))
+        .await?
+        .is_some();
+    Ok((
+        json!({
+            "success": true,
+            "blacklisted": blacklisted_by_policy && !has_visit_history,
+            "hasVisitHistory": has_visit_history,
+        }),
+        Vec::new(),
+    ))
+}
+
+async fn handle_run_command(
+    shared: &SharedState,
+    action: &str,
+    request: Value,
+) -> Result<(Value, Vec<MutationPayload>), WsServerError> {
+    let device_id = {
+        let config = shared.config.lock().await;
+        config.device_id.clone()
+    };
+    let request_string = |key: &str| -> Result<String, WsServerError> {
+        request
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| WsServerError::Ingest(format!("{action} missing {key}")))
+    };
+    let mutation = |mutation_type: &str, detail: Value| {
+        vec![MutationPayload {
+            mutation_type: mutation_type.to_string(),
+            list_id: detail
+                .get("listId")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            page_slug: detail
+                .get("pageSlug")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            note_slug: detail
+                .get("noteSlug")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            old_note_slug: detail
+                .get("oldNoteSlug")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            slug: detail
+                .get("slug")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            url: detail
+                .get("url")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            key: detail
+                .get("key")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        }]
+    };
+
+    match action {
+        "trimTitle" => trim_title_command(shared, &request).await,
+        "getPopupAccessState" => popup_access_state_command(shared, &request).await,
+        "reportVisit" => report_visit_command(shared, &request).await,
+        "reportLeave" => report_leave_command(shared, &request).await,
+        "saveSettingsKey" => {
+            let key = request_string("key")?;
+            let value = request
+                .get("value")
+                .cloned()
+                .ok_or_else(|| WsServerError::Ingest("saveSettingsKey missing value".into()))?;
+            commands::save_settings_key(&shared.storage, &device_id, &key, value)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            Ok((
+                json!({ "success": true }),
+                mutation("settings", json!({ "key": key })),
+            ))
+        }
+        "ensureDefaultLists" => {
+            let created = commands::ensure_default_lists(&shared.storage, &device_id)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            let mutations = if created {
+                let mut mutations = mutation("lists", json!({}));
+                mutations.extend(mutation("rules", json!({ "listId": "hubs" })));
+                mutations
+            } else {
+                Vec::new()
+            };
+            Ok((json!({ "success": true, "created": created }), mutations))
+        }
+        "renamePage" => {
+            let url = request_string("url")?;
+            let user_title = request_string("userTitle")?;
+            commands::rename_page(&shared.storage, &device_id, &url, &user_title)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            Ok((
+                json!({ "success": true }),
+                mutation("history", json!({ "url": url })),
+            ))
+        }
+        "ratePage" => {
+            let url = request_string("url")?;
+            let likes = request
+                .get("likes")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| WsServerError::Ingest("ratePage missing likes".into()))?;
+            let title = request
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            commands::replay_entry(
+                &shared.storage,
+                &device_id,
+                LogEntry::RatePage {
+                    timestamp: current_timestamp_millis(),
+                    url: url.clone(),
+                    likes,
+                    title,
+                },
+            )
+            .await
+            .map_err(WsServerError::Ingest)?;
+            Ok((
+                json!({ "success": true }),
+                mutation("history", json!({ "url": url })),
+            ))
+        }
+        "createNote" => {
+            let response = commands::create_note(&shared.storage, &device_id, &request)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            Ok((
+                response.clone(),
+                mutation(
+                    "note",
+                    json!({
+                        "pageSlug": response.get("pageSlug").cloned().unwrap_or(Value::Null),
+                        "noteSlug": response.get("noteSlug").cloned().unwrap_or(Value::Null),
+                    }),
+                ),
+            ))
+        }
+        "deleteNote" => {
+            let note_slug = request_string("noteSlug")?;
+            commands::delete_note(&shared.storage, &device_id, &note_slug)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            let mut mutations = mutation("note", json!({ "noteSlug": note_slug }));
+            mutations.extend(mutation("orphaned", json!({})));
+            Ok((json!({ "success": true }), mutations))
+        }
+        "updateNote" => {
+            let old_note_slug = request_string("noteSlug")?;
+            let note = request_string("note")?;
+            let response =
+                commands::update_note(&shared.storage, &device_id, &old_note_slug, &note)
+                    .await
+                    .map_err(WsServerError::Ingest)?;
+            let mutations = if response.get("oldNoteSlug").is_some() {
+                mutation(
+                    "note",
+                    json!({
+                        "noteSlug": response.get("noteSlug").cloned().unwrap_or(Value::Null),
+                        "oldNoteSlug": old_note_slug,
+                    }),
+                )
+            } else {
+                Vec::new()
+            };
+            Ok((response, mutations))
+        }
+        "toggleListPin" => {
+            let list_id = request_string("listId")?;
+            let response = commands::toggle_list_pin(&shared.storage, &device_id, &request)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            Ok((
+                response,
+                mutation(
+                    "pins",
+                    json!({ "listId": list_id, "url": request.get("url").cloned().unwrap_or(Value::Null) }),
+                ),
+            ))
+        }
+        "addListPins" => {
+            let list_id = request_string("listId")?;
+            commands::add_list_pins(&shared.storage, &device_id, &request)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            Ok((
+                json!({ "success": true }),
+                mutation("pins", json!({ "listId": list_id })),
+            ))
+        }
+        "saveListMeta" => {
+            let response = commands::save_list_meta(&shared.storage, &device_id, &request)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            Ok((response, mutation("lists", json!({}))))
+        }
+        "importBookmarks" => {
+            let tree = serde_json::from_value::<Vec<commands::BookmarkImportNode>>(
+                request
+                    .get("tree")
+                    .cloned()
+                    .ok_or_else(|| WsServerError::Ingest("importBookmarks missing tree".into()))?,
+            )?;
+            let (list_count, bookmark_count, failures) =
+                commands::import_bookmarks(&shared.storage, &device_id, tree)
+                    .await
+                    .map_err(WsServerError::Ingest)?;
+            Ok((
+                json!({
+                    "success": true,
+                    "listCount": list_count,
+                    "bookmarkCount": bookmark_count,
+                    "failures": failures,
+                }),
+                mutation("lists", json!({})),
+            ))
+        }
+        "importHistory" => {
+            let entries = serde_json::from_value::<Vec<commands::HistoryImportEntry>>(
+                request
+                    .get("entries")
+                    .cloned()
+                    .ok_or_else(|| WsServerError::Ingest("importHistory missing entries".into()))?,
+            )?;
+            let (page_count, visit_count, skipped_count) =
+                commands::import_history(&shared.storage, &device_id, entries)
+                    .await
+                    .map_err(WsServerError::Ingest)?;
+            Ok((
+                json!({
+                    "success": true,
+                    "pageCount": page_count,
+                    "visitCount": visit_count,
+                    "skippedCount": skipped_count,
+                }),
+                mutation("history", json!({})),
+            ))
+        }
+        "deleteList" => {
+            let list_id = request_string("listId")?;
+            commands::delete_list(&shared.storage, &device_id, &list_id)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            let mut mutations = mutation("lists", json!({}));
+            mutations.extend(mutation("orphaned", json!({})));
+            Ok((json!({ "success": true }), mutations))
+        }
+        "updateListTree" => {
+            let tree = serde_json::from_value(
+                request
+                    .get("tree")
+                    .cloned()
+                    .ok_or_else(|| WsServerError::Ingest("updateListTree missing tree".into()))?,
+            )?;
+            commands::update_list_tree(&shared.storage, &device_id, tree)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            Ok((json!({ "success": true }), mutation("lists", json!({}))))
+        }
+        "restoreNote" => {
+            let note_slug = request_string("noteSlug")?;
+            commands::restore_note(&shared.storage, &device_id, &note_slug)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            let mut mutations = mutation("orphaned", json!({}));
+            mutations.extend(mutation("note", json!({ "noteSlug": note_slug })));
+            Ok((json!({ "success": true }), mutations))
+        }
+        "restoreSnapshot" => {
+            let snap_slug = request_string("snapSlug")?;
+            let page_slug = commands::restore_snapshot(&shared.storage, &device_id, &snap_slug)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            let mut mutations = mutation("orphaned", json!({}));
+            mutations.extend(mutation("snapshot", json!({ "slug": page_slug })));
+            Ok((json!({ "success": true }), mutations))
+        }
+        "restoreList" => {
+            let list_id = request_string("listId")?;
+            commands::restore_list(&shared.storage, &device_id, &list_id)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            let mut mutations = mutation("orphaned", json!({}));
+            mutations.extend(mutation("lists", json!({})));
+            Ok((json!({ "success": true }), mutations))
+        }
+        "deleteSnapshot" => {
+            let slug = request_string("slug")?;
+            let timestamp = request
+                .get("timestamp")
+                .or_else(|| request.get("ts"))
+                .and_then(Value::as_i64)
+                .ok_or_else(|| WsServerError::Ingest("deleteSnapshot missing timestamp".into()))?;
+            commands::delete_snapshot(&shared.storage, &device_id, &slug, timestamp)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            let mut mutations = mutation("snapshot", json!({ "slug": slug }));
+            mutations.extend(mutation("orphaned", json!({})));
+            Ok((json!({ "success": true }), mutations))
+        }
+        "permanentDeleteAll" => {
+            let keys = shared
+                .storage
+                .load_orphaned()
+                .await?
+                .unwrap_or_default()
+                .entries
+                .into_iter()
+                .map(|entry| entry.key)
+                .collect::<Vec<_>>();
+            let deleted_keys = commands::permanent_delete_keys(&shared.storage, &device_id, &keys)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            let mut mutations = mutation("note", json!({}));
+            mutations.extend(mutation("snapshot", json!({})));
+            mutations.extend(mutation("lists", json!({})));
+            mutations.extend(mutation("orphaned", json!({})));
+            Ok((
+                json!({
+                    "success": true,
+                    "deletedKeys": deleted_keys,
+                }),
+                mutations,
+            ))
+        }
+        "clearAllData" => {
+            let deleted_count = {
+                let _guard = shared.storage.write_guard().await;
+                shared.storage.flush_checkpoints().await?;
+                shared
+                    .storage
+                    .clear_all_data(&device_id)
+                    .await
+                    .map_err(|error| WsServerError::Ingest(error.to_string()))?
+            };
+            {
+                let mut status = shared.ingest_status.lock().await;
+                status.buffer_depth = 0;
+                status.last_drained_at = None;
+            }
+            let mut mutations = mutation("note", json!({}));
+            mutations.extend(mutation("snapshot", json!({})));
+            mutations.extend(mutation("lists", json!({})));
+            mutations.extend(mutation("orphaned", json!({})));
+            mutations.extend(mutation("settings", json!({})));
+            Ok((
+                json!({
+                    "success": true,
+                    "deletedCount": deleted_count,
+                }),
+                mutations,
+            ))
+        }
+        "addRule" => {
+            let list_id = request_string("listId")?;
+            let rule = serde_json::from_value(
+                request
+                    .get("rule")
+                    .cloned()
+                    .ok_or_else(|| WsServerError::Ingest("addRule missing rule".into()))?,
+            )?;
+            let response = commands::add_rule(&shared.storage, &device_id, &list_id, rule)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            Ok((response, mutation("rules", json!({ "listId": list_id }))))
+        }
+        "removeRule" => {
+            let list_id = request_string("listId")?;
+            let rule_id = request_string("ruleId")?;
+            commands::remove_rule(&shared.storage, &device_id, &list_id, &rule_id)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            Ok((
+                json!({ "success": true }),
+                mutation("rules", json!({ "listId": list_id })),
+            ))
+        }
+        "updateRule" => {
+            let list_id = request_string("listId")?;
+            let rule_id = request_string("ruleId")?;
+            let config = serde_json::from_value(
+                request
+                    .get("config")
+                    .cloned()
+                    .ok_or_else(|| WsServerError::Ingest("updateRule missing config".into()))?,
+            )?;
+            commands::update_rule(&shared.storage, &device_id, &list_id, &rule_id, config)
+                .await
+                .map_err(WsServerError::Ingest)?;
+            Ok((
+                json!({ "success": true }),
+                mutation("rules", json!({ "listId": list_id })),
+            ))
+        }
+        other => Err(WsServerError::Ingest(format!(
+            "unsupported desktop command: {other}"
+        ))),
+    }
+}
+
+async fn run_command_authority(
+    shared: &SharedState,
+    action: &str,
+    request: Value,
+) -> Result<Value, WsServerError> {
+    let (response, mutations) = handle_run_command(shared, action, request).await?;
+    let success = response
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    if success {
+        broadcast_mutations(shared, mutations);
+    }
+    Ok(response)
+}
+
+fn broadcast_mutations(shared: &SharedState, mutations: Vec<MutationPayload>) {
     if mutations.is_empty() {
         return;
     }
     let message = DaemonMessage::Change { mutations };
-    let _ = shared.change_tx.send(BroadcastEnvelope {
-        origin_connection_id,
-        message: message.clone(),
-    });
     let _ = shared.change_message_tx.send(message);
 }
 
@@ -1604,13 +2319,14 @@ fn mutation(mutation_type: &str) -> MutationPayload {
 }
 
 fn note_slug_from_path(path: &str) -> Option<String> {
-    path.strip_prefix("notes/")
+    path.strip_prefix("objects/notes/")
         .and_then(|value| value.strip_suffix(".json"))
         .map(str::to_string)
 }
 
 fn snapshot_slug_from_path(path: &str) -> Option<String> {
-    path.strip_prefix("snapshots/")
+    path.strip_prefix("objects/snapshots/")
+        .and_then(|value| value.rsplit_once('/').map(|(_, stem)| stem).or(Some(value)))
         .and_then(|value| value.rsplit_once('-').map(|(slug, _)| slug.to_string()))
 }
 
@@ -1647,11 +2363,11 @@ fn build_mutations(
                 ..mutation("settings")
             });
         }
-        LogEntry::PinToList { items, .. } | LogEntry::UnpinFromList { items, .. } => {
+        LogEntry::PinToList { urls, .. } | LogEntry::UnpinFromList { urls, .. } => {
             let list_id = first_list_id_from_effects(effects);
             mutations.push(MutationPayload {
                 list_id,
-                url: items.first().cloned(),
+                url: urls.first().cloned(),
                 ..mutation("pins")
             });
         }
@@ -1999,7 +2715,7 @@ async fn handle_get_snapshot_html(shared: &SharedState, slug: String, ts: i64) -
 }
 
 async fn handle_get_entity(shared: &SharedState, key: String) -> DaemonMessage {
-    match shared.storage.load_entity(&key).await {
+    match shared.storage.load_entity_coordinated(&key).await {
         Ok(Some(entity)) => DaemonMessage::EntityResult {
             success: true,
             key,
@@ -2061,7 +2777,14 @@ async fn handle_clear_all_data(shared: &SharedState) -> DaemonMessage {
         config.device_id.clone()
     };
 
-    match shared.storage.clear_all_data(&device_id).await {
+    let result = async {
+        let _guard = shared.storage.write_guard().await;
+        shared.storage.flush_checkpoints().await?;
+        shared.storage.clear_all_data(&device_id).await
+    }
+    .await;
+
+    match result {
         Ok(deleted_count) => {
             {
                 let mut status = shared.ingest_status.lock().await;
@@ -2082,115 +2805,41 @@ async fn handle_clear_all_data(shared: &SharedState) -> DaemonMessage {
     }
 }
 
-async fn handle_load_sync_manifest(shared: &SharedState, key: String) -> DaemonMessage {
-    match shared.storage.load_sync_manifest(&key).await {
-        Ok(data) => DaemonMessage::SyncManifestResult {
-            success: true,
-            key,
-            data,
-            error: None,
-        },
-        Err(error) => DaemonMessage::SyncManifestResult {
-            success: false,
-            key,
-            data: None,
-            error: Some(error.to_string()),
-        },
-    }
-}
-
-async fn handle_save_sync_manifest(
-    shared: &SharedState,
-    key: String,
-    data: Value,
-) -> DaemonMessage {
-    match shared.storage.save_sync_manifest(&key, &data).await {
-        Ok(()) => DaemonMessage::SyncManifestResult {
-            success: true,
-            key,
-            data: Some(data),
-            error: None,
-        },
-        Err(error) => DaemonMessage::SyncManifestResult {
-            success: false,
-            key,
-            data: None,
-            error: Some(error.to_string()),
-        },
-    }
-}
-
-async fn handle_collect_sync_files(
-    shared: &SharedState,
-    device_id: String,
-    retention_days: i64,
-) -> DaemonMessage {
-    match shared
-        .storage
-        .collect_sync_files(&device_id, retention_days)
-        .await
-    {
-        Ok(files) => DaemonMessage::SyncFilesResult {
-            success: true,
-            files: files
-                .into_iter()
-                .map(|(path, content)| SyncFilePayload { path, content })
-                .collect(),
-            error: None,
-        },
-        Err(error) => DaemonMessage::SyncFilesResult {
-            success: false,
-            files: Vec::new(),
-            error: Some(error.to_string()),
-        },
-    }
-}
-
-async fn handle_write_sync_files(
-    shared: &SharedState,
-    files: Vec<SyncFilePayload>,
-) -> DaemonMessage {
-    let file_pairs: Vec<(String, String)> = files
-        .into_iter()
-        .map(|file| (file.path, file.content))
-        .collect();
-    match shared.storage.write_sync_files(&file_pairs).await {
-        Ok(()) => DaemonMessage::WriteSyncFilesResult {
-            success: true,
-            error: None,
-        },
-        Err(error) => DaemonMessage::WriteSyncFilesResult {
-            success: false,
-            error: Some(error.to_string()),
-        },
-    }
-}
-
 async fn handle_replay_remote_entries(
     shared: &SharedState,
     device_id: String,
     entries: Vec<Value>,
 ) -> Result<(DaemonMessage, Vec<MutationPayload>), WsServerError> {
-    let replay_context = ReplayContext { device_id };
-    let mut mutations = Vec::new();
+    let mutations = {
+        let _guard = shared.storage.write_guard().await;
+        let replay_context = ReplayContext {
+            device_id: device_id.clone(),
+        };
+        let mut mutations = Vec::new();
+        let mut all_effects = EntityMapView::default();
+        let mut parsed_entries = Vec::new();
 
-    for raw_entry in &entries {
-        let parsed: LogEntry = serde_json::from_value(raw_entry.clone())?;
-        let effects = effect_with_overlay(
-            parsed.clone(),
-            &shared.storage,
-            &EntityMapView::default(),
-            &replay_context,
-        )
-        .await
-        .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+        for raw_entry in &entries {
+            let parsed: LogEntry = serde_json::from_value(raw_entry.clone())?;
+            let effects = effect_with_overlay(
+                parsed.clone(),
+                &shared.storage,
+                &all_effects,
+                &replay_context,
+            )
+            .await
+            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
 
-        for (key, effect) in &effects {
-            shared.storage.apply_effect(key, effect).await?;
+            mutations.extend(build_mutations(&parsed, raw_entry, &effects));
+            all_effects.extend(effects);
+            parsed_entries.push((parsed, raw_entry.clone()));
         }
 
-        mutations.extend(build_mutations(&parsed, raw_entry, &effects));
-    }
+        commands::commit_effects_locked(&shared.storage, &device_id, &parsed_entries, all_effects)
+            .await
+            .map_err(WsServerError::Ingest)?;
+        mutations
+    };
 
     Ok((
         DaemonMessage::RemoteReplayResult {
@@ -2221,7 +2870,13 @@ async fn set_device_id_internal(
 }
 
 async fn handle_set_device_id(shared: &SharedState, device_id: String) -> DaemonMessage {
-    match set_device_id_internal(shared, device_id.clone()).await {
+    let result = async {
+        let _guard = shared.storage.write_guard().await;
+        set_device_id_internal(shared, device_id.clone()).await
+    }
+    .await;
+
+    match result {
         Ok(()) => DaemonMessage::SetDeviceIdResult {
             success: true,
             device_id,
@@ -2246,6 +2901,8 @@ async fn handle_test_reset_data(shared: &SharedState) -> DaemonMessage {
     };
 
     let result = async {
+        let _guard = shared.storage.write_guard().await;
+        shared.storage.flush_checkpoints().await?;
         shared.storage.clear_all_data(&device_id).await?;
         set_device_id_internal(shared, device_id.clone()).await?;
         shared.storage.reset_cache();
@@ -2284,11 +2941,23 @@ async fn handle_test_seed_data(
         return test_control_disabled_error();
     }
 
+    let files = match files
+        .into_iter()
+        .map(|file| validate_test_seed_path(file.path).map(|path| (path, file.content)))
+        .collect::<Result<Vec<_>, WsServerError>>()
+    {
+        Ok(files) => files,
+        Err(error) => {
+            return DaemonMessage::TestSeedDataResult {
+                success: false,
+                error: Some(error.to_string()),
+            };
+        }
+    };
+
     let result = async {
-        let files = files
-            .into_iter()
-            .map(|file| validate_test_seed_path(file.path).map(|path| (path, file.content)))
-            .collect::<Result<Vec<_>, WsServerError>>()?;
+        let _guard = shared.storage.write_guard().await;
+        shared.storage.flush_checkpoints().await?;
         shared.storage.write_sync_files(&files).await?;
         shared.storage.reset_cache();
         Ok::<(), WsServerError>(())
@@ -2429,7 +3098,7 @@ async fn load_page_info_parts(
         String,
     ),
 > {
-    let page = match shared.storage.load_page(slug).await {
+    let page = match shared.storage.load_page_coordinated(slug).await {
         Ok(page) => page,
         Err(error) => return Err((None, Vec::new(), Vec::new(), error.to_string())),
     };
@@ -2439,7 +3108,7 @@ async fn load_page_info_parts(
     if let Some(page_entity) = &page {
         for child_id in &page_entity.child_ids {
             if let Some(note_slug) = child_id.strip_prefix("note:") {
-                match shared.storage.load_note(note_slug).await {
+                match shared.storage.load_note_coordinated(note_slug).await {
                     Ok(Some(note)) => notes.push(PopupNoteResult {
                         slug: note.slug,
                         excerpt: note.excerpt,
@@ -2464,9 +3133,16 @@ async fn load_page_info_parts(
             let Ok(timestamp) = snapshot_stem[last_dash + 1..].parse::<i64>() else {
                 continue;
             };
-            let snapshots_dir = shared.storage.root().join("data").join("snapshots");
-            let has_md = snapshots_dir.join(format!("{snapshot_stem}.md")).exists();
-            let has_html = snapshots_dir.join(format!("{snapshot_stem}.html")).exists();
+            let page_slug = &snapshot_stem[..last_dash];
+            let has_md = shared
+                .storage
+                .snapshot_html_file_path(page_slug, timestamp)
+                .with_extension("md")
+                .exists();
+            let has_html = shared
+                .storage
+                .snapshot_html_file_path(page_slug, timestamp)
+                .exists();
             snapshots.push(PopupSnapshotResult {
                 timestamp,
                 has_md,
@@ -2481,7 +3157,7 @@ async fn load_page_info_parts(
 async fn load_popup_lists(shared: &SharedState) -> Result<Vec<PopupListResult>, String> {
     let order = shared
         .storage
-        .load_list_order()
+        .load_list_order_coordinated()
         .await
         .map_err(|error| error.to_string())?;
     let Some(order) = order else {
@@ -2492,7 +3168,7 @@ async fn load_popup_lists(shared: &SharedState) -> Result<Vec<PopupListResult>, 
     collect_list_ids(&order.tree, &mut list_ids);
     let mut lists = Vec::new();
     for list_id in list_ids {
-        match shared.storage.load_list(&list_id).await {
+        match shared.storage.load_list_coordinated(&list_id).await {
             Ok(Some(list)) if !list.deleted => lists.push(PopupListResult {
                 slug: list.slug,
                 name: list.name,
@@ -2746,12 +3422,25 @@ fn current_timestamp_millis() -> i64 {
         .as_millis() as i64
 }
 
+fn date_key_from_timestamp(timestamp: i64) -> String {
+    let datetime = Local
+        .timestamp_millis_opt(timestamp)
+        .single()
+        .unwrap_or_else(|| {
+            Local
+                .with_ymd_and_hms(1970, 1, 1, 0, 0, 0)
+                .earliest()
+                .expect("epoch exists")
+        });
+    datetime.format("%Y-%m-%d").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{websocket_config, MAX_WEBSOCKET_MESSAGE_BYTES};
 
     #[test]
-    fn websocket_config_caps_snapshot_payloads_at_16mb() {
+    fn websocket_config_caps_snapshot_payloads_at_64mb() {
         let config = websocket_config();
         assert_eq!(config.max_message_size, Some(MAX_WEBSOCKET_MESSAGE_BYTES));
         assert_eq!(config.max_frame_size, Some(MAX_WEBSOCKET_MESSAGE_BYTES));

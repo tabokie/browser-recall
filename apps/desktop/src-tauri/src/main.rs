@@ -4,19 +4,11 @@ mod login_item;
 mod search;
 
 use browser_recall_daemon::commands::{
-    add_list_pins, add_rule as command_add_rule, create_note as command_create_note,
-    delete_list as command_delete_list, delete_note as command_delete_note,
-    delete_snapshot as command_delete_snapshot, import_bookmarks, import_history,
     list_history_files, list_paired_browsers, load_all_pages_payload, load_history_batch,
     load_page_notes_payload, load_page_snapshot_payload, page_relations_payload,
-    pair_browser_revoke, permanent_delete_keys, preview_rule_payload, read_cacheable,
-    remove_rule as command_remove_rule, rename_page as command_rename_page,
-    restore_list as command_restore_list, restore_note as command_restore_note,
-    restore_snapshot as command_restore_snapshot, save_list_meta, save_settings_key,
+    pair_browser_revoke, preview_rule_payload, read_desktop_value,
     search_history as command_search_history, search_notes as command_search_notes,
-    search_snapshots as command_search_snapshots, submit_event, toggle_list_pin,
-    update_list_tree as command_update_list_tree, update_note as command_update_note,
-    BookmarkImportNode, HistoryImportEntry,
+    search_snapshots as command_search_snapshots,
 };
 use browser_recall_daemon::pairing::{
     ApprovalFuture, PairingApprover, PairingDecision, PairingRequest,
@@ -34,7 +26,8 @@ use browser_recall_daemon::sync::{
     SyncError,
 };
 use browser_recall_daemon::ws_server::{
-    start_server, ServerHandle, ServerSnapshot, ServerStartOptions, ServiceStatus,
+    start_server, ServerControlHandle, ServerHandle, ServerSnapshot, ServerStartOptions,
+    ServiceStatus,
 };
 use browser_recall_daemon::{ConfigStore, DaemonConfig};
 use search::SearchRequest;
@@ -612,7 +605,52 @@ fn shell_snapshot(app: &AppHandle) -> ServerSnapshot {
 }
 
 fn storage_for_app(app: &AppHandle) -> Result<Storage, String> {
+    let server_storage = {
+        let state = app.state::<DesktopState>();
+        let server = state._server.lock().expect("server state poisoned");
+        server.as_ref().map(ServerHandle::storage)
+    };
+    if let Some(storage) = server_storage {
+        return Ok(storage);
+    }
     Ok(Storage::new(shell_data_dir(app)?))
+}
+
+fn server_control_for_app(app: &AppHandle) -> Option<ServerControlHandle> {
+    let state = app.state::<DesktopState>();
+    let server = state._server.lock().expect("server state poisoned");
+    server.as_ref().map(ServerHandle::control_handle)
+}
+
+fn is_daemon_write_command(action: &str) -> bool {
+    matches!(
+        action,
+        "saveSettingsKey"
+            | "ensureDefaultLists"
+            | "renamePage"
+            | "reportVisit"
+            | "reportLeave"
+            | "ratePage"
+            | "createNote"
+            | "deleteNote"
+            | "updateNote"
+            | "toggleListPin"
+            | "addListPins"
+            | "saveListMeta"
+            | "importBookmarks"
+            | "importHistory"
+            | "deleteList"
+            | "updateListTree"
+            | "restoreNote"
+            | "restoreSnapshot"
+            | "restoreList"
+            | "permanentDeleteAll"
+            | "deleteSnapshot"
+            | "clearAllData"
+            | "addRule"
+            | "removeRule"
+            | "updateRule"
+    )
 }
 
 fn shell_device_id(app: &AppHandle) -> String {
@@ -811,32 +849,11 @@ fn session_bridge_clear(state: &mut StorageBridgeState) -> Map<String, Value> {
     session_bridge_remove(state, &keys)
 }
 
-fn request_sync_worker(app: &AppHandle) {
-    let state = app.state::<DesktopState>();
-    state.sync.request_worker();
-}
-
-fn emit_mutation_internal(
-    app: &AppHandle,
-    mutation_type: &str,
-    detail: Value,
-    schedule_sync: bool,
-) {
+fn emit_passive_mutation(app: &AppHandle, mutation_type: &str, detail: Value) {
     let mut payload = detail.as_object().cloned().unwrap_or_default();
     payload.insert("action".to_string(), Value::String("mutation".to_string()));
     payload.insert("type".to_string(), Value::String(mutation_type.to_string()));
     emit_runtime_message(app, Value::Object(payload));
-    if schedule_sync {
-        request_sync_worker(app);
-    }
-}
-
-fn emit_mutation(app: &AppHandle, mutation_type: &str, detail: Value) {
-    emit_mutation_internal(app, mutation_type, detail, true);
-}
-
-fn emit_passive_mutation(app: &AppHandle, mutation_type: &str, detail: Value) {
-    emit_mutation_internal(app, mutation_type, detail, false);
 }
 
 fn emit_sync_refresh_mutations(app: &AppHandle) {
@@ -879,6 +896,15 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
         .get("action")
         .and_then(Value::as_str)
         .ok_or_else(|| "bridge action missing `action`".to_string())?;
+    if is_daemon_write_command(action) {
+        if let Some(server) = server_control_for_app(&app) {
+            return server
+                .run_command(action, request.clone())
+                .await
+                .map_err(|error| error.to_string());
+        }
+        return Err("Browser Recall daemon is not running".to_string());
+    }
     let storage = storage_for_app(&app)?;
     let snapshot = shell_snapshot(&app);
     let device_id = shell_device_id(&app);
@@ -902,7 +928,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                     "port": null,
                     "deviceId": null,
                     "hasToken": false,
-                    "pendingEvents": 0,
+                    "pendingCommands": 0,
                     "pendingBytes": 0,
                     "refuseMode": false,
                     "lastError": null,
@@ -923,7 +949,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 "port": snapshot.port,
                 "deviceId": snapshot.device_id,
                 "hasToken": true,
-                "pendingEvents": 0,
+                "pendingCommands": 0,
                 "pendingBytes": 0,
                 "refuseMode": false,
                 "lastError": snapshot.last_error,
@@ -941,7 +967,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                     "port": null,
                     "deviceId": null,
                     "hasToken": false,
-                    "pendingEvents": 0,
+                    "pendingCommands": 0,
                     "pendingBytes": 0,
                     "refuseMode": false,
                     "lastError": null,
@@ -962,7 +988,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 "port": snapshot.port,
                 "deviceId": snapshot.device_id,
                 "hasToken": true,
-                "pendingEvents": 0,
+                "pendingCommands": 0,
                 "pendingBytes": 0,
                 "refuseMode": false,
                 "lastError": snapshot.last_error,
@@ -1202,42 +1228,20 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             "success": true,
             "size": storage.directory_size().await.map_err(|error| error.to_string())?,
         }),
-        "readCacheable" => {
+        "readDesktopValue" => {
             let key = request
                 .get("key")
                 .and_then(Value::as_str)
-                .ok_or_else(|| "readCacheable missing key".to_string())?;
+                .ok_or_else(|| "readDesktopValue missing key".to_string())?;
             let include_deleted = request
                 .get("includeDeleted")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-            let value = read_cacheable(&storage, key, include_deleted).await?;
+            let value = read_desktop_value(&storage, key, include_deleted).await?;
             json!({
                 "success": true,
                 "value": value,
             })
-        }
-        "saveSettingsKey" => {
-            let key = request
-                .get("key")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "saveSettingsKey missing key".to_string())?;
-            let value = request
-                .get("value")
-                .cloned()
-                .ok_or_else(|| "saveSettingsKey missing value".to_string())?;
-            save_settings_key(&storage, &device_id, key, value).await?;
-            emit_mutation(&app, "settings", json!({ "key": key }));
-            json!({ "success": true })
-        }
-        "submitEvent" | "submit_event" => {
-            let entry = request
-                .get("entry")
-                .cloned()
-                .ok_or_else(|| "submit_event missing entry".to_string())?;
-            let response = submit_event(&storage, &device_id, entry).await?;
-            emit_mutation(&app, "history", json!({}));
-            response
         }
         "listHistoryFiles" => {
             let include_sizes = request
@@ -1359,182 +1363,6 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 "children": payload["children"].clone(),
             })
         }
-        "createNote" => {
-            let response = command_create_note(&storage, &device_id, &request).await?;
-            emit_mutation(
-                &app,
-                "note",
-                json!({
-                    "pageSlug": response.get("pageSlug").cloned().unwrap_or(Value::Null),
-                    "noteSlug": response.get("noteSlug").cloned().unwrap_or(Value::Null),
-                }),
-            );
-            response
-        }
-        "deleteNote" => {
-            let note_slug = request
-                .get("noteSlug")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "deleteNote missing noteSlug".to_string())?;
-            command_delete_note(&storage, &device_id, note_slug).await?;
-            emit_mutation(&app, "note", json!({ "noteSlug": note_slug }));
-            emit_mutation(&app, "orphaned", json!({}));
-            json!({ "success": true })
-        }
-        "updateNote" => {
-            let old_note_slug = request
-                .get("noteSlug")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "updateNote missing noteSlug".to_string())?;
-            let note_value = request
-                .get("note")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "updateNote missing note".to_string())?;
-            let response =
-                command_update_note(&storage, &device_id, old_note_slug, note_value).await?;
-            if response.get("oldNoteSlug").is_some() {
-                emit_mutation(
-                    &app,
-                    "note",
-                    json!({
-                        "noteSlug": response.get("noteSlug").cloned().unwrap_or(Value::Null),
-                        "oldNoteSlug": old_note_slug,
-                    }),
-                );
-            }
-            response
-        }
-        "toggleListPin" => {
-            let list_id = request
-                .get("listId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "toggleListPin missing listId".to_string())?;
-            let response = toggle_list_pin(&storage, &device_id, &request).await?;
-            emit_mutation(&app, "pins", json!({ "listId": list_id }));
-            response
-        }
-        "addListPins" => {
-            let list_id = request
-                .get("listId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "addListPins missing listId".to_string())?;
-            add_list_pins(&storage, &device_id, &request).await?;
-            emit_mutation(&app, "pins", json!({ "listId": list_id }));
-            json!({ "success": true })
-        }
-        "saveListMeta" => {
-            let response = save_list_meta(&storage, &device_id, &request).await?;
-            emit_mutation(&app, "lists", json!({}));
-            response
-        }
-        "importBookmarks" => {
-            let tree = serde_json::from_value::<Vec<BookmarkImportNode>>(
-                request
-                    .get("tree")
-                    .cloned()
-                    .ok_or_else(|| "importBookmarks missing tree".to_string())?,
-            )
-            .map_err(|error| error.to_string())?;
-            let (list_count, bookmark_count, failures) =
-                import_bookmarks(&storage, &device_id, tree).await?;
-            emit_mutation(&app, "lists", json!({}));
-            json!({
-                "success": true,
-                "listCount": list_count,
-                "bookmarkCount": bookmark_count,
-                "failures": failures,
-            })
-        }
-        "importHistory" => {
-            let entries = serde_json::from_value::<Vec<HistoryImportEntry>>(
-                request
-                    .get("entries")
-                    .cloned()
-                    .ok_or_else(|| "importHistory missing entries".to_string())?,
-            )
-            .map_err(|error| error.to_string())?;
-            let (page_count, visit_count, skipped_count) =
-                import_history(&storage, &device_id, entries).await?;
-            emit_mutation(&app, "history", json!({}));
-            json!({
-                "success": true,
-                "pageCount": page_count,
-                "visitCount": visit_count,
-                "skippedCount": skipped_count,
-            })
-        }
-        "deleteList" => {
-            let list_id = request
-                .get("listId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "deleteList missing listId".to_string())?;
-            command_delete_list(&storage, &device_id, list_id).await?;
-            emit_mutation(&app, "lists", json!({}));
-            emit_mutation(&app, "orphaned", json!({}));
-            json!({ "success": true })
-        }
-        "updateListTree" => {
-            let tree = serde_json::from_value(
-                request
-                    .get("tree")
-                    .cloned()
-                    .ok_or_else(|| "updateListTree missing tree".to_string())?,
-            )
-            .map_err(|error| error.to_string())?;
-            command_update_list_tree(&storage, &device_id, tree).await?;
-            emit_mutation(&app, "lists", json!({}));
-            json!({ "success": true })
-        }
-        "restoreNote" => {
-            let note_slug = request
-                .get("noteSlug")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "restoreNote missing noteSlug".to_string())?;
-            command_restore_note(&storage, &device_id, note_slug).await?;
-            emit_mutation(&app, "orphaned", json!({}));
-            emit_mutation(&app, "note", json!({ "noteSlug": note_slug }));
-            json!({ "success": true })
-        }
-        "restoreSnapshot" => {
-            let snapshot_stem = request
-                .get("snapSlug")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "restoreSnapshot missing snapSlug".to_string())?;
-            let page_slug = command_restore_snapshot(&storage, &device_id, snapshot_stem).await?;
-            emit_mutation(&app, "orphaned", json!({}));
-            emit_mutation(&app, "snapshot", json!({ "slug": page_slug }));
-            json!({ "success": true })
-        }
-        "restoreList" => {
-            let list_id = request
-                .get("listId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "restoreList missing listId".to_string())?;
-            command_restore_list(&storage, &device_id, list_id).await?;
-            emit_mutation(&app, "orphaned", json!({}));
-            emit_mutation(&app, "lists", json!({}));
-            json!({ "success": true })
-        }
-        "permanentDeleteAll" => {
-            let keys = storage
-                .load_orphaned()
-                .await
-                .map_err(|error| error.to_string())?
-                .unwrap_or_default()
-                .entries
-                .into_iter()
-                .map(|entry| entry.key)
-                .collect::<Vec<_>>();
-            let deleted_keys = permanent_delete_keys(&storage, &device_id, &keys).await?;
-            emit_mutation(&app, "note", json!({}));
-            emit_mutation(&app, "snapshot", json!({}));
-            emit_mutation(&app, "lists", json!({}));
-            emit_mutation(&app, "orphaned", json!({}));
-            json!({
-                "success": true,
-                "deletedKeys": deleted_keys,
-            })
-        }
         "openSnapshot" => {
             let slug = request
                 .get("slug")
@@ -1554,36 +1382,6 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .map_err(|error| error.to_string())?;
             json!({ "success": true })
         }
-        "deleteSnapshot" => {
-            let slug = request
-                .get("slug")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "deleteSnapshot missing slug".to_string())?;
-            let timestamp = request
-                .get("timestamp")
-                .or_else(|| request.get("ts"))
-                .and_then(Value::as_i64)
-                .ok_or_else(|| "deleteSnapshot missing timestamp".to_string())?;
-            command_delete_snapshot(&storage, &device_id, slug, timestamp).await?;
-            emit_mutation(&app, "snapshot", json!({ "slug": slug }));
-            emit_mutation(&app, "orphaned", json!({}));
-            json!({ "success": true })
-        }
-        "clearAllData" => {
-            let deleted_count = storage
-                .clear_all_data(&device_id)
-                .await
-                .map_err(|error| error.to_string())?;
-            emit_mutation(&app, "note", json!({}));
-            emit_mutation(&app, "snapshot", json!({}));
-            emit_mutation(&app, "lists", json!({}));
-            emit_mutation(&app, "orphaned", json!({}));
-            emit_mutation(&app, "settings", json!({}));
-            json!({
-                "success": true,
-                "deletedCount": deleted_count,
-            })
-        }
         "previewRule" => {
             let rule = serde_json::from_value::<RulePayload>(
                 request
@@ -1600,48 +1398,6 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             )
             .map_err(|error| error.to_string())?;
             preview_rule_payload(rule, entries)?
-        }
-        "addRule" => {
-            let list_id = request
-                .get("listId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "addRule missing listId".to_string())?;
-            let rule = serde_json::from_value::<RulePayload>(
-                request
-                    .get("rule")
-                    .cloned()
-                    .ok_or_else(|| "addRule missing rule".to_string())?,
-            )
-            .map_err(|error| error.to_string())?;
-            let response = command_add_rule(&storage, &device_id, list_id, rule).await?;
-            if response.get("success").and_then(Value::as_bool) == Some(true) {
-                emit_mutation(&app, "rules", json!({ "listId": list_id }));
-            }
-            response
-        }
-        "removeRule" => {
-            let list_id = request
-                .get("listId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "removeRule missing listId".to_string())?;
-            let rule_id = request
-                .get("ruleId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "removeRule missing ruleId".to_string())?;
-            command_remove_rule(&storage, &device_id, list_id, rule_id).await?;
-            emit_mutation(&app, "rules", json!({ "listId": list_id }));
-            json!({ "success": true })
-        }
-        "reportPage" => {
-            if let Some(user_title) = request.get("user_title").and_then(Value::as_str) {
-                let url = request
-                    .get("url")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| "reportPage missing url".to_string())?;
-                command_rename_page(&storage, &device_id, url, user_title).await?;
-                emit_mutation(&app, "history", json!({ "url": url }));
-            }
-            json!({ "success": true })
         }
         "resumeService" => {
             let state = app.state::<DesktopState>();
@@ -1689,11 +1445,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 "paused": paused,
             })
         }
-        "updateSyncSettings"
-        | "clearSyncFolder"
-        | "hydrateCache"
-        | "initializeFilesystem"
-        | "flushLogBuffer" => {
+        "updateSyncSettings" | "clearSyncFolder" | "flushDesktopQueue" | "initializeFilesystem" => {
             let state = app.state::<DesktopState>();
             state.sync.settings_changed(&storage).await?;
             json!({ "success": true })

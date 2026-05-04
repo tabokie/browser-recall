@@ -3,10 +3,12 @@
 import { logDebug } from './logger.js';
 
 const savepageResolvers = new Map();
+const savepageSettings = new Map();
 
-export function captureSavePage(tabId) {
+export function captureSavePage(tabId, settings = {}) {
   return new Promise((resolve, reject) => {
     savepageResolvers.set(tabId, { resolve, reject });
+    savepageSettings.set(tabId, settings || {});
     logDebug('[savepage] injecting scripts into tab', tabId);
 
     // Inject content-frame.js into all frames, then content.js into main frame
@@ -32,6 +34,7 @@ export function captureSavePage(tabId) {
       .catch((err) => {
         logDebug('[savepage] injection error:', err.message);
         savepageResolvers.delete(tabId);
+        savepageSettings.delete(tabId);
         reject(err);
       });
 
@@ -39,6 +42,7 @@ export function captureSavePage(tabId) {
     setTimeout(() => {
       if (savepageResolvers.has(tabId)) {
         savepageResolvers.delete(tabId);
+        savepageSettings.delete(tabId);
         reject(new Error('Save Page WE capture timed out'));
       }
     }, 60000);
@@ -54,8 +58,8 @@ async function loadSavepageResource(
 ) {
   // Skip video URLs before fetching (SPWE treats loadFailure as "skip resource")
   if (/\.(mp4|webm|ogg|mov|avi|m4v)(\?|#|$)/i.test(location)) {
-    const s = await chrome.storage.session.get('manifest:settings');
-    if (s['manifest:settings']?.captureSnapshotVideo !== true) {
+    const settings = savepageSettings.get(tabId) || {};
+    if (settings.captureSnapshotVideo !== true) {
       chrome.tabs.sendMessage(tabId, {
         type: 'loadFailure',
         index,
@@ -120,8 +124,8 @@ async function loadSavepageResource(
 
       // Also catch videos by MIME type (URL extension check above may miss some)
       if (mimetype.startsWith('video/')) {
-        const s = await chrome.storage.session.get('manifest:settings');
-        if (s['manifest:settings']?.captureSnapshotVideo !== true) {
+        const settings = savepageSettings.get(tabId) || {};
+        if (settings.captureSnapshotVideo !== true) {
           chrome.tabs.sendMessage(tabId, {
             type: 'loadFailure',
             index,
@@ -245,6 +249,7 @@ export function initSavepageBridge() {
         const resolver = savepageResolvers.get(tabId);
         if (resolver) {
           savepageResolvers.delete(tabId);
+          savepageSettings.delete(tabId);
           resolver.resolve(message.html);
         } else {
           logDebug('[savepage] savepageDone but no resolver for tab', tabId);
@@ -257,6 +262,7 @@ export function initSavepageBridge() {
         const resolver = savepageResolvers.get(tabId);
         if (resolver) {
           savepageResolvers.delete(tabId);
+          savepageSettings.delete(tabId);
           resolver.reject(
             new Error('Save Page WE exited without producing HTML'),
           );

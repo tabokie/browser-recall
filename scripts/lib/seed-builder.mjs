@@ -1,5 +1,10 @@
 import { dateKeyFromTimestamp } from '../../apps/extension/utils.js';
 import { replayStore } from './replay-store.mjs';
+import { createHash } from 'node:crypto';
+
+function shard(value) {
+  return createHash('sha256').update(value).digest('hex').slice(0, 2);
+}
 
 export async function buildSeedFiles(
   events,
@@ -26,21 +31,21 @@ export async function buildSeedFiles(
 
   const replaySettings = store['manifest:settings'];
   const mergedSettings = { ...(replaySettings || {}), ...(settings || {}) };
-  files.push({ path: 'manifest/settings.json', data: mergedSettings });
+  files.push({ path: 'views/manifest/settings.json', data: mergedSettings });
   delete store['manifest:settings'];
 
   for (const [key, value] of Object.entries(store)) {
     if (!key.startsWith('manifest:')) continue;
     if (key === 'manifest:name-to-id') {
-      files.push({ path: 'manifest/list-name-to-id.json', data: value });
+      files.push({ path: 'views/manifest/list-name-to-id.json', data: value });
     } else if (key === 'manifest:list-order') {
-      files.push({ path: 'manifest/list-order.json', data: value });
+      files.push({ path: 'views/manifest/list-order.json', data: value });
     } else if (key === 'manifest:orphaned') {
       if (value.entries?.length) {
-        files.push({ path: 'manifest/orphaned.json', data: value });
+        files.push({ path: 'views/manifest/orphaned.json', data: value });
       }
     } else if (key === 'manifest:list-name-to-id') {
-      files.push({ path: 'manifest/list-name-to-id.json', data: value });
+      files.push({ path: 'views/manifest/list-name-to-id.json', data: value });
     }
   }
 
@@ -48,13 +53,16 @@ export async function buildSeedFiles(
     if (key.startsWith('manifest:')) continue;
     if (key.startsWith('page:')) {
       const slug = key.slice('page:'.length);
-      files.push({ path: `pages/${slug}.json`, data: value });
+      files.push({
+        path: `views/pages/${shard(slug)}/${slug}.json`,
+        data: value,
+      });
     } else if (key.startsWith('note:')) {
       const slug = key.slice('note:'.length);
-      files.push({ path: `data/notes/${slug}.json`, data: value });
+      files.push({ path: `objects/notes/${slug}.json`, data: value });
     } else if (key.startsWith('list:')) {
       const listId = key.slice('list:'.length);
-      files.push({ path: `lists/${listId}.json`, data: value });
+      files.push({ path: `views/lists/${listId}.json`, data: value });
     }
   }
 
@@ -68,7 +76,7 @@ export async function buildSeedFiles(
       grouped.get(groupKey).push(entry);
     }
     for (const [groupKey, entries] of grouped) {
-      files.push({ path: `data/logs/${groupKey}.jsonl`, lines: entries });
+      files.push({ path: `logs/${groupKey}.jsonl`, lines: entries });
     }
   }
 

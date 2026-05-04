@@ -2,10 +2,11 @@ import { buildPairRequest } from './pairing.js';
 import {
   bufferStats,
   bufferedMessageSize,
+  clearBufferedMessages,
   enqueueBufferedMessage,
   peekBufferedMessage,
   shiftBufferedMessage,
-} from './event-buffer.js';
+} from './command-buffer.js';
 import {
   CONNECTOR_STATES,
   CONNECTOR_STATE_STORAGE_KEYS,
@@ -23,6 +24,7 @@ const MANUAL_RECONNECT_DEADLINE_MS = 15_000;
 const RECONNECT_DELAY_MS = 15_000;
 const SOCKET_OPEN_TIMEOUT_MS = 5000;
 const BRIDGE_REQUEST_TIMEOUT_MS = 1500;
+const SNAPSHOT_REQUEST_TIMEOUT_MS = 60_000;
 const STATE_PROBE_TIMEOUT_MS = 2500;
 
 let currentSocket = null;
@@ -101,7 +103,7 @@ async function writeState(patch) {
 async function syncBufferStats() {
   const stats = await bufferStats();
   await writeState({
-    desktopPendingEvents: stats.pendingEvents,
+    desktopPendingCommands: stats.pendingCommands,
     desktopPendingBytes: stats.pendingBytes,
     desktopRefuseMode: stats.refuseMode,
   });
@@ -277,49 +279,36 @@ function appendOptionalString(payload, key, value) {
 function buildBufferedBridgePayload(next, stats) {
   const base = {
     source: 'extension',
-    bufferDepth: Math.max(stats.pendingEvents - 1, 0),
+    bufferDepth: Math.max(stats.pendingCommands - 1, 0),
     bufferBytes: Math.max(stats.pendingBytes - bufferedMessageSize(next), 0),
   };
 
-  if (next.kind === 'note') {
-    const payload = {
-      ...base,
-      type: 'note',
-      slug: requiredString(next.slug),
-      note: requiredString(next.note),
-      url: requiredString(next.url),
-      ts: requiredTimestamp(next.ts),
-    };
-    appendOptionalString(payload, 'excerpt', next.excerpt);
-    appendOptionalString(payload, 'cssPath', next.cssPath);
-    appendOptionalString(payload, 'oldSlug', next.oldSlug);
-    appendOptionalString(payload, 'title', next.title);
-    return payload;
-  }
-
-  if (next.kind === 'snapshot') {
-    const payload = {
-      ...base,
-      type: 'snapshot',
-      slug: requiredString(next.slug),
-      ts: requiredTimestamp(next.ts),
-      url: requiredString(next.url),
-      html: requiredString(next.html),
-    };
-    appendOptionalString(payload, 'title', next.title);
-    appendOptionalString(payload, 'markdown', next.markdown);
-    return payload;
-  }
-
-  if (next.kind === 'event') {
+  if (next.kind === 'command') {
     return {
       ...base,
-      type: 'event',
-      entry: next.entry ?? {},
+      type: 'run_command',
+      action: next.action,
+      request: next.request ?? {},
     };
   }
 
   return null;
+}
+
+function buildSnapshotBridgePayload(snapshot, stats) {
+  const payload = {
+    source: 'extension',
+    bufferDepth: stats.pendingCommands,
+    bufferBytes: stats.pendingBytes,
+    type: 'snapshot',
+    slug: requiredString(snapshot.slug),
+    ts: requiredTimestamp(snapshot.ts),
+    url: requiredString(snapshot.url),
+    html: requiredString(snapshot.html),
+  };
+  appendOptionalString(payload, 'title', snapshot.title);
+  appendOptionalString(payload, 'markdown', snapshot.markdown);
+  return payload;
 }
 
 async function waitForAuthenticatedSocket(timeoutMs = 1500) {
@@ -552,16 +541,6 @@ function attachSocket(socket) {
         break;
       case 'pong':
         break;
-      case 'change':
-        for (const mutation of payload.mutations || []) {
-          chrome.runtime
-            .sendMessage({
-              action: 'mutation',
-              ...mutation,
-            })
-            .catch(() => {});
-        }
-        break;
       default:
         break;
     }
@@ -615,7 +594,7 @@ async function refreshAfterAuthentication(source) {
   await flushBufferedMessages();
 }
 
-async function sendBridgeMessage(message, acceptTypes) {
+async function sendBridgeMessage(message, acceptTypes, options = {}) {
   const previous = bridgeRequestQueue;
   let releaseQueue;
   bridgeRequestQueue = new Promise((resolve) => {
@@ -625,7 +604,7 @@ async function sendBridgeMessage(message, acceptTypes) {
   await previous.catch(() => {});
   try {
     await ensureBridgeReadyForRequest();
-    return await sendBridgeMessageNow(message, acceptTypes);
+    return await sendBridgeMessageNow(message, acceptTypes, options);
   } finally {
     releaseQueue();
   }
@@ -652,7 +631,7 @@ async function ensureBridgeReadyForRequest() {
   throw new Error('Desktop bridge is not connected');
 }
 
-function sendBridgeMessageNow(message, acceptTypes) {
+function sendBridgeMessageNow(message, acceptTypes, options = {}) {
   if (!currentSocket || currentSocket.readyState !== WebSocket.OPEN) {
     throw new Error('Desktop bridge is not connected');
   }
@@ -666,7 +645,7 @@ function sendBridgeMessageNow(message, acceptTypes) {
       const error = new Error('Desktop bridge request timed out');
       error.code = 'bridge_timeout';
       reject(error);
-    }, BRIDGE_REQUEST_TIMEOUT_MS);
+    }, options.timeoutMs || BRIDGE_REQUEST_TIMEOUT_MS);
     pendingRequest = {
       resolve(value) {
         clearTimeout(timer);
@@ -737,11 +716,27 @@ async function flushBufferedMessages() {
           await shiftBufferedMessage();
           continue;
         }
-        const response = await sendBridgeMessage(payload, ['ack', 'error']);
+        const response = await sendBridgeMessage(payload, [
+          'ack',
+          'command_result',
+          'error',
+        ]);
+        if (response.type === 'command_result' && response.success === false) {
+          const error = new Error(
+            response.error ||
+              response.response?.error ||
+              'Desktop command failed',
+          );
+          error.code = response.code || 'command_error';
+          throw error;
+        }
         await shiftBufferedMessage();
+        const commandResponse = response.response || {};
         await writeState({
-          [STORAGE_KEYS.lastDrainedAt]: response.lastDrainedAt,
-          [STORAGE_KEYS.daemonBufferDepth]: response.bufferDepth,
+          [STORAGE_KEYS.lastDrainedAt]:
+            response.lastDrainedAt || commandResponse.timestamp || Date.now(),
+          [STORAGE_KEYS.daemonBufferDepth]:
+            response.bufferDepth ?? commandResponse.bufferDepth,
           [STORAGE_KEYS.lastError]: null,
           [STORAGE_KEYS.lastErrorCode]: null,
         });
@@ -794,6 +789,17 @@ export async function flushDesktopBuffer() {
     });
   }
 
+  return getConnectorBridgeState();
+}
+
+export async function clearDesktopBuffer() {
+  const stats = await clearBufferedMessages();
+  updateConnectorStatsCache(stats);
+  await writeState({
+    desktopPendingCommands: stats.pendingCommands,
+    desktopPendingBytes: stats.pendingBytes,
+    desktopRefuseMode: stats.refuseMode,
+  });
   return getConnectorBridgeState();
 }
 
@@ -919,26 +925,11 @@ export async function connectDesktopBridge() {
   return getConnectorBridgeState();
 }
 
-export async function enqueueDesktopEvent(entry) {
-  const stats = await enqueueBufferedMessage({ kind: 'event', entry });
-  await syncBufferStats();
-  if (currentSocket?._authenticated) {
-    void flushBufferedMessages();
-  } else {
-    void connect();
-  }
-  return stats;
-}
-
-export async function enqueueDesktopSnapshot(snapshot) {
+export async function enqueueDesktopCommand(action, request = {}) {
   const stats = await enqueueBufferedMessage({
-    kind: 'snapshot',
-    slug: snapshot.slug,
-    ts: snapshot.ts,
-    url: snapshot.url,
-    title: snapshot.title,
-    markdown: snapshot.markdown,
-    html: snapshot.html,
+    kind: 'command',
+    action,
+    request,
   });
   await syncBufferStats();
   if (currentSocket?._authenticated) {
@@ -949,26 +940,35 @@ export async function enqueueDesktopSnapshot(snapshot) {
   return stats;
 }
 
-export async function enqueueDesktopNote(note) {
-  const payload = {
-    kind: 'note',
-    slug: note.slug,
-    excerpt: note.excerpt,
-    note: note.note,
-    cssPath: note.cssPath ?? null,
-    url: note.url,
-    title: note.title,
-    ts: note.ts,
+export async function enqueueDesktopSnapshot(snapshot) {
+  const message = {
+    kind: 'snapshot',
+    slug: snapshot.slug,
+    ts: snapshot.ts,
+    url: snapshot.url,
+    title: snapshot.title,
+    markdown: snapshot.markdown,
+    html: snapshot.html,
   };
-  if (note.oldSlug) payload.oldSlug = note.oldSlug;
-  const stats = await enqueueBufferedMessage(payload);
-  await syncBufferStats();
-  if (currentSocket?._authenticated) {
-    void flushBufferedMessages();
-  } else {
-    void connect();
+  await ensureBridgeReadyForRequest();
+  await flushBufferedMessages();
+  const stats = await bufferStats();
+  if (stats.pendingCommands > 0) {
+    const error = new Error('Desktop command queue did not drain');
+    error.code = 'desktop_queue_not_drained';
+    throw error;
   }
-  return stats;
+  const payload = buildSnapshotBridgePayload(message, stats);
+  const response = await sendBridgeMessage(payload, ['ack', 'error'], {
+    timeoutMs: SNAPSHOT_REQUEST_TIMEOUT_MS,
+  });
+  await writeState({
+    [STORAGE_KEYS.lastDrainedAt]: response.lastDrainedAt,
+    [STORAGE_KEYS.daemonBufferDepth]: response.bufferDepth,
+    [STORAGE_KEYS.lastError]: null,
+    [STORAGE_KEYS.lastErrorCode]: null,
+  });
+  return await syncBufferStats();
 }
 
 export async function getConnectorBridgeState() {
@@ -1080,64 +1080,6 @@ export async function requestDesktopClearAllData() {
   );
 }
 
-export async function requestDesktopSyncManifest(key) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'load_sync_manifest',
-      key,
-    },
-    ['sync_manifest_result', 'error'],
-  );
-}
-
-export async function requestDesktopSaveSyncManifest(key, data) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'save_sync_manifest',
-      key,
-      data,
-    },
-    ['sync_manifest_result', 'error'],
-  );
-}
-
-export async function requestDesktopCollectSyncFiles(deviceId, retentionDays) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'collect_sync_files',
-      deviceId,
-      retentionDays,
-    },
-    ['sync_files_result', 'error'],
-  );
-}
-
-export async function requestDesktopWriteSyncFiles(files) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'write_sync_files',
-      files,
-    },
-    ['write_sync_files_result', 'error'],
-  );
-}
-
-export async function requestDesktopReplayRemoteEntries(deviceId, entries) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'replay_remote_entries',
-      deviceId,
-      entries,
-    },
-    ['remote_replay_result', 'error'],
-  );
-}
-
 export async function requestDesktopSetDeviceId(deviceId) {
   await waitForIdleBridge();
   const payload = await sendBridgeMessage(
@@ -1233,6 +1175,27 @@ export async function requestDesktopPopupLists() {
     },
     ['popup_lists_result', 'error'],
   );
+}
+
+export async function requestDesktopCommand(action, request = {}) {
+  await waitForIdleBridge();
+  const payload = await sendBridgeMessage(
+    {
+      type: 'run_command',
+      action,
+      request,
+    },
+    ['command_result', 'error'],
+  );
+  if (!payload?.success) {
+    return (
+      payload?.response || {
+        success: false,
+        error: payload?.error || `${action} failed`,
+      }
+    );
+  }
+  return payload.response || { success: true };
 }
 
 export async function requestDesktopHistorySearch(query, limit) {

@@ -63,7 +63,7 @@ test('timeOnPage reports foreground delta, not cumulative time since load', asyn
     const key = 'log:' + today;
     for (let i = 0; i < 40; i++) {
       const resp = await chrome.runtime.sendMessage({
-        action: 'readCacheable',
+        action: 'readDesktopValue',
         key,
       });
       const entries = resp?.value || [];

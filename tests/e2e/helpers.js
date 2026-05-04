@@ -43,13 +43,13 @@ export async function resetAndSeed(extContext, extensionId, files) {
     }
     done();
 
-    done = timer('resetAndSeed: rehydrateForTest');
+    done = timer('resetAndSeed: flush connector queue');
     const rehydrateResult = await page.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'rehydrateForTest' }),
+      chrome.runtime.sendMessage({ action: 'flushDesktopQueueForTest' }),
     );
     if (!rehydrateResult?.success) {
       throw new Error(
-        `rehydrateForTest failed: ${JSON.stringify(rehydrateResult)}`,
+        `flushDesktopQueueForTest failed: ${JSON.stringify(rehydrateResult)}`,
       );
     }
     done();
@@ -101,7 +101,7 @@ export function getSlugForUrl(url) {
 
 // Wait for a visit_page to be recorded for a URL after a link-click navigation.
 // Content scripts at document_idle sometimes fail to inject on fast localhost pages.
-// Falls back to sending reportPage explicitly from the helper page.
+// Falls back to sending recordPageActivity explicitly from the helper page.
 export async function waitForVisitRecorded(helper, page, url, referrer) {
   const slug = getSlugForUrl(url);
   const pageKey = 'page:' + slug;
@@ -110,7 +110,7 @@ export async function waitForVisitRecorded(helper, page, url, referrer) {
   let recorded = false;
   for (let i = 0; i < 20; i++) {
     const r = await helper.evaluate(
-      (k) => chrome.runtime.sendMessage({ action: 'readCacheable', key: k }),
+      (k) => chrome.runtime.sendMessage({ action: 'readDesktopValue', key: k }),
       pageKey,
     );
     if (r?.value?.timestamps) {
@@ -121,12 +121,12 @@ export async function waitForVisitRecorded(helper, page, url, referrer) {
   }
 
   if (!recorded) {
-    // Content script didn't inject — send reportPage from helper page
+    // Content script didn't inject — send recordPageActivity from helper page
     const title = await page.title();
     await helper.evaluate(
       ({ url, ref, title }) =>
         chrome.runtime.sendMessage({
-          action: 'reportPage',
+          action: 'recordPageActivity',
           url,
           isInitialLoad: true,
           title,
@@ -138,7 +138,7 @@ export async function waitForVisitRecorded(helper, page, url, referrer) {
     await helper.evaluate(async (k) => {
       for (let i = 0; i < 20; i++) {
         const r = await chrome.runtime.sendMessage({
-          action: 'readCacheable',
+          action: 'readDesktopValue',
           key: k,
         });
         if (r?.value?.timestamps) return;

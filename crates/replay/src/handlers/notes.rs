@@ -61,11 +61,7 @@ where
         }
     }
 
-    let note_slug = path
-        .strip_prefix("notes/")
-        .unwrap_or(path)
-        .strip_suffix(".json")
-        .unwrap_or(path);
+    let note_slug = note_slug_from_path(path);
     let note_key = format!("{NOTE_PREFIX}{note_slug}");
     append_unique(&mut page.child_ids, note_key.clone());
 

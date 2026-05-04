@@ -173,7 +173,9 @@ describe('browser-api shim', () => {
     const url = context.chrome.runtime.getURL('snapshot-viewer.html');
     expect(manifest).toEqual({ version: '1.2.3' });
     expect(manifest?.then).toBeUndefined();
-    expect(url).toBe('moz-extension://browser-recall.invalid/snapshot-viewer.html');
+    expect(url).toBe(
+      'moz-extension://browser-recall.invalid/snapshot-viewer.html',
+    );
     expect(url?.then).toBeUndefined();
   });
 

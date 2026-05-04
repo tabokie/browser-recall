@@ -68,12 +68,6 @@ pub struct SearchRequestPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SyncFilePayload {
-    pub path: String,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TestSeedFilePayload {
     pub path: String,
     pub content: String,
@@ -220,22 +214,6 @@ pub enum ConnectorMessage {
     GetDirectoryInfo,
     GetDirectorySize,
     ClearAllData,
-    LoadSyncManifest {
-        key: String,
-    },
-    SaveSyncManifest {
-        key: String,
-        data: Value,
-    },
-    CollectSyncFiles {
-        #[serde(rename = "deviceId")]
-        device_id: String,
-        #[serde(default, rename = "retentionDays")]
-        retention_days: Option<i64>,
-    },
-    WriteSyncFiles {
-        files: Vec<SyncFilePayload>,
-    },
     ReplayRemoteEntries {
         #[serde(rename = "deviceId")]
         device_id: String,
@@ -270,6 +248,15 @@ pub enum ConnectorMessage {
         keys: Vec<String>,
     },
     GetPopupLists,
+    RunCommand {
+        action: String,
+        #[serde(default)]
+        request: Value,
+        #[serde(default, rename = "bufferDepth")]
+        buffer_depth: Option<usize>,
+        #[serde(default, rename = "bufferBytes")]
+        buffer_bytes: Option<usize>,
+    },
     Event {
         entry: Value,
         source: String,
@@ -408,26 +395,6 @@ pub enum DaemonMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
-    SyncManifestResult {
-        success: bool,
-        key: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        data: Option<Value>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    SyncFilesResult {
-        success: bool,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        files: Vec<SyncFilePayload>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    WriteSyncFilesResult {
-        success: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
     RemoteReplayResult {
         success: bool,
         #[serde(rename = "replayedEntries")]
@@ -519,6 +486,13 @@ pub enum DaemonMessage {
         success: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         lists: Vec<PopupListResult>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    CommandResult {
+        success: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        response: Option<Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

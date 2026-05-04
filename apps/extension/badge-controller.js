@@ -8,12 +8,13 @@ export function createBadgeController({
   logDebug = () => {},
   normalIconPaths,
   syncDesktopConnectorPauseState,
-  readCacheable,
+  readDesktopValue,
   generateSlugFromUrl,
   pageKey,
   notePrefix,
   snapshotPrefix,
   listPrefix,
+  resolveTabUrl = (_tabId, url) => url,
   getBadgeAccentColor = async () => '#078C9B',
 }) {
   let connectorState = { state: 'starting' };
@@ -42,12 +43,9 @@ export function createBadgeController({
     ) {
       return true;
     }
-    return [
-      'offline',
-      'auth_failed',
-      'pair_denied',
-      'paused',
-    ].includes(connector.state);
+    return ['offline', 'auth_failed', 'pair_denied', 'paused'].includes(
+      connector.state,
+    );
   }
 
   function shouldClearConnectorBadge(connector = connectorState) {
@@ -91,7 +89,8 @@ export function createBadgeController({
         active: true,
         lastFocusedWindow: true,
       });
-      if (tab?.id > 0) await clearPageMarkerBadge(tab.id, { inheritGlobalBadge });
+      if (tab?.id > 0)
+        await clearPageMarkerBadge(tab.id, { inheritGlobalBadge });
     } catch (error) {
       logDebug('[badge] active page marker clear failed:', error.message);
     }
@@ -124,10 +123,14 @@ export function createBadgeController({
     }
     if (shouldClearConnectorBadge(connector)) {
       await clearGlobalConnectorBadge();
+      if (isConnectorUsable(connector)) await refreshActiveTabBadge();
     }
   }
 
-  async function clearPageMarkerBadge(tabId, { inheritGlobalBadge = false } = {}) {
+  async function clearPageMarkerBadge(
+    tabId,
+    { inheritGlobalBadge = false } = {},
+  ) {
     if (servicePaused) {
       await api.action.setTitle({ title: servicePauseTitle, tabId });
       await api.action.setBadgeBackgroundColor({
@@ -260,7 +263,8 @@ export function createBadgeController({
 
   async function updateBadgeForTab(tabId, url) {
     try {
-      if (!isPageBadgeUrl(url)) {
+      const badgeUrl = resolveTabUrl(tabId, url);
+      if (!isPageBadgeUrl(badgeUrl)) {
         await clearPageMarkerBadge(tabId, {
           inheritGlobalBadge: globalConnectorBadgeActive,
         });
@@ -275,15 +279,17 @@ export function createBadgeController({
       }
       syncDesktopConnectorPauseState(connectorState);
 
-      const slug = generateSlugFromUrl(url);
-      const page = await readCacheable(pageKey(slug));
+      const slug = generateSlugFromUrl(badgeUrl);
+      const page = await readDesktopValue(pageKey(slug));
       if (!page) {
         await clearPageMarkerBadge(tabId);
         return;
       }
       const childIds = page.childIds || [];
       const hasNoteRefs = childIds.some((c) => c.startsWith(notePrefix));
-      const hasSnapshotRefs = childIds.some((c) => c.startsWith(snapshotPrefix));
+      const hasSnapshotRefs = childIds.some((c) =>
+        c.startsWith(snapshotPrefix),
+      );
       const hasNotes = hasNoteRefs || hasSnapshotRefs;
       const hasLists = page.parentIds?.some((id) => id.startsWith(listPrefix));
       if (!hasNotes && !hasLists) {
@@ -301,8 +307,8 @@ export function createBadgeController({
   function collectBadgeUrlsFromEntry(entry) {
     const urls = new Set();
     if (entry?.url?.startsWith('http')) urls.add(entry.url);
-    for (const item of entry?.items || []) {
-      if (typeof item === 'string' && item.startsWith('http')) urls.add(item);
+    for (const url of entry?.urls || []) {
+      if (typeof url === 'string' && url.startsWith('http')) urls.add(url);
     }
     return [...urls];
   }
@@ -351,7 +357,6 @@ export function createBadgeController({
   function scheduleConnectorBadgeRefresh(connector) {
     void (async () => {
       await setConnectorState(connector);
-      if (isConnectorUsable(connector)) await refreshActiveTabBadge();
     })().catch((error) => {
       logDebug('[badge] connector badge refresh failed:', error.message);
     });

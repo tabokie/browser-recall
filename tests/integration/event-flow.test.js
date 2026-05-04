@@ -167,7 +167,6 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           action: 'visit_page',
           url: 'https://example.com/streamed',
           title: 'Streamed',
-          checkpoint: true,
         },
       }),
     );
@@ -271,7 +270,6 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           action: 'visit_page',
           url: 'https://example.com/searchable',
           title: 'Banana Searchable',
-          checkpoint: true,
         },
       }),
     );
@@ -373,10 +371,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           action: 'pin_to_list',
           listOwner: 'test-device',
           name: 'Reading',
-          items: ['https://example.com/popup'],
-          titles: {
-            'https://example.com/popup': 'Popup Page',
-          },
+          urls: ['https://example.com/popup'],
+          titles: ['Popup Page'],
         },
       }),
     );
@@ -391,7 +387,6 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           action: 'visit_page',
           url: 'https://example.com/popup',
           title: 'Popup Page',
-          checkpoint: true,
         },
       }),
     );
@@ -584,7 +579,6 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           action: 'visit_page',
           url: 'https://example.com/rpc-page',
           title: 'RPC Page',
-          checkpoint: true,
         },
       }),
     );
@@ -671,7 +665,6 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           action: 'visit_page',
           url: 'https://example.com/sync-page',
           title: 'Sync Page',
-          checkpoint: true,
         },
       }),
     );
@@ -691,115 +684,6 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       }),
     );
     expect((await nextMessage(socket)).type).toBe('ack');
-
-    socket.send(
-      JSON.stringify({
-        type: 'save_sync_manifest',
-        key: 'sync-cursors',
-        data: {
-          cursors: {
-            peer1: {
-              treeSha: 'abc',
-              files: { 'data/logs/peer1/a.jsonl': 'x' },
-            },
-          },
-        },
-      }),
-    );
-    await expect(nextMessage(socket)).resolves.toMatchObject({
-      type: 'sync_manifest_result',
-      success: true,
-      key: 'sync-cursors',
-      data: {
-        cursors: {
-          peer1: { treeSha: 'abc', files: { 'data/logs/peer1/a.jsonl': 'x' } },
-        },
-      },
-    });
-
-    socket.send(
-      JSON.stringify({
-        type: 'load_sync_manifest',
-        key: 'sync-cursors',
-      }),
-    );
-    await expect(nextMessage(socket)).resolves.toMatchObject({
-      type: 'sync_manifest_result',
-      success: true,
-      key: 'sync-cursors',
-      data: {
-        cursors: {
-          peer1: { treeSha: 'abc', files: { 'data/logs/peer1/a.jsonl': 'x' } },
-        },
-      },
-    });
-
-    socket.send(JSON.stringify({ type: 'get_status' }));
-    const status = await nextMessage(socket);
-    expect(status.type).toBe('status');
-    const deviceId = status.deviceId;
-
-    socket.send(
-      JSON.stringify({
-        type: 'collect_sync_files',
-        deviceId,
-        retentionDays: 7,
-      }),
-    );
-    const syncFiles = await nextMessage(socket);
-    expect(syncFiles).toMatchObject({
-      type: 'sync_files_result',
-      success: true,
-    });
-    expect(
-      syncFiles.files.some((file) =>
-        file.path.startsWith(`data/logs/${deviceId}/`),
-      ),
-    ).toBe(true);
-    expect(
-      syncFiles.files.some((file) => file.path === 'data/notes/sync-note.json'),
-    ).toBe(true);
-
-    socket.send(
-      JSON.stringify({
-        type: 'write_sync_files',
-        files: [
-          {
-            path: 'data/logs/peer-sync/2026-04-19.jsonl',
-            content:
-              '{"timestamp":1710000010200,"action":"visit_page","url":"https://peer.example/path","title":"Peer"}\n',
-          },
-          {
-            path: 'data/notes/peer-note.json',
-            content: '{"slug":"peer-note","note":"remote"}',
-          },
-        ],
-      }),
-    );
-    await expect(nextMessage(socket)).resolves.toEqual({
-      type: 'write_sync_files_result',
-      success: true,
-    });
-
-    expect(
-      readFileSync(
-        path.join(
-          dir,
-          'portal-data',
-          'data',
-          'logs',
-          'peer-sync',
-          '2026-04-19.jsonl',
-        ),
-        'utf8',
-      ),
-    ).toContain('"url":"https://peer.example/path"');
-    expect(
-      readFileSync(
-        path.join(dir, 'portal-data', 'data', 'notes', 'peer-note.json'),
-        'utf8',
-      ),
-    ).toContain('"peer-note"');
 
     socket.send(
       JSON.stringify({
@@ -1250,10 +1134,8 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           action: 'pin_to_list',
           listOwner: 'test-device',
           name: 'Reading',
-          items: ['https://example.com/reading'],
-          titles: {
-            'https://example.com/reading': 'Reading Page',
-          },
+          urls: ['https://example.com/reading'],
+          titles: ['Reading Page'],
         },
       }),
     );
@@ -1271,7 +1153,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           rule: {
             id: 'rule-k-reading',
             type: 'keyword',
-            config: { pattern: 'reading', fields: ['title'] },
+            config: { pattern: 'reading' },
           },
         },
       }),
@@ -1412,7 +1294,6 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           action: 'visit_page',
           url: 'https://example.com/',
           title: 'Example Home',
-          checkpoint: true,
         },
       }),
     );
@@ -1458,7 +1339,6 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           action: 'visit_page',
           url: 'https://example.com/clear-me',
           title: 'Clear Me',
-          checkpoint: true,
         },
       }),
     );
@@ -1595,7 +1475,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           rule: {
             id: 'rule-k-reading',
             type: 'keyword',
-            config: { pattern: 'github', fields: ['url'] },
+            config: { pattern: 'Repo' },
           },
         },
       }),

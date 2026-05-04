@@ -4,6 +4,7 @@ pub mod connectors;
 pub mod pairing;
 pub mod protocol;
 pub mod rules;
+pub mod runtime;
 pub mod search;
 pub mod storage;
 pub mod sync;

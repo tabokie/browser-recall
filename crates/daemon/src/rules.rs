@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 use tracing::warn;
 use url::Url;
 
-const VALID_KEYWORD_FIELDS: &[&str] = &["title", "url"];
 const BANNED_GLOBALS: &[&str] = &[
     "fetch",
     "chrome",
@@ -110,10 +109,19 @@ pub fn preview_rule(rule: &RuleSpec, page: &PageData) -> Result<bool, String> {
 
 pub fn validate_rule(rule: &RuleSpec) -> Result<(), String> {
     match rule.rule_type.as_str() {
-        "keyword" => Ok(()),
+        "keyword" => validate_keyword_rule(rule),
         "function" => compile_function_rule(rule),
         _ => Ok(()),
     }
+}
+
+fn validate_keyword_rule(rule: &RuleSpec) -> Result<(), String> {
+    for key in rule.config.keys() {
+        if key != "pattern" {
+            return Err(format!("Unsupported keyword rule field: {key}"));
+        }
+    }
+    Ok(())
 }
 
 pub fn validate_fn_rule_source(fn_source: &str) -> ValidationResult {
@@ -175,64 +183,16 @@ fn match_keyword_rule_from_config(config: &BTreeMap<String, Value>, page: &PageD
         return false;
     }
 
-    let case_sensitive = config
-        .get("caseSensitive")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let mut fields = config
-        .get("fields")
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_str)
-                .filter(|field| VALID_KEYWORD_FIELDS.contains(field) || *field == "body")
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_else(|| vec!["title".to_string(), "url".to_string()]);
-    if page.body.is_some() && !fields.iter().any(|field| field == "body") {
-        fields.push("body".to_string());
-    }
-
     if pattern.starts_with('/') && pattern.ends_with('/') && pattern.len() >= 2 {
-        let flags = if case_sensitive { "" } else { "(?i)" };
-        let expression = format!("{flags}{}", &pattern[1..pattern.len() - 1]);
+        let expression = format!("(?i){}", &pattern[1..pattern.len() - 1]);
         let Ok(regex) = regex::Regex::new(&expression) else {
             return false;
         };
-        return fields.into_iter().any(|field| {
-            field_value(page, &field)
-                .map(|value| regex.is_match(value))
-                .unwrap_or(false)
-        });
+        return regex.is_match(&page.title);
     }
 
-    let needle = if case_sensitive {
-        pattern.to_string()
-    } else {
-        pattern.to_lowercase()
-    };
-    fields.into_iter().any(|field| {
-        field_value(page, &field)
-            .map(|value| {
-                if case_sensitive {
-                    value.contains(&needle)
-                } else {
-                    value.to_lowercase().contains(&needle)
-                }
-            })
-            .unwrap_or(false)
-    })
-}
-
-fn field_value<'a>(page: &'a PageData, field: &str) -> Option<&'a str> {
-    match field {
-        "title" => Some(page.title.as_str()),
-        "url" => Some(page.url.as_str()),
-        "body" => page.body.as_deref(),
-        _ => None,
-    }
+    let needle = pattern.to_lowercase();
+    page.title.to_lowercase().contains(&needle)
 }
 
 fn execute_function_rule(rule: &RuleEntity, page: &PageData) -> Result<bool, String> {
@@ -359,7 +319,10 @@ impl ParsedUrl {
 
 #[cfg(test)]
 mod tests {
-    use super::{list_matches_page, page_data_from_raw_entry, validate_fn_rule_source, PageData};
+    use super::{
+        list_matches_page, page_data_from_raw_entry, validate_fn_rule_source, validate_rule,
+        PageData, RuleSpec,
+    };
     use browser_recall_replay::entities::{ListEntity, RuleEntity};
     use serde_json::json;
     use std::collections::{BTreeMap, HashMap};
@@ -405,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn keyword_rules_match_title_and_body() {
+    fn keyword_rules_match_title_only() {
         let list = list_with_rule(RuleEntity {
             id: "rule-k-1".to_string(),
             rule_type: "keyword".to_string(),
@@ -421,12 +384,82 @@ mod tests {
                 body: None,
             }
         ));
-        assert!(list_matches_page(
+        assert!(!list_matches_page(
             &list,
             &PageData {
                 title: "No title match".to_string(),
                 url: "https://example.com/page".to_string(),
                 body: Some("Cats are here".to_string()),
+            }
+        ));
+    }
+
+    #[test]
+    fn keyword_rules_ignore_legacy_fields_config() {
+        let list = list_with_rule(RuleEntity {
+            id: "rule-k-1".to_string(),
+            rule_type: "keyword".to_string(),
+            config: BTreeMap::from([
+                ("pattern".to_string(), json!("ai")),
+                ("fields".to_string(), json!(["url", "body"])),
+            ]),
+            created_at: 1,
+        });
+
+        assert!(!list_matches_page(
+            &list,
+            &PageData {
+                title: "Introducing Essential Voice - YouTube".to_string(),
+                url: "https://example.ai/video".to_string(),
+                body: Some("ai appears in page body".to_string()),
+            }
+        ));
+    }
+
+    #[test]
+    fn keyword_rule_validation_rejects_fields_config() {
+        let result = validate_rule(&RuleSpec {
+            rule_type: "keyword".to_string(),
+            config: BTreeMap::from([
+                ("pattern".to_string(), json!("ai")),
+                ("fields".to_string(), json!(["title"])),
+            ]),
+        });
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn keyword_rule_validation_rejects_case_sensitive_config() {
+        let result = validate_rule(&RuleSpec {
+            rule_type: "keyword".to_string(),
+            config: BTreeMap::from([
+                ("pattern".to_string(), json!("ai")),
+                ("caseSensitive".to_string(), json!(true)),
+            ]),
+        });
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn keyword_rules_ignore_stale_case_sensitive_config() {
+        let list = list_with_rule(RuleEntity {
+            id: "rule-k-1".to_string(),
+            rule_type: "keyword".to_string(),
+            config: BTreeMap::from([
+                ("pattern".to_string(), json!("AI")),
+                ("caseSensitive".to_string(), json!(true)),
+            ]),
+            created_at: 1,
+        });
+
+        assert!(list_matches_page(
+            &list,
+            &PageData {
+                title: "ai research".to_string(),
+                url: "https://example.com/page".to_string(),
+                body: None,
             }
         ));
     }

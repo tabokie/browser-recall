@@ -21,7 +21,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/desktop/src-tauri/` | Tauri shell, event bridge, OS integration |
 | `apps/extension/` | Thin Chrome connector: capture, popup, pairing, buffering |
 | `crates/daemon/` | Storage/search/sync/pairing command layer |
-| `crates/replay/` | Authoritative replay engine for production |
+| `crates/replay/` | Authoritative replay engine and replay verifier |
 | `crates/search/` | Native search helpers |
 | `packages/core/` | Shared JS helpers, theme, CSS, runtime utilities |
 | `packages/protocol/` | Shared protocol schema/message definitions |
@@ -36,7 +36,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/desktop/ui/index.js` | Ported main UI logic: history, lists, search, settings, recycle bin |
 | `apps/desktop/ui/extension-api-shim.js` | Tauri-backed `chrome.*` compatibility layer for the ported UI |
 | `apps/desktop/ui/bookmark-parser.js` | Desktop bookmark import parser |
-| `apps/desktop/src-tauri/src/main.rs` | Tauri entry point, invoke bridge, desktop events, window/deep-link handling |
+| `apps/desktop/src-tauri/src/main.rs` | Tauri entry point, invoke bridge, daemon write routing, desktop events, window/deep-link handling |
 | `apps/desktop/src-tauri/src/config.rs` | Desktop config loading/persistence helpers |
 | `apps/desktop/src-tauri/src/login_item.rs` | Login-item integration for desktop startup behavior |
 | `apps/desktop/src-tauri/src/search.rs` | Desktop-side search adapters/helpers |
@@ -46,18 +46,20 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/extension/savepage-bridge.js` | Save Page WE capture bridge |
 | `apps/extension/connector/ws-client.js` | Connector websocket transport to daemon |
 | `apps/extension/connector/pairing.js` | Pairing bootstrap and session helpers |
-| `apps/extension/connector/event-buffer.js` | Outbound event buffering/flush helpers |
+| `apps/extension/connector/command-buffer.js` | Outbound command buffering/flush helpers |
 | `apps/extension/options-stub.html` | Stub page that points users to the desktop app |
 | `crates/daemon/src/commands.rs` | Replay-backed command surface for desktop UI and shell |
-| `crates/daemon/src/storage.rs` | Filesystem/data-root storage implementation |
+| `crates/daemon/src/runtime.rs` | Shared replay overlay helpers used by daemon command/write paths |
+| `crates/daemon/src/storage.rs` | Data-root storage, sharded object/view paths, coordinated cache reads, current projection cache, log append, and flushable ordered checkpoint worker |
 | `crates/daemon/src/search.rs` | Daemon search queries over history/notes/snapshots |
 | `crates/daemon/src/sync.rs` | GitHub sync controller, token handling, pause persistence |
 | `crates/daemon/src/ws_server.rs` | Browser pairing, websocket RPC, change broadcasts |
 | `crates/daemon/src/pairing.rs` | Pairing data/state helpers |
 | `crates/replay/src/lib.rs` | Production replay engine |
+| `crates/replay/src/bin/replay-verify.rs` | Full-log checkpoint verifier using the production replay and checkpoint policy |
 | `crates/search/src/lib.rs` | Native search primitives |
 | `packages/core/index.js` | Shared package exports |
-| `packages/core/rule-engine.js` | Shared rule validation/matching helpers |
+| `packages/core/rule-engine.js` | Shared rule validation/matching helpers; keyword rules are title-only |
 | `packages/core/search-helpers.js` | Shared query parsing/search helper logic |
 | `packages/core/time-chart.js` | Shared history chart rendering helpers |
 | `packages/core/virtual-scroller.js` | Shared virtual scrolling helper |
@@ -86,9 +88,10 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 ### Replay and Storage
 
-- `crates/replay/` is the production replay engine.
-- `crates/daemon/src/storage.rs` reads/writes the data root and derived checkpoint files.
-- `crates/daemon/src/commands.rs` exposes replay-backed reads and mutations to the desktop shell.
+- `crates/replay/` is the production replay engine and owns replay-derived checkpoint policy used by verification and daemon persistence.
+- `crates/daemon/src/storage.rs` owns coordinated cache-miss reads, serialized write coordination, synchronous log append helpers, checkpoint-capacity reservation, ordered async checkpoint persistence, replay progress, and the current `logs/`, `objects/`, `views/` path layout.
+- `crates/daemon/src/commands.rs` exposes replay-backed reads and mutations to the desktop shell, canonicalizes log entries before append, and keeps command-only fields out of JSONL.
+- `crates/daemon/src/runtime.rs` provides shared replay overlay helpers used by command, websocket, and sync write paths.
 
 ### Search
 
@@ -100,11 +103,13 @@ This map intentionally excludes removed extension-only storage/sync internals.
 - `crates/daemon/src/ws_server.rs` owns paired-browser websocket sessions.
 - `apps/extension/connector/pairing.js` and `apps/extension/connector/ws-client.js` manage the browser side.
 - `apps/desktop/src-tauri/src/main.rs` rebroadcasts daemon change notifications to desktop webviews.
+- Authenticated connector sockets also receive daemon change notifications for live popup/badge refresh.
 
 ### Sync
 
 - `crates/daemon/src/sync.rs` owns GitHub sync orchestration, auth/token handling, and persisted sync pause state.
 - `apps/desktop/ui/index.js` edits sync settings and renders sync status.
+- Connector websocket RPCs do not expose sync file or manifest operations.
 
 ## Current Test Coverage
 

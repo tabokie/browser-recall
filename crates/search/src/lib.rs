@@ -436,9 +436,13 @@ fn extract_note_fields(note: &NoteData) -> Vec<String> {
 }
 
 fn extract_slug_from_snapshot_name(name: &str) -> Option<String> {
-    let name = name
+    let basename = Path::new(name)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(name);
+    let name = basename
         .strip_suffix(".md")
-        .or_else(|| name.strip_suffix(".html"))?;
+        .or_else(|| basename.strip_suffix(".html"))?;
     let last_dash = name.rfind('-')?;
     let timestamp = &name[last_dash + 1..];
     if timestamp.len() == 13 && timestamp.chars().all(|char| char.is_ascii_digit()) {

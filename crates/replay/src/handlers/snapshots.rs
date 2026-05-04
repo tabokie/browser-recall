@@ -1,8 +1,9 @@
 use std::future::Future;
 
 use crate::{
-    append_unique, ensure_page, entities::Entity, is_page_eligible, orphan_key, unorphan_key,
-    Context, EntityEffect, EntityMap, ReplayError, SNAPSHOT_PREFIX,
+    append_unique, ensure_page, entities::Entity, is_page_eligible, orphan_key,
+    snapshot_stem_from_path, unorphan_key, Context, EntityEffect, EntityMap, ReplayError,
+    SNAPSHOT_PREFIX,
 };
 
 pub(crate) async fn handle_create_snapshot<L, Fut>(
@@ -33,10 +34,9 @@ where
             page.title = Some(title_value.to_string());
         }
     }
-    let snapshot_suffix = path.strip_prefix("snapshots/").unwrap_or(path);
     append_unique(
         &mut page.child_ids,
-        format!("{SNAPSHOT_PREFIX}{snapshot_suffix}"),
+        format!("{SNAPSHOT_PREFIX}{}", snapshot_stem_from_path(path)),
     );
 
     let mut result = EntityMap::new();
@@ -56,10 +56,7 @@ where
     Fut: Future<Output = Option<Entity>>,
 {
     let (page_key, mut page) = ensure_page(load, url, 0).await?;
-    let snapshot_key = format!(
-        "{SNAPSHOT_PREFIX}{}",
-        path.strip_prefix("snapshots/").unwrap_or(path)
-    );
+    let snapshot_key = format!("{SNAPSHOT_PREFIX}{}", snapshot_stem_from_path(path));
     page.child_ids.retain(|child| child != &snapshot_key);
 
     let mut result = EntityMap::new();
@@ -92,10 +89,7 @@ where
     Fut: Future<Output = Option<Entity>>,
 {
     let (page_key, mut page) = ensure_page(load, url, timestamp).await?;
-    let snapshot_key = format!(
-        "{SNAPSHOT_PREFIX}{}",
-        path.strip_prefix("snapshots/").unwrap_or(path)
-    );
+    let snapshot_key = format!("{SNAPSHOT_PREFIX}{}", snapshot_stem_from_path(path));
     append_unique(&mut page.child_ids, snapshot_key.clone());
 
     let mut result = EntityMap::new();

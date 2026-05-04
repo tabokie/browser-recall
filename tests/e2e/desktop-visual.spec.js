@@ -319,7 +319,7 @@ async function installDesktopBridgeMock(page, options = {}) {
         return changes;
       }
 
-      function readCacheable(key) {
+      function readDesktopValue(key) {
         return clone(stores.session.get(key)) ?? null;
       }
 
@@ -395,7 +395,7 @@ async function installDesktopBridgeMock(page, options = {}) {
               port: setupComplete ? 28471 : null,
               deviceId: setupComplete ? 'visual-device' : null,
               hasToken: setupComplete,
-              pendingEvents: 0,
+              pendingCommands: 0,
               pendingBytes: 0,
               refuseMode: false,
               lastError: null,
@@ -474,10 +474,10 @@ async function installDesktopBridgeMock(page, options = {}) {
           }
           case 'getDirectorySize':
             return { success: true, size: 4096 };
-          case 'readCacheable':
-            return { success: true, value: readCacheable(request.key) };
+          case 'readDesktopValue':
+            return { success: true, value: readDesktopValue(request.key) };
           case 'saveSettingsKey': {
-            const settings = readCacheable('manifest:settings') || {};
+            const settings = readDesktopValue('manifest:settings') || {};
             settings[request.key] = request.value;
             stores.session.set('manifest:settings', settings);
             return { success: true };

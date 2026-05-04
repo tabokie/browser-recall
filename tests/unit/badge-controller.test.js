@@ -8,7 +8,9 @@ const NORMAL_ICON_PATHS = {
   128: 'icons/icon128.png',
 };
 
-function createApi({ activeTab = { id: 7, url: 'https://example.test/' } } = {}) {
+function createApi({
+  activeTab = { id: 7, url: 'https://example.test/' },
+} = {}) {
   return {
     action: {
       setBadgeBackgroundColor: vi.fn(async () => {}),
@@ -29,7 +31,7 @@ function createApi({ activeTab = { id: 7, url: 'https://example.test/' } } = {})
 }
 
 function createController(overrides = {}) {
-  const api = overrides.api || createApi();
+  const api = overrides.api || createApi({ activeTab: overrides.activeTab });
   return {
     api,
     controller: createBadgeController({
@@ -38,12 +40,13 @@ function createController(overrides = {}) {
       logDebug: () => {},
       normalIconPaths: NORMAL_ICON_PATHS,
       syncDesktopConnectorPauseState: vi.fn(),
-      readCacheable: overrides.readCacheable || vi.fn(async () => null),
+      readDesktopValue: overrides.readDesktopValue || vi.fn(async () => null),
       generateSlugFromUrl: (url) => new URL(url).hostname,
       pageKey: (slug) => `page:${slug}`,
       notePrefix: 'note:',
       snapshotPrefix: 'snapshot:',
       listPrefix: 'list:',
+      resolveTabUrl: overrides.resolveTabUrl,
     }),
   };
 }
@@ -124,7 +127,7 @@ describe('badge controller', () => {
 
   it('applies page marker color from page relations only when connected', async () => {
     const { api, controller } = createController({
-      readCacheable: vi.fn(async () => ({
+      readDesktopValue: vi.fn(async () => ({
         childIds: ['note:1'],
         parentIds: ['list:1'],
       })),
@@ -146,9 +149,73 @@ describe('badge controller', () => {
     });
   });
 
+  it('uses resolved tab identity before applying a Chrome-style page marker', async () => {
+    const readDesktopValue = vi.fn(async (key) =>
+      key === 'page:original.example.test'
+        ? {
+            childIds: [],
+            parentIds: ['list:1'],
+          }
+        : null,
+    );
+    const { api, controller } = createController({
+      activeTab: {
+        id: 22,
+        url: 'https://mutated.example.test/page?tab=comments',
+      },
+      readDesktopValue,
+      resolveTabUrl: vi.fn(() => 'https://original.example.test/page'),
+    });
+    await controller.setConnectorState({
+      state: 'connected',
+      deviceId: 'device-1',
+    });
+
+    await controller.refreshActiveTabBadge();
+
+    expect(readDesktopValue).toHaveBeenCalledWith('page:original.example.test');
+    expect(api.action.setBadgeBackgroundColor).toHaveBeenCalledWith({
+      color: '#4CAF50',
+      tabId: 22,
+    });
+    expect(api.action.setBadgeText).toHaveBeenCalledWith({
+      text: ' ',
+      tabId: 22,
+    });
+    expect(api.action.setIcon).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        imageData: expect.anything(),
+        tabId: 22,
+      }),
+    );
+  });
+
+  it('refreshes the active page marker after clearing the global connected badge', async () => {
+    const { api, controller } = createController({
+      readDesktopValue: vi.fn(async () => ({
+        childIds: [],
+        parentIds: ['list:1'],
+      })),
+    });
+
+    await controller.setConnectorState({
+      state: 'connected',
+      deviceId: 'device-1',
+    });
+
+    const globalClearIndex = api.action.setBadgeText.mock.calls.findIndex(
+      ([details]) => details.text === '' && details.tabId == null,
+    );
+    const pageMarkerIndex = api.action.setBadgeText.mock.calls.findIndex(
+      ([details]) => details.text === ' ' && details.tabId === 7,
+    );
+    expect(globalClearIndex).toBeGreaterThanOrEqual(0);
+    expect(pageMarkerIndex).toBeGreaterThan(globalClearIndex);
+  });
+
   it('keeps the snapshot marker for visible snapshot refs without backing files', async () => {
     const { api, controller } = createController({
-      readCacheable: vi.fn(async () => ({
+      readDesktopValue: vi.fn(async () => ({
         childIds: ['snapshot:example.test-1710000000000'],
         parentIds: [],
       })),
@@ -168,7 +235,7 @@ describe('badge controller', () => {
 
   it('uses combined marker color for a list and visible snapshot cleanup ref', async () => {
     const { api, controller } = createController({
-      readCacheable: vi.fn(async () => ({
+      readDesktopValue: vi.fn(async () => ({
         childIds: ['snapshot:example.test-1710000000000'],
         parentIds: ['list:1'],
       })),
@@ -222,7 +289,7 @@ describe('badge controller', () => {
     try {
       const { api, controller } = createController({
         capabilities: { usesIconPageMarker: true },
-        readCacheable: vi.fn(async () => ({
+        readDesktopValue: vi.fn(async () => ({
           childIds: ['note:1'],
           parentIds: [],
         })),

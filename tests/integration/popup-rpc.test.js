@@ -171,7 +171,6 @@ describe.sequential('popup rpc integration', () => {
           action: 'visit_page',
           url,
           title: 'Popup Summary',
-          checkpoint: true,
         },
       }),
     );
@@ -201,8 +200,8 @@ describe.sequential('popup rpc integration', () => {
           action: 'pin_to_list',
           name: 'Reading',
           listOwner: deviceId,
-          items: [url],
-          titles: { [url]: 'Popup Summary' },
+          urls: [url],
+          titles: ['Popup Summary'],
         },
       }),
     );

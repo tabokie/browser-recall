@@ -118,7 +118,7 @@ pub struct Context {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "action", rename_all = "snake_case")]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LogEntry {
     VisitPage {
         timestamp: i64,
@@ -127,8 +127,6 @@ pub enum LogEntry {
         title: Option<String>,
         #[serde(default, rename = "referrerUrl")]
         referrer_url: Option<String>,
-        #[serde(default)]
-        checkpoint: bool,
     },
     LeavePage {
         timestamp: i64,
@@ -163,9 +161,9 @@ pub enum LogEntry {
         name: String,
         #[serde(rename = "listOwner")]
         list_owner: String,
-        items: Vec<String>,
+        urls: Vec<String>,
         #[serde(default)]
-        titles: Option<BTreeMap<String, String>>,
+        titles: Option<Vec<Option<String>>>,
         #[serde(default)]
         source: Option<String>,
     },
@@ -174,7 +172,7 @@ pub enum LogEntry {
         name: String,
         #[serde(rename = "listOwner")]
         list_owner: String,
-        items: Vec<String>,
+        urls: Vec<String>,
     },
     AddRule {
         timestamp: i64,
@@ -328,12 +326,14 @@ impl LogEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplayError {
+    InvalidEntry(String),
     InvalidUrl(String),
 }
 
 impl fmt::Display for ReplayError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidEntry(message) => write!(f, "invalid log entry: {message}"),
             Self::InvalidUrl(url) => write!(f, "invalid url: {url}"),
         }
     }
@@ -366,14 +366,12 @@ where
             url,
             title,
             referrer_url,
-            checkpoint,
         } => {
             handle_visit_page(
                 timestamp,
                 &url,
                 title.as_deref(),
                 referrer_url.as_deref(),
-                checkpoint,
                 &load,
                 &context,
             )
@@ -417,7 +415,7 @@ where
             timestamp,
             name,
             list_owner,
-            items,
+            urls,
             titles,
             source,
         } => {
@@ -425,7 +423,7 @@ where
                 timestamp,
                 &name,
                 &list_owner,
-                &items,
+                &urls,
                 titles.as_ref(),
                 source.as_deref(),
                 &load,
@@ -437,8 +435,8 @@ where
             timestamp,
             name,
             list_owner,
-            items,
-        } => handle_unpin_from_list(timestamp, &name, &list_owner, &items, &load, &context).await,
+            urls,
+        } => handle_unpin_from_list(timestamp, &name, &list_owner, &urls, &load, &context).await,
         LogEntry::AddRule {
             timestamp,
             name,
@@ -868,10 +866,18 @@ pub(crate) fn append_unique(items: &mut Vec<String>, value: String) {
 }
 
 pub(crate) fn note_slug_from_path(path: &str) -> &str {
-    path.strip_prefix("notes/")
-        .unwrap_or(path)
+    path.strip_prefix("objects/notes/")
+        .expect("note path must start with objects/notes/")
         .strip_suffix(".json")
-        .unwrap_or(path)
+        .expect("note path must end with .json")
+}
+
+pub(crate) fn snapshot_stem_from_path(path: &str) -> &str {
+    path.strip_prefix("objects/snapshots/")
+        .expect("snapshot path must start with objects/snapshots/")
+        .rsplit_once('/')
+        .map(|(_, stem)| stem)
+        .expect("snapshot path must include shard segment")
 }
 
 pub(crate) fn entity_slug(key: &str) -> &str {
@@ -882,7 +888,7 @@ pub(crate) fn is_system_list(key: &str) -> bool {
     key.starts_with("list:system/")
 }
 
-pub(crate) fn is_page_eligible(page: &PageEntity) -> bool {
+pub fn page_retains_checkpoint(page: &PageEntity) -> bool {
     page.parent_ids.iter().any(|id| id.starts_with("list:"))
         || page
             .child_ids
@@ -893,6 +899,10 @@ pub(crate) fn is_page_eligible(page: &PageEntity) -> bool {
             .as_deref()
             .is_some_and(|title| !title.is_empty())
         || page.likes.unwrap_or(0) != 0
+}
+
+pub(crate) fn is_page_eligible(page: &PageEntity) -> bool {
+    page_retains_checkpoint(page)
 }
 
 pub(crate) fn append_capped(items: &mut Vec<String>, value: String) {

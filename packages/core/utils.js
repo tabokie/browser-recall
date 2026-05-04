@@ -13,20 +13,11 @@ export function isInternalBrowserUrl(url) {
   );
 }
 
-// Unified cache read: session cache → background readCacheable fallback.
+// Desktop-backed entity read through the background bridge.
 // Keys use entity key format: 'manifest:settings', 'manifest:orphaned', 'list:reading', etc.
-export async function readCacheable(key, includeDeleted = false) {
-  try {
-    const cached = await chrome.storage.session.get([key]);
-    if (key in cached) {
-      if (!includeDeleted && cached[key]?.deleted) return null;
-      return cached[key];
-    }
-  } catch (e) {
-    logDebug('[readCacheable] session cache error:', e.message);
-  }
+export async function readDesktopValue(key, includeDeleted = false) {
   const resp = await chrome.runtime.sendMessage({
-    action: 'readCacheable',
+    action: 'readDesktopValue',
     key,
     includeDeleted,
   });
@@ -38,7 +29,7 @@ export async function readCacheable(key, includeDeleted = false) {
 
 // Read a settings sub-key from the unified settings entity.
 export async function loadSettingsValue(key, defaultValue) {
-  const settings = await readCacheable('manifest:settings');
+  const settings = await readDesktopValue('manifest:settings');
   const v = settings?.[key];
   return v !== undefined ? v : defaultValue;
 }
@@ -52,7 +43,7 @@ export async function sendAction(msg) {
   return resp ?? {};
 }
 
-// Save a single key to settings.json via background, which updates session cache + buffers write
+// Save a single settings key through background; Desktop applies the write.
 export async function saveSettingsValue(key, value) {
   try {
     await chrome.runtime.sendMessage({ action: 'saveSettingsKey', key, value });

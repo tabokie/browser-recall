@@ -1,16 +1,24 @@
 use browser_recall_replay::entities::{
     Entity, ListEntity, ListOrderManifest, NameToIdManifest, NoteEntity, OrphanedManifest,
-    PageEntity, SettingsEntity, TreeNode,
+    PageEntity, SettingsEntity,
 };
-use browser_recall_replay::EntityEffect;
+use browser_recall_replay::{page_retains_checkpoint, EntityEffect, LogEntry};
 use chrono::{Local, TimeZone};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::{mpsc, oneshot, Mutex};
+use tracing::warn;
+
+const REPLAY_PROGRESS_FILE: &str = "replay-progress.json";
+const REPLAY_PROGRESS_MIN_STEP_MS: i64 = 15 * 60 * 1000;
+static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
 pub struct Storage {
@@ -20,8 +28,29 @@ pub struct Storage {
 #[derive(Debug)]
 struct StorageInner {
     root: PathBuf,
-    cache: Mutex<EntityCache>,
+    cache: StdMutex<EntityCache>,
+    write_gate: Mutex<()>,
+    checkpoint_tx: mpsc::Sender<CheckpointWork>,
+    checkpoint_error: StdMutex<Option<String>>,
 }
+
+pub type CheckpointBatch = BTreeMap<String, EntityEffect>;
+pub type ReplayProgress = BTreeMap<String, i64>;
+
+#[derive(Debug)]
+pub struct CheckpointBatchWork {
+    pub effects: CheckpointBatch,
+    pub replay_progress: ReplayProgress,
+}
+
+#[derive(Debug)]
+enum CheckpointWork {
+    Batch(CheckpointBatchWork),
+    Flush(oneshot::Sender<()>),
+}
+
+#[derive(Debug)]
+pub struct CheckpointPermit(mpsc::OwnedPermit<CheckpointWork>);
 
 #[derive(Debug)]
 struct EntityCache {
@@ -58,11 +87,6 @@ impl EntityCache {
         }
     }
 
-    fn remove(&mut self, key: &str) {
-        self.entries.remove(key);
-        self.order.retain(|entry| entry != key);
-    }
-
     fn touch(&mut self, key: &str) {
         self.order.retain(|entry| entry != key);
         self.order.push_back(key.to_string());
@@ -71,25 +95,35 @@ impl EntityCache {
 
 impl Storage {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self {
+        let (checkpoint_tx, checkpoint_rx) = mpsc::channel(64);
+        let storage = Self {
             inner: Arc::new(StorageInner {
                 root: root.into(),
-                cache: Mutex::new(EntityCache::new(5_000)),
+                cache: StdMutex::new(EntityCache::new(5_000)),
+                write_gate: Mutex::new(()),
+                checkpoint_tx,
+                checkpoint_error: StdMutex::new(None),
             }),
-        }
+        };
+        tokio::spawn(checkpoint_worker(storage.clone(), checkpoint_rx));
+        storage
     }
 
     pub fn root(&self) -> &Path {
         &self.inner.root
     }
 
+    pub async fn write_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.inner.write_gate.lock().await
+    }
+
     pub async fn ensure_layout(&self, device_id: &str) -> io::Result<()> {
-        fs::create_dir_all(self.root().join("pages")).await?;
-        fs::create_dir_all(self.root().join("lists")).await?;
-        fs::create_dir_all(self.root().join("manifest")).await?;
-        fs::create_dir_all(self.root().join("data").join("notes")).await?;
-        fs::create_dir_all(self.root().join("data").join("logs").join(device_id)).await?;
-        fs::create_dir_all(self.root().join("data").join("snapshots")).await?;
+        fs::create_dir_all(self.root().join("views").join("pages")).await?;
+        fs::create_dir_all(self.root().join("views").join("lists")).await?;
+        fs::create_dir_all(self.root().join("views").join("manifest")).await?;
+        fs::create_dir_all(self.root().join("objects").join("notes")).await?;
+        fs::create_dir_all(self.root().join("objects").join("snapshots")).await?;
+        fs::create_dir_all(self.root().join("logs").join(device_id)).await?;
         Ok(())
     }
 
@@ -136,9 +170,20 @@ impl Storage {
         }
     }
 
+    pub async fn load_entity_coordinated(&self, key: &str) -> io::Result<Option<Entity>> {
+        if let Some(entity) = self.cache_get(key) {
+            return Ok(entity);
+        }
+        let _guard = self.write_guard().await;
+        self.load_entity(key).await
+    }
+
     pub async fn load_page(&self, slug: &str) -> io::Result<Option<PageEntity>> {
-        if let Some(Some(Entity::Page(page))) = self.cache_get(&format!("page:{slug}")) {
-            return Ok(Some(page));
+        if let Some(cached) = self.cache_get(&format!("page:{slug}")) {
+            return Ok(match cached {
+                Some(Entity::Page(page)) => Some(page),
+                _ => None,
+            });
         }
         let path = self.page_path(slug);
         if !path.exists() {
@@ -151,45 +196,164 @@ impl Storage {
         Ok(Some(page))
     }
 
-    pub async fn save_entity(&self, key: &str, entity: &Entity) -> io::Result<()> {
+    pub async fn load_page_coordinated(&self, slug: &str) -> io::Result<Option<PageEntity>> {
+        Ok(
+            match self
+                .load_entity_coordinated(&format!("page:{slug}"))
+                .await?
+            {
+                Some(Entity::Page(page)) => Some(page),
+                _ => None,
+            },
+        )
+    }
+
+    async fn write_entity_checkpoint(&self, key: &str, entity: &Entity) -> io::Result<()> {
         match entity {
-            Entity::Page(page) => {
-                self.save_page(key.strip_prefix("page:").unwrap_or(&page.slug), page)
-                    .await
-            }
+            Entity::Page(page) => self.persist_page_checkpoint_effect(key, page).await,
             Entity::Note(note) => {
-                self.save_note(key.strip_prefix("note:").unwrap_or(&note.slug), note)
+                self.write_note_checkpoint(key.strip_prefix("note:").unwrap_or(&note.slug), note)
                     .await
             }
             Entity::List(list) => {
-                self.save_list(key.strip_prefix("list:").unwrap_or(&list.slug), list)
+                self.write_list_checkpoint(key.strip_prefix("list:").unwrap_or(&list.slug), list)
                     .await
             }
-            Entity::Settings(settings) => self.save_settings(settings).await,
-            Entity::NameToId(manifest) => self.save_name_to_id(manifest).await,
-            Entity::ListOrder(manifest) => self.save_list_order(manifest).await,
-            Entity::Orphaned(manifest) => self.save_orphaned(manifest).await,
+            Entity::Settings(settings) => self.write_settings_checkpoint(settings).await,
+            Entity::NameToId(manifest) => self.write_name_to_id_checkpoint(manifest).await,
+            Entity::ListOrder(manifest) => self.write_list_order_checkpoint(manifest).await,
+            Entity::Orphaned(manifest) => self.write_orphaned_checkpoint(manifest).await,
         }
     }
 
-    pub async fn apply_effect(&self, key: &str, effect: &EntityEffect) -> io::Result<()> {
+    pub fn apply_effect_to_cache(&self, key: &str, effect: &EntityEffect) {
         match effect {
-            EntityEffect::Upsert(entity) => self.save_entity(key, entity).await,
-            EntityEffect::Delete => self.delete_entity(key).await,
+            EntityEffect::Upsert(entity) => self.cache_put(key.to_string(), Some(entity.clone())),
+            EntityEffect::Delete => self.cache_put(key.to_string(), None),
         }
+    }
+
+    pub async fn persist_checkpoint_effect(
+        &self,
+        key: &str,
+        effect: &EntityEffect,
+    ) -> io::Result<()> {
+        match effect {
+            EntityEffect::Upsert(entity) => self.write_entity_checkpoint(key, entity).await,
+            EntityEffect::Delete => self.delete_checkpoint_entity(key).await,
+        }
+    }
+
+    pub async fn reserve_checkpoint_slot(&self) -> io::Result<CheckpointPermit> {
+        self.check_checkpoint_health()?;
+        self.inner
+            .checkpoint_tx
+            .clone()
+            .reserve_owned()
+            .await
+            .map(CheckpointPermit)
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "checkpoint worker stopped"))
+    }
+
+    pub fn send_reserved_checkpoint_work(
+        permit: CheckpointPermit,
+        effects: CheckpointBatch,
+        replay_progress: ReplayProgress,
+    ) {
+        permit.0.send(CheckpointWork::Batch(CheckpointBatchWork {
+            effects,
+            replay_progress,
+        }));
+    }
+
+    pub async fn flush_checkpoints(&self) -> io::Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .checkpoint_tx
+            .send(CheckpointWork::Flush(tx))
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "checkpoint worker stopped"))?;
+        rx.await
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "checkpoint worker stopped"))?;
+        self.check_checkpoint_health()
+    }
+
+    pub async fn load_replay_progress(&self) -> io::Result<ReplayProgress> {
+        Ok(load_json(self.manifest_path(REPLAY_PROGRESS_FILE))
+            .await?
+            .unwrap_or_default())
+    }
+
+    async fn save_replay_progress(&self, replay_progress: &ReplayProgress) -> io::Result<()> {
+        save_json(self.manifest_path(REPLAY_PROGRESS_FILE), replay_progress).await
+    }
+
+    pub async fn load_log_entries_after_replay_progress(
+        &self,
+    ) -> io::Result<Vec<(String, LogEntry)>> {
+        let replay_progress = self.load_replay_progress().await?;
+        let logs_root = self.root().join("logs");
+        let mut result = Vec::new();
+        let mut devices = match fs::read_dir(&logs_root).await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(result),
+            Err(error) => return Err(error),
+        };
+
+        while let Some(device_entry) = devices.next_entry().await? {
+            if !device_entry.file_type().await?.is_dir() {
+                continue;
+            }
+            let Some(device_id) = device_entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            let progress = replay_progress.get(&device_id).copied().unwrap_or(i64::MIN);
+            let mut files = fs::read_dir(device_entry.path()).await?;
+            while let Some(file_entry) = files.next_entry().await? {
+                if !file_entry.file_type().await?.is_file() {
+                    continue;
+                }
+                let Some(name) = file_entry.file_name().to_str().map(str::to_string) else {
+                    continue;
+                };
+                if !name.ends_with(".jsonl") {
+                    continue;
+                }
+                let raw = fs::read_to_string(file_entry.path()).await?;
+                for (index, line) in raw.lines().enumerate() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    let entry: LogEntry = serde_json::from_str(line).map_err(|error| {
+                        invalid_data(format!(
+                            "{}:{}: {error}",
+                            file_entry.path().display(),
+                            index + 1
+                        ))
+                    })?;
+                    if entry.timestamp() > progress {
+                        result.push((device_id.clone(), entry));
+                    }
+                }
+            }
+        }
+
+        result.sort_by(|left, right| left.1.timestamp().cmp(&right.1.timestamp()));
+        Ok(result)
     }
 
     pub async fn save_page(&self, slug: &str, page: &PageEntity) -> io::Result<()> {
-        fs::create_dir_all(self.root().join("pages")).await?;
-        let payload = serde_json::to_vec_pretty(page).map_err(invalid_data)?;
-        fs::write(self.page_path(slug), payload).await?;
+        self.write_page_checkpoint(slug, page).await?;
         self.cache_put(format!("page:{slug}"), Some(Entity::Page(page.clone())));
         Ok(())
     }
 
     pub async fn load_note(&self, slug: &str) -> io::Result<Option<NoteEntity>> {
-        if let Some(Some(Entity::Note(note))) = self.cache_get(&format!("note:{slug}")) {
-            return Ok(Some(note));
+        if let Some(cached) = self.cache_get(&format!("note:{slug}")) {
+            return Ok(match cached {
+                Some(Entity::Note(note)) => Some(note),
+                _ => None,
+            });
         }
         let path = self.note_path(slug);
         if !path.exists() {
@@ -202,17 +366,30 @@ impl Storage {
         Ok(Some(note))
     }
 
+    pub async fn load_note_coordinated(&self, slug: &str) -> io::Result<Option<NoteEntity>> {
+        Ok(
+            match self
+                .load_entity_coordinated(&format!("note:{slug}"))
+                .await?
+            {
+                Some(Entity::Note(note)) => Some(note),
+                _ => None,
+            },
+        )
+    }
+
     pub async fn save_note(&self, slug: &str, note: &NoteEntity) -> io::Result<()> {
-        fs::create_dir_all(self.root().join("data").join("notes")).await?;
-        let payload = serde_json::to_vec_pretty(note).map_err(invalid_data)?;
-        fs::write(self.note_path(slug), payload).await?;
+        self.write_note_checkpoint(slug, note).await?;
         self.cache_put(format!("note:{slug}"), Some(Entity::Note(note.clone())));
         Ok(())
     }
 
     pub async fn load_list(&self, slug: &str) -> io::Result<Option<ListEntity>> {
-        if let Some(Some(Entity::List(list))) = self.cache_get(&format!("list:{slug}")) {
-            return Ok(Some(list));
+        if let Some(cached) = self.cache_get(&format!("list:{slug}")) {
+            return Ok(match cached {
+                Some(Entity::List(list)) => Some(list),
+                _ => None,
+            });
         }
         let path = self.list_path(slug);
         if !path.exists() {
@@ -225,21 +402,31 @@ impl Storage {
         Ok(Some(list))
     }
 
+    pub async fn load_list_coordinated(&self, slug: &str) -> io::Result<Option<ListEntity>> {
+        Ok(
+            match self
+                .load_entity_coordinated(&format!("list:{slug}"))
+                .await?
+            {
+                Some(Entity::List(list)) => Some(list),
+                _ => None,
+            },
+        )
+    }
+
     pub async fn save_list(&self, slug: &str, list: &ListEntity) -> io::Result<()> {
-        let path = self.list_path(slug);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).await?;
-        }
-        let payload = serde_json::to_vec_pretty(list).map_err(invalid_data)?;
-        fs::write(path, payload).await?;
+        self.write_list_checkpoint(slug, list).await?;
         self.cache_put(format!("list:{slug}"), Some(Entity::List(list.clone())));
         Ok(())
     }
 
     pub async fn load_settings(&self) -> io::Result<Option<SettingsEntity>> {
         let key = "manifest:settings";
-        if let Some(Some(Entity::Settings(settings))) = self.cache_get(key) {
-            return Ok(Some(settings));
+        if let Some(cached) = self.cache_get(key) {
+            return Ok(match cached {
+                Some(Entity::Settings(settings)) => Some(settings),
+                _ => None,
+            });
         }
         let value = load_json(self.manifest_path("settings.json")).await?;
         self.cache_put(key.to_string(), value.clone().map(Entity::Settings));
@@ -247,7 +434,7 @@ impl Storage {
     }
 
     pub async fn save_settings(&self, settings: &SettingsEntity) -> io::Result<()> {
-        save_json(self.manifest_path("settings.json"), settings).await?;
+        self.write_settings_checkpoint(settings).await?;
         self.cache_put(
             "manifest:settings".to_string(),
             Some(Entity::Settings(settings.clone())),
@@ -257,8 +444,11 @@ impl Storage {
 
     pub async fn load_name_to_id(&self) -> io::Result<Option<NameToIdManifest>> {
         let key = "manifest:name-to-id";
-        if let Some(Some(Entity::NameToId(manifest))) = self.cache_get(key) {
-            return Ok(Some(manifest));
+        if let Some(cached) = self.cache_get(key) {
+            return Ok(match cached {
+                Some(Entity::NameToId(manifest)) => Some(manifest),
+                _ => None,
+            });
         }
         let value = load_json(self.manifest_path("list-name-to-id.json")).await?;
         self.cache_put(key.to_string(), value.clone().map(Entity::NameToId));
@@ -266,7 +456,7 @@ impl Storage {
     }
 
     pub async fn save_name_to_id(&self, manifest: &NameToIdManifest) -> io::Result<()> {
-        save_json(self.manifest_path("list-name-to-id.json"), manifest).await?;
+        self.write_name_to_id_checkpoint(manifest).await?;
         self.cache_put(
             "manifest:name-to-id".to_string(),
             Some(Entity::NameToId(manifest.clone())),
@@ -276,16 +466,28 @@ impl Storage {
 
     pub async fn load_list_order(&self) -> io::Result<Option<ListOrderManifest>> {
         let key = "manifest:list-order";
-        if let Some(Some(Entity::ListOrder(manifest))) = self.cache_get(key) {
-            return Ok(Some(manifest));
+        if let Some(cached) = self.cache_get(key) {
+            return Ok(match cached {
+                Some(Entity::ListOrder(manifest)) => Some(manifest),
+                _ => None,
+            });
         }
         let value = load_json(self.manifest_path("list-order.json")).await?;
         self.cache_put(key.to_string(), value.clone().map(Entity::ListOrder));
         Ok(value)
     }
 
+    pub async fn load_list_order_coordinated(&self) -> io::Result<Option<ListOrderManifest>> {
+        Ok(
+            match self.load_entity_coordinated("manifest:list-order").await? {
+                Some(Entity::ListOrder(manifest)) => Some(manifest),
+                _ => None,
+            },
+        )
+    }
+
     pub async fn save_list_order(&self, manifest: &ListOrderManifest) -> io::Result<()> {
-        save_json(self.manifest_path("list-order.json"), manifest).await?;
+        self.write_list_order_checkpoint(manifest).await?;
         self.cache_put(
             "manifest:list-order".to_string(),
             Some(Entity::ListOrder(manifest.clone())),
@@ -295,8 +497,11 @@ impl Storage {
 
     pub async fn load_orphaned(&self) -> io::Result<Option<OrphanedManifest>> {
         let key = "manifest:orphaned";
-        if let Some(Some(Entity::Orphaned(manifest))) = self.cache_get(key) {
-            return Ok(Some(manifest));
+        if let Some(cached) = self.cache_get(key) {
+            return Ok(match cached {
+                Some(Entity::Orphaned(manifest)) => Some(manifest),
+                _ => None,
+            });
         }
         let value = load_json(self.manifest_path("orphaned.json")).await?;
         self.cache_put(key.to_string(), value.clone().map(Entity::Orphaned));
@@ -304,7 +509,7 @@ impl Storage {
     }
 
     pub async fn save_orphaned(&self, manifest: &OrphanedManifest) -> io::Result<()> {
-        save_json(self.manifest_path("orphaned.json"), manifest).await?;
+        self.write_orphaned_checkpoint(manifest).await?;
         self.cache_put(
             "manifest:orphaned".to_string(),
             Some(Entity::Orphaned(manifest.clone())),
@@ -312,32 +517,22 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn delete_entity(&self, key: &str) -> io::Result<()> {
+    async fn delete_checkpoint_entity(&self, key: &str) -> io::Result<()> {
         if let Some(slug) = key.strip_prefix("page:") {
-            remove_if_exists(self.page_path(slug)).await?;
-            self.cache_remove(key);
-            return Ok(());
+            return remove_if_exists(self.page_path(slug)).await;
         }
         if let Some(slug) = key.strip_prefix("note:") {
-            self.remove_note_references(slug).await?;
-            remove_if_exists(self.note_path(slug)).await?;
-            self.cache_remove(key);
-            return Ok(());
+            return remove_if_exists(self.note_path(slug)).await;
         }
         if let Some(slug) = key.strip_prefix("list:") {
-            self.remove_list_references(slug).await?;
-            remove_if_exists(self.list_path(slug)).await?;
-            self.cache_remove(key);
-            return Ok(());
+            return remove_if_exists(self.list_path(slug)).await;
         }
         if let Some(snapshot_stem) = key.strip_prefix("snapshot:") {
             if let Some((slug, timestamp)) = split_snapshot_stem(snapshot_stem) {
-                self.delete_snapshot(&slug, timestamp).await?;
+                remove_if_exists(self.snapshot_html_path(&slug, timestamp)).await?;
+                remove_if_exists(self.snapshot_markdown_path(&slug, timestamp)).await?;
             }
-            self.cache_remove(key);
-            return Ok(());
         }
-        self.cache_remove(key);
         Ok(())
     }
 
@@ -347,7 +542,7 @@ impl Storage {
         timestamp: i64,
         entry: &Value,
     ) -> io::Result<PathBuf> {
-        let directory = self.root().join("data").join("logs").join(device_id);
+        let directory = self.root().join("logs").join(device_id);
         fs::create_dir_all(&directory).await?;
         let filename = format!("{}.jsonl", local_date(timestamp));
         let path = directory.join(filename);
@@ -369,9 +564,14 @@ impl Storage {
         timestamp: i64,
         html: &str,
     ) -> io::Result<PathBuf> {
-        let directory = self.root().join("data").join("snapshots");
+        let stem = snapshot_stem(slug, timestamp);
+        let directory = self
+            .root()
+            .join("objects")
+            .join("snapshots")
+            .join(shard_for(&stem));
         fs::create_dir_all(&directory).await?;
-        let path = directory.join(format!("{slug}-{timestamp}.html"));
+        let path = directory.join(format!("{stem}.html"));
         fs::write(&path, html.as_bytes()).await?;
         Ok(path)
     }
@@ -382,9 +582,14 @@ impl Storage {
         timestamp: i64,
         markdown: &str,
     ) -> io::Result<PathBuf> {
-        let directory = self.root().join("data").join("snapshots");
+        let stem = snapshot_stem(slug, timestamp);
+        let directory = self
+            .root()
+            .join("objects")
+            .join("snapshots")
+            .join(shard_for(&stem));
         fs::create_dir_all(&directory).await?;
-        let path = directory.join(format!("{slug}-{timestamp}.md"));
+        let path = directory.join(format!("{stem}.md"));
         fs::write(&path, markdown.as_bytes()).await?;
         Ok(path)
     }
@@ -403,6 +608,11 @@ impl Storage {
 
     pub fn snapshot_html_file_path(&self, slug: &str, timestamp: i64) -> PathBuf {
         self.snapshot_html_path(slug, timestamp)
+    }
+
+    pub fn snapshot_sidecar_relative_path(&self, slug: &str, timestamp: i64) -> String {
+        let stem = snapshot_stem(slug, timestamp);
+        format!("objects/snapshots/{}/{}", shard_for(&stem), stem)
     }
 
     pub async fn delete_snapshot(&self, slug: &str, timestamp: i64) -> io::Result<()> {
@@ -477,7 +687,7 @@ impl Storage {
             chrono::Datelike::day(&cutoff)
         );
 
-        let logs_dir = self.root().join("data").join("logs").join(device_id);
+        let logs_dir = self.root().join("logs").join(device_id);
         let mut log_entries = match fs::read_dir(&logs_dir).await {
             Ok(entries) => Some(entries),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
@@ -499,13 +709,13 @@ impl Storage {
                     continue;
                 }
                 files.push((
-                    format!("data/logs/{device_id}/{name}"),
+                    format!("logs/{device_id}/{name}"),
                     fs::read_to_string(entry.path()).await?,
                 ));
             }
         }
 
-        let notes_dir = self.root().join("data").join("notes");
+        let notes_dir = self.root().join("objects").join("notes");
         let mut note_entries = match fs::read_dir(&notes_dir).await {
             Ok(entries) => Some(entries),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
@@ -523,7 +733,7 @@ impl Storage {
                     continue;
                 }
                 files.push((
-                    format!("data/notes/{name}"),
+                    format!("objects/notes/{name}"),
                     fs::read_to_string(entry.path()).await?,
                 ));
             }
@@ -540,6 +750,7 @@ impl Storage {
             }
             fs::write(path, content).await?;
         }
+        self.clear_cache();
         Ok(())
     }
 
@@ -547,7 +758,7 @@ impl Storage {
         &self,
         include_sizes: bool,
     ) -> io::Result<(Vec<String>, Option<BTreeMap<String, u64>>)> {
-        let logs_root = self.root().join("data").join("logs");
+        let logs_root = self.root().join("logs");
         let mut names = BTreeMap::new();
         let mut devices = match fs::read_dir(&logs_root).await {
             Ok(entries) => entries,
@@ -584,7 +795,7 @@ impl Storage {
     }
 
     pub async fn load_history_batch(&self, filenames: &[String]) -> io::Result<Vec<Value>> {
-        let logs_root = self.root().join("data").join("logs");
+        let logs_root = self.root().join("logs");
         let wanted: std::collections::HashSet<&str> =
             filenames.iter().map(String::as_str).collect();
         let mut results = Vec::new();
@@ -640,34 +851,71 @@ impl Storage {
     }
 
     pub async fn load_all_pages(&self) -> io::Result<BTreeMap<String, PageEntity>> {
-        let pages_dir = self.root().join("pages");
+        let pages_dir = self.root().join("views").join("pages");
         let mut result = BTreeMap::new();
-        let mut entries = match fs::read_dir(&pages_dir).await {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(result),
-            Err(error) => return Err(error),
-        };
-
-        while let Some(entry) = entries.next_entry().await? {
-            if !entry.file_type().await?.is_file() {
-                continue;
+        match fs::read_dir(&pages_dir).await {
+            Ok(mut entries) => {
+                while let Some(entry) = entries.next_entry().await? {
+                    if !entry.file_type().await?.is_dir() {
+                        continue;
+                    }
+                    let mut files = fs::read_dir(entry.path()).await?;
+                    while let Some(file) = files.next_entry().await? {
+                        if !file.file_type().await?.is_file() {
+                            continue;
+                        }
+                        let Some(name) = file.file_name().to_str().map(str::to_string) else {
+                            continue;
+                        };
+                        let Some(slug) = name.strip_suffix(".json").map(str::to_string) else {
+                            continue;
+                        };
+                        let raw = fs::read_to_string(file.path()).await?;
+                        let page: PageEntity = serde_json::from_str(&raw).map_err(invalid_data)?;
+                        result.insert(slug, page);
+                    }
+                }
             }
-            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            let Some(slug) = name.strip_suffix(".json").map(str::to_string) else {
-                continue;
-            };
-            let raw = fs::read_to_string(entry.path()).await?;
-            let page: PageEntity = serde_json::from_str(&raw).map_err(invalid_data)?;
-            result.insert(slug, page);
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+
+        for (slug, cached) in self.cached_page_overlay() {
+            match cached {
+                Some(page) => {
+                    result.insert(slug, page);
+                }
+                None => {
+                    result.remove(&slug);
+                }
+            }
         }
 
         Ok(result)
     }
 
+    fn cached_page_overlay(&self) -> BTreeMap<String, Option<PageEntity>> {
+        let cache = self
+            .inner
+            .cache
+            .lock()
+            .expect("storage cache mutex poisoned");
+        cache
+            .entries
+            .iter()
+            .filter_map(|(key, value)| {
+                let slug = key.strip_prefix("page:")?;
+                let page = match value {
+                    Some(Entity::Page(page)) => Some(page.clone()),
+                    _ => None,
+                };
+                Some((slug.to_string(), page))
+            })
+            .collect()
+    }
+
     pub async fn load_all_lists(&self) -> io::Result<BTreeMap<String, ListEntity>> {
-        let lists_dir = self.root().join("lists");
+        let lists_dir = self.root().join("views").join("lists");
         let mut result = BTreeMap::new();
         let mut entries = match fs::read_dir(&lists_dir).await {
             Ok(entries) => entries,
@@ -693,51 +941,6 @@ impl Storage {
         Ok(result)
     }
 
-    async fn remove_note_references(&self, slug: &str) -> io::Result<()> {
-        let note_key = format!("note:{slug}");
-        self.remove_page_child_references(&note_key).await?;
-
-        for (list_slug, mut list) in self.load_all_lists().await? {
-            let original_len = list.pins.len();
-            list.pins.retain(|pin| pin.id != note_key);
-            if list.pins.len() != original_len {
-                self.save_list(&list_slug, &list).await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn remove_list_references(&self, slug: &str) -> io::Result<()> {
-        let list_key = format!("list:{slug}");
-
-        if let Some(mut order) = self.load_list_order().await? {
-            let original_tree = order.tree.clone();
-            order.tree = remove_list_from_tree(&order.tree, &list_key);
-            if order.tree != original_tree {
-                self.save_list_order(&order).await?;
-            }
-        }
-
-        if let Some(mut name_map) = self.load_name_to_id().await? {
-            let original_len = name_map.paths.len();
-            name_map.paths.retain(|_, value| value != slug);
-            if name_map.paths.len() != original_len {
-                self.save_name_to_id(&name_map).await?;
-            }
-        }
-
-        for (page_slug, mut page) in self.load_all_pages().await? {
-            let original_len = page.parent_ids.len();
-            page.parent_ids.retain(|parent| parent != &list_key);
-            if page.parent_ids.len() != original_len {
-                self.save_or_delete_page(&page_slug, page).await?;
-            }
-        }
-
-        Ok(())
-    }
-
     async fn remove_page_child_references(&self, child_key: &str) -> io::Result<()> {
         for (page_slug, mut page) in self.load_all_pages().await? {
             let original_len = page.child_ids.len();
@@ -750,46 +953,103 @@ impl Storage {
     }
 
     async fn save_or_delete_page(&self, slug: &str, page: PageEntity) -> io::Result<()> {
-        if page_retains_user_state(&page) {
+        if page_retains_checkpoint(&page) {
             self.save_page(slug, &page).await
         } else {
             remove_if_exists(self.page_path(slug)).await?;
-            self.cache_remove(&format!("page:{slug}"));
+            self.cache_put(format!("page:{slug}"), Some(Entity::Page(page)));
             Ok(())
         }
     }
 
     fn page_path(&self, slug: &str) -> PathBuf {
-        self.root().join("pages").join(format!("{slug}.json"))
+        self.root()
+            .join("views")
+            .join("pages")
+            .join(shard_for(slug))
+            .join(format!("{slug}.json"))
+    }
+
+    async fn write_page_checkpoint(&self, slug: &str, page: &PageEntity) -> io::Result<()> {
+        if let Some(parent) = self.page_path(slug).parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        let payload = serde_json::to_vec_pretty(page).map_err(invalid_data)?;
+        fs::write(self.page_path(slug), payload).await
+    }
+
+    async fn persist_page_checkpoint_effect(&self, key: &str, page: &PageEntity) -> io::Result<()> {
+        let slug = key.strip_prefix("page:").unwrap_or(&page.slug);
+        if page_retains_checkpoint(page) {
+            self.write_page_checkpoint(slug, page).await
+        } else {
+            remove_if_exists(self.page_path(slug)).await
+        }
     }
 
     fn note_path(&self, slug: &str) -> PathBuf {
         self.root()
-            .join("data")
+            .join("objects")
             .join("notes")
             .join(format!("{slug}.json"))
     }
 
+    async fn write_note_checkpoint(&self, slug: &str, note: &NoteEntity) -> io::Result<()> {
+        fs::create_dir_all(self.root().join("objects").join("notes")).await?;
+        let payload = serde_json::to_vec_pretty(note).map_err(invalid_data)?;
+        fs::write(self.note_path(slug), payload).await
+    }
+
     fn list_path(&self, slug: &str) -> PathBuf {
-        self.root().join("lists").join(format!("{slug}.json"))
+        self.root()
+            .join("views")
+            .join("lists")
+            .join(format!("{slug}.json"))
+    }
+
+    async fn write_list_checkpoint(&self, slug: &str, list: &ListEntity) -> io::Result<()> {
+        let path = self.list_path(slug);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+        let payload = serde_json::to_vec_pretty(list).map_err(invalid_data)?;
+        fs::write(path, payload).await
     }
 
     fn manifest_path(&self, filename: &str) -> PathBuf {
-        self.root().join("manifest").join(filename)
+        self.root().join("views").join("manifest").join(filename)
+    }
+
+    async fn write_settings_checkpoint(&self, settings: &SettingsEntity) -> io::Result<()> {
+        save_json(self.manifest_path("settings.json"), settings).await
+    }
+
+    async fn write_name_to_id_checkpoint(&self, manifest: &NameToIdManifest) -> io::Result<()> {
+        save_json(self.manifest_path("list-name-to-id.json"), manifest).await
+    }
+
+    async fn write_list_order_checkpoint(&self, manifest: &ListOrderManifest) -> io::Result<()> {
+        save_json(self.manifest_path("list-order.json"), manifest).await
+    }
+
+    async fn write_orphaned_checkpoint(&self, manifest: &OrphanedManifest) -> io::Result<()> {
+        save_json(self.manifest_path("orphaned.json"), manifest).await
     }
 
     fn snapshot_html_path(&self, slug: &str, timestamp: i64) -> PathBuf {
         self.root()
-            .join("data")
+            .join("objects")
             .join("snapshots")
-            .join(format!("{slug}-{timestamp}.html"))
+            .join(shard_for(&snapshot_stem(slug, timestamp)))
+            .join(format!("{}.html", snapshot_stem(slug, timestamp)))
     }
 
     fn snapshot_markdown_path(&self, slug: &str, timestamp: i64) -> PathBuf {
         self.root()
-            .join("data")
+            .join("objects")
             .join("snapshots")
-            .join(format!("{slug}-{timestamp}.md"))
+            .join(shard_for(&snapshot_stem(slug, timestamp)))
+            .join(format!("{}.md", snapshot_stem(slug, timestamp)))
     }
 
     fn cache_get(&self, key: &str) -> Option<Option<Entity>> {
@@ -808,14 +1068,6 @@ impl Storage {
             .put(key, value);
     }
 
-    fn cache_remove(&self, key: &str) {
-        self.inner
-            .cache
-            .lock()
-            .expect("storage cache mutex poisoned")
-            .remove(key);
-    }
-
     fn clear_cache(&self) {
         let mut cache = self
             .inner
@@ -828,6 +1080,38 @@ impl Storage {
     pub fn reset_cache(&self) {
         self.clear_cache();
     }
+
+    fn set_checkpoint_error(&self, error: String) {
+        *self
+            .inner
+            .checkpoint_error
+            .lock()
+            .expect("checkpoint error mutex poisoned") = Some(error);
+    }
+
+    fn check_checkpoint_health(&self) -> io::Result<()> {
+        if let Some(error) = self
+            .inner
+            .checkpoint_error
+            .lock()
+            .expect("checkpoint error mutex poisoned")
+            .clone()
+        {
+            return Err(io::Error::other(format!(
+                "checkpoint persistence failed: {error}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+fn shard_for(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    format!("{:02x}", digest[0])
+}
+
+fn snapshot_stem(slug: &str, timestamp: i64) -> String {
+    format!("{slug}-{timestamp}")
 }
 
 fn local_date(timestamp: i64) -> String {
@@ -860,31 +1144,77 @@ async fn remove_if_exists(path: PathBuf) -> io::Result<()> {
     }
 }
 
-fn page_retains_user_state(page: &PageEntity) -> bool {
-    page.parent_ids.iter().any(|id| id.starts_with("list:"))
-        || page
-            .child_ids
-            .iter()
-            .any(|id| id.starts_with("note:") || id.starts_with("snapshot:"))
-        || page
-            .user_title
-            .as_deref()
-            .is_some_and(|title| !title.is_empty())
-        || page.likes.unwrap_or(0) != 0
+async fn checkpoint_worker(storage: Storage, mut rx: mpsc::Receiver<CheckpointWork>) {
+    let mut durable_progress = storage.load_replay_progress().await.unwrap_or_default();
+    while let Some(work) = rx.recv().await {
+        match work {
+            CheckpointWork::Batch(batch) => {
+                let mut failed = false;
+                for (key, effect) in batch.effects {
+                    if let Err(error) = storage.persist_checkpoint_effect(&key, &effect).await {
+                        warn!(key = %key, error = %error, "checkpoint persistence failed");
+                        storage.set_checkpoint_error(error.to_string());
+                        failed = true;
+                    }
+                }
+                if !failed {
+                    merge_replay_progress(&mut durable_progress, &batch.replay_progress);
+                    if let Err(error) =
+                        persist_due_replay_progress(&storage, &durable_progress, false).await
+                    {
+                        warn!(error = %error, "replay progress persistence failed");
+                        storage.set_checkpoint_error(error.to_string());
+                    }
+                }
+            }
+            CheckpointWork::Flush(done) => {
+                if let Err(error) =
+                    persist_due_replay_progress(&storage, &durable_progress, true).await
+                {
+                    warn!(error = %error, "replay progress persistence failed");
+                    storage.set_checkpoint_error(error.to_string());
+                }
+                let _ = done.send(());
+            }
+        }
+    }
 }
 
-fn remove_list_from_tree(tree: &[TreeNode], list_key: &str) -> Vec<TreeNode> {
-    let mut result = Vec::new();
-    for node in tree {
-        if node.id == list_key {
-            result.extend(node.children.clone());
+fn merge_replay_progress(target: &mut ReplayProgress, source: &ReplayProgress) {
+    for (device, timestamp) in source {
+        let current = target.entry(device.clone()).or_insert(i64::MIN);
+        *current = (*current).max(*timestamp);
+    }
+}
+
+async fn persist_due_replay_progress(
+    storage: &Storage,
+    durable_progress: &ReplayProgress,
+    force: bool,
+) -> io::Result<()> {
+    if durable_progress.is_empty() {
+        return Ok(());
+    }
+    let mut persisted = storage.load_replay_progress().await?;
+    let mut changed = false;
+    for (device, durable_timestamp) in durable_progress {
+        let persisted_timestamp = persisted.get(device).copied().unwrap_or(i64::MIN);
+        if *durable_timestamp <= persisted_timestamp {
             continue;
         }
-        let mut node = node.clone();
-        node.children = remove_list_from_tree(&node.children, list_key);
-        result.push(node);
+        if !force
+            && persisted_timestamp != i64::MIN
+            && *durable_timestamp - persisted_timestamp < REPLAY_PROGRESS_MIN_STEP_MS
+        {
+            continue;
+        }
+        persisted.insert(device.clone(), *durable_timestamp);
+        changed = true;
     }
-    result
+    if changed {
+        storage.save_replay_progress(&persisted).await?;
+    }
+    Ok(())
 }
 
 async fn remove_path(path: PathBuf) -> io::Result<usize> {
@@ -938,5 +1268,22 @@ where
         fs::create_dir_all(parent).await?;
     }
     let payload = serde_json::to_vec_pretty(value).map_err(invalid_data)?;
-    fs::write(path, payload).await
+    let filename = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("checkpoint");
+    let counter = ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = path.with_file_name(format!(
+        ".{filename}.{}.{}.tmp",
+        std::process::id(),
+        counter
+    ));
+    fs::write(&tmp_path, payload).await?;
+    match fs::rename(&tmp_path, &path).await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(&tmp_path).await;
+            Err(error)
+        }
+    }
 }

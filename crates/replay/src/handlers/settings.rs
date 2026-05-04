@@ -8,6 +8,21 @@ use crate::{
     SETTINGS_KEY,
 };
 
+const SETTINGS_KEYS: &[&str] = &[
+    "theme",
+    "colorScheme",
+    "historyFileBatch",
+    "captureSnapshotVideo",
+    "blacklistEnabled",
+    "urlBlacklist",
+    "titleCleanupEnabled",
+    "titleTrimRules",
+    "syncEnabled",
+    "syncMethod",
+    "syncRepoUrl",
+    "syncRetentionDays",
+];
+
 pub(crate) async fn handle_update_setting<L, Fut>(
     timestamp: i64,
     key: &str,
@@ -19,6 +34,10 @@ where
     L: Fn(&str) -> Fut,
     Fut: Future<Output = Option<Entity>>,
 {
+    if !SETTINGS_KEYS.contains(&key) {
+        return Ok(EntityMap::new());
+    }
+
     let mut settings = load_settings(load, SETTINGS_KEY)
         .await
         .unwrap_or_else(SettingsEntity::new);

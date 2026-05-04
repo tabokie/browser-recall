@@ -5,6 +5,7 @@ use browser_recall_replay::entities::{
 use browser_recall_replay::RuleInput;
 use browser_recall_replay::{effect_of, generate_slug_from_url, Context, EntityEffect, LogEntry};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::ready;
 
@@ -28,6 +29,16 @@ fn note(slug: &str, url: &str) -> NoteEntity {
     let mut note = NoteEntity::new(slug.to_string());
     note.url = Some(url.to_string());
     note
+}
+
+fn shard_for(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    format!("{:02x}", digest[0])
+}
+
+fn snapshot_path(slug: &str, timestamp: i64) -> String {
+    let stem = format!("{slug}-{timestamp}");
+    format!("objects/snapshots/{}/{}", shard_for(&stem), stem)
 }
 
 fn list(slug: &str, name: &str) -> ListEntity {
@@ -110,7 +121,6 @@ async fn visit_page_enriches_existing_page() {
             url: "https://a.com".to_string(),
             title: Some("A".to_string()),
             referrer_url: None,
-            checkpoint: false,
         },
         load_from(store),
         context(),
@@ -140,7 +150,6 @@ async fn visit_page_adds_visit_date() {
             url: "https://a.com".to_string(),
             title: None,
             referrer_url: None,
-            checkpoint: false,
         },
         load_from(store),
         context(),
@@ -156,26 +165,7 @@ async fn visit_page_adds_visit_date() {
 }
 
 #[tokio::test]
-async fn visit_page_without_checkpoint_does_not_create_page() {
-    let result = effect_of(
-        LogEntry::VisitPage {
-            timestamp: 100,
-            url: "https://a.com".to_string(),
-            title: Some("A".to_string()),
-            referrer_url: None,
-            checkpoint: false,
-        },
-        |_| ready(None),
-        context(),
-    )
-    .await
-    .expect("visit replay succeeds");
-
-    assert!(result.is_empty());
-}
-
-#[tokio::test]
-async fn visit_page_checkpoint_creates_page() {
+async fn visit_page_creates_missing_page() {
     let slug = generate_slug_from_url("https://a.com").expect("slug");
     let key = format!("page:{slug}");
     let result = effect_of(
@@ -184,13 +174,103 @@ async fn visit_page_checkpoint_creates_page() {
             url: "https://a.com".to_string(),
             title: Some("A".to_string()),
             referrer_url: None,
-            checkpoint: true,
         },
         |_| ready(None),
         context(),
     )
     .await
-    .expect("checkpoint replay succeeds");
+    .expect("visit replay succeeds");
+
+    let page = result
+        .get(&key)
+        .and_then(EntityEffect::as_page)
+        .expect("page created");
+    assert_eq!(page.created_at, Some(100));
+    assert_eq!(page.url.as_deref(), Some("https://a.com"));
+}
+
+#[test]
+fn visit_page_log_schema_has_no_checkpoint_control_field() {
+    let value = serde_json::to_value(LogEntry::VisitPage {
+        timestamp: 100,
+        url: "https://a.com".to_string(),
+        title: Some("A".to_string()),
+        referrer_url: None,
+    })
+    .expect("visit serializes");
+
+    assert!(value.get("checkpoint").is_none());
+}
+
+#[test]
+fn pin_to_list_log_schema_uses_urls_and_aligned_titles() {
+    let parsed: LogEntry = serde_json::from_value(json!({
+        "timestamp": 100,
+        "action": "pin_to_list",
+        "name": "Reading",
+        "listOwner": "device-a",
+        "urls": ["https://a.com", "https://b.com"],
+        "titles": ["A", null]
+    }))
+    .expect("pin schema parses");
+
+    let value = serde_json::to_value(parsed).expect("pin serializes");
+    assert_eq!(
+        value.get("urls"),
+        Some(&json!(["https://a.com", "https://b.com"]))
+    );
+    assert_eq!(value.get("titles"), Some(&json!(["A", null])));
+    assert!(value.get("items").is_none());
+
+    let legacy = serde_json::from_value::<LogEntry>(json!({
+        "timestamp": 100,
+        "action": "pin_to_list",
+        "name": "Reading",
+        "listOwner": "device-a",
+        "items": ["https://a.com"],
+        "titles": { "https://a.com": "A" }
+    }));
+    assert!(legacy.is_err());
+}
+
+#[tokio::test]
+async fn pin_to_list_rejects_misaligned_titles() {
+    let result = effect_of(
+        LogEntry::PinToList {
+            timestamp: 100,
+            name: "Test".to_string(),
+            list_owner: "test-device".to_string(),
+            urls: vec!["https://a.com".to_string(), "https://b.com".to_string()],
+            titles: Some(vec![Some("A".to_string())]),
+            source: None,
+        },
+        |_| ready(None),
+        context(),
+    )
+    .await;
+
+    assert!(matches!(
+        result,
+        Err(browser_recall_replay::ReplayError::InvalidEntry(_))
+    ));
+}
+
+#[tokio::test]
+async fn visit_page_replay_is_idempotent_for_existing_page() {
+    let slug = generate_slug_from_url("https://a.com").expect("slug");
+    let key = format!("page:{slug}");
+    let result = effect_of(
+        LogEntry::VisitPage {
+            timestamp: 100,
+            url: "https://a.com".to_string(),
+            title: Some("A".to_string()),
+            referrer_url: None,
+        },
+        |_| ready(None),
+        context(),
+    )
+    .await
+    .expect("visit replay succeeds");
 
     let page = result
         .get(&key)
@@ -216,7 +296,6 @@ async fn visit_page_updates_referrer_relationships() {
             url: "https://child.com".to_string(),
             title: Some("Child".to_string()),
             referrer_url: Some("https://parent.com".to_string()),
-            checkpoint: false,
         },
         load_from(store),
         context(),
@@ -237,7 +316,7 @@ async fn visit_page_updates_referrer_relationships() {
 }
 
 #[tokio::test]
-async fn checkpoint_enriches_existing_page_without_overwriting_created_at() {
+async fn visit_page_enriches_existing_page_without_overwriting_created_at() {
     let slug = generate_slug_from_url("https://a.com").expect("slug");
     let key = format!("page:{slug}");
     let mut existing = page(&slug);
@@ -249,22 +328,21 @@ async fn checkpoint_enriches_existing_page_without_overwriting_created_at() {
         LogEntry::VisitPage {
             timestamp: 100,
             url: "https://a.com".to_string(),
-            title: Some("Checkpointed".to_string()),
+            title: Some("Visited".to_string()),
             referrer_url: None,
-            checkpoint: true,
         },
         load_from(store),
         context(),
     )
     .await
-    .expect("checkpoint replay succeeds");
+    .expect("visit replay succeeds");
 
     let page = result
         .get(&key)
         .and_then(EntityEffect::as_page)
         .expect("page written");
     assert_eq!(page.created_at, Some(50));
-    assert_eq!(page.title.as_deref(), Some("Checkpointed"));
+    assert_eq!(page.title.as_deref(), Some("Visited"));
 }
 
 #[tokio::test]
@@ -417,7 +495,7 @@ async fn create_snapshot_creates_page_and_links_child() {
         LogEntry::CreateSnapshot {
             timestamp: 1000,
             url: "https://a.com".to_string(),
-            path: format!("snapshots/{slug}-1000"),
+            path: snapshot_path(&slug, 1000),
             title: Some("Snap Title".to_string()),
         },
         |_| ready(None),
@@ -447,7 +525,7 @@ async fn create_snapshot_appends_to_existing_child_ids() {
         LogEntry::CreateSnapshot {
             timestamp: 1000,
             url: "https://a.com".to_string(),
-            path: format!("snapshots/{slug}-1000"),
+            path: snapshot_path(&slug, 1000),
             title: None,
         },
         load_from(store),
@@ -477,7 +555,7 @@ async fn create_snapshot_preserves_existing_created_at() {
         LogEntry::CreateSnapshot {
             timestamp: 1000,
             url: "https://a.com".to_string(),
-            path: format!("snapshots/{slug}-1000"),
+            path: snapshot_path(&slug, 1000),
             title: Some("Ignored".to_string()),
         },
         load_from(store),
@@ -672,7 +750,7 @@ async fn create_note_creates_page_and_links_note_entity() {
         LogEntry::CreateNote {
             timestamp: 100,
             url: "https://a.com".to_string(),
-            path: "notes/n1.json".to_string(),
+            path: "objects/notes/n1.json".to_string(),
             title: Some("Note Page".to_string()),
             excerpt: Some("hello".to_string()),
             note: Some("world".to_string()),
@@ -713,7 +791,7 @@ async fn create_note_links_note_on_existing_page() {
         LogEntry::CreateNote {
             timestamp: 100,
             url: "https://a.com".to_string(),
-            path: "notes/n1.json".to_string(),
+            path: "objects/notes/n1.json".to_string(),
             title: None,
             excerpt: None,
             note: None,
@@ -746,7 +824,7 @@ async fn create_note_preserves_existing_created_at() {
         LogEntry::CreateNote {
             timestamp: 100,
             url: "https://a.com".to_string(),
-            path: "notes/n1.json".to_string(),
+            path: "objects/notes/n1.json".to_string(),
             title: Some("Ignored".to_string()),
             excerpt: None,
             note: None,
@@ -792,7 +870,7 @@ async fn delete_note_unlinks_note_and_tombstones_ineligible_page() {
         LogEntry::DeleteNote {
             timestamp: 200,
             url: Some("https://a.com".to_string()),
-            path: "notes/n1.json".to_string(),
+            path: "objects/notes/n1.json".to_string(),
         },
         load_from(store),
         context(),
@@ -857,7 +935,7 @@ async fn delete_note_removes_note_pins_from_lists() {
         LogEntry::DeleteNote {
             timestamp: 100,
             url: Some("https://a.com".to_string()),
-            path: "notes/n1.json".to_string(),
+            path: "objects/notes/n1.json".to_string(),
         },
         load_from(store),
         context(),
@@ -901,7 +979,7 @@ async fn delete_note_noops_when_deleted_timestamp_is_newer() {
         LogEntry::DeleteNote {
             timestamp: 200,
             url: Some("https://a.com".to_string()),
-            path: "notes/n1.json".to_string(),
+            path: "objects/notes/n1.json".to_string(),
         },
         load_from(store),
         context(),
@@ -947,7 +1025,7 @@ async fn restore_note_relinks_and_clears_deleted_flag() {
         LogEntry::RestoreNote {
             timestamp: 200,
             url: Some("https://a.com".to_string()),
-            path: "notes/n1.json".to_string(),
+            path: "objects/notes/n1.json".to_string(),
         },
         load_from(store),
         context(),
@@ -999,8 +1077,8 @@ async fn replace_note_links_new_note_and_deletes_old_note() {
         LogEntry::ReplaceNote {
             timestamp: 200,
             url: Some("https://a.com".to_string()),
-            path: "notes/n2.json".to_string(),
-            old_path: "notes/n1.json".to_string(),
+            path: "objects/notes/n2.json".to_string(),
+            old_path: "objects/notes/n1.json".to_string(),
             excerpt: Some("old excerpt".to_string()),
             note: Some("new body".to_string()),
             css_path: Some("body > p".to_string()),
@@ -1067,8 +1145,8 @@ async fn replace_note_transfers_pins_and_removes_old_note_from_recycle_bin() {
         LogEntry::ReplaceNote {
             timestamp: 100,
             url: Some("https://a.com".to_string()),
-            path: "notes/n2.json".to_string(),
-            old_path: "notes/n1.json".to_string(),
+            path: "objects/notes/n2.json".to_string(),
+            old_path: "objects/notes/n1.json".to_string(),
             excerpt: Some("new excerpt".to_string()),
             note: Some("new body".to_string()),
             css_path: Some("body > p".to_string()),
@@ -1127,8 +1205,8 @@ async fn replace_note_proceeds_when_old_note_was_already_deleted() {
         LogEntry::ReplaceNote {
             timestamp: 100,
             url: Some("https://a.com".to_string()),
-            path: "notes/n2.json".to_string(),
-            old_path: "notes/n1.json".to_string(),
+            path: "objects/notes/n2.json".to_string(),
+            old_path: "objects/notes/n1.json".to_string(),
             excerpt: Some("new excerpt".to_string()),
             note: Some("new body".to_string()),
             css_path: Some("body > p".to_string()),
@@ -1177,8 +1255,8 @@ async fn replace_note_replay_is_idempotent() {
     let entry = LogEntry::ReplaceNote {
         timestamp: 100,
         url: Some("https://a.com".to_string()),
-        path: "notes/n2.json".to_string(),
-        old_path: "notes/n1.json".to_string(),
+        path: "objects/notes/n2.json".to_string(),
+        old_path: "objects/notes/n1.json".to_string(),
         excerpt: Some("new excerpt".to_string()),
         note: Some("new body".to_string()),
         css_path: Some("body > p".to_string()),
@@ -1220,7 +1298,7 @@ async fn delete_snapshot_tombstones_page_when_last_retention_signal_is_removed()
         LogEntry::DeleteSnapshot {
             timestamp: 200,
             url: "https://a.com".to_string(),
-            path: format!("snapshots/{slug}-1000"),
+            path: snapshot_path(&slug, 1000),
         },
         load_from(store),
         context(),
@@ -1260,7 +1338,7 @@ async fn restore_snapshot_relinks_child_on_page() {
         LogEntry::RestoreSnapshot {
             timestamp: 200,
             url: "https://a.com".to_string(),
-            path: format!("snapshots/{slug}-1000"),
+            path: snapshot_path(&slug, 1000),
         },
         load_from(store),
         context(),
@@ -1416,6 +1494,26 @@ async fn update_setting_preserves_unrelated_keys_and_replay_is_idempotent() {
 }
 
 #[tokio::test]
+async fn update_setting_ignores_keys_outside_persistent_schema() {
+    let result = effect_of(
+        LogEntry::UpdateSetting {
+            timestamp: 100,
+            key: "archiveQuality".to_string(),
+            value: json!("medium"),
+        },
+        |_| ready(None),
+        context(),
+    )
+    .await
+    .expect("settings replay succeeds");
+
+    assert!(
+        result.is_empty(),
+        "unused legacy setting keys should not affect replayed projections"
+    );
+}
+
+#[tokio::test]
 async fn create_and_update_list_refresh_manifests() {
     let mut store = BTreeMap::new();
     store.insert(
@@ -1517,11 +1615,8 @@ async fn pin_and_unpin_list_updates_list_and_page_parent_ids() {
             timestamp: 100,
             name: "Test".to_string(),
             list_owner: "test-device".to_string(),
-            items: vec!["https://example.com/list-page".to_string()],
-            titles: Some(BTreeMap::from([(
-                "https://example.com/list-page".to_string(),
-                "Pinned Page".to_string(),
-            )])),
+            urls: vec!["https://example.com/list-page".to_string()],
+            titles: Some(vec![Some("Pinned Page".to_string())]),
             source: None,
         },
         load_from(store.clone()),
@@ -1551,7 +1646,7 @@ async fn pin_and_unpin_list_updates_list_and_page_parent_ids() {
             timestamp: 200,
             name: "Test".to_string(),
             list_owner: "test-device".to_string(),
-            items: vec!["https://example.com/list-page".to_string()],
+            urls: vec!["https://example.com/list-page".to_string()],
         },
         load_from(store),
         context(),
@@ -1589,11 +1684,8 @@ async fn pin_to_list_uses_entry_titles_for_new_pages_without_overwriting_existin
             timestamp: 100,
             name: "Test".to_string(),
             list_owner: "test-device".to_string(),
-            items: vec!["https://a.com".to_string()],
-            titles: Some(BTreeMap::from([(
-                "https://a.com".to_string(),
-                "Page A Title".to_string(),
-            )])),
+            urls: vec!["https://a.com".to_string()],
+            titles: Some(vec![Some("Page A Title".to_string())]),
             source: None,
         },
         load_from(store.clone()),
@@ -1616,11 +1708,8 @@ async fn pin_to_list_uses_entry_titles_for_new_pages_without_overwriting_existin
             timestamp: 100,
             name: "Test".to_string(),
             list_owner: "test-device".to_string(),
-            items: vec!["https://a.com".to_string()],
-            titles: Some(BTreeMap::from([(
-                "https://a.com".to_string(),
-                "Ignored".to_string(),
-            )])),
+            urls: vec!["https://a.com".to_string()],
+            titles: Some(vec![Some("Ignored".to_string())]),
             source: None,
         },
         load_from(store),
@@ -1655,7 +1744,7 @@ async fn pin_to_list_skips_empty_items_and_deduplicates_pins() {
             timestamp: 100,
             name: "Test".to_string(),
             list_owner: "test-device".to_string(),
-            items: vec![
+            urls: vec![
                 "".to_string(),
                 "https://a.com".to_string(),
                 "https://a.com".to_string(),
@@ -1696,7 +1785,7 @@ async fn pin_to_list_preserves_higher_existing_list_timestamp() {
             timestamp: 100,
             name: "Test".to_string(),
             list_owner: "test-device".to_string(),
-            items: vec!["https://a.com".to_string()],
+            urls: vec!["https://a.com".to_string()],
             titles: None,
             source: None,
         },
@@ -1746,7 +1835,7 @@ async fn unpin_keeps_page_when_note_child_remains() {
             timestamp: 100,
             name: "Test".to_string(),
             list_owner: "test-device".to_string(),
-            items: vec!["https://a.com".to_string()],
+            urls: vec!["https://a.com".to_string()],
         },
         load_from(store),
         context(),
@@ -1795,7 +1884,7 @@ async fn unpin_keeps_page_when_user_title_remains() {
             timestamp: 100,
             name: "Test".to_string(),
             list_owner: "test-device".to_string(),
-            items: vec!["https://a.com".to_string()],
+            urls: vec!["https://a.com".to_string()],
         },
         load_from(store),
         context(),
@@ -2092,7 +2181,7 @@ async fn pin_to_deleted_orphaned_list_is_preserved() {
             timestamp: 100,
             name: "Test".to_string(),
             list_owner: "test-device".to_string(),
-            items: vec!["https://a.com".to_string()],
+            urls: vec!["https://a.com".to_string()],
             titles: None,
             source: None,
         },
@@ -3030,7 +3119,6 @@ async fn visit_page_caps_parent_ids_at_referrer_limit() {
             url: "https://example.com/child".to_string(),
             title: Some("Child".to_string()),
             referrer_url: Some(new_parent_url.to_string()),
-            checkpoint: false,
         },
         load_from(store),
         context(),
@@ -3086,7 +3174,6 @@ async fn visit_page_caps_referrer_child_ids_at_referrer_limit() {
             url: new_child_url.to_string(),
             title: Some("New Child".to_string()),
             referrer_url: Some("https://example.com/parent".to_string()),
-            checkpoint: false,
         },
         load_from(store),
         context(),
@@ -3118,7 +3205,6 @@ async fn visit_page_preserves_higher_existing_timestamp() {
             url: "https://a.com".to_string(),
             title: Some("A".to_string()),
             referrer_url: None,
-            checkpoint: false,
         },
         load_from(store),
         context(),
@@ -3209,12 +3295,12 @@ async fn note_delete_then_restore_converges_to_restored_state() {
     let delete = LogEntry::DeleteNote {
         timestamp: 10,
         url: Some("https://a.com".to_string()),
-        path: "notes/n1.json".to_string(),
+        path: "objects/notes/n1.json".to_string(),
     };
     let restore = LogEntry::RestoreNote {
         timestamp: 20,
         url: Some("https://a.com".to_string()),
-        path: "notes/n1.json".to_string(),
+        path: "objects/notes/n1.json".to_string(),
     };
 
     let forward = replay_sequence(
@@ -3263,8 +3349,8 @@ async fn two_devices_replacing_same_note_preserves_both_new_notes() {
     let first = LogEntry::ReplaceNote {
         timestamp: 10,
         url: Some("https://a.com".to_string()),
-        path: "notes/newY.json".to_string(),
-        old_path: "notes/n1.json".to_string(),
+        path: "objects/notes/newY.json".to_string(),
+        old_path: "objects/notes/n1.json".to_string(),
         excerpt: None,
         note: None,
         css_path: None,
@@ -3272,8 +3358,8 @@ async fn two_devices_replacing_same_note_preserves_both_new_notes() {
     let second = LogEntry::ReplaceNote {
         timestamp: 20,
         url: Some("https://a.com".to_string()),
-        path: "notes/newZ.json".to_string(),
-        old_path: "notes/n1.json".to_string(),
+        path: "objects/notes/newZ.json".to_string(),
+        old_path: "objects/notes/n1.json".to_string(),
         excerpt: None,
         note: None,
         css_path: None,
@@ -3322,8 +3408,8 @@ async fn replace_and_delete_note_converge_with_new_note_preserved() {
     let replace = LogEntry::ReplaceNote {
         timestamp: 10,
         url: Some("https://a.com".to_string()),
-        path: "notes/newY.json".to_string(),
-        old_path: "notes/n1.json".to_string(),
+        path: "objects/notes/newY.json".to_string(),
+        old_path: "objects/notes/n1.json".to_string(),
         excerpt: None,
         note: None,
         css_path: None,
@@ -3331,7 +3417,7 @@ async fn replace_and_delete_note_converge_with_new_note_preserved() {
     let delete = LogEntry::DeleteNote {
         timestamp: 20,
         url: Some("https://a.com".to_string()),
-        path: "notes/n1.json".to_string(),
+        path: "objects/notes/n1.json".to_string(),
     };
 
     let state_a = replay_sequence(
@@ -3388,12 +3474,12 @@ async fn note_restore_then_delete_converges_to_deleted_state() {
     let restore = LogEntry::RestoreNote {
         timestamp: 10,
         url: Some("https://a.com".to_string()),
-        path: "notes/n1.json".to_string(),
+        path: "objects/notes/n1.json".to_string(),
     };
     let delete = LogEntry::DeleteNote {
         timestamp: 20,
         url: Some("https://a.com".to_string()),
-        path: "notes/n1.json".to_string(),
+        path: "objects/notes/n1.json".to_string(),
     };
 
     let forward = replay_sequence(
@@ -3760,7 +3846,7 @@ async fn delete_then_pin_to_deleted_list_converges_for_list_state() {
         timestamp: 20,
         name: "Test".to_string(),
         list_owner: "test-device".to_string(),
-        items: vec!["https://a.com".to_string()],
+        urls: vec!["https://a.com".to_string()],
         titles: None,
         source: None,
     };
@@ -3820,7 +3906,7 @@ async fn pin_delete_restore_list_converges_across_all_orderings() {
             timestamp: 10,
             name: "Test".to_string(),
             list_owner: "test-device".to_string(),
-            items: vec!["https://a.com".to_string()],
+            urls: vec!["https://a.com".to_string()],
             titles: None,
             source: None,
         },
@@ -3903,7 +3989,7 @@ async fn delete_then_unpin_from_deleted_list_converges_for_list_state() {
         timestamp: 20,
         name: "Test".to_string(),
         list_owner: "test-device".to_string(),
-        items: vec!["https://a.com".to_string()],
+        urls: vec!["https://a.com".to_string()],
     };
 
     let forward = replay_sequence(
@@ -3951,8 +4037,8 @@ async fn replace_delete_restore_note_converges_across_all_orderings() {
         LogEntry::ReplaceNote {
             timestamp: 10,
             url: Some("https://a.com".to_string()),
-            path: "notes/newY.json".to_string(),
-            old_path: "notes/n1.json".to_string(),
+            path: "objects/notes/newY.json".to_string(),
+            old_path: "objects/notes/n1.json".to_string(),
             excerpt: None,
             note: None,
             css_path: None,
@@ -3960,12 +4046,12 @@ async fn replace_delete_restore_note_converges_across_all_orderings() {
         LogEntry::DeleteNote {
             timestamp: 20,
             url: Some("https://a.com".to_string()),
-            path: "notes/n1.json".to_string(),
+            path: "objects/notes/n1.json".to_string(),
         },
         LogEntry::RestoreNote {
             timestamp: 30,
             url: Some("https://a.com".to_string()),
-            path: "notes/n1.json".to_string(),
+            path: "objects/notes/n1.json".to_string(),
         },
     ];
 
@@ -4028,7 +4114,7 @@ async fn delete_pin_restore_list_converges_across_all_orderings() {
             timestamp: 20,
             name: "Test".to_string(),
             list_owner: "test-device".to_string(),
-            items: vec!["https://a.com".to_string()],
+            urls: vec!["https://a.com".to_string()],
             titles: None,
             source: None,
         },

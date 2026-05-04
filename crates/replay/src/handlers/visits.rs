@@ -10,7 +10,6 @@ pub(crate) async fn handle_visit_page<L, Fut>(
     url: &str,
     title: Option<&str>,
     referrer_url: Option<&str>,
-    checkpoint: bool,
     load: &L,
     context: &Context,
 ) -> Result<EntityMap, ReplayError>
@@ -23,36 +22,26 @@ where
     let mut result = EntityMap::new();
 
     let maybe_page = load_page(load, &page_key).await;
-    let mut page = if checkpoint {
-        let mut page = maybe_page.unwrap_or_else(|| default_page(&slug));
-        if page.created_at.is_none() {
-            page.created_at = Some(timestamp);
-        }
-        Some(page)
-    } else {
-        maybe_page
-    };
-
-    if let Some(mut page_value) = page.take() {
-        touch_timestamp(&mut page_value, &context.device_id, timestamp);
-        page_value.url = Some(url.to_string());
-        if let Some(title_value) = title {
-            page_value.title = Some(title_value.to_string());
-        }
-        let visit_date = local_visit_date(timestamp);
-        if !page_value.visit_dates.contains(&visit_date) {
-            page_value.visit_dates.push(visit_date);
-        }
-        if let Some(referrer) = referrer_url {
-            let parent_slug = crate::generate_slug_from_url(referrer)?;
-            let parent_key = format!("{PAGE_PREFIX}{parent_slug}");
-            append_capped(&mut page_value.parent_ids, parent_key);
-        }
-        result.insert(
-            page_key.clone(),
-            EntityEffect::Upsert(Entity::Page(page_value)),
-        );
+    let mut page = maybe_page.unwrap_or_else(|| default_page(&slug));
+    if page.created_at.is_none() {
+        page.created_at = Some(timestamp);
     }
+
+    touch_timestamp(&mut page, &context.device_id, timestamp);
+    page.url = Some(url.to_string());
+    if let Some(title_value) = title {
+        page.title = Some(title_value.to_string());
+    }
+    let visit_date = local_visit_date(timestamp);
+    if !page.visit_dates.contains(&visit_date) {
+        page.visit_dates.push(visit_date);
+    }
+    if let Some(referrer) = referrer_url {
+        let parent_slug = crate::generate_slug_from_url(referrer)?;
+        let parent_key = format!("{PAGE_PREFIX}{parent_slug}");
+        append_capped(&mut page.parent_ids, parent_key);
+    }
+    result.insert(page_key.clone(), EntityEffect::Upsert(Entity::Page(page)));
 
     if let Some(referrer) = referrer_url {
         let parent_slug = crate::generate_slug_from_url(referrer)?;

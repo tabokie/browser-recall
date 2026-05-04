@@ -1,7 +1,9 @@
 use crate::config::{ConfigStore, DaemonConfig, SyncDeviceRecord, Token};
+use crate::runtime::{effect_with_overlay, EntityMapView};
 use crate::storage::Storage;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+use browser_recall_replay::{Context as ReplayContext, LogEntry};
 use chrono::TimeZone;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{json, Value};
@@ -1098,9 +1100,9 @@ impl GitHubTransport {
             let mut log_files = Vec::new();
             for (path, sha) in changed {
                 let content = self.get_blob(&sha).await?;
-                if path.starts_with("data/notes/") {
+                if path.starts_with("objects/notes/") {
                     note_files.push(SyncFile { path, content });
-                } else if path.starts_with("data/logs/") {
+                } else if path.starts_with("logs/") {
                     log_files.push(SyncFile { path, content });
                 }
             }
@@ -1108,50 +1110,72 @@ impl GitHubTransport {
             let mut downloaded = Vec::new();
             downloaded.extend(note_files.iter().cloned());
             downloaded.extend(log_files.iter().cloned());
-            if !downloaded.is_empty() {
-                let write_files = downloaded
-                    .iter()
-                    .map(|file| (file.path.clone(), file.content.clone()))
-                    .collect::<Vec<_>>();
-                storage
-                    .write_sync_files(&write_files)
-                    .await
-                    .map_err(|error| SyncError::Message(error.to_string()))?;
-            }
-
-            if !paused_devices.contains(&peer.name) {
-                let entries = log_files
+            let entries = if paused_devices.contains(&peer.name) {
+                Vec::new()
+            } else {
+                log_files
                     .iter()
                     .flat_map(|file| file.content.lines())
                     .filter(|line| !line.trim().is_empty())
                     .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                    .collect::<Vec<_>>()
+            };
+            replayed += entries.len();
+
+            if !downloaded.is_empty() || !entries.is_empty() {
+                let write_files = downloaded
+                    .iter()
+                    .map(|file| (file.path.clone(), file.content.clone()))
                     .collect::<Vec<_>>();
-                replayed += entries.len();
-                for entry in entries {
-                    let parsed: browser_recall_replay::LogEntry = serde_json::from_value(entry)
-                        .map_err(|error| SyncError::Message(error.to_string()))?;
-                    let effects = browser_recall_replay::effect_of(
-                        parsed,
-                        {
-                            let storage = storage.clone();
-                            move |key| {
-                                let storage = storage.clone();
-                                let key = key.to_string();
-                                async move { storage.load_entity(&key).await.ok().flatten() }
-                            }
-                        },
-                        browser_recall_replay::Context {
-                            device_id: peer.name.clone(),
-                        },
-                    )
+                let _guard = storage.write_guard().await;
+                storage
+                    .flush_checkpoints()
                     .await
                     .map_err(|error| SyncError::Message(error.to_string()))?;
-                    for (key, effect) in &effects {
+                let checkpoint_slot = if entries.is_empty() {
+                    None
+                } else {
+                    Some(
                         storage
-                            .apply_effect(key, effect)
+                            .reserve_checkpoint_slot()
                             .await
-                            .map_err(|error| SyncError::Message(error.to_string()))?;
-                    }
+                            .map_err(|error| SyncError::Message(error.to_string()))?,
+                    )
+                };
+                if !write_files.is_empty() {
+                    storage
+                        .write_sync_files(&write_files)
+                        .await
+                        .map_err(|error| SyncError::Message(error.to_string()))?;
+                }
+
+                let mut overlay = EntityMapView::new();
+                let mut replay_progress = std::collections::BTreeMap::new();
+                let replay_context = ReplayContext {
+                    device_id: peer.name.clone(),
+                };
+                for entry in entries {
+                    let parsed: LogEntry = serde_json::from_value(entry)
+                        .map_err(|error| SyncError::Message(error.to_string()))?;
+                    let current = replay_progress.entry(peer.name.clone()).or_insert(i64::MIN);
+                    *current = (*current).max(parsed.timestamp());
+                    let effects = effect_with_overlay(parsed, storage, &overlay, &replay_context)
+                        .await
+                        .map_err(|error| SyncError::Message(error.to_string()))?;
+                    overlay.extend(effects);
+                }
+
+                for (key, effect) in &overlay {
+                    storage.apply_effect_to_cache(key, effect);
+                }
+                if let Some(checkpoint_slot) =
+                    checkpoint_slot.filter(|_| !overlay.is_empty() || !replay_progress.is_empty())
+                {
+                    Storage::send_reserved_checkpoint_work(
+                        checkpoint_slot,
+                        overlay,
+                        replay_progress,
+                    );
                 }
             }
 

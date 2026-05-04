@@ -75,7 +75,7 @@ async function dumpState(ctx, extensionId) {
       );
       const send = (obj) => chrome.runtime.sendMessage(obj);
       const read = async (key) =>
-        (await send({ action: 'readCacheable', key }))?.value;
+        (await send({ action: 'readDesktopValue', key }))?.value;
 
       const listOrderEntity = (await read('manifest:list-order')) || {
         tree: [],

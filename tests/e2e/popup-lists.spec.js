@@ -5,6 +5,126 @@ const TEST_URL = 'https://example.com/';
 const TEST_SLUG = getSlugForUrl(TEST_URL);
 
 test.describe('Popup list chip behavior', () => {
+  test('popup opened after a list already exists shows it as available', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    localServer.addPage('/popup-list-refresh', {
+      title: 'Popup List Refresh',
+      body: '<main>Popup list refresh page</main>',
+    });
+    const url = localServer.url('/popup-list-refresh');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:existing' }],
+        },
+      },
+      {
+        path: 'lists/existing.json',
+        data: {
+          slug: 'existing',
+          name: 'Existing',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: `pages/${slug}.json`,
+        data: {
+          slug,
+          url,
+          title: 'Popup List Refresh',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+      {
+        path: 'manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: {
+            'test-device/Existing': 'existing',
+          },
+        },
+      },
+      {
+        path: `data/logs/test-device/2026-03-01.jsonl`,
+        lines: [
+          {
+            timestamp: now,
+            action: 'visit_page',
+            url,
+            title: 'Popup List Refresh',
+          },
+        ],
+      },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const warmed = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'getPopupLists' }),
+    );
+    expect(warmed.success).toBe(true);
+    expect(warmed.lists.map((list) => list.name)).toEqual(['Existing']);
+    const createResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'saveListMeta',
+        name: 'Desktop Added',
+      }),
+    );
+    expect(createResp.success).toBe(true);
+    await helper.close();
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    await page.bringToFront();
+
+    const popup = await extContext.newPage();
+    await popup.addInitScript(
+      ({ url }) => {
+        const patchTabsQuery = () => {
+          if (!globalThis.chrome?.tabs?.query) {
+            setTimeout(patchTabsQuery, 0);
+            return;
+          }
+          const originalQuery = chrome.tabs.query.bind(chrome.tabs);
+          chrome.tabs.query = async (queryInfo) => {
+            if (queryInfo?.active && queryInfo?.currentWindow) {
+              return [{ id: 10001, url, title: 'Popup List Refresh' }];
+            }
+            return originalQuery(queryInfo);
+          };
+        };
+        patchTabsQuery();
+      },
+      { url },
+    );
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+    await expect(popup.locator('#listChips')).toContainText('Existing');
+    await expect(popup.locator('#listChips')).toContainText('Desktop Added');
+
+    await popup.locator('#listAddBtn').click();
+    await expect(popup.locator('#listPickerList')).toContainText('Existing');
+    await expect(popup.locator('#listPickerList')).toContainText(
+      'Desktop Added',
+    );
+
+    await popup.close();
+    await page.close();
+  });
+
   test('toggling a chip does not change chip order', async ({
     extContext,
     extensionId,
@@ -99,7 +219,7 @@ test.describe('Popup list chip behavior', () => {
       const result = {};
       for (const id of lists) {
         const resp = await chrome.runtime.sendMessage({
-          action: 'readCacheable',
+          action: 'readDesktopValue',
           key: 'list:' + id,
         });
         result[id] = resp.value.pins;
@@ -126,7 +246,10 @@ test.describe('Popup list chip behavior', () => {
 
     // Read beta pins — should now be unpinned
     const betaAfter = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:beta' }),
+      chrome.runtime.sendMessage({
+        action: 'readDesktopValue',
+        key: 'list:beta',
+      }),
     );
     expect(betaAfter.value.pins).toHaveLength(0);
 
@@ -140,7 +263,10 @@ test.describe('Popup list chip behavior', () => {
     );
 
     const betaRePinned = await helper.evaluate(() =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: 'list:beta' }),
+      chrome.runtime.sendMessage({
+        action: 'readDesktopValue',
+        key: 'list:beta',
+      }),
     );
     // Beta's pinnedAt is now the newest
     expect(betaRePinned.value.pins[0].pinnedAt).toBeGreaterThan(
@@ -227,7 +353,7 @@ test.describe('Popup list chip behavior', () => {
     const newList = await helper.evaluate(
       (id) =>
         chrome.runtime.sendMessage({
-          action: 'readCacheable',
+          action: 'readDesktopValue',
           key: 'list:' + id,
         }),
       newListId,

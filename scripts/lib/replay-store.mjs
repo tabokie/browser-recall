@@ -7,6 +7,7 @@ export function replayStore({ steps, baseStore = {} }) {
     {
       input: JSON.stringify({ steps, base_store: baseStore }),
       encoding: 'utf8',
+      maxBuffer: 256 * 1024 * 1024,
     },
   );
   if (result.status !== 0) {

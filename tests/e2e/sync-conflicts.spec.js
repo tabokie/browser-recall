@@ -1,11 +1,11 @@
 import { test, expect } from './fixtures.js';
 import { resetAndSeed, openHelperPage, getSlugForUrl } from './helpers.js';
 
-// Helper: read entity from session cache via background readCacheable
+// Helper: read entity through the background's Desktop-backed read facade.
 async function readEntity(helper, key) {
   const resp = await helper.evaluate(
     async (k) =>
-      chrome.runtime.sendMessage({ action: 'readCacheable', key: k }),
+      chrome.runtime.sendMessage({ action: 'readDesktopValue', key: k }),
     key,
   );
   return resp?.value;
@@ -392,7 +392,7 @@ test.describe('Sync conflicts — multi-device hydration', () => {
 
     const helper = await openHelperPage(extContext, extensionId);
 
-    // readCacheable filters deleted entities (returns null), so verify via side-effects:
+    // readDesktopValue filters deleted entities (returns null), so verify via side-effects:
     // 1. Note should NOT be readable (deleted)
     const note = await readEntity(helper, `note:${noteSlug}`);
     expect(note).toBeNull();
@@ -547,7 +547,7 @@ test.describe('Sync conflicts — multi-device hydration', () => {
 
     const helper = await openHelperPage(extContext, extensionId);
 
-    // readCacheable filters deleted entities, so verify via side-effects:
+    // readDesktopValue filters deleted entities, so verify via side-effects:
     // 1. List should NOT be readable (deleted)
     const list = await readEntity(helper, `list:${listId}`);
     expect(list).toBeNull();
@@ -625,7 +625,7 @@ test.describe('Sync conflicts — multi-device hydration', () => {
             action: 'pin_to_list',
             name: listName,
             listOwner: 'dev-local',
-            items: [PAGE_URL],
+            urls: [PAGE_URL],
           },
           {
             timestamp: 300,
@@ -719,7 +719,7 @@ test.describe('Sync conflicts — multi-device hydration', () => {
             action: 'pin_to_list',
             name: listName,
             listOwner: 'dev-local',
-            items: [PAGE_URL],
+            urls: [PAGE_URL],
           },
         ],
       },

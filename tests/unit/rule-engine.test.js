@@ -52,7 +52,7 @@ describe('validateRuleConfig', () => {
     it('accepts valid keyword config', () => {
       const result = validateRuleConfig({
         type: 'keyword',
-        config: { pattern: 'test', fields: ['title'] },
+        config: { pattern: 'test' },
       });
       expect(result.valid).toBe(true);
       expect(result.errors).toHaveLength(0);
@@ -61,7 +61,7 @@ describe('validateRuleConfig', () => {
     it('rejects missing pattern', () => {
       const result = validateRuleConfig({
         type: 'keyword',
-        config: { fields: ['title'] },
+        config: {},
       });
       expect(result.valid).toBe(false);
       expect(result.errors.some((e) => e.includes('pattern'))).toBe(true);
@@ -70,21 +70,30 @@ describe('validateRuleConfig', () => {
     it('rejects empty pattern', () => {
       const result = validateRuleConfig({
         type: 'keyword',
-        config: { pattern: '', fields: ['title'] },
+        config: { pattern: '' },
       });
       expect(result.valid).toBe(false);
     });
 
-    it('rejects invalid fields', () => {
+    it('rejects keyword fields because keyword rules are title-only', () => {
       const result = validateRuleConfig({
         type: 'keyword',
-        config: { pattern: 'test', fields: ['body'] },
+        config: { pattern: 'test', fields: ['title'] },
       });
       expect(result.valid).toBe(false);
       expect(result.errors.some((e) => e.includes('fields'))).toBe(true);
     });
 
-    it('defaults fields to title+url when not specified', () => {
+    it('rejects caseSensitive because keyword matching is always case-insensitive', () => {
+      const result = validateRuleConfig({
+        type: 'keyword',
+        config: { pattern: 'test', caseSensitive: true },
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors.some((e) => e.includes('caseSensitive'))).toBe(true);
+    });
+
+    it('uses title-only keyword matching when fields are not specified', () => {
       const result = validateRuleConfig({
         type: 'keyword',
         config: { pattern: 'test' },
@@ -95,7 +104,7 @@ describe('validateRuleConfig', () => {
     it('accepts regex pattern delimited by slashes', () => {
       const result = validateRuleConfig({
         type: 'keyword',
-        config: { pattern: '/test\\d+/', fields: ['title'] },
+        config: { pattern: '/test\\d+/' },
       });
       expect(result.valid).toBe(true);
     });
@@ -103,7 +112,7 @@ describe('validateRuleConfig', () => {
     it('rejects invalid regex pattern', () => {
       const result = validateRuleConfig({
         type: 'keyword',
-        config: { pattern: '/[invalid(/', fields: ['title'] },
+        config: { pattern: '/[invalid(/' },
       });
       expect(result.valid).toBe(false);
       expect(result.errors.some((e) => e.includes('regex'))).toBe(true);
@@ -288,7 +297,7 @@ describe('validateFnRuleSource', () => {
 
 describe('matchKeywordRule', () => {
   it('matches substring in title', () => {
-    const rule = { config: { pattern: 'hello', fields: ['title'] } };
+    const rule = { config: { pattern: 'hello' } };
     expect(
       matchKeywordRule(rule, {
         title: 'say hello world',
@@ -297,69 +306,72 @@ describe('matchKeywordRule', () => {
     ).toBe(1);
   });
 
-  it('matches substring in url', () => {
-    const rule = { config: { pattern: 'github', fields: ['url'] } };
+  it('does not match substring in url', () => {
+    const rule = { config: { pattern: 'github' } };
     expect(
       matchKeywordRule(rule, { title: 'Repo', url: 'https://github.com/foo' }),
-    ).toBe(1);
+    ).toBe(0);
+  });
+
+  it('ignores legacy fields config and still checks title only', () => {
+    const rule = { config: { pattern: 'github', fields: ['url', 'body'] } };
+    expect(
+      matchKeywordRule(rule, {
+        title: 'Repo',
+        url: 'https://github.com/foo',
+        body: 'github appears here',
+      }),
+    ).toBe(0);
   });
 
   it('returns 0 on no match', () => {
-    const rule = { config: { pattern: 'xyz', fields: ['title'] } };
+    const rule = { config: { pattern: 'xyz' } };
     expect(
       matchKeywordRule(rule, { title: 'hello world', url: 'https://x.com' }),
     ).toBe(0);
   });
 
   it('matches case-insensitively by default', () => {
-    const rule = { config: { pattern: 'HELLO', fields: ['title'] } };
+    const rule = { config: { pattern: 'HELLO' } };
     expect(matchKeywordRule(rule, { title: 'hello world', url: '' })).toBe(1);
   });
 
-  it('respects caseSensitive flag', () => {
+  it('ignores stale caseSensitive config and remains case-insensitive', () => {
     const rule = {
-      config: { pattern: 'HELLO', fields: ['title'], caseSensitive: true },
+      config: { pattern: 'HELLO', caseSensitive: true },
     };
-    expect(matchKeywordRule(rule, { title: 'hello world', url: '' })).toBe(0);
+    expect(matchKeywordRule(rule, { title: 'hello world', url: '' })).toBe(1);
     expect(matchKeywordRule(rule, { title: 'HELLO world', url: '' })).toBe(1);
   });
 
-  it('checks both title and url when fields has both', () => {
-    const rule = { config: { pattern: 'match', fields: ['title', 'url'] } };
-    expect(
-      matchKeywordRule(rule, { title: 'no', url: 'https://match.com' }),
-    ).toBe(1);
-    expect(
-      matchKeywordRule(rule, { title: 'match here', url: 'https://x.com' }),
-    ).toBe(1);
-  });
-
-  it('defaults fields to title+url when not specified', () => {
+  it('checks title when fields are not specified', () => {
     const rule = { config: { pattern: 'found' } };
     expect(
       matchKeywordRule(rule, { title: 'not here', url: 'https://found.com' }),
+    ).toBe(0);
+    expect(
+      matchKeywordRule(rule, { title: 'found here', url: 'https://x.com' }),
     ).toBe(1);
   });
 
   it('handles regex pattern', () => {
-    const rule = { config: { pattern: '/test\\d+/', fields: ['title'] } };
+    const rule = { config: { pattern: '/test\\d+/' } };
     expect(matchKeywordRule(rule, { title: 'test123 page', url: '' })).toBe(1);
     expect(matchKeywordRule(rule, { title: 'test page', url: '' })).toBe(0);
   });
 
   it('handles regex with case-insensitive flag', () => {
-    const rule = { config: { pattern: '/TEST/', fields: ['title'] } };
-    // Regex without caseSensitive should still be case-insensitive by default
+    const rule = { config: { pattern: '/TEST/' } };
     expect(matchKeywordRule(rule, { title: 'test page', url: '' })).toBe(1);
   });
 
   it('returns 0 for invalid regex gracefully', () => {
-    const rule = { config: { pattern: '/[invalid(/', fields: ['title'] } };
+    const rule = { config: { pattern: '/[invalid(/' } };
     expect(matchKeywordRule(rule, { title: 'test', url: '' })).toBe(0);
   });
 
   it('handles missing pageData fields', () => {
-    const rule = { config: { pattern: 'test', fields: ['title'] } };
+    const rule = { config: { pattern: 'test' } };
     expect(matchKeywordRule(rule, { url: 'https://x.com' })).toBe(0);
     expect(matchKeywordRule(rule, {})).toBe(0);
   });
@@ -375,10 +387,13 @@ describe('matchRules', () => {
       {
         id: 'r1',
         type: 'keyword',
-        config: { pattern: 'github', fields: ['url'] },
+        config: { pattern: 'github' },
       },
     ];
-    const pageData = { title: 'My Repo', url: 'https://github.com/foo' };
+    const pageData = {
+      title: 'My GitHub Repo',
+      url: 'https://example.com/foo',
+    };
     const results = await matchRules(rules, pageData, {});
     expect(results).toHaveLength(1);
     expect(results[0]).toEqual({ ruleId: 'r1', match: true });
@@ -389,7 +404,7 @@ describe('matchRules', () => {
       {
         id: 'r1',
         type: 'keyword',
-        config: { pattern: 'notfound', fields: ['title'] },
+        config: { pattern: 'notfound' },
       },
     ];
     const results = await matchRules(rules, { title: 'hello', url: '' }, {});
@@ -435,7 +450,7 @@ describe('matchRules', () => {
       {
         id: 'r1',
         type: 'keyword',
-        config: { pattern: 'test', fields: ['title'] },
+        config: { pattern: 'test' },
       },
       {
         id: 'r2',
@@ -469,7 +484,7 @@ describe('matchRules', () => {
       {
         id: 'r1',
         type: 'keyword',
-        config: { pattern: 'notfound', fields: ['title'] },
+        config: { pattern: 'notfound' },
       },
       {
         id: 'r2',

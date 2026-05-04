@@ -169,15 +169,25 @@ cargo clippy --workspace --all-targets -- -D warnings        # Rust lints
 Replays the full JSONL event log through `effectOf` and diffs the result against on-disk checkpoints. Useful for validating that the replay engine reproduces the expected state.
 
 ```bash
-npm run replay:verify                                   # default output
-node scripts/replay-verify.mjs --write /tmp/my-replay   # custom output dir
-node scripts/replay-verify.mjs --verbose                 # show all diffs (not just 5 per category)
+cargo run -q -p browser-recall-replay --bin replay-verify --                         # default output
+cargo run -q -p browser-recall-replay --bin replay-verify -- --write /tmp/my-replay  # custom output dir
+cargo run -q -p browser-recall-replay --bin replay-verify -- --verbose               # show all diffs (not just 5 per category)
 ```
+
+## Data Schema Migration
+
+The current desktop data layout is `logs/`, `objects/`, and `views/`. To verify migration from the legacy layout without writing files:
+
+```bash
+node scripts/migrate-browser-data-schema.mjs --root ~/browser-data --dry-run
+```
+
+Use `--apply` only after the dry run looks correct; the script writes a timestamped backup before modifying the data root.
 
 Before replay, the script normalizes known data inconsistencies:
 - Rewrites `pin_to_list` entries that reference a list by its post-rename name before the rename event
 - Adjusts `create_list` timestamps when pins predate the list's creation
-- Filters null items from `pin_to_list`/`unpin_from_list` entries
+- Filters null urls from `pin_to_list`/`unpin_from_list` entries while preserving title alignment
 
 Diff results are classified into three categories:
 - **schema-gap** — field added/removed by code evolution (e.g. `createdAt` on old pages)
@@ -194,13 +204,13 @@ Diff results are classified into three categories:
 ├── apps/extension/         # Chrome connector extension
 │   ├── manifest.json       # MV3 manifest
 │   ├── background.js       # Connector service worker
-│   ├── connector/          # Pairing, WS bridge, event buffer
+│   ├── connector/          # Pairing, WS bridge, command buffer
 │   ├── content.js          # Page capture, attention tracking
 │   ├── popup.html/js       # Popup dashboard
 │   ├── options-stub.html/js # Opens the desktop app
 │   └── savepage/           # Save Page WE fork (HTML snapshots)
 ├── crates/daemon/          # Pairing, storage, search, sync transport
-├── crates/replay/          # Pure event replay + entity effects
+├── crates/replay/          # Pure event replay, entity effects, replay verifier
 ├── crates/search/src/lib.rs # Native search crate
 ├── packages/core/          # Shared JS modules during desktop split
 ├── tests/
@@ -208,7 +218,7 @@ Diff results are classified into three categories:
 │   ├── e2e/                # Playwright E2E specs
 │   ├── lib/seed-builder.mjs # Manual seed-data builder
 │   └── fixtures/           # Test data files
-├── scripts/                # Manual test browser + replay verification
+├── scripts/                # Manual test browser + data migration helpers
 ├── seeds/                  # Manual test seed cases (gitignored)
 ├── plans/                  # Implementation plans
 ├── Cargo.toml              # Rust dependencies

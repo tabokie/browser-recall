@@ -6,15 +6,31 @@ use crate::storage::Storage;
 use crate::{
     protocol::{RuleBatchEntry, RulePayload},
     rules::{preview_rule, validate_rule, PageData, RuleSpec},
+    runtime::{effect_with_overlay, EntityMapView},
 };
 use browser_recall_replay::entities::{Entity, TreeNode};
 use browser_recall_replay::{
-    effect_of, generate_slug_from_url, Context as ReplayContext, LogEntry, RuleInput,
+    generate_slug_from_url, Context as ReplayContext, LogEntry, RuleInput,
 };
 use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+const SETTINGS_KEYS: &[&str] = &[
+    "theme",
+    "colorScheme",
+    "historyFileBatch",
+    "captureSnapshotVideo",
+    "blacklistEnabled",
+    "urlBlacklist",
+    "titleCleanupEnabled",
+    "titleTrimRules",
+    "syncEnabled",
+    "syncMethod",
+    "syncRepoUrl",
+    "syncRetentionDays",
+];
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -83,13 +99,13 @@ fn entity_visible(value: &Value, include_deleted: bool) -> bool {
             .unwrap_or(false)
 }
 
-pub async fn read_cacheable(
+pub async fn read_desktop_value(
     storage: &Storage,
     key: &str,
     include_deleted: bool,
 ) -> Result<Option<Value>, String> {
     let value = match storage
-        .load_entity(key)
+        .load_entity_coordinated(key)
         .await
         .map_err(|error| error.to_string())?
     {
@@ -108,7 +124,7 @@ pub async fn read_cacheable(
 
 pub async fn load_page_notes_payload(storage: &Storage, slug: &str) -> Result<Vec<Value>, String> {
     let page = storage
-        .load_page(slug)
+        .load_page_coordinated(slug)
         .await
         .map_err(|error| error.to_string())?;
     let mut notes = Vec::new();
@@ -118,7 +134,7 @@ pub async fn load_page_notes_payload(storage: &Storage, slug: &str) -> Result<Ve
                 continue;
             };
             let Some(note) = storage
-                .load_note(note_slug)
+                .load_note_coordinated(note_slug)
                 .await
                 .map_err(|error| error.to_string())?
             else {
@@ -141,12 +157,11 @@ pub async fn load_page_snapshot_payload(
     slug: &str,
 ) -> Result<Vec<Value>, String> {
     let page = storage
-        .load_page(slug)
+        .load_page_coordinated(slug)
         .await
         .map_err(|error| error.to_string())?;
     let mut snapshots = Vec::new();
     if let Some(page) = page {
-        let snapshots_dir = storage.root().join("data").join("snapshots");
         for child_id in &page.child_ids {
             let Some(snapshot_stem) = child_id.strip_prefix("snapshot:") else {
                 continue;
@@ -157,8 +172,14 @@ pub async fn load_page_snapshot_payload(
             let Ok(timestamp) = snapshot_stem[last_dash + 1..].parse::<i64>() else {
                 continue;
             };
-            let has_md = snapshots_dir.join(format!("{snapshot_stem}.md")).exists();
-            let has_html = snapshots_dir.join(format!("{snapshot_stem}.html")).exists();
+            let page_slug = &snapshot_stem[..last_dash];
+            let has_md = storage
+                .snapshot_html_file_path(page_slug, timestamp)
+                .with_extension("md")
+                .exists();
+            let has_html = storage
+                .snapshot_html_file_path(page_slug, timestamp)
+                .exists();
             snapshots.push(json!({
                 "timestamp": timestamp,
                 "hasMd": has_md,
@@ -181,7 +202,7 @@ pub async fn load_all_pages_payload(storage: &Storage) -> Result<Value, String> 
 pub async fn page_relations_payload(storage: &Storage, url: &str) -> Result<Value, String> {
     let slug = generate_slug_from_url(url).map_err(|error| error.to_string())?;
     let page = storage
-        .load_page(&slug)
+        .load_page_coordinated(&slug)
         .await
         .map_err(|error| error.to_string())?;
     let Some(page) = page else {
@@ -196,7 +217,7 @@ pub async fn page_relations_payload(storage: &Storage, url: &str) -> Result<Valu
     for parent_id in &page.parent_ids {
         if let Some(parent_slug) = parent_id.strip_prefix("page:") {
             if let Some(parent_page) = storage
-                .load_page(parent_slug)
+                .load_page_coordinated(parent_slug)
                 .await
                 .map_err(|error| error.to_string())?
             {
@@ -209,7 +230,7 @@ pub async fn page_relations_payload(storage: &Storage, url: &str) -> Result<Valu
 
         if let Some(list_slug) = parent_id.strip_prefix("list:") {
             if let Some(list_entity) = storage
-                .load_list(list_slug)
+                .load_list_coordinated(list_slug)
                 .await
                 .map_err(|error| error.to_string())?
             {
@@ -228,7 +249,7 @@ pub async fn page_relations_payload(storage: &Storage, url: &str) -> Result<Valu
             continue;
         };
         if let Some(child_page) = storage
-            .load_page(child_slug)
+            .load_page_coordinated(child_slug)
             .await
             .map_err(|error| error.to_string())?
         {
@@ -302,34 +323,145 @@ pub async fn replay_entry(
     device_id: &str,
     entry: LogEntry,
 ) -> Result<(), String> {
-    let storage_for_load = storage.clone();
-    let effects = effect_of(
-        entry.clone(),
-        move |key| {
-            let storage = storage_for_load.clone();
-            let key = key.to_string();
-            async move { storage.load_entity(&key).await.ok().flatten() }
-        },
-        ReplayContext {
-            device_id: device_id.to_string(),
-        },
-    )
-    .await
-    .map_err(|error| error.to_string())?;
+    replay_entries(storage, device_id, vec![entry]).await
+}
 
-    for (key, effect) in &effects {
+pub async fn replay_entries(
+    storage: &Storage,
+    device_id: &str,
+    entries: Vec<LogEntry>,
+) -> Result<(), String> {
+    let _guard = storage.write_guard().await;
+    replay_entries_locked(storage, device_id, entries).await
+}
+
+async fn replay_entries_locked(
+    storage: &Storage,
+    device_id: &str,
+    entries: Vec<LogEntry>,
+) -> Result<(), String> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let entries = entries
+        .iter()
+        .map(|entry| serde_json::to_value(entry).map(|raw| (entry.clone(), raw)))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+
+    let replay_context = ReplayContext {
+        device_id: device_id.to_string(),
+    };
+    let mut effects = EntityMapView::new();
+    for (entry, _) in &entries {
+        let next_effects = effect_with_overlay(entry.clone(), storage, &effects, &replay_context)
+            .await
+            .map_err(|error| error.to_string())?;
+        effects.extend(next_effects);
+    }
+
+    commit_effects_locked(storage, device_id, &entries, effects).await
+}
+
+pub async fn commit_effects_locked(
+    storage: &Storage,
+    device_id: &str,
+    entries: &[(LogEntry, Value)],
+    effects: EntityMapView,
+) -> Result<(), String> {
+    let persisted_progress = storage
+        .load_replay_progress()
+        .await
+        .map_err(|error| error.to_string())?;
+    let must_flush_before_ack = persisted_progress.get(device_id).is_some_and(|progress| {
+        entries
+            .iter()
+            .any(|(entry, _)| entry.timestamp() <= *progress)
+    });
+    let replay_progress =
+        replay_progress_for_entries(device_id, entries.iter().map(|(entry, _)| entry));
+    let checkpoint_slot = if effects.is_empty() && replay_progress.is_empty() {
+        None
+    } else {
+        Some(
+            storage
+                .reserve_checkpoint_slot()
+                .await
+                .map_err(|error| error.to_string())?,
+        )
+    };
+
+    for (entry, _) in entries {
+        let raw = serde_json::to_value(entry).map_err(|error| error.to_string())?;
         storage
-            .apply_effect(key, effect)
+            .append_log_entry(device_id, entry.timestamp(), &raw)
             .await
             .map_err(|error| error.to_string())?;
     }
 
-    let raw = serde_json::to_value(&entry).map_err(|error| error.to_string())?;
-    storage
-        .append_log_entry(device_id, entry.timestamp(), &raw)
+    for (key, effect) in &effects {
+        storage.apply_effect_to_cache(key, effect);
+    }
+    if let Some(checkpoint_slot) = checkpoint_slot {
+        Storage::send_reserved_checkpoint_work(checkpoint_slot, effects, replay_progress);
+    }
+    if must_flush_before_ack {
+        storage
+            .flush_checkpoints()
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn replay_progress_for_entries<'a>(
+    device_id: &str,
+    entries: impl Iterator<Item = &'a LogEntry>,
+) -> BTreeMap<String, i64> {
+    let mut replay_progress = BTreeMap::new();
+    for entry in entries {
+        let current = replay_progress
+            .entry(device_id.to_string())
+            .or_insert(i64::MIN);
+        *current = (*current).max(entry.timestamp());
+    }
+    replay_progress
+}
+
+pub async fn recover_checkpoint_tail(storage: &Storage) -> Result<usize, String> {
+    let _guard = storage.write_guard().await;
+    let entries = storage
+        .load_log_entries_after_replay_progress()
         .await
         .map_err(|error| error.to_string())?;
-    Ok(())
+    if entries.is_empty() {
+        return Ok(0);
+    }
+
+    let mut effects = EntityMapView::new();
+    let mut replay_progress = BTreeMap::new();
+    for (device_id, entry) in &entries {
+        let replay_context = ReplayContext {
+            device_id: device_id.clone(),
+        };
+        let next_effects = effect_with_overlay(entry.clone(), storage, &effects, &replay_context)
+            .await
+            .map_err(|error| error.to_string())?;
+        effects.extend(next_effects);
+        let current = replay_progress.entry(device_id.clone()).or_insert(i64::MIN);
+        *current = (*current).max(entry.timestamp());
+    }
+
+    for (key, effect) in &effects {
+        storage.apply_effect_to_cache(key, effect);
+    }
+
+    let checkpoint_slot = storage
+        .reserve_checkpoint_slot()
+        .await
+        .map_err(|error| error.to_string())?;
+    Storage::send_reserved_checkpoint_work(checkpoint_slot, effects, replay_progress);
+    Ok(entries.len())
 }
 
 pub async fn submit_event(
@@ -453,6 +585,9 @@ pub async fn save_settings_key(
     key: &str,
     value: Value,
 ) -> Result<(), String> {
+    if !SETTINGS_KEYS.contains(&key) {
+        return Err(format!("Unknown settings key: {key}"));
+    }
     replay_entry(
         storage,
         device_id,
@@ -465,58 +600,138 @@ pub async fn save_settings_key(
     .await
 }
 
+pub async fn ensure_default_lists(storage: &Storage, device_id: &str) -> Result<bool, String> {
+    let _guard = storage.write_guard().await;
+    let name_map = storage
+        .load_name_to_id()
+        .await
+        .map_err(|error| error.to_string())?;
+    let paths = name_map.as_ref().map(|manifest| &manifest.paths);
+    let has_user_lists = paths
+        .map(|paths| paths.keys().any(|key| !key.starts_with("system/")))
+        .unwrap_or(false);
+    let has_hubs = paths
+        .and_then(|paths| paths.get("system/Hubs"))
+        .map(|list_id| list_id == "hubs")
+        .unwrap_or(false);
+    if has_user_lists || has_hubs {
+        return Ok(false);
+    }
+
+    let timestamp = chrono::Local::now().timestamp_millis();
+    let mut config = BTreeMap::new();
+    config.insert(
+        "description".to_string(),
+        Value::String("Hub and landing pages".to_string()),
+    );
+    config.insert(
+        "fnSource".to_string(),
+        Value::String(
+            [
+                "const u = new URL(page.url);",
+                "const p = u.pathname.toLowerCase();",
+                "const skip = ['s', 'search', 'query', 'q', 'target'];",
+                "if (skip.some(k => u.searchParams.has(k))) return false;",
+                "if (p === '/' || p === '') return u.search.length <= 100;",
+                "const parts = p.split('/').filter(Boolean);",
+                "if (parts.length === 1 && p.endsWith('/')) return true;",
+                "const last = parts[parts.length - 1] || '';",
+                "const hub = ['blog', 'wiki', 'home', 'landing', 'explore', 'discover', 'index'];",
+                "if (hub.some(k => last.includes(k))) return !u.hash;",
+                "return false;",
+            ]
+            .join("\n"),
+        ),
+    );
+    replay_entries_locked(
+        storage,
+        device_id,
+        vec![
+            LogEntry::CreateList {
+                timestamp,
+                list_owner: "system".to_string(),
+                list_id: Some("hubs".to_string()),
+                name: "Hubs".to_string(),
+                parent_list_id: None,
+            },
+            LogEntry::AddRule {
+                timestamp: timestamp + 1,
+                list_owner: "system".to_string(),
+                name: "Hubs".to_string(),
+                rule: RuleInput {
+                    id: None,
+                    rule_type: "function".to_string(),
+                    config,
+                },
+            },
+        ],
+    )
+    .await?;
+
+    Ok(true)
+}
+
 pub async fn create_note(
     storage: &Storage,
     device_id: &str,
     request: &Value,
 ) -> Result<Value, String> {
-    let timestamp = chrono::Local::now().timestamp_millis();
-    let page_slug = request
-        .get("pageSlug")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let excerpt = excerpt_text(request.get("excerpt"));
-    let page = if let Some(slug) = page_slug.as_deref() {
-        storage
-            .load_page(slug)
-            .await
-            .map_err(|error| error.to_string())?
-    } else {
-        None
-    };
-    let note_slug = generate_note_slug(timestamp, excerpt.as_deref());
-    let page_url = page
-        .as_ref()
-        .and_then(|value| value.url.clone())
-        .or_else(|| {
+    let (page_slug, note_slug) = {
+        let _guard = storage.write_guard().await;
+        let timestamp = chrono::Local::now().timestamp_millis();
+        let page_slug = request
+            .get("pageSlug")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let excerpt = excerpt_text(request.get("excerpt"));
+        let page = if let Some(slug) = page_slug.as_deref() {
+            storage
+                .load_page(slug)
+                .await
+                .map_err(|error| error.to_string())?
+        } else {
+            None
+        };
+        let note_slug = generate_note_slug(timestamp, excerpt.as_deref());
+        let page_url = page
+            .as_ref()
+            .and_then(|value| value.url.clone())
+            .or_else(|| {
+                request
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .ok_or_else(|| "Cannot determine page URL for note".to_string())?;
+        let page_title = page.and_then(|value| value.title).or_else(|| {
             request
-                .get("url")
+                .get("title")
                 .and_then(Value::as_str)
                 .map(str::to_string)
-        })
-        .ok_or_else(|| "Cannot determine page URL for note".to_string())?;
-    let page_title = page.and_then(|value| value.title);
+        });
 
-    replay_entry(
-        storage,
-        device_id,
-        LogEntry::CreateNote {
-            timestamp,
-            url: page_url,
-            path: format!("notes/{note_slug}.json"),
-            title: page_title,
-            excerpt: excerpt.clone(),
-            note: request
-                .get("note")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            css_path: request
-                .get("cssPath")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-        },
-    )
-    .await?;
+        replay_entries_locked(
+            storage,
+            device_id,
+            vec![LogEntry::CreateNote {
+                timestamp,
+                url: page_url,
+                path: format!("objects/notes/{note_slug}.json"),
+                title: page_title,
+                excerpt: excerpt.clone(),
+                note: request
+                    .get("note")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                css_path: request
+                    .get("cssPath")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            }],
+        )
+        .await?;
+        (page_slug, note_slug)
+    };
     let notes = if let Some(page_slug) = page_slug.as_deref() {
         load_page_notes_payload(storage, page_slug).await?
     } else {
@@ -535,18 +750,19 @@ pub async fn delete_note(
     device_id: &str,
     note_slug: &str,
 ) -> Result<(), String> {
+    let _guard = storage.write_guard().await;
     let note = storage
         .load_note(note_slug)
         .await
         .map_err(|error| error.to_string())?;
-    replay_entry(
+    replay_entries_locked(
         storage,
         device_id,
-        LogEntry::DeleteNote {
+        vec![LogEntry::DeleteNote {
             timestamp: chrono::Local::now().timestamp_millis(),
             url: note.as_ref().and_then(|value| value.url.clone()),
-            path: format!("notes/{note_slug}.json"),
-        },
+            path: format!("objects/notes/{note_slug}.json"),
+        }],
     )
     .await
 }
@@ -557,6 +773,7 @@ pub async fn update_note(
     note_slug: &str,
     note_value: &str,
 ) -> Result<Value, String> {
+    let _guard = storage.write_guard().await;
     let old_note = storage
         .load_note(note_slug)
         .await
@@ -569,20 +786,24 @@ pub async fn update_note(
         }));
     }
 
-    let timestamp = chrono::Local::now().timestamp_millis();
-    let new_note_slug = generate_note_slug(timestamp, old_note.excerpt.as_deref());
-    replay_entry(
+    let mut timestamp = chrono::Local::now().timestamp_millis();
+    let mut new_note_slug = generate_note_slug(timestamp, old_note.excerpt.as_deref());
+    while new_note_slug == note_slug {
+        timestamp += 1;
+        new_note_slug = generate_note_slug(timestamp, old_note.excerpt.as_deref());
+    }
+    replay_entries_locked(
         storage,
         device_id,
-        LogEntry::ReplaceNote {
+        vec![LogEntry::ReplaceNote {
             timestamp,
             url: old_note.url.clone(),
-            path: format!("notes/{new_note_slug}.json"),
-            old_path: format!("notes/{note_slug}.json"),
+            path: format!("objects/notes/{new_note_slug}.json"),
+            old_path: format!("objects/notes/{note_slug}.json"),
             excerpt: old_note.excerpt.clone(),
             note: Some(note_value.to_string()),
             css_path: old_note.css_path.clone(),
-        },
+        }],
     )
     .await?;
     Ok(json!({
@@ -597,6 +818,7 @@ pub async fn toggle_list_pin(
     device_id: &str,
     request: &Value,
 ) -> Result<Value, String> {
+    let _guard = storage.write_guard().await;
     let list_id = request
         .get("listId")
         .and_then(Value::as_str)
@@ -611,7 +833,7 @@ pub async fn toggle_list_pin(
         .ok_or_else(|| "List not found".to_string())?;
     let note_id = request.get("id").and_then(Value::as_str);
     let pin_item = if let Some(note_id) = note_id.filter(|value| value.starts_with("note:")) {
-        format!("notes/{}.json", &note_id["note:".len()..])
+        format!("objects/notes/{}.json", &note_id["note:".len()..])
     } else {
         request
             .get("url")
@@ -628,40 +850,44 @@ pub async fn toggle_list_pin(
         )
     };
     let is_pinned = list.pins.iter().any(|pin| pin.id == pin_key);
-    let titles = if !is_pinned && !pin_key.starts_with("note:") {
+    let title = if !is_pinned && !pin_key.starts_with("note:") {
         storage
             .load_entity(&pin_key)
             .await
             .map_err(|error| error.to_string())?
             .and_then(|entity| match entity {
-                Entity::Page(page) => page
-                    .title
-                    .map(|title| BTreeMap::from([(pin_item.clone(), title)])),
+                Entity::Page(page) => page.title,
                 _ => None,
+            })
+            .or_else(|| {
+                request
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
             })
     } else {
         None
     };
-    replay_entry(
+    replay_entries_locked(
         storage,
         device_id,
-        if is_pinned {
+        vec![if is_pinned {
             LogEntry::UnpinFromList {
                 timestamp: chrono::Local::now().timestamp_millis(),
                 name: list_name,
                 list_owner,
-                items: vec![pin_item],
+                urls: vec![pin_item],
             }
         } else {
             LogEntry::PinToList {
                 timestamp: chrono::Local::now().timestamp_millis(),
                 name: list_name,
                 list_owner,
-                items: vec![pin_item],
-                titles,
+                urls: vec![pin_item],
+                titles: title.map(|value| vec![Some(value)]),
                 source: None,
             }
-        },
+        }],
     )
     .await?;
     Ok(json!({
@@ -675,6 +901,7 @@ pub async fn add_list_pins(
     device_id: &str,
     request: &Value,
 ) -> Result<(), String> {
+    let _guard = storage.write_guard().await;
     let list_id = request
         .get("listId")
         .and_then(Value::as_str)
@@ -693,12 +920,13 @@ pub async fn add_list_pins(
     let mut titles = request
         .get("titles")
         .cloned()
-        .map(serde_json::from_value::<BTreeMap<String, String>>)
+        .map(serde_json::from_value::<Vec<Option<String>>>)
         .transpose()
         .map_err(|error| error.to_string())?
-        .unwrap_or_default();
-    for url in &urls {
-        if titles.contains_key(url) {
+        .unwrap_or_else(|| vec![None; urls.len()]);
+    titles.resize(urls.len(), None);
+    for (index, url) in urls.iter().enumerate() {
+        if titles[index].is_some() {
             continue;
         }
         let page_key = format!(
@@ -711,21 +939,21 @@ pub async fn add_list_pins(
             .map_err(|error| error.to_string())?
         {
             if let Some(title) = page.title {
-                titles.insert(url.clone(), title);
+                titles[index] = Some(title);
             }
         }
     }
-    replay_entry(
+    replay_entries_locked(
         storage,
         device_id,
-        LogEntry::PinToList {
+        vec![LogEntry::PinToList {
             timestamp: chrono::Local::now().timestamp_millis(),
             name: list_name,
             list_owner,
-            items: urls,
-            titles: (!titles.is_empty()).then_some(titles),
+            urls,
+            titles: titles.iter().any(Option::is_some).then_some(titles),
             source: None,
-        },
+        }],
     )
     .await
 }
@@ -735,6 +963,7 @@ pub async fn save_list_meta(
     device_id: &str,
     request: &Value,
 ) -> Result<Value, String> {
+    let _guard = storage.write_guard().await;
     let list_id = request.get("listId").and_then(Value::as_str);
     let name = request
         .get("name")
@@ -754,15 +983,15 @@ pub async fn save_list_meta(
         if list.name == new_name {
             return Ok(json!({ "success": true }));
         }
-        replay_entry(
+        replay_entries_locked(
             storage,
             device_id,
-            LogEntry::UpdateList {
+            vec![LogEntry::UpdateList {
                 timestamp: chrono::Local::now().timestamp_millis(),
                 name: list.name,
                 list_owner: list.owner.unwrap_or_else(|| device_id.to_string()),
                 new_name: Some(new_name),
-            },
+            }],
         )
         .await?;
         Ok(json!({ "success": true }))
@@ -770,10 +999,10 @@ pub async fn save_list_meta(
         let name = name.ok_or_else(|| "saveListMeta missing name".to_string())?;
         let timestamp = chrono::Local::now().timestamp_millis();
         let generated_list_id = generate_list_id(&name, timestamp);
-        replay_entry(
+        replay_entries_locked(
             storage,
             device_id,
-            LogEntry::CreateList {
+            vec![LogEntry::CreateList {
                 timestamp,
                 name,
                 list_owner: device_id.to_string(),
@@ -781,7 +1010,7 @@ pub async fn save_list_meta(
                 parent_list_id: parse_parent_list_id(
                     request.get("parentPath").and_then(Value::as_str),
                 ),
-            },
+            }],
         )
         .await?;
         Ok(json!({
@@ -792,17 +1021,18 @@ pub async fn save_list_meta(
 }
 
 pub async fn delete_list(storage: &Storage, device_id: &str, list_id: &str) -> Result<(), String> {
+    let _guard = storage.write_guard().await;
     let (list_name, list_owner) = list_event_fields(storage, device_id, list_id)
         .await?
         .ok_or_else(|| "List not found".to_string())?;
-    replay_entry(
+    replay_entries_locked(
         storage,
         device_id,
-        LogEntry::DeleteList {
+        vec![LogEntry::DeleteList {
             timestamp: chrono::Local::now().timestamp_millis(),
             name: list_name,
             list_owner,
-        },
+        }],
     )
     .await
 }
@@ -812,13 +1042,14 @@ pub async fn update_list_tree(
     device_id: &str,
     tree: Vec<TreeNode>,
 ) -> Result<(), String> {
-    replay_entry(
+    let _guard = storage.write_guard().await;
+    replay_entries_locked(
         storage,
         device_id,
-        LogEntry::UpdateListTree {
+        vec![LogEntry::UpdateListTree {
             timestamp: chrono::Local::now().timestamp_millis(),
             tree,
-        },
+        }],
     )
     .await
 }
@@ -828,6 +1059,7 @@ pub async fn restore_note(
     device_id: &str,
     note_slug: &str,
 ) -> Result<(), String> {
+    let _guard = storage.write_guard().await;
     let orphaned = storage
         .load_orphaned()
         .await
@@ -846,14 +1078,14 @@ pub async fn restore_note(
                 .and_then(|entry| entry.url.clone())
         })
         .or_else(|| note.and_then(|value| value.url));
-    replay_entry(
+    replay_entries_locked(
         storage,
         device_id,
-        LogEntry::RestoreNote {
+        vec![LogEntry::RestoreNote {
             timestamp: chrono::Local::now().timestamp_millis(),
             url: page_url,
-            path: format!("notes/{note_slug}.json"),
-        },
+            path: format!("objects/notes/{note_slug}.json"),
+        }],
     )
     .await
 }
@@ -863,6 +1095,7 @@ pub async fn restore_snapshot(
     device_id: &str,
     snapshot_stem: &str,
 ) -> Result<String, String> {
+    let _guard = storage.write_guard().await;
     let (page_slug, timestamp) = split_snapshot_stem(snapshot_stem)
         .ok_or_else(|| "restoreSnapshot invalid snapSlug".to_string())?;
     let orphaned = storage
@@ -884,33 +1117,34 @@ pub async fn restore_snapshot(
         })
         .or_else(|| page.and_then(|value| value.url))
         .ok_or_else(|| "Cannot determine page URL for snapshot".to_string())?;
-    replay_entry(
+    replay_entries_locked(
         storage,
         device_id,
-        LogEntry::RestoreSnapshot {
+        vec![LogEntry::RestoreSnapshot {
             timestamp: chrono::Local::now().timestamp_millis(),
             url: page_url,
-            path: format!("snapshots/{page_slug}-{timestamp}"),
-        },
+            path: storage.snapshot_sidecar_relative_path(&page_slug, timestamp),
+        }],
     )
     .await?;
     Ok(page_slug)
 }
 
 pub async fn restore_list(storage: &Storage, device_id: &str, list_id: &str) -> Result<(), String> {
+    let _guard = storage.write_guard().await;
     let list = storage
         .load_list(list_id)
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "List not found".to_string())?;
-    replay_entry(
+    replay_entries_locked(
         storage,
         device_id,
-        LogEntry::RestoreList {
+        vec![LogEntry::RestoreList {
             timestamp: chrono::Local::now().timestamp_millis(),
             name: list.name,
             list_owner: list.owner.unwrap_or_else(|| device_id.to_string()),
-        },
+        }],
     )
     .await
 }
@@ -921,6 +1155,7 @@ pub async fn delete_snapshot(
     slug: &str,
     timestamp: i64,
 ) -> Result<(), String> {
+    let _guard = storage.write_guard().await;
     let page = storage
         .load_page(slug)
         .await
@@ -929,14 +1164,14 @@ pub async fn delete_snapshot(
     let url = page
         .url
         .ok_or_else(|| "Page entity missing URL for snapshot".to_string())?;
-    replay_entry(
+    replay_entries_locked(
         storage,
         device_id,
-        LogEntry::DeleteSnapshot {
+        vec![LogEntry::DeleteSnapshot {
             timestamp: chrono::Local::now().timestamp_millis(),
             url,
-            path: format!("snapshots/{slug}-{timestamp}"),
-        },
+            path: storage.snapshot_sidecar_relative_path(slug, timestamp),
+        }],
     )
     .await
 }
@@ -946,17 +1181,22 @@ pub async fn permanent_delete_keys(
     device_id: &str,
     keys: &[String],
 ) -> Result<Vec<String>, String> {
+    let _guard = storage.write_guard().await;
     let deleted_keys = permanent_delete_candidates(keys);
     if deleted_keys.is_empty() {
         return Ok(deleted_keys);
     }
-    replay_entry(
+    storage
+        .flush_checkpoints()
+        .await
+        .map_err(|error| error.to_string())?;
+    replay_entries_locked(
         storage,
         device_id,
-        LogEntry::PermanentDelete {
+        vec![LogEntry::PermanentDelete {
             timestamp: chrono::Local::now().timestamp_millis(),
             keys: deleted_keys.clone(),
-        },
+        }],
     )
     .await?;
     Ok(deleted_keys)
@@ -1079,6 +1319,7 @@ pub async fn add_rule(
     list_id: &str,
     rule: RulePayload,
 ) -> Result<Value, String> {
+    let _guard = storage.write_guard().await;
     let (list_name, list_owner) = list_event_fields(storage, device_id, list_id)
         .await?
         .ok_or_else(|| "List not found".to_string())?;
@@ -1093,10 +1334,10 @@ pub async fn add_rule(
         }));
     }
 
-    replay_entry(
+    replay_entries_locked(
         storage,
         device_id,
-        LogEntry::AddRule {
+        vec![LogEntry::AddRule {
             timestamp: chrono::Local::now().timestamp_millis(),
             name: list_name,
             list_owner,
@@ -1105,7 +1346,7 @@ pub async fn add_rule(
                 rule_type: rule.rule_type,
                 config: rule.config,
             },
-        },
+        }],
     )
     .await?;
     Ok(json!({ "success": true }))
@@ -1117,18 +1358,44 @@ pub async fn remove_rule(
     list_id: &str,
     rule_id: &str,
 ) -> Result<(), String> {
+    let _guard = storage.write_guard().await;
     let (list_name, list_owner) = list_event_fields(storage, device_id, list_id)
         .await?
         .ok_or_else(|| "List not found".to_string())?;
-    replay_entry(
+    replay_entries_locked(
         storage,
         device_id,
-        LogEntry::RemoveRule {
+        vec![LogEntry::RemoveRule {
             timestamp: chrono::Local::now().timestamp_millis(),
             name: list_name,
             list_owner,
             rule_id: rule_id.to_string(),
-        },
+        }],
+    )
+    .await
+}
+
+pub async fn update_rule(
+    storage: &Storage,
+    device_id: &str,
+    list_id: &str,
+    rule_id: &str,
+    config: BTreeMap<String, Value>,
+) -> Result<(), String> {
+    let _guard = storage.write_guard().await;
+    let (list_name, list_owner) = list_event_fields(storage, device_id, list_id)
+        .await?
+        .ok_or_else(|| "List not found".to_string())?;
+    replay_entries_locked(
+        storage,
+        device_id,
+        vec![LogEntry::UpdateRule {
+            timestamp: chrono::Local::now().timestamp_millis(),
+            name: list_name,
+            list_owner,
+            rule_id: rule_id.to_string(),
+            config,
+        }],
     )
     .await
 }
@@ -1264,12 +1531,10 @@ pub async fn import_bookmarks(
 
         if !node.bookmarks.is_empty() {
             let mut urls = Vec::with_capacity(node.bookmarks.len());
-            let mut titles = BTreeMap::new();
+            let mut titles = Vec::with_capacity(node.bookmarks.len());
             for bookmark in node.bookmarks {
                 urls.push(bookmark.url.clone());
-                if !bookmark.title.trim().is_empty() {
-                    titles.insert(bookmark.url, bookmark.title);
-                }
+                titles.push((!bookmark.title.trim().is_empty()).then_some(bookmark.title));
             }
 
             replay_entry(
@@ -1279,8 +1544,8 @@ pub async fn import_bookmarks(
                     timestamp: chrono::Local::now().timestamp_millis(),
                     name: list_name.clone(),
                     list_owner: device_id.to_string(),
-                    items: urls.clone(),
-                    titles: (!titles.is_empty()).then_some(titles),
+                    urls: urls.clone(),
+                    titles: titles.iter().any(Option::is_some).then_some(titles),
                     source: None,
                 },
             )
@@ -1374,7 +1639,6 @@ pub async fn import_history(
                 url,
                 title,
                 referrer_url,
-                checkpoint: true,
             },
         )
         .await?;

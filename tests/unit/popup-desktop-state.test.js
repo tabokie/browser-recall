@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
+import { generateSlugFromUrl } from '../../apps/extension/utils.js';
 
 const ROOT = process.cwd();
 const POPUP_HTML = readFileSync(
@@ -116,6 +117,8 @@ function installChromeMock({ tab, responses }) {
       sendMessage: vi.fn(async () => ({ success: true })),
     },
   };
+
+  return { runtimeMessages, sessionStore, storageChanged };
 }
 
 describe('popup desktop state rendering', () => {
@@ -148,8 +151,8 @@ describe('popup desktop state rendering', () => {
           hasToken: true,
         },
         getReportedUrl: { success: true, url: tab.url },
-        trimTitle: { title: tab.title },
-        readCacheable: { success: true, value: null },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
         getPageSummary: {
           success: false,
           error: 'Desktop popup page summary failed',
@@ -257,7 +260,7 @@ describe('popup desktop state rendering', () => {
         },
         getReportedUrl: { success: true, url: tab.url },
         trimTitle: { title: tab.title },
-        readCacheable: { success: true, value: null },
+        readDesktopValue: { success: true, value: null },
         getPageSummary: {
           success: true,
           url: tab.url,
@@ -266,15 +269,30 @@ describe('popup desktop state rendering', () => {
           snapshots: [],
           lists: [],
         },
-        getPopupLists: { success: true, lists: [] },
+        getPopupLists: () => ({
+          success: true,
+          lists: [
+            {
+              slug: 'reading',
+              name: 'Reading',
+              pins: pinned
+                ? [
+                    {
+                      id: `page:${generateSlugFromUrl(tab.url)}`,
+                      pinnedAt: Date.now(),
+                    },
+                  ]
+                : [],
+            },
+          ],
+        }),
       },
     });
 
     await import('../../apps/extension/popup.js');
 
     await waitFor(
-      () =>
-        document.getElementById('dashboard').style.display === 'flex',
+      () => document.getElementById('dashboard').style.display === 'flex',
     );
 
     expect(document.getElementById('setup-required').style.display).toBe(
@@ -339,8 +357,8 @@ describe('popup desktop state rendering', () => {
           hasToken: true,
         },
         getReportedUrl: { success: true, url: tab.url },
-        trimTitle: { title: tab.title },
-        readCacheable: { success: true, value: null },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
         getPageSummary: () => pageSummary.promise,
         getPopupLists: { success: true, lists: [] },
       },
@@ -377,7 +395,8 @@ describe('popup desktop state rendering', () => {
     });
 
     await waitFor(
-      () => document.getElementById('dashboard').style.display === 'flex',
+      () =>
+        document.getElementById('pageTitle').textContent === 'Desktop Title',
     );
     expect(document.documentElement.style.opacity).toBe('');
     expect(document.getElementById('pageTitle').textContent).toBe(
@@ -385,5 +404,157 @@ describe('popup desktop state rendering', () => {
     );
     expect(document.getElementById('notesSection').style.display).toBe('');
     expect(document.getElementById('snapshotSection').style.display).toBe('');
+  });
+
+  it('keeps the editable page title legible in the dark popup theme', async () => {
+    installDom();
+
+    const inputRule = [...document.styleSheets]
+      .flatMap((sheet) => [...sheet.cssRules])
+      .find((rule) => rule.selectorText === '.page-title-input');
+
+    expect(inputRule?.style.color).toBe('var(--text-primary)');
+  });
+
+  it('shows a popup error bubble when capture fails because the extension context was invalidated', async () => {
+    const tab = {
+      id: 49,
+      url: 'https://example.com/context-invalidated',
+      title: 'Context Invalidated',
+    };
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: { title: tab.title },
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: {
+          success: true,
+          url: tab.url,
+          page: {
+            slug: 'context-invalidated',
+            url: tab.url,
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: [],
+        },
+        getPopupLists: { success: true, lists: [] },
+        captureCurrentPageFromPopup: {
+          success: false,
+          error: 'Extension context invalidated.',
+        },
+      },
+    });
+    chrome.tabs.sendMessage.mockRejectedValue(
+      new Error('Extension context invalidated.'),
+    );
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () => document.getElementById('dashboard').style.display === 'flex',
+    );
+    document.getElementById('captureBtn').click();
+
+    await waitFor(() => document.getElementById('errorBubble'));
+    expect(document.getElementById('errorBubble').textContent).toContain(
+      'refresh the page',
+    );
+  });
+
+  it('keeps the popup title trimmed after adding the current page to a list', async () => {
+    const tab = {
+      id: 50,
+      url: 'https://example.com/trimmed-title-after-pin',
+      title: 'Trimmed Title | Example Site',
+    };
+    let pinned = false;
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({
+          title: (request.title || '').split('|')[0].trim(),
+        }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () => ({
+          success: true,
+          url: tab.url,
+          page: {
+            slug: 'trimmed-title-after-pin',
+            url: tab.url,
+            title: pinned ? tab.title : 'Trimmed Title',
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: [
+            {
+              slug: 'reading',
+              name: 'Reading',
+              pins: pinned
+                ? [
+                    {
+                      id: `page:${generateSlugFromUrl(tab.url)}`,
+                      pinnedAt: Date.now(),
+                    },
+                  ]
+                : [],
+            },
+          ],
+        }),
+        getPopupLists: () => ({
+          success: true,
+          lists: [
+            {
+              slug: 'reading',
+              name: 'Reading',
+              pins: pinned
+                ? [
+                    {
+                      id: `page:${generateSlugFromUrl(tab.url)}`,
+                      pinnedAt: Date.now(),
+                    },
+                  ]
+                : [],
+            },
+          ],
+        }),
+        toggleListPin: () => {
+          pinned = true;
+          return { success: true, pinned: true };
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () =>
+        document.getElementById('pageTitle').textContent === 'Trimmed Title',
+    );
+    document.querySelector('.list-chip').click();
+
+    await waitFor(() => document.querySelector('.list-chip.selected'));
+    expect(document.getElementById('pageTitle').textContent).toBe(
+      'Trimmed Title',
+    );
   });
 });

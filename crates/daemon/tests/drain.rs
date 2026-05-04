@@ -8,8 +8,12 @@ use browser_recall_replay::entities::{
 };
 use browser_recall_replay::generate_slug_from_url;
 use futures_util::SinkExt;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::path::Path;
 use tempfile::tempdir;
+use tokio::time::{sleep, Duration};
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 use support::{next_text_message, paired_socket, test_server_options};
@@ -33,6 +37,45 @@ async fn read_log_lines(log_dir: &std::path::Path) -> Vec<Value> {
     lines
 }
 
+async fn wait_for_json<T, F>(path: &Path, predicate: F) -> T
+where
+    T: DeserializeOwned,
+    F: Fn(&T) -> bool,
+{
+    let mut last_error = None;
+    for _ in 0..100 {
+        match tokio::fs::read_to_string(path).await {
+            Ok(raw) => match serde_json::from_str::<T>(&raw) {
+                Ok(value) if predicate(&value) => return value,
+                Ok(_) => {}
+                Err(error) => last_error = Some(error.to_string()),
+            },
+            Err(error) => last_error = Some(error.to_string()),
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
+    panic!(
+        "timed out waiting for {}: {}",
+        path.display(),
+        last_error.unwrap_or_else(|| "predicate did not match".to_string())
+    );
+}
+
+async fn wait_for_ack(socket: &mut support::TestSocket) {
+    loop {
+        let message = next_text_message(socket).await;
+        let parsed: DaemonMessage = serde_json::from_str(&message).expect("daemon message json");
+        if matches!(parsed, DaemonMessage::Ack { .. }) {
+            return;
+        }
+    }
+}
+
+fn shard_for(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    format!("{:02x}", digest[0])
+}
+
 #[tokio::test]
 async fn drain_pipeline_preserves_fifo_order_for_page_updates() {
     let dir = tempdir().expect("tempdir");
@@ -49,7 +92,6 @@ async fn drain_pipeline_preserves_fifo_order_for_page_updates() {
             "action": "visit_page",
             "url": url,
             "title": "Initial Title",
-            "checkpoint": true
         }),
         json!({
             "timestamp": 1_710_000_100_100i64,
@@ -85,23 +127,28 @@ async fn drain_pipeline_preserves_fifo_order_for_page_updates() {
             ))
             .await
             .expect("send event");
-        let ack = next_text_message(&mut socket).await;
-        let ack: DaemonMessage = serde_json::from_str(&ack).expect("ack json");
-        assert!(matches!(ack, DaemonMessage::Ack { .. }));
+        wait_for_ack(&mut socket).await;
     }
 
     let slug = generate_slug_from_url(url).expect("slug");
-    let page_raw = tokio::fs::read_to_string(data_dir.join("pages").join(format!("{slug}.json")))
-        .await
-        .expect("page exists");
-    let page: PageEntity = serde_json::from_str(&page_raw).expect("page json");
+    let page_path = data_dir
+        .join("views")
+        .join("pages")
+        .join(shard_for(&slug))
+        .join(format!("{slug}.json"));
+    let page: PageEntity = wait_for_json(&page_path, |page: &PageEntity| {
+        page.likes == Some(1)
+            && page.user_title.as_deref() == Some("Pinned Title")
+            && page.scroll_depth == Some(45)
+    })
+    .await;
     assert_eq!(page.title.as_deref(), Some("Initial Title"));
     assert_eq!(page.user_title.as_deref(), Some("Pinned Title"));
     assert_eq!(page.scroll_depth, Some(45));
     assert_eq!(page.time_on_page, Some(12));
     assert_eq!(page.likes, Some(1));
 
-    let lines = read_log_lines(&data_dir.join("data").join("logs").join(device_id)).await;
+    let lines = read_log_lines(&data_dir.join("logs").join(device_id)).await;
     let actions: Vec<_> = lines
         .iter()
         .map(|line| {
@@ -163,39 +210,46 @@ async fn drain_pipeline_reconciles_list_manifests_after_sequential_mutations() {
             ))
             .await
             .expect("send event");
-        let ack = next_text_message(&mut socket).await;
-        let ack: DaemonMessage = serde_json::from_str(&ack).expect("ack json");
-        assert!(matches!(ack, DaemonMessage::Ack { .. }));
+        wait_for_ack(&mut socket).await;
     }
 
-    let list_raw = tokio::fs::read_to_string(data_dir.join("lists").join("reading.json"))
-        .await
-        .expect("list exists");
-    let list: ListEntity = serde_json::from_str(&list_raw).expect("list json");
+    let list_path = data_dir.join("views").join("lists").join("reading.json");
+    let list: ListEntity = wait_for_json(&list_path, |list: &ListEntity| list.deleted).await;
     assert_eq!(list.name, "Longform");
     assert!(list.deleted);
     assert_eq!(list.deleted_ts, Some(1_710_000_200_200i64));
 
-    let name_to_id_raw =
-        tokio::fs::read_to_string(data_dir.join("manifest").join("list-name-to-id.json"))
-            .await
-            .expect("name map exists");
+    let name_to_id_path = data_dir
+        .join("views")
+        .join("manifest")
+        .join("list-name-to-id.json");
     let name_to_id: NameToIdManifest =
-        serde_json::from_str(&name_to_id_raw).expect("name map json");
+        wait_for_json(&name_to_id_path, |name_to_id: &NameToIdManifest| {
+            !name_to_id.paths.contains_key("test-device/Longform")
+        })
+        .await;
     assert!(!name_to_id.paths.contains_key("test-device/Reading"));
     assert!(!name_to_id.paths.contains_key("test-device/Longform"));
 
-    let list_order_raw =
-        tokio::fs::read_to_string(data_dir.join("manifest").join("list-order.json"))
-            .await
-            .expect("list order exists");
+    let list_order_path = data_dir
+        .join("views")
+        .join("manifest")
+        .join("list-order.json");
     let list_order: ListOrderManifest =
-        serde_json::from_str(&list_order_raw).expect("list order json");
+        wait_for_json(&list_order_path, |list_order: &ListOrderManifest| {
+            list_order.tree.is_empty()
+        })
+        .await;
     assert!(list_order.tree.is_empty());
 
-    let orphaned_raw = tokio::fs::read_to_string(data_dir.join("manifest").join("orphaned.json"))
-        .await
-        .expect("orphaned exists");
+    let orphaned_raw = tokio::fs::read_to_string(
+        data_dir
+            .join("views")
+            .join("manifest")
+            .join("orphaned.json"),
+    )
+    .await
+    .expect("orphaned exists");
     let orphaned: OrphanedManifest = serde_json::from_str(&orphaned_raw).expect("orphaned json");
     assert!(orphaned
         .entries

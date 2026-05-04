@@ -7,7 +7,7 @@ import {
   it,
   vi,
 } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -91,6 +91,20 @@ async function waitFor(predicate, timeoutMs = 15_000, stepMs = 50) {
     await new Promise((resolve) => setTimeout(resolve, stepMs));
   }
   throw new Error('condition not met before timeout');
+}
+
+async function readAllLogLines(logsDir) {
+  const lines = [];
+  for (const deviceDir of await readdir(logsDir)) {
+    const devicePath = path.join(logsDir, deviceDir);
+    for (const logFile of await readdir(devicePath)) {
+      const raw = readFileSync(path.join(devicePath, logFile), 'utf8').trim();
+      if (!raw) continue;
+      lines.push(...raw.split('\n').map((line) => JSON.parse(line)));
+    }
+  }
+  lines.sort((left, right) => (left.timestamp || 0) - (right.timestamp || 0));
+  return lines;
 }
 
 function createChromeMock() {
@@ -331,7 +345,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     }
   });
 
-  it('queues connector events while offline and flushes them in order after reconnect', async () => {
+  it('queues connector commands while offline and flushes them in order after reconnect', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-buffer-flush-'),
     );
@@ -376,38 +390,39 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       return state.state === 'offline';
     });
 
-    const queuedEntries = [
+    const queuedCommands = [
       {
-        timestamp: 1710000002100,
-        action: 'create_list',
-        listOwner: 'test-device',
-        name: 'Queued Reading',
-        listId: 'queued-reading',
-      },
-      {
-        timestamp: 1710000002200,
-        action: 'pin_to_list',
-        listOwner: 'test-device',
-        name: 'Queued Reading',
-        items: ['https://example.com/queued'],
-        titles: {
-          'https://example.com/queued': 'Queued Page',
+        action: 'reportVisit',
+        request: {
+          timestamp: 1710000002100,
+          url: 'https://example.com/queued',
+          title: 'Queued Page',
         },
       },
       {
-        timestamp: 1710000002300,
-        action: 'update_setting',
-        key: 'theme',
-        value: 'sepia',
+        action: 'saveSettingsKey',
+        request: {
+          key: 'theme',
+          value: 'sepia',
+        },
+      },
+      {
+        action: 'reportLeave',
+        request: {
+          timestamp: 1710000002300,
+          url: 'https://example.com/queued',
+          title: 'Queued Page',
+          timeOnPage: 42,
+        },
       },
     ];
 
-    for (const entry of queuedEntries) {
-      await wsClient.enqueueDesktopEvent(entry);
+    for (const command of queuedCommands) {
+      await wsClient.enqueueDesktopCommand(command.action, command.request);
     }
 
-    expect(store.desktopPendingEvents).toBe(3);
-    expect(store.desktopEventBuffer).toHaveLength(3);
+    expect(store.desktopPendingCommands).toBe(3);
+    expect(store.desktopCommandBuffer).toHaveLength(3);
 
     child = launchDaemon(dir, 'allow');
     childProcesses.push(child);
@@ -416,16 +431,18 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     await wsClient.connectDesktopBridge();
     await waitFor(async () => {
       const state = await wsClient.getConnectorBridgeState();
-      return state.state === 'connected' && state.pendingEvents === 0;
+      return state.state === 'connected' && state.pendingCommands === 0;
     });
 
     const dataRoot = path.join(dir, 'portal-data');
-    const listRaw = readFileSync(
-      path.join(dataRoot, 'lists', 'queued-reading.json'),
+    const pageFiles = await readdir(path.join(dataRoot, 'pages'));
+    const queuedPage = pageFiles.find((file) => file.includes('example'));
+    expect(queuedPage).toBeTruthy();
+    const pageRaw = readFileSync(
+      path.join(dataRoot, 'pages', queuedPage),
       'utf8',
     );
-    expect(listRaw).toContain('"name": "Queued Reading"');
-    expect(listRaw).toContain('"id": "page:');
+    expect(pageRaw).toContain('"title": "Queued Page"');
 
     const settingsRaw = readFileSync(
       path.join(dataRoot, 'manifest', 'settings.json'),
@@ -434,23 +451,18 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(settingsRaw).toContain('"theme": "sepia"');
 
     const logsDir = path.join(dataRoot, 'data', 'logs');
-    const [deviceDir] = await readdir(logsDir);
-    const [logFile] = await readdir(path.join(logsDir, deviceDir));
-    const lines = readFileSync(path.join(logsDir, deviceDir, logFile), 'utf8')
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line));
-    expect(lines.slice(-3).map((line) => line.action)).toEqual([
-      'create_list',
-      'pin_to_list',
-      'update_setting',
-    ]);
+    const lines = await readAllLogLines(logsDir);
+    expect(
+      lines
+        .map((line) => line.action)
+        .filter((action) => action === 'visit_page' || action === 'leave_page'),
+    ).toEqual(['visit_page', 'leave_page']);
 
-    expect(store.desktopPendingEvents).toBe(0);
-    expect(store.desktopEventBuffer).toEqual([]);
+    expect(store.desktopPendingCommands).toBe(0);
+    expect(store.desktopCommandBuffer).toEqual([]);
   }, 30_000);
 
-  it('flushes queued events, notes, and snapshots in FIFO order after reconnect', async () => {
+  it('flushes queued commands and notes in FIFO order after reconnect', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-buffer-flush-mixed-'),
     );
@@ -495,33 +507,20 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       return state.state === 'offline';
     });
 
-    await wsClient.enqueueDesktopEvent({
+    await wsClient.enqueueDesktopCommand('reportVisit', {
       timestamp: 1710000002400,
-      action: 'create_list',
-      listOwner: 'test-device',
-      name: 'Mixed Queue',
-      listId: 'mixed-queue',
+      url: 'https://example.com/offline',
+      title: 'Offline Page',
     });
-    await wsClient.enqueueDesktopNote({
-      slug: 'offline-note',
+    await wsClient.enqueueDesktopCommand('createNote', {
       excerpt: 'offline highlight',
       note: 'offline note body',
       cssPath: null,
       url: 'https://example.com/offline',
       title: 'Offline Page',
-      ts: 1710000002500,
     });
-    await wsClient.enqueueDesktopSnapshot({
-      slug: 'offline-page',
-      ts: 1710000002600,
-      url: 'https://example.com/offline',
-      title: 'Offline Page',
-      markdown: 'offline snapshot body',
-      html: '<html><body>offline snapshot body</body></html>',
-    });
-
-    expect(store.desktopPendingEvents).toBe(3);
-    expect(store.desktopEventBuffer).toHaveLength(3);
+    expect(store.desktopPendingCommands).toBe(2);
+    expect(store.desktopCommandBuffer).toHaveLength(2);
 
     child = launchDaemon(dir, 'allow');
     childProcesses.push(child);
@@ -530,32 +529,17 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     await wsClient.connectDesktopBridge();
     await waitFor(async () => {
       const state = await wsClient.getConnectorBridgeState();
-      return state.state === 'connected' && state.pendingEvents === 0;
+      return state.state === 'connected' && state.pendingCommands === 0;
     });
 
     const dataRoot = path.join(dir, 'portal-data');
+    const noteFiles = await readdir(path.join(dataRoot, 'data', 'notes'));
     const noteRaw = readFileSync(
-      path.join(dataRoot, 'data', 'notes', 'offline-note.json'),
+      path.join(dataRoot, 'data', 'notes', noteFiles[0]),
       'utf8',
     );
     expect(noteRaw).toContain('"excerpt": "offline highlight"');
     expect(noteRaw).toContain('"note": "offline note body"');
-
-    const snapshotHtml = readFileSync(
-      path.join(
-        dataRoot,
-        'data',
-        'snapshots',
-        'offline-page-1710000002600.html',
-      ),
-      'utf8',
-    );
-    expect(snapshotHtml).toContain('offline snapshot body');
-    const snapshotMd = readFileSync(
-      path.join(dataRoot, 'data', 'snapshots', 'offline-page-1710000002600.md'),
-      'utf8',
-    );
-    expect(snapshotMd).toContain('offline snapshot body');
 
     const pageFiles = await readdir(path.join(dataRoot, 'pages'));
     const offlinePageRaw = readFileSync(
@@ -566,29 +550,25 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       ),
       'utf8',
     );
-    expect(offlinePageRaw).toContain('"note:offline-note"');
-    expect(offlinePageRaw).toContain('"snapshot:offline-page-1710000002600"');
+    expect(offlinePageRaw).toContain('"note:');
 
     const logsDir = path.join(dataRoot, 'data', 'logs');
-    const [deviceDir] = await readdir(logsDir);
-    const [logFile] = await readdir(path.join(logsDir, deviceDir));
-    const lines = readFileSync(path.join(logsDir, deviceDir, logFile), 'utf8')
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line));
-    expect(lines.slice(-3).map((line) => line.action)).toEqual([
-      'create_list',
-      'create_note',
-      'create_snapshot',
-    ]);
+    const lines = await readAllLogLines(logsDir);
+    expect(
+      lines
+        .map((line) => line.action)
+        .filter(
+          (action) => action === 'visit_page' || action === 'create_note',
+        ),
+    ).toEqual(['visit_page', 'create_note']);
 
-    expect(store.desktopPendingEvents).toBe(0);
-    expect(store.desktopEventBuffer).toEqual([]);
+    expect(store.desktopPendingCommands).toBe(0);
+    expect(store.desktopCommandBuffer).toEqual([]);
   }, 30_000);
 
-  it('normalizes nullable buffered snapshot fields before flushing', async () => {
+  it('sends large connected snapshots directly without storing them in chrome.storage.local', async () => {
     const dir = mkdtempSync(
-      path.join(tmpdir(), 'browser-recall-buffer-null-snapshot-'),
+      path.join(tmpdir(), 'browser-recall-large-snapshot-direct-'),
     );
     tempDirs.push(dir);
 
@@ -598,18 +578,6 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     originalSetTimeout = globalThis.setTimeout;
 
     const { chrome, store } = createChromeMock();
-    store.desktopEventBuffer = [
-      {
-        kind: 'snapshot',
-        slug: 'nullable-snapshot-page',
-        ts: 1710000002700,
-        url: 'https://example.com/nullable-snapshot',
-        title: null,
-        markdown: null,
-        html: null,
-      },
-    ];
-    store.desktopPendingEvents = 1;
     globalThis.chrome = chrome;
     globalThis.WebSocket = BrowserLikeWebSocket;
     Object.defineProperty(globalThis, 'navigator', {
@@ -632,25 +600,34 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     await wsClient.initConnectorBridge();
     await waitFor(async () => {
       const state = await wsClient.getConnectorBridgeState();
-      return state.state === 'connected' && state.pendingEvents === 0;
+      return state.state === 'connected' && state.hasToken;
     });
 
+    const largeBody = 'large snapshot body '.repeat(512 * 1024);
+    await wsClient.enqueueDesktopSnapshot({
+      slug: 'large-snapshot-page',
+      ts: 1710000002700,
+      url: 'https://example.com/large-snapshot',
+      title: 'Large Snapshot Page',
+      markdown: 'large snapshot markdown',
+      html: `<html><body>${largeBody}</body></html>`,
+    });
+
+    expect(store.desktopPendingCommands).toBe(0);
+    expect(store.desktopCommandBuffer || []).toEqual([]);
+
     const dataRoot = path.join(dir, 'portal-data');
-    const snapshotHtml = readFileSync(
-      path.join(
-        dataRoot,
-        'data',
-        'snapshots',
-        'nullable-snapshot-page-1710000002700.html',
-      ),
-      'utf8',
+    const snapshotPath = path.join(
+      dataRoot,
+      'data',
+      'snapshots',
+      'large-snapshot-page-1710000002700.html',
     );
-    expect(snapshotHtml).toBe('');
-    expect(store.desktopPendingEvents).toBe(0);
-    expect(store.desktopEventBuffer).toEqual([]);
+    expect(statSync(snapshotPath).size).toBeGreaterThan(8 * 1024 * 1024);
+    expect(readFileSync(snapshotPath, 'utf8')).toContain('large snapshot body');
   }, 30_000);
 
-  it('drops one invalid buffered event and continues flushing the queue', async () => {
+  it('drops one unknown buffered command item and continues flushing the queue', async () => {
     const dir = mkdtempSync(
       path.join(tmpdir(), 'browser-recall-buffer-invalid-event-'),
     );
@@ -662,28 +639,23 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     originalSetTimeout = globalThis.setTimeout;
 
     const { chrome, store } = createChromeMock();
-    store.desktopEventBuffer = [
+    store.desktopCommandBuffer = [
       {
-        kind: 'event',
-        entry: {
-          timestamp: 1710000002800,
-          action: 'visit_page',
-          url: null,
-          title: 'Poison event',
+        kind: 'unknown',
+        request: {
+          title: 'Poison command',
         },
       },
       {
-        kind: 'event',
-        entry: {
-          timestamp: 1710000002810,
-          action: 'create_list',
-          listOwner: 'test-device',
-          name: 'After Poison',
-          listId: 'after-poison',
+        kind: 'command',
+        action: 'saveSettingsKey',
+        request: {
+          key: 'theme',
+          value: 'after-poison',
         },
       },
     ];
-    store.desktopPendingEvents = 2;
+    store.desktopPendingCommands = 2;
     globalThis.chrome = chrome;
     globalThis.WebSocket = BrowserLikeWebSocket;
     Object.defineProperty(globalThis, 'navigator', {
@@ -706,17 +678,17 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     await wsClient.initConnectorBridge();
     await waitFor(async () => {
       const state = await wsClient.getConnectorBridgeState();
-      return state.state === 'connected' && state.pendingEvents === 0;
+      return state.state === 'connected' && state.pendingCommands === 0;
     });
 
     const dataRoot = path.join(dir, 'portal-data');
-    const listRaw = readFileSync(
-      path.join(dataRoot, 'lists', 'after-poison.json'),
+    const settingsRaw = readFileSync(
+      path.join(dataRoot, 'manifest', 'settings.json'),
       'utf8',
     );
-    expect(listRaw).toContain('"name": "After Poison"');
-    expect(store.desktopPendingEvents).toBe(0);
-    expect(store.desktopEventBuffer).toEqual([]);
+    expect(settingsRaw).toContain('"theme": "after-poison"');
+    expect(store.desktopPendingCommands).toBe(0);
+    expect(store.desktopCommandBuffer).toEqual([]);
     expect(store.connectorState).toBe('connected');
   }, 30_000);
 
@@ -804,16 +776,14 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     });
 
     const url = 'https://example.com/popup-overlap';
-    await wsClient.enqueueDesktopEvent({
+    await wsClient.enqueueDesktopCommand('reportVisit', {
       timestamp: 1710000002700,
-      action: 'visit_page',
       url,
       title: 'Popup Overlap',
-      checkpoint: true,
     });
     await waitFor(async () => {
       const state = await wsClient.getConnectorBridgeState();
-      return state.pendingEvents === 0;
+      return state.pendingCommands === 0;
     });
     await waitFor(async () => {
       const state = await wsClient.getConnectorBridgeState();
@@ -823,20 +793,18 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     BrowserLikeWebSocket.delayMessageMs = 250;
     BrowserLikeWebSocket.delayMessagePredicate = (data) => {
       try {
-        return JSON.parse(data).type === 'ack';
+        return JSON.parse(data).type === 'run_command';
       } catch {
         return false;
       }
     };
 
-    await wsClient.enqueueDesktopNote({
-      slug: 'popup-overlap-note',
+    await wsClient.enqueueDesktopCommand('createNote', {
       excerpt: null,
       note: 'Page note body',
       cssPath: null,
       url,
       title: 'Popup Overlap',
-      ts: 1710000002800,
     });
     await new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -853,13 +821,12 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(summary.notes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          slug: 'popup-overlap-note',
           note: 'Page note body',
         }),
       ]),
     );
 
-    expect(store.desktopPendingEvents).toBe(0);
+    expect(store.desktopPendingCommands).toBe(0);
   }, 30_000);
 
   it('reconnects immediately after an authenticated socket closes unexpectedly', async () => {
@@ -900,16 +867,14 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     });
 
     const url = 'https://example.com/socket-close-recovery';
-    await wsClient.enqueueDesktopEvent({
+    await wsClient.enqueueDesktopCommand('reportVisit', {
       timestamp: 1710000002900,
-      action: 'visit_page',
       url,
       title: 'Socket Close Recovery',
-      checkpoint: true,
     });
     await waitFor(async () => {
       const state = await wsClient.getConnectorBridgeState();
-      return state.pendingEvents === 0;
+      return state.pendingCommands === 0;
     });
 
     const firstSocket =

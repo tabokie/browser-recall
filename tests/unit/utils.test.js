@@ -46,28 +46,14 @@ describe('generateSlugFromUrl', () => {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// readCacheable / loadSettingsValue (behavioral tests with mocked chrome APIs)
+// readDesktopValue / loadSettingsValue (behavioral tests with mocked chrome APIs)
 // ---------------------------------------------------------------------------
 
-describe('readCacheable', () => {
-  let sessionStore;
+describe('readDesktopValue', () => {
   let sendMessageMock;
 
   beforeEach(() => {
-    sessionStore = {};
-    // Mock chrome.storage.session.get
     globalThis.chrome = {
-      storage: {
-        session: {
-          get: vi.fn(async (keys) => {
-            const arr = Array.isArray(keys) ? keys : [keys];
-            const result = {};
-            for (const k of arr)
-              if (k in sessionStore) result[k] = sessionStore[k];
-            return result;
-          }),
-        },
-      },
       runtime: {
         sendMessage: vi.fn(async () => ({ success: true, value: undefined })),
       },
@@ -79,24 +65,15 @@ describe('readCacheable', () => {
     delete globalThis.chrome;
   });
 
-  it('returns value from session cache without sendMessage', async () => {
-    sessionStore['manifest:settings'] = { trimRules: [] };
-    // Dynamic import to pick up mocked chrome
-    const { readCacheable } = await import('../../apps/extension/utils.js');
-    const result = await readCacheable('manifest:settings');
-    expect(result).toEqual({ trimRules: [] });
-    expect(sendMessageMock).not.toHaveBeenCalled();
-  });
-
-  it('sends readCacheable action on session miss and returns resp.value', async () => {
+  it('sends readDesktopValue action and returns resp.value', async () => {
     sendMessageMock.mockResolvedValue({
       success: true,
       value: { timestamp: 0, pins: [] },
     });
-    const { readCacheable } = await import('../../apps/extension/utils.js');
-    const result = await readCacheable('list:some-list');
+    const { readDesktopValue } = await import('../../apps/extension/utils.js');
+    const result = await readDesktopValue('list:some-list');
     expect(sendMessageMock).toHaveBeenCalledWith({
-      action: 'readCacheable',
+      action: 'readDesktopValue',
       key: 'list:some-list',
       includeDeleted: false,
     });
@@ -105,30 +82,17 @@ describe('readCacheable', () => {
 
   it('returns undefined when both session and background miss', async () => {
     sendMessageMock.mockResolvedValue({ success: true, value: undefined });
-    const { readCacheable } = await import('../../apps/extension/utils.js');
-    const result = await readCacheable('nonExistent');
+    const { readDesktopValue } = await import('../../apps/extension/utils.js');
+    const result = await readDesktopValue('nonExistent');
     expect(result).toBeUndefined();
   });
 });
 
-describe('loadSettingsValue delegates to readCacheable', () => {
-  let sessionStore;
+describe('loadSettingsValue delegates to readDesktopValue', () => {
   let sendMessageMock;
 
   beforeEach(() => {
-    sessionStore = {};
     globalThis.chrome = {
-      storage: {
-        session: {
-          get: vi.fn(async (keys) => {
-            const arr = Array.isArray(keys) ? keys : [keys];
-            const result = {};
-            for (const k of arr)
-              if (k in sessionStore) result[k] = sessionStore[k];
-            return result;
-          }),
-        },
-      },
       runtime: {
         sendMessage: vi.fn(async () => ({ success: true, value: undefined })),
       },
@@ -140,15 +104,18 @@ describe('loadSettingsValue delegates to readCacheable', () => {
     delete globalThis.chrome;
   });
 
-  it('returns defaultValue when readCacheable returns undefined', async () => {
+  it('returns defaultValue when readDesktopValue returns undefined', async () => {
     sendMessageMock.mockResolvedValue({ success: true, value: undefined });
     const { loadSettingsValue } = await import('../../apps/extension/utils.js');
     const result = await loadSettingsValue('archiveQuality', 'medium');
     expect(result).toBe('medium');
   });
 
-  it('returns value from readCacheable when present', async () => {
-    sessionStore['manifest:settings'] = { archiveQuality: 'high' };
+  it('returns value from readDesktopValue when present', async () => {
+    sendMessageMock.mockResolvedValue({
+      success: true,
+      value: { archiveQuality: 'high' },
+    });
     const { loadSettingsValue } = await import('../../apps/extension/utils.js');
     const result = await loadSettingsValue('archiveQuality', 'medium');
     expect(result).toBe('high');

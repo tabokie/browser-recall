@@ -49,7 +49,7 @@ export const CONNECTOR_STORAGE_KEYS = {
 
 export const CONNECTOR_STATE_STORAGE_KEYS = [
   ...Object.values(CONNECTOR_STORAGE_KEYS),
-  'desktopPendingEvents',
+  'desktopPendingCommands',
   'desktopPendingBytes',
   'desktopRefuseMode',
 ];
@@ -60,7 +60,8 @@ export function connectorStateFromStorage(stored = {}, stats = {}) {
     port: stored[CONNECTOR_STORAGE_KEYS.port] || null,
     deviceId: stored[CONNECTOR_STORAGE_KEYS.deviceId] || null,
     hasToken: Boolean(stored[CONNECTOR_STORAGE_KEYS.token]),
-    pendingEvents: stored.desktopPendingEvents ?? stats.pendingEvents ?? 0,
+    pendingCommands:
+      stored.desktopPendingCommands ?? stats.pendingCommands ?? 0,
     pendingBytes: stored.desktopPendingBytes ?? stats.pendingBytes ?? 0,
     refuseMode: Boolean(stored.desktopRefuseMode ?? stats.refuseMode),
     lastError: stored[CONNECTOR_STORAGE_KEYS.lastError] || null,

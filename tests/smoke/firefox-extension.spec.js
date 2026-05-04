@@ -294,11 +294,15 @@ function createOrionCallbackWebExtensionApi({
 } = {}) {
   const runtimeMessage = createEvent();
   const storageChanged = createEvent();
+  const badgeState = {
+    global: { text: '', color: null, icon: null, title: '' },
+    tabs: new Map(),
+  };
   const storageData = {
     connectorState: 'connected',
     connectorDeviceId: 'orion-device',
     connectorAuthToken: 'token',
-    desktopPendingEvents: 0,
+    desktopPendingCommands: 0,
     desktopPendingBytes: 0,
     desktopRefuseMode: false,
   };
@@ -318,21 +322,35 @@ function createOrionCallbackWebExtensionApi({
     return callbackLater(result, callback);
   }
 
-  return {
-    action: {
-      setBadgeBackgroundColor(_, callback) {
-        return callbackLater(undefined, callback);
-      },
-      setBadgeText(_, callback) {
-        return callbackLater(undefined, callback);
-      },
-      setIcon(_, callback) {
-        return callbackLater(undefined, callback);
-      },
-      setTitle(_, callback) {
-        return callbackLater(undefined, callback);
-      },
+  function badgeTarget(details = {}) {
+    if (details.tabId == null) return badgeState.global;
+    if (!badgeState.tabs.has(details.tabId)) {
+      badgeState.tabs.set(details.tabId, { ...badgeState.global });
+    }
+    return badgeState.tabs.get(details.tabId);
+  }
+
+  const action = {
+    setBadgeBackgroundColor(details, callback) {
+      badgeTarget(details).color = details.color;
+      return callbackLater(undefined, callback);
     },
+    setBadgeText(details, callback) {
+      badgeTarget(details).text = details.text;
+      return callbackLater(undefined, callback);
+    },
+    setIcon(details, callback) {
+      badgeTarget(details).icon = details.imageData || details.path || null;
+      return callbackLater(undefined, callback);
+    },
+    setTitle(details, callback) {
+      badgeTarget(details).title = details.title;
+      return callbackLater(undefined, callback);
+    },
+  };
+  return {
+    badgeState,
+    action,
     alarms: {
       onAlarm: createEvent(),
       clear(callback) {
@@ -489,11 +507,21 @@ class SuccessfulWebSocket {
   static OPEN = 1;
   static CLOSING = 2;
   static CLOSED = 3;
+  static instances = [];
+  static entityForKey = (key) =>
+    key?.startsWith('page:')
+      ? {
+          url: 'https://example.test/marked',
+          childIds: ['note:smoke'],
+          parentIds: [],
+        }
+      : null;
 
   constructor(url) {
     this.url = url;
     this.readyState = SuccessfulWebSocket.CONNECTING;
     this.listeners = new Map();
+    SuccessfulWebSocket.instances.push(this);
     queueMicrotask(() => {
       this.readyState = SuccessfulWebSocket.OPEN;
       this.#emit('open', {});
@@ -533,13 +561,7 @@ class SuccessfulWebSocket {
       return;
     }
     if (payload.type === 'get_entity') {
-      const entity = payload.key?.startsWith('page:')
-        ? {
-            url: 'https://example.test/marked',
-            childIds: ['note:smoke'],
-            parentIds: [],
-          }
-        : null;
+      const entity = SuccessfulWebSocket.entityForKey(payload.key);
       queueMicrotask(() =>
         this.#emit('message', {
           data: JSON.stringify({
@@ -586,6 +608,12 @@ class SuccessfulWebSocket {
         }),
       }),
     );
+  }
+
+  emitMessage(payload) {
+    this.#emit('message', {
+      data: JSON.stringify(payload),
+    });
   }
 
   close() {
@@ -746,7 +774,7 @@ test.describe('Firefox extension smoke', () => {
               success: true,
               state: 'offline',
               hasToken: false,
-              pendingEvents: 0,
+              pendingCommands: 0,
               pendingBytes: 0,
             };
           }
@@ -1217,6 +1245,150 @@ test.describe('Firefox extension smoke', () => {
       );
 
       for (const timer of timers) clearTimeout(timer);
+    });
+  });
+
+  test('staged Orion background renders Chrome-style badge for active listed page on first load', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const activeTab = {
+        id: 17,
+        url: 'https://example.test/orion-first-load',
+        title: 'Orion First Load',
+      };
+      const api = createOrionCallbackWebExtensionApi({
+        tab: activeTab,
+        responses: {},
+      });
+      api.storage.local._data.connectorState = 'offline';
+      const timers = new Set();
+      const nativeSetTimeout = globalThis.setTimeout;
+      const unrefSetTimeout = (callback, ms, ...args) => {
+        const timer = nativeSetTimeout(callback, ms, ...args);
+        timer.unref?.();
+        timers.add(timer);
+        return timer;
+      };
+      SuccessfulWebSocket.instances = [];
+      const previousEntityForKey = SuccessfulWebSocket.entityForKey;
+      SuccessfulWebSocket.entityForKey = (key) =>
+        key?.startsWith('page:')
+          ? {
+              url: activeTab.url,
+              childIds: [],
+              parentIds: ['list:reading'],
+            }
+          : null;
+
+      try {
+        await withPatchedGlobals(
+          {
+            browser: api,
+            chrome: {},
+            navigator: navigatorWithUserAgent(
+              globalThis.navigator,
+              NON_FIREFOX_USER_AGENT,
+            ),
+            WebSocket: SuccessfulWebSocket,
+            OffscreenCanvas: FakeOffscreenCanvas,
+            setTimeout: unrefSetTimeout,
+          },
+          async () => {
+            await import(
+              pathToFileURL(path.join(outDir, 'background.js')).href
+            );
+
+            await waitFor(
+              () => api.badgeState.tabs.get(activeTab.id)?.text === ' ',
+              'Orion first-load page marker badge',
+            );
+            expect(api.badgeState.tabs.get(activeTab.id).color).toBe('#4CAF50');
+            expect(
+              api.badgeState.tabs.get(activeTab.id).icon?.[16]?.width,
+            ).toBeUndefined();
+          },
+        );
+      } finally {
+        SuccessfulWebSocket.entityForKey = previousEntityForKey;
+        for (const timer of timers) clearTimeout(timer);
+      }
+    });
+  });
+
+  test('staged Orion background refreshes Chrome-style badge from Desktop mutations', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      const activeTab = {
+        id: 18,
+        url: 'https://example.test/orion-listed',
+        title: 'Orion Listed Page',
+      };
+      const api = createOrionCallbackWebExtensionApi({
+        tab: activeTab,
+        responses: {},
+      });
+      api.storage.local._data.connectorState = 'offline';
+      const timers = new Set();
+      const nativeSetTimeout = globalThis.setTimeout;
+      const unrefSetTimeout = (callback, ms, ...args) => {
+        const timer = nativeSetTimeout(callback, ms, ...args);
+        timer.unref?.();
+        timers.add(timer);
+        return timer;
+      };
+      SuccessfulWebSocket.instances = [];
+      const previousEntityForKey = SuccessfulWebSocket.entityForKey;
+      SuccessfulWebSocket.entityForKey = () => null;
+
+      try {
+        await withPatchedGlobals(
+          {
+            browser: api,
+            chrome: {},
+            navigator: navigatorWithUserAgent(
+              globalThis.navigator,
+              NON_FIREFOX_USER_AGENT,
+            ),
+            WebSocket: SuccessfulWebSocket,
+            OffscreenCanvas: FakeOffscreenCanvas,
+            setTimeout: unrefSetTimeout,
+          },
+          async () => {
+            await import(
+              pathToFileURL(path.join(outDir, 'background.js')).href
+            );
+
+            await waitFor(
+              () => api.storage.local._data.connectorState === 'connected',
+              'Orion background connector state',
+            );
+            expect(api.badgeState.tabs.get(activeTab.id)?.text || '').toBe('');
+
+            SuccessfulWebSocket.entityForKey = (key) =>
+              key?.startsWith('page:')
+                ? {
+                    url: activeTab.url,
+                    childIds: [],
+                    parentIds: ['list:reading'],
+                  }
+                : null;
+            SuccessfulWebSocket.instances[0].emitMessage({
+              type: 'change',
+              mutations: [{ type: 'pins', url: activeTab.url }],
+            });
+
+            await waitFor(
+              () => api.badgeState.tabs.get(activeTab.id)?.text === ' ',
+              'Orion page marker badge',
+            );
+            expect(api.badgeState.tabs.get(activeTab.id).color).toBe('#4CAF50');
+            expect(
+              api.badgeState.tabs.get(activeTab.id).icon?.[16]?.width,
+            ).toBeUndefined();
+          },
+        );
+      } finally {
+        SuccessfulWebSocket.entityForKey = previousEntityForKey;
+        for (const timer of timers) clearTimeout(timer);
+      }
     });
   });
 });

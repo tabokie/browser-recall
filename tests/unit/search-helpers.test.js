@@ -1,19 +1,19 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  mergeBufferIntoHistory,
-  getBufferContentMap,
+  mergeQueueIntoHistory,
+  getQueueContentMap,
   buildHistoryForEngine,
-  extractHistoryBuffer,
+  extractHistoryQueue,
 } from '../../apps/extension/search-helpers.js';
 
-describe('mergeBufferIntoHistory', () => {
-  it('appends new buffer entries', () => {
+describe('mergeQueueIntoHistory', () => {
+  it('appends new queue entries', () => {
     const entries = [{ url: 'https://a.com', timestamp: 1, slug: 'a' }];
-    const buffer = [
+    const queueEntries = [
       { url: 'https://b.com', title: 'B', timestamp: 2, slug: 'b' },
     ];
 
-    mergeBufferIntoHistory(entries, buffer);
+    mergeQueueIntoHistory(entries, queueEntries);
 
     expect(entries).toHaveLength(2);
     expect(entries[1].url).toBe('https://b.com');
@@ -23,11 +23,11 @@ describe('mergeBufferIntoHistory', () => {
     const entries = [
       { url: 'https://a.com', timestamp: 1, title: 'old', slug: 'a' },
     ];
-    const buffer = [
+    const queueEntries = [
       { url: 'https://a.com', timestamp: 3, title: 'new', slug: 'a' },
     ];
 
-    mergeBufferIntoHistory(entries, buffer);
+    mergeQueueIntoHistory(entries, queueEntries);
 
     expect(entries).toHaveLength(1);
     expect(entries[0].title).toBe('new');
@@ -35,12 +35,12 @@ describe('mergeBufferIntoHistory', () => {
 
   it('sorts merged result by timestamp', () => {
     const entries = [{ url: 'https://c.com', timestamp: 10, slug: 'c' }];
-    const buffer = [
+    const queueEntries = [
       { url: 'https://a.com', timestamp: 1, slug: 'a' },
       { url: 'https://b.com', timestamp: 5, slug: 'b' },
     ];
 
-    mergeBufferIntoHistory(entries, buffer);
+    mergeQueueIntoHistory(entries, queueEntries);
 
     expect(entries.map((i) => i.url)).toEqual([
       'https://a.com',
@@ -50,63 +50,85 @@ describe('mergeBufferIntoHistory', () => {
   });
 });
 
-describe('extractHistoryBuffer (logBuffer format)', () => {
-  it('extracts visit entries (no action field) from logBuffer', () => {
-    const logBuffer = [
-      { timestamp: 1, url: 'https://a.com', title: 'A', slug: 'a' },
-      { timestamp: 2, action: 'list_meta', id: 'test', name: 'Test' },
-      { timestamp: 3, url: 'https://b.com', title: 'B', slug: 'b' },
+describe('extractHistoryQueue (Desktop command queue format)', () => {
+  it('extracts visit entries from connector queue command items', () => {
+    const desktopCommandQueue = [
       {
-        timestamp: 4,
-        action: 'highlight',
-        slug: 'a',
-        highlight: { text: 'hi' },
+        kind: 'command',
+        action: 'reportVisit',
+        request: {
+          timestamp: 1,
+          url: 'https://a.com',
+          title: 'A',
+        },
+      },
+      { kind: 'note', slug: 'note', url: 'https://a.com' },
+      {
+        kind: 'command',
+        action: 'reportLeave',
+        request: { timestamp: 2, url: 'https://a.com' },
       },
     ];
 
-    const result = extractHistoryBuffer(logBuffer);
+    const result = extractHistoryQueue(desktopCommandQueue);
 
     expect(result).toHaveLength(2);
-    expect(result[0].url).toBe('https://a.com');
-    expect(result[1].url).toBe('https://b.com');
+    expect(result.map((entry) => entry.action)).toEqual([
+      'visit_page',
+      'leave_page',
+    ]);
   });
 
   it('returns empty array for buffer with no visit entries', () => {
-    const logBuffer = [
+    const desktopCommandQueue = [
       { timestamp: 1, action: 'list_meta', id: 'test', name: 'Test' },
       { timestamp: 2, action: 'highlight', slug: 'x', highlight: {} },
     ];
 
-    const result = extractHistoryBuffer(logBuffer);
+    const result = extractHistoryQueue(desktopCommandQueue);
     expect(result).toHaveLength(0);
   });
 
-  it('works with mergeBufferIntoHistory after extraction', () => {
+  it('works with mergeQueueIntoHistory after extraction', () => {
     const entries = [{ url: 'https://old.com', timestamp: 1, slug: 'old' }];
-    const logBuffer = [
-      { timestamp: 2, url: 'https://new.com', title: 'New', slug: 'new' },
-      { timestamp: 3, action: 'list_meta', id: 'test', name: 'Test' },
+    const desktopCommandQueue = [
+      {
+        kind: 'command',
+        action: 'reportVisit',
+        request: {
+          timestamp: 2,
+          url: 'https://new.com',
+          title: 'New',
+          slug: 'new',
+        },
+      },
+      {
+        kind: 'command',
+        action: 'reportLeave',
+        request: { timestamp: 3, url: 'https://new.com' },
+      },
+      { kind: 'note', slug: 'note', url: 'https://new.com' },
     ];
 
-    const extracted = extractHistoryBuffer(logBuffer);
-    mergeBufferIntoHistory(entries, extracted);
+    const extracted = extractHistoryQueue(desktopCommandQueue);
+    mergeQueueIntoHistory(entries, extracted);
 
     expect(entries).toHaveLength(2);
     expect(entries.map((i) => i.url)).toContain('https://new.com');
   });
 
   it('returns empty array for empty buffer', () => {
-    const result = extractHistoryBuffer([]);
+    const result = extractHistoryQueue([]);
     expect(result).toHaveLength(0);
   });
 });
 
-describe('getBufferContentMap', () => {
+describe('getQueueContentMap', () => {
   it('returns empty map (content is on disk in event-sourced model)', () => {
     const buffer = [
       { timestamp: 1, url: 'https://a.com', title: 'A', slug: 'a' },
     ];
-    const contentMap = getBufferContentMap(buffer);
+    const contentMap = getQueueContentMap(buffer);
     expect(contentMap).toEqual({});
   });
 });

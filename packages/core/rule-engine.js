@@ -6,8 +6,6 @@ export const RULE_TYPES = {
   FUNCTION: 'function',
 };
 
-const VALID_KEYWORD_FIELDS = ['title', 'url'];
-
 const BANNED_GLOBALS = [
   'fetch',
   'chrome',
@@ -63,14 +61,9 @@ export function validateRuleConfig({ type, config }) {
         errors.push(`Invalid regex pattern: ${config.pattern}`);
       }
     }
-    if (config.fields) {
-      const invalid = config.fields.filter(
-        (f) => !VALID_KEYWORD_FIELDS.includes(f),
-      );
-      if (invalid.length) {
-        errors.push(
-          `Invalid fields: ${invalid.join(', ')}. Allowed: ${VALID_KEYWORD_FIELDS.join(', ')}`,
-        );
+    for (const key of Object.keys(config)) {
+      if (key !== 'pattern') {
+        errors.push(`Unsupported keyword rule field: ${key}`);
       }
     }
   }
@@ -117,13 +110,12 @@ export function validateFnRuleSource(fnSource) {
 /**
  * Match a keyword rule against page data.
  * Returns 1 (match) or 0 (no match).
- * Checks title, url by default; also checks body if present in pageData.
+ * Checks the page title only.
  */
 export function matchKeywordRule(rule, pageData) {
-  const { pattern, fields, caseSensitive } = rule.config;
-  const checkFields = [...(fields || ['title', 'url'])];
-  // Always include body when available (fetched page content for richer matching)
-  if (pageData.body && !checkFields.includes('body')) checkFields.push('body');
+  const { pattern } = rule.config;
+  const value = pageData.title;
+  if (!pattern || !value) return 0;
 
   let isRegex = false;
   let regex = null;
@@ -131,24 +123,18 @@ export function matchKeywordRule(rule, pageData) {
   if (pattern.startsWith('/') && pattern.endsWith('/')) {
     isRegex = true;
     try {
-      const flags = caseSensitive ? '' : 'i';
-      regex = new RegExp(pattern.slice(1, -1), flags);
+      regex = new RegExp(pattern.slice(1, -1), 'i');
     } catch {
       return 0;
     }
   }
 
-  for (const field of checkFields) {
-    const value = pageData[field];
-    if (!value) continue;
-
-    if (isRegex) {
-      if (regex.test(value)) return 1;
-    } else {
-      const haystack = caseSensitive ? value : value.toLowerCase();
-      const needle = caseSensitive ? pattern : pattern.toLowerCase();
-      if (haystack.includes(needle)) return 1;
-    }
+  if (isRegex) {
+    if (regex.test(value)) return 1;
+  } else {
+    const haystack = value.toLowerCase();
+    const needle = pattern.toLowerCase();
+    if (haystack.includes(needle)) return 1;
   }
 
   return 0;

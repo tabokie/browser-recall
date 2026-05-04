@@ -1,9 +1,9 @@
 use browser_recall_daemon::commands::{
-    add_rule, create_note, delete_note, import_history, list_history_files, list_paired_browsers,
-    load_history_batch, load_page_notes_payload, load_page_snapshot_payload, pair_browser_revoke,
-    permanent_delete_keys, preview_rule_payload, read_cacheable, remove_rule, rename_page,
-    replay_entry, restore_note, save_list_meta, save_settings_key, submit_event, toggle_list_pin,
-    update_note, HistoryImportEntry,
+    add_rule, create_note, delete_note, delete_snapshot, import_history, list_history_files,
+    list_paired_browsers, load_history_batch, load_page_notes_payload, load_page_snapshot_payload,
+    pair_browser_revoke, permanent_delete_keys, preview_rule_payload, read_desktop_value,
+    recover_checkpoint_tail, remove_rule, rename_page, replay_entry, restore_note, save_list_meta,
+    save_settings_key, submit_event, toggle_list_pin, update_note, HistoryImportEntry,
 };
 use browser_recall_daemon::protocol::{RuleBatchEntry, RulePayload};
 use browser_recall_daemon::storage::Storage;
@@ -60,7 +60,7 @@ async fn import_history_creates_pages_and_log_entries() {
 }
 
 #[tokio::test]
-async fn read_cacheable_filters_deleted_entities() {
+async fn read_desktop_value_filters_deleted_entities() {
     let dir = tempdir().expect("tempdir");
     let storage = Storage::new(dir.path());
     storage
@@ -76,12 +76,12 @@ async fn read_cacheable_filters_deleted_entities() {
         .await
         .expect("save list");
 
-    let hidden = read_cacheable(&storage, "list:test-list", false)
+    let hidden = read_desktop_value(&storage, "list:test-list", false)
         .await
         .expect("read hidden");
     assert!(hidden.is_none());
 
-    let visible = read_cacheable(&storage, "list:test-list", true)
+    let visible = read_desktop_value(&storage, "list:test-list", true)
         .await
         .expect("read visible")
         .expect("value exists");
@@ -89,6 +89,277 @@ async fn read_cacheable_filters_deleted_entities() {
         visible.get("deleted").and_then(|value| value.as_bool()),
         Some(true)
     );
+}
+
+#[tokio::test]
+async fn write_updates_cache_after_a_cached_miss() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+
+    let missing = storage.load_list("later").await.expect("load missing list");
+    assert!(missing.is_none());
+
+    let response = save_list_meta(
+        &storage,
+        "device-a",
+        &serde_json::json!({
+            "name": "Later",
+        }),
+    )
+    .await
+    .expect("create list after miss");
+    let list_id = response
+        .get("listId")
+        .and_then(|value| value.as_str())
+        .expect("list id");
+
+    let list = storage
+        .load_list(list_id)
+        .await
+        .expect("load created list")
+        .expect("created list is visible from cache");
+    assert_eq!(list.name, "Later");
+}
+
+#[tokio::test]
+async fn concurrent_toggle_list_pin_serializes_against_current_cache() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+
+    let response = save_list_meta(
+        &storage,
+        "device-a",
+        &serde_json::json!({
+            "name": "Reading",
+        }),
+    )
+    .await
+    .expect("create list");
+    let list_id = response
+        .get("listId")
+        .and_then(|value| value.as_str())
+        .expect("list id")
+        .to_string();
+
+    submit_event(
+        &storage,
+        "device-a",
+        serde_json::json!({
+            "timestamp": 1_710_000_000_000i64,
+            "action": "visit_page",
+            "url": "https://example.com/toggle",
+            "title": "Toggle Page",
+        }),
+    )
+    .await
+    .expect("seed page");
+
+    let request = serde_json::json!({
+        "listId": list_id,
+        "url": "https://example.com/toggle",
+        "title": "Toggle Page"
+    });
+    let (left, right) = tokio::join!(
+        toggle_list_pin(&storage, "device-a", &request),
+        toggle_list_pin(&storage, "device-a", &request)
+    );
+    let left = left.expect("left toggle");
+    let right = right.expect("right toggle");
+    let pinned_results = [
+        left.get("pinned").and_then(|value| value.as_bool()),
+        right.get("pinned").and_then(|value| value.as_bool()),
+    ];
+    assert!(pinned_results.contains(&Some(true)));
+    assert!(pinned_results.contains(&Some(false)));
+
+    let list = storage
+        .load_list(
+            request
+                .get("listId")
+                .and_then(|value| value.as_str())
+                .expect("list id"),
+        )
+        .await
+        .expect("load list")
+        .expect("list exists");
+    assert!(
+        list.pins.is_empty(),
+        "second toggle should observe the first toggle and unpin"
+    );
+}
+
+#[tokio::test]
+async fn raw_sync_file_write_clears_cached_misses() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+
+    assert!(storage
+        .load_list("synced")
+        .await
+        .expect("load missing list")
+        .is_none());
+
+    let mut list = ListEntity::new("synced".to_string());
+    list.name = "Synced".to_string();
+    let payload = serde_json::to_string(&list).expect("serialize list");
+    storage
+        .write_sync_files(&[("views/lists/synced.json".to_string(), payload)])
+        .await
+        .expect("write sync files");
+
+    let loaded = storage
+        .load_list("synced")
+        .await
+        .expect("load synced list")
+        .expect("synced list visible after cache reset");
+    assert_eq!(loaded.name, "Synced");
+}
+
+#[tokio::test]
+async fn replay_appends_log_before_checkpoint_visibility_is_required() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::UpdateSetting {
+            timestamp: 1_710_000_000_000,
+            key: "syncEnabled".to_string(),
+            value: serde_json::json!(true),
+        },
+    )
+    .await
+    .expect("replay entry");
+
+    let files = list_history_files(&storage, false)
+        .await
+        .expect("history files")
+        .0;
+    let batch = load_history_batch(&storage, &files)
+        .await
+        .expect("history batch");
+    assert_eq!(batch.len(), 1);
+
+    let settings = storage
+        .load_settings()
+        .await
+        .expect("load settings")
+        .expect("settings visible from cache");
+    assert_eq!(
+        settings
+            .values
+            .get("syncEnabled")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+}
+
+#[tokio::test]
+async fn startup_recovery_replays_logs_after_replay_progress() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+    let raw = serde_json::json!({
+        "timestamp": 1_710_000_000_000i64,
+        "action": "visit_page",
+        "url": "https://example.com/recovered",
+        "title": "Recovered Page",
+    });
+    storage
+        .append_log_entry("device-a", 1_710_000_000_000, &raw)
+        .await
+        .expect("append log only");
+
+    let recovered_storage = Storage::new(dir.path());
+    recovered_storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+    let replayed = recover_checkpoint_tail(&recovered_storage)
+        .await
+        .expect("recover checkpoint tail");
+    assert_eq!(replayed, 1);
+
+    let slug = generate_slug_from_url("https://example.com/recovered").expect("slug");
+    let page = recovered_storage
+        .load_page(&slug)
+        .await
+        .expect("load recovered page")
+        .expect("page recovered from log");
+    assert_eq!(page.title.as_deref(), Some("Recovered Page"));
+}
+
+#[tokio::test]
+async fn old_timestamp_entries_flush_checkpoints_before_ack() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+    let replay_progress_path = dir
+        .path()
+        .join("views")
+        .join("manifest")
+        .join("replay-progress.json");
+    tokio::fs::write(&replay_progress_path, r#"{"device-a":1710000100000}"#)
+        .await
+        .expect("write replay progress");
+
+    let url = "https://example.com/old-import";
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::VisitPage {
+            timestamp: 1_710_000_000_000,
+            url: url.to_string(),
+            title: Some("Old Import".to_string()),
+            referrer_url: None,
+        },
+    )
+    .await
+    .expect("replay old visit entry");
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::RatePage {
+            timestamp: 1_710_000_000_001,
+            url: url.to_string(),
+            likes: 1,
+            title: Some("Old Import".to_string()),
+        },
+    )
+    .await
+    .expect("replay old retained entry");
+
+    let fresh_storage = Storage::new(dir.path());
+    let slug = generate_slug_from_url(url).expect("slug");
+    let page = fresh_storage
+        .load_page(&slug)
+        .await
+        .expect("load page from checkpoint")
+        .expect("old entry checkpoint was flushed before ack");
+    assert_eq!(page.title.as_deref(), Some("Old Import"));
 }
 
 #[tokio::test]
@@ -106,7 +377,7 @@ async fn note_and_snapshot_payloads_reflect_storage_state() {
         LogEntry::CreateNote {
             timestamp: 1_710_000_100_000,
             url: "https://example.com/page".to_string(),
-            path: "notes/example-note.json".to_string(),
+            path: "objects/notes/example-note.json".to_string(),
             title: Some("Example Page".to_string()),
             excerpt: Some("excerpt text".to_string()),
             note: Some("note body".to_string()),
@@ -131,7 +402,7 @@ async fn note_and_snapshot_payloads_reflect_storage_state() {
         LogEntry::CreateSnapshot {
             timestamp: 1_710_000_200_000,
             url: "https://example.com/page".to_string(),
-            path: format!("snapshots/{slug}-1710000200000"),
+            path: storage.snapshot_sidecar_relative_path(&slug, 1_710_000_200_000),
             title: Some("Example Page".to_string()),
         },
     )
@@ -164,22 +435,13 @@ async fn note_and_snapshot_payloads_reflect_storage_state() {
         Some(true)
     );
 
-    tokio::fs::remove_file(
-        dir.path()
-            .join("data")
-            .join("snapshots")
-            .join(format!("{slug}-1710000200000.html")),
-    )
-    .await
-    .expect("remove html backing file");
-    tokio::fs::remove_file(
-        dir.path()
-            .join("data")
-            .join("snapshots")
-            .join(format!("{slug}-1710000200000.md")),
-    )
-    .await
-    .expect("remove markdown backing file");
+    let snapshot_path = storage.snapshot_sidecar_relative_path(&slug, 1_710_000_200_000);
+    tokio::fs::remove_file(dir.path().join(format!("{snapshot_path}.html")))
+        .await
+        .expect("remove html backing file");
+    tokio::fs::remove_file(dir.path().join(format!("{snapshot_path}.md")))
+        .await
+        .expect("remove markdown backing file");
 
     let snapshots = load_page_snapshot_payload(&storage, &slug)
         .await
@@ -196,8 +458,7 @@ async fn note_and_snapshot_payloads_reflect_storage_state() {
         Some(false)
     );
 
-    storage
-        .delete_snapshot(&slug, 1_710_000_200_000)
+    delete_snapshot(&storage, "device-a", &slug, 1_710_000_200_000)
         .await
         .expect("delete snapshot metadata");
 
@@ -231,11 +492,15 @@ async fn permanent_delete_repairs_note_and_list_relationship_metadata() {
         .await
         .expect("storage layout");
 
-    let mut page = PageEntity::new("page-a".to_string());
+    let page_slug = generate_slug_from_url("https://example.com/page-a").expect("slug");
+    let mut page = PageEntity::new(page_slug.clone());
     page.url = Some("https://example.com/page-a".to_string());
     page.child_ids = vec!["note:n1".to_string()];
     page.parent_ids = vec!["list:reading".to_string()];
-    storage.save_page("page-a", &page).await.expect("save page");
+    storage
+        .save_page(&page_slug, &page)
+        .await
+        .expect("save page");
 
     replay_entry(
         &storage,
@@ -243,7 +508,7 @@ async fn permanent_delete_repairs_note_and_list_relationship_metadata() {
         LogEntry::CreateNote {
             timestamp: 1_710_000_000_000,
             url: "https://example.com/page-a".to_string(),
-            path: "notes/n1.json".to_string(),
+            path: "objects/notes/n1.json".to_string(),
             title: Some("Page A".to_string()),
             excerpt: Some("highlight".to_string()),
             note: Some("note body".to_string()),
@@ -258,7 +523,7 @@ async fn permanent_delete_repairs_note_and_list_relationship_metadata() {
     list.owner = Some("device-a".to_string());
     list.pins = vec![
         PinEntity {
-            id: "page:page-a".to_string(),
+            id: format!("page:{page_slug}"),
             pinned_at: 1,
             source: Some("manual".to_string()),
         },
@@ -295,7 +560,7 @@ async fn permanent_delete_repairs_note_and_list_relationship_metadata() {
         .expect("permanent delete note");
     assert_eq!(deleted, vec!["note:n1".to_string()]);
     let page = storage
-        .load_page("page-a")
+        .load_page(&page_slug)
         .await
         .expect("load page")
         .expect("page remains through list membership");
@@ -317,7 +582,7 @@ async fn permanent_delete_repairs_note_and_list_relationship_metadata() {
         .expect("load list")
         .is_none());
     assert!(storage
-        .load_page("page-a")
+        .load_page(&page_slug)
         .await
         .expect("load page")
         .is_none());
@@ -373,6 +638,39 @@ async fn submit_event_replays_arbitrary_log_entries() {
             .and_then(|value| value.as_bool()),
         Some(true)
     );
+}
+
+#[tokio::test]
+async fn submit_event_rejects_non_canonical_log_schema() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+
+    let result = submit_event(
+        &storage,
+        "device-a",
+        serde_json::json!({
+            "timestamp": 1_710_000_300_000i64,
+            "action": "visit_page",
+            "url": "https://example.com/schema",
+            "title": "Schema Page",
+            "bodyPreview": "transient rule matching data",
+            "checkpoint": true,
+        }),
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "submit_event accepts canonical log entries only; transient command fields must be stripped before append"
+    );
+
+    let (files, _) = list_history_files(&storage, false)
+        .await
+        .expect("history files");
+    assert!(files.is_empty());
 }
 
 #[test]
@@ -464,7 +762,6 @@ async fn migrated_note_and_list_commands_replay_entities() {
             url: "https://example.com/migrated".to_string(),
             title: Some("Migrated Page".to_string()),
             referrer_url: None,
-            checkpoint: true,
         },
     )
     .await
@@ -673,7 +970,6 @@ async fn rule_and_rename_commands_replay_entities() {
             url: "https://example.com/rules".to_string(),
             title: Some("Original".to_string()),
             referrer_url: None,
-            checkpoint: true,
         },
     )
     .await

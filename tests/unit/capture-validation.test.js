@@ -77,7 +77,7 @@ describe('capture paths send error notifications', () => {
     // Background should NOT send showErrorNotification for popup captures — popup.js
     // now owns that responsibility. Only the keyboard shortcut path sends it from background.
     const popupCaseMatch = bgSource.match(
-      /case\s+'captureCurrentPageFromPopup'[\s\S]*?break;\s*case\s+'hydrateCache'/,
+      /case\s+'captureCurrentPageFromPopup'[\s\S]*?break;\s*case\s+'flushDesktopQueue'/,
     );
     expect(popupCaseMatch).not.toBeNull();
     expect(popupCaseMatch[0]).not.toContain('showErrorNotification');
@@ -129,5 +129,37 @@ describe('savepage/content.js guards against undefined resourceMimeType', () => 
       hasGuard,
       'loadSuccess should guard against undefined resourceMimeType[index]',
     ).toBe(true);
+  });
+});
+
+describe('savepage bridge uses capture-scoped Desktop settings', () => {
+  const bridgeSource = readFileSync(
+    resolve(extDir, 'savepage-bridge.js'),
+    'utf-8',
+  );
+  const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
+
+  it('does not read snapshot settings from extension session storage', () => {
+    expect(bridgeSource).not.toContain(
+      "chrome.storage.session.get('manifest:settings'",
+    );
+    expect(bridgeSource).not.toContain(
+      'chrome.storage.session.get("manifest:settings"',
+    );
+    expect(bridgeSource).toContain(
+      'savepageSettings.set(tabId, settings || {})',
+    );
+    expect(bridgeSource).toContain('savepageSettings.delete(tabId)');
+  });
+
+  it('passes Desktop-backed settings into captureSavePage', () => {
+    const captureAndLogMatch = bgSource.match(
+      /async function captureAndLog[\s\S]*?^}/m,
+    );
+    expect(captureAndLogMatch).not.toBeNull();
+    expect(captureAndLogMatch[0]).toContain(
+      "await readDesktopValue('manifest:settings')",
+    );
+    expect(captureAndLogMatch[0]).toContain('captureSavePage(tabId, settings)');
   });
 });

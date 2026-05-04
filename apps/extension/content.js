@@ -263,14 +263,7 @@ function initContentScript() {
       .substring(0, maxLength);
   }
 
-  // Generate slug from the current page URL (inline version of utils.js generateSlugFromUrl)
-  // For snapshot blob: tabs, reads the embedded x-portal-slug meta tag instead.
-  function getSlugForCurrentPage() {
-    // Check for embedded slug identity (snapshot viewer)
-    const meta = document.querySelector('meta[name="x-portal-slug"]');
-    if (meta && meta.content) return meta.content;
-
-    const url = window.location.href;
+  function slugFromUrl(url) {
     try {
       const parsed = new URL(url);
       let domain = parsed.hostname.toLowerCase();
@@ -290,6 +283,29 @@ function initContentScript() {
     } catch (e) {
       return null;
     }
+  }
+
+  function isSameDocumentPageUrl(left, right) {
+    try {
+      const leftUrl = new URL(left);
+      const rightUrl = new URL(right);
+      return (
+        leftUrl.origin === rightUrl.origin &&
+        leftUrl.pathname === rightUrl.pathname &&
+        leftUrl.search === rightUrl.search
+      );
+    } catch {
+      return left === right;
+    }
+  }
+
+  // Generate slug from the current page URL (inline version of utils.js generateSlugFromUrl)
+  // For snapshot blob: tabs, reads the embedded x-portal-slug meta tag instead.
+  function getSlugForCurrentPage() {
+    // Check for embedded slug identity (snapshot viewer)
+    const meta = document.querySelector('meta[name="x-portal-slug"]');
+    if (meta && meta.content) return meta.content;
+    return slugFromUrl(window.location.href);
   }
 
   // Generate a CSS selector path for an element (for re-applying highlights)
@@ -857,26 +873,26 @@ function initContentScript() {
   // Must match INTERNAL_URL_PREFIXES in utils.js (can't import — content scripts are non-module).
   const internalUrlPrefixes = ['chrome://', 'edge://', 'about:'];
 
-  function report(delta) {
-    const url = window.location.href;
+  function reportForUrl(url, delta) {
     if (
       internalUrlPrefixes.some((prefix) => url.startsWith(prefix)) ||
       url.startsWith('chrome-extension://')
     )
       return;
     chrome.runtime
-      .sendMessage({ action: 'reportPage', url, ...delta })
+      .sendMessage({ action: 'recordPageActivity', url, ...delta })
       .catch(() => {});
   }
 
   // Track latest title locally; included in leave_page report.
   let latestTitle = document.title;
+  let activePageUrl = window.location.href;
 
-  function onLeavePage() {
+  function onLeavePage(url = activePageUrl) {
     if (lastActiveTime === null) return; // already reported, skip no-op
     const timeOnPage = Math.min(Date.now() - lastActiveTime, 3600000); // cap at 1h
     lastActiveTime = null; // prevent double-counting on subsequent fires
-    report({
+    reportForUrl(url, {
       title: latestTitle,
       scrollDepth: Math.round(maxScrollDepth),
       timeOnPage,
@@ -884,24 +900,55 @@ function initContentScript() {
     });
   }
 
-  // Initial visit report
-  currentHistoryId = window.location.href;
-  const initialDelta = {
-    title: document.title,
-    slug: getSlugForCurrentPage(),
-    isInitialLoad: true,
-  };
-  // Capture first N words of page text for rule matching.
-  // Must match BODY_WORD_LIMIT in utils.js (can't import — content scripts are non-module).
-  const BODY_WORD_LIMIT = 200;
-  const bodyText = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
-  const bodyWords = bodyText.split(' ');
-  if (bodyWords.length > 0 && bodyWords[0] !== '') {
-    initialDelta.bodyPreview = bodyWords.slice(0, BODY_WORD_LIMIT).join(' ');
+  function buildInitialVisitDelta(url, referrerUrl) {
+    const delta = {
+      title: document.title,
+      slug: slugFromUrl(url),
+      isInitialLoad: true,
+    };
+    // Capture first N words of page text for rule matching.
+    // Must match BODY_WORD_LIMIT in utils.js (can't import — content scripts are non-module).
+    const BODY_WORD_LIMIT = 200;
+    const bodyText = (document.body?.innerText || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const bodyWords = bodyText.split(' ');
+    if (bodyWords.length > 0 && bodyWords[0] !== '') {
+      delta.bodyPreview = bodyWords.slice(0, BODY_WORD_LIMIT).join(' ');
+    }
+    const ref = referrerUrl ?? document.referrer;
+    if (ref) delta.referrer = ref;
+    return delta;
   }
-  const ref = document.referrer;
-  if (ref) initialDelta.referrer = ref;
-  report(initialDelta);
+
+  function reportInitialVisit(url = window.location.href, referrerUrl) {
+    currentHistoryId = url;
+    activePageUrl = url;
+    latestTitle = document.title;
+    reportForUrl(url, buildInitialVisitDelta(url, referrerUrl));
+  }
+
+  // Initial visit report
+  reportInitialVisit(activePageUrl);
+
+  function handleSameDocumentNavigation(nextUrl = window.location.href) {
+    if (nextUrl === activePageUrl) return;
+    if (isSameDocumentPageUrl(activePageUrl, nextUrl)) return;
+
+    const previousUrl = activePageUrl;
+    onLeavePage(previousUrl);
+    maxScrollDepth = 0;
+    lastActiveTime = Date.now();
+    reportInitialVisit(nextUrl, previousUrl);
+    reapplyHighlights();
+  }
+
+  const spaNavigationBridge = globalThis.__browserRecallSpaNavigationBridge;
+  if (spaNavigationBridge?.addListener) {
+    spaNavigationBridge.addListener((url) => {
+      queueMicrotask(() => handleSameDocumentNavigation(url));
+    });
+  }
 
   // Title changes: cache locally so leave_page includes the latest title.
   function observeTitle(el) {
