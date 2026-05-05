@@ -111,6 +111,24 @@ export function pageCheckpointPath(slug) {
   return `views/pages/${shard}/${slug}.json`;
 }
 
+export function seededRandom(seedText) {
+  let seed = 0;
+  for (let i = 0; i < seedText.length; i += 1) {
+    seed = Math.imul(seed ^ seedText.charCodeAt(i), 2654435761) >>> 0;
+  }
+  return () => {
+    seed = (seed + 0x6d2b79f5) >>> 0;
+    let value = seed;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function pickSeeded(random, values) {
+  return values[Math.floor(random() * values.length)];
+}
+
 // Wait for a visit_page to be recorded for a URL after a link-click navigation.
 // Content scripts at document_idle sometimes fail to inject on fast localhost pages.
 // Falls back to sending recordPageActivity explicitly from the helper page.

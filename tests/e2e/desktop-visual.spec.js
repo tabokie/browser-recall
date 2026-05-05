@@ -7,11 +7,14 @@ import { stageDesktopUiAssets } from '../../scripts/stage-app-assets.mjs';
 import { listKey, pageKey } from '../../packages/core/entity-types.js';
 import { generateSlugFromUrl } from '../../packages/core/utils.js';
 import { VIRTUAL_SCROLLER_BUFFER } from '../../packages/core/virtual-scroller.js';
+import { pickSeeded, seededRandom } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '../..');
 const desktopUiDir = path.join(repoRoot, 'dist/desktop-ui');
 const VIRTUALIZED_ENTRY_COUNT = VIRTUAL_SCROLLER_BUFFER * 3 + 150;
+const DESKTOP_COMBO_SEED = 'desktop-combo-20260505-a';
+const DESKTOP_RULE_PREVIEW_SEED = 'desktop-rule-preview-20260505-a';
 
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -770,6 +773,106 @@ test.describe('desktop visual regression', () => {
       await expect(page.getByText('Live mutation visit')).toBeVisible({
         timeout: 3000,
       });
+    });
+  });
+
+  test(`seeded desktop workflow combines search, list filtering, and live mutation seed=${DESKTOP_COMBO_SEED}`, async ({
+    page,
+  }) => {
+    const random = seededRandom(DESKTOP_COMBO_SEED);
+    const now = Date.now();
+    const nouns = ['Atlas', 'Beacon', 'Cinder', 'Drift', 'Ember', 'Fjord'];
+    const verbs = ['audit', 'brief', 'index', 'map', 'review', 'trace'];
+    const listName = `Research ${pickSeeded(random, nouns)}`;
+    const historyEntries = Array.from({ length: 9 }, (_, index) => {
+      const noun = pickSeeded(random, nouns);
+      const verb = pickSeeded(random, verbs);
+      return {
+        url: `https://example.com/desktop-combo/${index}-${noun.toLowerCase()}-${verb}`,
+        title: `${noun} combo ${verb} ${index}`,
+        timestamp: now - index * 1000,
+        duration: 20 + index,
+        deviceId: index % 2 === 0 ? 'device-a' : 'device-b',
+      };
+    });
+    const pinnedIndexes = new Set([1, 4, 7]);
+    const pins = [];
+    const extraSession = {};
+    for (const [index, entry] of historyEntries.entries()) {
+      const slug = generateSlugFromUrl(entry.url);
+      const key = pageKey(slug);
+      const pinned = pinnedIndexes.has(index);
+      if (pinned) pins.push({ id: key, pinnedAt: now - index * 1000 });
+      extraSession[key] = {
+        slug,
+        url: entry.url,
+        title: entry.title,
+        parentIds: pinned ? [listKey('research')] : [],
+        childIds: [],
+        visitDates: [todayKey()],
+        timestamps: { [entry.deviceId]: entry.timestamp },
+      };
+    }
+    extraSession[listKey('research')] = {
+      slug: 'research',
+      name: listName,
+      pins,
+    };
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+        extraSession,
+      });
+
+      await expect(page.locator('#mainTitle')).toHaveText('Explore');
+      await page.locator('#searchDraftInput').fill('combo');
+      await expect
+        .poll(() =>
+          page.locator('#relatedResults').getAttribute('data-search-count'),
+        )
+        .toBe(String(historyEntries.length));
+      await expect(
+        page.locator(`.result-row[data-url="${historyEntries[0].url}"]`),
+      ).toBeVisible();
+
+      await page.locator('.sidebar-item[data-list-id="research"]').click();
+      await expect(page.locator('#mainTitle')).toHaveText(listName);
+      await page.locator('#searchDraftInput').fill('combo');
+      for (const index of pinnedIndexes) {
+        await expect(
+          page.locator(`.result-row[data-url="${historyEntries[index].url}"]`),
+        ).toBeVisible();
+      }
+      await expect(
+        page.locator(`.result-row[data-url="${historyEntries[0].url}"]`),
+      ).toHaveCount(0);
+
+      const liveEntry = {
+        url: 'https://example.com/desktop-combo/live-mutation',
+        title: `${pickSeeded(random, nouns)} live-combo mutation`,
+        timestamp: now + 1000,
+        duration: 41,
+        deviceId: 'device-a',
+      };
+      await page.locator('#exploreBtn').click();
+      await expect(page.locator('#mainTitle')).toHaveText('Explore');
+      await page.locator('#searchDraftInput').fill('live-combo');
+      await expect(
+        page.locator(`.result-row[data-url="${liveEntry.url}"]`),
+      ).toHaveCount(0);
+      await page.evaluate((entry) => {
+        window.__desktopVisualHarness.appendHistoryEntry(entry);
+        window.__desktopVisualHarness.emitRuntimeMessage({
+          action: 'mutation',
+          type: 'history',
+        });
+      }, liveEntry);
+      await expect(
+        page.locator(`.result-row[data-url="${liveEntry.url}"]`),
+      ).toBeVisible();
     });
   });
 
@@ -1720,10 +1823,7 @@ test.describe('desktop visual regression', () => {
 
       const badgeBox = await page.locator('.card-tag-liked').boundingBox();
       expect(badgeBox).not.toBeNull();
-      await page.mouse.move(
-        badgeBox.x + 4,
-        badgeBox.y + badgeBox.height / 2,
-      );
+      await page.mouse.move(badgeBox.x + 4, badgeBox.y + badgeBox.height / 2);
       await page.mouse.down();
       await page.mouse.move(
         badgeBox.x + 90,
@@ -2010,6 +2110,76 @@ test.describe('desktop visual regression', () => {
       await expect(
         page.getByText('No visits found to match against'),
       ).toHaveCount(0);
+    });
+  });
+
+  test(`keyword rule preview combines recent visits and active list pins seed=${DESKTOP_RULE_PREVIEW_SEED}`, async ({
+    page,
+  }) => {
+    const random = seededRandom(DESKTOP_RULE_PREVIEW_SEED);
+    const now = Date.now();
+    const nouns = ['Atlas', 'Beacon', 'Cinder', 'Drift', 'Ember', 'Fjord'];
+    const verbs = ['audit', 'brief', 'index', 'map', 'review', 'trace'];
+    const titleMatch = `${pickSeeded(random, nouns)} Mixed NEEDLE ${pickSeeded(random, verbs)}`;
+    const urlOnlyMiss = `${pickSeeded(random, nouns)} plain ${pickSeeded(random, verbs)}`;
+    const pinnedTitle = `${pickSeeded(random, nouns)} pinned NeEdLe ${pickSeeded(random, verbs)}`;
+    const pinnedUrl = 'https://example.com/rule-preview/pinned-active-list';
+    const pinnedSlug = generateSlugFromUrl(pinnedUrl);
+    const historyEntries = [
+      {
+        url: 'https://example.com/rule-preview/title-match',
+        title: titleMatch,
+        timestamp: now,
+        deviceId: 'device-a',
+      },
+      {
+        url: 'https://example.com/rule-preview/needle-url-only',
+        title: urlOnlyMiss,
+        timestamp: now - 1000,
+        deviceId: 'device-a',
+      },
+    ];
+    const extraSession = {
+      [pageKey(pinnedSlug)]: {
+        slug: pinnedSlug,
+        url: pinnedUrl,
+        title: pinnedTitle,
+        parentIds: [listKey('research')],
+        childIds: [],
+        visitDates: [todayKey()],
+        timestamps: { 'device-a': now - 2000 },
+      },
+      [listKey('research')]: {
+        slug: 'research',
+        name: 'Research',
+        pins: [{ id: pageKey(pinnedSlug), pinnedAt: now - 2000 }],
+      },
+    };
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+        extraSession,
+      });
+
+      await page.locator('.sidebar-item[data-list-id="research"]').click();
+      await expect(
+        page.locator(`.result-row[data-url="${pinnedUrl}"]`),
+      ).toBeVisible();
+      await page.locator('#inboxToggleBtn').click();
+      await page.locator('#rulesAddBtn').click();
+      await page.locator('.rule-edit-input').fill('needle');
+      await page.locator('.rule-preview-btn').click();
+
+      await expect(page.locator('#rulesPreviewList')).toContainText(titleMatch);
+      await expect(page.locator('#rulesPreviewList')).not.toContainText(
+        urlOnlyMiss,
+      );
+      await expect(page.locator('#rulesPinsPreviewList')).toContainText(
+        pinnedTitle,
+      );
     });
   });
 

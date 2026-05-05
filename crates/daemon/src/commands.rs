@@ -592,7 +592,7 @@ pub async fn save_settings_key(
         storage,
         device_id,
         LogEntry::UpdateSetting {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             key: key.to_string(),
             value,
         },
@@ -618,7 +618,8 @@ pub async fn ensure_default_lists(storage: &Storage, device_id: &str) -> Result<
         return Ok(false);
     }
 
-    let timestamp = chrono::Local::now().timestamp_millis();
+    let list_timestamp = storage.next_command_timestamp_millis();
+    let rule_timestamp = storage.next_command_timestamp_millis();
     let mut config = BTreeMap::new();
     config.insert(
         "description".to_string(),
@@ -648,14 +649,14 @@ pub async fn ensure_default_lists(storage: &Storage, device_id: &str) -> Result<
         device_id,
         vec![
             LogEntry::CreateList {
-                timestamp,
+                timestamp: list_timestamp,
                 list_owner: "system".to_string(),
                 list_id: Some("hubs".to_string()),
                 name: "Hubs".to_string(),
                 parent_list_id: None,
             },
             LogEntry::AddRule {
-                timestamp: timestamp + 1,
+                timestamp: rule_timestamp,
                 list_owner: "system".to_string(),
                 name: "Hubs".to_string(),
                 rule: RuleInput {
@@ -678,7 +679,7 @@ pub async fn create_note(
 ) -> Result<Value, String> {
     let (page_slug, note_slug) = {
         let _guard = storage.write_guard().await;
-        let timestamp = chrono::Local::now().timestamp_millis();
+        let timestamp = storage.next_command_timestamp_millis();
         let page_slug = request
             .get("pageSlug")
             .and_then(Value::as_str)
@@ -749,22 +750,32 @@ pub async fn delete_note(
     storage: &Storage,
     device_id: &str,
     note_slug: &str,
-) -> Result<(), String> {
+) -> Result<Value, String> {
     let _guard = storage.write_guard().await;
     let note = storage
         .load_note(note_slug)
         .await
         .map_err(|error| error.to_string())?;
+    let note_url = note.as_ref().and_then(|value| value.url.clone());
+    let page_slug = note_url
+        .as_deref()
+        .and_then(|url| generate_slug_from_url(url).ok());
     replay_entries_locked(
         storage,
         device_id,
         vec![LogEntry::DeleteNote {
-            timestamp: chrono::Local::now().timestamp_millis(),
-            url: note.as_ref().and_then(|value| value.url.clone()),
+            timestamp: storage.next_command_timestamp_millis(),
+            url: note_url.clone(),
             path: format!("objects/notes/{note_slug}.json"),
         }],
     )
-    .await
+    .await?;
+    Ok(json!({
+        "success": true,
+        "noteSlug": note_slug,
+        "pageSlug": page_slug,
+        "url": note_url,
+    }))
 }
 
 pub async fn update_note(
@@ -786,7 +797,7 @@ pub async fn update_note(
         }));
     }
 
-    let mut timestamp = chrono::Local::now().timestamp_millis();
+    let mut timestamp = storage.next_command_timestamp_millis();
     let mut new_note_slug = generate_note_slug(timestamp, old_note.excerpt.as_deref());
     while new_note_slug == note_slug {
         timestamp += 1;
@@ -873,14 +884,14 @@ pub async fn toggle_list_pin(
         device_id,
         vec![if is_pinned {
             LogEntry::UnpinFromList {
-                timestamp: chrono::Local::now().timestamp_millis(),
+                timestamp: storage.next_command_timestamp_millis(),
                 name: list_name,
                 list_owner,
                 urls: vec![pin_item],
             }
         } else {
             LogEntry::PinToList {
-                timestamp: chrono::Local::now().timestamp_millis(),
+                timestamp: storage.next_command_timestamp_millis(),
                 name: list_name,
                 list_owner,
                 urls: vec![pin_item],
@@ -947,7 +958,7 @@ pub async fn add_list_pins(
         storage,
         device_id,
         vec![LogEntry::PinToList {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             name: list_name,
             list_owner,
             urls,
@@ -987,7 +998,7 @@ pub async fn save_list_meta(
             storage,
             device_id,
             vec![LogEntry::UpdateList {
-                timestamp: chrono::Local::now().timestamp_millis(),
+                timestamp: storage.next_command_timestamp_millis(),
                 name: list.name,
                 list_owner: list.owner.unwrap_or_else(|| device_id.to_string()),
                 new_name: Some(new_name),
@@ -997,7 +1008,7 @@ pub async fn save_list_meta(
         Ok(json!({ "success": true }))
     } else {
         let name = name.ok_or_else(|| "saveListMeta missing name".to_string())?;
-        let timestamp = chrono::Local::now().timestamp_millis();
+        let timestamp = storage.next_command_timestamp_millis();
         let generated_list_id = generate_list_id(&name, timestamp);
         replay_entries_locked(
             storage,
@@ -1020,8 +1031,32 @@ pub async fn save_list_meta(
     }
 }
 
-pub async fn delete_list(storage: &Storage, device_id: &str, list_id: &str) -> Result<(), String> {
+pub async fn delete_list(
+    storage: &Storage,
+    device_id: &str,
+    list_id: &str,
+) -> Result<Value, String> {
     let _guard = storage.write_guard().await;
+    let list = storage
+        .load_list(list_id)
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "List not found".to_string())?;
+    let mut urls = Vec::new();
+    for pin in &list.pins {
+        if !pin.id.starts_with("page:") {
+            continue;
+        }
+        if let Some(Entity::Page(page)) = storage
+            .load_entity(&pin.id)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            if let Some(url) = page.url {
+                urls.push(url);
+            }
+        }
+    }
     let (list_name, list_owner) = list_event_fields(storage, device_id, list_id)
         .await?
         .ok_or_else(|| "List not found".to_string())?;
@@ -1029,12 +1064,17 @@ pub async fn delete_list(storage: &Storage, device_id: &str, list_id: &str) -> R
         storage,
         device_id,
         vec![LogEntry::DeleteList {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             name: list_name,
             list_owner,
         }],
     )
-    .await
+    .await?;
+    Ok(json!({
+        "success": true,
+        "listId": list_id,
+        "urls": urls,
+    }))
 }
 
 pub async fn update_list_tree(
@@ -1047,7 +1087,7 @@ pub async fn update_list_tree(
         storage,
         device_id,
         vec![LogEntry::UpdateListTree {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             tree,
         }],
     )
@@ -1082,7 +1122,7 @@ pub async fn restore_note(
         storage,
         device_id,
         vec![LogEntry::RestoreNote {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             url: page_url,
             path: format!("objects/notes/{note_slug}.json"),
         }],
@@ -1121,7 +1161,7 @@ pub async fn restore_snapshot(
         storage,
         device_id,
         vec![LogEntry::RestoreSnapshot {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             url: page_url,
             path: storage.snapshot_sidecar_relative_path(&page_slug, timestamp),
         }],
@@ -1141,7 +1181,7 @@ pub async fn restore_list(storage: &Storage, device_id: &str, list_id: &str) -> 
         storage,
         device_id,
         vec![LogEntry::RestoreList {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             name: list.name,
             list_owner: list.owner.unwrap_or_else(|| device_id.to_string()),
         }],
@@ -1168,7 +1208,7 @@ pub async fn delete_snapshot(
         storage,
         device_id,
         vec![LogEntry::DeleteSnapshot {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             url,
             path: storage.snapshot_sidecar_relative_path(slug, timestamp),
         }],
@@ -1194,7 +1234,7 @@ pub async fn permanent_delete_keys(
         storage,
         device_id,
         vec![LogEntry::PermanentDelete {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             keys: deleted_keys.clone(),
         }],
     )
@@ -1338,7 +1378,7 @@ pub async fn add_rule(
         storage,
         device_id,
         vec![LogEntry::AddRule {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             name: list_name,
             list_owner,
             rule: RuleInput {
@@ -1366,7 +1406,7 @@ pub async fn remove_rule(
         storage,
         device_id,
         vec![LogEntry::RemoveRule {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             name: list_name,
             list_owner,
             rule_id: rule_id.to_string(),
@@ -1390,7 +1430,7 @@ pub async fn update_rule(
         storage,
         device_id,
         vec![LogEntry::UpdateRule {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             name: list_name,
             list_owner,
             rule_id: rule_id.to_string(),
@@ -1410,7 +1450,7 @@ pub async fn rename_page(
         storage,
         device_id,
         LogEntry::RenamePage {
-            timestamp: chrono::Local::now().timestamp_millis(),
+            timestamp: storage.next_command_timestamp_millis(),
             url: url.to_string(),
             user_title: user_title.to_string(),
         },
@@ -1486,7 +1526,7 @@ async fn create_import_list(
     name: &str,
     parent_list_id: Option<String>,
 ) -> Result<String, String> {
-    let timestamp = chrono::Local::now().timestamp_millis();
+    let timestamp = storage.next_command_timestamp_millis();
     let list_name = import_list_name(name);
     let list_id = generate_list_id(&list_name, timestamp);
     replay_entry(
@@ -1541,7 +1581,7 @@ pub async fn import_bookmarks(
                 storage,
                 device_id,
                 LogEntry::PinToList {
-                    timestamp: chrono::Local::now().timestamp_millis(),
+                    timestamp: storage.next_command_timestamp_millis(),
                     name: list_name.clone(),
                     list_owner: device_id.to_string(),
                     urls: urls.clone(),

@@ -1,8 +1,9 @@
 mod support;
 
+use browser_recall_daemon::pairing::{static_approver, PairingDecision};
 use browser_recall_daemon::protocol::{ConnectorMessage, DaemonMessage};
 use browser_recall_daemon::ws_server::start_server;
-use browser_recall_daemon::{ApprovedConnector, ConfigStore, Token};
+use browser_recall_daemon::{ApprovedConnector, ConfigStore, ServerStartOptions, Token};
 use browser_recall_replay::generate_slug_from_url;
 use futures_util::SinkExt;
 use serde_json::{json, Value};
@@ -15,6 +16,19 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 use support::{next_text_message, pair_once, paired_socket, test_server_options, TestSocket};
+
+fn test_control_server_options(config_store: ConfigStore) -> ServerStartOptions {
+    let mut options = test_server_options(config_store);
+    options.test_control_enabled = true;
+    options
+}
+
+fn denied_pairing_server_options(config_store: ConfigStore) -> ServerStartOptions {
+    let mut options =
+        ServerStartOptions::phase1_defaults(config_store, static_approver(PairingDecision::Deny));
+    options.port_candidates = vec![0];
+    options
+}
 
 fn approved_connector(browser_id: &str, token: &str) -> ApprovedConnector {
     ApprovedConnector {
@@ -91,6 +105,24 @@ async fn next_daemon(socket: &mut TestSocket) -> DaemonMessage {
         if !matches!(message, DaemonMessage::Change { .. }) {
             return message;
         }
+    }
+}
+
+async fn get_entity(socket: &mut TestSocket, key: &str) -> Option<Value> {
+    send_raw(socket, json!({ "type": "get_entity", "key": key })).await;
+    match next_daemon(socket).await {
+        DaemonMessage::EntityResult {
+            success,
+            key: result_key,
+            entity,
+            error,
+        } => {
+            assert!(success);
+            assert_eq!(result_key, key);
+            assert!(error.is_none());
+            entity
+        }
+        other => panic!("expected entity result for {key}, got {other:?}"),
     }
 }
 
@@ -471,6 +503,1218 @@ async fn event_ingest_rejects_missing_source_metadata() {
         .await
         .expect("pages dir exists");
     assert!(entries.next_entry().await.expect("pages read").is_none());
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn connector_source_errors_are_protocol_errors_not_socket_disconnects() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let (mut socket, data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::Event {
+            entry: json!({
+                "timestamp": 1_710_000_000_000i64,
+                "action": "visit_page",
+                "url": "https://example.com/bad-source",
+                "title": "Bad Source",
+            }),
+            source: "content-script".to_string(),
+            buffer_depth: Some(3),
+            buffer_bytes: Some(99),
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::Error {
+            error,
+            code,
+            message,
+        } => {
+            assert_eq!(error, "invalid_message");
+            assert_eq!(code, "invalid_message");
+            assert!(message.contains("invalid connector source"));
+        }
+        other => panic!("expected invalid source error, got {other:?}"),
+    }
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::Note {
+            slug: "bad-source-note".to_string(),
+            excerpt: Some("bad source".to_string()),
+            note: "should not persist".to_string(),
+            css_path: None,
+            old_slug: None,
+            url: "https://example.com/bad-source".to_string(),
+            title: Some("Bad Source".to_string()),
+            ts: 1_710_000_000_100i64,
+            source: "popup-cache".to_string(),
+            buffer_depth: None,
+            buffer_bytes: None,
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::Error {
+            error,
+            code,
+            message,
+        } => {
+            assert_eq!(error, "invalid_message");
+            assert_eq!(code, "invalid_message");
+            assert!(message.contains("invalid connector source"));
+        }
+        other => panic!("expected invalid note source error, got {other:?}"),
+    }
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::Snapshot {
+            slug: "bad-source-page".to_string(),
+            ts: 1_710_000_000_200i64,
+            url: "https://example.com/bad-source".to_string(),
+            title: Some("Bad Source".to_string()),
+            markdown: Some("should not persist".to_string()),
+            html: "<html><body>should not persist</body></html>".to_string(),
+            source: "snapshot-cache".to_string(),
+            buffer_depth: None,
+            buffer_bytes: None,
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::Error {
+            error,
+            code,
+            message,
+        } => {
+            assert_eq!(error, "invalid_message");
+            assert_eq!(code, "invalid_message");
+            assert!(message.contains("invalid connector source"));
+        }
+        other => panic!("expected invalid snapshot source error, got {other:?}"),
+    }
+
+    send_connector(&mut socket, ConnectorMessage::GetStatus).await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::Status {
+            buffer_depth,
+            buffer_bytes,
+            daemon_buffer_depth,
+            ..
+        } => {
+            assert_eq!(buffer_depth, 0);
+            assert_eq!(buffer_bytes, 0);
+            assert_eq!(daemon_buffer_depth, 0);
+        }
+        other => panic!("expected status after invalid source errors, got {other:?}"),
+    }
+
+    let slug = generate_slug_from_url("https://example.com/bad-source").expect("slug");
+    assert!(!page_path(&data_dir, &slug).exists());
+    assert!(!note_path(&data_dir, "bad-source-note").exists());
+    assert!(!snapshot_base_path(&data_dir, "bad-source-page", 1_710_000_000_200)
+        .with_extension("html")
+        .exists());
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let mut config = config_store.load_or_create().expect("config");
+    config
+        .connectors
+        .push(approved_connector("browser-install", "valid-token"));
+    config_store.save(&config).expect("save config");
+    let handle = start_server(test_control_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let mut request = format!("ws://127.0.0.1:{}/", handle.port())
+        .into_client_request()
+        .expect("request");
+    request.headers_mut().insert(
+        "Origin",
+        "chrome-extension://abcdefghijklmnop".parse().unwrap(),
+    );
+    let (mut unauthenticated, _) = connect_async(request).await.expect("ws connect");
+
+    unauthenticated
+        .send(Message::Text(
+            json!({
+                "type": "get_all_pages"
+            })
+            .to_string(),
+        ))
+        .await
+        .expect("send unauthenticated read");
+    let unauthorized: DaemonMessage =
+        serde_json::from_str(&next_text_message(&mut unauthenticated).await)
+            .expect("unauthorized json");
+    match unauthorized {
+        DaemonMessage::Error { error, code, .. } => {
+            assert_eq!(error, "unauthorized");
+            assert_eq!(code, "auth_required");
+        }
+        other => panic!("expected unauthorized error, got {other:?}"),
+    }
+
+    unauthenticated
+        .send(Message::Text("not-json".to_string()))
+        .await
+        .expect("send malformed json");
+    let malformed: DaemonMessage =
+        serde_json::from_str(&next_text_message(&mut unauthenticated).await)
+            .expect("malformed json response");
+    match malformed {
+        DaemonMessage::Error { error, code, .. } => {
+            assert_eq!(error, "invalid_message");
+            assert_eq!(code, "invalid_message");
+        }
+        other => panic!("expected invalid message error, got {other:?}"),
+    }
+
+    unauthenticated
+        .send(Message::Text(
+            serde_json::to_string(&ConnectorMessage::TestSeedData {
+                files: vec![browser_recall_daemon::protocol::TestSeedFilePayload {
+                    path: "../escape.json".to_string(),
+                    content: "{}".to_string(),
+                }],
+            })
+            .expect("invalid seed json"),
+        ))
+        .await
+        .expect("send invalid seed");
+    let invalid_seed: DaemonMessage =
+        serde_json::from_str(&next_text_message(&mut unauthenticated).await)
+            .expect("invalid seed response");
+    match invalid_seed {
+        DaemonMessage::TestSeedDataResult { success, error } => {
+            assert!(!success);
+            assert!(error.expect("error").contains("invalid test seed path"));
+        }
+        other => panic!("expected invalid seed result, got {other:?}"),
+    }
+
+    unauthenticated
+        .send(Message::Text(
+            serde_json::to_string(&ConnectorMessage::TestSeedData {
+                files: vec![browser_recall_daemon::protocol::TestSeedFilePayload {
+                    path: "logs/seed-device/2024-03-04.jsonl".to_string(),
+                    content: "{\"timestamp\":1710000000000,\"action\":\"visit_page\",\"url\":\"https://seed.example/page\",\"title\":\"Seed Page\"}\n".to_string(),
+                }],
+            })
+            .expect("seed json"),
+        ))
+        .await
+        .expect("send seed");
+    let seed: DaemonMessage =
+        serde_json::from_str(&next_text_message(&mut unauthenticated).await).expect("seed response");
+    match seed {
+        DaemonMessage::TestSeedDataResult { success, error } => {
+            assert!(success, "expected seed success: {error:?}");
+        }
+        other => panic!("expected seed result, got {other:?}"),
+    }
+
+    unauthenticated
+        .send(Message::Text(
+            serde_json::to_string(&ConnectorMessage::TestResetData).expect("reset json"),
+        ))
+        .await
+        .expect("send reset");
+    let reset: DaemonMessage =
+        serde_json::from_str(&next_text_message(&mut unauthenticated).await).expect("reset response");
+    match reset {
+        DaemonMessage::TestResetDataResult {
+            success,
+            device_id,
+            error,
+        } => {
+            assert!(success, "expected reset success: {error:?}");
+            assert_eq!(device_id, config_store.load_or_create().expect("config").device_id);
+        }
+        other => panic!("expected reset result, got {other:?}"),
+    }
+
+    let mut bad_auth_request = format!("ws://127.0.0.1:{}/", handle.port())
+        .into_client_request()
+        .expect("request");
+    bad_auth_request.headers_mut().insert(
+        "Origin",
+        "chrome-extension://abcdefghijklmnop".parse().unwrap(),
+    );
+    let (mut bad_auth, _) = connect_async(bad_auth_request).await.expect("ws connect");
+    send_connector(
+        &mut bad_auth,
+        ConnectorMessage::Auth {
+            token: "missing-token".to_string(),
+        },
+    )
+    .await;
+    let auth_fail = next_text_message(&mut bad_auth).await;
+    let auth_fail: DaemonMessage = serde_json::from_str(&auth_fail).expect("auth fail json");
+    match auth_fail {
+        DaemonMessage::AuthFail { reason } => assert_eq!(reason, "token_not_found"),
+        other => panic!("expected auth fail, got {other:?}"),
+    }
+
+    let mut socket = authenticated_socket(handle.port(), "valid-token").await;
+    let revoked = handle
+        .control_handle()
+        .revoke_connector("browser-install", "abcdefghijklmnop")
+        .await
+        .expect("revoke connector");
+    assert!(revoked);
+    let revoked = next_text_message(&mut socket).await;
+    let revoked: DaemonMessage = serde_json::from_str(&revoked).expect("revoked json");
+    match revoked {
+        DaemonMessage::AuthFail { reason } => assert_eq!(reason, "token_revoked"),
+        other => panic!("expected token revoked, got {other:?}"),
+    }
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn websocket_pairing_denial_is_explicit_and_closes_request() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(denied_pairing_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let mut request = format!("ws://127.0.0.1:{}/", handle.port())
+        .into_client_request()
+        .expect("request");
+    request.headers_mut().insert(
+        "Origin",
+        "chrome-extension://abcdefghijklmnop".parse().unwrap(),
+    );
+    let (mut socket, _) = connect_async(request).await.expect("ws connect");
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::PairRequest {
+            browser_id: "denied-browser".to_string(),
+            browser_name: "Chrome".to_string(),
+            extension_id: "abcdefghijklmnop".to_string(),
+            browser_profile: Some("Default".to_string()),
+        },
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::PairPending { .. }
+    ));
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::PairDenied
+    ));
+
+    let config = config_store.load_or_create().expect("config");
+    assert!(config.connectors.is_empty());
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn websocket_unauthenticated_matrix_rejects_privileged_messages_without_closing() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let mut request = format!("ws://127.0.0.1:{}/", handle.port())
+        .into_client_request()
+        .expect("request");
+    request.headers_mut().insert(
+        "Origin",
+        "chrome-extension://abcdefghijklmnop".parse().unwrap(),
+    );
+    let (mut socket, _) = connect_async(request).await.expect("ws connect");
+
+    for message in [
+        json!({ "type": "get_status" }),
+        json!({ "type": "get_directory_info" }),
+        json!({ "type": "get_directory_size" }),
+        json!({ "type": "clear_all_data" }),
+        json!({ "type": "replay_remote_entries", "deviceId": "peer", "entries": [] }),
+        json!({ "type": "set_device_id", "deviceId": "peer" }),
+        json!({ "type": "list_history_files", "includeSizes": true }),
+        json!({ "type": "load_history_batch", "files": [] }),
+        json!({ "type": "get_all_pages" }),
+        json!({ "type": "get_page_info", "slug": "missing" }),
+        json!({ "type": "get_page_summary", "url": "https://example.com/summary" }),
+        json!({ "type": "get_snapshot_html", "slug": "missing", "ts": 1 }),
+        json!({ "type": "get_entity", "key": "page:missing" }),
+        json!({ "type": "permanent_delete", "keys": ["note:missing"] }),
+        json!({ "type": "get_popup_lists" }),
+        json!({ "type": "run_command", "action": "trimTitle", "request": {} }),
+        json!({ "type": "search_history", "query": "x" }),
+        json!({ "type": "search_notes", "query": "x" }),
+        json!({ "type": "search_snapshots", "query": "x" }),
+        json!({
+            "type": "event",
+            "entry": {
+                "timestamp": 1_710_050_000_000i64,
+                "action": "visit_page",
+                "url": "https://example.com/unauth"
+            },
+            "source": "extension"
+        }),
+        json!({ "type": "run_rule_batch", "listIds": [], "entries": [] }),
+        json!({
+            "type": "preview_rule",
+            "rule": { "type": "keyword", "config": { "pattern": "x" } },
+            "entries": []
+        }),
+        json!({
+            "type": "snapshot",
+            "slug": "unauth",
+            "ts": 1_710_050_000_100i64,
+            "url": "https://example.com/unauth",
+            "html": "<html></html>",
+            "source": "extension"
+        }),
+        json!({
+            "type": "note",
+            "slug": "unauth-note",
+            "note": "unauth",
+            "url": "https://example.com/unauth",
+            "ts": 1_710_050_000_200i64,
+            "source": "extension"
+        }),
+    ] {
+        send_raw(&mut socket, message).await;
+        match next_daemon(&mut socket).await {
+            DaemonMessage::Error { error, code, .. } => {
+                assert_eq!(error, "unauthorized");
+                assert_eq!(code, "auth_required");
+            }
+            other => panic!("expected unauthorized error, got {other:?}"),
+        }
+    }
+
+    send_connector(&mut socket, ConnectorMessage::Ping).await;
+    assert!(matches!(next_daemon(&mut socket).await, DaemonMessage::Pong));
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn websocket_command_and_rule_error_matrix_is_structured() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let (mut socket, data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
+
+    for (action, request, expected) in [
+        ("reportVisit", json!({}), "reportVisit missing url"),
+        ("reportLeave", json!({}), "reportLeave missing url"),
+        ("saveSettingsKey", json!({}), "saveSettingsKey missing key"),
+        (
+            "ratePage",
+            json!({ "url": "https://example.com/rate-missing-likes" }),
+            "ratePage missing likes",
+        ),
+        ("importBookmarks", json!({}), "importBookmarks missing tree"),
+        ("importHistory", json!({}), "importHistory missing entries"),
+        (
+            "deleteSnapshot",
+            json!({ "slug": "missing-snapshot" }),
+            "deleteSnapshot missing timestamp",
+        ),
+        (
+            "addRule",
+            json!({ "listId": "missing-list" }),
+            "addRule missing rule",
+        ),
+        (
+            "updateRule",
+            json!({ "listId": "missing-list", "ruleId": "missing-rule" }),
+            "updateRule missing config",
+        ),
+    ] {
+        send_raw(
+            &mut socket,
+            json!({
+                "type": "run_command",
+                "action": action,
+                "request": request
+            }),
+        )
+        .await;
+        match next_daemon(&mut socket).await {
+            DaemonMessage::CommandResult {
+                success,
+                response,
+                error: Some(error),
+            } => {
+                assert!(!success, "{action} should fail");
+                assert!(response.is_none());
+                assert!(error.contains(expected), "{action} returned {error}");
+            }
+            other => panic!("expected structured command error for {action}, got {other:?}"),
+        }
+    }
+
+    for (key, value) in [
+        (
+            "titleTrimRules",
+            json!([
+                { "urlPrefix": "https://docs.example/", "action": "remove_after_pipe" },
+                { "urlPrefix": "https://docs.example/", "action": "remove_brackets" },
+                { "urlPrefix": "https://docs.example/", "action": "remove_parens" }
+            ]),
+        ),
+        ("urlBlacklist", json!(["https://private.example/"])),
+    ] {
+        send_raw(
+            &mut socket,
+            json!({
+                "type": "run_command",
+                "action": "saveSettingsKey",
+                "request": { "key": key, "value": value }
+            }),
+        )
+        .await;
+        assert!(matches!(
+            next_daemon(&mut socket).await,
+            DaemonMessage::CommandResult { success: true, .. }
+        ));
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "trimTitle",
+            "request": {
+                "url": "https://docs.example/page",
+                "title": "  API Guide [Draft] (Internal) | Browser Recall  "
+            }
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success,
+            response: Some(response),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            assert_eq!(response.get("title").and_then(Value::as_str), Some("API Guide"));
+        }
+        other => panic!("expected trim title response, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "reportVisit",
+            "request": {
+                "timestamp": 1_710_040_000_000i64,
+                "url": "https://private.example/secret",
+                "title": "Private Page"
+            }
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success,
+            response: Some(response),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            assert_eq!(response.get("skipped").and_then(Value::as_bool), Some(true));
+        }
+        other => panic!("expected skipped reportVisit response, got {other:?}"),
+    }
+    let private_slug = generate_slug_from_url("https://private.example/secret").expect("slug");
+    assert!(!page_path(&data_dir, &private_slug).exists());
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "reportVisit",
+            "request": {
+                "timestamp": 1_710_040_000_100i64,
+                "url": "https://private.example/secret",
+                "title": "Private Page",
+                "bypassBlacklist": true
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+    wait_for_absent(&page_path(&data_dir, &private_slug)).await;
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "replay_remote_entries",
+            "deviceId": "peer",
+            "entries": [{
+                "timestamp": 1_710_040_001_000i64,
+                "action": "visit_page",
+                "url": "not a url"
+            }]
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::RemoteReplayResult {
+            success,
+            replayed_entries,
+            error: Some(error),
+        } => {
+            assert!(!success);
+            assert_eq!(replayed_entries, 0);
+            assert!(!error.trim().is_empty());
+        }
+        other => panic!("expected remote replay error, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_rule_batch",
+            "listIds": ["missing-list"],
+            "entries": [{
+                "url": "https://example.com/no-match",
+                "title": "No Match"
+            }]
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::RuleBatchResult {
+            success,
+            results,
+            error,
+        } => {
+            assert!(success);
+            assert!(results.is_empty());
+            assert!(error.is_none());
+        }
+        other => panic!("expected empty rule batch result, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "preview_rule",
+            "rule": {
+                "type": "keyword",
+                "config": { "pattern": "Private", "fields": ["url"] }
+            },
+            "entries": [{
+                "url": "https://example.com/private",
+                "title": "Private"
+            }]
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::PreviewRuleResult {
+            success,
+            results,
+            error: Some(error),
+        } => {
+            assert!(!success);
+            assert!(results.is_empty());
+            assert!(error.contains("fields") || error.contains("field"));
+        }
+        other => panic!("expected preview validation error, got {other:?}"),
+    }
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let (mut socket, _data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "event",
+            "entry": {
+                "timestamp": 1_710_060_000_000i64,
+                "action": "visit_page",
+                "url": "https://example.com/invalid-payload",
+                "title": 42
+            },
+            "source": "extension"
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::Error { error, code, .. } => {
+            assert_eq!(error, "invalid_message");
+            assert_eq!(code, "invalid_message");
+        }
+        other => panic!("expected invalid event payload error, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "event",
+            "entry": {
+                "timestamp": 1_710_060_000_100i64,
+                "action": "visit_page",
+                "url": "not a url",
+                "title": "Invalid URL"
+            },
+            "source": "extension"
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::Error { error, code, .. } => {
+            assert_eq!(error, "paused");
+            assert_eq!(code, "replay_error");
+        }
+        other => panic!("expected paused replay error, got {other:?}"),
+    }
+
+    for message in [
+        json!({ "type": "clear_all_data" }),
+        json!({ "type": "replay_remote_entries", "deviceId": "peer", "entries": [] }),
+        json!({ "type": "set_device_id", "deviceId": "paused-device" }),
+        json!({ "type": "permanent_delete", "keys": ["note:paused"] }),
+        json!({ "type": "run_command", "action": "trimTitle", "request": {} }),
+        json!({
+            "type": "event",
+            "entry": {
+                "timestamp": 1_710_060_000_200i64,
+                "action": "visit_page",
+                "url": "https://example.com/paused"
+            },
+            "source": "extension"
+        }),
+        json!({ "type": "run_rule_batch", "listIds": [], "entries": [] }),
+        json!({
+            "type": "snapshot",
+            "slug": "paused",
+            "ts": 1_710_060_000_300i64,
+            "url": "https://example.com/paused",
+            "html": "<html></html>",
+            "source": "extension"
+        }),
+        json!({
+            "type": "note",
+            "slug": "paused-note",
+            "note": "paused",
+            "url": "https://example.com/paused",
+            "ts": 1_710_060_000_400i64,
+            "source": "extension"
+        }),
+    ] {
+        send_raw(&mut socket, message).await;
+        match next_daemon(&mut socket).await {
+            DaemonMessage::Error { error, code, .. } => {
+                assert_eq!(error, "paused");
+                assert_eq!(code, "replay_error");
+            }
+            other => panic!("expected paused error, got {other:?}"),
+        }
+    }
+
+    handle.resume().await;
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::Snapshot {
+            slug: "bad-snapshot-url".to_string(),
+            ts: 1_710_060_000_500i64,
+            url: "not a url".to_string(),
+            title: Some("Bad Snapshot".to_string()),
+            markdown: None,
+            html: "<html><body>bad</body></html>".to_string(),
+            source: "extension".to_string(),
+            buffer_depth: None,
+            buffer_bytes: None,
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::Error { error, code, .. } => {
+            assert_eq!(error, "paused");
+            assert_eq!(code, "fs_error");
+        }
+        other => panic!("expected snapshot fs pause, got {other:?}"),
+    }
+
+    handle.resume().await;
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::Note {
+            slug: "bad-note-url".to_string(),
+            excerpt: None,
+            note: "bad".to_string(),
+            css_path: None,
+            old_slug: None,
+            url: "not a url".to_string(),
+            title: Some("Bad Note".to_string()),
+            ts: 1_710_060_000_600i64,
+            source: "extension".to_string(),
+            buffer_depth: None,
+            buffer_bytes: None,
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::Error { error, code, .. } => {
+            assert_eq!(error, "paused");
+            assert_eq!(code, "fs_error");
+        }
+        other => panic!("expected note fs pause, got {other:?}"),
+    }
+
+    handle.resume().await;
+    send_connector(&mut socket, ConnectorMessage::GetStatus).await;
+    assert!(matches!(next_daemon(&mut socket).await, DaemonMessage::Status { .. }));
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let (mut socket, data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "ensureDefaultLists",
+            "request": {}
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "ensureDefaultLists",
+            "request": {}
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success,
+            response: Some(response),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            assert_eq!(response.get("created").and_then(Value::as_bool), Some(false));
+        }
+        other => panic!("expected ensureDefaultLists no-op, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "renamePage",
+            "request": {
+                "url": "https://example.com/secondary",
+                "userTitle": "Secondary Title"
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "createNote",
+            "request": {
+                "url": "https://example.com/secondary",
+                "title": "Secondary",
+                "excerpt": "secondary excerpt",
+                "note": "secondary note"
+            }
+        }),
+    )
+    .await;
+    let note_slug = match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success,
+            response: Some(response),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            response
+                .get("noteSlug")
+                .and_then(Value::as_str)
+                .expect("note slug")
+                .to_string()
+        }
+        other => panic!("expected note creation, got {other:?}"),
+    };
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "updateNote",
+            "request": {
+                "noteSlug": note_slug,
+                "note": "secondary note unchanged"
+            }
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success,
+            response: Some(response),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            assert!(response.get("noteSlug").and_then(Value::as_str).is_some());
+        }
+        other => panic!("expected in-place note update, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "clearAllData",
+            "request": {}
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success,
+            response: Some(response),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            assert!(response
+                .get("deletedCount")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                > 0);
+        }
+        other => panic!("expected command clearAllData, got {other:?}"),
+    }
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::GetPageSummary {
+            url: "not a url".to_string(),
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::PageSummaryResult {
+            success,
+            page,
+            notes,
+            snapshots,
+            lists,
+            attention,
+            error: Some(error),
+            ..
+        } => {
+            assert!(!success);
+            assert!(page.is_none());
+            assert!(notes.is_empty());
+            assert!(snapshots.is_empty());
+            assert!(lists.is_empty());
+            assert!(attention.is_none());
+            assert!(!error.trim().is_empty());
+        }
+        other => panic!("expected invalid page summary, got {other:?}"),
+    }
+
+    tokio::fs::remove_dir_all(data_dir.join("logs"))
+        .await
+        .expect("remove logs");
+    tokio::fs::write(data_dir.join("logs"), "not a directory")
+        .await
+        .expect("write logs file");
+    send_connector(
+        &mut socket,
+        ConnectorMessage::SearchHistory {
+            query: "secondary".to_string(),
+            limit: Some(10),
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::SearchHistoryResult {
+            success,
+            results,
+            error: Some(error),
+        } => {
+            assert!(!success);
+            assert!(results.is_empty());
+            assert!(!error.trim().is_empty());
+        }
+        other => panic!("expected history search error, got {other:?}"),
+    }
+
+    tokio::fs::remove_dir_all(data_dir.join("objects").join("notes"))
+        .await
+        .expect("remove notes");
+    tokio::fs::write(data_dir.join("objects").join("notes"), "not a directory")
+        .await
+        .expect("write notes file");
+    send_connector(
+        &mut socket,
+        ConnectorMessage::SearchNotes {
+            query: "secondary".to_string(),
+            limit: Some(10),
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::SearchNotesResult {
+            success,
+            results,
+            error: Some(error),
+        } => {
+            assert!(!success);
+            assert!(results.is_empty());
+            assert!(!error.trim().is_empty());
+        }
+        other => panic!("expected note search error, got {other:?}"),
+    }
+
+    tokio::fs::remove_dir_all(data_dir.join("objects").join("snapshots"))
+        .await
+        .expect("remove snapshots");
+    tokio::fs::write(data_dir.join("objects").join("snapshots"), "not a directory")
+        .await
+        .expect("write snapshots file");
+    send_connector(
+        &mut socket,
+        ConnectorMessage::SearchSnapshots {
+            query: "secondary".to_string(),
+            limit: Some(10),
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::SearchSnapshotsResult {
+            success,
+            results,
+            error: Some(error),
+        } => {
+            assert!(!success);
+            assert!(results.is_empty());
+            assert!(!error.trim().is_empty());
+        }
+        other => panic!("expected snapshot search error, got {other:?}"),
+    }
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn websocket_get_entity_covers_manifest_and_child_entities() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let (mut socket, _data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "saveSettingsKey",
+            "request": {
+                "key": "titleCleanupEnabled",
+                "value": false
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "ensureDefaultLists",
+            "request": {}
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    let settings = get_entity(&mut socket, "manifest:settings")
+        .await
+        .expect("settings entity");
+    assert_eq!(
+        settings
+            .get("titleCleanupEnabled")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+
+    let name_to_id = get_entity(&mut socket, "manifest:name-to-id")
+        .await
+        .expect("name map entity");
+    assert_eq!(
+        name_to_id
+            .get("paths")
+            .and_then(|paths| paths.get("system/Hubs"))
+            .and_then(Value::as_str),
+        Some("hubs")
+    );
+
+    let list_order = get_entity(&mut socket, "manifest:list-order")
+        .await
+        .expect("list order entity");
+    let hubs_in_tree = list_order
+        .get("tree")
+        .and_then(Value::as_array)
+        .expect("list tree")
+        .iter()
+        .any(|node| node.get("id").and_then(Value::as_str) == Some("list:hubs"));
+    assert!(hubs_in_tree);
+
+    let hubs_list = get_entity(&mut socket, "list:hubs")
+        .await
+        .expect("hubs list entity");
+    assert_eq!(hubs_list.get("name").and_then(Value::as_str), Some("Hubs"));
+    assert!(hubs_list
+        .get("rules")
+        .and_then(Value::as_array)
+        .is_some_and(|rules| !rules.is_empty()));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "createNote",
+            "request": {
+                "url": "https://example.com/entity-note",
+                "title": "Entity Note",
+                "excerpt": "entity excerpt",
+                "note": "entity note"
+            }
+        }),
+    )
+    .await;
+    let note_slug = match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success,
+            response: Some(response),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            response
+                .get("noteSlug")
+                .and_then(Value::as_str)
+                .expect("note slug")
+                .to_string()
+        }
+        other => panic!("expected note creation, got {other:?}"),
+    };
+
+    let note = get_entity(&mut socket, &format!("note:{note_slug}"))
+        .await
+        .expect("note entity");
+    assert_eq!(note.get("note").and_then(Value::as_str), Some("entity note"));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "deleteNote",
+            "request": { "noteSlug": note_slug }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    let orphaned = get_entity(&mut socket, "manifest:orphaned")
+        .await
+        .expect("orphaned entity");
+    let orphaned_note_key = format!("note:{note_slug}");
+    let note_is_orphaned = orphaned
+        .get("entries")
+        .and_then(Value::as_array)
+        .expect("orphaned entries")
+        .iter()
+        .any(|entry| entry.get("key").and_then(Value::as_str) == Some(orphaned_note_key.as_str()));
+    assert!(note_is_orphaned);
+
+    assert!(get_entity(&mut socket, "list:missing-list").await.is_none());
 
     handle.shutdown().await;
 }
@@ -1096,6 +2340,677 @@ async fn run_command_executes_desktop_mutation() {
     let list_raw = wait_for_text(&list_path, |raw| raw.contains("\"id\": \"page:")).await;
     assert!(list_raw.contains("\"id\": \"page:"));
 
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let (mut socket, data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
+
+    send_connector(&mut socket, ConnectorMessage::Ping).await;
+    assert!(matches!(next_daemon(&mut socket).await, DaemonMessage::Pong));
+
+    send_connector(&mut socket, ConnectorMessage::GetDirectoryInfo).await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::DirectoryInfoResult {
+            success,
+            info: Some(info),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            assert!(info.has_permission);
+        }
+        other => panic!("expected directory info, got {other:?}"),
+    }
+
+    send_connector(&mut socket, ConnectorMessage::GetDirectorySize).await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::DirectorySizeResult { success, error, .. } => {
+            assert!(success);
+            assert!(error.is_none());
+        }
+        other => panic!("expected directory size, got {other:?}"),
+    }
+
+    send_connector(&mut socket, ConnectorMessage::TestResetData).await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::Error { error, code, .. } => {
+            assert_eq!(error, "test_control_disabled");
+            assert_eq!(code, "test_control_disabled");
+        }
+        other => panic!("expected disabled test control error, got {other:?}"),
+    }
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::RunCommand {
+            action: "unsupportedCommand".to_string(),
+            request: json!({}),
+            buffer_depth: None,
+            buffer_bytes: None,
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success,
+            response,
+            error: Some(error),
+        } => {
+            assert!(!success);
+            assert!(response.is_none());
+            assert!(error.contains("unsupported desktop command"));
+        }
+        other => panic!("expected unsupported command result, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "saveSettingsKey",
+            "request": { "key": "theme", "value": "dark" },
+            "bufferDepth": 7,
+            "bufferBytes": 2048
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_connector(&mut socket, ConnectorMessage::GetStatus).await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::Status {
+            buffer_depth,
+            buffer_bytes,
+            ..
+        } => {
+            assert_eq!(buffer_depth, 7);
+            assert_eq!(buffer_bytes, 2048);
+        }
+        other => panic!("expected status, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "trimTitle",
+            "request": {
+                "url": "https://example.com/matrix",
+                "title": "  Matrix   Page  "
+            }
+        }),
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success,
+            response: Some(response),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            assert_eq!(response.get("title").and_then(Value::as_str), Some("Matrix Page"));
+        }
+        other => panic!("expected trimTitle result, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "reportVisit",
+            "request": {
+                "timestamp": 1_710_030_000_000i64,
+                "url": "https://example.com/matrix",
+                "title": "Matrix Page",
+                "referrerUrl": "https://example.com/ref",
+                "bodyPreview": "matrix body"
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "reportLeave",
+            "request": {
+                "timestamp": 1_710_030_005_000i64,
+                "url": "https://example.com/matrix",
+                "title": "Matrix Page Updated",
+                "scrollDepth": 80,
+                "timeOnPage": 5000
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "ratePage",
+            "request": {
+                "url": "https://example.com/matrix",
+                "title": "Matrix Page Updated",
+                "likes": 1
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "saveListMeta",
+            "request": { "name": "Matrix List" }
+        }),
+    )
+    .await;
+    let list_id = match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success,
+            response: Some(response),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            response
+                .get("listId")
+                .and_then(Value::as_str)
+                .expect("list id")
+                .to_string()
+        }
+        other => panic!("expected saveListMeta result, got {other:?}"),
+    };
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "addRule",
+            "request": {
+                "listId": list_id,
+                "rule": {
+                    "type": "keyword",
+                    "config": { "pattern": "Matrix" }
+                }
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+    let list = handle
+        .storage()
+        .load_list(&list_id)
+        .await
+        .expect("load list")
+        .expect("list exists");
+    let rule_id = list.rules.first().expect("rule exists").id.clone();
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "updateRule",
+            "request": {
+                "listId": list_id,
+                "ruleId": rule_id,
+                "config": { "pattern": "Updated" }
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "removeRule",
+            "request": {
+                "listId": list_id,
+                "ruleId": rule_id
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "addListPins",
+            "request": {
+                "listId": list_id,
+                "urls": [
+                    "https://example.com/matrix",
+                    "https://example.com/matrix-extra"
+                ],
+                "titles": [null, "Matrix Extra"]
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "updateListTree",
+            "request": {
+                "tree": [{ "id": format!("list:{list_id}"), "children": [] }]
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "createNote",
+            "request": {
+                "url": "https://example.com/matrix",
+                "title": "Matrix Page",
+                "excerpt": "matrix excerpt",
+                "note": "matrix note"
+            }
+        }),
+    )
+    .await;
+    let note_slug = match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success,
+            response: Some(response),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            response
+                .get("noteSlug")
+                .and_then(Value::as_str)
+                .expect("note slug")
+                .to_string()
+        }
+        other => panic!("expected createNote result, got {other:?}"),
+    };
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "updateNote",
+            "request": {
+                "noteSlug": note_slug,
+                "note": "matrix note updated"
+            }
+        }),
+    )
+    .await;
+    let updated_note_slug = match next_daemon(&mut socket).await {
+        DaemonMessage::CommandResult {
+            success,
+            response: Some(response),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            response
+                .get("noteSlug")
+                .and_then(Value::as_str)
+                .expect("updated note slug")
+                .to_string()
+        }
+        other => panic!("expected updateNote result, got {other:?}"),
+    };
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "deleteNote",
+            "request": { "noteSlug": updated_note_slug }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "restoreNote",
+            "request": { "noteSlug": updated_note_slug }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    let page_slug = generate_slug_from_url("https://example.com/matrix").expect("page slug");
+    send_snapshot_and_ack(&mut socket, &page_slug, "https://example.com/matrix", 1_710_030_010_000)
+        .await;
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "deleteSnapshot",
+            "request": {
+                "slug": page_slug,
+                "timestamp": 1_710_030_010_000i64
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "restoreSnapshot",
+            "request": { "snapSlug": format!("{page_slug}-1710030010000") }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "deleteList",
+            "request": { "listId": list_id }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "restoreList",
+            "request": { "listId": list_id }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "importHistory",
+            "request": {
+                "entries": [{
+                    "url": "https://example.com/imported-history",
+                    "title": "Imported History",
+                    "visitTimes": [1_710_030_020_000i64]
+                }]
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "importBookmarks",
+            "request": {
+                "tree": [{
+                    "title": "Imported Folder",
+                    "bookmarks": [{
+                        "url": "https://example.com/imported-bookmark",
+                        "title": "Imported Bookmark"
+                    }]
+                }]
+            }
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::ListHistoryFiles {
+            include_sizes: true,
+        },
+    )
+    .await;
+    let files = match next_daemon(&mut socket).await {
+        DaemonMessage::HistoryFilesResult {
+            success,
+            files,
+            sizes: Some(sizes),
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            assert!(!sizes.is_empty());
+            files
+        }
+        other => panic!("expected history files, got {other:?}"),
+    };
+    assert!(!files.is_empty());
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::LoadHistoryBatch {
+            files: files.clone(),
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::HistoryBatchResult {
+            success,
+            entries,
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            assert!(entries
+                .iter()
+                .any(|entry| entry.get("url").and_then(Value::as_str)
+                    == Some("https://example.com/matrix")));
+        }
+        other => panic!("expected history batch, got {other:?}"),
+    }
+
+    send_connector(&mut socket, ConnectorMessage::GetAllPages).await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::AllPagesResult {
+            success,
+            pages,
+            error,
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            assert!(pages.contains_key(&page_slug));
+        }
+        other => panic!("expected all pages, got {other:?}"),
+    }
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::GetPageSummary {
+            url: "https://example.com/matrix".to_string(),
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::PageSummaryResult {
+            success,
+            page: Some(page),
+            attention: Some(attention),
+            error,
+            ..
+        } => {
+            assert!(success);
+            assert!(error.is_none());
+            assert_eq!(page.url.as_deref(), Some("https://example.com/matrix"));
+            assert_eq!(attention.total_seconds, 5);
+        }
+        other => panic!("expected page summary, got {other:?}"),
+    }
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::GetSnapshotHtml {
+            slug: "missing".to_string(),
+            ts: 1,
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::SnapshotHtmlResult {
+            success,
+            html,
+            error: Some(error),
+        } => {
+            assert!(!success);
+            assert!(html.is_none());
+            assert_eq!(error, "Not found");
+        }
+        other => panic!("expected missing snapshot html, got {other:?}"),
+    }
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::GetEntity {
+            key: "page:missing".to_string(),
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::EntityResult {
+            success,
+            entity,
+            error,
+            ..
+        } => {
+            assert!(success);
+            assert!(entity.is_none());
+            assert!(error.is_none());
+        }
+        other => panic!("expected missing entity result, got {other:?}"),
+    }
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::PermanentDelete {
+            keys: vec!["manifest:orphaned".to_string()],
+        },
+    )
+    .await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::PermanentDeleteResult {
+            success,
+            deleted_keys,
+            error,
+        } => {
+            assert!(success);
+            assert!(deleted_keys.is_empty());
+            assert!(error.is_none());
+        }
+        other => panic!("expected no-op permanent delete, got {other:?}"),
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_command",
+            "action": "permanentDeleteAll",
+            "request": {}
+        }),
+    )
+    .await;
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::CommandResult { success: true, .. }
+    ));
+
+    send_connector(&mut socket, ConnectorMessage::GetStatus).await;
+    match next_daemon(&mut socket).await {
+        DaemonMessage::Status {
+            buffer_depth,
+            buffer_bytes,
+            ..
+        } => {
+            assert_eq!(buffer_depth, 0);
+            assert_eq!(buffer_bytes, 0);
+        }
+        other => panic!("expected status, got {other:?}"),
+    }
+
+    assert!(data_dir.exists());
     handle.shutdown().await;
 }
 
@@ -1842,6 +3757,67 @@ async fn run_rule_batch_persists_matches_and_returns_hits() {
             .any(|log| log.contains("\"action\":\"pin_to_list\"")),
         "expected pin_to_list in at least one log file"
     );
+
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn run_rule_batch_invalid_matching_url_returns_structured_error() {
+    let dir = tempdir().expect("tempdir");
+    let config_store = ConfigStore::new(dir.path());
+    let handle = start_server(test_server_options(config_store.clone()))
+        .await
+        .expect("server starts");
+
+    let (mut socket, _data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
+    for entry in [
+        json!({
+            "timestamp": 1_710_000_006_000i64,
+            "action": "create_list",
+            "listOwner": "test-device",
+            "name": "Broken Rule Batch",
+            "listId": "broken-rule-batch"
+        }),
+        json!({
+            "timestamp": 1_710_000_006_100i64,
+            "action": "add_rule",
+            "listOwner": "test-device",
+            "name": "Broken Rule Batch",
+            "rule": {
+                "id": "rule-k-invalid",
+                "type": "keyword",
+                "config": { "pattern": "Match" }
+            }
+        }),
+    ] {
+        send_event_and_ack(&mut socket, entry).await;
+    }
+
+    send_raw(
+        &mut socket,
+        json!({
+            "type": "run_rule_batch",
+            "listIds": ["broken-rule-batch"],
+            "entries": [{
+                "url": "not a url",
+                "title": "Match"
+            }]
+        }),
+    )
+    .await;
+
+    match next_daemon(&mut socket).await {
+        DaemonMessage::RuleBatchResult {
+            success,
+            results,
+            error: Some(error),
+        } => {
+            assert!(!success);
+            assert!(results.is_empty());
+            assert!(!error.trim().is_empty());
+        }
+        other => panic!("expected invalid rule batch error, got {other:?}"),
+    }
 
     handle.shutdown().await;
 }

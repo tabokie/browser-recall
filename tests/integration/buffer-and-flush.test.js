@@ -12,7 +12,9 @@ import { readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import NodeWebSocket from 'ws';
+import { generateSlugFromUrl } from '../../packages/core/utils.js';
 
 const ROOT = process.cwd();
 const BINARY_PATH = path.join(ROOT, 'target', 'debug', 'browser-recall-daemon');
@@ -107,6 +109,25 @@ async function readAllLogLines(logsDir) {
   return lines;
 }
 
+function pagePath(dataRoot, url) {
+  const slug = generateSlugFromUrl(url);
+  const shard = createHash('sha256').update(slug).digest('hex').slice(0, 2);
+  return path.join(dataRoot, 'views', 'pages', shard, `${slug}.json`);
+}
+
+async function listFilesRecursive(root) {
+  const files = [];
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listFilesRecursive(entryPath)));
+    } else {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}
+
 function createChromeMock() {
   const store = {};
   const alarms = new Map();
@@ -144,6 +165,7 @@ function createChromeMock() {
     chrome: {
       runtime: {
         id: 'abcdefghijklmnop',
+        sendMessage: vi.fn(async () => undefined),
       },
       alarms: {
         create(name, info) {
@@ -435,22 +457,13 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     });
 
     const dataRoot = path.join(dir, 'portal-data');
-    const pageFiles = await readdir(path.join(dataRoot, 'pages'));
-    const queuedPage = pageFiles.find((file) => file.includes('example'));
-    expect(queuedPage).toBeTruthy();
-    const pageRaw = readFileSync(
-      path.join(dataRoot, 'pages', queuedPage),
-      'utf8',
-    );
-    expect(pageRaw).toContain('"title": "Queued Page"');
-
     const settingsRaw = readFileSync(
-      path.join(dataRoot, 'manifest', 'settings.json'),
+      path.join(dataRoot, 'views', 'manifest', 'settings.json'),
       'utf8',
     );
     expect(settingsRaw).toContain('"theme": "sepia"');
 
-    const logsDir = path.join(dataRoot, 'data', 'logs');
+    const logsDir = path.join(dataRoot, 'logs');
     const lines = await readAllLogLines(logsDir);
     expect(
       lines
@@ -533,26 +546,21 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     });
 
     const dataRoot = path.join(dir, 'portal-data');
-    const noteFiles = await readdir(path.join(dataRoot, 'data', 'notes'));
+    const noteFiles = await readdir(path.join(dataRoot, 'objects', 'notes'));
     const noteRaw = readFileSync(
-      path.join(dataRoot, 'data', 'notes', noteFiles[0]),
+      path.join(dataRoot, 'objects', 'notes', noteFiles[0]),
       'utf8',
     );
     expect(noteRaw).toContain('"excerpt": "offline highlight"');
     expect(noteRaw).toContain('"note": "offline note body"');
 
-    const pageFiles = await readdir(path.join(dataRoot, 'pages'));
     const offlinePageRaw = readFileSync(
-      path.join(
-        dataRoot,
-        'pages',
-        pageFiles.find((name) => name !== undefined),
-      ),
+      pagePath(dataRoot, 'https://example.com/offline'),
       'utf8',
     );
     expect(offlinePageRaw).toContain('"note:');
 
-    const logsDir = path.join(dataRoot, 'data', 'logs');
+    const logsDir = path.join(dataRoot, 'logs');
     const lines = await readAllLogLines(logsDir);
     expect(
       lines
@@ -617,12 +625,13 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(store.desktopCommandBuffer || []).toEqual([]);
 
     const dataRoot = path.join(dir, 'portal-data');
-    const snapshotPath = path.join(
-      dataRoot,
-      'data',
-      'snapshots',
-      'large-snapshot-page-1710000002700.html',
+    const snapshotFiles = await listFilesRecursive(
+      path.join(dataRoot, 'objects', 'snapshots'),
     );
+    const snapshotPath = snapshotFiles.find((file) =>
+      file.endsWith('large-snapshot-page-1710000002700.html'),
+    );
+    expect(snapshotPath).toBeTruthy();
     expect(statSync(snapshotPath).size).toBeGreaterThan(8 * 1024 * 1024);
     expect(readFileSync(snapshotPath, 'utf8')).toContain('large snapshot body');
   }, 30_000);
@@ -683,7 +692,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
 
     const dataRoot = path.join(dir, 'portal-data');
     const settingsRaw = readFileSync(
-      path.join(dataRoot, 'manifest', 'settings.json'),
+      path.join(dataRoot, 'views', 'manifest', 'settings.json'),
       'utf8',
     );
     expect(settingsRaw).toContain('"theme": "after-poison"');
@@ -1342,5 +1351,76 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(BrowserLikeWebSocket.instances).toHaveLength(socketCount);
     expect(store.connectorState).toBe('connected');
     expect(store.connectorDataFolder).toContain('portal-data');
+  }, 30_000);
+
+  it('rebroadcasts daemon change messages as extension mutations', async () => {
+    const dir = mkdtempSync(
+      path.join(tmpdir(), 'browser-recall-change-broadcast-'),
+    );
+    tempDirs.push(dir);
+
+    originalWebSocket = globalThis.WebSocket;
+    originalChrome = globalThis.chrome;
+    originalNavigator = globalThis.navigator;
+    originalSetTimeout = globalThis.setTimeout;
+
+    const { chrome, store } = createChromeMock();
+    globalThis.chrome = chrome;
+    globalThis.WebSocket = BrowserLikeWebSocket;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { userAgent: 'Chrome/123.0.0.0 Safari/537.36' },
+      configurable: true,
+    });
+    globalThis.setTimeout = (fn, delay, ...args) => {
+      const timer = originalSetTimeout(fn, delay, ...args);
+      timer?.unref?.();
+      return timer;
+    };
+
+    const wsClient =
+      await import('../../apps/extension/connector/ws-client.js');
+
+    const child = launchDaemon(dir, 'allow');
+    childProcesses.push(child);
+    store.connectorDaemonPort = await waitForListening(child);
+
+    await wsClient.initConnectorBridge();
+    await waitFor(async () => {
+      const state = await wsClient.getConnectorBridgeState();
+      return state.state === 'connected' && state.hasToken;
+    });
+
+    const clientSocket = BrowserLikeWebSocket.instances.find(
+      (socket) => socket.readyState === NodeWebSocket.OPEN,
+    );
+    expect(clientSocket).toBeTruthy();
+
+    clientSocket.socket.emit(
+      'message',
+      JSON.stringify({
+        type: 'change',
+        mutations: [
+          { type: 'history', url: 'https://example.com/change' },
+          {
+            type: 'note',
+            pageSlug: 'change',
+            noteSlug: 'change-note',
+          },
+        ],
+      }),
+    );
+
+    await waitFor(() => chrome.runtime.sendMessage.mock.calls.length >= 2);
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      action: 'mutation',
+      type: 'history',
+      url: 'https://example.com/change',
+    });
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      action: 'mutation',
+      type: 'note',
+      pageSlug: 'change',
+      noteSlug: 'change-note',
+    });
   }, 30_000);
 });

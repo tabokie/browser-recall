@@ -4,10 +4,13 @@ import {
   getSlugForUrl,
   openHelperPage,
   pageCheckpointPath,
+  pickSeeded,
+  seededRandom,
 } from './helpers.js';
 
 const TEST_URL = 'https://example.com/';
 const TEST_SLUG = getSlugForUrl(TEST_URL);
+const POPUP_MUTATION_SEED = 'popup-live-mutation-20260505-a';
 
 async function openPopupForUrl(extContext, extensionId, { url, title }) {
   const popup = await extContext.newPage();
@@ -483,6 +486,119 @@ test.describe('Popup list chip behavior', () => {
 
     await helper.close();
     await popup.close();
+    await page.close();
+  });
+
+  test(`popup refreshes notes, list chips, and badge from live desktop mutations seed=${POPUP_MUTATION_SEED}`, async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const random = seededRandom(POPUP_MUTATION_SEED);
+    const nouns = ['Atlas', 'Beacon', 'Cinder', 'Drift', 'Ember', 'Fjord'];
+    const verbs = ['audit', 'brief', 'index', 'map', 'review', 'trace'];
+    const now = Date.now();
+    const noun = pickSeeded(random, nouns);
+    const verb = pickSeeded(random, verbs);
+    const title = `${noun} popup mutation ${verb}`;
+    const excerpt = `${noun} selected excerpt ${verb}`;
+    const note = `${verb} note ${noun}`;
+    const listName = `Reading ${pickSeeded(random, nouns)}`;
+
+    localServer.addPage('/popup-live-mutation-combo', {
+      title,
+      body: `<main><h1>${noun}</h1><p>${excerpt}</p></main>`,
+    });
+    const url = localServer.url('/popup-live-mutation-combo');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: { timestamp: now, tree: [{ id: 'list:reading-live' }] },
+      },
+      {
+        path: 'views/lists/reading-live.json',
+        data: {
+          slug: 'reading-live',
+          name: listName,
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'views/manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: {
+            [`test-device/${listName}`]: 'reading-live',
+          },
+        },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title,
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const helper = await openHelperPage(extContext, extensionId);
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title,
+    });
+
+    await expect(popup.locator('#highlightList')).not.toContainText(excerpt);
+    await expect(popup.locator('#listCount')).toHaveText('00');
+
+    const noteResp = await helper.evaluate(
+      ({ pageUrl, pageTitle, pageExcerpt, pageNote }) =>
+        chrome.runtime.sendMessage({
+          action: 'createNote',
+          url: pageUrl,
+          title: pageTitle,
+          excerpt: pageExcerpt,
+          note: pageNote,
+          cssPath: null,
+        }),
+      { pageUrl: url, pageTitle: title, pageExcerpt: excerpt, pageNote: note },
+    );
+    expect(noteResp.success).toBe(true);
+
+    await expect(popup.locator('#highlightList')).toContainText(excerpt);
+    await expect(popup.locator('#highlightList')).toContainText(note);
+
+    const pinResp = await helper.evaluate(
+      (pageUrl) =>
+        chrome.runtime.sendMessage({
+          action: 'toggleListPin',
+          listId: 'reading-live',
+          url: pageUrl,
+        }),
+      url,
+    );
+    expect(pinResp.success).toBe(true);
+
+    await expect(popup.locator('#listCount')).toHaveText('01');
+    await expect(popup.locator('.list-chip.selected')).toContainText(listName);
+    await expect
+      .poll(() => getBadgeForUrl(helper, url))
+      .toMatchObject({ text: ' ', color: [156, 39, 176, 255] });
+
+    await popup.close();
+    await helper.close();
     await page.close();
   });
 

@@ -199,4 +199,6 @@ Current automated coverage is split across three layers:
 - `tests/integration/` for daemon/connector RPC and event-flow coverage
 - `tests/e2e/` for current shipped extension popup and connector behavior
 
+E2E is the preferred product safety net for desktop and extension behavior. New coverage should favor real user workflows, cross-feature combinations, and seeded randomized inputs over expanding unit-test LoC. Rust daemon integration tests are the preferred fallback for daemon authority behavior that is impractical to assert through browser E2E. `scripts/test-coverage-monitor.mjs` surfaces JS and Rust uncovered production line ranges for triage, tracks the suite mix, and fails on JS or inline Rust unit-test LoC growth unless an explicit exception is made.
+
 The desktop smoke / GUI parity suite remains the notable intentionally-skipped gap.

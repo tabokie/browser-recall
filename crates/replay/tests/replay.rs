@@ -1417,6 +1417,216 @@ async fn permanent_delete_removes_entities_and_orphan_entries() {
 }
 
 #[tokio::test]
+async fn permanent_delete_snapshot_unlinks_page_and_deletes_unretained_checkpoint() {
+    let slug = generate_slug_from_url("https://snap.example/article").expect("slug");
+    let page_key = format!("page:{slug}");
+    let snapshot_key = format!("snapshot:{slug}-1000");
+    let mut retained_page = page(&slug);
+    retained_page.url = Some("https://snap.example/article".to_string());
+    retained_page.child_ids = vec![snapshot_key.clone()];
+    retained_page.timestamps.insert("older".to_string(), 150);
+
+    let store = BTreeMap::from([(page_key.clone(), Entity::Page(retained_page))]);
+    let result = effect_of(
+        LogEntry::PermanentDelete {
+            timestamp: 250,
+            keys: vec![snapshot_key.clone()],
+        },
+        load_from(store),
+        context(),
+    )
+    .await
+    .expect("permanent snapshot delete replay succeeds");
+
+    assert!(result.get(&snapshot_key).expect("snapshot delete").is_delete());
+    assert!(result.get(&page_key).expect("page delete").is_delete());
+    let orphaned = result
+        .get("manifest:orphaned")
+        .and_then(EntityEffect::as_orphaned)
+        .expect("orphaned manifest touched");
+    assert!(orphaned.entries.is_empty());
+    assert_eq!(orphaned.timestamps.get("test-device"), Some(&250));
+}
+
+#[tokio::test]
+async fn permanent_delete_list_cleans_pages_tree_and_name_manifest() {
+    let target_list_key = "list:reading-id".to_string();
+    let sibling_list_key = "list:sibling-id".to_string();
+    let pinned_page_key = "page:pinned".to_string();
+    let retained_page_key = "page:retained".to_string();
+
+    let mut target_list = list("reading-id", "Reading");
+    target_list.pins = vec![
+        PinEntity {
+            id: pinned_page_key.clone(),
+            pinned_at: 100,
+            source: None,
+        },
+        PinEntity {
+            id: retained_page_key.clone(),
+            pinned_at: 101,
+            source: Some("manual".to_string()),
+        },
+        PinEntity {
+            id: "note:n1".to_string(),
+            pinned_at: 102,
+            source: None,
+        },
+    ];
+
+    let mut pinned_page = page("pinned");
+    pinned_page.parent_ids = vec![target_list_key.clone()];
+    let mut retained_page = page("retained");
+    retained_page.parent_ids = vec![target_list_key.clone(), sibling_list_key.clone()];
+    retained_page.child_ids = vec!["note:keep".to_string()];
+
+    let name_map = NameToIdManifest {
+        timestamps: Default::default(),
+        paths: BTreeMap::from([
+            ("test-device/Reading".to_string(), "reading-id".to_string()),
+            ("test-device/Sibling".to_string(), "sibling-id".to_string()),
+        ]),
+    };
+    let list_order = ListOrderManifest {
+        timestamps: Default::default(),
+        tree: vec![TreeNode {
+            id: "root".to_string(),
+            children: vec![TreeNode {
+                id: target_list_key.clone(),
+                children: vec![TreeNode {
+                    id: "list:child-id".to_string(),
+                    children: Vec::new(),
+                }],
+            }],
+        }],
+    };
+
+    let store = BTreeMap::from([
+        (target_list_key.clone(), Entity::List(target_list)),
+        (pinned_page_key.clone(), Entity::Page(pinned_page)),
+        (retained_page_key.clone(), Entity::Page(retained_page)),
+        ("manifest:name-to-id".to_string(), Entity::NameToId(name_map)),
+        (
+            "manifest:list-order".to_string(),
+            Entity::ListOrder(list_order),
+        ),
+    ]);
+
+    let result = effect_of(
+        LogEntry::PermanentDelete {
+            timestamp: 300,
+            keys: vec![target_list_key.clone()],
+        },
+        load_from(store),
+        context(),
+    )
+    .await
+    .expect("permanent list delete replay succeeds");
+
+    assert!(result
+        .get(&target_list_key)
+        .expect("list delete")
+        .is_delete());
+    assert!(result
+        .get(&pinned_page_key)
+        .expect("unretained pinned page deleted")
+        .is_delete());
+
+    let retained_page = result
+        .get(&retained_page_key)
+        .and_then(EntityEffect::as_page)
+        .expect("retained page updated");
+    assert_eq!(retained_page.parent_ids, vec![sibling_list_key]);
+    assert_eq!(retained_page.timestamps.get("test-device"), Some(&300));
+
+    let name_map = result
+        .get("manifest:name-to-id")
+        .and_then(EntityEffect::as_name_to_id)
+        .expect("name map updated");
+    assert_eq!(
+        name_map.paths,
+        BTreeMap::from([(
+            "test-device/Sibling".to_string(),
+            "sibling-id".to_string()
+        )])
+    );
+    assert_eq!(name_map.timestamps.get("test-device"), Some(&300));
+
+    let order = result
+        .get("manifest:list-order")
+        .and_then(EntityEffect::as_list_order)
+        .expect("list order updated");
+    let ids = collect_tree_ids(&order.tree);
+    assert!(!ids.contains(&target_list_key));
+    assert!(ids.contains("list:child-id"));
+    assert_eq!(order.timestamps.get("test-device"), Some(&300));
+}
+
+#[tokio::test]
+async fn permanent_delete_page_removes_matching_list_pins() {
+    let page_key = "page:gone".to_string();
+    let mut first = list("first", "First");
+    first.pins = vec![
+        PinEntity {
+            id: page_key.clone(),
+            pinned_at: 100,
+            source: Some("rule".to_string()),
+        },
+        PinEntity {
+            id: "page:keep".to_string(),
+            pinned_at: 101,
+            source: None,
+        },
+    ];
+    let mut second = list("second", "Second");
+    second.pins = vec![PinEntity {
+        id: page_key.clone(),
+        pinned_at: 102,
+        source: None,
+    }];
+    let name_map = NameToIdManifest {
+        timestamps: Default::default(),
+        paths: BTreeMap::from([
+            ("test-device/First".to_string(), "first".to_string()),
+            ("test-device/Second".to_string(), "second".to_string()),
+        ]),
+    };
+
+    let store = BTreeMap::from([
+        ("list:first".to_string(), Entity::List(first)),
+        ("list:second".to_string(), Entity::List(second)),
+        ("manifest:name-to-id".to_string(), Entity::NameToId(name_map)),
+    ]);
+
+    let result = effect_of(
+        LogEntry::PermanentDelete {
+            timestamp: 400,
+            keys: vec![page_key.clone()],
+        },
+        load_from(store),
+        context(),
+    )
+    .await
+    .expect("permanent page delete replay succeeds");
+
+    assert!(result.get(&page_key).expect("page delete").is_delete());
+    let first = result
+        .get("list:first")
+        .and_then(EntityEffect::as_list)
+        .expect("first list updated");
+    assert_eq!(first.pins.len(), 1);
+    assert_eq!(first.pins[0].id, "page:keep");
+    assert_eq!(first.timestamps.get("test-device"), Some(&400));
+
+    let second = result
+        .get("list:second")
+        .and_then(EntityEffect::as_list)
+        .expect("second list updated");
+    assert!(second.pins.is_empty());
+    assert_eq!(second.timestamps.get("test-device"), Some(&400));
+}
+
+#[tokio::test]
 async fn update_setting_persists_dynamic_value_with_timestamp() {
     let result = effect_of(
         LogEntry::UpdateSetting {

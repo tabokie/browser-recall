@@ -30,6 +30,7 @@ struct StorageInner {
     root: PathBuf,
     cache: StdMutex<EntityCache>,
     write_gate: Mutex<()>,
+    last_command_timestamp_ms: StdMutex<i64>,
     checkpoint_tx: mpsc::Sender<CheckpointWork>,
     checkpoint_error: StdMutex<Option<String>>,
 }
@@ -101,6 +102,7 @@ impl Storage {
                 root: root.into(),
                 cache: StdMutex::new(EntityCache::new(5_000)),
                 write_gate: Mutex::new(()),
+                last_command_timestamp_ms: StdMutex::new(0),
                 checkpoint_tx,
                 checkpoint_error: StdMutex::new(None),
             }),
@@ -115,6 +117,18 @@ impl Storage {
 
     pub async fn write_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.inner.write_gate.lock().await
+    }
+
+    pub fn next_command_timestamp_millis(&self) -> i64 {
+        let now = Local::now().timestamp_millis();
+        let mut last = self
+            .inner
+            .last_command_timestamp_ms
+            .lock()
+            .expect("command timestamp lock poisoned");
+        let next = now.max(*last + 1);
+        *last = next;
+        next
     }
 
     pub async fn ensure_layout(&self, device_id: &str) -> io::Result<()> {
@@ -957,7 +971,7 @@ impl Storage {
             self.save_page(slug, &page).await
         } else {
             remove_if_exists(self.page_path(slug)).await?;
-            self.cache_put(format!("page:{slug}"), Some(Entity::Page(page)));
+            self.cache_put(format!("page:{slug}"), None);
             Ok(())
         }
     }

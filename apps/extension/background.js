@@ -1448,9 +1448,18 @@ async function handleCreateNote(request, sender) {
 async function handleDeleteNote(request) {
   const response = await runDesktopCommand('deleteNote', request);
   if (!response.success) return response;
-  notifyMutation('note', { noteSlug: request.noteSlug });
+  if (response.url) {
+    void badgeController.refreshBadgesForUrls([response.url]);
+  } else {
+    void badgeController.refreshActiveTabBadge();
+  }
+  notifyMutation('note', {
+    noteSlug: response.noteSlug || request.noteSlug,
+    pageSlug: response.pageSlug,
+    url: response.url,
+  });
   notifyMutation('orphaned');
-  return { success: true };
+  return response;
 }
 
 async function handleUpdateNote(request) {
@@ -1493,7 +1502,15 @@ async function handleSaveListMeta(request) {
 async function handleDeleteList(request) {
   const response = await runDesktopCommand('deleteList', request);
   if (!response.success) return response;
-  notifyMutation('lists');
+  if (Array.isArray(response.urls) && response.urls.length > 0) {
+    void badgeController.refreshBadgesForUrls(response.urls);
+  } else {
+    void badgeController.refreshActiveTabBadge();
+  }
+  notifyMutation('lists', {
+    listId: response.listId || request.listId,
+    urls: response.urls,
+  });
   notifyMutation('orphaned');
   return response;
 }

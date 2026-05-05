@@ -1,9 +1,14 @@
 use browser_recall_daemon::commands::{
-    add_rule, create_note, delete_note, delete_snapshot, import_history, list_history_files,
-    list_paired_browsers, load_history_batch, load_page_notes_payload, load_page_snapshot_payload,
-    pair_browser_revoke, permanent_delete_keys, preview_rule_payload, read_desktop_value,
-    recover_checkpoint_tail, remove_rule, rename_page, replay_entry, restore_note, save_list_meta,
-    save_settings_key, submit_event, toggle_list_pin, update_note, HistoryImportEntry,
+    add_list_pins, add_rule, create_note, delete_list, delete_note, delete_snapshot,
+    ensure_default_lists, get_snapshot_html, import_bookmarks, import_history, list_event_fields,
+    list_history_files, list_paired_browsers, load_all_pages_payload, load_history_batch,
+    load_page_notes_payload, load_page_snapshot_payload, page_relations_payload,
+    pair_browser_revoke, permanent_delete_candidates, permanent_delete_keys, preview_rule_payload,
+    read_desktop_value, recover_checkpoint_tail, remove_rule, rename_page, replay_entries,
+    replay_entry, restore_list, restore_note, restore_snapshot, save_list_meta, save_settings_key,
+    search_history, search_notes, search_snapshots, submit_event, toggle_list_pin, update_note,
+    update_rule, BookmarkImportEntry, BookmarkImportNode, BookmarkImportSkipped,
+    HistoryImportEntry,
 };
 use browser_recall_daemon::protocol::{RuleBatchEntry, RulePayload};
 use browser_recall_daemon::storage::Storage;
@@ -11,9 +16,26 @@ use browser_recall_daemon::{ApprovedConnector, ConfigStore, Token};
 use browser_recall_replay::entities::{
     ListEntity, ListOrderManifest, NameToIdManifest, PageEntity, PinEntity, TreeNode,
 };
-use browser_recall_replay::{generate_slug_from_url, LogEntry};
+use browser_recall_replay::{generate_slug_from_url, LogEntry, RuleInput};
 use std::collections::BTreeMap;
+use std::path::Path;
 use tempfile::tempdir;
+
+async fn read_log_files(log_dir: &Path) -> Vec<String> {
+    let mut entries = tokio::fs::read_dir(log_dir).await.expect("log dir exists");
+    let mut logs = Vec::new();
+    while let Some(entry) = entries.next_entry().await.expect("dir read") {
+        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+            continue;
+        }
+        logs.push(
+            tokio::fs::read_to_string(entry.path())
+                .await
+                .expect("log exists"),
+        );
+    }
+    logs
+}
 
 #[tokio::test]
 async fn import_history_creates_pages_and_log_entries() {
@@ -989,4 +1011,733 @@ async fn rule_and_rename_commands_replay_entities() {
         .expect("load page")
         .expect("page exists");
     assert_eq!(page.user_title.as_deref(), Some("Renamed Page"));
+}
+
+#[tokio::test]
+async fn command_workflow_combines_bookmark_import_bulk_pins_restore_and_relations() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+    for _ in 0..10_000 {
+        storage.next_command_timestamp_millis();
+    }
+
+    assert!(
+        ensure_default_lists(&storage, "device-a")
+            .await
+            .expect("bootstrap default lists"),
+        "first run should create the system hubs list"
+    );
+    assert!(
+        !ensure_default_lists(&storage, "device-a")
+            .await
+            .expect("bootstrap is idempotent"),
+        "second run should not create duplicate default lists"
+    );
+
+    save_settings_key(
+        &storage,
+        "device-a",
+        "colorScheme",
+        serde_json::json!("rose"),
+    )
+    .await
+    .expect("save setting after default lists");
+    let logs_after_bootstrap = read_log_files(&dir.path().join("logs").join("device-a")).await;
+    let timestamps_after_bootstrap = logs_after_bootstrap
+        .iter()
+        .flat_map(|raw| raw.lines())
+        .map(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .expect("log json")
+                .get("timestamp")
+                .and_then(serde_json::Value::as_i64)
+                .expect("timestamp")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(timestamps_after_bootstrap.len(), 3);
+    let default_rule_timestamp = timestamps_after_bootstrap[1];
+    assert!(
+        timestamps_after_bootstrap[0] < timestamps_after_bootstrap[1],
+        "default list creation should reserve distinct timestamps"
+    );
+    assert!(
+        timestamps_after_bootstrap[1] < timestamps_after_bootstrap[2],
+        "next command must be newer than every default-list entry"
+    );
+    assert!(
+        default_rule_timestamp < storage.next_command_timestamp_millis(),
+        "command clock should advance past the second default-list entry"
+    );
+
+    let (list_count, bookmark_count, failures) = import_bookmarks(
+        &storage,
+        "device-a",
+        vec![BookmarkImportNode {
+            title: " Research ".to_string(),
+            bookmarks: vec![
+                BookmarkImportEntry {
+                    url: "https://example.com/bookmark-a".to_string(),
+                    title: "Bookmark A".to_string(),
+                },
+                BookmarkImportEntry {
+                    url: "https://example.com/bookmark-b".to_string(),
+                    title: String::new(),
+                },
+            ],
+            skipped: vec![BookmarkImportSkipped {
+                url: "chrome://settings".to_string(),
+                title: "Settings".to_string(),
+                reason: "unsupported URL".to_string(),
+            }],
+            children: vec![BookmarkImportNode {
+                title: String::new(),
+                bookmarks: vec![BookmarkImportEntry {
+                    url: "https://example.com/child-bookmark".to_string(),
+                    title: "Child Bookmark".to_string(),
+                }],
+                skipped: Vec::new(),
+                children: Vec::new(),
+            }],
+        }],
+    )
+    .await
+    .expect("import bookmarks");
+
+    assert_eq!(list_count, 2);
+    assert_eq!(bookmark_count, 3);
+    assert_eq!(
+        failures
+            .first()
+            .and_then(|value| value.get("reason"))
+            .and_then(|value| value.as_str()),
+        Some("unsupported URL")
+    );
+    storage
+        .flush_checkpoints()
+        .await
+        .expect("flush imported list checkpoints");
+
+    let imported_lists = storage.load_all_lists().await.expect("load imported lists");
+    assert!(imported_lists.values().any(|list| list.name == "Hubs"));
+    let research_id = imported_lists
+        .iter()
+        .find_map(|(id, list)| (list.name == "Research").then_some(id.clone()))
+        .expect("research import list");
+    let untitled_id = imported_lists
+        .iter()
+        .find_map(|(id, list)| (list.name == "Untitled").then_some(id.clone()))
+        .expect("untitled child import list");
+
+    let order = storage
+        .load_list_order()
+        .await
+        .expect("load list order")
+        .expect("list order exists");
+    assert!(
+        order
+            .tree
+            .iter()
+            .flat_map(|node| node.children.iter())
+            .any(|node| node.id == format!("list:{research_id}")),
+        "import list should be nested below the generated import parent"
+    );
+    assert!(
+        order
+            .tree
+            .iter()
+            .flat_map(|node| node.children.iter())
+            .flat_map(|node| node.children.iter())
+            .any(|node| node.id == format!("list:{untitled_id}")),
+        "child bookmark folder should be nested below the imported parent"
+    );
+
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::VisitPage {
+            timestamp: 1_710_001_000_000,
+            url: "https://example.com/bulk-a".to_string(),
+            title: Some("Existing Bulk Title".to_string()),
+            referrer_url: Some("https://example.com/referrer".to_string()),
+        },
+    )
+    .await
+    .expect("seed bulk page");
+    rename_page(
+        &storage,
+        "device-a",
+        "https://example.com/referrer",
+        "Durable Referrer",
+    )
+    .await
+    .expect("retain referrer page");
+    add_list_pins(
+        &storage,
+        "device-a",
+        &serde_json::json!({
+            "listId": research_id,
+            "urls": [
+                "https://example.com/bulk-a",
+                "https://example.com/bulk-b"
+            ],
+            "titles": [
+                null,
+                "Provided Bulk Title"
+            ]
+        }),
+    )
+    .await
+    .expect("bulk add pins");
+
+    let research = storage
+        .load_list(&research_id)
+        .await
+        .expect("load research list")
+        .expect("research list exists");
+    let bulk_a_slug = generate_slug_from_url("https://example.com/bulk-a").expect("bulk a slug");
+    let bulk_b_slug = generate_slug_from_url("https://example.com/bulk-b").expect("bulk b slug");
+    assert!(research
+        .pins
+        .iter()
+        .any(|pin| pin.id == format!("page:{bulk_a_slug}")));
+    assert!(research
+        .pins
+        .iter()
+        .any(|pin| pin.id == format!("page:{bulk_b_slug}")));
+    let bulk_a_page = storage
+        .load_page(&bulk_a_slug)
+        .await
+        .expect("load bulk page")
+        .expect("bulk page exists");
+    assert_eq!(bulk_a_page.title.as_deref(), Some("Existing Bulk Title"));
+    let bulk_b_page = storage
+        .load_page(&bulk_b_slug)
+        .await
+        .expect("load second bulk page")
+        .expect("second bulk page exists");
+    assert_eq!(bulk_b_page.title.as_deref(), Some("Provided Bulk Title"));
+
+    let pages_payload = load_all_pages_payload(&storage)
+        .await
+        .expect("load all pages payload");
+    assert!(
+        pages_payload
+            .as_object()
+            .expect("pages payload is object")
+            .contains_key(&bulk_a_slug)
+    );
+
+    let relations = page_relations_payload(&storage, "https://example.com/bulk-a")
+        .await
+        .expect("page relations");
+    assert!(
+        relations["parents"]["lists"]
+            .as_array()
+            .expect("list parents")
+            .iter()
+            .any(|value| value.get("slug").and_then(|slug| slug.as_str())
+                == Some(research_id.as_str()))
+    );
+    assert!(
+        relations["parents"]["referrers"]
+            .as_array()
+            .expect("referrer parents")
+            .iter()
+            .any(|value| value.as_str() == Some("https://example.com/referrer"))
+    );
+
+    let mut renamed_rule = BTreeMap::new();
+    renamed_rule.insert(
+        "pattern".to_string(),
+        serde_json::Value::String("Bulk".to_string()),
+    );
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::AddRule {
+            timestamp: 1_710_001_000_100,
+            list_owner: "device-a".to_string(),
+            name: "Research".to_string(),
+            rule: RuleInput {
+                id: Some("rule-fixed".to_string()),
+                rule_type: "keyword".to_string(),
+                config: renamed_rule,
+            },
+        },
+    )
+    .await
+    .expect("seed rule");
+    update_rule(
+        &storage,
+        "device-a",
+        &research_id,
+        "rule-fixed",
+        BTreeMap::from([(
+            "pattern".to_string(),
+            serde_json::Value::String("Existing".to_string()),
+        )]),
+    )
+    .await
+    .expect("update rule through command");
+    let updated_research = storage
+        .load_list(&research_id)
+        .await
+        .expect("load updated list")
+        .expect("updated list exists");
+    assert_eq!(
+        updated_research
+            .rules
+            .first()
+            .and_then(|rule| rule.config.get("pattern"))
+            .and_then(|value| value.as_str()),
+        Some("Existing")
+    );
+
+    let deleted = delete_list(&storage, "device-a", &research_id)
+        .await
+        .expect("delete list command");
+    assert_eq!(deleted.get("listId").and_then(|value| value.as_str()), Some(research_id.as_str()));
+    assert!(
+        deleted
+            .get("urls")
+            .and_then(|value| value.as_array())
+            .expect("deleted urls")
+            .iter()
+            .any(|value| value.as_str() == Some("https://example.com/bulk-a")),
+        "delete_list should return affected page URLs for badge refresh"
+    );
+    restore_list(&storage, "device-a", &research_id)
+        .await
+        .expect("restore list command");
+    let restored_research = storage
+        .load_list(&research_id)
+        .await
+        .expect("load restored list")
+        .expect("restored list exists");
+    assert!(!restored_research.deleted);
+
+    let snapshot_ts = 1_710_001_000_200;
+    storage
+        .save_snapshot_html(&bulk_a_slug, snapshot_ts, "<html><body>bulk snapshot</body></html>")
+        .await
+        .expect("save snapshot html");
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::CreateSnapshot {
+            timestamp: snapshot_ts,
+            url: "https://example.com/bulk-a".to_string(),
+            path: storage.snapshot_sidecar_relative_path(&bulk_a_slug, snapshot_ts),
+            title: Some("Existing Bulk Title".to_string()),
+        },
+    )
+    .await
+    .expect("create snapshot");
+    delete_snapshot(&storage, "device-a", &bulk_a_slug, snapshot_ts)
+        .await
+        .expect("delete snapshot command");
+    let restored_page_slug = restore_snapshot(
+        &storage,
+        "device-a",
+        &format!("{bulk_a_slug}-{snapshot_ts}"),
+    )
+    .await
+    .expect("restore snapshot command");
+    assert_eq!(restored_page_slug, bulk_a_slug);
+
+    let missing_relations = page_relations_payload(&storage, "https://example.com/missing")
+        .await
+        .expect("missing page relations");
+    assert_eq!(missing_relations["parents"]["lists"], serde_json::json!([]));
+    assert_eq!(
+        restore_snapshot(&storage, "device-a", "bad-snapshot-stem")
+            .await
+            .expect_err("invalid snapshot stem should fail"),
+        "restoreSnapshot invalid snapSlug"
+    );
+}
+
+#[tokio::test]
+async fn command_error_and_normalization_paths_are_explicit() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+
+    assert_eq!(
+        read_desktop_value(&storage, "page:missing", false)
+            .await
+            .expect("read missing"),
+        None
+    );
+    assert!(load_page_notes_payload(&storage, "missing")
+        .await
+        .expect("missing notes")
+        .is_empty());
+    assert!(load_page_snapshot_payload(&storage, "missing")
+        .await
+        .expect("missing snapshots")
+        .is_empty());
+    assert_eq!(
+        get_snapshot_html(&storage, "missing", 123)
+            .await
+            .expect("missing snapshot html"),
+        None
+    );
+    assert!(list_event_fields(&storage, "device-a", "missing")
+        .await
+        .expect("missing list fields")
+        .is_none());
+    replay_entries(&storage, "device-a", Vec::new())
+        .await
+        .expect("empty replay is accepted");
+    assert_eq!(
+        recover_checkpoint_tail(&storage)
+            .await
+            .expect("empty recovery"),
+        0
+    );
+
+    let (page_count, visit_count, skipped_count) = import_history(
+        &storage,
+        "device-a",
+        vec![
+            HistoryImportEntry {
+                url: "   ".to_string(),
+                title: Some("Blank".to_string()),
+                referrer_url: None,
+                visit_times: vec![1],
+            },
+            HistoryImportEntry {
+                url: "chrome://settings".to_string(),
+                title: Some("Chrome".to_string()),
+                referrer_url: None,
+                visit_times: vec![2],
+            },
+            HistoryImportEntry {
+                url: "https://example.com/skipped-empty-times".to_string(),
+                title: Some("No Time".to_string()),
+                referrer_url: None,
+                visit_times: vec![0, -1],
+            },
+            HistoryImportEntry {
+                url: "https://example.com/trimmed".to_string(),
+                title: Some("  Trimmed Title  ".to_string()),
+                referrer_url: Some(" file:///tmp/local ".to_string()),
+                visit_times: vec![1_710_002_000_000, 1_710_002_000_000],
+            },
+        ],
+    )
+    .await
+    .expect("history import with skips");
+    assert_eq!((page_count, visit_count, skipped_count), (1, 1, 3));
+    let trimmed_slug = generate_slug_from_url("https://example.com/trimmed").expect("slug");
+    let trimmed_page = storage
+        .load_page(&trimmed_slug)
+        .await
+        .expect("load trimmed page")
+        .expect("trimmed page exists");
+    assert_eq!(trimmed_page.title.as_deref(), Some("Trimmed Title"));
+    assert!(
+        trimmed_page.parent_ids.is_empty(),
+        "non-http referrer should be ignored during import"
+    );
+
+    assert_eq!(
+        save_settings_key(&storage, "device-a", "unknownSetting", serde_json::json!(true))
+            .await
+            .expect_err("unknown settings key fails"),
+        "Unknown settings key: unknownSetting"
+    );
+    assert_eq!(
+        create_note(&storage, "device-a", &serde_json::json!({"excerpt": [" ", null]}))
+            .await
+            .expect_err("missing note URL fails"),
+        "Cannot determine page URL for note"
+    );
+    let note_response = create_note(
+        &storage,
+        "device-a",
+        &serde_json::json!({
+            "url": "https://example.com/direct-note",
+            "title": "Direct Note",
+            "excerpt": [" Alpha ", "", "Beta"],
+            "note": "body",
+            "cssPath": ".content"
+        }),
+    )
+    .await
+    .expect("create direct note");
+    assert!(
+        note_response
+            .get("notes")
+            .and_then(|value| value.as_array())
+            .expect("notes array")
+            .is_empty(),
+        "without a pageSlug the command returns only the created slug"
+    );
+    let direct_note_slug = note_response
+        .get("noteSlug")
+        .and_then(|value| value.as_str())
+        .expect("note slug")
+        .to_string();
+    let unchanged_note = update_note(&storage, "device-a", &direct_note_slug, "body")
+        .await
+        .expect("unchanged note update succeeds");
+    assert_eq!(
+        unchanged_note
+            .get("noteSlug")
+            .and_then(|value| value.as_str()),
+        Some(direct_note_slug.as_str())
+    );
+    assert_eq!(
+        update_note(&storage, "device-a", "missing-note", "body")
+            .await
+            .expect_err("missing note update fails"),
+        "Note not found"
+    );
+
+    let root_list_response = save_list_meta(
+        &storage,
+        "device-a",
+        &serde_json::json!({"name": "Root Parent"}),
+    )
+    .await
+    .expect("create root list");
+    let root_list_id = root_list_response
+        .get("listId")
+        .and_then(|value| value.as_str())
+        .expect("root list id")
+        .to_string();
+    let child_list_response = save_list_meta(
+        &storage,
+        "device-a",
+        &serde_json::json!({
+            "name": "Child List",
+            "parentPath": format!("root/list:{root_list_id}")
+        }),
+    )
+    .await
+    .expect("create child list");
+    let child_list_id = child_list_response
+        .get("listId")
+        .and_then(|value| value.as_str())
+        .expect("child list id")
+        .to_string();
+    let no_name_update = save_list_meta(
+        &storage,
+        "device-a",
+        &serde_json::json!({"listId": child_list_id}),
+    )
+    .await
+    .expect("empty list update is no-op");
+    assert_eq!(no_name_update.get("success").and_then(|value| value.as_bool()), Some(true));
+    let same_name_update = save_list_meta(
+        &storage,
+        "device-a",
+        &serde_json::json!({"listId": child_list_id, "name": "Child List"}),
+    )
+    .await
+    .expect("same-name list update is no-op");
+    assert_eq!(
+        same_name_update
+            .get("success")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        save_list_meta(&storage, "device-a", &serde_json::json!({"name": "   "}))
+            .await
+            .expect_err("missing create name fails"),
+        "saveListMeta missing name"
+    );
+    assert_eq!(
+        save_list_meta(
+            &storage,
+            "device-a",
+            &serde_json::json!({"listId": "missing", "name": "New"})
+        )
+        .await
+        .expect_err("missing list update fails"),
+        "List not found"
+    );
+
+    assert_eq!(
+        toggle_list_pin(
+            &storage,
+            "device-a",
+            &serde_json::json!({"url": "https://example.com/no-list"})
+        )
+        .await
+        .expect_err("toggle without list id fails"),
+        "toggleListPin missing listId"
+    );
+    assert_eq!(
+        toggle_list_pin(
+            &storage,
+            "device-a",
+            &serde_json::json!({"listId": child_list_id})
+        )
+        .await
+        .expect_err("toggle without URL fails"),
+        "toggleListPin missing url"
+    );
+    toggle_list_pin(
+        &storage,
+        "device-a",
+        &serde_json::json!({"listId": child_list_id, "id": format!("note:{direct_note_slug}")}),
+    )
+    .await
+    .expect("pin note by id");
+    let child_list = storage
+        .load_list(&child_list_id)
+        .await
+        .expect("load child list")
+        .expect("child list exists");
+    assert!(child_list
+        .pins
+        .iter()
+        .any(|pin| pin.id == format!("note:{direct_note_slug}")));
+
+    assert_eq!(
+        add_list_pins(
+            &storage,
+            "device-a",
+            &serde_json::json!({"urls": ["https://example.com/a"]})
+        )
+        .await
+        .expect_err("bulk pins missing list id fails"),
+        "addListPins missing listId"
+    );
+    assert_eq!(
+        add_list_pins(
+            &storage,
+            "device-a",
+            &serde_json::json!({"listId": child_list_id})
+        )
+        .await
+        .expect_err("bulk pins missing urls fails"),
+        "addListPins missing urls"
+    );
+    add_list_pins(
+        &storage,
+        "device-a",
+        &serde_json::json!({
+            "listId": child_list_id,
+            "urls": ["https://example.com/no-title-a", "https://example.com/no-title-b"],
+            "titles": []
+        }),
+    )
+    .await
+    .expect("bulk pins with resized empty titles");
+
+    assert_eq!(
+        delete_list(&storage, "device-a", "missing-list")
+            .await
+            .expect_err("missing delete list fails"),
+        "List not found"
+    );
+    assert_eq!(
+        restore_list(&storage, "device-a", "missing-list")
+            .await
+            .expect_err("missing restore list fails"),
+        "List not found"
+    );
+    assert_eq!(
+        delete_snapshot(&storage, "device-a", "missing-page", 123)
+            .await
+            .expect_err("missing snapshot page fails"),
+        "Page entity not found for snapshot"
+    );
+    let missing_url_slug = "snapshot-missing-url";
+    storage
+        .save_page(missing_url_slug, &PageEntity::new(missing_url_slug.to_string()))
+        .await
+        .expect("save URL-less page");
+    assert_eq!(
+        delete_snapshot(&storage, "device-a", missing_url_slug, 123)
+            .await
+            .expect_err("URL-less snapshot page fails"),
+        "Page entity missing URL for snapshot"
+    );
+
+    assert_eq!(
+        permanent_delete_candidates(&[
+            "note:n1".to_string(),
+            "list:l1".to_string(),
+            "page:p1".to_string(),
+            "snapshot:s1-1".to_string(),
+            "manifest:orphaned".to_string(),
+        ]),
+        vec![
+            "note:n1".to_string(),
+            "list:l1".to_string(),
+            "page:p1".to_string(),
+            "snapshot:s1-1".to_string(),
+        ]
+    );
+    assert!(permanent_delete_keys(&storage, "device-a", &["manifest:orphaned".to_string()])
+        .await
+        .expect("no permanent candidates")
+        .is_empty());
+
+    let invalid_rule = RulePayload {
+        rule_type: "keyword".to_string(),
+        config: BTreeMap::from([(
+            "case_sensitive".to_string(),
+            serde_json::Value::Bool(true),
+        )]),
+    };
+    let preview = preview_rule_payload(
+        invalid_rule.clone(),
+        vec![RuleBatchEntry {
+            url: "https://example.com/rule".to_string(),
+            title: Some("Rule Page".to_string()),
+            body_preview: None,
+            body: Some("body text".to_string()),
+            timestamp: None,
+            action: None,
+        }],
+    )
+    .expect("invalid preview returns payload");
+    assert_eq!(preview.get("success").and_then(|value| value.as_bool()), Some(false));
+    let add_rule_result = add_rule(&storage, "device-a", &child_list_id, invalid_rule)
+        .await
+        .expect("invalid add rule returns payload");
+    assert_eq!(
+        add_rule_result
+            .get("success")
+            .and_then(|value| value.as_bool()),
+        Some(false)
+    );
+    assert_eq!(
+        remove_rule(&storage, "device-a", "missing-list", "rule")
+            .await
+            .expect_err("missing remove rule list fails"),
+        "List not found"
+    );
+    assert_eq!(
+        update_rule(&storage, "device-a", "missing-list", "rule", BTreeMap::new())
+            .await
+            .expect_err("missing update rule list fails"),
+        "List not found"
+    );
+
+    assert!(search_history(&storage, "Trimmed")
+        .expect("search history")
+        .iter()
+        .any(|hit| hit.url == "https://example.com/trimmed"));
+    assert!(search_notes(&storage, "Alpha Beta")
+        .expect("search notes")
+        .iter()
+        .any(|hit| hit.note_slug == direct_note_slug));
+    assert!(search_snapshots(&storage, "nothing")
+        .expect("search snapshots")
+        .is_empty());
 }

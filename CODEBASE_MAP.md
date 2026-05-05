@@ -58,6 +58,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `crates/replay/src/lib.rs` | Production replay engine |
 | `crates/replay/src/bin/replay-verify.rs` | Full-log checkpoint verifier using the production replay and checkpoint policy |
 | `crates/search/src/lib.rs` | Native search primitives |
+| `scripts/test-coverage-monitor.mjs` | Test investment and JS/Rust uncovered-line monitor; enforces no JS or inline Rust unit-test LoC growth |
 | `packages/core/index.js` | Shared package exports |
 | `packages/core/rule-engine.js` | Shared rule validation/matching helpers; keyword rules are title-only |
 | `packages/core/search-helpers.js` | Shared query parsing/search helper logic |
@@ -76,7 +77,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 ### Connector Popup
 
-- `apps/extension/popup.js` requests page summaries and submits popup mutations.
+- `apps/extension/popup.js` requests page summaries, submits popup mutations, and refreshes the current page dashboard from background mutation broadcasts.
 - `apps/extension/background.js` resolves popup actions through the daemon connection.
 - `apps/extension/options-stub.js` only opens the desktop app; it is not a settings surface.
 
@@ -121,6 +122,8 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `tests/integration/event-flow.test.js` | Connector event flow into the daemon |
 | `tests/e2e/popup-lists.spec.js` | Popup list interactions in the shipped connector |
 | `tests/e2e/badge.spec.js` | Popup/badge behavior in the shipped connector |
+| `tests/e2e/seeded-combination-workflows.spec.js` | Seeded randomized extension workflow combining visits, notes, list pins, and popup reads |
+| `scripts/test-coverage-monitor.mjs` | Test-suite LoC mix and JS/Rust uncovered production line reporting |
 | `crates/daemon/tests/commands.rs` | Desktop command-surface coverage |
 | `crates/daemon/tests/sync_controller.rs` | Daemon sync-controller coverage |
 

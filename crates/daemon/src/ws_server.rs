@@ -858,7 +858,10 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     send_json(&mut write, &unauthorized_error()).await?;
                     continue;
                 }
-                validate_connector_source(&source)?;
+                if let Err(error) = validate_connector_source(&source) {
+                    send_json(&mut write, &invalid_message_error(error.to_string())).await?;
+                    continue;
+                }
                 let parsed: LogEntry = match serde_json::from_value(entry.clone()) {
                     Ok(parsed) => parsed,
                     Err(error) => {
@@ -948,7 +951,10 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     send_json(&mut write, &unauthorized_error()).await?;
                     continue;
                 }
-                validate_connector_source(&source)?;
+                if let Err(error) = validate_connector_source(&source) {
+                    send_json(&mut write, &invalid_message_error(error.to_string())).await?;
+                    continue;
+                }
                 match ingest_snapshot(&shared, slug, ts, url, title, markdown, html).await {
                     Ok(IngestSuccess { ack, mutations }) => {
                         record_connector_buffer(&shared, buffer_depth, buffer_bytes).await;
@@ -986,7 +992,10 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     send_json(&mut write, &unauthorized_error()).await?;
                     continue;
                 }
-                validate_connector_source(&source)?;
+                if let Err(error) = validate_connector_source(&source) {
+                    send_json(&mut write, &invalid_message_error(error.to_string())).await?;
+                    continue;
+                }
                 match ingest_note(
                     &shared, slug, excerpt, note, css_path, old_slug, url, title, ts,
                 )
@@ -1999,12 +2008,19 @@ async fn handle_run_command(
         }
         "deleteNote" => {
             let note_slug = request_string("noteSlug")?;
-            commands::delete_note(&shared.storage, &device_id, &note_slug)
+            let response = commands::delete_note(&shared.storage, &device_id, &note_slug)
                 .await
                 .map_err(WsServerError::Ingest)?;
-            let mut mutations = mutation("note", json!({ "noteSlug": note_slug }));
+            let mut mutations = mutation(
+                "note",
+                json!({
+                    "noteSlug": response.get("noteSlug").cloned().unwrap_or(Value::Null),
+                    "pageSlug": response.get("pageSlug").cloned().unwrap_or(Value::Null),
+                    "url": response.get("url").cloned().unwrap_or(Value::Null),
+                }),
+            );
             mutations.extend(mutation("orphaned", json!({})));
-            Ok((json!({ "success": true }), mutations))
+            Ok((response, mutations))
         }
         "updateNote" => {
             let old_note_slug = request_string("noteSlug")?;
@@ -2099,12 +2115,18 @@ async fn handle_run_command(
         }
         "deleteList" => {
             let list_id = request_string("listId")?;
-            commands::delete_list(&shared.storage, &device_id, &list_id)
+            let response = commands::delete_list(&shared.storage, &device_id, &list_id)
                 .await
                 .map_err(WsServerError::Ingest)?;
-            let mut mutations = mutation("lists", json!({}));
+            let mut mutations = mutation(
+                "lists",
+                json!({
+                    "listId": response.get("listId").cloned().unwrap_or(Value::Null),
+                    "urls": response.get("urls").cloned().unwrap_or(Value::Null),
+                }),
+            );
             mutations.extend(mutation("orphaned", json!({})));
-            Ok((json!({ "success": true }), mutations))
+            Ok((response, mutations))
         }
         "updateListTree" => {
             let tree = serde_json::from_value(

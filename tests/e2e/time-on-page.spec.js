@@ -1,6 +1,34 @@
 import { test, expect } from './fixtures.js';
 import { resetAndSeed, openHelperPage } from './helpers.js';
 
+const TITLE_LIFECYCLE_SEED = 'title-lifecycle-20260505-a';
+
+async function readTodayLogEntries(
+  helper,
+  predicate,
+  { minCount = 1, timeoutMs = 4000 } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const entries = await helper.evaluate(async () => {
+      await chrome.runtime.sendMessage({ action: 'flushDesktopQueue' });
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const resp = await chrome.runtime.sendMessage({
+        action: 'readDesktopValue',
+        key: `log:${today}`,
+      });
+      return resp?.value || [];
+    });
+    const matches = entries.filter(predicate);
+    if (matches.length >= minCount) return matches;
+    await helper.evaluate(
+      () => new Promise((resolve) => setTimeout(resolve, 100)),
+    );
+  }
+  return [];
+}
+
 // Bug: onLeavePage() sends Date.now() - startTime (cumulative since page load).
 // When leave_page fires multiple times (tab switch away, switch back, switch away),
 // replay accumulates these cumulative values, overcounting time on page.
@@ -24,7 +52,7 @@ test('timeOnPage reports foreground delta, not cumulative time since load', asyn
     body: '<h1>Time Test</h1>',
   });
   await resetAndSeed(extContext, extensionId, [
-    { path: 'manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+    { path: 'views/manifest/settings.json', data: { trimRules: [], blacklist: [] } },
   ]);
   const testUrl = localServer.url('/time-test');
 
@@ -57,24 +85,11 @@ test('timeOnPage reports foreground delta, not cumulative time since load', asyn
 
   // Read leave_page entries for the test URL through the daemon-backed cache.
   const helper = await openHelperPage(extContext, extensionId);
-  const leaveEntries = await helper.evaluate(async (url) => {
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const key = 'log:' + today;
-    for (let i = 0; i < 40; i++) {
-      const resp = await chrome.runtime.sendMessage({
-        action: 'readDesktopValue',
-        key,
-      });
-      const entries = resp?.value || [];
-      const matches = entries.filter(
-        (e) => e.url === url && e.action === 'leave_page',
-      );
-      if (matches.length >= 2) return matches;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    return [];
-  }, testUrl);
+  const leaveEntries = await readTodayLogEntries(
+    helper,
+    (entry) => entry.url === testUrl && entry.action === 'leave_page',
+    { minCount: 2 },
+  );
   await helper.close();
 
   // Should have 2 leave_page entries
@@ -88,6 +103,51 @@ test('timeOnPage reports foreground delta, not cumulative time since load', asyn
   // With the fix (foreground delta):
   //   #1 ≈ 2s, #2 ≈ 500ms → 2nd < 1st → PASSES
   expect(leaveEntries[1].timeOnPage).toBeLessThan(leaveEntries[0].timeOnPage);
+
+  await page.close();
+});
+
+test(`leave_page reports the latest same-URL document title seed=${TITLE_LIFECYCLE_SEED}`, async ({
+  extContext,
+  extensionId,
+  setupDir,
+  localServer,
+}) => {
+  localServer.addPage('/title-lifecycle', {
+    title: 'Initial Lifecycle Title',
+    body: '<h1>Title lifecycle</h1><p>Title changes without navigation.</p>',
+  });
+  await resetAndSeed(extContext, extensionId, [
+    { path: 'views/manifest/settings.json', data: { trimRules: [], blacklist: [] } },
+  ]);
+
+  const testUrl = localServer.url('/title-lifecycle');
+  const updatedTitle = `Runtime ${TITLE_LIFECYCLE_SEED}`;
+  const page = await extContext.newPage();
+  await page.goto(testUrl);
+  await page.waitForSelector('h1');
+  await page.evaluate((title) => {
+    document.title = title;
+  }, updatedTitle);
+  await expect(page).toHaveTitle(updatedTitle);
+
+  await page.evaluate(() => document.dispatchEvent(new Event('freeze')));
+
+  const helper = await openHelperPage(extContext, extensionId);
+  const [leaveEntry] = await readTodayLogEntries(
+    helper,
+    (entry) =>
+      entry.url === testUrl &&
+      entry.action === 'leave_page' &&
+      entry.title === updatedTitle,
+  );
+  await helper.close();
+
+  expect(leaveEntry).toMatchObject({
+    action: 'leave_page',
+    url: testUrl,
+    title: updatedTitle,
+  });
 
   await page.close();
 });

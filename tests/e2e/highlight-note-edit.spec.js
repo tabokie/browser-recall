@@ -20,7 +20,7 @@ test.describe('Highlight note edit', () => {
 
     // Seed page entity + note with excerpt but empty note text
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
         path: `pages/${slug}.json`,
         data: {
@@ -120,7 +120,7 @@ test.describe('Highlight note edit', () => {
 
     // Seed page with a note that has both excerpt and note text
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
         path: `pages/${slug}.json`,
         data: {
@@ -191,7 +191,7 @@ test.describe('Highlight note edit', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
         path: `pages/${slug}.json`,
         data: {

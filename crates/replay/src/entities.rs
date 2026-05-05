@@ -419,4 +419,35 @@ mod tests {
         assert_eq!(value["pins"], serde_json::json!([]));
         assert_eq!(value["rules"], serde_json::json!([]));
     }
+
+    #[test]
+    fn entity_accessors_accept_only_the_matching_variant() {
+        let entities = vec![
+            Entity::Page(PageEntity::new("page".to_string())),
+            Entity::Note(NoteEntity::new("note".to_string())),
+            Entity::List(ListEntity::new("list".to_string())),
+            Entity::Settings(SettingsEntity::new()),
+            Entity::NameToId(NameToIdManifest::new()),
+            Entity::ListOrder(ListOrderManifest::new()),
+            Entity::Orphaned(OrphanedManifest::new()),
+        ];
+
+        for (index, entity) in entities.iter().enumerate() {
+            assert_eq!(entity.as_page().is_some(), index == 0);
+            assert_eq!(entity.as_note().is_some(), index == 1);
+            assert_eq!(entity.as_list().is_some(), index == 2);
+            assert_eq!(entity.as_settings().is_some(), index == 3);
+            assert_eq!(entity.as_name_to_id().is_some(), index == 4);
+            assert_eq!(entity.as_list_order().is_some(), index == 5);
+            assert_eq!(entity.as_orphaned().is_some(), index == 6);
+
+            assert_eq!(entity.clone().into_page().is_some(), index == 0);
+            assert_eq!(entity.clone().into_note().is_some(), index == 1);
+            assert_eq!(entity.clone().into_list().is_some(), index == 2);
+            assert_eq!(entity.clone().into_settings().is_some(), index == 3);
+            assert_eq!(entity.clone().into_name_to_id().is_some(), index == 4);
+            assert_eq!(entity.clone().into_list_order().is_some(), index == 5);
+            assert_eq!(entity.clone().into_orphaned().is_some(), index == 6);
+        }
+    }
 }

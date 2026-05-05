@@ -315,8 +315,8 @@ pub fn current_hostname() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_device_id, device_id_from_hostname, device_id_from_os_parts, stable_device_suffix,
-        DaemonConfig,
+        current_hostname, default_device_id, device_id_from_hostname, device_id_from_os_parts,
+        stable_device_suffix, ConfigStore, DaemonConfig, Token,
     };
     use tempfile::tempdir;
 
@@ -338,6 +338,11 @@ mod tests {
             Some("office-pc-02".to_string())
         );
         assert_eq!(device_id_from_hostname("東京"), None);
+        assert_eq!(device_id_from_hostname("...---___"), None);
+        assert_eq!(
+            device_id_from_hostname("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+            Some("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv".to_string())
+        );
     }
 
     #[test]
@@ -351,5 +356,39 @@ mod tests {
             device_id_from_os_parts("東京", Some("machine-id-123")),
             format!("desktop-{suffix}")
         );
+        assert_eq!(
+            device_id_from_os_parts(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                Some("machine-id-123"),
+            ),
+            format!("abcdefghijklmnopqrstuvwxyzabcdefghi-{suffix}")
+        );
+        assert_eq!(
+            device_id_from_os_parts("Office", Some("  ")),
+            "office".to_string()
+        );
+    }
+
+    #[test]
+    fn config_store_round_trips_and_redacts_tokens() {
+        let dir = tempdir().expect("tempdir");
+        let store = ConfigStore::new(dir.path());
+        assert_eq!(store.root_dir(), dir.path());
+        assert_eq!(store.default_data_dir(), dir.path().join("portal-data"));
+        assert!(!store.exists());
+        assert!(store.load().expect("load missing").is_none());
+
+        let mut config = DaemonConfig::new_default(store.default_data_dir());
+        config.sync_github_token = Some(Token("secret".to_string()));
+        store.save(&config).expect("save config");
+        assert!(store.exists());
+        let loaded = store.load().expect("load saved").expect("config exists");
+        assert_eq!(loaded.sync_github_token, Some(Token("secret".to_string())));
+        assert_eq!(format!("{:?}", Token("secret".to_string())), "<redacted>");
+        assert!(!current_hostname().trim().is_empty());
+
+        std::fs::write(store.config_path(), "{not json").expect("write invalid json");
+        let error = store.load().expect_err("invalid config should fail");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     }
 }

@@ -16,7 +16,7 @@ test.describe('Tab reported URL tracking', () => {
     localServer,
   }) => {
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);

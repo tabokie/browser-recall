@@ -85,6 +85,16 @@ function updateConnectorStatsCache(stats) {
   notifyConnectorStateListeners();
 }
 
+function broadcastDaemonMutations(mutations) {
+  if (!Array.isArray(mutations)) return;
+  for (const mutation of mutations) {
+    if (!mutation || typeof mutation.type !== 'string') continue;
+    chrome.runtime
+      .sendMessage({ action: 'mutation', ...mutation })
+      .catch(() => {});
+  }
+}
+
 function installReconnectAlarmListener() {
   if (alarmListenerInstalled || !chrome.alarms?.onAlarm?.addListener) return;
   alarmListenerInstalled = true;
@@ -540,6 +550,9 @@ function attachSocket(socket) {
         }
         break;
       case 'pong':
+        break;
+      case 'change':
+        broadcastDaemonMutations(payload.mutations);
         break;
       default:
         break;

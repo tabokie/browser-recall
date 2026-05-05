@@ -80,7 +80,12 @@ Project name: **browser-recall** (display name "Browser Recall"). Version 1.0 ta
 ## Workflow Preferences
 
 - Bug fixes are test-first: write the failing test, confirm it fails, apply the fix, confirm it passes.
-- Prefer E2E tests for user-facing behavior. Use unit tests when a behavior cannot be isolated in E2E or when guarding architecture invariants.
+- E2E is the primary product safety net. For desktop app and extension app behavior, reproduce bugs and cover new functionality in Playwright first, using the real daemon/connector path whenever feasible.
+- Rust daemon integration tests are acceptable for daemon authority behavior that is impractical or too indirect to assert through browser E2E; keep those tests at the daemon/WebSocket boundary rather than adding inline unit tests.
+- New E2E coverage should exercise user scenarios, feature combinations, and slightly randomized-but-reproducible input data, not only one fixed happy path. Randomized cases must log or derive from a stable seed so failures can be replayed.
+- Do not add new unit tests by default. Convert existing unit coverage to E2E when practical, and use unit tests only when behavior cannot be exercised through E2E or when guarding a narrow architecture invariant such as replay idempotence or strict protocol parsing.
+- When a bug escapes tests, first ask why current E2E coverage missed it, then add or strengthen the E2E scenario before fixing the product code.
+- Use `npm run coverage` / `npm run coverage:monitor` to find uncovered production lines worth reviewing across JS and Rust; coverage percentages are context, not a target. Prefer closing meaningful gaps with E2E coverage. Unit-test LoC must not grow without an explicit architecture exception.
 - When functionality is added, removed, or significantly changed, update both [CODEBASE_MAP.md](./CODEBASE_MAP.md) and [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Formatting And Lint Tools

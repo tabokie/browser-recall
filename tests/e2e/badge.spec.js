@@ -6,6 +6,17 @@ import {
   pageCheckpointPath,
 } from './helpers.js';
 
+async function getBadgeForUrl(helper, url) {
+  return helper.evaluate(async (pageUrl) => {
+    const tabs = await chrome.tabs.query({ url: pageUrl });
+    if (!tabs.length) return { text: '', color: '' };
+    const tabId = tabs[0].id;
+    const text = await chrome.action.getBadgeText({ tabId });
+    const color = await chrome.action.getBadgeBackgroundColor({ tabId });
+    return { text, color };
+  }, url);
+}
+
 test.describe('Extension badge', () => {
   test('shows blue dot for page with notes', async ({
     extContext,
@@ -301,6 +312,166 @@ test.describe('Extension badge', () => {
       return { text: await chrome.action.getBadgeText({ tabId }) };
     }, url);
     expect(badgeAfter.text).toBe('');
+
+    await page.close();
+    await helper.close();
+  });
+
+  test('badge clears after deleting the only note', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/note-del', {
+      title: 'Note Delete Test',
+      body: '<p>Content with a note</p>',
+    });
+    const url = localServer.url('/note-del');
+    const slug = getSlugForUrl(url);
+    const noteSlug = 'delete-only-note';
+
+    await resetAndSeed(extContext, extensionId, [
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Note Delete Test',
+          childIds: [`note:${noteSlug}`],
+          parentIds: [],
+          timestamps: { dev1: 1 },
+        },
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: 'Only note',
+          note: 'delete me',
+          cssPath: null,
+          url,
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+
+    const helper = await openHelperPage(extContext, extensionId);
+    await expect
+      .poll(() => getBadgeForUrl(helper, url))
+      .toMatchObject({ text: ' ', color: [74, 144, 217, 255] });
+
+    const deleteResp = await helper.evaluate(
+      (slugToDelete) =>
+        chrome.runtime.sendMessage({
+          action: 'deleteNote',
+          noteSlug: slugToDelete,
+        }),
+      noteSlug,
+    );
+    expect(deleteResp.success).toBe(true);
+
+    await expect
+      .poll(() => getBadgeForUrl(helper, url))
+      .toMatchObject({
+        text: '',
+      });
+
+    await page.close();
+    await helper.close();
+  });
+
+  test('badge clears after deleting the only list that pinned the page', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/list-del-badge', {
+      title: 'List Delete Badge Test',
+      body: '<p>Content pinned in one list</p>',
+    });
+    const url = localServer.url('/list-del-badge');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      {
+        path: 'views/manifest/list-order.json',
+        data: {
+          timestamp: Date.now(),
+          tree: [{ id: 'list:delete-badge-list' }],
+        },
+      },
+      {
+        path: 'views/lists/delete-badge-list.json',
+        data: {
+          slug: 'delete-badge-list',
+          name: 'Delete Badge List',
+          owner: 'test-device',
+          timestamp: Date.now(),
+          pins: [{ id: `page:${slug}`, pinnedAt: Date.now() }],
+        },
+      },
+      {
+        path: 'views/manifest/list-name-to-id.json',
+        data: {
+          timestamp: Date.now(),
+          paths: {
+            'test-device/Delete Badge List': 'delete-badge-list',
+          },
+        },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'List Delete Badge Test',
+          childIds: [],
+          parentIds: ['list:delete-badge-list'],
+          timestamps: { dev1: 1 },
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+
+    const helper = await openHelperPage(extContext, extensionId);
+    await expect
+      .poll(() => getBadgeForUrl(helper, url))
+      .toMatchObject({ text: ' ', color: [76, 175, 80, 255] });
+
+    const deleteResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'deleteList',
+        listId: 'delete-badge-list',
+      }),
+    );
+    expect(deleteResp.success).toBe(true);
+    expect(deleteResp.urls).toContain(url);
+    await expect
+      .poll(() =>
+        helper.evaluate(
+          (pageKeyValue) =>
+            chrome.runtime.sendMessage({
+              action: 'readDesktopValue',
+              key: pageKeyValue,
+            }),
+          `page:${slug}`,
+        ),
+      )
+      .toMatchObject({ success: true, value: null });
+
+    await expect
+      .poll(() => getBadgeForUrl(helper, url))
+      .toMatchObject({
+        text: '',
+      });
 
     await page.close();
     await helper.close();

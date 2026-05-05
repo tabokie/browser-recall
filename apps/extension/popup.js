@@ -1705,6 +1705,44 @@ async function initPopup() {
 }
 initPopup().catch((err) => showFatalError(err.message));
 
+let mutationRefreshTimer = null;
+
+function currentPageAffectedByMutation(message) {
+  if (!currentUrl || !currentSlug) return false;
+
+  if (message.url && message.url !== currentUrl) return false;
+  if (message.pageSlug && message.pageSlug !== currentSlug) return false;
+  if (message.slug && message.slug !== currentSlug) return false;
+
+  switch (message.type) {
+    case 'history':
+    case 'lists':
+    case 'note':
+    case 'pins':
+    case 'settings':
+    case 'snapshot':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function scheduleMutationRefresh() {
+  if (mutationRefreshTimer) clearTimeout(mutationRefreshTimer);
+  mutationRefreshTimer = setTimeout(() => {
+    mutationRefreshTimer = null;
+    void refreshCurrentPageSummary();
+  }, 50);
+}
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.action !== 'mutation') return false;
+  if (currentPageAffectedByMutation(message)) {
+    scheduleMutationRefresh();
+  }
+  return false;
+});
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local') return;
   if (!hasConnectorStateStorageChange(changes)) return;

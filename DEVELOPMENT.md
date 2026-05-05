@@ -125,6 +125,19 @@ Playwright needs a Chromium binary. Install it if you haven't:
 npx playwright install chromium
 ```
 
+### Coverage Monitor
+
+Use the coverage monitor to find uncovered production lines worth reviewing and to track the long-term test investment mix:
+
+```bash
+npm run coverage:js       # generate per-line JS coverage data for stable unit/protocol tests
+npm run coverage:rust     # generate Rust llvm-cov coverage data for the workspace
+npm run coverage:monitor  # print uncovered line ranges and suite LoC mix
+npm run coverage          # run JS coverage, Rust coverage, then the monitor
+```
+
+`coverage:rust` requires `cargo-llvm-cov` (`cargo install cargo-llvm-cov`). Coverage percentages are context, not a target. The useful output is the uncovered file/line list from the stable JS coverage source plus Rust llvm-cov missing-line output: review those gaps and decide whether they represent real user workflows that deserve E2E or daemon integration coverage. `coverage:monitor` also enforces the E2E-first policy by keeping JS unit and inline Rust unit LoC at or below their current baselines unless `ALLOW_UNIT_TEST_GROWTH=1` is set for an explicit architecture exception.
+
 ### Manual Testing
 
 Launch a temporary daemon and Chrome profile with the staged extension loaded. Nothing touches your personal browser profile.

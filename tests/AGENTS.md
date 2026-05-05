@@ -4,7 +4,19 @@
 
 - **Unit tests**: `npm test` (vitest). Config: `vitest.config.js`, files: `tests/**/*.test.js`.
 - **E2E tests**: `npx playwright test`. Config: `playwright.config.js`, files: `tests/e2e/*.spec.js`. Single worker, chromium channel, 30s per-test timeout.
+- **Coverage monitor**: `npm run coverage:monitor` reports uncovered JS and Rust production line ranges plus test LoC by suite type, and fails if JS or inline Rust unit-test LoC grows above the current baseline. `npm run coverage` first generates Vitest V8 line data for the stable unit/protocol subset and Rust llvm-cov data for the workspace.
 - The two suites are independent — run either without the other.
+
+## Test Investment Policy
+
+- Prefer Playwright E2E for desktop UI, extension UI, connector, daemon command, and user workflow behavior.
+- Use Rust daemon integration tests for daemon authority behavior that is impractical or too indirect to assert through browser E2E; keep them at the command/WebSocket/storage boundary instead of expanding inline unit tests.
+- Add new unit tests only for behavior that is impractical to cover in E2E or for narrow architecture invariants such as replay idempotence, strict protocol validation, deterministic helpers, or serialization contracts.
+- When feasible, replace brittle or low-signal unit coverage with E2E coverage instead of expanding the unit suite.
+- E2E scenarios should cover combinations of features, not just individual controls. Use seeded randomized input for names, titles, URLs, timestamps, list structures, note text, and navigation sequences when that can reveal ordering/state bugs.
+- Randomized E2E must be reproducible: derive data from an explicit seed and include the seed in failure output or test title.
+- For every escaped bug, add the missing E2E coverage first, then fix the product behavior.
+- Treat coverage output as a triage map. The question is which uncovered lines correspond to valuable user scenarios or risky state combinations, not whether a percentage went up; prefer closing meaningful gaps with E2E coverage.
 
 ## E2E Infrastructure
 

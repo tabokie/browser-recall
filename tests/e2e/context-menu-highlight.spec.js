@@ -12,7 +12,7 @@ test.describe('Context menu highlight', () => {
   }) => {
     const now = Date.now();
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
         path: `pages/${TEST_SLUG}.json`,
         data: {
@@ -66,7 +66,7 @@ test.describe('Context menu highlight', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
         path: `pages/${slug}.json`,
         data: {
@@ -122,7 +122,7 @@ test.describe('Context menu highlight', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
         path: `pages/${slug}.json`,
         data: {

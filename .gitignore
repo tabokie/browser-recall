@@ -16,6 +16,7 @@ yarn-error.log*
 /dist/
 /build/
 /test-results/
+/coverage/
 extension/vendor/
 
 # IDE

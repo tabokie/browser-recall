@@ -1,0 +1,33 @@
+- Walk me through the types of testing used in this project, in different levels of details
+- What is the LoC breakdown between different types
+- I think we need to increase the investment in E2E tests with slightly randomized input around desktop app and extension app. Because I've noticed in the development cycle, tests rarely help to catch unknown bugs in advance, a lot of effort went into fixing the bugs after they happen (you can trace a lot of them in prompts/* and in commit messages), even though the pure LoC of tests seem pretty impressive. The E2E tests should cover no only all features and functionalities, and cover combinations of them.
+On the other hand, we shouldn't add any more unit tests. We should on the contrary convert the coverage into E2E instead if possible. This should be a long-term policy encoded in AGENTS.md
+I also want to have code coverage monitor over the codebase.
+- The pure coverage number is not that important, the important thing is which lines are not covered and whether they are worth covering
+- Cool, now how about we actually improve the tests?
+- You should do it more methodically, based on information from (1) coverage miss lines, (2) past bugs that went uncaught, (3) unit tests that has no counterpart in E2E, (4) functionality and user scenarios and their combination
+- Go ahead, add more high-value tests based on the criteria, aim to catch unknown bugs in the codebase
+- What is the coverage percentage now, approximately?
+- Wow, that's really low, and why is line cov lower than branch cov?
+- Continue on adding high-value tests and catch unknown bugs. The goal is to increase coverage to 90% for high-value modules.
+- Just to confirm, the coverage does include Rust code right? We don't want to only cover extension side
+- Fix it, and then continue on the test improvement
+- resume
+- resume
+- hello
+- resume
+- resume
+- resume
+- resume
+- resume
+- Continue on adding high-value tests and catch unknown bugs. The goal is to increase coverage to 90% for high-value modules.
+- Continue on adding high-value tests and catch unknown bugs. The goal is to increase coverage to 90% for high-value modules. Don't stop until reaching that goal. You can plan ahead by scoping the high-value modules first.
+- resume
+- resume
+- What bugs have you fixed since the beginning of this session, you can check pending Git diffs to be complete
+- $gap
+- Fix them all, including high-level improvements
+- Fix the old E2E too
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix it, TDD
+- $finish model=GPT-5.5 Codex

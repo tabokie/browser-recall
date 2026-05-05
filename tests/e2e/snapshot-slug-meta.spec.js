@@ -25,7 +25,7 @@ test.describe('Snapshot slug meta tag', () => {
 
     // Seed: page entity with a note child, and the note entity with an excerpt
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
         path: `pages/${slug}.json`,
         data: {
@@ -83,7 +83,7 @@ test.describe('Snapshot slug meta tag', () => {
       `<body><p>This is an ${highlightText} in the document.</p></body></html>`;
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
         path: `pages/${slug}.json`,
         data: {
@@ -153,7 +153,7 @@ test.describe('Snapshot slug meta tag', () => {
     const snapshotHtml = `<html><head></head><body><p>Content.</p></body></html>`;
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
         path: `pages/${slug}.json`,
         data: {
@@ -207,7 +207,7 @@ test.describe('Snapshot slug meta tag', () => {
     const slug = getSlugForUrl(pageUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
     ]);
 
     const page = await extContext.newPage();
@@ -256,7 +256,7 @@ test.describe('Snapshot slug meta tag', () => {
     const slug = getSlugForUrl(pageUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
     ]);
 
     // Navigate to the page so content script is available for capture

@@ -247,6 +247,305 @@ async fn load_all_pages_reflects_committed_cache_before_checkpoint_flush() {
 }
 
 #[tokio::test]
+async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
+    let temp_dir = tempdir().expect("tempdir");
+    let storage = Storage::new(temp_dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("layout created");
+
+    storage
+        .save_sync_manifest("sync-cursors", &json!({"device-b": 123}))
+        .await
+        .expect("save sync manifest");
+    assert_eq!(
+        storage
+            .load_sync_manifest("sync-cursors")
+            .await
+            .expect("load sync manifest"),
+        Some(json!({"device-b": 123}))
+    );
+
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    storage
+        .write_sync_files(&[
+            (
+                format!("logs/device-a/{today}.jsonl"),
+                [
+                    serde_json::to_string(&json!({
+                        "timestamp": 1_710_100_000_001i64,
+                        "action": "visit_page",
+                        "url": "https://example.com/sync-a",
+                        "title": "Sync A"
+                    }))
+                    .expect("log json"),
+                    String::new(),
+                    "not json".to_string(),
+                ]
+                .join("\n"),
+            ),
+            (
+                "logs/device-a/1999-01-01.jsonl".to_string(),
+                serde_json::to_string(&json!({
+                    "timestamp": 1i64,
+                    "action": "visit_page",
+                    "url": "https://example.com/old",
+                    "title": "Old"
+                }))
+                .expect("old log json"),
+            ),
+            ("logs/device-a/readme.txt".to_string(), "ignored".to_string()),
+            (
+                "logs/device-b/not-a-date.jsonl".to_string(),
+                serde_json::to_string(&json!({
+                    "timestamp": 1_710_100_000_000i64,
+                    "action": "visit_page",
+                    "url": "https://example.com/sync-b",
+                    "title": "Sync B"
+                }))
+                .expect("device-b log json"),
+            ),
+            (
+                "objects/notes/sync-note.json".to_string(),
+                serde_json::to_string(&NoteEntity {
+                    slug: "sync-note".to_string(),
+                    excerpt: Some("remote excerpt".to_string()),
+                    note: Some("remote note".to_string()),
+                    css_path: None,
+                    url: Some("https://example.com/sync-a".to_string()),
+                    deleted: false,
+                    deleted_ts: None,
+                    deletion_reason: None,
+                    replaced_by: None,
+                })
+                .expect("note json"),
+            ),
+            ("objects/notes/ignored.tmp".to_string(), "ignored".to_string()),
+            (
+                "views/lists/remote.json".to_string(),
+                serde_json::to_string(&ListEntity {
+                    slug: "remote".to_string(),
+                    name: "Remote".to_string(),
+                    owner: Some("device-b".to_string()),
+                    pins: Vec::new(),
+                    rules: Vec::new(),
+                    timestamps: HashMap::new(),
+                    deleted: false,
+                    deleted_ts: None,
+                })
+                .expect("list json"),
+            ),
+        ])
+        .await
+        .expect("write sync files");
+
+    let loaded_note = storage
+        .load_note("sync-note")
+        .await
+        .expect("load synced note")
+        .expect("synced note exists");
+    assert_eq!(loaded_note.note.as_deref(), Some("remote note"));
+
+    let lists = storage.load_all_lists().await.expect("load all lists");
+    assert_eq!(
+        lists.get("remote").map(|list| list.name.as_str()),
+        Some("Remote")
+    );
+    let missing_lists = Storage::new(temp_dir.path().join("missing"))
+        .load_all_lists()
+        .await
+        .expect("missing lists dir returns empty");
+    assert!(missing_lists.is_empty());
+
+    let (history_files, sizes) = storage
+        .list_history_files(true)
+        .await
+        .expect("list history files");
+    assert_eq!(
+        history_files,
+        vec![
+            "not-a-date.jsonl".to_string(),
+            format!("{today}.jsonl"),
+            "1999-01-01.jsonl".to_string(),
+        ]
+    );
+    let sizes = sizes.expect("history sizes");
+    assert!(sizes
+        .get(&format!("{today}.jsonl"))
+        .copied()
+        .unwrap_or_default()
+        > 0);
+
+    let batch = storage
+        .load_history_batch(&[format!("{today}.jsonl"), "not-a-date.jsonl".to_string()])
+        .await
+        .expect("load history batch");
+    assert_eq!(batch.len(), 2);
+    assert_eq!(
+        batch
+            .iter()
+            .map(|value| value.get("deviceId").and_then(|id| id.as_str()).unwrap())
+            .collect::<Vec<_>>(),
+        vec!["device-b", "device-a"]
+    );
+
+    let collected = storage
+        .collect_sync_files("device-a", 0)
+        .await
+        .expect("collect sync files");
+    let collected_paths = collected
+        .iter()
+        .map(|(path, _)| path.as_str())
+        .collect::<Vec<_>>();
+    assert!(collected_paths.contains(&format!("logs/device-a/{today}.jsonl").as_str()));
+    assert!(!collected_paths.contains(&"logs/device-a/1999-01-01.jsonl"));
+    assert!(collected_paths.contains(&"objects/notes/sync-note.json"));
+    assert!(!collected_paths.contains(&"objects/notes/ignored.tmp"));
+
+    let missing_storage = Storage::new(temp_dir.path().join("missing-storage"));
+    assert!(missing_storage
+        .collect_sync_files("device-a", 0)
+        .await
+        .expect("missing sync dirs")
+        .is_empty());
+
+    let size = storage.directory_size().await.expect("directory size");
+    assert!(size > 0);
+    let cleared = storage
+        .clear_all_data("device-a")
+        .await
+        .expect("clear all data");
+    assert!(cleared > 0);
+    assert_eq!(
+        storage
+            .directory_size()
+            .await
+            .expect("directory size after clear"),
+        0
+    );
+    let cleared_missing = missing_storage
+        .clear_all_data("device-a")
+        .await
+        .expect("clear missing data root");
+    assert_eq!(cleared_missing, 0);
+}
+
+#[tokio::test]
+async fn snapshot_child_cleanup_and_checkpoint_errors_are_visible() {
+    let temp_dir = tempdir().expect("tempdir");
+    let storage = Storage::new(temp_dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("layout created");
+
+    let retained_slug = "retained-snapshot-page";
+    let deleted_slug = "deleted-snapshot-page";
+    let timestamp = 1_710_200_000_000;
+    let mut retained = PageEntity::new(retained_slug.to_string());
+    retained.url = Some("https://example.com/retained-snapshot".to_string());
+    retained.user_title = Some("Keep Me".to_string());
+    retained.child_ids = vec![format!("snapshot:{retained_slug}-{timestamp}")];
+    storage
+        .save_page(retained_slug, &retained)
+        .await
+        .expect("save retained page");
+    let mut deleted = PageEntity::new(deleted_slug.to_string());
+    deleted.url = Some("https://example.com/deleted-snapshot".to_string());
+    deleted.child_ids = vec![format!("snapshot:{deleted_slug}-{timestamp}")];
+    storage
+        .save_page(deleted_slug, &deleted)
+        .await
+        .expect("save deleted page");
+    storage
+        .save_snapshot_html(retained_slug, timestamp, "<html>retained</html>")
+        .await
+        .expect("save retained html");
+    storage
+        .save_snapshot_markdown(retained_slug, timestamp, "retained md")
+        .await
+        .expect("save retained md");
+    storage
+        .save_snapshot_html(deleted_slug, timestamp, "<html>deleted</html>")
+        .await
+        .expect("save deleted html");
+
+    storage
+        .delete_snapshot(retained_slug, timestamp)
+        .await
+        .expect("delete retained snapshot");
+    storage
+        .delete_snapshot(deleted_slug, timestamp)
+        .await
+        .expect("delete deleted snapshot");
+
+    assert_eq!(
+        storage
+            .load_snapshot_html(retained_slug, timestamp)
+            .await
+            .expect("load deleted retained html"),
+        None
+    );
+    let retained_after = storage
+        .load_page(retained_slug)
+        .await
+        .expect("load retained page")
+        .expect("retained page remains because user title is durable");
+    assert!(retained_after.child_ids.is_empty());
+    assert!(
+        storage
+            .load_page(deleted_slug)
+            .await
+            .expect("load unretained page")
+            .is_none(),
+        "removing the only snapshot child should delete an unretained page checkpoint"
+    );
+
+    let checkpoint_storage = Storage::new(temp_dir.path().join("checkpoint-error"));
+    checkpoint_storage
+        .ensure_layout("device-a")
+        .await
+        .expect("layout created");
+    let blocking_path = checkpoint_storage
+        .root()
+        .join("views")
+        .join("manifest")
+        .join("settings.json");
+    tokio::fs::create_dir_all(&blocking_path)
+        .await
+        .expect("create directory where settings file should be");
+    let mut settings = SettingsEntity::new();
+    settings
+        .values
+        .insert("theme".to_string(), serde_json::json!("dark"));
+    checkpoint_storage
+        .persist_checkpoint_effect(
+            "manifest:settings",
+            &EntityEffect::Upsert(Entity::Settings(settings)),
+        )
+        .await
+        .expect_err("directory collision should fail checkpoint write");
+
+    let permit = checkpoint_storage
+        .reserve_checkpoint_slot()
+        .await
+        .expect("reserve checkpoint slot");
+    let mut batch = BTreeMap::new();
+    batch.insert(
+        "manifest:settings".to_string(),
+        EntityEffect::Upsert(Entity::Settings(SettingsEntity::new())),
+    );
+    Storage::send_reserved_checkpoint_work(permit, batch, BTreeMap::new());
+    let error = checkpoint_storage
+        .flush_checkpoints()
+        .await
+        .expect_err("worker checkpoint error is surfaced");
+    assert!(error.to_string().contains("checkpoint persistence failed"));
+    assert!(checkpoint_storage.reserve_checkpoint_slot().await.is_err());
+}
+
+#[tokio::test]
 async fn checkpoint_worker_persists_only_user_retained_pages() {
     let temp_dir = tempdir().expect("tempdir");
     let storage = Storage::new(temp_dir.path());
