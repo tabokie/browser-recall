@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 function timer(label) {
   const t0 = performance.now();
   return () =>
@@ -97,6 +99,16 @@ export function getSlugForUrl(url) {
   } catch {
     throw new Error(`getSlugForUrl: invalid URL: ${url}`);
   }
+}
+
+export function pageCheckpointPath(slug) {
+  const shard = crypto
+    .createHash('sha256')
+    .update(slug)
+    .digest()
+    .subarray(0, 1)
+    .toString('hex');
+  return `views/pages/${shard}/${slug}.json`;
 }
 
 // Wait for a visit_page to be recorded for a URL after a link-click navigation.

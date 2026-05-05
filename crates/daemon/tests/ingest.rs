@@ -1292,8 +1292,7 @@ async fn popup_lists_use_shared_storage_cache_after_desktop_side_write() {
                 .iter()
                 .map(|list| list.name.as_str())
                 .collect::<Vec<_>>();
-            assert!(names.contains(&"Existing"));
-            assert!(names.contains(&"Desktop Added"));
+            assert_eq!(names, vec!["Desktop Added", "Existing"]);
         }
         other => panic!("expected popup lists result, got {other:?}"),
     }

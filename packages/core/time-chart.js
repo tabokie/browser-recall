@@ -53,7 +53,7 @@ export function renderTimeChartInto(
     ...(hasEstimates ? [...estimatedByDay.values()] : []),
     0.1,
   );
-  const chartHeight = 44;
+  const chartHeight = 39;
 
   // Expand range: 1st of earliest month → today (all local time)
   const todayKey = dateKeyFromTimestamp(Date.now());

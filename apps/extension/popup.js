@@ -943,9 +943,20 @@ async function renderListChips() {
   });
 
   // + button opens picker dropdown
-  document.getElementById('listAddBtn').addEventListener('click', (e) => {
+  document.getElementById('listAddBtn').addEventListener('click', async (e) => {
     e.stopPropagation();
-    openListPicker(lists, allPins);
+    if (document.getElementById('listPicker')) {
+      closeListPicker();
+      return;
+    }
+    try {
+      const freshLists = await loadLists();
+      const freshPins = await loadListPins(freshLists);
+      openListPicker(freshLists, freshPins);
+    } catch (err) {
+      showErrorBubble(err.message);
+      openListPicker(lists, allPins);
+    }
   });
   showSection('listSection');
 }

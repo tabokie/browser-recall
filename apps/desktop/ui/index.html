@@ -590,7 +590,9 @@
 
       .chart-bars {
         overflow-x: auto;
+        overflow-y: visible;
         min-height: 60px; /* chart-bars-row (44px) + gap (4px) + chart-axis (12px) */
+        padding-top: 3px;
         display: flex;
         align-items: flex-start;
       }
@@ -607,7 +609,7 @@
         display: flex;
         align-items: flex-end;
         gap: 1px;
-        height: 44px;
+        height: 46px;
       }
 
       .chart-bar-group {
@@ -725,6 +727,8 @@
           box-shadow 0.25s var(--ease-smooth),
           border-color 0.15s;
         cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
       }
 
       .result-item + .result-item {

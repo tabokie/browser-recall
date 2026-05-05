@@ -1,5 +1,10 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, openHelperPage, getSlugForUrl } from './helpers.js';
+import {
+  resetAndSeed,
+  openHelperPage,
+  getSlugForUrl,
+  pageCheckpointPath,
+} from './helpers.js';
 
 test.describe('Extension badge', () => {
   test('shows blue dot for page with notes', async ({
@@ -17,7 +22,7 @@ test.describe('Extension badge', () => {
 
     await resetAndSeed(extContext, extensionId, [
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url,
@@ -28,7 +33,7 @@ test.describe('Extension badge', () => {
         },
       },
       {
-        path: 'notes/test-note.json',
+        path: 'objects/notes/test-note.json',
         data: {
           slug: 'test-note',
           excerpt: 'hi',
@@ -84,7 +89,7 @@ test.describe('Extension badge', () => {
 
     await resetAndSeed(extContext, extensionId, [
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url,
@@ -133,7 +138,7 @@ test.describe('Extension badge', () => {
 
     await resetAndSeed(extContext, extensionId, [
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url,
@@ -194,7 +199,7 @@ test.describe('Extension badge', () => {
 
     await resetAndSeed(extContext, extensionId, [
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url,
@@ -244,7 +249,7 @@ test.describe('Extension badge', () => {
 
     await resetAndSeed(extContext, extensionId, [
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url,
@@ -351,9 +356,9 @@ test.describe('Extension badge', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url,
@@ -364,7 +369,7 @@ test.describe('Extension badge', () => {
         },
       },
       {
-        path: `data/notes/${noteSlug1}.json`,
+        path: `objects/notes/${noteSlug1}.json`,
         data: {
           slug: noteSlug1,
           excerpt: 'First highlight',
@@ -374,7 +379,7 @@ test.describe('Extension badge', () => {
         },
       },
       {
-        path: `data/notes/${noteSlug2}.json`,
+        path: `objects/notes/${noteSlug2}.json`,
         data: {
           slug: noteSlug2,
           excerpt: 'Second highlight',
@@ -384,7 +389,7 @@ test.describe('Extension badge', () => {
         },
       },
       {
-        path: `data/logs/test-device/2026-03-01.jsonl`,
+        path: `logs/test-device/2026-03-01.jsonl`,
         lines: [
           {
             timestamp: now,
@@ -474,9 +479,9 @@ test.describe('Extension badge', () => {
     const now = Date.now();
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url,
@@ -487,7 +492,7 @@ test.describe('Extension badge', () => {
         },
       },
       {
-        path: `data/notes/${noteSlug}.json`,
+        path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
           excerpt: 'test excerpt',
@@ -497,7 +502,7 @@ test.describe('Extension badge', () => {
         },
       },
       {
-        path: `data/logs/test-device/2026-03-01.jsonl`,
+        path: `logs/test-device/2026-03-01.jsonl`,
         lines: [
           { timestamp: now, action: 'visit_page', url, title: 'Slug Match' },
         ],

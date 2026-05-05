@@ -1556,7 +1556,10 @@ async fn create_and_update_list_refresh_manifests() {
         name_map.paths.get("test-device/Reading"),
         Some(&"reading-list".to_string())
     );
-    assert!(tree.tree.iter().any(|node| node.id == "list:reading-list"));
+    assert_eq!(
+        tree.tree.first().map(|node| node.id.as_str()),
+        Some("list:reading-list")
+    );
 
     store.insert("list:reading-list".to_string(), Entity::List(list.clone()));
     store.insert(
@@ -2402,7 +2405,10 @@ async fn create_list_uses_provided_list_id() {
         .and_then(EntityEffect::as_name_to_id)
         .expect("name map updated");
     assert_eq!(list.name, "Cinema");
-    assert!(tree.tree.iter().any(|node| node.id == "list:cinema-gfl1h7"));
+    assert_eq!(
+        tree.tree.first().map(|node| node.id.as_str()),
+        Some("list:cinema-gfl1h7")
+    );
     assert_eq!(
         name_map.paths.get("test-device/Cinema"),
         Some(&"cinema-gfl1h7".to_string())

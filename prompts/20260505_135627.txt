@@ -1,0 +1,49 @@
+- Take a look at this list of issues, a lot of them have already been fixed, but I want you to double check if there's E2E coverage, for issues that haven't been fixed or covered, cover them in E2E.
+
+(1) Popup UI doesn't have a up-to-date display of available lists.
+(2) Page visit is not recorded when I navigate to another page in the same browser tab
+(3) In popup UI, when editing the title, text is near black and hard to see
+(4) When a page is added to a list via Desktop, the popup UI is not updated (even after refreshing the page), although the icon correctly shows a badge. Two issues here, the inconsistency between popup and desktop, and the inconsistency between icon and popup.
+(5) When capturing snapshot in browser, when "Extension context invalidated.", it should show an error bubble asking user to refresh the page instead of fail silently
+(6) In popup UI, after adding the page to a list, the page title becomes untrimmed
+(7) In popup UI add to a list, the extension icon is not updated, when I reopen the popup the icon is updated
+(8) new list from extension is added to the bottom of the list order, while new list created from desktop is added to the top
+- resume
+- Which of the issues are real, which of them are already fixed before this session?
+- > Popup listens for daemon mutation broadcasts
+Is this really necessary? It is okay to not immediately refresh when data changes, as long as the view is correct at the moment of popup opening
+- resume
+- Good, let's take a look at a new batch of issues at desktop side, the workflow is the same, cover in E2E first:
+
+(1) Sometimes I cannot drag the selected page items in Desktop app
+(2) The top of the highest time chart bars is slightly truncated
+(3) In desktop app, recycle bin is not updated the moment I deleted a list
+(4) When I drag some pages or a list within the list sidebar area, it should scroll up or down as mouse goes near the top or bottom, so that I can reach lists not in the view
+(5) The desktop app rule preview reliably says "No visits found to match against"
+(6) In desktop app, when I try to select multiple using command&click, the text is selected as well
+(7) delete a page causes the scroll offset to jump (sometimes straight to the end), clearing search query does that too
+- resume
+- hello
+- resume
+- Fix tests
+- $gap
+- Fix them all, including the simplification and coverage
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix it
+- What was the launch abort?
+- Some of the issues are not fixed, figure out what went wrong in the testing phase, and check if there're similar issues in other tests too:
+
+(1) The desktop app rule preview of "Recent Visits" reliably says "No visits found to match against"
+(2) In desktop app, when I try to select multiple using click+command+click, the text is selected as well
+(3) Sometimes, when I drag the select page item, text is selected not item is not dragged
+- What else is missing?
+- > but it is now doing enough daemon behavior that it could drift again
+This is worth improving
+- The issue of dragging turned to text select is not fully fixed. The edge case is, for a page item with additional badge, when I drag it by clicking on the second line of the item, the drag is turned to text select.
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix it
+- $finish model=GPT-5.5 Codex
+- save
+- no
+- save

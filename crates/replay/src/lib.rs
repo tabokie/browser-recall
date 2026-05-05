@@ -1011,7 +1011,7 @@ pub(crate) fn append_to_tree(
     };
     if parent_id.is_none() {
         let mut next = tree.to_vec();
-        next.push(new_node);
+        next.insert(0, new_node);
         return next;
     }
     let mut cloned = tree.to_vec();

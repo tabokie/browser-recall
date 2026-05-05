@@ -52,6 +52,7 @@ Project name: **browser-recall** (display name "Browser Recall"). Version 1.0 ta
 - Keyword rules are title-only and always case-insensitive. Their config is exactly `{ pattern }`; they do not carry field selectors and never match URL or body preview text.
 - Rule previews may inspect command-only page data, but persisted rules and logs must remain canonical.
 - Search queries and result enrichment should read through daemon/desktop APIs, not direct extension-local persistence.
+- Desktop UI test mocks should mirror real daemon API boundaries; do not let `readDesktopValue` expose history log entities that production only serves through history batch APIs.
 
 ## Refactoring Lessons
 
@@ -74,6 +75,7 @@ Project name: **browser-recall** (display name "Browser Recall"). Version 1.0 ta
 - `innerHTML` replacement destroys DOM state. Do not force full re-render from callbacks that modify DOM state; adjust padding or targeted rows.
 - Use `getBoundingClientRect()` differences for offsets, not `offsetTop` relative to a positioned ancestor.
 - Preserve CSS base padding by reading computed styles and adding virtual padding to it.
+- Scroll anchors must use the same viewport-relative container offset as render range calculation; never mix raw `scrollTop` with container-relative row offsets.
 
 ## Workflow Preferences
 

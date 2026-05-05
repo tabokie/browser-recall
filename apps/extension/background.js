@@ -1468,6 +1468,7 @@ async function handleUpdateNote(request) {
 async function handleToggleListPin(request) {
   const response = await runDesktopCommand('toggleListPin', request);
   if (!response.success) return response;
+  if (request.url) void badgeController.refreshBadgesForUrls([request.url]);
   notifyMutation('pins', { listId: request.listId, url: request.url });
   return response;
 }
@@ -1475,6 +1476,9 @@ async function handleToggleListPin(request) {
 async function handleAddListPins(request) {
   const response = await runDesktopCommand('addListPins', request);
   if (!response.success) return response;
+  if (Array.isArray(request.urls) && request.urls.length > 0) {
+    void badgeController.refreshBadgesForUrls(request.urls);
+  }
   notifyMutation('pins', { listId: request.listId });
   return response;
 }
@@ -1607,8 +1611,16 @@ async function handleInitializeFilesystem(request) {
 }
 
 async function handleDeleteSnapshot(request) {
+  const pageBefore = request.slug
+    ? await readDesktopValue(pageKey(request.slug)).catch(() => null)
+    : null;
   const response = await runDesktopCommand('deleteSnapshot', request);
   if (!response.success) return response;
+  if (pageBefore?.url) {
+    void badgeController.refreshBadgesForUrls([pageBefore.url]);
+  } else {
+    void badgeController.refreshActiveTabBadge();
+  }
   notifyMutation('snapshot', { slug: request.slug });
   notifyMutation('orphaned');
   return response;

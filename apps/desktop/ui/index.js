@@ -600,6 +600,8 @@ let listsReadyPromise = Promise.resolve();
 let marqueeActive = false; // suppress click during marquee drag
 let queueContentMap = {}; // slug -> markdown from pending queue entries
 let draggedSidebarListId = null;
+let sidebarDragScrollFrame = 0;
+let sidebarDragScrollVelocity = 0;
 let desktopPairInFlight = false;
 let onboardingSelectedScheme = 'amber';
 let onboardingCompletionPromise = null;
@@ -771,6 +773,7 @@ const searchState = {
   pendingPhases: 0, // count of in-flight phases — spinner shown while > 0
 };
 let resetRelatedScrollOnNextRender = false;
+let preserveRelatedScrollOnNextRender = false;
 
 function prepareRelatedChartDateFilter(contextKey) {
   const chartEl = document.getElementById('relatedChart');
@@ -2928,11 +2931,14 @@ async function runPreviewAgainstHistory(rule, signal) {
     const d = new Date(today);
     d.setDate(d.getDate() - dayOffset);
     const dateKey = d.toISOString().slice(0, 10);
-    const dayEntries = (await readDesktopValue('log:' + dateKey)) || [];
+    const dayEntries = await loadHistoryEntriesForDate(dateKey);
     const visits = dayEntries
       .filter(
         (e) =>
-          e.action === 'visit_page' && e.url && e.title && !seenUrls.has(e.url),
+          (!e.action || e.action === 'visit_page') &&
+          e.url &&
+          e.title &&
+          !seenUrls.has(e.url),
       )
       .reverse();
     const uniqueVisits = [];
@@ -2949,21 +2955,34 @@ async function runPreviewAgainstHistory(rule, signal) {
       if (checked >= MAX_CHECKED || matchCount >= MAX_MATCHES) break;
       const remaining = Math.min(BATCH_SIZE, MAX_CHECKED - checked);
       const batch = uniqueVisits.slice(i, i + remaining);
-      const bodies = await Promise.all(
-        batch.map((e) =>
-          e.bodyPreview ? Promise.resolve(e.bodyPreview) : fetchPageBody(e.url),
-        ),
-      );
       const entries = [];
-      for (let j = 0; j < batch.length; j++) {
-        if (!bodies[j]) continue;
-        entries.push({
-          timestamp: batch[j].timestamp,
-          action: batch[j].action,
-          url: batch[j].url,
-          title: batch[j].title || '',
-          bodyPreview: bodies[j],
-        });
+      if (rule?.type === 'keyword') {
+        for (const entry of batch) {
+          entries.push({
+            timestamp: entry.timestamp,
+            action: entry.action || 'visit_page',
+            url: entry.url,
+            title: entry.title || '',
+          });
+        }
+      } else {
+        const bodies = await Promise.all(
+          batch.map((e) =>
+            e.bodyPreview
+              ? Promise.resolve(e.bodyPreview)
+              : fetchPageBody(e.url),
+          ),
+        );
+        for (let j = 0; j < batch.length; j++) {
+          if (!bodies[j]) continue;
+          entries.push({
+            timestamp: batch[j].timestamp,
+            action: batch[j].action || 'visit_page',
+            url: batch[j].url,
+            title: batch[j].title || '',
+            bodyPreview: bodies[j],
+          });
+        }
       }
       if (entries.length === 0) continue;
       const resp = await previewRuleEntries(rule, entries);
@@ -3163,10 +3182,20 @@ async function renderListPinView(allPins, listId) {
 function runActiveSearchPipeline() {
   if (activeView.type === 'explore') {
     if (exploreDebounceTimer) clearTimeout(exploreDebounceTimer);
-    exploreDebounceTimer = setTimeout(() => runSearchFilterPipeline(), 300);
+    const preserveScroll = Boolean(runActiveSearchPipeline._preserveScroll);
+    exploreDebounceTimer = setTimeout(() => {
+      if (preserveScroll) {
+        preserveRelatedScrollOnNextRender = true;
+      }
+      runSearchFilterPipeline();
+    }, 300);
   } else if (activeView.type === 'list') {
+    if (runActiveSearchPipeline._preserveScroll) {
+      preserveRelatedScrollOnNextRender = true;
+    }
     runListPinFilter();
   }
+  runActiveSearchPipeline._preserveScroll = false;
 }
 
 // Filter list pins by current queries + draft input, then apply filters
@@ -3218,6 +3247,8 @@ function renderFilteredPins(pins, listId, searchQuery) {
   vs._headerHtml = '';
   vs.onLoadMore = null; // Clear stale explore demand-loader
   const renderAtTop = consumeRelatedTopReset();
+  const preserveScroll = preserveRelatedScrollOnNextRender;
+  preserveRelatedScrollOnNextRender = false;
   const renderRow = (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
       pinned: true,
@@ -3238,7 +3269,7 @@ function renderFilteredPins(pins, listId, searchQuery) {
   if (renderAtTop) {
     vs.updateDataAtTop(sorted, renderRow);
   } else {
-    vs.updateData(sorted, renderRow);
+    vs.updateData(sorted, renderRow, { preserveScroll });
   }
   bindPinClicks(relatedContainer, listId);
 
@@ -4022,8 +4053,8 @@ function resultRowHtml(title, url, opts = {}) {
     ? `<div class="card-actions"><button class="result-delete" data-delete-url="${safeUrl}" data-delete-title="${safeTitle}" title="Delete">${DELETE_SVG}</button></div>`
     : '';
 
-  return `<div class="result-item${cssClass ? ' ' + cssClass : ''}">
-    <div class="result-row" data-url="${safeUrl}" data-title="${safeTitle}" data-dates="${dates}" draggable="true">
+  return `<div class="result-item${cssClass ? ' ' + cssClass : ''}" draggable="true">
+    <div class="result-row" data-url="${safeUrl}" data-title="${safeTitle}" data-dates="${dates}">
       <div class="card-row">
         <div class="result-title">${safeTitle}</div>
         <span class="result-site">${escapeHtml(site)}</span>
@@ -4039,6 +4070,10 @@ function resultRowHtml(title, url, opts = {}) {
 function bindResultDelegation(container) {
   if (container._resultDelegationBound) return;
   container._resultDelegationBound = true;
+
+  container.addEventListener('selectstart', (e) => {
+    if (e.target.closest('.result-item')) e.preventDefault();
+  });
 
   container.addEventListener('click', (e) => {
     if (e.target.closest('.att-ctrl-btn')) {
@@ -4112,7 +4147,8 @@ function bindResultDelegation(container) {
   });
 
   container.addEventListener('dragstart', (e) => {
-    const row = e.target.closest('.result-row');
+    const item = e.target.closest('.result-item');
+    const row = item?.querySelector('.result-row');
     if (!row) return;
     // Include all selected rows if the dragged row is part of a selection
     const selected = container.querySelectorAll('.result-row.selected');
@@ -4632,7 +4668,9 @@ function createSidebarItemDOM(node, depth) {
       listId: node.slug,
     });
     delete allListPins[node.slug];
-    renderLists();
+    await renderLists();
+    await updateRecycleBinBadge();
+    if (activeView.type === 'recycle-bin') await showRecycleBin();
     if (activeView.type === 'list' && activeView.id === node.slug) {
       showExplore();
     }
@@ -4691,6 +4729,53 @@ async function handleSidebarDrop(draggedId, targetSlug, relY, tree) {
   await renderLists();
 }
 
+function stopSidebarDragAutoScroll() {
+  sidebarDragScrollVelocity = 0;
+  if (sidebarDragScrollFrame) {
+    cancelAnimationFrame(sidebarDragScrollFrame);
+    sidebarDragScrollFrame = 0;
+  }
+}
+
+function updateSidebarDragAutoScroll(clientY) {
+  const sidebar = document.querySelector('.sidebar-content');
+  if (!sidebar) return;
+  const rect = sidebar.getBoundingClientRect();
+  const edge = Math.min(72, rect.height / 3);
+  let velocity = 0;
+  if (clientY < rect.top + edge) {
+    velocity = -Math.ceil(((rect.top + edge - clientY) / edge) * 18);
+  } else if (clientY > rect.bottom - edge) {
+    velocity = Math.ceil(((clientY - (rect.bottom - edge)) / edge) * 18);
+  }
+  sidebarDragScrollVelocity = velocity;
+  if (!velocity) return;
+  if (sidebarDragScrollFrame) return;
+  const tick = () => {
+    if (!sidebarDragScrollVelocity) {
+      sidebarDragScrollFrame = 0;
+      return;
+    }
+    sidebar.scrollTop += sidebarDragScrollVelocity;
+    sidebarDragScrollFrame = requestAnimationFrame(tick);
+  };
+  sidebarDragScrollFrame = requestAnimationFrame(tick);
+}
+
+function bindSidebarDragAutoScroll() {
+  const sidebar = document.querySelector('.sidebar-content');
+  if (!sidebar || sidebar._dragAutoScrollBound) return;
+  sidebar._dragAutoScrollBound = true;
+  sidebar.addEventListener('dragover', (e) => {
+    updateSidebarDragAutoScroll(e.clientY);
+  });
+  sidebar.addEventListener('dragleave', (e) => {
+    if (!sidebar.contains(e.relatedTarget)) stopSidebarDragAutoScroll();
+  });
+  sidebar.addEventListener('drop', () => stopSidebarDragAutoScroll());
+  sidebar.addEventListener('dragend', () => stopSidebarDragAutoScroll());
+}
+
 function bindSidebarItemDragDrop(item, node) {
   item.draggable = true;
   item.addEventListener('dragstart', (e) => {
@@ -4702,6 +4787,7 @@ function bindSidebarItemDragDrop(item, node) {
   });
   item.addEventListener('dragend', () => {
     draggedSidebarListId = null;
+    stopSidebarDragAutoScroll();
     item.classList.remove('dragging');
     document
       .querySelectorAll('.reorder-above, .reorder-below, .nest-target')
@@ -4861,6 +4947,8 @@ document.getElementById('exploreBtn').addEventListener('click', () => {
   showExplore();
 });
 
+bindSidebarDragAutoScroll();
+
 // --- Event listeners: Create List button ---
 document.getElementById('createListBtn').addEventListener('click', () => {
   // Remove any existing inline input
@@ -4880,16 +4968,8 @@ document.getElementById('createListBtn').addEventListener('click', () => {
     const name = input.value.trim();
     input.remove();
     if (!name) return;
-    // Create list via saveListMeta (appends to tree end)
+    // Desktop replay owns list placement.
     await sendAction({ action: 'saveListMeta', name });
-    // Move new list to first position in tree
-    const order = await readDesktopValue('manifest:list-order');
-    const rawTree = order?.tree || [];
-    if (rawTree.length > 1) {
-      const last = rawTree[rawTree.length - 1];
-      const reordered = [last, ...rawTree.slice(0, -1)];
-      await sendAction({ action: 'updateListTree', tree: reordered });
-    }
     await renderLists();
   }
 
@@ -6776,7 +6856,11 @@ function bindSearchEvents(container) {
   const draftInput = container.querySelector('#searchDraftInput');
   if (draftInput) {
     draftInput.addEventListener('input', () => {
+      const hadInput = Boolean(currentSearchInput.trim());
       currentSearchInput = draftInput.value;
+      if (hadInput && !currentSearchInput.trim()) {
+        runActiveSearchPipeline._preserveScroll = true;
+      }
       runActiveSearchPipeline();
     });
     draftInput.addEventListener('keydown', async (e) => {
@@ -7128,6 +7212,8 @@ async function runSearchFilterPipeline() {
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = '';
   const renderAtTop = consumeRelatedTopReset();
+  const preserveScroll = preserveRelatedScrollOnNextRender;
+  preserveRelatedScrollOnNextRender = false;
   const renderRow = (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
       attScore: r.attScore,
@@ -7144,7 +7230,7 @@ async function runSearchFilterPipeline() {
   if (renderAtTop) {
     vs.updateDataAtTop(sorted, renderRow);
   } else {
-    vs.updateData(sorted, renderRow);
+    vs.updateData(sorted, renderRow, { preserveScroll });
   }
 
   // When no active filters, enrich in background and refresh visible rows
@@ -7789,6 +7875,7 @@ document.addEventListener('keydown', async (e) => {
     const title = row.dataset.title;
     if (url) await toggleResultPin(listId, url, title);
   }
+  preserveRelatedScrollOnNextRender = true;
   refreshPins();
 });
 

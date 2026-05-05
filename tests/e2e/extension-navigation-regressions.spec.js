@@ -1,5 +1,10 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, openHelperPage, getSlugForUrl } from './helpers.js';
+import {
+  resetAndSeed,
+  openHelperPage,
+  getSlugForUrl,
+  pageCheckpointPath,
+} from './helpers.js';
 
 async function readPageEntity(helper, url) {
   const slug = getSlugForUrl(url);
@@ -122,7 +127,7 @@ test.describe('extension same-tab navigation regressions', () => {
     });
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
     ]);
 
     const entryUrl = localServer.url('/spa-entry');
@@ -200,9 +205,9 @@ test.describe('extension same-tab navigation regressions', () => {
     const listedSlug = getSlugForUrl(listedUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
-        path: `pages/${listedSlug}.json`,
+        path: pageCheckpointPath(listedSlug),
         data: {
           slug: listedSlug,
           url: listedUrl,
@@ -265,9 +270,9 @@ test.describe('extension same-tab navigation regressions', () => {
     const updatedSlug = getSlugForUrl(updatedUrl);
 
     await resetAndSeed(extContext, extensionId, [
-      { path: 'manifest/settings.json', data: { trimRules: [] } },
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
-        path: `pages/${originalSlug}.json`,
+        path: pageCheckpointPath(originalSlug),
         data: {
           slug: originalSlug,
           url: originalUrl,

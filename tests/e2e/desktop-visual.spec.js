@@ -320,6 +320,11 @@ async function installDesktopBridgeMock(page, options = {}) {
       }
 
       function readDesktopValue(key) {
+        // Desktop entity reads do not expose JSONL history logs. History must
+        // go through listHistoryFiles/loadHistoryBatch, matching Tauri/daemon.
+        if (key.startsWith('log:')) {
+          return null;
+        }
         return clone(stores.session.get(key)) ?? null;
       }
 
@@ -357,6 +362,26 @@ async function installDesktopBridgeMock(page, options = {}) {
         for (const handler of listeners.get('bridge-runtime-message') || []) {
           handler({ payload: clone(message) });
         }
+      }
+
+      function removeListFromTree(nodes = [], listId) {
+        const listEntityId = `list:${listId}`;
+        const next = [];
+        for (const node of nodes) {
+          if (node.id === listEntityId) continue;
+          next.push({
+            ...node,
+            children: removeListFromTree(node.children || [], listId),
+          });
+        }
+        return next;
+      }
+
+      function pageKeyForUrl(url) {
+        for (const [key, value] of stores.session.entries()) {
+          if (key.startsWith('page:') && value?.url === url) return key;
+        }
+        return null;
       }
 
       window.__desktopVisualHarness = {
@@ -494,9 +519,108 @@ async function installDesktopBridgeMock(page, options = {}) {
                 ...entity,
                 name: request.name || entity.name || listId,
               });
+            } else if (request.name) {
+              const slug = String(request.name)
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-|-$/g, '');
+              const key = `list:${slug}`;
+              stores.session.set(key, {
+                slug,
+                name: request.name,
+                pins: [],
+              });
+              const order = stores.session.get('manifest:list-order') || {
+                tree: [],
+              };
+              stores.session.set('manifest:list-order', {
+                ...order,
+                tree: [{ id: key, children: [] }, ...(order.tree || [])],
+              });
+              return { success: true, listId: slug };
             }
             return { success: true };
           }
+          case 'deleteList': {
+            const listId = request.listId || request.slug;
+            const key = `list:${listId}`;
+            const existing = stores.session.get(key) || {
+              slug: listId,
+              pins: [],
+            };
+            stores.session.set(key, {
+              ...existing,
+              deleted: true,
+              deletedTs: Date.now(),
+            });
+            const order = stores.session.get('manifest:list-order') || {
+              tree: [],
+            };
+            stores.session.set('manifest:list-order', {
+              ...order,
+              tree: removeListFromTree(order.tree || [], listId),
+            });
+            const orphaned = stores.session.get('manifest:orphaned') || {
+              timestamp: 0,
+              entries: [],
+            };
+            stores.session.set('manifest:orphaned', {
+              timestamp: Date.now(),
+              entries: [
+                ...(orphaned.entries || []).filter(
+                  (entry) => entry.key !== key,
+                ),
+                { key, deletedAt: Date.now() },
+              ],
+            });
+            return { success: true };
+          }
+          case 'toggleListPin': {
+            const listId = request.listId;
+            const url = request.url;
+            const pinId = url ? pageKeyForUrl(url) : null;
+            if (!listId || !pinId) return { success: true };
+            const key = `list:${listId}`;
+            const entity = stores.session.get(key) || {
+              slug: listId,
+              name: listId,
+              pins: [],
+            };
+            const pins = entity.pins || [];
+            stores.session.set(key, {
+              ...entity,
+              pins: pins.some((pin) => pin.id === pinId)
+                ? pins.filter((pin) => pin.id !== pinId)
+                : [...pins, { id: pinId, pinnedAt: Date.now() }],
+            });
+            return { success: true };
+          }
+          case 'addListPins': {
+            const listId = request.listId;
+            if (!listId) return { success: true };
+            const key = `list:${listId}`;
+            const entity = stores.session.get(key) || {
+              slug: listId,
+              name: listId,
+              pins: [],
+            };
+            const pins = [...(entity.pins || [])];
+            for (const url of request.urls || []) {
+              const pinId = pageKeyForUrl(url);
+              if (!pinId) continue;
+              if (!pins.some((pin) => pin.id === pinId)) {
+                pins.push({ id: pinId, pinnedAt: Date.now() });
+              }
+            }
+            stores.session.set(key, { ...entity, pins });
+            return { success: true };
+          }
+          case 'updateListTree':
+            stores.session.set('manifest:list-order', {
+              timestamp: Date.now(),
+              tree: clone(request.tree || []),
+            });
+            return { success: true };
           case 'startWindowDrag':
           case 'openExternalUrl':
             return { success: true };
@@ -1462,6 +1586,561 @@ test.describe('desktop visual regression', () => {
       expect(visibility.rowBottom).toBeLessThanOrEqual(
         visibility.mainBottom + 1,
       );
+    });
+  });
+
+  test('command-click selection does not select text and selected pages drag together', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const historyEntries = Array.from({ length: 8 }, (_, i) => ({
+      url: `https://example.com/drag-selected-${i}`,
+      title: `Drag selected ${i}`,
+      timestamp: now - i * 1000,
+      deviceId: 'device-a',
+    }));
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll('.result-row').length >= 2,
+      );
+
+      const rows = page.locator('.result-row');
+      await rows.nth(0).click();
+
+      const secondTitleBox = await rows
+        .nth(1)
+        .locator('.result-title')
+        .boundingBox();
+      expect(secondTitleBox).not.toBeNull();
+      await page.keyboard.down('Meta');
+      await page.mouse.move(
+        secondTitleBox.x + 12,
+        secondTitleBox.y + secondTitleBox.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.up();
+      await page.keyboard.up('Meta');
+
+      await expect(page.locator('.result-row.selected')).toHaveCount(2);
+      await expect
+        .poll(() => page.evaluate(() => getSelection()?.toString() || ''))
+        .toBe('');
+
+      const firstTitleBox = await rows
+        .nth(0)
+        .locator('.result-title')
+        .boundingBox();
+      expect(firstTitleBox).not.toBeNull();
+      await page.mouse.move(
+        firstTitleBox.x + 12,
+        firstTitleBox.y + firstTitleBox.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        firstTitleBox.x + 120,
+        firstTitleBox.y + firstTitleBox.height / 2 + 16,
+        { steps: 8 },
+      );
+      await page.mouse.up();
+      await expect
+        .poll(() => page.evaluate(() => getSelection()?.toString() || ''))
+        .toBe('');
+
+      const dragPayload = await page.evaluate(() => {
+        const row = document.querySelector('.result-row.selected');
+        const data = new Map();
+        const event = new DragEvent('dragstart', {
+          bubbles: true,
+          cancelable: true,
+        });
+        Object.defineProperty(event, 'dataTransfer', {
+          value: {
+            types: [],
+            effectAllowed: '',
+            setData(type, value) {
+              data.set(type, value);
+              if (!this.types.includes(type)) this.types.push(type);
+            },
+            getData(type) {
+              return data.get(type) || '';
+            },
+          },
+        });
+        row.dispatchEvent(event);
+        return JSON.parse(data.get('text/plain') || '{}');
+      });
+
+      expect(dragPayload.items.map((item) => item.url)).toEqual([
+        'https://example.com/drag-selected-0',
+        'https://example.com/drag-selected-1',
+      ]);
+    });
+  });
+
+  test('dragging a page from second-line badges does not select text', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const url = 'https://example.com/drag-from-badge';
+    const slug = generateSlugFromUrl(url);
+    const historyEntries = [
+      {
+        url,
+        title: 'Drag from badge',
+        timestamp: now,
+        deviceId: 'device-a',
+      },
+    ];
+    const extraSession = {
+      [pageKey(slug)]: {
+        slug,
+        url,
+        title: 'Drag from badge',
+        likes: 1,
+        parentIds: [],
+        childIds: [],
+        visitDates: [],
+      },
+    };
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+        extraSession,
+      });
+      await expect(page.locator('.card-tag-liked')).toBeVisible();
+
+      const badgeBox = await page.locator('.card-tag-liked').boundingBox();
+      expect(badgeBox).not.toBeNull();
+      await page.mouse.move(
+        badgeBox.x + 4,
+        badgeBox.y + badgeBox.height / 2,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        badgeBox.x + 90,
+        badgeBox.y + badgeBox.height / 2 + 10,
+        { steps: 8 },
+      );
+      await page.mouse.up();
+      await expect
+        .poll(() => page.evaluate(() => getSelection()?.toString() || ''))
+        .toBe('');
+
+      const dragPayload = await page.evaluate(() => {
+        const badge = document.querySelector('.card-tag-liked');
+        const data = new Map();
+        const event = new DragEvent('dragstart', {
+          bubbles: true,
+          cancelable: true,
+        });
+        Object.defineProperty(event, 'dataTransfer', {
+          value: {
+            types: [],
+            effectAllowed: '',
+            setData(type, value) {
+              data.set(type, value);
+              if (!this.types.includes(type)) this.types.push(type);
+            },
+            getData(type) {
+              return data.get(type) || '';
+            },
+          },
+        });
+        badge.dispatchEvent(event);
+        return JSON.parse(data.get('text/plain') || '{}');
+      });
+
+      expect(dragPayload.items).toEqual([
+        {
+          url: 'https://example.com/drag-from-badge',
+          title: 'Drag from badge',
+        },
+      ]);
+    });
+  });
+
+  test('highest time chart bar has vertical breathing room', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const historyEntries = Array.from({ length: 12 }, (_, i) => ({
+      url: `https://example.com/chart-peak-${i}`,
+      title: `Chart peak ${i}`,
+      timestamp: now - i * 1000,
+      deviceId: 'device-a',
+    }));
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+      });
+      await expect(page.locator('#relatedChart.visible')).toBeVisible();
+
+      const chartMetrics = await page.evaluate(() => {
+        const bars = document.getElementById('relatedChartBars');
+        const row = bars.querySelector('.chart-bars-row');
+        const tallest = [...bars.querySelectorAll('.chart-bar')].reduce(
+          (max, bar) => {
+            return !max ||
+              bar.getBoundingClientRect().height >
+                max.getBoundingClientRect().height
+              ? bar
+              : max;
+          },
+          null,
+        );
+        const rowRect = row.getBoundingClientRect();
+        const barRect = tallest.getBoundingClientRect();
+        return {
+          rowTop: rowRect.top,
+          barTop: barRect.top,
+        };
+      });
+
+      expect(chartMetrics.barTop).toBeGreaterThan(chartMetrics.rowTop);
+    });
+  });
+
+  test('recycle bin updates immediately after deleting a list', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+      });
+
+      await expect(page.locator('#recycleBinBtn')).toBeHidden();
+      await page.locator('.sidebar-item[data-list-id="research"]').hover();
+      await page
+        .locator('.sidebar-item[data-list-id="research"] .remove-list')
+        .click({ force: true });
+
+      await expect(page.locator('#recycleBinBtn')).toBeVisible();
+      await expect(page.locator('#recycleBinCount')).toHaveText('1');
+      await page.locator('#recycleBinBtn').click();
+      await expect(page.locator('.recycle-card-key')).toContainText(
+        'list:research',
+      );
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness
+              .recycleBinKeys()
+              .map((entry) => entry.key),
+          ),
+        )
+        .toEqual(['list:research']);
+    });
+  });
+
+  test('sidebar auto-scrolls while dragging lists or pages near its edges', async ({
+    page,
+  }) => {
+    const extraSession = {
+      'manifest:list-order': { tree: [] },
+    };
+    for (let i = 0; i < 48; i++) {
+      const slug = `overflow-${i}`;
+      extraSession['manifest:list-order'].tree.push({
+        id: listKey(slug),
+        children: [],
+      });
+      extraSession[listKey(slug)] = {
+        slug,
+        name: `Overflow ${i}`,
+        pins: [],
+      };
+    }
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        extraSession,
+      });
+
+      await page.waitForFunction(
+        () => document.querySelectorAll('.sidebar-item').length >= 40,
+      );
+
+      const scrollDelta = await page.evaluate(async () => {
+        const sidebar = document.querySelector('.sidebar-content');
+        const target = document.querySelector(
+          '.sidebar-item[data-list-id="overflow-1"]',
+        );
+        const rect = sidebar.getBoundingClientRect();
+        const dispatchDragover = async ({ clientY, dataTransfer }) => {
+          const event = new DragEvent('dragover', {
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + 20,
+            clientY,
+          });
+          Object.defineProperty(event, 'dataTransfer', {
+            value: dataTransfer,
+          });
+          target.dispatchEvent(event);
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        };
+        const listTransfer = {
+          types: ['application/x-list-reorder'],
+          dropEffect: '',
+          getData() {
+            return 'overflow-0';
+          },
+          setData() {},
+        };
+        const pageTransfer = {
+          types: ['text/plain'],
+          dropEffect: '',
+          getData(type) {
+            if (type === 'text/plain') {
+              return JSON.stringify({
+                items: [
+                  {
+                    url: 'https://example.com/sidebar-page-drag',
+                    title: 'Sidebar page drag',
+                  },
+                ],
+              });
+            }
+            return '';
+          },
+          setData() {},
+        };
+
+        sidebar.scrollTop = 0;
+        await dispatchDragover({
+          clientY: rect.bottom - 2,
+          dataTransfer: listTransfer,
+        });
+        const afterDown = sidebar.scrollTop;
+
+        sidebar.scrollTop = sidebar.scrollHeight;
+        await dispatchDragover({
+          clientY: rect.top + 2,
+          dataTransfer: listTransfer,
+        });
+        const afterUp =
+          sidebar.scrollHeight - sidebar.clientHeight - sidebar.scrollTop;
+
+        sidebar.scrollTop = 0;
+        await dispatchDragover({
+          clientY: rect.bottom - 2,
+          dataTransfer: pageTransfer,
+        });
+        const pageDown = sidebar.scrollTop;
+
+        sidebar.scrollTop = 0;
+        target.dispatchEvent(
+          new DragEvent('dragover', {
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + 20,
+            clientY: rect.bottom - 2,
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        const beforeDragEnd = sidebar.scrollTop;
+        target.dispatchEvent(
+          new DragEvent('dragend', {
+            bubbles: false,
+            cancelable: true,
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        const afterDragEnd = sidebar.scrollTop;
+
+        return {
+          down: afterDown,
+          up: afterUp,
+          pageDown,
+          dragEndDelta: afterDragEnd - beforeDragEnd,
+        };
+      });
+
+      expect(scrollDelta.down).toBeGreaterThan(0);
+      expect(scrollDelta.up).toBeGreaterThan(0);
+      expect(scrollDelta.pageDown).toBeGreaterThan(0);
+      expect(scrollDelta.dragEndDelta).toBeLessThanOrEqual(1);
+    });
+  });
+
+  test('keyword rule preview checks recent visits from desktop history', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const historyEntries = [
+      {
+        url: 'https://example.com/rule-preview-match',
+        title: 'Rule preview needle',
+        timestamp: now,
+        deviceId: 'device-a',
+      },
+    ];
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+      });
+
+      await page.locator('.sidebar-item[data-list-id="research"]').click();
+      await page.locator('#inboxToggleBtn').click();
+      await page.locator('#rulesAddBtn').click();
+      await page.locator('.rule-edit-input').fill('needle');
+      await page.locator('.rule-preview-btn').click();
+
+      await expect(page.locator('#rulesPreviewList')).toContainText(
+        'Rule preview needle',
+      );
+      await expect(
+        page.getByText('No visits found to match against'),
+      ).toHaveCount(0);
+    });
+  });
+
+  test('deleting a pinned page preserves the list scroll position', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const pins = [];
+    const extraSession = {};
+    for (let i = 0; i < VIRTUALIZED_ENTRY_COUNT; i++) {
+      const url = `https://example.com/delete-scroll-${i}`;
+      const slug = generateSlugFromUrl(url);
+      pins.push({ id: pageKey(slug), pinnedAt: now - i * 1000 });
+      extraSession[pageKey(slug)] = {
+        slug,
+        url,
+        title: `Delete scroll ${i}`,
+        watermark: now - i * 1000,
+      };
+    }
+    extraSession[listKey('research')] = {
+      slug: 'research',
+      name: 'Research',
+      pins,
+    };
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        extraSession,
+      });
+
+      await page.locator('.sidebar-item[data-list-id="research"]').click();
+      await page.waitForFunction(
+        () => document.querySelectorAll('.result-row').length > 0,
+      );
+
+      const before = await page.evaluate(async () => {
+        const main = document.querySelector('.main');
+        main.scrollTop = 1800;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        return main.scrollTop;
+      });
+      await page.evaluate(async () => {
+        const rows = [...document.querySelectorAll('.result-row')];
+        rows[6].classList.add('selected');
+        document.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            bubbles: true,
+            cancelable: true,
+            key: 'Delete',
+          }),
+        );
+      });
+      await page.waitForFunction(
+        () =>
+          ![...document.querySelectorAll('.result-title')].some(
+            (node) => node.textContent.trim() === 'Delete scroll 6',
+          ),
+      );
+
+      const after = await page.evaluate(() => {
+        const main = document.querySelector('.main');
+        return {
+          scrollTop: main.scrollTop,
+          maxScroll: main.scrollHeight - main.clientHeight,
+        };
+      });
+      expect(Math.abs(after.scrollTop - before)).toBeLessThanOrEqual(80);
+      expect(after.scrollTop).toBeLessThan(after.maxScroll - 200);
+    });
+  });
+
+  test('clearing a search query does not jump the results scroll to the end', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const historyEntries = Array.from(
+      { length: VIRTUALIZED_ENTRY_COUNT },
+      (_, i) => ({
+        url: `https://example.com/search-clear-${i}`,
+        title: `Search clear ${i}`,
+        timestamp: now - i * 1000,
+        deviceId: 'device-a',
+      }),
+    );
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll('.result-row').length > 0,
+      );
+
+      await page.locator('#searchDraftInput').fill('Search clear');
+      await page.waitForFunction(
+        () =>
+          Number(
+            document.getElementById('relatedResults').dataset.searchCount || 0,
+          ) > 0,
+      );
+      const before = await page.evaluate(async () => {
+        const main = document.querySelector('.main');
+        main.scrollTop = 1600;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        return main.scrollTop;
+      });
+      await page.evaluate(() => {
+        const input = document.getElementById('searchDraftInput');
+        input.value = '';
+        input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      });
+      await page.waitForFunction(
+        () =>
+          document.getElementById('relatedResults')._virtualScroller?._fullData
+            ?.length > 0,
+      );
+
+      const after = await page.evaluate(() => {
+        const main = document.querySelector('.main');
+        return {
+          scrollTop: main.scrollTop,
+          maxScroll: main.scrollHeight - main.clientHeight,
+        };
+      });
+      expect(Math.abs(after.scrollTop - before)).toBeLessThanOrEqual(120);
+      expect(after.scrollTop).toBeLessThan(after.maxScroll - 200);
     });
   });
 });

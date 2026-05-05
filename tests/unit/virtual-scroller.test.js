@@ -521,6 +521,29 @@ describe('VirtualScroller', () => {
       expect(scrollEl.scrollTop).toBe(500);
     });
 
+    it('preserves scroll anchors using the viewport-relative container offset', () => {
+      const items = Array.from({ length: 20 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
+      vs = new VirtualScroller(scrollEl, containerEl, 50);
+      vs.setData(items, (item) => `<div>${item.id}</div>`);
+
+      scrollEl._top = 0;
+      scrollEl.scrollTop = 500;
+      // The results container starts 300px below the scroll content top, so
+      // the viewport is 200px into the results, not 500px into them.
+      containerEl._top = -200;
+
+      vs.updateData(
+        items.filter((item) => item.url !== 'https://example.com/7'),
+        (item) => `<div>${item.id}</div>`,
+        { preserveScroll: true },
+      );
+
+      expect(scrollEl.scrollTop).toBe(500);
+    });
+
     it('keeps the bottom anchored after appending variable-height rows', () => {
       let rafCallback = null;
       globalThis.requestAnimationFrame = (fn) => {

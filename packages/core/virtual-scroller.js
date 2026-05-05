@@ -94,7 +94,8 @@ export class VirtualScroller {
     this._render(true);
   }
 
-  updateData(items, renderRowFn) {
+  updateData(items, renderRowFn, options = {}) {
+    const anchor = options.preserveScroll ? this._captureScrollAnchor() : null;
     // Save nodes with meaningful state (selected/expanded) before destroying
     for (const item of this.containerEl.querySelectorAll('.result-item')) {
       this._saveOrDiscard(item);
@@ -116,6 +117,7 @@ export class VirtualScroller {
     this._estimateCalibrated = false;
     // _savedNodes NOT cleared — _render(true) will restore matching nodes
     this._render(true);
+    this._restoreScrollAnchor(anchor);
     // Re-detect expanded state from restored nodes
     this.onExpandToggle();
   }
@@ -430,6 +432,16 @@ export class VirtualScroller {
     return Math.max(0, scrollHeight - clientHeight);
   }
 
+  _viewportTopOffset() {
+    // Use getBoundingClientRect for correct offset regardless of intermediate
+    // positioned ancestors (e.g. .section-results-wrapper with position:relative).
+    return Math.max(
+      0,
+      this.scrollEl.getBoundingClientRect().top -
+        this.containerEl.getBoundingClientRect().top,
+    );
+  }
+
   _captureBottomAnchor() {
     const maxScrollTop = this._maxScrollTop();
     if (maxScrollTop == null) return null;
@@ -443,6 +455,41 @@ export class VirtualScroller {
     const maxScrollTop = this._maxScrollTop();
     if (maxScrollTop == null) return false;
     this.scrollEl.scrollTop = Math.max(0, maxScrollTop - anchor.bottomOffset);
+    return true;
+  }
+
+  _captureScrollAnchor() {
+    if (!this.data || this.data.length === 0) return null;
+    const scrollTop = this.scrollEl.scrollTop || 0;
+    if (scrollTop <= 0) return null;
+    const viewportTop = this._viewportTopOffset();
+    const firstVisible = this._firstVisibleIndex(viewportTop);
+    const key = this._keyForIndex(firstVisible);
+    if (!key) return null;
+    return {
+      key,
+      offsetWithin: viewportTop - this._offsetForIndex(firstVisible),
+      fallbackTop: scrollTop,
+    };
+  }
+
+  _restoreScrollAnchor(anchor) {
+    if (!anchor) return false;
+    const index = this._indexByKey.get(anchor.key);
+    const maxScrollTop = this._maxScrollTop();
+    if (index == null || index < 0) {
+      if (maxScrollTop == null) return false;
+      this.scrollEl.scrollTop = Math.min(anchor.fallbackTop, maxScrollTop);
+      return true;
+    }
+    const containerScrollOffset =
+      (this.scrollEl.scrollTop || 0) - this._viewportTopOffset();
+    const target =
+      containerScrollOffset + this._offsetForIndex(index) + anchor.offsetWithin;
+    this.scrollEl.scrollTop =
+      maxScrollTop == null
+        ? Math.max(0, target)
+        : Math.min(target, maxScrollTop);
     return true;
   }
 
@@ -545,13 +592,7 @@ export class VirtualScroller {
     }
 
     const viewH = this.scrollEl.clientHeight;
-    // Use getBoundingClientRect for correct offset regardless of intermediate
-    // positioned ancestors (e.g. .section-results-wrapper with position:relative).
-    const adjTop = Math.max(
-      0,
-      this.scrollEl.getBoundingClientRect().top -
-        this.containerEl.getBoundingClientRect().top,
-    );
+    const adjTop = this._viewportTopOffset();
 
     const { start, end } = this._rangeForViewport(adjTop, viewH);
 
