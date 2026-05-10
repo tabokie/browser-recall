@@ -261,6 +261,7 @@ async function installDesktopBridgeMock(page, options = {}) {
         session: new Map(Object.entries(seed.session)),
         local: new Map(Object.entries(seed.local)),
       };
+      const openedExternalUrls = [];
 
       function clone(value) {
         return value === undefined
@@ -398,6 +399,9 @@ async function installDesktopBridgeMock(page, options = {}) {
         emitRuntimeMessage,
         recycleBinKeys() {
           return clone(stores.session.get('manifest:orphaned'))?.entries || [];
+        },
+        openedExternalUrls() {
+          return clone(openedExternalUrls);
         },
       };
 
@@ -626,6 +630,9 @@ async function installDesktopBridgeMock(page, options = {}) {
             return { success: true };
           case 'startWindowDrag':
           case 'openExternalUrl':
+            if (request.action === 'openExternalUrl') {
+              openedExternalUrls.push(request.url);
+            }
             return { success: true };
           default:
             return { success: true };
@@ -980,6 +987,32 @@ test.describe('desktop visual regression', () => {
         'highlights',
         'snapshots',
       ]);
+    });
+  });
+
+  test('page detail URL opens through the desktop bridge', async ({ page }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        includeDetailListMembership: true,
+      });
+
+      const url = 'https://example.com/product-research';
+      const row = page.locator(`.result-row[data-url="${url}"]`);
+      await row.locator('.att-ctrl-btn').click({ force: true });
+
+      const detailUrl = page.locator('.detail-url a');
+      await expect(detailUrl).toHaveText(url);
+      await detailUrl.click();
+
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.openedExternalUrls(),
+          ),
+        )
+        .toEqual([url]);
     });
   });
 

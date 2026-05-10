@@ -3,7 +3,6 @@
 // replay are owned by the desktop daemon.
 import './browser-api.js';
 import { generateSlugFromUrl, isInternalBrowserUrl } from './utils.js';
-import { validateRuleConfig, validateFnRuleSource } from './rule-engine.js';
 import { initSavepageBridge, captureSavePage } from './savepage-bridge.js';
 import { SCHEME_HEX } from './color-scheme-map.js';
 import { logDebug, logError } from './logger.js';
@@ -18,38 +17,24 @@ import {
   initConnectorBridge,
   refreshConnectorBridgeState,
   subscribeConnectorBridgeState,
-  requestDesktopHistorySearch,
   requestDesktopHistoryFiles,
   requestDesktopHistoryBatch,
   requestDesktopPageInfo,
   requestDesktopPageSummary,
-  requestDesktopNotesSearch,
   requestDesktopEntity,
-  requestDesktopDirectoryInfo,
-  requestDesktopDirectorySize,
-  requestDesktopClearAllData,
   requestDesktopCommand,
-  requestDesktopAllPages,
-  requestDesktopPermanentDelete,
   requestDesktopPopupLists,
-  requestDesktopRuleBatch,
-  requestDesktopRulePreview,
   requestDesktopSetDeviceId,
   requestDesktopSnapshotHtml,
-  requestDesktopSnapshotsSearch,
   requestDesktopTestReset,
   requestDesktopTestSeed,
   connectDesktopBridge,
 } from './connector/ws-client.js';
 import {
-  PAGE_PREFIX,
   NOTE_PREFIX,
   SNAPSHOT_PREFIX,
   LIST_PREFIX,
-  entitySlug,
-  isSystemList,
   pageKey,
-  listKey,
 } from './entity-types.js';
 
 logDebug('Background script loading...');
@@ -241,32 +226,6 @@ async function enqueueCommand(action, request) {
     logDebug('[desktop] command enqueue failed:', error.message);
     throw error;
   }
-}
-
-async function canCallDesktopRuleRpc() {
-  const connector = await getConnectorBridgeState();
-  syncDesktopConnectorPauseState(connector);
-  return connector.state === 'connected' && !connector.refuseMode;
-}
-
-async function requestRuleBatch(listIds, entries) {
-  if (!(await canCallDesktopRuleRpc())) {
-    return { success: false, error: 'Desktop rule engine unavailable' };
-  }
-  return await requestDesktopRuleBatch(listIds, entries);
-}
-
-async function requestRulePreview(rule, entries) {
-  if (!(await canCallDesktopRuleRpc())) {
-    return { success: false, error: 'Desktop rule engine unavailable' };
-  }
-  return await requestDesktopRulePreview(rule, entries);
-}
-
-async function canCallDesktopSearchRpc() {
-  const connector = await getConnectorBridgeState();
-  syncDesktopConnectorPauseState(connector);
-  return connector.state === 'connected' && !connector.refuseMode;
 }
 
 async function canCallDesktopPopupRpc() {
@@ -681,6 +640,61 @@ async function stopSpinnerBadge(tabId) {
   }
 }
 
+function escapeHtmlAttribute(value) {
+  return String(value).replace(
+    /[&<>"']/g,
+    (char) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[char],
+  );
+}
+
+function prepareSnapshotHtml(html, slug, url = null) {
+  if (!html) return html;
+  let cleaned = html
+    .replace(
+      /<mark\b(?=[^>]*\bclass=(["'])[^"']*\bportal-highlight\b[^"']*\1)[^>]*>([\s\S]*?)<\/mark>/gi,
+      '$2',
+    )
+    .replace(
+      /\sclass=(["'])([^"']*\bportal-highlight\b[^"']*)\1/gi,
+      (_, quote, classes) => {
+        const remaining = classes
+          .split(/\s+/)
+          .filter((className) => className && className !== 'portal-highlight')
+          .join(' ');
+        return remaining ? ` class=${quote}${remaining}${quote}` : '';
+      },
+    )
+    .replace(/\sdata-highlight-(?:text|timestamp)=(["']).*?\1/gi, '')
+    .replace(/\sdata-note-slug=(["']).*?\1/gi, '');
+
+  if (!slug || /<meta\s+name=(["'])x-portal-slug\1/i.test(cleaned)) {
+    return cleaned;
+  }
+  const meta = [
+    `<meta name="x-portal-slug" content="${escapeHtmlAttribute(slug)}">`,
+    url
+      ? `<meta name="x-portal-url" content="${escapeHtmlAttribute(url)}">`
+      : '',
+  ].join('');
+  if (/<head\b[^>]*>/i.test(cleaned)) {
+    return cleaned.replace(/<head\b[^>]*>/i, (match) => `${match}${meta}`);
+  }
+  if (/<html\b[^>]*>/i.test(cleaned)) {
+    return cleaned.replace(
+      /<html\b[^>]*>/i,
+      (match) => `${match}<head>${meta}</head>`,
+    );
+  }
+  return `${meta}${cleaned}`;
+}
+
 async function captureAndLog(tabId, slug, timestamp, url, title) {
   startSpinnerBadge(tabId);
   try {
@@ -702,7 +716,11 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
       action: 'extractMarkdown',
     });
     const settings = (await readDesktopValue('manifest:settings')) || {};
-    const html = await captureSavePage(tabId, settings);
+    const html = prepareSnapshotHtml(
+      await captureSavePage(tabId, settings),
+      slug,
+      url,
+    );
     const markdown = mdResp?.markdown || '';
     if (!markdown && !html) {
       throw new Error('Capture failed: page returned no content');
@@ -1231,172 +1249,6 @@ async function handleOpenSnapshot(request) {
   return { success: true, tabId: tab.id };
 }
 
-async function handleGetDirectoryInfo() {
-  if (!(await canCallDesktopStreamingReadRpc())) {
-    return { success: false, error: 'Desktop bridge unavailable' };
-  }
-  try {
-    const desktopResp = await requestDesktopDirectoryInfo();
-    if (!desktopResp?.success) {
-      return {
-        success: false,
-        error: desktopResp?.error || 'Desktop directory info unavailable',
-      };
-    }
-    return { success: true, info: desktopResp.info || null };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-}
-
-async function handleGetDirectorySize() {
-  if (!(await canCallDesktopStreamingReadRpc())) {
-    return { success: false, error: 'Desktop bridge unavailable' };
-  }
-  try {
-    const desktopResp = await requestDesktopDirectorySize();
-    if (!desktopResp?.success) {
-      return {
-        success: false,
-        error: desktopResp?.error || 'Desktop directory size unavailable',
-      };
-    }
-    return { success: true, size: desktopResp.size || 0 };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-}
-
-async function handleListHistoryFiles(request) {
-  if (!(await canCallDesktopSearchRpc())) {
-    return {
-      success: true,
-      files: [],
-      ...(request.includeSizes ? { sizes: {} } : {}),
-    };
-  }
-  try {
-    const desktopResp = await requestDesktopHistoryFiles(
-      Boolean(request.includeSizes),
-    );
-    if (!desktopResp?.success) {
-      return {
-        success: false,
-        error: desktopResp?.error || 'Desktop history file list unavailable',
-      };
-    }
-    return {
-      success: true,
-      files: desktopResp.files || [],
-      ...(request.includeSizes ? { sizes: desktopResp.sizes || {} } : {}),
-    };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-}
-
-async function handleLoadHistoryBatch(request) {
-  const t0 = performance.now();
-  if (!(await canCallDesktopSearchRpc())) {
-    return { success: true, entries: [] };
-  }
-  let resp;
-  try {
-    const desktopResp = await requestDesktopHistoryBatch(request.files);
-    if (!desktopResp?.success) {
-      return {
-        success: false,
-        error: desktopResp?.error || 'Desktop history batch unavailable',
-      };
-    }
-    resp = { success: true, entries: desktopResp.entries || [] };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-  logDebug(
-    `[I/O] loadHistoryBatch: ${request.files.length} files in ${(performance.now() - t0).toFixed(1)}ms`,
-  );
-  return resp;
-}
-
-async function handleLoadAllPages() {
-  const t0 = performance.now();
-  if (!(await canCallDesktopPopupRpc())) {
-    return { success: false, error: 'Desktop page scan unavailable' };
-  }
-  try {
-    const desktopResp = await requestDesktopAllPages();
-    if (!desktopResp?.success) {
-      return {
-        success: false,
-        error: desktopResp?.error || 'Desktop page scan unavailable',
-      };
-    }
-    const resp = { success: true, pages: desktopResp.pages || {} };
-    logDebug(
-      `[I/O] loadAllPages: ${Object.keys(resp.pages).length} pages in ${(performance.now() - t0).toFixed(1)}ms`,
-    );
-    return resp;
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-}
-
-// ─── Message Handlers: Page Relations ────────────────────────────────
-
-async function handleGetPageRelations(request) {
-  try {
-    const url = request.url;
-    const slug = generateSlugFromUrl(url);
-    const page = (await readDesktopValue(pageKey(slug))) || {};
-
-    async function resolveRefs(refs) {
-      const urls = [];
-      for (const ref of refs) {
-        if (ref.startsWith(PAGE_PREFIX)) {
-          const p = await readDesktopValue(ref);
-          if (p && p.url) urls.push(p.url);
-        }
-      }
-      return urls;
-    }
-
-    const pageParentRefs = (page.parentIds || []).filter((p) =>
-      p.startsWith(PAGE_PREFIX),
-    );
-    const parentReferrers = await resolveRefs(pageParentRefs);
-
-    const parentLists = [];
-    const listParentRefs = (page.parentIds || []).filter(
-      (p) => p.startsWith(LIST_PREFIX) && !isSystemList(p),
-    );
-    for (const lk of listParentRefs) {
-      const listEntity = await readDesktopValue(lk);
-      if (listEntity) {
-        const listSlug = entitySlug(lk);
-        parentLists.push({
-          slug: listSlug,
-          name: listEntity.name,
-          type: 'pin',
-        });
-      }
-    }
-
-    const childRefs = (page.childIds || []).filter((c) =>
-      c.startsWith(PAGE_PREFIX),
-    );
-    const children = await resolveRefs(childRefs);
-
-    return {
-      success: true,
-      parents: { referrers: parentReferrers, lists: parentLists },
-      children,
-    };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-}
-
 // ─── Message Handlers: Context Menu & Settings ───────────────────────
 
 async function handleContextMenuHighlightMsg(request) {
@@ -1522,98 +1374,6 @@ async function handleUpdateListTree(request) {
   return response;
 }
 
-// ─── Message Handlers: Recycle Bin ───────────────────────────────────
-
-async function handleRestoreNote(request) {
-  const response = await runDesktopCommand('restoreNote', request);
-  if (!response.success) return response;
-  notifyMutation('orphaned');
-  notifyMutation('note', { noteSlug: request.noteSlug });
-  return response;
-}
-
-async function handleRestoreSnapshot(request) {
-  const response = await runDesktopCommand('restoreSnapshot', request);
-  if (!response.success) return response;
-  const snapStem = request.snapSlug;
-  const lastDash = snapStem.lastIndexOf('-');
-  const pageSlug = lastDash >= 0 ? snapStem.slice(0, lastDash) : snapStem;
-  notifyMutation('orphaned');
-  notifyMutation('snapshot', { slug: pageSlug });
-  return response;
-}
-
-async function handleRestoreList(request) {
-  const response = await runDesktopCommand('restoreList', request);
-  if (!response.success) return response;
-  notifyMutation('orphaned');
-  notifyMutation('lists');
-  return response;
-}
-
-async function handlePermanentDelete(request) {
-  if (isServicePaused())
-    return { success: false, error: 'Service paused', code: serviceError.code };
-  if (!(await canCallDesktopMutationRpc())) {
-    return { success: false, error: 'Desktop bridge unavailable' };
-  }
-  const key = request.key;
-  try {
-    const desktopResp = await requestDesktopPermanentDelete([key]);
-    if (!desktopResp?.success) {
-      return {
-        success: false,
-        error: desktopResp?.error || 'Desktop permanent delete failed',
-      };
-    }
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-  if (key.startsWith(NOTE_PREFIX)) {
-    notifyMutation('note', { noteSlug: entitySlug(key) });
-  } else if (key.startsWith(LIST_PREFIX)) {
-    notifyMutation('lists');
-  } else if (key.startsWith(SNAPSHOT_PREFIX)) {
-    const snapStem = entitySlug(key);
-    const lastDash = snapStem.lastIndexOf('-');
-    const slug = lastDash >= 0 ? snapStem.slice(0, lastDash) : snapStem;
-    notifyMutation('snapshot', { slug });
-  }
-  notifyMutation('orphaned');
-  return { success: true };
-}
-
-async function handlePermanentDeleteAll() {
-  if (isServicePaused())
-    return { success: false, error: 'Service paused', code: serviceError.code };
-  if (!(await canCallDesktopMutationRpc())) {
-    return { success: false, error: 'Desktop bridge unavailable' };
-  }
-  const orphaned = (await readDesktopValue('manifest:orphaned')) || {
-    timestamp: 0,
-    entries: [],
-  };
-  const keys = (orphaned.entries || []).map((entry) => entry.key);
-  if (keys.length > 0) {
-    try {
-      const desktopResp = await requestDesktopPermanentDelete(keys);
-      if (!desktopResp?.success) {
-        return {
-          success: false,
-          error: desktopResp?.error || 'Desktop permanent delete failed',
-        };
-      }
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  }
-  notifyMutation('note', {});
-  notifyMutation('snapshot', {});
-  notifyMutation('lists');
-  notifyMutation('orphaned');
-  return { success: true };
-}
-
 // ─── Message Handlers: Filesystem ────────────────────────────────────
 
 async function handleInitializeFilesystem(request) {
@@ -1641,182 +1401,6 @@ async function handleDeleteSnapshot(request) {
   notifyMutation('snapshot', { slug: request.slug });
   notifyMutation('orphaned');
   return response;
-}
-
-async function handleClearAllData() {
-  if (!(await canCallDesktopMutationRpc())) {
-    return { success: false, error: 'Desktop bridge unavailable' };
-  }
-  const resp = await requestDesktopClearAllData();
-  if (!resp?.success) return resp;
-  await clearDesktopBuffer();
-  tabReportedUrls.clear();
-  return { success: true, deletedCount: resp.deletedCount };
-}
-
-async function handleSetImportDirectoryHandle(request) {
-  void request;
-  return {
-    success: false,
-    error: 'Import directory handles are not supported in desktop mode',
-  };
-}
-
-// ─── Message Handlers: Rules ─────────────────────────────────────────
-
-async function handleAddRule(request) {
-  const { listId, rule } = request;
-  const validation = validateRuleConfig(rule);
-  if (!validation.valid)
-    return { success: false, error: validation.errors.join('; ') };
-
-  if (rule.type === 'function') {
-    const fnValidation = validateFnRuleSource(rule.config.fnSource);
-    if (!fnValidation.valid)
-      return { success: false, error: fnValidation.errors.join('; ') };
-    const compileResp = await requestRulePreview(rule, []);
-    if (!compileResp?.success)
-      return {
-        success: false,
-        error: compileResp?.error || 'Function failed to compile',
-      };
-  }
-
-  const response = await runDesktopCommand('addRule', request);
-  if (!response.success) return response;
-  notifyMutation('rules', { listId });
-  return response;
-}
-
-async function handleRemoveRule(request) {
-  const { listId, ruleId } = request;
-  const response = await runDesktopCommand('removeRule', request);
-  if (!response.success) return response;
-  notifyMutation('rules', { listId });
-  return response;
-}
-
-async function handleUpdateRule(request) {
-  const { listId, ruleId, config } = request;
-  const response = await runDesktopCommand('updateRule', request);
-  if (!response.success) return response;
-  notifyMutation('rules', { listId });
-  return response;
-}
-
-async function handleRunRuleBatch(request) {
-  const { listIds: batchListIds, entries } = request;
-  const desktopResp = await requestRuleBatch(batchListIds, entries);
-  if (!desktopResp?.success) {
-    return {
-      success: false,
-      error: desktopResp?.error || 'Rule batch failed',
-    };
-  }
-  const touchedListIds = new Set(
-    (desktopResp.results || [])
-      .map((result) => result?.listId)
-      .filter((listId) => typeof listId === 'string' && listId),
-  );
-  for (const listId of touchedListIds) {
-    notifyMutation('pins', { listId });
-  }
-  return {
-    success: true,
-    results: desktopResp.results || [],
-  };
-}
-
-async function handlePreviewRule(request) {
-  const { rule, entries } = request;
-  const validation = validateRuleConfig(rule);
-  if (!validation.valid)
-    return { success: false, error: validation.errors.join('; ') };
-  if (rule.type === 'function') {
-    const fnValidation = validateFnRuleSource(rule.config.fnSource);
-    if (!fnValidation.valid)
-      return { success: false, error: fnValidation.errors.join('; ') };
-  }
-  const desktopResp = await requestRulePreview(rule, entries);
-  if (!desktopResp?.success) {
-    return {
-      success: false,
-      error: desktopResp?.error || 'Rule preview failed',
-    };
-  }
-  return { success: true, results: desktopResp.results || [] };
-}
-
-async function handleSearchHistory(request) {
-  if (!(await canCallDesktopSearchRpc())) {
-    return { success: false, error: 'Desktop search unavailable' };
-  }
-  try {
-    const desktopResp = await requestDesktopHistorySearch(
-      request.query,
-      request.limit,
-    );
-    if (!desktopResp?.success) {
-      return {
-        success: false,
-        error: desktopResp?.error || 'Desktop history search failed',
-      };
-    }
-    return {
-      success: true,
-      results: desktopResp.results || [],
-    };
-  } catch (error) {
-    return { success: false, error: error.message || 'Desktop search failed' };
-  }
-}
-
-async function handleSearchNotes(request) {
-  if (!(await canCallDesktopSearchRpc())) {
-    return { success: false, error: 'Desktop search unavailable' };
-  }
-  try {
-    const desktopResp = await requestDesktopNotesSearch(
-      request.query,
-      request.limit,
-    );
-    if (!desktopResp?.success) {
-      return {
-        success: false,
-        error: desktopResp?.error || 'Desktop note search failed',
-      };
-    }
-    return {
-      success: true,
-      results: desktopResp.results || [],
-    };
-  } catch (error) {
-    return { success: false, error: error.message || 'Desktop search failed' };
-  }
-}
-
-async function handleSearchSnapshots(request) {
-  if (!(await canCallDesktopSearchRpc())) {
-    return { success: false, error: 'Desktop search unavailable' };
-  }
-  try {
-    const desktopResp = await requestDesktopSnapshotsSearch(
-      request.query,
-      request.limit,
-    );
-    if (!desktopResp?.success) {
-      return {
-        success: false,
-        error: desktopResp?.error || 'Desktop snapshot search failed',
-      };
-    }
-    return {
-      success: true,
-      results: desktopResp.results || [],
-    };
-  } catch (error) {
-    return { success: false, error: error.message || 'Desktop search failed' };
-  }
 }
 
 // ─── Message Handlers: Test ──────────────────────────────────────────
@@ -1995,25 +1579,6 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
         case 'openSnapshot':
           sendResponse(await handleOpenSnapshot(request));
           break;
-        case 'getDirectoryInfo':
-          sendResponse(await handleGetDirectoryInfo());
-          break;
-        case 'getDirectorySize':
-          sendResponse(await handleGetDirectorySize());
-          break;
-        case 'listHistoryFiles':
-          sendResponse(await handleListHistoryFiles(request));
-          break;
-        case 'loadHistoryBatch':
-          sendResponse(await handleLoadHistoryBatch(request));
-          break;
-        case 'loadAllPages':
-          sendResponse(await handleLoadAllPages());
-          break;
-        // Page relations
-        case 'getPageRelations':
-          sendResponse(await handleGetPageRelations(request));
-          break;
         // Context menu / settings
         case 'contextMenuHighlight':
           sendResponse(await handleContextMenuHighlightMsg(request));
@@ -2047,59 +1612,12 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
         case 'updateListTree':
           sendResponse(await handleUpdateListTree(request));
           break;
-        // Recycle bin
-        case 'restoreNote':
-          sendResponse(await handleRestoreNote(request));
-          break;
-        case 'restoreSnapshot':
-          sendResponse(await handleRestoreSnapshot(request));
-          break;
-        case 'restoreList':
-          sendResponse(await handleRestoreList(request));
-          break;
-        case 'permanentDelete':
-          sendResponse(await handlePermanentDelete(request));
-          break;
-        case 'permanentDeleteAll':
-          sendResponse(await handlePermanentDeleteAll());
-          break;
         // Filesystem
         case 'initializeFilesystem':
           sendResponse(await handleInitializeFilesystem(request));
           break;
         case 'deleteSnapshot':
           sendResponse(await handleDeleteSnapshot(request));
-          break;
-        case 'clearAllData':
-          sendResponse(await handleClearAllData());
-          break;
-        case 'setImportDirectoryHandle':
-          sendResponse(await handleSetImportDirectoryHandle(request));
-          break;
-        // Rules
-        case 'addRule':
-          sendResponse(await handleAddRule(request));
-          break;
-        case 'removeRule':
-          sendResponse(await handleRemoveRule(request));
-          break;
-        case 'updateRule':
-          sendResponse(await handleUpdateRule(request));
-          break;
-        case 'runRuleBatch':
-          sendResponse(await handleRunRuleBatch(request));
-          break;
-        case 'previewRule':
-          sendResponse(await handlePreviewRule(request));
-          break;
-        case 'searchHistory':
-          sendResponse(await handleSearchHistory(request));
-          break;
-        case 'searchNotes':
-          sendResponse(await handleSearchNotes(request));
-          break;
-        case 'searchSnapshots':
-          sendResponse(await handleSearchSnapshots(request));
           break;
         // Test helpers
         case 'resetForTest':

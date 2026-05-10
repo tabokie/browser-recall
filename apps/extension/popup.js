@@ -1324,7 +1324,7 @@ function reattachDashboardContent() {
 
 async function resolvePageIdentity(tab) {
   const effectiveUrl = tab._effectiveUrl || tab.url;
-  let title = tab.title || '<unknown>';
+  let title = tab._effectiveTitle || tab.title || '<unknown>';
   try {
     const resp = await chrome.runtime.sendMessage({
       action: 'trimTitle',
@@ -1333,13 +1333,7 @@ async function resolvePageIdentity(tab) {
     });
     if (resp?.title) title = resp.title;
   } catch {}
-  const viewerPrefix = chrome.runtime.getURL('snapshot-viewer.html');
-  let slug;
-  if (tab.url.startsWith(viewerPrefix)) {
-    slug = new URL(tab.url).searchParams.get('slug') || '';
-  } else {
-    slug = generateSlugFromUrl(effectiveUrl);
-  }
+  const slug = tab._effectiveSlug || generateSlugFromUrl(effectiveUrl);
   return { slug, url: effectiveUrl, title };
 }
 
@@ -1544,14 +1538,11 @@ async function verifyDeviceIdentity(connector) {
 
 async function resolveActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const isSnapshotViewer = tab?.url?.startsWith(
-    chrome.runtime.getURL('snapshot-viewer.html'),
-  );
   if (
     !tab ||
     !tab.url ||
     isInternalBrowserUrl(tab.url) ||
-    (tab.url.startsWith('chrome-extension://') && !isSnapshotViewer)
+    (tab.url.startsWith('chrome-extension://') && !isSnapshotViewerUrl(tab.url))
   ) {
     showUnavailablePage('Not available for this page');
     return null;
@@ -1559,15 +1550,75 @@ async function resolveActiveTab() {
   return tab;
 }
 
+function snapshotViewerSlugFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.href.startsWith(chrome.runtime.getURL('snapshot-viewer.html'))) {
+      return parsed.searchParams.get('slug');
+    }
+  } catch {}
+  return null;
+}
+
+function isSnapshotViewerUrl(url) {
+  return Boolean(snapshotViewerSlugFromUrl(url));
+}
+
 async function resolveEffectiveUrl(tab) {
   let effectiveUrl = tab.url;
+  let reportedUrl = null;
   try {
     const reported = await chrome.runtime.sendMessage({
       action: 'getReportedUrl',
       tabId: tab.id,
     });
-    if (reported?.success && reported.url) effectiveUrl = reported.url;
+    if (reported?.success && reported.url) {
+      reportedUrl = reported.url;
+      effectiveUrl = reported.url;
+    }
   } catch {}
+
+  if (tab.id != null) {
+    const viewerSlug = snapshotViewerSlugFromUrl(tab.url);
+    if (viewerSlug) {
+      try {
+        const pageInfo = await chrome.runtime.sendMessage({
+          action: 'getPageInfo',
+          slug: viewerSlug,
+        });
+        if (pageInfo?.success && pageInfo.entry?.url) {
+          tab._effectiveSlug = viewerSlug;
+          effectiveUrl = pageInfo.entry.url;
+          if (pageInfo.entry.title) tab._effectiveTitle = pageInfo.entry.title;
+        }
+      } catch {}
+      tab._effectiveUrl = effectiveUrl;
+      return;
+    }
+
+    try {
+      const identity = await chrome.tabs.sendMessage(tab.id, {
+        action: 'getPageIdentity',
+      });
+      if (identity?.success && identity.embedded && identity.slug) {
+        tab._effectiveSlug = identity.slug;
+        if (identity.url) {
+          effectiveUrl = identity.url;
+        } else {
+          const pageInfo = await chrome.runtime.sendMessage({
+            action: 'getPageInfo',
+            slug: identity.slug,
+          });
+          if (pageInfo?.success && pageInfo.entry?.url) {
+            effectiveUrl = pageInfo.entry.url;
+            if (pageInfo.entry.title)
+              tab._effectiveTitle = pageInfo.entry.title;
+          }
+        }
+      }
+    } catch {}
+  }
+
   tab._effectiveUrl = effectiveUrl;
 }
 

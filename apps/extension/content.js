@@ -299,13 +299,36 @@ function initContentScript() {
     }
   }
 
-  // Generate slug from the current page URL (inline version of utils.js generateSlugFromUrl)
-  // For snapshot blob: tabs, reads the embedded x-portal-slug meta tag instead.
-  function getSlugForCurrentPage() {
-    // Check for embedded slug identity (snapshot viewer)
+  function getEmbeddedPageSlug() {
     const meta = document.querySelector('meta[name="x-portal-slug"]');
-    if (meta && meta.content) return meta.content;
-    return slugFromUrl(window.location.href);
+    return meta?.content || null;
+  }
+
+  function getEmbeddedPageUrl() {
+    const meta = document.querySelector('meta[name="x-portal-url"]');
+    return meta?.content || null;
+  }
+
+  // Generate identity from the current page URL. Snapshot pages carry an
+  // embedded slug so highlights and popup reads resolve the same page entity.
+  function getPageIdentity() {
+    const embeddedSlug = getEmbeddedPageSlug();
+    if (embeddedSlug) {
+      return {
+        slug: embeddedSlug,
+        url: getEmbeddedPageUrl(),
+        embedded: true,
+      };
+    }
+    return {
+      slug: slugFromUrl(window.location.href),
+      url: window.location.href,
+      embedded: false,
+    };
+  }
+
+  function getSlugForCurrentPage() {
+    return getPageIdentity().slug;
   }
 
   // Generate a CSS selector path for an element (for re-applying highlights)
@@ -874,6 +897,7 @@ function initContentScript() {
   const internalUrlPrefixes = ['chrome://', 'edge://', 'about:'];
 
   function reportForUrl(url, delta) {
+    if (getEmbeddedPageSlug()) return;
     if (
       internalUrlPrefixes.some((prefix) => url.startsWith(prefix)) ||
       url.startsWith('chrome-extension://')
@@ -1270,6 +1294,8 @@ function initContentScript() {
       // Extract markdown for snapshot (HTML comes from Save Page WE flow)
       const markdown = extractMarkdown();
       sendResponse({ success: true, markdown });
+    } else if (request.action === 'getPageIdentity') {
+      sendResponse({ success: true, ...getPageIdentity() });
     } else if (request.action === 'highlightSelection') {
       // Highlight selected text or open global note (triggered by Alt+H)
       const selection = window.getSelection();

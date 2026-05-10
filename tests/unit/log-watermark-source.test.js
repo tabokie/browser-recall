@@ -128,14 +128,9 @@ describe('extension write queue invariants', () => {
     expect(desktopUiSource).not.toContain("action: 'reportPage'");
   });
 
-  it('does not apply Desktop rule batch results locally in the extension', () => {
-    const runRuleBatch = bgSource.match(
-      /async function handleRunRuleBatch[\s\S]*?^}/m,
-    );
-    expect(runRuleBatch).not.toBeNull();
-    expect(runRuleBatch[0]).toContain('requestRuleBatch');
-    expect(runRuleBatch[0]).toContain("notifyMutation('pins'");
-    expect(runRuleBatch[0]).not.toContain('applyDesktopRuleBatchLocally');
+  it('does not ship Desktop rule batch handling in the extension', () => {
+    expect(bgSource).not.toContain('handleRunRuleBatch');
+    expect(bgSource).not.toContain("case 'runRuleBatch'");
     expect(bgSource).not.toContain('function applyDesktopRuleBatchLocally');
   });
 
@@ -166,7 +161,11 @@ describe('extension write queue invariants', () => {
     expect(storageSource).toContain('page_retains_checkpoint');
     expect(storageSource).not.toContain('fn page_retains_user_state');
     expect(storageSource).toContain('persist_page_checkpoint_effect');
-    const jsVerifierPath = resolve(process.cwd(), 'scripts', 'replay-verify.mjs');
+    const jsVerifierPath = resolve(
+      process.cwd(),
+      'scripts',
+      'replay-verify.mjs',
+    );
     if (existsSync(jsVerifierPath)) {
       const replayVerifySource = readFileSync(jsVerifierPath, 'utf8');
       expect(replayVerifySource).not.toContain('pageRetainsCheckpoint');

@@ -3522,7 +3522,7 @@ const DELETE_SVG =
   '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
 
 function buildDetailHtml(url, attDetail, notes, likes = 0) {
-  let html = `<div class="detail-url"><a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a></div>`;
+  let html = `<div class="detail-url"><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a></div>`;
 
   const hasMetrics = attDetail || likes > 0;
   if (hasMetrics) {
@@ -3557,6 +3557,22 @@ function buildDetailHtml(url, attDetail, notes, likes = 0) {
   }
 
   return html;
+}
+
+function bindDetailUrlHandlers(container) {
+  container.querySelectorAll('.detail-url a[href]').forEach((link) => {
+    link.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const url = link.getAttribute('href');
+      if (!url) return;
+      try {
+        await chrome.tabs.create({ url });
+      } catch {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+    });
+  });
 }
 
 // Lazy-load extra detail data (notes, lists, snapshots) when detail is expanded
@@ -4214,6 +4230,7 @@ function openPageDetailCard(
         body.innerHTML =
           html +
           (extraHtml ? `<div class="detail-extra">${extraHtml}</div>` : '');
+        bindDetailUrlHandlers(body);
         bindNoteDeleteButtons(body);
         bindSnapshotClickHandlers(body);
         bindPageNoteHandler(body, url);

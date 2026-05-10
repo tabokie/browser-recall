@@ -1,5 +1,48 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, getSlugForUrl, openHelperPage } from './helpers.js';
+import crypto from 'crypto';
+import {
+  resetAndSeed,
+  getSlugForUrl,
+  openHelperPage,
+  pageCheckpointPath,
+} from './helpers.js';
+
+function snapshotSidecarPath(slug, timestamp, ext) {
+  const stem = `${slug}-${timestamp}`;
+  const shard = crypto
+    .createHash('sha256')
+    .update(stem)
+    .digest()
+    .subarray(0, 1)
+    .toString('hex');
+  return `objects/snapshots/${shard}/${stem}.${ext}`;
+}
+
+async function openPopupForUrl(extContext, extensionId, { url, title }) {
+  const popup = await extContext.newPage();
+  await popup.addInitScript(
+    ({ url, title }) => {
+      const patchTabsQuery = () => {
+        if (!globalThis.chrome?.tabs?.query) {
+          setTimeout(patchTabsQuery, 0);
+          return;
+        }
+        const originalQuery = chrome.tabs.query.bind(chrome.tabs);
+        chrome.tabs.query = async (queryInfo) => {
+          if (queryInfo?.active && queryInfo?.currentWindow) {
+            return [{ id: 12001, url, title }];
+          }
+          return originalQuery(queryInfo);
+        };
+      };
+      patchTabsQuery();
+    },
+    { url, title },
+  );
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await expect(popup.locator('#dashboard')).toBeVisible();
+  return popup;
+}
 
 test.describe('Snapshot slug meta tag', () => {
   // Content script resolves slug from x-portal-slug meta tag and reapplies highlights.
@@ -27,7 +70,7 @@ test.describe('Snapshot slug meta tag', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url: originalUrl,
@@ -38,7 +81,7 @@ test.describe('Snapshot slug meta tag', () => {
         },
       },
       {
-        path: `data/notes/${noteSlug}.json`,
+        path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
           excerpt: highlightText,
@@ -64,132 +107,189 @@ test.describe('Snapshot slug meta tag', () => {
     await page.close();
   });
 
-  // openSnapshot opens the snapshot-viewer.html extension page which renders the
-  // snapshot in an iframe and applies highlights from the original page's notes.
-  test('highlights applied on snapshot via openSnapshot viewer', async ({
+  test('popup resolves snapshot pages through the same embedded slug identity as highlights', async ({
     extContext,
     extensionId,
     setupDir,
+    localServer,
   }) => {
-    const originalUrl = 'https://example.com/article';
+    const originalUrl = 'https://example.com/snapshot-original';
     const slug = getSlugForUrl(originalUrl);
-    const noteSlug = 'test-note-blob';
-    const highlightText = 'important sentence';
+    const noteSlug = 'snapshot-popup-note';
+    const highlightText = 'snapshot popup highlight';
     const now = Date.now();
-    const snapTs = now - 1000;
 
-    const snapshotHtml =
-      `<html><head><meta name="x-portal-slug" content="${slug}"></head>` +
-      `<body><p>This is an ${highlightText} in the document.</p></body></html>`;
+    localServer.addPage('/snapshot-popup-view', {
+      title: 'Stored Snapshot',
+      body: `<meta name="x-portal-slug" content="${slug}"><p>This page contains a ${highlightText}.</p>`,
+    });
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url: originalUrl,
-          title: 'Example Article',
-          timestamp: now,
+          title: 'Original Snapshot Page',
           parentIds: [],
-          childIds: [`note:${noteSlug}`, `snapshot:${slug}-${snapTs}`],
+          childIds: [`note:${noteSlug}`],
+          timestamps: { 'test-device': now },
         },
       },
       {
-        path: `data/notes/${noteSlug}.json`,
+        path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
           excerpt: highlightText,
-          note: '',
+          note: 'snapshot popup note',
           url: originalUrl,
         },
       },
-      { path: `data/snapshots/${slug}-${snapTs}.html`, content: snapshotHtml },
+      {
+        path: `logs/test-device/2026-03-01.jsonl`,
+        lines: [
+          {
+            timestamp: now,
+            action: 'visit_page',
+            url: originalUrl,
+            title: 'Original Snapshot Page',
+          },
+        ],
+      },
     ]);
 
+    const snapshotUrl = localServer.url('/snapshot-popup-view');
+    const snapshotPage = await extContext.newPage();
+    await snapshotPage.goto(snapshotUrl);
+    await snapshotPage.waitForSelector('mark', { timeout: 5000 });
+
     const helper = await openHelperPage(extContext, extensionId);
+    const snapshotTab = await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      return tab ? { id: tab.id, url: tab.url, title: tab.title } : null;
+    }, snapshotUrl);
+    expect(snapshotTab).not.toBeNull();
 
-    // Open snapshot via openSnapshot — background opens viewer page
-    const resp = await helper.evaluate(
-      ({ slug, timestamp }) =>
-        chrome.runtime.sendMessage({ action: 'openSnapshot', slug, timestamp }),
-      { slug, timestamp: snapTs },
+    const popup = await extContext.newPage();
+    await popup.addInitScript((tab) => {
+      const patchTabsQuery = () => {
+        if (!globalThis.chrome?.tabs?.query) {
+          setTimeout(patchTabsQuery, 0);
+          return;
+        }
+        const originalQuery = chrome.tabs.query.bind(chrome.tabs);
+        chrome.tabs.query = async (queryInfo) => {
+          if (queryInfo?.active && queryInfo?.currentWindow) return [tab];
+          return originalQuery(queryInfo);
+        };
+      };
+      patchTabsQuery();
+    }, snapshotTab);
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+
+    await expect(popup.locator('#dashboard')).toBeVisible();
+    await expect(popup.locator('#pageTitle')).toHaveText(
+      'Original Snapshot Page',
     );
-    expect(resp.success).toBe(true);
+    await expect(popup.locator('#pageUrl')).toHaveText(originalUrl);
+    await expect(popup.locator('#notesSection')).toContainText(highlightText);
 
-    // Wait for the viewer page to open and iframe to be populated
-    const viewerPage = await extContext.waitForEvent('page');
-    await viewerPage.waitForLoadState('domcontentloaded');
-    await viewerPage.waitForFunction(
-      () => {
-        const frame = document.getElementById('frame');
-        return frame && frame.srcdoc && frame.srcdoc.length > 0;
-      },
-      { timeout: 5000 },
-    );
-
-    // Viewer renders snapshot in an iframe; wait for highlights inside it
-    const frame = viewerPage.frameLocator('#frame');
-    await frame.locator('mark').waitFor({ timeout: 5000 });
-    const markText = await frame.locator('mark').textContent();
-    expect(markText).toBe(highlightText);
-
-    await viewerPage.close();
+    await popup.close();
     await helper.close();
+    await snapshotPage.close();
   });
 
-  // Popup resolves slug from snapshot-viewer.html URL params
-  test('getPageInfo returns notes when called with slug from viewer URL', async ({
+  test('popup snapshot row opens an extension viewer that renders and reapplies highlights', async ({
     extContext,
     extensionId,
     setupDir,
   }) => {
-    const originalUrl = 'https://example.com/article';
+    const originalUrl = 'https://example.com/popup-open-snapshot';
     const slug = getSlugForUrl(originalUrl);
-    const noteSlug = 'test-note-viewer';
-    const now = Date.now();
-    const snapTs = now - 1000;
-
-    const snapshotHtml = `<html><head></head><body><p>Content.</p></body></html>`;
+    const timestamp = Date.now();
+    const noteSlug = 'popup-open-snapshot-note';
+    const highlightText = 'restored snapshot highlight';
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url: originalUrl,
-          title: 'Example Article',
-          timestamp: now,
+          title: 'Popup Open Snapshot',
           parentIds: [],
-          childIds: [`note:${noteSlug}`, `snapshot:${slug}-${snapTs}`],
+          childIds: [`note:${noteSlug}`, `snapshot:${slug}-${timestamp}`],
+          timestamps: { 'test-device': timestamp },
         },
       },
       {
-        path: `data/notes/${noteSlug}.json`,
+        path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
-          excerpt: 'some text',
-          note: 'my note',
+          excerpt: highlightText,
+          note: 'snapshot note',
           url: originalUrl,
         },
       },
-      { path: `data/snapshots/${slug}-${snapTs}.html`, content: snapshotHtml },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'html'),
+        content: `<!doctype html><html><head><title>Popup Open Snapshot</title></head><body><p>A saved page with ${highlightText} inside.</p></body></html>`,
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'md'),
+        content: `A saved page with ${highlightText} inside.`,
+      },
+      {
+        path: `logs/test-device/2026-03-01.jsonl`,
+        lines: [
+          {
+            timestamp,
+            action: 'visit_page',
+            url: originalUrl,
+            title: 'Popup Open Snapshot',
+          },
+        ],
+      },
     ]);
 
-    const helper = await openHelperPage(extContext, extensionId);
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url: originalUrl,
+      title: 'Popup Open Snapshot',
+    });
 
-    // Simulate what popup does: extract slug from viewer URL and query getPageInfo
-    const info = await helper.evaluate(
-      (slug) => chrome.runtime.sendMessage({ action: 'getPageInfo', slug }),
-      slug,
+    const snapshotRow = popup.locator('.snapshot-row').first();
+    await expect(snapshotRow).toBeVisible();
+
+    const openedPromise = extContext.waitForEvent('page');
+    await snapshotRow.dblclick();
+    const viewer = await openedPromise;
+    await viewer.waitForLoadState('domcontentloaded');
+
+    expect(viewer.url()).toContain(
+      `chrome-extension://${extensionId}/snapshot-viewer.html`,
+    );
+    await expect(viewer.locator('iframe')).toBeVisible();
+    const frame = viewer.frameLocator('iframe');
+    await expect(frame.locator('body')).toContainText(highlightText);
+    await expect(frame.locator('mark')).toHaveText(highlightText);
+
+    const viewerPopup = await openPopupForUrl(extContext, extensionId, {
+      url: viewer.url(),
+      title: 'Popup Open Snapshot',
+    });
+    await expect(viewerPopup.locator('#pageTitle')).toHaveText(
+      'Popup Open Snapshot',
+    );
+    await expect(viewerPopup.locator('#pageUrl')).toHaveText(originalUrl);
+    await expect(viewerPopup.locator('#notesSection')).toContainText(
+      highlightText,
     );
 
-    expect(info.success).toBe(true);
-    expect(info.notes.length).toBe(1);
-    expect(info.notes[0].slug).toBe(noteSlug);
-
-    await helper.close();
+    await viewerPopup.close();
+    await viewer.close();
+    await popup.close();
   });
 
   // captureSnapshot strips portal highlight marks from captured HTML
@@ -221,21 +321,25 @@ test.describe('Snapshot slug meta tag', () => {
     );
     expect(captureResp.success).toBe(true);
 
-    // Fetch the captured HTML
-    const htmlResp = await helper.evaluate(
+    const urlResp = await helper.evaluate(
       ({ slug, timestamp }) =>
         chrome.runtime.sendMessage({
-          action: 'getSnapshotHtml',
+          action: 'getSnapshotUrl',
           slug,
           timestamp,
         }),
       { slug, timestamp: captureResp.timestamp },
     );
-    expect(htmlResp.success).toBe(true);
+    expect(urlResp.success).toBe(true);
+
+    const html = decodeURIComponent(
+      urlResp.url.replace(/^data:text\/html;charset=utf-8,/, ''),
+    );
 
     // Should not contain portal highlight marks, but text should be preserved
-    expect(htmlResp.html).not.toContain('portal-highlight');
-    expect(htmlResp.html).toContain('important');
+    expect(html).not.toContain('portal-highlight');
+    expect(html).not.toMatch(/<mark\b[^>]*>\s*important\s*<\/mark>/i);
+    expect(html).toContain('important');
 
     await helper.close();
     await page.close();
@@ -273,7 +377,7 @@ test.describe('Snapshot slug meta tag', () => {
     expect(captureResp.success).toBe(true);
     const timestamp = captureResp.timestamp;
 
-    // Get blob URL for the snapshot and fetch its HTML content
+    // Get generated snapshot HTML URL and decode its content.
     const urlResp = await helper.evaluate(
       ({ slug, timestamp }) =>
         chrome.runtime.sendMessage({
@@ -285,11 +389,9 @@ test.describe('Snapshot slug meta tag', () => {
     );
     expect(urlResp.success).toBe(true);
 
-    // Fetch blob URL content from within the extension origin.
-    const html = await helper.evaluate(async (url) => {
-      const resp = await fetch(url);
-      return resp.text();
-    }, urlResp.url);
+    const html = decodeURIComponent(
+      urlResp.url.replace(/^data:text\/html;charset=utf-8,/, ''),
+    );
     expect(html).toContain(`<meta name="x-portal-slug" content="${slug}">`);
 
     await helper.close();

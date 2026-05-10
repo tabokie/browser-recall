@@ -54,8 +54,20 @@ function waitForListening(child) {
 
 function nextMessage(socket) {
   return new Promise((resolve, reject) => {
-    socket.once('message', (raw) => resolve(JSON.parse(raw.toString())));
-    socket.once('error', reject);
+    const onMessage = (raw) => {
+      const message = JSON.parse(raw.toString());
+      if (message.type === 'change') return;
+      socket.off('message', onMessage);
+      socket.off('error', onError);
+      resolve(message);
+    };
+    const onError = (error) => {
+      socket.off('message', onMessage);
+      socket.off('error', onError);
+      reject(error);
+    };
+    socket.on('message', onMessage);
+    socket.on('error', onError);
   });
 }
 

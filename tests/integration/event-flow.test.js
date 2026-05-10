@@ -1,8 +1,16 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import WebSocket from 'ws';
 
 const ROOT = process.cwd();
@@ -33,8 +41,20 @@ function waitForListening(child) {
 
 function nextMessage(socket) {
   return new Promise((resolve, reject) => {
-    socket.once('message', (raw) => resolve(JSON.parse(raw.toString())));
-    socket.once('error', reject);
+    const onMessage = (raw) => {
+      const message = JSON.parse(raw.toString());
+      if (message.type === 'change') return;
+      socket.off('message', onMessage);
+      socket.off('error', onError);
+      resolve(message);
+    };
+    const onError = (error) => {
+      socket.off('message', onMessage);
+      socket.off('error', onError);
+      reject(error);
+    };
+    socket.on('message', onMessage);
+    socket.on('error', onError);
   });
 }
 
@@ -83,6 +103,92 @@ function generateSlugFromUrl(url) {
   return generateSlug(domain + parsed.pathname, url);
 }
 
+function shardFor(value) {
+  return createHash('sha256')
+    .update(value)
+    .digest()
+    .subarray(0, 1)
+    .toString('hex');
+}
+
+function notePath(root, slug) {
+  return path.join(root, 'objects', 'notes', `${slug}.json`);
+}
+
+function snapshotPath(root, slug, timestamp, ext) {
+  const stem = `${slug}-${timestamp}`;
+  return path.join(
+    root,
+    'objects',
+    'snapshots',
+    shardFor(stem),
+    `${stem}.${ext}`,
+  );
+}
+
+function snapshotRelativePath(slug, timestamp) {
+  const stem = `${slug}-${timestamp}`;
+  return `objects/snapshots/${shardFor(stem)}/${stem}`;
+}
+
+function pagePath(root, slug) {
+  return path.join(root, 'views', 'pages', shardFor(slug), `${slug}.json`);
+}
+
+function listPath(root, listId) {
+  return path.join(root, 'views', 'lists', `${listId}.json`);
+}
+
+function manifestPath(root, name) {
+  return path.join(root, 'views', 'manifest', name);
+}
+
+async function waitForFileContent(filePath, predicate = () => true) {
+  const deadline = Date.now() + 2_000;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      const raw = readFileSync(filePath, 'utf8');
+      if (predicate(raw)) return raw;
+      lastError = new Error(`File content did not match: ${filePath}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(20);
+  }
+  throw lastError;
+}
+
+async function waitForMissing(filePath) {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    if (!existsSync(filePath)) return;
+    await delay(20);
+  }
+  throw new Error(`Expected file to be removed: ${filePath}`);
+}
+
+async function waitForFirstLog(root) {
+  const deadline = Date.now() + 2_000;
+  let lastError;
+  const logsDir = path.join(root, 'logs');
+  while (Date.now() < deadline) {
+    try {
+      for (const deviceDir of readdirSync(logsDir)) {
+        const devicePath = path.join(logsDir, deviceDir);
+        for (const logFile of readdirSync(devicePath)) {
+          return readFileSync(path.join(devicePath, logFile), 'utf8');
+        }
+      }
+      lastError = new Error(`No log files under: ${logsDir}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await delay(20);
+  }
+  throw lastError;
+}
+
 function launchDaemon(configDir, approveMode = 'allow') {
   return spawn(
     BINARY_PATH,
@@ -96,6 +202,18 @@ function launchDaemon(configDir, approveMode = 'allow') {
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
+}
+
+async function stopDaemon(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise((resolve) => {
+    const timer = setTimeout(resolve, 2_000);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.kill('SIGINT');
+  });
 }
 
 async function pairSocket(port) {
@@ -141,10 +259,10 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     expect(build.status).toBe(0);
   });
 
-  afterEach(() => {
-    for (const child of childProcesses.splice(0)) {
-      child.kill('SIGINT');
-    }
+  afterEach(async () => {
+    await Promise.all(
+      childProcesses.splice(0).map((child) => stopDaemon(child)),
+    );
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -185,14 +303,9 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     });
     expect(status.lastDrainedAt).toBe(1710000000000);
 
-    const pagesDir = path.join(dir, 'portal-data', 'pages');
-    const pageFiles = await import('node:fs/promises').then((fs) =>
-      fs.readdir(pagesDir),
-    );
-    expect(pageFiles.length).toBe(1);
-    const pageRaw = readFileSync(path.join(pagesDir, pageFiles[0]), 'utf8');
-    expect(pageRaw).toContain('"title": "Streamed"');
-    expect(pageRaw).toContain('"url": "https://example.com/streamed"');
+    const logRaw = await waitForFirstLog(path.join(dir, 'portal-data'));
+    expect(logRaw).toContain('"action":"visit_page"');
+    expect(logRaw).toContain('"url":"https://example.com/streamed"');
 
     socket.close();
   });
@@ -220,24 +333,23 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     const ack = await nextMessage(socket);
     expect(ack.type).toBe('ack');
 
-    const htmlPath = path.join(
-      dir,
-      'portal-data',
-      'data',
-      'snapshots',
-      'example-streamed-1710000001000.html',
+    const dataRoot = path.join(dir, 'portal-data');
+    const htmlPath = snapshotPath(
+      dataRoot,
+      'example-streamed',
+      1710000001000,
+      'html',
     );
     expect(readFileSync(htmlPath, 'utf8')).toContain('streamed snapshot');
-    const markdownPath = path.join(
-      dir,
-      'portal-data',
-      'data',
-      'snapshots',
-      'example-streamed-1710000001000.md',
+    const markdownPath = snapshotPath(
+      dataRoot,
+      'example-streamed',
+      1710000001000,
+      'md',
     );
     expect(readFileSync(markdownPath, 'utf8')).toContain('streamed snapshot');
 
-    const logsDir = path.join(dir, 'portal-data', 'data', 'logs');
+    const logsDir = path.join(dataRoot, 'logs');
     const [deviceDir] = await import('node:fs/promises').then((fs) =>
       fs.readdir(logsDir),
     );
@@ -453,24 +565,9 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       html: '<html><body>popup snapshot body</body></html>',
     });
 
-    rmSync(
-      path.join(
-        dir,
-        'portal-data',
-        'data',
-        'snapshots',
-        'popup-page-1710000001200.html',
-      ),
-    );
-    rmSync(
-      path.join(
-        dir,
-        'portal-data',
-        'data',
-        'snapshots',
-        'popup-page-1710000001200.md',
-      ),
-    );
+    const dataRoot = path.join(dir, 'portal-data');
+    rmSync(snapshotPath(dataRoot, 'popup-page', 1710000001200, 'html'));
+    rmSync(snapshotPath(dataRoot, 'popup-page', 1710000001200, 'md'));
 
     socket.send(JSON.stringify({ type: 'get_page_info', slug }));
     const staleSnapshotInfo = await nextMessage(socket);
@@ -491,7 +588,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           timestamp: 1710000001300,
           action: 'delete_snapshot',
           url: 'https://example.com/popup',
-          path: 'snapshots/popup-page-1710000001200',
+          path: snapshotRelativePath('popup-page', 1710000001200),
         },
       }),
     );
@@ -768,13 +865,13 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         timestamp: 1710000020300,
         action: 'delete_note',
         url,
-        path: 'notes/n1.json',
+        path: 'objects/notes/n1.json',
       },
       {
         timestamp: 1710000020400,
         action: 'delete_snapshot',
         url,
-        path: `snapshots/${pageSlug}-1710000020200`,
+        path: snapshotRelativePath(pageSlug, 1710000020200),
       },
       {
         timestamp: 1710000020500,
@@ -809,38 +906,20 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       ],
     });
 
-    expect(() =>
-      readFileSync(path.join(dir, 'portal-data', 'data', 'notes', 'n1.json')),
-    ).toThrow();
-    expect(() =>
-      readFileSync(
-        path.join(
-          dir,
-          'portal-data',
-          'data',
-          'snapshots',
-          `${pageSlug}-1710000020200.html`,
-        ),
-      ),
-    ).toThrow();
-    expect(() =>
-      readFileSync(
-        path.join(
-          dir,
-          'portal-data',
-          'data',
-          'snapshots',
-          `${pageSlug}-1710000020200.md`,
-        ),
-      ),
-    ).toThrow();
-    expect(() =>
-      readFileSync(path.join(dir, 'portal-data', 'lists', 'reading-list.json')),
-    ).toThrow();
+    const dataRoot = path.join(dir, 'portal-data');
+    await waitForMissing(notePath(dataRoot, 'n1'));
+    await waitForMissing(
+      snapshotPath(dataRoot, pageSlug, 1710000020200, 'html'),
+    );
+    await waitForMissing(snapshotPath(dataRoot, pageSlug, 1710000020200, 'md'));
+    await waitForMissing(listPath(dataRoot, 'reading-list'));
 
-    const orphanedRaw = readFileSync(
-      path.join(dir, 'portal-data', 'manifest', 'orphaned.json'),
-      'utf8',
+    const orphanedRaw = await waitForFileContent(
+      manifestPath(dataRoot, 'orphaned.json'),
+      (raw) =>
+        !raw.includes('"note:n1"') &&
+        !raw.includes(`"snapshot:${pageSlug}-1710000020200"`) &&
+        !raw.includes('"list:reading-list"'),
     );
     expect(orphanedRaw).not.toContain('"note:n1"');
     expect(orphanedRaw).not.toContain(`"snapshot:${pageSlug}-1710000020200"`);
@@ -886,12 +965,13 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     );
     expect((await nextMessage(socket)).type).toBe('ack');
 
-    const pagesDir = path.join(dir, 'portal-data', 'pages');
-    const pageFiles = await import('node:fs/promises').then((fs) =>
-      fs.readdir(pagesDir),
+    const pageRaw = await waitForFileContent(
+      pagePath(
+        path.join(dir, 'portal-data'),
+        generateSlugFromUrl('https://example.com/page-only'),
+      ),
+      (raw) => raw.includes('"user_title": "Renamed Page"'),
     );
-    expect(pageFiles.length).toBe(1);
-    const pageRaw = readFileSync(path.join(pagesDir, pageFiles[0]), 'utf8');
     expect(pageRaw).toContain('"likes": 1');
     expect(pageRaw).toContain('"title": "Original Title"');
     expect(pageRaw).toContain('"user_title": "Renamed Page"');
@@ -922,18 +1002,14 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     );
     expect((await nextMessage(socket)).type).toBe('ack');
 
-    const noteRaw = readFileSync(
-      path.join(dir, 'portal-data', 'data', 'notes', 'n1.json'),
-      'utf8',
-    );
+    const dataRoot = path.join(dir, 'portal-data');
+    const noteRaw = await waitForFileContent(notePath(dataRoot, 'n1'));
     expect(noteRaw).toContain('"excerpt": "hello"');
     expect(noteRaw).toContain('"note": "world"');
 
-    const pagesDir = path.join(dir, 'portal-data', 'pages');
-    const pageFiles = await import('node:fs/promises').then((fs) =>
-      fs.readdir(pagesDir),
+    const pageRaw = await waitForFileContent(
+      pagePath(dataRoot, generateSlugFromUrl('https://example.com/note-page')),
     );
-    const pageRaw = readFileSync(path.join(pagesDir, pageFiles[0]), 'utf8');
     expect(pageRaw).toContain('"note:n1"');
     expect(pageRaw).toContain('"title": "Note Page"');
 
@@ -988,7 +1064,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           timestamp: 1710000000400,
           action: 'delete_note',
           url: 'https://example.com/note-page',
-          path: 'notes/n2.json',
+          path: 'objects/notes/n2.json',
         },
       }),
     );
@@ -1002,29 +1078,34 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           timestamp: 1710000000500,
           action: 'restore_note',
           url: 'https://example.com/note-page',
-          path: 'notes/n2.json',
+          path: 'objects/notes/n2.json',
         },
       }),
     );
     expect((await nextMessage(socket)).type).toBe('ack');
 
-    expect(
-      existsSync(path.join(dir, 'portal-data', 'data', 'notes', 'n1.json')),
-    ).toBe(false);
+    expect(existsSync(notePath(path.join(dir, 'portal-data'), 'n1'))).toBe(
+      false,
+    );
 
-    const newNoteRaw = readFileSync(
-      path.join(dir, 'portal-data', 'data', 'notes', 'n2.json'),
-      'utf8',
+    const newNoteRaw = await waitForFileContent(
+      notePath(path.join(dir, 'portal-data'), 'n2'),
+      (raw) =>
+        raw.includes('"note": "updated world"') &&
+        !raw.includes('"deleted": true') &&
+        raw.includes('"deletedTs": 1710000000500'),
     );
     expect(newNoteRaw).toContain('"note": "updated world"');
     expect(newNoteRaw).not.toContain('"deleted": true');
     expect(newNoteRaw).toContain('"deletedTs": 1710000000500');
 
-    const pagesDir = path.join(dir, 'portal-data', 'pages');
-    const [pageFile] = await import('node:fs/promises').then((fs) =>
-      fs.readdir(pagesDir),
+    const pageRaw = await waitForFileContent(
+      pagePath(
+        path.join(dir, 'portal-data'),
+        generateSlugFromUrl('https://example.com/note-page'),
+      ),
+      (raw) => raw.includes('"note:n2"') && !raw.includes('"note:n1"'),
     );
-    const pageRaw = readFileSync(path.join(pagesDir, pageFile), 'utf8');
     expect(pageRaw).toContain('"note:n2"');
     expect(pageRaw).not.toContain('"note:n1"');
 
@@ -1063,7 +1144,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           timestamp: 1710000000700,
           action: 'delete_snapshot',
           url: 'https://example.com/snapshot-page',
-          path: 'snapshots/snapshot-page-1710000000600',
+          path: snapshotRelativePath('snapshot-page', 1710000000600),
         },
       }),
     );
@@ -1077,26 +1158,27 @@ describe.sequential('phase 2 daemon event flow integration', () => {
           timestamp: 1710000000800,
           action: 'restore_snapshot',
           url: 'https://example.com/snapshot-page',
-          path: 'snapshots/snapshot-page-1710000000600',
+          path: snapshotRelativePath('snapshot-page', 1710000000600),
         },
       }),
     );
     expect((await nextMessage(socket)).type).toBe('ack');
 
-    const htmlPath = path.join(
-      dir,
-      'portal-data',
-      'data',
-      'snapshots',
-      'snapshot-page-1710000000600.html',
+    const htmlPath = snapshotPath(
+      path.join(dir, 'portal-data'),
+      'snapshot-page',
+      1710000000600,
+      'html',
     );
     expect(readFileSync(htmlPath, 'utf8')).toContain('snapshot page');
 
-    const pagesDir = path.join(dir, 'portal-data', 'pages');
-    const [pageFile] = await import('node:fs/promises').then((fs) =>
-      fs.readdir(pagesDir),
+    const pageRaw = await waitForFileContent(
+      pagePath(
+        path.join(dir, 'portal-data'),
+        generateSlugFromUrl('https://example.com/snapshot-page'),
+      ),
+      (raw) => raw.includes('"snapshot:snapshot-page-1710000000600"'),
     );
-    const pageRaw = readFileSync(path.join(pagesDir, pageFile), 'utf8');
     expect(pageRaw).toContain('"snapshot:snapshot-page-1710000000600"');
 
     socket.close();
@@ -1202,9 +1284,14 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     );
     expect((await nextMessage(socket)).type).toBe('ack');
 
-    const listRaw = readFileSync(
-      path.join(dir, 'portal-data', 'lists', 'reading-list.json'),
-      'utf8',
+    const listRaw = await waitForFileContent(
+      listPath(path.join(dir, 'portal-data'), 'reading-list'),
+      (raw) =>
+        raw.includes('"name": "Reading"') &&
+        raw.includes('"rule-k-reading"') &&
+        raw.includes('"id": "page:') &&
+        !raw.includes('"deleted": true') &&
+        raw.includes('"deletedTs": 1710000001400'),
     );
     expect(listRaw).toContain('"name": "Reading"');
     expect(listRaw).toContain('"rule-k-reading"');
@@ -1213,25 +1300,25 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     expect(listRaw).toContain('"deletedTs": 1710000001400');
 
     const nameMapRaw = readFileSync(
-      path.join(dir, 'portal-data', 'manifest', 'list-name-to-id.json'),
+      manifestPath(path.join(dir, 'portal-data'), 'list-name-to-id.json'),
       'utf8',
     );
     expect(nameMapRaw).toContain('"test-device/Reading": "reading-list"');
 
     const listOrderRaw = readFileSync(
-      path.join(dir, 'portal-data', 'manifest', 'list-order.json'),
+      manifestPath(path.join(dir, 'portal-data'), 'list-order.json'),
       'utf8',
     );
     expect(listOrderRaw).toContain('"id": "list:reading-list"');
 
     const settingsRaw = readFileSync(
-      path.join(dir, 'portal-data', 'manifest', 'settings.json'),
+      manifestPath(path.join(dir, 'portal-data'), 'settings.json'),
       'utf8',
     );
     expect(settingsRaw).toContain('"theme": "sepia"');
 
     const orphanedRaw = readFileSync(
-      path.join(dir, 'portal-data', 'manifest', 'orphaned.json'),
+      manifestPath(path.join(dir, 'portal-data'), 'orphaned.json'),
       'utf8',
     );
     expect(orphanedRaw).not.toContain('"list:reading-list"');
@@ -1299,15 +1386,18 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     );
     expect((await nextMessage(socket)).type).toBe('ack');
 
-    const listRaw = readFileSync(
-      path.join(dir, 'portal-data', 'lists', 'hubs.json'),
-      'utf8',
+    const listRaw = await waitForFileContent(
+      listPath(path.join(dir, 'portal-data'), 'hubs'),
+      (raw) =>
+        raw.includes('"rule-f-hubs"') &&
+        raw.includes('"source": "auto"') &&
+        raw.includes('"id": "page:'),
     );
     expect(listRaw).toContain('"rule-f-hubs"');
     expect(listRaw).toContain('"source": "auto"');
     expect(listRaw).toContain('"id": "page:');
 
-    const logsDir = path.join(dir, 'portal-data', 'data', 'logs');
+    const logsDir = path.join(dir, 'portal-data', 'logs');
     const [deviceDir] = await import('node:fs/promises').then((fs) =>
       fs.readdir(logsDir),
     );
@@ -1367,10 +1457,10 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       success: true,
     });
 
-    const pagesDir = path.join(dir, 'portal-data', 'pages');
-    const listsDir = path.join(dir, 'portal-data', 'lists');
-    const manifestDir = path.join(dir, 'portal-data', 'manifest');
-    const logsDir = path.join(dir, 'portal-data', 'data', 'logs');
+    const pagesDir = path.join(dir, 'portal-data', 'views', 'pages');
+    const listsDir = path.join(dir, 'portal-data', 'views', 'lists');
+    const manifestDir = path.join(dir, 'portal-data', 'views', 'manifest');
+    const logsDir = path.join(dir, 'portal-data', 'logs');
     expect(readFileSync(path.join(dir, 'config.json'), 'utf8')).toContain(
       '"device_id"',
     );
@@ -1507,9 +1597,9 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     expect(batch.results[0].listId).toBe('reading');
     expect(batch.results[0].url).toBe('https://github.com/example/repo');
 
-    const listRaw = readFileSync(
-      path.join(dir, 'portal-data', 'lists', 'reading.json'),
-      'utf8',
+    const listRaw = await waitForFileContent(
+      listPath(path.join(dir, 'portal-data'), 'reading'),
+      (raw) => raw.includes('"source": "auto"'),
     );
     expect(listRaw).toContain('"source": "auto"');
 

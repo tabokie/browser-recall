@@ -992,32 +992,6 @@ export async function getConnectorBridgeState() {
   return cachedConnectorState();
 }
 
-export async function requestDesktopRuleBatch(listIds, entries) {
-  await waitForIdleBridge();
-  const payload = await sendBridgeMessage(
-    {
-      type: 'run_rule_batch',
-      listIds,
-      entries,
-    },
-    ['rule_batch_result', 'error'],
-  );
-  return payload;
-}
-
-export async function requestDesktopRulePreview(rule, entries) {
-  await waitForIdleBridge();
-  const payload = await sendBridgeMessage(
-    {
-      type: 'preview_rule',
-      rule,
-      entries,
-    },
-    ['preview_rule_result', 'error'],
-  );
-  return payload;
-}
-
 export async function requestDesktopPageInfo(slug) {
   await waitForIdleBridge();
   return sendBridgeMessage(
@@ -1060,36 +1034,6 @@ export async function requestDesktopEntity(key) {
       key,
     },
     ['entity_result', 'error'],
-  );
-}
-
-export async function requestDesktopDirectoryInfo() {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'get_directory_info',
-    },
-    ['directory_info_result', 'error'],
-  );
-}
-
-export async function requestDesktopDirectorySize() {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'get_directory_size',
-    },
-    ['directory_size_result', 'error'],
-  );
-}
-
-export async function requestDesktopClearAllData() {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'clear_all_data',
-    },
-    ['clear_all_data_result', 'error'],
   );
 }
 
@@ -1159,27 +1103,6 @@ export async function requestDesktopHistoryBatch(files) {
   );
 }
 
-export async function requestDesktopAllPages() {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'get_all_pages',
-    },
-    ['all_pages_result', 'error'],
-  );
-}
-
-export async function requestDesktopPermanentDelete(keys) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'permanent_delete',
-      keys,
-    },
-    ['permanent_delete_result', 'error'],
-  );
-}
-
 export async function requestDesktopPopupLists() {
   await waitForIdleBridge();
   return sendBridgeMessage(
@@ -1209,40 +1132,4 @@ export async function requestDesktopCommand(action, request = {}) {
     );
   }
   return payload.response || { success: true };
-}
-
-export async function requestDesktopHistorySearch(query, limit) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'search_history',
-      query,
-      ...(limit !== undefined ? { limit } : {}),
-    },
-    ['search_history_result', 'error'],
-  );
-}
-
-export async function requestDesktopNotesSearch(query, limit) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'search_notes',
-      query,
-      ...(limit !== undefined ? { limit } : {}),
-    },
-    ['search_notes_result', 'error'],
-  );
-}
-
-export async function requestDesktopSnapshotsSearch(query, limit) {
-  await waitForIdleBridge();
-  return sendBridgeMessage(
-    {
-      type: 'search_snapshots',
-      query,
-      ...(limit !== undefined ? { limit } : {}),
-    },
-    ['search_snapshots_result', 'error'],
-  );
 }

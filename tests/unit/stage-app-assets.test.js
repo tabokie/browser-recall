@@ -1,7 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -32,11 +31,17 @@ describe('extension staged assets', () => {
     );
     expect(popupSource).not.toContain('../../packages/core/');
 
-    const entityTypes = await import(
-      pathToFileURL(join(outDir, 'entity-types.js')).href
+    const entityTypesSource = readFileSync(
+      join(outDir, 'entity-types.js'),
+      'utf8',
     );
-    expect(entityTypes.listKey('reading')).toBe('list:reading');
-    expect(entityTypes.pageKey('article')).toBe('page:article');
+    expect(entityTypesSource).toBe("export * from './core/entity-types.js';\n");
+    const coreEntityTypes = readFileSync(
+      join(outDir, 'core/entity-types.js'),
+      'utf8',
+    );
+    expect(coreEntityTypes).toContain('export const listKey = (id) =>');
+    expect(coreEntityTypes).toContain('export const pageKey = (slug) =>');
   });
 
   it('keeps shared CSS imports valid in the staged extension bundle', () => {
@@ -122,10 +127,13 @@ describe('extension staged assets', () => {
       type: 'module',
     });
     expect(manifest.content_scripts[0].js).toEqual([
+      'spa-navigation-bridge.js',
+    ]);
+    expect(manifest.content_scripts[1].js).toEqual([
       'browser-api.js',
       'content.js',
     ]);
-    expect(manifest.content_scripts[1].js).toEqual([
+    expect(manifest.content_scripts[2].js).toEqual([
       'browser-api.js',
       'savepage/content-fontface.js',
     ]);

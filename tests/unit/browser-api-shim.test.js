@@ -137,8 +137,8 @@ describe('browser-api shim', () => {
 
     runShim(context);
 
-    expect(context.chrome.runtime.getURL('snapshot-viewer.html')).toBe(
-      'moz-extension://browser-recall.invalid/snapshot-viewer.html',
+    expect(context.chrome.runtime.getURL('popup.html')).toBe(
+      'moz-extension://browser-recall.invalid/popup.html',
     );
   });
 
@@ -170,12 +170,10 @@ describe('browser-api shim', () => {
     runShim(context);
 
     const manifest = context.chrome.runtime.getManifest();
-    const url = context.chrome.runtime.getURL('snapshot-viewer.html');
+    const url = context.chrome.runtime.getURL('popup.html');
     expect(manifest).toEqual({ version: '1.2.3' });
     expect(manifest?.then).toBeUndefined();
-    expect(url).toBe(
-      'moz-extension://browser-recall.invalid/snapshot-viewer.html',
-    );
+    expect(url).toBe('moz-extension://browser-recall.invalid/popup.html');
     expect(url?.then).toBeUndefined();
   });
 

@@ -1,0 +1,14 @@
+- Let's simplify the extension part of the codebase. Examine its structure first.
+- No need to perform split, let's focusing on cutting down the total LoC first. Go ahead with the useless code removal. And I noticed there is a dark-theme.css which I think is useless. The snapshot-viewer looks suspicious too because we now should only use directly file open and browser's native HTML rendering.
+- > make extension snapshot opening delegate to the desktop command
+You mean the extension cannot open a file path directly?
+- I see. The desktop redirect sounds too complex, and it could open the wrong default browser when user is on another browser? If so let's keep the old approach (blob url)
+- Fix the tests
+- I fount two issues, fix them TDD using E2E tests
+(1) In desktop page detail window, I cannot click open the underscored URL
+(2) When opening a snapshot in browser, the extension popup UI thinks the page is "file://path/to/snapshot" instead of the original page, however, the snapshot HTML does have highlights rendered correctly. So it's possible that the highlight rendering and popup rendering use two different paths, they should be unified
+- What other bugs could have been introduced by this cleanup session?
+- Actually, when I click open the snapshot from popup UI, the snapshot doesn't load. So the first issue is bigger than what's stated. And it is serious because it should've been caught early in the test.
+Fix second issue. Drop third issue.
+- Why didn't you fix the first issue? I said it was bigger than what's stated, and exposes issues in our testing. So it should be fixed more thoroughly.
+- $finish model=GPT-5.5 Codex

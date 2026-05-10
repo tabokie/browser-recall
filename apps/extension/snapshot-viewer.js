@@ -2,41 +2,44 @@ import { logDebug } from './logger.js';
 import { findTextRange } from './highlight-helpers.js';
 import { getSchemePalette } from './color-scheme-map.js';
 
-const { colorScheme: _cs } = await chrome.storage.session.get(['colorScheme']);
-const palette = getSchemePalette(_cs);
+const { colorScheme } = await chrome.storage.session.get(['colorScheme']);
+const palette = getSchemePalette(colorScheme);
 
 const params = new URLSearchParams(location.search);
 const slug = params.get('slug');
-const ts = params.get('ts');
+const ts = Number(params.get('ts'));
 
-if (!slug || !ts) {
+if (!slug || !Number.isFinite(ts)) {
   document.body.textContent = 'Missing snapshot parameters.';
-  throw new Error('Missing slug or ts');
+  throw new Error('Missing snapshot parameters');
 }
 
-// Fetch snapshot HTML content through the background daemon RPC.
-const htmlResp = await chrome.runtime.sendMessage({
-  action: 'getSnapshotHtml',
-  slug,
-  timestamp: parseInt(ts),
-});
-if (!htmlResp?.success) {
+const [htmlResp, pageResp] = await Promise.all([
+  chrome.runtime.sendMessage({
+    action: 'getSnapshotHtml',
+    slug,
+    timestamp: ts,
+  }),
+  chrome.runtime.sendMessage({
+    action: 'getPageInfo',
+    slug,
+  }),
+]);
+
+if (!htmlResp?.success || !htmlResp.html) {
   document.body.textContent = 'Snapshot not found.';
   throw new Error(htmlResp?.error || 'getSnapshotHtml failed');
 }
 
+const pageUrl = pageResp?.entry?.url || '';
 const html = htmlResp.html;
-
 const frame = document.getElementById('frame');
 frame.srcdoc = html;
 
-// Set tab title from snapshot content
-const parser = new DOMParser();
-const parsed = parser.parseFromString(html, 'text/html');
+const parsed = new DOMParser().parseFromString(html, 'text/html');
 const title = parsed.querySelector('title')?.textContent;
 if (title) document.title = title;
 
-// After iframe loads, apply highlights and wire up interactivity
 frame.addEventListener('load', async () => {
   try {
     const resp = await chrome.runtime.sendMessage({
@@ -57,59 +60,50 @@ frame.addEventListener('load', async () => {
       }
     }
 
-    // New highlights: text selection inside the iframe
     doc.addEventListener('mouseup', () => {
       const selection = doc.getSelection();
       const selectedText = selection?.toString().trim();
-      if (
-        !selectedText ||
-        selectedText.length === 0 ||
-        selection.rangeCount === 0
-      )
-        return;
-      // Ignore if selection is inside an existing highlight
+      if (!selectedText || selection.rangeCount === 0) return;
       const anchor = selection.anchorNode;
       if (
         anchor &&
-        (anchor.nodeType === 3 ? anchor.parentElement : anchor)?.closest?.(
-          'mark',
-        )
-      )
+        (anchor.nodeType === Node.TEXT_NODE
+          ? anchor.parentElement
+          : anchor
+        )?.closest?.('mark')
+      ) {
         return;
+      }
 
       const range = selection.getRangeAt(0);
       chrome.runtime
         .sendMessage({
           action: 'createNote',
           pageSlug: slug,
-          url: '', // resolved from page entity by background
+          url: pageUrl,
           excerpt: selectedText,
           note: '',
           cssPath: null,
         })
-        .then((resp) => {
-          if (!resp?.success) return;
-          const noteSlug = resp.noteSlug;
-          const mark = wrapRangeWithMark(doc, range, selectedText);
-          if (mark && noteSlug) {
-            mark.dataset.noteSlug = noteSlug;
+        .then((response) => {
+          if (!response?.success) return;
+          const noteSlug = response.noteSlug;
+          const mark = wrapRangeWithMark(doc, range, selectedText, noteSlug);
+          if (mark) {
             attachMarkClickHandler(doc, mark);
             showHighlightEditOverlay(doc, mark, selectedText, noteSlug, '');
           }
           selection.removeAllRanges();
         });
     });
-  } catch (e) {
-    logDebug('[snapshot-viewer] highlight injection failed:', e);
+  } catch (error) {
+    logDebug('[snapshot-viewer] highlight injection failed:', error.message);
   }
 });
 
-// ─── Highlight helpers (operate on iframe document) ──────────────────
-
-// Find text across nodes and wrap in <mark>. Returns the mark element or undefined.
 function highlightInDoc(doc, text, noteSlug) {
   const range = findTextRange(doc.body, text, doc);
-  if (!range) return;
+  if (!range) return null;
   return wrapRangeWithMark(doc, range, text, noteSlug);
 }
 
@@ -120,18 +114,18 @@ function wrapRangeWithMark(doc, range, text, noteSlug) {
   mark.dataset.highlightText = text;
   if (noteSlug) mark.dataset.noteSlug = noteSlug;
 
-  if (range.startContainer === range.endContainer) {
-    try {
-      range.surroundContents(mark);
-      return mark;
-    } catch {}
-  }
   try {
-    const fragment = range.extractContents();
-    mark.appendChild(fragment);
-    range.insertNode(mark);
+    if (range.startContainer === range.endContainer) {
+      range.surroundContents(mark);
+    } else {
+      const fragment = range.extractContents();
+      mark.appendChild(fragment);
+      range.insertNode(mark);
+    }
     return mark;
-  } catch {}
+  } catch {
+    return null;
+  }
 }
 
 function unwrapHighlightMark(mark) {
@@ -142,28 +136,18 @@ function unwrapHighlightMark(mark) {
   parent.normalize();
 }
 
-// ─── Click handler + overlay (mirrors content.js) ────────────────────
-
 function attachMarkClickHandler(doc, mark) {
-  mark.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const existing = doc.getElementById('portal-highlight-overlay');
-    if (existing) existing.remove();
+  mark.addEventListener('click', (event) => {
+    event.stopPropagation();
+    doc.getElementById('portal-highlight-overlay')?.remove();
 
     const noteSlug = mark.dataset.noteSlug;
     const text = mark.dataset.highlightText || mark.textContent;
-
-    if (!noteSlug) {
-      showHighlightEditOverlay(doc, mark, text, null, '');
-      return;
-    }
-
     chrome.runtime
       .sendMessage({ action: 'loadPageNotes', slug })
       .then((resp) => {
-        if (resp?.success === false) return;
         const notes = resp?.notes || [];
-        const match = notes.find((n) => n.slug === noteSlug);
+        const match = notes.find((note) => note.slug === noteSlug);
         const displayText = match
           ? Array.isArray(match.excerpt)
             ? match.excerpt.join(' ')
@@ -183,7 +167,6 @@ function attachMarkClickHandler(doc, mark) {
   });
 }
 
-// Overlay styles + HTML — same as content.js showHighlightEditOverlay
 const OVERLAY_STYLE = `
   .overlay {
     display: flex; align-items: flex-start; gap: 8px; width: 280px;
@@ -220,40 +203,25 @@ const OVERLAY_HTML = `
   </div>
 `;
 
-function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
-  const existing = doc.getElementById('portal-highlight-overlay');
-  if (existing) existing.remove();
+function showHighlightEditOverlay(doc, mark, _text, noteSlug, existingNote) {
+  doc.getElementById('portal-highlight-overlay')?.remove();
 
   const rect = mark.getBoundingClientRect();
   const win = doc.defaultView;
-
   const host = doc.createElement('div');
   host.id = 'portal-highlight-overlay';
   host.style.cssText = 'position: absolute; z-index: 2147483647;';
-  host.style.left = rect.left + win.scrollX + 'px';
-  host.style.top = rect.bottom + win.scrollY + 4 + 'px';
+  host.style.left = `${rect.left + win.scrollX}px`;
+  host.style.top = `${rect.bottom + win.scrollY + 4}px`;
 
   const shadow = host.attachShadow({ mode: 'closed' });
   shadow.innerHTML = `<style>${OVERLAY_STYLE}</style>${OVERLAY_HTML}`;
-
   doc.body.appendChild(host);
 
   const textarea = shadow.querySelector('textarea');
   const deleteBtn = shadow.querySelector('.delete-btn');
-
-  textarea.value = existingNote;
-
-  function autoResize() {
-    textarea.style.height = '28px';
-    if (textarea.scrollHeight > 28)
-      textarea.style.height = textarea.scrollHeight + 'px';
-  }
-  if (existingNote) autoResize();
-
+  textarea.value = existingNote || '';
   textarea.focus();
-  textarea.addEventListener('input', () => {
-    autoResize();
-  });
 
   let saved = false;
   function saveAndClose() {
@@ -261,34 +229,23 @@ function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
     saved = true;
     const note = textarea.value;
     if (note !== existingNote && noteSlug) {
-      chrome.runtime
-        .sendMessage({
-          action: 'updateNote',
-          noteSlug,
-          note,
-        })
-        .then((resp) => {
-          if (resp?.noteSlug) mark.dataset.noteSlug = resp.noteSlug;
-        })
-        .catch(() => {});
+      chrome.runtime.sendMessage({ action: 'updateNote', noteSlug, note });
     }
     host.remove();
   }
 
-  deleteBtn.addEventListener('click', (ev) => {
-    ev.stopPropagation();
+  deleteBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
     unwrapHighlightMark(mark);
     if (noteSlug)
       chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug });
     host.remove();
   });
-
-  textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') saveAndClose();
+  textarea.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') saveAndClose();
   });
-
-  const handleOutsideClick = (e) => {
-    if (!host.contains(e.target)) {
+  const handleOutsideClick = (event) => {
+    if (!host.contains(event.target)) {
       saveAndClose();
       doc.removeEventListener('mousedown', handleOutsideClick);
     }
