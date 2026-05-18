@@ -9,22 +9,47 @@ const params = new URLSearchParams(location.search);
 const slug = params.get('slug');
 const ts = Number(params.get('ts'));
 
+function showSnapshotRuntimeError(error) {
+  if (!globalThis.browserRecallWebExtension?.isRuntimeFailure?.(error)) {
+    return false;
+  }
+  const message =
+    'Browser Recall extension reloaded. Please reload the page and try again.';
+  let banner = document.getElementById('snapshotRuntimeError');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'snapshotRuntimeError';
+    banner.setAttribute('role', 'status');
+    banner.style.cssText =
+      'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2147483647;background:rgba(180,30,30,0.92);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 14px;border-radius:6px;max-width:420px;text-align:center;';
+    document.body.appendChild(banner);
+  }
+  banner.textContent = message;
+  return true;
+}
+
 if (!slug || !Number.isFinite(ts)) {
   document.body.textContent = 'Missing snapshot parameters.';
   throw new Error('Missing snapshot parameters');
 }
 
-const [htmlResp, pageResp] = await Promise.all([
-  chrome.runtime.sendMessage({
-    action: 'getSnapshotHtml',
-    slug,
-    timestamp: ts,
-  }),
-  chrome.runtime.sendMessage({
-    action: 'getPageInfo',
-    slug,
-  }),
-]);
+let htmlResp;
+let pageResp;
+try {
+  [htmlResp, pageResp] = await Promise.all([
+    chrome.runtime.sendMessage({
+      action: 'getSnapshotHtml',
+      slug,
+      timestamp: ts,
+    }),
+    chrome.runtime.sendMessage({
+      action: 'getPageInfo',
+      slug,
+    }),
+  ]);
+} catch (error) {
+  if (!showSnapshotRuntimeError(error)) throw error;
+}
 
 if (!htmlResp?.success || !htmlResp.html) {
   document.body.textContent = 'Snapshot not found.';
@@ -94,9 +119,13 @@ frame.addEventListener('load', async () => {
             showHighlightEditOverlay(doc, mark, selectedText, noteSlug, '');
           }
           selection.removeAllRanges();
+        })
+        .catch((error) => {
+          showSnapshotRuntimeError(error);
         });
     });
   } catch (error) {
+    if (showSnapshotRuntimeError(error)) return;
     logDebug('[snapshot-viewer] highlight injection failed:', error.message);
   }
 });
@@ -161,7 +190,8 @@ function attachMarkClickHandler(doc, mark) {
           match?.note || '',
         );
       })
-      .catch(() => {
+      .catch((error) => {
+        if (showSnapshotRuntimeError(error)) return;
         showHighlightEditOverlay(doc, mark, text, noteSlug, '');
       });
   });
@@ -229,7 +259,11 @@ function showHighlightEditOverlay(doc, mark, _text, noteSlug, existingNote) {
     saved = true;
     const note = textarea.value;
     if (note !== existingNote && noteSlug) {
-      chrome.runtime.sendMessage({ action: 'updateNote', noteSlug, note });
+      chrome.runtime
+        .sendMessage({ action: 'updateNote', noteSlug, note })
+        .catch((error) => {
+          showSnapshotRuntimeError(error);
+        });
     }
     host.remove();
   }
@@ -238,7 +272,11 @@ function showHighlightEditOverlay(doc, mark, _text, noteSlug, existingNote) {
     event.stopPropagation();
     unwrapHighlightMark(mark);
     if (noteSlug)
-      chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug });
+      chrome.runtime
+        .sendMessage({ action: 'deleteNote', noteSlug })
+        .catch((error) => {
+          showSnapshotRuntimeError(error);
+        });
     host.remove();
   });
   textarea.addEventListener('keydown', (event) => {

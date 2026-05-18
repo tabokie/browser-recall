@@ -763,6 +763,36 @@
         cursor: pointer;
         position: relative;
       }
+      .result-drag-preview {
+        position: fixed;
+        top: -1000px;
+        left: -1000px;
+        z-index: 2147483647;
+        width: 260px;
+        max-width: 260px;
+        padding: 6px;
+        border: 1px solid var(--accent-primary);
+        border-radius: var(--radius-md);
+        background: var(--bg-surface);
+        box-shadow: var(--shadow-float);
+        color: var(--text-primary);
+        pointer-events: none;
+      }
+      .result-drag-preview-row,
+      .result-drag-preview-more {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        line-height: 18px;
+      }
+      .result-drag-preview-row {
+        padding: 2px 4px;
+      }
+      .result-drag-preview-more {
+        padding: 2px 4px 0;
+        color: var(--text-muted);
+      }
 
       .card-row {
         display: flex;

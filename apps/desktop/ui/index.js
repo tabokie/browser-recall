@@ -1443,6 +1443,7 @@ function showRecycleBinLayout() {
 
 let recycleBinRenderSeq = 0;
 let recycleBinBadgeSeq = 0;
+let recycleBinEmptyBound = false;
 
 async function readOrphanedManifestFresh() {
   const resp = await sendAction({
@@ -1483,6 +1484,7 @@ async function loadRecycleBinEntries() {
 }
 
 async function showRecycleBin() {
+  bindRecycleBinEmptyButton();
   const renderSeq = ++recycleBinRenderSeq;
   activeView = { type: 'recycle-bin' };
   updateSidebarActive();
@@ -1513,6 +1515,8 @@ async function showRecycleBin() {
   }
   emptyEl.style.display = 'none';
   headerEl.style.display = '';
+  const emptyBtn = document.querySelector('.empty-bin-btn');
+  if (emptyBtn) emptyBtn.disabled = false;
 
   for (const { key } of entries) {
     const typeLabel = entityTypeLabel(key);
@@ -1630,14 +1634,18 @@ async function showRecycleBin() {
     });
     itemsEl.appendChild(card);
   }
+}
 
-  // Empty bin button
+function bindRecycleBinEmptyButton() {
   const emptyBtn = document.querySelector('.empty-bin-btn');
-  // Clone to remove old listeners
-  const newBtn = emptyBtn.cloneNode(true);
-  emptyBtn.parentNode.replaceChild(newBtn, emptyBtn);
-  newBtn.addEventListener('click', async () => {
-    newBtn.disabled = true;
+  if (recycleBinEmptyBound) return;
+  if (!emptyBtn) return;
+  recycleBinEmptyBound = true;
+  emptyBtn.addEventListener('click', async () => {
+    emptyBtn.disabled = true;
+    const itemsEl = document.getElementById('recycleBinItems');
+    const emptyEl = document.getElementById('recycleBinEmpty');
+    const headerEl = document.querySelector('.recycle-bin-header');
     try {
       await sendAction({ action: 'permanentDeleteAll' });
       recycleBinRenderSeq++;
@@ -1651,7 +1659,7 @@ async function showRecycleBin() {
       await updateRecycleBinBadge();
       if (activeView.type === 'recycle-bin') await showRecycleBin();
     } catch (error) {
-      newBtn.disabled = false;
+      emptyBtn.disabled = false;
       showErrorBubble(`Failed to empty recycle bin: ${error.message}`, {
         suffix: '',
       });
@@ -3870,6 +3878,8 @@ function bindSnapshotClickHandlers(container) {
       ) {
         section.closest('.detail-section')?.remove();
       }
+      await updateRecycleBinBadge();
+      if (activeView.type === 'recycle-bin') await showRecycleBin();
     });
   });
 }
@@ -4177,6 +4187,26 @@ function bindResultDelegation(container) {
         : [{ url: row.dataset.url, title: row.dataset.title }];
     e.dataTransfer.setData('text/plain', JSON.stringify({ items }));
     e.dataTransfer.effectAllowed = 'copy';
+    if (items.length > 1 && typeof e.dataTransfer.setDragImage === 'function') {
+      const preview = document.createElement('div');
+      preview.className = 'result-drag-preview';
+      preview.innerHTML = items
+        .slice(0, 6)
+        .map(
+          (dragItem) =>
+            `<div class="result-drag-preview-row">${escapeHtml(dragItem.title || dragItem.url || '')}</div>`,
+        )
+        .join('');
+      if (items.length > 6) {
+        preview.insertAdjacentHTML(
+          'beforeend',
+          `<div class="result-drag-preview-more">+${items.length - 6} more</div>`,
+        );
+      }
+      document.body.appendChild(preview);
+      e.dataTransfer.setDragImage(preview, 16, 16);
+      requestAnimationFrame(() => preview.remove());
+    }
   });
 }
 

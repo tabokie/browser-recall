@@ -297,9 +297,8 @@ const categories = [
 
 const totalTestLines = categories.reduce((sum, [, value]) => sum + value, 0);
 const unitLines = categories[0][1];
-const rustInlineUnitLines = categories.find(
-  ([label]) => label === 'Inline Rust unit tests',
-)?.[1] ?? 0;
+const rustInlineUnitLines =
+  categories.find(([label]) => label === 'Inline Rust unit tests')?.[1] ?? 0;
 const e2eLines = categories
   .filter(([label]) => label.includes('E2E') || label.includes('smoke'))
   .reduce((sum, [, value]) => sum + value, 0);

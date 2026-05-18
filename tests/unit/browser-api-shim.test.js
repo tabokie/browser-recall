@@ -110,6 +110,45 @@ describe('browser-api shim', () => {
     expect(context.browserRecallWebExtension.engine).toBe('chromium');
   });
 
+  it('classifies extension runtime failures that need user-visible recovery', () => {
+    const context = {
+      console,
+      navigator: {
+        userAgent:
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0',
+      },
+      browser: {
+        runtime: {
+          id: 'browser-recall@example.invalid',
+        },
+        storage: {
+          local: promiseStorageArea(),
+          session: promiseStorageArea(),
+        },
+      },
+    };
+
+    runShim(context);
+
+    const isRuntimeFailure = context.browserRecallWebExtension.isRuntimeFailure;
+    expect(isRuntimeFailure(new Error('Extension context invalidated.'))).toBe(
+      true,
+    );
+    expect(
+      isRuntimeFailure(
+        new Error('requestStorageAccessFor: Permission denied.'),
+      ),
+    ).toBe(true);
+    expect(
+      isRuntimeFailure(
+        new Error(
+          "The service worker navigation preload request was cancelled before 'preloadResponse' settled.",
+        ),
+      ),
+    ).toBe(true);
+    expect(isRuntimeFailure(new Error('Validation failed.'))).toBe(false);
+  });
+
   it('fills runtime.getURL from the extension page origin when the browser API omits it', () => {
     const context = {
       console,

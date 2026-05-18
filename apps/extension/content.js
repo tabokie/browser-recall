@@ -470,7 +470,9 @@ function initContentScript() {
               .then((resp) => {
                 if (resp?.noteSlug) existingNoteSlug = resp.noteSlug;
               })
-              .catch(() => {});
+              .catch((error) => {
+                showExtensionReloadNotification(error);
+              });
           } else {
             chrome.runtime
               .sendMessage({
@@ -481,7 +483,9 @@ function initContentScript() {
                 note,
                 cssPath: null,
               })
-              .catch(() => {});
+              .catch((error) => {
+                showExtensionReloadNotification(error);
+              });
           }
         }
       },
@@ -803,7 +807,8 @@ function initContentScript() {
             pageSlug,
           );
         })
-        .catch(() => {
+        .catch((error) => {
+          if (showExtensionReloadNotification(error)) return;
           showHighlightEditOverlay(mark, text, noteSlug, '', pageSlug);
         });
     });
@@ -834,8 +839,8 @@ function initContentScript() {
           }
         }
       }
-    } catch (e) {
-      // Extension context may not be ready yet
+    } catch (error) {
+      showExtensionReloadNotification(error);
     }
   }
 
@@ -866,7 +871,9 @@ function initContentScript() {
               note,
             });
             if (resp?.noteSlug) mark.dataset.noteSlug = resp.noteSlug;
-          } catch {}
+          } catch (error) {
+            showExtensionReloadNotification(error);
+          }
         }
       },
     });
@@ -875,7 +882,11 @@ function initContentScript() {
       ev.stopPropagation();
       unwrapHighlightMark(mark);
       if (noteSlug)
-        chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug });
+        chrome.runtime
+          .sendMessage({ action: 'deleteNote', noteSlug })
+          .catch((error) => {
+            showExtensionReloadNotification(error);
+          });
       dismiss();
     });
   }
@@ -905,7 +916,9 @@ function initContentScript() {
       return;
     chrome.runtime
       .sendMessage({ action: 'recordPageActivity', url, ...delta })
-      .catch(() => {});
+      .catch((error) => {
+        showExtensionReloadNotification(error);
+      });
   }
 
   // Track latest title locally; included in leave_page report.
@@ -1022,6 +1035,10 @@ function initContentScript() {
     fadeHold,
   }) {
     const host = document.createElement('div');
+    host.setAttribute('role', 'status');
+    host.setAttribute('aria-label', message);
+    host.style.cssText =
+      'position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
     const shadow = host.attachShadow({ mode: 'closed' });
     shadow.innerHTML = `
     <style>
@@ -1137,6 +1154,28 @@ function initContentScript() {
     });
   }
 
+  function isExtensionRuntimeFailure(error) {
+    return Boolean(
+      globalThis.browserRecallWebExtension?.isRuntimeFailure?.(error),
+    );
+  }
+
+  function showExtensionReloadNotification(error) {
+    if (!isExtensionRuntimeFailure(error)) return false;
+    showErrorNotification(
+      'Browser Recall extension reloaded. Please reload the page and try again.',
+    );
+    return true;
+  }
+
+  window.addEventListener('unhandledrejection', (event) => {
+    if (showExtensionReloadNotification(event.reason)) event.preventDefault();
+  });
+
+  window.addEventListener('error', (event) => {
+    showExtensionReloadNotification(event.error || event.message);
+  });
+
   // ─── Highlights Panel (for pages where visual marks can't render) ─────
 
   function showHighlightsPanel(notes, pageSlug, { hint } = {}) {
@@ -1238,7 +1277,9 @@ function initContentScript() {
                   });
               }
             })
-            .catch(() => {});
+            .catch((error) => {
+              showExtensionReloadNotification(error);
+            });
       });
       ta.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') ta.blur();
@@ -1246,7 +1287,9 @@ function initContentScript() {
       item.querySelector('.delete-btn').addEventListener('click', () => {
         chrome.runtime
           .sendMessage({ action: 'deleteNote', noteSlug })
-          .catch(() => {});
+          .catch((error) => {
+            showExtensionReloadNotification(error);
+          });
         item.remove();
         const remaining = shadow.querySelectorAll('.highlight-item').length;
         shadow.querySelector('.panel-header span').textContent =
@@ -1356,6 +1399,9 @@ function initContentScript() {
                     slug,
                   );
                 }
+              })
+              .catch((error) => {
+                showExtensionReloadNotification(error);
               });
           }
         } else {
@@ -1392,6 +1438,9 @@ function initContentScript() {
                   slug,
                 );
               }
+            })
+            .catch((error) => {
+              showExtensionReloadNotification(error);
             });
         }
         sendResponse({ success: true });
@@ -1418,8 +1467,9 @@ function initContentScript() {
               slug,
             );
           })
-          .catch(() => {
-            showGlobalNoteOverlay('', null, slug);
+          .catch((error) => {
+            showExtensionReloadNotification(error) ||
+              showGlobalNoteOverlay('', null, slug);
           });
         sendResponse({ success: true });
       }
@@ -1495,7 +1545,8 @@ function initContentScript() {
               hint: 'Select text and right-click to highlight',
             });
           })
-          .catch(() => {
+          .catch((error) => {
+            if (showExtensionReloadNotification(error)) return;
             showHighlightsPanel([], pdfSlug, {
               hint: 'Select text and right-click to highlight',
             });

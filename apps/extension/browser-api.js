@@ -179,5 +179,11 @@
   globalScope.browserRecallWebExtension = {
     api,
     engine: detectEngine(),
+    isRuntimeFailure(error) {
+      const message = String(error?.message || error || '');
+      return /extension context invalidated|receiving end does not exist|message port closed|could not establish connection|requeststorageaccessfor: permission denied|navigation preload request was cancelled/i.test(
+        message,
+      );
+    },
   };
 })(globalThis);

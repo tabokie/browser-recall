@@ -101,7 +101,7 @@ function openDesktopApp(route = 'open') {
 
 function showErrorBubble(message) {
   let displayMessage = message;
-  if (/extension context invalidated/i.test(String(message || ''))) {
+  if (globalThis.browserRecallWebExtension?.isRuntimeFailure?.(message)) {
     displayMessage =
       'Extension context invalidated. Please refresh the page and try again.';
   } else {

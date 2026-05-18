@@ -1,0 +1,9 @@
+- Here're some bugs, let's fix them TDD with E2E tests:
+(1) recycle bin is not rendered immediately on the sidebar when I delete a snapshot, this issue doesn't happen when I delete a list
+(2) sometimes when the extension worker is reloaded, the frontend stops working silently. There're errors like "The service worker navigation preload request was cancelled before 'preloadResponse' settled. If you intend to use 'preloadResponse', use waitUntil() or respondWith() to wait for the promise to settle.", "requestStorageAccessFor: Permission denied.". I want the user to see some errors hinting to reload the page, is that possible?
+(3) when I drag multiple selected page items in desktop app, the transparent item hint only has one item instead of all selected items.
+(4) when I delete a list, the "empty recycle bin" button has no effect
+- Fix existing issues too
+- $gap
+- I think 1, 2, 3 are worth digging further. The purpose is to not have any silent error conditions where user expected the app to have recorded an interaction.
+- $finish model=GPT-5.5 Codex

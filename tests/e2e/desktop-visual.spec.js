@@ -489,6 +489,22 @@ async function installDesktopBridgeMock(page, options = {}) {
                 .filter((snapshot) => snapshot.timestamp !== request.timestamp)
                 .map(clone),
             );
+            stores.session.set('manifest:orphaned', {
+              timestamp: Date.now(),
+              entries: [
+                ...(
+                  stores.session.get('manifest:orphaned')?.entries || []
+                ).filter(
+                  (entry) =>
+                    entry.key !==
+                    `snapshot:${request.slug}-${request.timestamp}`,
+                ),
+                {
+                  key: `snapshot:${request.slug}-${request.timestamp}`,
+                  deletedAt: Date.now(),
+                },
+              ],
+            });
             return { success: true };
           case 'permanentDeleteAll': {
             const orphaned = stores.session.get('manifest:orphaned') || {
@@ -1038,6 +1054,47 @@ test.describe('desktop visual regression', () => {
       await page.locator('.detail-snapshot-delete').click();
 
       await expect(snapshotRow).toBeVisible();
+    });
+  });
+
+  test('recycle bin updates immediately after deleting a snapshot', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        includeDetailListMembership: true,
+      });
+
+      await expect(page.locator('#recycleBinBtn')).toBeHidden();
+      const row = page.locator(
+        '.result-row[data-url="https://example.com/product-research"]',
+      );
+      await row.locator('.att-ctrl-btn').click({ force: true });
+      const snapshotRow = page.locator('.detail-snapshot-row');
+      await expect(snapshotRow).toBeVisible();
+      const snapshotKey = await snapshotRow.evaluate((el) => {
+        const section = el.closest('.detail-snapshots');
+        return `snapshot:${section.dataset.slug}-${el.dataset.ts}`;
+      });
+
+      await page.locator('.detail-snapshot-delete').click();
+
+      await expect(page.locator('#recycleBinBtn')).toBeVisible();
+      await expect(page.locator('#recycleBinCount')).toHaveText('1');
+      await page.keyboard.press('Escape');
+      await page.locator('#recycleBinBtn').click();
+      await expect(page.locator('.recycle-card-key')).toHaveText(snapshotKey);
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness
+              .recycleBinKeys()
+              .map((entry) => entry.key),
+          ),
+        )
+        .toEqual([snapshotKey]);
     });
   });
 
@@ -1788,9 +1845,10 @@ test.describe('desktop visual regression', () => {
         .poll(() => page.evaluate(() => getSelection()?.toString() || ''))
         .toBe('');
 
-      const dragPayload = await page.evaluate(() => {
+      const dragResult = await page.evaluate(() => {
         const row = document.querySelector('.result-row.selected');
         const data = new Map();
+        let dragImage = null;
         const event = new DragEvent('dragstart', {
           bubbles: true,
           cancelable: true,
@@ -1806,16 +1864,24 @@ test.describe('desktop visual regression', () => {
             getData(type) {
               return data.get(type) || '';
             },
+            setDragImage(element, x, y) {
+              dragImage = { text: element.textContent, x, y };
+            },
           },
         });
         row.dispatchEvent(event);
-        return JSON.parse(data.get('text/plain') || '{}');
+        return {
+          payload: JSON.parse(data.get('text/plain') || '{}'),
+          dragImage,
+        };
       });
 
-      expect(dragPayload.items.map((item) => item.url)).toEqual([
+      expect(dragResult.payload.items.map((item) => item.url)).toEqual([
         'https://example.com/drag-selected-0',
         'https://example.com/drag-selected-1',
       ]);
+      expect(dragResult.dragImage.text).toContain('Drag selected 0');
+      expect(dragResult.dragImage.text).toContain('Drag selected 1');
     });
   });
 
@@ -1975,6 +2041,41 @@ test.describe('desktop visual regression', () => {
           ),
         )
         .toEqual(['list:research']);
+    });
+  });
+
+  test('empty recycle bin works immediately after deleting a list', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+      });
+
+      await page.locator('.sidebar-item[data-list-id="research"]').hover();
+      await page
+        .locator('.sidebar-item[data-list-id="research"] .remove-list')
+        .click({ force: true });
+      await page.locator('#recycleBinBtn').click();
+      await expect(page.locator('.recycle-card-key')).toHaveText(
+        'list:research',
+      );
+
+      await page.locator('.empty-bin-btn').click();
+
+      await expect(page.locator('.recycle-card')).toHaveCount(0);
+      await expect(page.locator('#recycleBinEmpty')).toBeVisible();
+      await expect(page.locator('#recycleBinBtn')).toBeHidden();
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness
+              .recycleBinKeys()
+              .map((entry) => entry.key),
+          ),
+        )
+        .toEqual([]);
     });
   });
 
