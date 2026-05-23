@@ -1,51 +1,11 @@
 // Content script for capturing user intent and attention (scroll depth, time on page)
 console.log('Browser Recall content script loaded on:', window.location.href);
 
-const SCHEME_PALETTES = {
-  amber: {
-    accent: '#D07030',
-    bgBase: '#FFF8F0',
-    borderSubtle: 'rgba(180,160,140,0.15)',
-    borderSection: 'rgba(180,160,140,0.1)',
-    shadowColor: '53,40,32',
-    textPrimary: '#352820',
-    textSecondary: '#5E4D3E',
-    textMuted: '#8E7D6D',
-    excerptBg: '#fff8dc',
-    excerptBorder: '#f0c040',
-  },
-  mono: {
-    accent: '#1A1A1A',
-    bgBase: '#FFFFFF',
-    borderSubtle: 'rgba(0,0,0,0.08)',
-    borderSection: 'rgba(0,0,0,0.06)',
-    shadowColor: '0,0,0',
-    textPrimary: '#1A1A1A',
-    textSecondary: '#555555',
-    textMuted: '#999999',
-    excerptBg: '#F8F8F8',
-    excerptBorder: '#1A1A1A',
-  },
-  rose: {
-    accent: '#D84070',
-    bgBase: '#FFECE8',
-    borderSubtle: 'rgba(180,138,140,0.18)',
-    borderSection: 'rgba(180,138,140,0.12)',
-    shadowColor: '58,30,34',
-    textPrimary: '#3C1C20',
-    textSecondary: '#64303A',
-    textMuted: '#905862',
-    excerptBg: '#FAE0DC',
-    excerptBorder: '#E86898',
-  },
-};
-let palette = SCHEME_PALETTES.amber;
+const extensionSurface = globalThis.browserRecallExtensionSurface;
 
 // Recording paused: skip all content script functionality.
-chrome.storage.session.get(['workspace', 'colorScheme'], (result) => {
+chrome.storage.session.get(['workspace'], (result) => {
   const recordingState = result.workspace;
-  if (result.colorScheme && SCHEME_PALETTES[result.colorScheme])
-    palette = SCHEME_PALETTES[result.colorScheme];
   if (recordingState && recordingState.mode === 'private') {
     console.log('[content] Recording paused — all tracking disabled');
     return;
@@ -362,6 +322,7 @@ function initContentScript() {
     positionStyle,
     extraCss,
     beforeTextareaHtml,
+    bodyHtml,
     placeholder,
     existingNote,
     onClose,
@@ -376,35 +337,81 @@ function initContentScript() {
     const shadow = host.attachShadow({ mode: 'closed' });
     shadow.innerHTML = `
     <style>
+      ${extensionSurface.shadowCss}
       .overlay {
-        width: 280px;
-        background: ${palette.bgBase};
-        border: 1px solid ${palette.borderSubtle};
-        border-radius: 10px;
-        box-shadow: 0 1px 2px rgba(${palette.shadowColor},0.04), 0 4px 12px rgba(${palette.shadowColor},0.08);
-        font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        width: 300px;
+        background: var(--br-bg-base);
+        border: 1px solid var(--br-border-section);
+        border-radius: 2px;
+        color: var(--br-text-primary);
+        font-family: var(--br-font-body);
+        font-size: 12px;
+        line-height: 1.45;
         padding: 8px;
+      }
+      .br-note-label {
+        margin-bottom: 7px;
+        color: var(--br-text-muted);
+        font-size: 10px;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .br-note-excerpt {
+        margin-bottom: 8px;
+        padding: 7px 0 8px;
+        border-top: 1px dotted var(--br-border-section);
+        border-bottom: 1px dotted var(--br-border-section);
+        color: var(--br-text-muted);
+        font-style: italic;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
+      .br-note-editor {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
+      .br-note-body {
+        flex: 1;
+        min-width: 0;
       }
       textarea {
         width: 100%;
-        min-height: 28px;
-        height: 28px;
-        border: 1px solid ${palette.borderSubtle};
-        border-radius: 6px;
-        padding: 4px 8px;
+        min-height: 30px;
+        height: 30px;
+        border: 1px solid var(--br-border-section);
+        border-radius: 2px;
+        padding: 5px 8px;
         font-family: inherit;
         font-size: 12px;
         resize: none;
         box-sizing: border-box;
         line-height: 18px;
         overflow: hidden;
+        background: transparent;
+        color: var(--br-text-primary);
       }
-      textarea:focus { outline: none; border-color: ${palette.accent}; }
+      textarea::placeholder { color: var(--br-text-muted); }
+      textarea:focus {
+        outline: none;
+        border-color: var(--br-accent-primary);
+        box-shadow: 0 0 0 3px var(--br-accent-soft);
+      }
       ${extraCss || ''}
     </style>
     <div class="overlay">
-      ${beforeTextareaHtml || ''}
-      <textarea placeholder="${placeholder}"></textarea>
+      ${
+        bodyHtml ||
+        `
+        <div class="br-note-editor">
+          ${beforeTextareaHtml || ''}
+          <div class="br-note-body">
+            <textarea placeholder="${placeholder}"></textarea>
+          </div>
+        </div>
+      `
+      }
     </div>
   `;
 
@@ -415,7 +422,7 @@ function initContentScript() {
 
     function autoResize() {
       textarea.style.height = '0';
-      textarea.style.height = Math.max(28, textarea.scrollHeight) + 'px';
+      textarea.style.height = Math.max(30, textarea.scrollHeight) + 'px';
     }
     if (existingNote) autoResize();
 
@@ -423,30 +430,38 @@ function initContentScript() {
     textarea.addEventListener('input', autoResize);
 
     let closed = false;
-    async function close() {
+    function close() {
       if (closed) return;
       closed = true;
+      document.removeEventListener('keydown', handleKeyDown, true);
       document.removeEventListener('mousedown', handleOutsideClick);
-      await onClose(textarea.value);
+      const note = textarea.value;
       host.remove();
+      Promise.resolve(onClose(note)).catch((error) => {
+        showExtensionReloadNotification(error);
+      });
     }
     function dismiss() {
       if (closed) return;
       closed = true;
+      document.removeEventListener('keydown', handleKeyDown, true);
       document.removeEventListener('mousedown', handleOutsideClick);
       host.remove();
     }
 
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') close();
+    };
     textarea.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') close();
     });
     const handleOutsideClick = (e) => {
       if (!host.contains(e.target)) close();
     };
-    setTimeout(
-      () => document.addEventListener('mousedown', handleOutsideClick),
-      100,
-    );
+    document.addEventListener('keydown', handleKeyDown, true);
+    setTimeout(() => {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }, 100);
 
     return { host, shadow, textarea, close, dismiss };
   }
@@ -456,6 +471,10 @@ function initContentScript() {
     createNoteOverlay({
       positionStyle:
         'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);',
+      bodyHtml: extensionSurface.noteOverlayHtml({
+        title: 'Page Note',
+        placeholder: 'Add a page note... Esc to save.',
+      }),
       placeholder: 'Add a page note... Esc to save.',
       existingNote,
       onClose(note) {
@@ -852,14 +871,19 @@ function initContentScript() {
     pageSlug,
   ) {
     const rect = mark.getBoundingClientRect();
-    const { shadow, dismiss } = createNoteOverlay({
-      positionStyle: `position: absolute; left: ${rect.left + window.scrollX}px; top: ${rect.bottom + window.scrollY + 4}px;`,
-      extraCss: `.overlay { display: flex; align-items: flex-start; gap: 8px; }
-      .delete-btn { flex-shrink:0; width:28px; height:28px; display:flex; align-items:center; justify-content:center; background:none; border:1px solid ${palette.borderSubtle}; border-radius:6px; cursor:pointer; color:${palette.textMuted}; padding:0; }
-      .delete-btn:hover { background:rgba(184,80,64,0.1); border-color:#B85040; color:#B85040; }
-      .delete-btn svg { width:16px; height:16px; fill:currentColor; }
-      textarea { width:auto; flex:1; min-width:0; }`,
-      beforeTextareaHtml: `<button class="delete-btn" title="Delete note"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>`,
+    const { host, shadow, textarea, dismiss } = createNoteOverlay({
+      positionStyle: 'position: absolute; visibility: hidden;',
+      extraCss: `
+      .delete-btn { flex-shrink:0; width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:none; border:1px solid var(--br-border-section); border-radius:2px; cursor:pointer; color:var(--br-text-muted); padding:0; }
+      .delete-btn:hover { background:var(--br-accent-red-soft); border-color:var(--br-accent-red); color:var(--br-accent-red); }
+      .delete-btn svg { width:16px; height:16px; fill:currentColor; }`,
+      beforeTextareaHtml: extensionSurface.trashButtonHtml(),
+      bodyHtml: extensionSurface.noteOverlayHtml({
+        title: 'Highlight Note',
+        excerpt: text || '',
+        placeholder: 'Add a note... Esc to save.',
+        includeDelete: true,
+      }),
       placeholder: 'Add a note... Esc to save.',
       existingNote,
       async onClose(note) {
@@ -877,6 +901,8 @@ function initContentScript() {
         }
       },
     });
+    extensionSurface.positionNearRect(host, rect);
+    textarea.focus();
 
     shadow.querySelector('.delete-btn').addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -1029,10 +1055,10 @@ function initContentScript() {
   // ─── Notification bubble factory ─────────────────────────────────────
   function showNotificationBubble({
     message,
-    background,
     duration,
     fadeIn,
     fadeHold,
+    tone = 'neutral',
   }) {
     const host = document.createElement('div');
     host.setAttribute('role', 'status');
@@ -1040,22 +1066,37 @@ function initContentScript() {
     host.style.cssText =
       'position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
     const shadow = host.attachShadow({ mode: 'closed' });
+    const escapedMessage = extensionSurface.escapeHtml(message);
     shadow.innerHTML = `
     <style>
+      ${extensionSurface.shadowCss}
       .bubble {
         position: fixed;
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%) scale(0.92);
         z-index: 2147483647;
-        background: ${background};
-        color: #fff;
-        font: 14px/1.4 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        padding: 10px 20px;
-        border-radius: 8px;
+        min-width: 180px;
+        max-width: min(360px, calc(100vw - 32px));
+        background: var(--br-bg-base);
+        color: var(--br-text-primary);
+        border: 1px solid var(--br-border-section);
+        border-radius: 2px;
+        font-family: var(--br-font-body);
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        line-height: 1.45;
+        padding: 9px 12px;
         pointer-events: none;
+        text-align: center;
+        text-transform: uppercase;
         opacity: 0;
         animation: fadeInOut ${duration}s ease forwards;
+      }
+      .bubble.error {
+        border-color: var(--br-accent-red);
+        color: var(--br-accent-red);
       }
       @keyframes fadeInOut {
         0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
@@ -1064,7 +1105,7 @@ function initContentScript() {
         100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
       }
     </style>
-    <div class="bubble">${message}</div>
+    <div class="bubble ${tone}">${escapedMessage}</div>
   `;
     document.documentElement.appendChild(host);
     setTimeout(() => host.remove(), duration * 1000 + 100);
@@ -1078,21 +1119,28 @@ function initContentScript() {
     const shadow = host.attachShadow({ mode: 'closed' });
     shadow.innerHTML = `
     <style>
+      ${extensionSurface.shadowCss}
       .bubble {
         position: fixed;
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%) scale(0.92);
         z-index: 2147483647;
-        background: rgba(0, 0, 0, 0.78);
-        color: #fff;
-        font: 14px/1.4 'Nunito', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        padding: 10px 20px;
-        border-radius: 8px;
+        background: var(--br-bg-base);
+        color: var(--br-text-primary);
+        border: 1px solid var(--br-border-section);
+        border-radius: 2px;
+        font-family: var(--br-font-body);
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        line-height: 1.45;
+        padding: 9px 12px;
         pointer-events: none;
         display: flex;
         align-items: center;
         gap: 8px;
+        text-transform: uppercase;
         opacity: 0;
         animation: fadeIn 0.18s ease forwards;
       }
@@ -1105,8 +1153,8 @@ function initContentScript() {
       .spinner {
         width: 14px;
         height: 14px;
-        border: 2px solid rgba(255,255,255,0.3);
-        border-top-color: #fff;
+        border: 2px solid var(--br-border-section);
+        border-top-color: var(--br-text-primary);
         border-radius: 50%;
         animation: spin 0.7s linear infinite;
       }
@@ -1127,7 +1175,6 @@ function initContentScript() {
   function showCaptureNotification() {
     showNotificationBubble({
       message: 'Snapshot captured',
-      background: 'rgba(0, 0, 0, 0.78)',
       duration: 1.6,
       fadeIn: 12,
       fadeHold: 75,
@@ -1136,8 +1183,7 @@ function initContentScript() {
 
   function showLikeNotification(delta = 1) {
     showNotificationBubble({
-      message: delta >= 0 ? '\uD83D\uDC4D Liked' : '\uD83D\uDC4E Disliked',
-      background: 'rgba(0, 0, 0, 0.78)',
+      message: delta >= 0 ? 'Liked' : 'Disliked',
       duration: 1.6,
       fadeIn: 12,
       fadeHold: 75,
@@ -1147,10 +1193,10 @@ function initContentScript() {
   function showErrorNotification(message) {
     showNotificationBubble({
       message,
-      background: 'rgba(180, 30, 30, 0.88)',
       duration: 2.4,
       fadeIn: 10,
       fadeHold: 80,
+      tone: 'error',
     });
   }
 
@@ -1185,13 +1231,6 @@ function initContentScript() {
     const excerptNotes = notes.filter((n) => n.excerpt !== null);
     if (excerptNotes.length === 0 && !hint) return;
 
-    const esc = (s) =>
-      s
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-
     const host = document.createElement('div');
     host.id = 'portal-highlights-panel';
     host.style.cssText =
@@ -1200,20 +1239,24 @@ function initContentScript() {
     const shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = `
     <style>
-      .panel { width: 300px; max-height: 400px; overflow-y: auto; background: ${palette.bgBase}; border: 1px solid ${palette.borderSubtle}; border-radius: 10px; box-shadow: 0 1px 2px rgba(${palette.shadowColor},0.04), 0 4px 16px rgba(${palette.shadowColor},0.1); font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; }
-      .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid ${palette.borderSubtle}; font-weight: 600; font-size: 12px; color: ${palette.textSecondary}; cursor: move; user-select: none; }
-      .close-btn { background: none; border: none; cursor: pointer; color: ${palette.textMuted}; font-size: 16px; padding: 0 4px; line-height: 1; }
-      .close-btn:hover { color: ${palette.textPrimary}; }
-      .highlight-item { padding: 8px 12px; border-bottom: 1px solid ${palette.borderSection}; }
+      ${extensionSurface.shadowCss}
+      .panel { width: 300px; max-height: 400px; overflow-y: auto; background: var(--br-bg-base); border: 1px solid var(--br-border-section); border-radius: 2px; color: var(--br-text-primary); font-family: var(--br-font-body); font-size: 12px; line-height: 1.45; }
+      .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--br-border-section); color: var(--br-text-primary); cursor: move; font-size: 10px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; user-select: none; }
+      .close-btn { width: 22px; height: 22px; background: none; border: none; border-radius: 2px; cursor: pointer; color: var(--br-text-muted); font-size: 16px; line-height: 1; padding: 0; }
+      .close-btn:hover { background: var(--br-bg-surface-active); color: var(--br-text-primary); }
+      .highlight-item { display: grid; grid-template-columns: 18px 1fr; column-gap: 8px; padding: 9px 12px; border-bottom: 1px dotted var(--br-border-section); }
+      .highlight-item::before { content: attr(data-note-index); color: var(--br-accent-red); font-weight: 900; }
       .highlight-item:last-child { border-bottom: none; }
-      .excerpt { font-size: 12px; color: ${palette.textPrimary}; background: ${palette.excerptBg}; padding: 4px 6px; border-radius: 6px; border-left: 3px solid ${palette.excerptBorder}; margin-bottom: 4px; line-height: 1.4; word-break: break-word; }
-      .note-row { display: flex; align-items: flex-start; gap: 4px; }
-      textarea { flex: 1; min-height: 24px; height: 24px; border: 1px solid ${palette.borderSubtle}; border-radius: 6px; padding: 3px 6px; font-family: inherit; font-size: 11px; resize: none; box-sizing: border-box; line-height: 16px; overflow: hidden; }
-      textarea:focus { outline: none; border-color: ${palette.accent}; }
-      .delete-btn { flex-shrink: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: none; border: 1px solid transparent; border-radius: 6px; cursor: pointer; color: ${palette.textMuted}; padding: 0; }
-      .delete-btn:hover { background: rgba(184, 80, 64, 0.1); color: #B85040; border-color: #B85040; }
+      .excerpt { color: var(--br-text-muted); font-style: italic; line-height: 1.45; margin-bottom: 5px; word-break: break-word; }
+      .note-row { display: flex; align-items: flex-start; gap: 6px; }
+      textarea { flex: 1; min-height: 24px; height: 24px; border: 1px solid var(--br-border-section); border-radius: 2px; padding: 3px 6px; background: transparent; color: var(--br-text-primary); font-family: inherit; font-size: 11px; resize: none; box-sizing: border-box; line-height: 16px; overflow: hidden; }
+      textarea::placeholder { color: var(--br-text-muted); }
+      textarea:focus { outline: none; border-color: var(--br-accent-primary); box-shadow: 0 0 0 3px var(--br-accent-soft); }
+      .delete-btn { flex-shrink: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 2px; cursor: pointer; color: var(--br-text-muted); padding: 0; }
+      .delete-btn:hover { background: var(--br-accent-red-soft); color: var(--br-accent-red); }
       .delete-btn svg { width: 14px; height: 14px; fill: currentColor; }
-      .hint { padding: 8px 12px; font-size: 11px; color: ${palette.textMuted}; line-height: 1.4; }
+      .highlight-body { min-width: 0; }
+      .hint { padding: 8px 12px; border-top: 1px solid var(--br-border-section); font-size: 11px; color: var(--br-text-muted); line-height: 1.4; }
     </style>
     <div class="panel">
       <div class="panel-header">
@@ -1221,20 +1264,22 @@ function initContentScript() {
         <button class="close-btn" title="Close">&times;</button>
       </div>
       ${excerptNotes
-        .map((n) => {
+        .map((n, index) => {
           const text = Array.isArray(n.excerpt)
             ? n.excerpt.join(' ')
             : n.excerpt;
-          return `<div class="highlight-item" data-note-slug="${n.slug}">
-          <div class="excerpt">${esc(text)}</div>
+          return `<div class="highlight-item" data-note-slug="${n.slug}" data-note-index="${String(index + 1).padStart(2, '0')}">
+          <div class="highlight-body">
+          <div class="excerpt">${extensionSurface.escapeHtml(text)}</div>
           <div class="note-row">
-            <textarea placeholder="Add a note...">${esc(n.note || '')}</textarea>
+            <textarea placeholder="Add a note...">${extensionSurface.escapeHtml(n.note || '')}</textarea>
             <button class="delete-btn" title="Delete"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>
+          </div>
           </div>
         </div>`;
         })
         .join('')}
-      ${hint ? `<div class="hint">${esc(hint)}</div>` : ''}
+      ${hint ? `<div class="hint">${extensionSurface.escapeHtml(hint)}</div>` : ''}
     </div>
   `;
 

@@ -1,5 +1,10 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, getSlugForUrl, openHelperPage } from './helpers.js';
+import {
+  resetAndSeed,
+  getSlugForUrl,
+  openHelperPage,
+  pageCheckpointPath,
+} from './helpers.js';
 
 const TEST_URL = 'https://example.com/article';
 const TEST_SLUG = getSlugForUrl(TEST_URL);
@@ -124,18 +129,18 @@ test.describe('Context menu highlight', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url: pageUrl,
           title: 'Multi',
-          timestamp: now,
+          timestamps: { 'test-device': now },
           parentIds: [],
           childIds: ['note:note-a', 'note:note-b'],
         },
       },
       {
-        path: 'data/notes/note-a.json',
+        path: 'objects/notes/note-a.json',
         data: {
           slug: 'note-a',
           excerpt: 'first',
@@ -144,7 +149,7 @@ test.describe('Context menu highlight', () => {
         },
       },
       {
-        path: 'data/notes/note-b.json',
+        path: 'objects/notes/note-b.json',
         data: {
           slug: 'note-b',
           excerpt: 'second',

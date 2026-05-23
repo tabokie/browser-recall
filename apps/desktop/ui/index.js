@@ -2384,6 +2384,7 @@ async function showExplore() {
 
   showListLayout();
   resetMainScroll();
+  preserveRelatedScrollOnNextRender = false;
   resetRelatedScrollOnNextRender = true;
   renderListSkeleton();
 
@@ -2464,6 +2465,7 @@ async function showList(list) {
   attachTitleClick(displayName);
   showListLayout();
   resetMainScroll();
+  preserveRelatedScrollOnNextRender = false;
   resetRelatedScrollOnNextRender = true;
   renderListSkeleton();
 
@@ -3254,9 +3256,9 @@ function renderFilteredPins(pins, listId, searchQuery) {
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = '';
   vs.onLoadMore = null; // Clear stale explore demand-loader
-  const renderAtTop = consumeRelatedTopReset();
   const preserveScroll = preserveRelatedScrollOnNextRender;
   preserveRelatedScrollOnNextRender = false;
+  const renderAtTop = preserveScroll ? false : consumeRelatedTopReset();
   const renderRow = (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
       pinned: true,
@@ -7258,9 +7260,9 @@ async function runSearchFilterPipeline() {
 
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = '';
-  const renderAtTop = consumeRelatedTopReset();
   const preserveScroll = preserveRelatedScrollOnNextRender;
   preserveRelatedScrollOnNextRender = false;
+  const renderAtTop = preserveScroll ? false : consumeRelatedTopReset();
   const renderRow = (r) =>
     resultRowHtml(r.user_title || r.title, r.url, {
       attScore: r.attScore,
@@ -7890,23 +7892,60 @@ function getActiveContainer() {
     : document.getElementById('relatedResults');
 }
 
+function isTextEditingTarget(target = document.activeElement) {
+  const tag = target?.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable;
+}
+
+function isKeyboardActivationTarget(target = document.activeElement) {
+  const tag = target?.tagName;
+  return (
+    isTextEditingTarget(target) ||
+    tag === 'BUTTON' ||
+    tag === 'A' ||
+    tag === 'SELECT' ||
+    target?.closest?.('button, a, [role="button"], [role="link"]')
+  );
+}
+
+function selectedRowsInActiveContainer() {
+  const container = getActiveContainer();
+  return container
+    ? [...container.querySelectorAll('.result-row.selected')]
+    : [];
+}
+
+async function openUrlsInBrowser(urls) {
+  for (const url of urls) {
+    await chrome.tabs.create({ url });
+  }
+}
+
+// --- Keyboard open for selected result rows ---
+document.addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey)
+    return;
+  if (isKeyboardActivationTarget(e.target)) return;
+
+  const urls = [
+    ...new Set(selectedRowsInActiveContainer().map((row) => row.dataset.url)),
+  ].filter(Boolean);
+  if (urls.length === 0) return;
+
+  e.preventDefault();
+  await openUrlsInBrowser(urls);
+});
+
 // --- Keyboard delete for selected result rows ---
 document.addEventListener('keydown', async (e) => {
   if (e.key !== 'Delete' && e.key !== 'Backspace') return;
   // Don't intercept when typing in an input/textarea
-  const tag = document.activeElement?.tagName;
-  if (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    document.activeElement?.isContentEditable
-  )
-    return;
+  if (isTextEditingTarget()) return;
 
   // Determine which container has selected rows
   const isListView = activeView.type === 'list';
-  const container = getActiveContainer();
-  const selected = container?.querySelectorAll('.result-row.selected');
-  if (!selected || selected.length === 0) return;
+  const selected = selectedRowsInActiveContainer();
+  if (selected.length === 0) return;
 
   e.preventDefault();
 
@@ -7929,19 +7968,12 @@ document.addEventListener('keydown', async (e) => {
 // --- Ctrl+C / Ctrl+V for page copy-paste ---
 document.addEventListener('keydown', async (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
-  const tag = document.activeElement?.tagName;
-  if (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    document.activeElement?.isContentEditable
-  )
-    return;
+  if (isTextEditingTarget()) return;
 
   if (e.key === 'c') {
     // Copy selected rows as readable text with angle-bracket URLs
-    const container = getActiveContainer();
-    const selected = container?.querySelectorAll('.result-row.selected');
-    if (!selected || selected.length === 0) return;
+    const selected = selectedRowsInActiveContainer();
+    if (selected.length === 0) return;
 
     e.preventDefault();
     const lines = [...selected].map((r) => {

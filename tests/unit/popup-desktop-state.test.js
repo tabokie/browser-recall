@@ -60,6 +60,14 @@ function installDom() {
   globalThis.HTMLElement = dom.window.HTMLElement;
   globalThis.CustomEvent = dom.window.CustomEvent;
   globalThis.getComputedStyle = dom.window.getComputedStyle;
+  globalThis.browserRecallWebExtension = {
+    isRuntimeFailure(error) {
+      const message = String(error?.message || error || '');
+      return /extension context invalidated|receiving end does not exist|message port closed|could not establish connection|requeststorageaccessfor: permission denied|navigation preload request was cancelled/i.test(
+        message,
+      );
+    },
+  };
   dom.window.matchMedia = () => ({
     matches: false,
     addEventListener() {},
@@ -132,6 +140,7 @@ describe('popup desktop state rendering', () => {
     delete globalThis.HTMLElement;
     delete globalThis.CustomEvent;
     delete globalThis.getComputedStyle;
+    delete globalThis.browserRecallWebExtension;
   });
 
   it('does not render synthetic page details when desktop summary metadata fails', async () => {
@@ -168,22 +177,28 @@ describe('popup desktop state rendering', () => {
       ),
     );
     await waitFor(
-      () => document.getElementById('setup-required').style.display === 'block',
+      () =>
+        document.getElementById('pageDiagnosticTitle').textContent ===
+        'Page Data Unavailable',
     );
 
-    expect(document.getElementById('dashboard').style.display).toBe('none');
-    expect(document.getElementById('setupRequiredTitle').textContent).toBe(
+    expect(document.getElementById('dashboard').style.display).toBe('flex');
+    expect(document.getElementById('dashboardContent').style.display).toBe(
+      'block',
+    );
+    expect(document.getElementById('pageHeader').style.display).toBe('none');
+    expect(document.getElementById('pageDiagnosticTitle').textContent).toBe(
       'Page Data Unavailable',
     );
-    expect(document.getElementById('setupRequiredMeta').textContent).toContain(
+    expect(document.getElementById('pageDiagnosticMessage').textContent).toBe(
       'Desktop popup page summary failed',
     );
-    expect(document.getElementById('setupDiagnostic').textContent).toContain(
-      'reason: popup-page-summary-failed',
-    );
-    expect(document.getElementById('setupDiagnostic').textContent).toContain(
-      'connector: connected',
-    );
+    expect(
+      document.getElementById('pageDiagnosticDetail').textContent,
+    ).toContain('reason: popup-page-summary-failed');
+    expect(
+      document.getElementById('pageDiagnosticDetail').textContent,
+    ).toContain('connector: connected');
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
       action: 'getPageSummary',
       url: tab.url,
@@ -193,6 +208,212 @@ describe('popup desktop state rendering', () => {
         ([request]) => request.action === 'getExtensionDiagnostics',
       ),
     ).toBe(false);
+  });
+
+  it('clears a stale page diagnostic after page summary recovers', async () => {
+    const tab = {
+      id: 43,
+      url: 'https://example.com/popup-summary-recovers',
+      title: 'Recovered Browser Title',
+    };
+    let recovered = false;
+    installDom();
+    const { runtimeMessages } = installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () =>
+          recovered
+            ? {
+                success: true,
+                url: tab.url,
+                page: {
+                  slug: 'popup-summary-recovers',
+                  url: tab.url,
+                  title: 'Recovered Desktop Title',
+                  visitDates: [],
+                },
+                notes: [],
+                snapshots: [],
+                lists: [],
+              }
+            : {
+                success: false,
+                error: 'Temporary summary failure',
+              },
+        getPopupLists: { success: true, lists: [] },
+        captureCurrentPageFromPopup: { success: true },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () =>
+        document.getElementById('pageDiagnosticTitle').textContent ===
+        'Page Data Unavailable',
+    );
+    expect(document.getElementById('pageHeader').style.display).toBe('none');
+
+    recovered = true;
+    document.getElementById('captureBtn').click();
+
+    await waitFor(
+      () =>
+        document.getElementById('pageTitle').textContent ===
+        'Recovered Desktop Title',
+    );
+    expect(document.getElementById('pageDiagnosticSection').style.display).toBe(
+      'none',
+    );
+    expect(document.getElementById('pageHeader').style.display).toBe('');
+  });
+
+  it('keeps the recording banner visible when page data is unavailable', async () => {
+    const tab = {
+      id: 41,
+      url: 'https://example.com/popup-broken-summary-banner',
+      title: 'Broken Summary Banner',
+    };
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: {
+          success: false,
+          error: 'Desktop popup page summary failed',
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () =>
+        document.getElementById('pageDiagnosticTitle').textContent ===
+        'Page Data Unavailable',
+    );
+
+    expect(document.getElementById('dashboard').style.display).toBe('flex');
+    expect(document.getElementById('recordingBar')).toBeTruthy();
+    expect(document.getElementById('recordingToggle')).toBeTruthy();
+    expect(document.getElementById('dashboardContent').style.display).toBe(
+      'block',
+    );
+    expect(document.getElementById('pageHeader').style.display).toBe('none');
+  });
+
+  it('keeps the recording banner visible when the active page is unavailable', async () => {
+    const tab = {
+      id: 39,
+      url: 'chrome://extensions/',
+      title: 'Extensions',
+    };
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () =>
+        document.getElementById('pageDiagnosticTitle').textContent ===
+        'Not available for this page',
+    );
+
+    expect(document.getElementById('loading').style.display).toBe('none');
+    expect(document.getElementById('dashboard').style.display).toBe('flex');
+    expect(document.getElementById('recordingBar')).toBeTruthy();
+    expect(document.getElementById('recordingToggle')).toBeTruthy();
+    expect(document.getElementById('dashboardContent').style.display).toBe(
+      'block',
+    );
+    expect(document.getElementById('pageDiagnosticSection').style.display).toBe(
+      '',
+    );
+    expect(document.getElementById('pageHeader').style.display).toBe('none');
+    expect(document.getElementById('pageTitle').textContent).toBe('—');
+    const messageStyle = getComputedStyle(
+      document.getElementById('pageDiagnosticTitle'),
+    );
+    expect(messageStyle.textTransform).toBe('uppercase');
+    expect(messageStyle.fontWeight).toBe('900');
+    expect(document.getElementById('recordingBar').nextElementSibling).toBe(
+      document.getElementById('dashboardContent'),
+    );
+  });
+
+  it('keeps the recording banner visible when the current page is blacklisted', async () => {
+    const tab = {
+      id: 40,
+      url: 'https://blocked.example.com/private',
+      title: 'Blocked Page',
+    };
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        getPopupAccessState: {
+          success: true,
+          blacklisted: true,
+          hasVisitHistory: false,
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () =>
+        document.getElementById('pageDiagnosticTitle').textContent ===
+        'Blacklisted',
+    );
+
+    expect(document.getElementById('dashboard').style.display).toBe('flex');
+    expect(document.getElementById('recordingBar')).toBeTruthy();
+    expect(document.getElementById('recordingToggle')).toBeTruthy();
+    expect(document.getElementById('dashboardContent').style.display).toBe(
+      'block',
+    );
+    expect(document.getElementById('pageHeader').style.display).toBe('none');
+    expect(document.getElementById('pageDiagnosticMessage').textContent).toBe(
+      tab.url,
+    );
+    expect(document.getElementById('captureOnceBtn')).toBeTruthy();
+    expect(document.getElementById('blacklistSettingsLink')).toBeTruthy();
   });
 
   it('shows connector diagnostics while desktop is not connected', async () => {

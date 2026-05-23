@@ -52,6 +52,11 @@ function revealPopup() {
   document.documentElement.style.opacity = '';
 }
 
+function hideElement(id) {
+  const element = document.getElementById(id);
+  if (element) element.style.display = 'none';
+}
+
 function revealSetupIfStillWaiting() {
   if (document.documentElement.style.opacity !== '0') return;
   if (document.getElementById('setup-required')?.style.display === 'block') {
@@ -59,10 +64,18 @@ function revealSetupIfStillWaiting() {
   }
 }
 
-function showSetupRequired(connector = {}, options = {}) {
+function renderLoading() {
+  document.getElementById('loading').style.display = 'flex';
+  document.getElementById('setup-required').style.display = 'none';
+  hideElement('blacklisted');
+  document.getElementById('dashboard').style.display = 'none';
+  clearSetupDiagnostic();
+}
+
+function renderConnectorDiagnostic(connector = {}, options = {}) {
   const { reveal = true } = options;
   document.getElementById('loading').style.display = 'none';
-  document.getElementById('blacklisted').style.display = 'none';
+  hideElement('blacklisted');
   document.getElementById('dashboard').style.display = 'none';
   clearSetupDiagnostic();
   const el = document.getElementById('setup-required');
@@ -83,15 +96,61 @@ function showSetupRequired(connector = {}, options = {}) {
   if (reveal) revealPopup();
 }
 
-function showUnavailablePage(message = 'Not available for this page') {
-  const loading = document.getElementById('loading');
-  loading.textContent = message;
-  loading.style.display = 'flex';
+function renderBannerOnly() {
+  document.getElementById('loading').style.display = 'none';
   document.getElementById('setup-required').style.display = 'none';
-  clearSetupDiagnostic();
-  document.getElementById('blacklisted').style.display = 'none';
-  document.getElementById('dashboard').style.display = 'none';
+  const dashboard = document.getElementById('dashboard');
+  const content = document.getElementById('dashboardContent');
+  if (dashboard) dashboard.style.display = 'flex';
+  if (content) content.style.display = 'none';
+  void renderRecordingBar();
+}
+
+function renderPageDiagnostic({ title, message, detail = null, actions = [] }) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('setup-required').style.display = 'none';
+  hideElement('blacklisted');
+  renderPageDashboardShell();
+  resetDashboardSections();
+  const content = document.getElementById('dashboardContent');
+  const section = document.getElementById('pageDiagnosticSection');
+  const titleEl = document.getElementById('pageDiagnosticTitle');
+  const messageEl = document.getElementById('pageDiagnosticMessage');
+  const detailEl = document.getElementById('pageDiagnosticDetail');
+  const actionsEl = document.getElementById('pageDiagnosticActions');
+  const pageHeader = document.getElementById('pageHeader');
+  if (content) content.style.display = 'block';
+  if (section) section.style.display = '';
+  if (titleEl) titleEl.textContent = title;
+  if (messageEl) messageEl.textContent = message;
+  const detailText = formatSetupDiagnostic(detail);
+  if (detailEl) {
+    detailEl.textContent = detailText;
+    detailEl.style.display = detailText ? 'block' : 'none';
+  }
+  if (actionsEl) {
+    actionsEl.innerHTML = '';
+    actionsEl.style.display = actions.length > 0 ? 'flex' : 'none';
+    for (const action of actions) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.id = action.id;
+      button.className = action.className || 'page-diagnostic-link';
+      button.textContent = action.label;
+      if (action.onClick) button.addEventListener('click', action.onClick);
+      actionsEl.appendChild(button);
+    }
+  }
+  if (pageHeader) pageHeader.style.display = 'none';
   revealPopup();
+}
+
+function showSetupRequired(connector = {}, options = {}) {
+  renderConnectorDiagnostic(connector, options);
+}
+
+function showUnavailablePage(message = 'Not available for this page') {
+  renderPageDiagnostic({ title: message, message: '' });
 }
 
 function openDesktopApp(route = 'open') {
@@ -332,7 +391,7 @@ function showDesktopConnectorError(message) {
 function showDesktopUnavailable(
   message = 'Browser Recall Desktop is offline.',
 ) {
-  showSetupRequired({ state: 'offline', hasToken: true });
+  renderConnectorDiagnostic({ state: 'offline', hasToken: true });
   const title = document.getElementById('setupRequiredTitle');
   if (title) {
     title.textContent =
@@ -349,12 +408,11 @@ function showDesktopDataUnavailable(
   message = 'Desktop page data unavailable.',
   diagnostic = null,
 ) {
-  showSetupRequired({ state: 'connected' });
-  const title = document.getElementById('setupRequiredTitle');
-  if (title) title.textContent = 'Page Data Unavailable';
-  const meta = document.getElementById('setupRequiredMeta');
-  if (meta) meta.textContent = message;
-  renderSetupDiagnostic(diagnostic);
+  renderPageDiagnostic({
+    title: 'Page Data Unavailable',
+    message,
+    detail: diagnostic,
+  });
 }
 
 function clearSetupDiagnostic() {
@@ -411,6 +469,7 @@ function hideSection(id) {
 
 function resetDashboardSections() {
   for (const id of [
+    'pageDiagnosticSection',
     'visitsLikesSection',
     'listSection',
     'notesSection',
@@ -418,6 +477,20 @@ function resetDashboardSections() {
   ]) {
     hideSection(id);
     document.getElementById(id)?.classList.remove('is-empty');
+  }
+  const pageHeader = document.getElementById('pageHeader');
+  if (pageHeader) pageHeader.style.display = '';
+  const pageDiagnosticDetail = document.getElementById('pageDiagnosticDetail');
+  if (pageDiagnosticDetail) {
+    pageDiagnosticDetail.style.display = 'none';
+    pageDiagnosticDetail.textContent = '';
+  }
+  const pageDiagnosticActions = document.getElementById(
+    'pageDiagnosticActions',
+  );
+  if (pageDiagnosticActions) {
+    pageDiagnosticActions.style.display = 'none';
+    pageDiagnosticActions.innerHTML = '';
   }
   const attention = document.getElementById('attentionGrid');
   if (attention) attention.innerHTML = '';
@@ -1377,6 +1450,7 @@ async function fetchAndRenderPageData(tab, slug) {
     logDebug('[popup] getPageSummary response:', summary);
 
     if (summary?.success) {
+      resetDashboardSections();
       const page = summary.page || pageSummaryFallback(tab, slug, summary);
       currentPageSummary = { ...summary, page };
       currentEntry = page;
@@ -1450,14 +1524,18 @@ async function refreshCurrentPageSummary() {
   await Promise.all([renderListChips(), renderRecordingBar()]);
 }
 
-function showDashboardUI() {
+function renderPageDashboardShell() {
   document.getElementById('loading').style.display = 'none';
-  document.getElementById('blacklisted').style.display = 'none';
+  hideElement('blacklisted');
   document.getElementById('setup-required').style.display = 'none';
   document.getElementById('dashboard').style.display = 'flex';
   document.getElementById('dashboardContent').style.display = 'block';
   revealPopup();
+  void renderRecordingBar();
+}
 
+function showDashboardUI() {
+  renderPageDashboardShell();
   const frame =
     globalThis.requestAnimationFrame ||
     globalThis.window?.requestAnimationFrame ||
@@ -1626,12 +1704,10 @@ async function handlePrivateMode(tab) {
   void tab;
   const { paused } = await loadRecordingState();
   if (!paused) return false;
-  await renderRecordingBar();
   const content = document.getElementById('dashboardContent');
   detachedContent = content;
   content.remove();
-  document.getElementById('loading').style.display = 'none';
-  document.getElementById('dashboard').style.display = 'flex';
+  renderBannerOnly();
   revealPopup();
   return true;
 }
@@ -1647,57 +1723,61 @@ async function handleBlacklist(tab) {
   }
   if (!response?.blacklisted || response?.hasVisitHistory) return false;
 
-  document.getElementById('loading').style.display = 'none';
-  document.getElementById('blacklistedUrl').textContent = tab.url;
-  document.getElementById('blacklisted').style.display = 'block';
-  revealPopup();
-  document
-    .getElementById('blacklistSettingsLink')
-    .addEventListener('click', () => {
-      openDesktopApp('settings');
-    });
+  renderPageDiagnostic({
+    title: 'Blacklisted',
+    message: tab.url,
+    actions: [
+      {
+        id: 'captureOnceBtn',
+        className: 'capture-once-btn',
+        label: 'Capture It',
+        onClick: async (event) => {
+          const btn = event.currentTarget;
+          btn.disabled = true;
+          btn.textContent = 'Capturing...';
 
-  document
-    .getElementById('captureOnceBtn')
-    .addEventListener('click', async () => {
-      const btn = document.getElementById('captureOnceBtn');
-      btn.disabled = true;
-      btn.textContent = 'Capturing...';
+          try {
+            const slug = generateSlugFromUrl(effectiveUrl);
+            await chrome.runtime.sendMessage({
+              action: 'recordPageActivity',
+              url: effectiveUrl,
+              title: tab.title || null,
+              slug,
+              isInitialLoad: true,
+              bypassBlacklist: true,
+            });
+            const resp = await chrome.runtime.sendMessage({
+              action: 'captureCurrentPageFromPopup',
+            });
+            if (resp && !resp.success) {
+              chrome.tabs
+                .sendMessage(tab.id, {
+                  action: 'showErrorNotification',
+                  message: resp.error || 'Capture failed',
+                })
+                .catch(() => {});
+            }
+            logDebug('[popup] Capture once completed for blacklisted page');
+          } catch (error) {
+            logError('[popup] Capture once failed:', error);
+            chrome.tabs
+              .sendMessage(tab.id, {
+                action: 'showErrorNotification',
+                message: error.message || 'Capture failed',
+              })
+              .catch(() => {});
+          }
 
-      try {
-        const slug = generateSlugFromUrl(effectiveUrl);
-        await chrome.runtime.sendMessage({
-          action: 'recordPageActivity',
-          url: effectiveUrl,
-          title: tab.title || null,
-          slug,
-          isInitialLoad: true,
-          bypassBlacklist: true,
-        });
-        const resp = await chrome.runtime.sendMessage({
-          action: 'captureCurrentPageFromPopup',
-        });
-        if (resp && !resp.success) {
-          chrome.tabs
-            .sendMessage(tab.id, {
-              action: 'showErrorNotification',
-              message: resp.error || 'Capture failed',
-            })
-            .catch(() => {});
-        }
-        logDebug('[popup] Capture once completed for blacklisted page');
-      } catch (error) {
-        logError('[popup] Capture once failed:', error);
-        chrome.tabs
-          .sendMessage(tab.id, {
-            action: 'showErrorNotification',
-            message: error.message || 'Capture failed',
-          })
-          .catch(() => {});
-      }
-
-      await showDashboard(tab);
-    });
+          await showDashboard(tab);
+        },
+      },
+      {
+        id: 'blacklistSettingsLink',
+        label: 'Manage in Settings',
+        onClick: () => openDesktopApp('settings'),
+      },
+    ],
+  });
 
   return true;
 }
@@ -1718,7 +1798,8 @@ async function loadConnectedDashboard(connector) {
 
 async function initPopup() {
   await applyTheme();
-  showSetupRequired({ state: 'connecting' }, { reveal: false });
+  renderLoading();
+  renderConnectorDiagnostic({ state: 'connecting' }, { reveal: false });
   const revealTimer = setTimeout(revealSetupIfStillWaiting, 250);
   try {
     const cachedConnector = await getCachedDesktopConnectorState();

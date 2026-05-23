@@ -43,6 +43,8 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/extension/background.js` | Thin connector runtime: popup RPC, buffering, pairing, snapshot/capture forwarding |
 | `apps/extension/content.js` | Visit/attention capture from pages |
 | `apps/extension/popup.js` | Current-tab popup UI |
+| `apps/extension/extension-surface.css` | Shared dark ledger styling for extension pages |
+| `apps/extension/extension-surface.js` | Shared shadow-DOM styling and overlay placement helpers for extension content surfaces |
 | `apps/extension/savepage-bridge.js` | Save Page WE capture bridge |
 | `apps/extension/connector/ws-client.js` | Connector websocket transport to daemon |
 | `apps/extension/connector/pairing.js` | Pairing bootstrap and session helpers |

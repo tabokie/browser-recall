@@ -1,0 +1,20 @@
+- There's an issue with scroll position in desktop app, it should've been reported and fixed earlier, not sure why test didn't coverage it fully and it re-occurs again. The issue is, when I enter a search query, the scroll is jumped all the way down to the bottom when it should've stayed at the top.
+- An improvement task: when a page is unavailable or blacklisted, in extension popup UI, still show the browser-recall banner with pause button
+- The "Not available for this page" message should be below the banner, and styled in a consistent way as the normal popup layout.
+- There is a weird empty title section, the title text is "-". Also, the text is not styled consistent as the whole aesthetics.
+- What is so complicated about the requirement? My initial guess is to just use a boolean flag to control whether to enter the normal popup render, otherwise render the message.
+- Isn't all those abnormal states handled the same way (i.e. no visit is recorded, no widget is rendered)?. So I think a better interface is "render(diagnostic)". Then again, I'm not sure if the render for "desktop unavailable" fit in this framework.
+- What is "loading"?
+- Why not use diffeernt functions instead of a new enum state? E.g. `renderLoading(); if !connected { renderConnectorDiagnostic(); } else if !page { renderPageDiagnostic(); } else { .. }`. Does this make the code more bloated?
+- Go ahead, refactor it to be simple and elegant
+- Another improvement: In desktop app, when some pages are selected, press Enter to open them in browser
+- Fix the test, it must be caused by the earlier search-scroll fixes
+- Can we unify extension UIs like highlight hover window and options page to be consistent with the popup UI, in terms of style and aesthetics?
+- Go ahead
+- Two issues: (1) The highligh hover window seems to be using old style still, (2) the options page could use a narrower content width, to reproduce the receipt concept
+- continue
+- $gap
+- Fix them all, thoroughly
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix them, but keep the STAGING.txt
+- $finish model=GPT-5.5 Codex

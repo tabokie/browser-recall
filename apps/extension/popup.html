@@ -560,6 +560,48 @@
         text-align: center;
       }
 
+      .page-diagnostic-title {
+        font-family: var(--font-display);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.12em;
+        line-height: 1.35;
+        color: var(--text-primary);
+        text-transform: uppercase;
+      }
+
+      .page-diagnostic-message {
+        margin-top: 6px;
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .page-diagnostic-detail {
+        margin-top: 10px;
+      }
+
+      .page-diagnostic-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .page-diagnostic-link {
+        align-self: flex-start;
+        border: none;
+        background: transparent;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-family: var(--font-body);
+        font-size: 11px;
+        padding: 0;
+      }
+
+      .page-diagnostic-link:hover {
+        color: var(--text-primary);
+      }
+
       .list-chips {
         display: flex;
         flex-wrap: wrap;
@@ -854,32 +896,6 @@
         padding: 32px;
       }
 
-      .blacklisted {
-        text-align: center;
-        padding: 32px 24px;
-        color: var(--text-secondary);
-      }
-
-      .blacklisted-icon {
-        font-size: 32px;
-        margin-bottom: 8px;
-        color: var(--accent-red);
-      }
-
-      .blacklisted-title {
-        font-size: 14px;
-        font-weight: 600;
-        color: var(--accent-red);
-        margin-bottom: 4px;
-      }
-
-      .blacklisted-url {
-        font-size: 11px;
-        color: var(--text-muted);
-        word-break: break-all;
-        margin-bottom: 12px;
-      }
-
       .capture-once-btn {
         padding: 7px 12px;
         border: none;
@@ -902,21 +918,6 @@
         background: var(--text-muted);
         border-color: var(--text-muted);
         cursor: default;
-      }
-
-      .blacklisted-hint {
-        font-size: 11px;
-        color: var(--text-muted);
-      }
-
-      .blacklisted-hint a {
-        color: var(--accent-primary);
-        cursor: pointer;
-        text-decoration: none;
-      }
-
-      .blacklisted-hint a:hover {
-        text-decoration: underline;
       }
 
       .setup-required {
@@ -1081,17 +1082,6 @@
       </div>
     </div>
 
-    <div id="blacklisted" class="popup-shell blacklisted" style="display: none">
-      <div class="blacklisted-icon">&#x26D4;</div>
-      <div class="blacklisted-title">Blacklisted</div>
-      <div class="blacklisted-url" id="blacklistedUrl"></div>
-      <button class="capture-once-btn" id="captureOnceBtn">Capture It</button>
-      <div class="blacklisted-hint">
-        This site is on your blocklist.
-        <a id="blacklistSettingsLink">Manage in Settings</a>
-      </div>
-    </div>
-
     <div id="dashboard" style="display: none">
       <div class="recording-bar" id="recordingBar">
         <div class="recording-state">
@@ -1111,7 +1101,17 @@
       </div>
 
       <div id="dashboardContent">
-        <div class="header">
+        <div class="section" id="pageDiagnosticSection" style="display: none">
+          <div class="page-diagnostic-title" id="pageDiagnosticTitle"></div>
+          <div class="page-diagnostic-message" id="pageDiagnosticMessage"></div>
+          <div
+            class="setup-diagnostic page-diagnostic-detail"
+            id="pageDiagnosticDetail"
+          ></div>
+          <div class="page-diagnostic-actions" id="pageDiagnosticActions"></div>
+        </div>
+
+        <div class="header" id="pageHeader">
           <div class="page-title" id="pageTitle">—</div>
           <div class="page-url" id="pageUrl">—</div>
         </div>

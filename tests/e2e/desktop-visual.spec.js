@@ -1885,6 +1885,91 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('pressing enter opens selected pages in the browser', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const historyEntries = Array.from({ length: 4 }, (_, i) => ({
+      url: `https://example.com/open-selected-${i}`,
+      title: `Open selected ${i}`,
+      timestamp: now - i * 1000,
+      deviceId: 'device-a',
+    }));
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll('.result-row').length >= 2,
+      );
+
+      const rows = page.locator('.result-row');
+      await rows.nth(0).click();
+      await page.keyboard.down('Meta');
+      await rows.nth(1).click();
+      await page.keyboard.up('Meta');
+
+      await expect(page.locator('.result-row.selected')).toHaveCount(2);
+      await page.keyboard.press('Enter');
+
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.openedExternalUrls(),
+          ),
+        )
+        .toEqual([
+          'https://example.com/open-selected-0',
+          'https://example.com/open-selected-1',
+        ]);
+    });
+  });
+
+  test('pressing enter on a focused control does not open selected pages', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const historyEntries = Array.from({ length: 3 }, (_, i) => ({
+      url: `https://example.com/focused-control-${i}`,
+      title: `Focused control ${i}`,
+      timestamp: now - i * 1000,
+      deviceId: 'device-a',
+    }));
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll('.result-row').length >= 2,
+      );
+
+      const rows = page.locator('.result-row');
+      await rows.nth(0).click();
+      await page.keyboard.down('Meta');
+      await rows.nth(1).click();
+      await page.keyboard.up('Meta');
+      await expect(page.locator('.result-row.selected')).toHaveCount(2);
+
+      await page.locator('#settingsBtn').focus();
+      await page.keyboard.press('Enter');
+
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.openedExternalUrls(),
+          ),
+        )
+        .toEqual([]);
+      await expect(page.locator('#settingsModal')).toBeVisible();
+    });
+  });
+
   test('dragging a page from second-line badges does not select text', async ({
     page,
   }) => {
@@ -2445,6 +2530,73 @@ test.describe('desktop visual regression', () => {
       });
       expect(Math.abs(after.scrollTop - before)).toBeLessThanOrEqual(120);
       expect(after.scrollTop).toBeLessThan(after.maxScroll - 200);
+    });
+  });
+
+  test('entering a search query from a short top view keeps results at the top', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const searchHistoryResults = Array.from(
+      { length: VIRTUALIZED_ENTRY_COUNT },
+      (_, i) => ({
+        url: `https://example.com/search-enter-${i}`,
+        title: `Search enter ${i}`,
+        timestamp: now - i * 1000,
+        score: 1,
+      }),
+    );
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [
+          {
+            url: 'https://example.com/short-before-search',
+            title: 'Short before search',
+            timestamp: now,
+            deviceId: 'device-a',
+          },
+        ],
+        searchHistoryResults,
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll('.result-row').length > 0,
+      );
+
+      const before = await page.evaluate(() => {
+        const main = document.querySelector('.main');
+        return {
+          scrollTop: main.scrollTop,
+          maxScroll: main.scrollHeight - main.clientHeight,
+        };
+      });
+      expect(before.scrollTop).toBe(0);
+      expect(before.maxScroll).toBe(0);
+
+      await page.locator('#searchDraftInput').fill('Search enter');
+      await page.waitForFunction(
+        ({ expected }) =>
+          Number(
+            document.getElementById('relatedResults').dataset.searchCount || 0,
+          ) === expected,
+        { expected: VIRTUALIZED_ENTRY_COUNT },
+      );
+
+      const after = await page.evaluate(() => {
+        const main = document.querySelector('.main');
+        return {
+          scrollTop: main.scrollTop,
+          maxScroll: main.scrollHeight - main.clientHeight,
+          firstTitle: document
+            .querySelector('.result-row .result-title')
+            ?.textContent?.trim(),
+        };
+      });
+      expect(after.maxScroll).toBeGreaterThan(1000);
+      expect(after.scrollTop).toBe(0);
+      expect(after.firstTitle).toBe('Search enter 0');
     });
   });
 });

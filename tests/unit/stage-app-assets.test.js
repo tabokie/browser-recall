@@ -95,12 +95,66 @@ describe('extension staged assets', () => {
     const popupHtml = readFileSync(join(outDir, 'popup.html'), 'utf8');
     const optionsHtml = readFileSync(join(outDir, 'options-stub.html'), 'utf8');
     const optionsSource = readFileSync(join(outDir, 'options-stub.js'), 'utf8');
+    const extensionSurfaceCss = readFileSync(
+      join(outDir, 'extension-surface.css'),
+      'utf8',
+    );
 
     expect(popupHtml).not.toContain('shortcut-bar');
     expect(optionsHtml).toContain('Keyboard Shortcuts');
+    expect(optionsHtml).toContain('extension-surface.css');
+    expect(optionsHtml).toContain('class="extension-page"');
+    expect(extensionSurfaceCss).toContain('--bg-base: #0f0f0d');
+    expect(extensionSurfaceCss).toContain('width: min(380px');
+    expect(extensionSurfaceCss).toContain('.extension-button');
     expect(optionsHtml).toContain('id="customizeShortcuts"');
     expect(optionsSource).toContain('chrome.commands.getAll()');
     expect(optionsSource).toContain('chrome://extensions/shortcuts');
+  });
+
+  it('keeps content highlight surfaces on the popup visual system', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
+    stagedDirs.push(outDir);
+    stageExtensionAssets(outDir);
+
+    const contentSource = readFileSync(join(outDir, 'content.js'), 'utf8');
+    const extensionSurfaceSource = readFileSync(
+      join(outDir, 'extension-surface.js'),
+      'utf8',
+    );
+    const snapshotViewerSource = readFileSync(
+      join(outDir, 'snapshot-viewer.js'),
+      'utf8',
+    );
+    const manifest = JSON.parse(readFileSync(join(outDir, 'manifest.json')));
+    const snapshotViewerHtml = readFileSync(
+      join(outDir, 'snapshot-viewer.html'),
+      'utf8',
+    );
+
+    expect(manifest.content_scripts[1].js).toEqual([
+      'browser-api.js',
+      'extension-surface.js',
+      'content.js',
+    ]);
+    expect(snapshotViewerHtml).toContain(
+      '<script src="extension-surface.js"></script>',
+    );
+    expect(extensionSurfaceSource).toContain(
+      'globalThis.browserRecallExtensionSurface',
+    );
+    expect(extensionSurfaceSource).toContain('--br-bg-base: #0f0f0d');
+    expect(extensionSurfaceSource).toContain('br-note-label');
+    expect(extensionSurfaceSource).toContain('br-note-excerpt');
+    expect(extensionSurfaceSource).toContain('positionNearRect');
+    expect(contentSource).toContain('data-note-index');
+    expect(contentSource).toContain('var(--br-border-section)');
+    expect(contentSource).not.toContain('SCHEME_PALETTES');
+    expect(contentSource).not.toContain('EXTENSION_SURFACE_CSS');
+    expect(contentSource).toContain('extensionSurface.positionNearRect');
+    expect(snapshotViewerSource).toContain('extensionSurface.positionNearRect');
+    expect(snapshotViewerSource).not.toContain('EXTENSION_SURFACE_CSS');
+    expect(snapshotViewerSource).not.toContain('getSchemePalette');
   });
 
   it('uses the desktop app icon and no removed down-state icons', () => {
@@ -131,6 +185,7 @@ describe('extension staged assets', () => {
     ]);
     expect(manifest.content_scripts[1].js).toEqual([
       'browser-api.js',
+      'extension-surface.js',
       'content.js',
     ]);
     expect(manifest.content_scripts[2].js).toEqual([

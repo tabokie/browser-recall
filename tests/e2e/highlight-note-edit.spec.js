@@ -1,5 +1,10 @@
 import { test, expect } from './fixtures.js';
-import { resetAndSeed, getSlugForUrl, openHelperPage } from './helpers.js';
+import {
+  resetAndSeed,
+  getSlugForUrl,
+  openHelperPage,
+  pageCheckpointPath,
+} from './helpers.js';
 
 test.describe('Highlight note edit', () => {
   test('note text persists after edit without page reload', async ({
@@ -22,18 +27,18 @@ test.describe('Highlight note edit', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url: pageUrl,
           title: 'Note Edit Test',
-          timestamp: now,
+          timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [`note:${noteSlug}`],
         },
       },
       {
-        path: `data/notes/${noteSlug}.json`,
+        path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
           excerpt: 'quick brown fox',
@@ -71,8 +76,21 @@ test.describe('Highlight note edit', () => {
       timeout: 3000,
     });
 
-    // Wait for updateNote to complete (async message to background)
-    await page.waitForTimeout(500);
+    await expect
+      .poll(async () => {
+        const helper = await openHelperPage(extContext, extensionId);
+        try {
+          const notesResp = await helper.evaluate(
+            (s) =>
+              chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: s }),
+            slug,
+          );
+          return notesResp.notes?.[0]?.note || '';
+        } finally {
+          await helper.close();
+        }
+      })
+      .toBe('my important note');
 
     // Click the highlight again to re-open the overlay
     await page.click('mark.portal-highlight');
@@ -87,7 +105,6 @@ test.describe('Highlight note edit', () => {
     expect(updatedNoteSlug).toBeTruthy();
     expect(updatedNoteSlug).not.toBe(noteSlug);
 
-    // Verify the new note has the text via background
     const helper = await openHelperPage(extContext, extensionId);
     const notesResp = await helper.evaluate(
       (s) => chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: s }),
@@ -100,6 +117,75 @@ test.describe('Highlight note edit', () => {
     expect(notesResp.notes[0].slug).toBe(updatedNoteSlug);
 
     await helper.close();
+    await page.close();
+  });
+
+  test('highlight note overlay stays inside the viewport near page edge', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/note-edge', {
+      title: 'Note Edge Test',
+      body: '<main style="height:120vh;padding-top:32px;text-align:right"><p><span id="edge">edge highlight phrase</span></p></main>',
+    });
+    const pageUrl = localServer.url('/note-edge');
+    const slug = getSlugForUrl(pageUrl);
+    const noteSlug = 'note-edge-test-slug';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Note Edge Test',
+          timestamps: { 'test-device': now },
+          parentIds: [],
+          childIds: [`note:${noteSlug}`],
+        },
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: 'edge highlight phrase',
+          note: '',
+          cssPath: null,
+          url: pageUrl,
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.setViewportSize({ width: 360, height: 300 });
+    await page.goto(pageUrl);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('mark.portal-highlight', { timeout: 5000 });
+    await page.click('mark.portal-highlight');
+    await page.waitForSelector('#portal-highlight-overlay', { timeout: 3000 });
+
+    const box = await page.evaluate(() => {
+      const rect = document
+        .getElementById('portal-highlight-overlay')
+        .getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: innerWidth,
+        height: innerHeight,
+      };
+    });
+    expect(box.left).toBeGreaterThanOrEqual(0);
+    expect(box.right).toBeLessThanOrEqual(box.width);
+    expect(box.top).toBeGreaterThanOrEqual(0);
+    expect(box.bottom).toBeLessThanOrEqual(box.height);
+
     await page.close();
   });
 
@@ -122,18 +208,18 @@ test.describe('Highlight note edit', () => {
     await resetAndSeed(extContext, extensionId, [
       { path: 'views/manifest/settings.json', data: { trimRules: [] } },
       {
-        path: `pages/${slug}.json`,
+        path: pageCheckpointPath(slug),
         data: {
           slug,
           url: pageUrl,
           title: 'Highlight Show Test',
-          timestamp: now,
+          timestamps: { 'test-device': now },
           parentIds: [],
           childIds: [`note:${noteSlug}`],
         },
       },
       {
-        path: `data/notes/${noteSlug}.json`,
+        path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
           excerpt: 'quick brown fox',

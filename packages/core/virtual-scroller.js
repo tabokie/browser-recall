@@ -127,7 +127,7 @@ export class VirtualScroller {
     this.updateData(items, renderRowFn);
     this._topLockFrames = 2;
     this.scrollEl.scrollTop = 0;
-    requestAnimationFrame(() => {
+    const lockTop = () => {
       if (this._topLockFrames <= 0) return;
       this._topLockFrames -= 1;
       this.scrollEl.scrollTop = 0;
@@ -135,7 +135,9 @@ export class VirtualScroller {
         this.renderedRange = { start: -1, end: -1 };
         this._render(true);
       }
-    });
+      if (this._topLockFrames > 0) requestAnimationFrame(lockTop);
+    };
+    requestAnimationFrame(lockTop);
   }
 
   // Filter displayed data without losing the full dataset.
@@ -445,6 +447,7 @@ export class VirtualScroller {
   _captureBottomAnchor() {
     const maxScrollTop = this._maxScrollTop();
     if (maxScrollTop == null) return null;
+    if (maxScrollTop <= 4) return null;
     const bottomOffset = maxScrollTop - this.scrollEl.scrollTop;
     if (bottomOffset > 4) return null;
     return { bottomOffset: Math.max(0, bottomOffset) };
@@ -477,6 +480,10 @@ export class VirtualScroller {
     if (!anchor) return false;
     const index = this._indexByKey.get(anchor.key);
     const maxScrollTop = this._maxScrollTop();
+    if (maxScrollTop != null && maxScrollTop <= 4 && anchor.fallbackTop > 0) {
+      this.scrollEl.scrollTop = anchor.fallbackTop;
+      return true;
+    }
     if (index == null || index < 0) {
       if (maxScrollTop == null) return false;
       this.scrollEl.scrollTop = Math.min(anchor.fallbackTop, maxScrollTop);

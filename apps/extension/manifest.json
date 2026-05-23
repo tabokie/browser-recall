@@ -28,7 +28,7 @@
     },
     {
       "matches": ["<all_urls>"],
-      "js": ["browser-api.js", "content.js"],
+      "js": ["browser-api.js", "extension-surface.js", "content.js"],
       "run_at": "document_idle"
     },
     {

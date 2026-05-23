@@ -1,9 +1,7 @@
 import { logDebug } from './logger.js';
 import { findTextRange } from './highlight-helpers.js';
-import { getSchemePalette } from './color-scheme-map.js';
 
-const { colorScheme } = await chrome.storage.session.get(['colorScheme']);
-const palette = getSchemePalette(colorScheme);
+const extensionSurface = globalThis.browserRecallExtensionSurface;
 
 const params = new URLSearchParams(location.search);
 const slug = params.get('slug');
@@ -198,55 +196,60 @@ function attachMarkClickHandler(doc, mark) {
 }
 
 const OVERLAY_STYLE = `
+  ${extensionSurface.shadowCss}
   .overlay {
-    display: flex; align-items: flex-start; gap: 8px; width: 280px;
-    background: ${palette.bgBase}; border: 1px solid ${palette.borderSubtle};
-    border-radius: 10px; box-shadow: 0 1px 2px rgba(${palette.shadowColor},0.04), 0 4px 12px rgba(${palette.shadowColor},0.08);
-    font-family: 'Nunito', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    width: 300px;
+    background: var(--br-bg-base); border: 1px solid var(--br-border-section);
+    border-radius: 2px; color: var(--br-text-primary);
+    font-family: var(--br-font-body); font-size: 12px; line-height: 1.45;
     padding: 8px;
   }
-  .delete-btn {
-    flex-shrink: 0; width: 28px; height: 28px; display: flex;
-    align-items: center; justify-content: center; background: none;
-    border: 1px solid ${palette.borderSubtle}; border-radius: 6px;
-    cursor: pointer; color: ${palette.textMuted}; padding: 0;
+  .br-note-label {
+    margin-bottom: 7px; color: var(--br-text-muted); font-size: 10px;
+    font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase;
   }
-  .delete-btn:hover { background: rgba(184, 80, 64, 0.1); border-color: #B85040; color: #B85040; }
+  .br-note-excerpt {
+    margin-bottom: 8px; padding: 7px 0 8px;
+    border-top: 1px dotted var(--br-border-section);
+    border-bottom: 1px dotted var(--br-border-section);
+    color: var(--br-text-muted); font-style: italic; line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+  .br-note-editor { display: flex; align-items: flex-start; gap: 8px; }
+  .br-note-body { flex: 1; min-width: 0; }
+  .delete-btn {
+    flex-shrink: 0; width: 30px; height: 30px; display: flex;
+    align-items: center; justify-content: center; background: none;
+    border: 1px solid var(--br-border-section); border-radius: 2px;
+    cursor: pointer; color: var(--br-text-muted); padding: 0;
+  }
+  .delete-btn:hover { background: var(--br-accent-red-soft); border-color: var(--br-accent-red); color: var(--br-accent-red); }
   .delete-btn svg { width: 16px; height: 16px; fill: currentColor; }
   textarea {
-    width: 100%; min-height: 28px; height: 28px;
-    border: 1px solid ${palette.borderSubtle}; border-radius: 6px;
+    width: 100%; min-height: 30px; height: 30px;
+    border: 1px solid var(--br-border-section); border-radius: 2px;
     padding: 4px 8px; font-family: inherit; font-size: 12px;
     resize: none; box-sizing: border-box; line-height: 18px; overflow: hidden;
+    background: transparent; color: var(--br-text-primary);
   }
-  textarea:focus { outline: none; border-color: ${palette.accent}; }
+  textarea::placeholder { color: var(--br-text-muted); }
+  textarea:focus { outline: none; border-color: var(--br-accent-primary); box-shadow: 0 0 0 3px var(--br-accent-soft); }
 `;
 
-const OVERLAY_HTML = `
-  <div class="overlay">
-    <button class="delete-btn" title="Delete note">
-      <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-    </button>
-    <div style="flex:1;min-width:0">
-      <textarea placeholder="Add a note... Esc to save."></textarea>
-    </div>
-  </div>
-`;
-
-function showHighlightEditOverlay(doc, mark, _text, noteSlug, existingNote) {
+function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
   doc.getElementById('portal-highlight-overlay')?.remove();
 
   const rect = mark.getBoundingClientRect();
   const win = doc.defaultView;
   const host = doc.createElement('div');
   host.id = 'portal-highlight-overlay';
-  host.style.cssText = 'position: absolute; z-index: 2147483647;';
-  host.style.left = `${rect.left + win.scrollX}px`;
-  host.style.top = `${rect.bottom + win.scrollY + 4}px`;
+  host.style.cssText =
+    'position: absolute; z-index: 2147483647; visibility: hidden;';
 
   const shadow = host.attachShadow({ mode: 'closed' });
-  shadow.innerHTML = `<style>${OVERLAY_STYLE}</style>${OVERLAY_HTML}`;
+  shadow.innerHTML = `<style>${OVERLAY_STYLE}</style><div class="overlay">${extensionSurface.noteOverlayHtml({ title: 'Highlight Note', excerpt: text || '', placeholder: 'Add a note... Esc to save.', includeDelete: true })}</div>`;
   doc.body.appendChild(host);
+  extensionSurface.positionNearRect(host, rect, win);
 
   const textarea = shadow.querySelector('textarea');
   const deleteBtn = shadow.querySelector('.delete-btn');
