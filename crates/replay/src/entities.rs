@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn entity_accessors_accept_only_the_matching_variant() {
-        let entities = vec![
+        let entities = [
             Entity::Page(PageEntity::new("page".to_string())),
             Entity::Note(NoteEntity::new("note".to_string())),
             Entity::List(ListEntity::new("list".to_string())),

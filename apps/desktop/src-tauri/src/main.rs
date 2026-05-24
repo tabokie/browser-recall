@@ -17,8 +17,8 @@ use browser_recall_daemon::protocol::{
     DaemonMessage, MutationPayload, RuleBatchEntry, RulePayload,
 };
 use browser_recall_daemon::search::{
-    search_history_in_data_dir, search_notes_in_data_dir, search_snapshots_in_data_dir,
-    HistorySearchHit, NoteSearchHit, SnapshotSearchHit,
+    search_history_in_data_dir, search_history_parallel_in_data_dir, search_notes_in_data_dir,
+    search_snapshots_in_data_dir, HistorySearchHit, NoteSearchHit, SnapshotSearchHit,
 };
 use browser_recall_daemon::storage::Storage;
 use browser_recall_daemon::sync::{
@@ -30,12 +30,15 @@ use browser_recall_daemon::ws_server::{
     ServiceStatus,
 };
 use browser_recall_daemon::{ConfigStore, DaemonConfig};
-use search::SearchRequest;
+use search::{CancelSearchRequest, SearchRequest, StreamingSearchRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use tauri::menu::{MenuBuilder, MenuItem, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::{
@@ -49,6 +52,7 @@ use tracing::{info, warn};
 
 const TRAY_ID: &str = "browser-recall";
 const BRIDGE_RUNTIME_MESSAGE_EVENT: &str = "bridge-runtime-message";
+const BRIDGE_SEARCH_HISTORY_EVENT: &str = "bridge-search-history";
 const BRIDGE_STORAGE_CHANGE_EVENT: &str = "bridge-storage-change";
 const NORMAL_WINDOW_WIDTH: f64 = 1120.0;
 const NORMAL_WINDOW_HEIGHT: f64 = 760.0;
@@ -72,9 +76,15 @@ struct DesktopState {
     shell: Mutex<ShellState>,
     sync: SyncController,
     storage_bridge: Mutex<StorageBridgeState>,
+    active_history_search: Mutex<Option<ActiveHistorySearch>>,
     status_item: MenuItem<tauri::Wry>,
     logging: logging::LoggingHandle,
     quit_requested: Mutex<bool>,
+}
+
+struct ActiveHistorySearch {
+    search_id: String,
+    cancel: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -747,6 +757,10 @@ async fn start_shell_server(app: &AppHandle) -> Result<ServerSnapshot, String> {
 
 fn emit_runtime_message(app: &AppHandle, payload: Value) {
     let _ = app.emit(BRIDGE_RUNTIME_MESSAGE_EVENT, payload);
+}
+
+fn emit_history_search_event(app: &AppHandle, payload: Value) {
+    let _ = app.emit(BRIDGE_SEARCH_HISTORY_EVENT, payload);
 }
 
 fn emit_storage_change_message(
@@ -1529,6 +1543,108 @@ fn search_history(app: AppHandle, request: SearchRequest) -> Result<serde_json::
 }
 
 #[tauri::command]
+async fn search_history_stream(
+    app: AppHandle,
+    request: StreamingSearchRequest,
+) -> Result<serde_json::Value, String> {
+    let data_dir = shell_data_dir(&app)?;
+    let state = app.state::<DesktopState>();
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut active = state
+            .active_history_search
+            .lock()
+            .expect("active history search state poisoned");
+        if let Some(previous) = active.take() {
+            previous.cancel.store(true, Ordering::Relaxed);
+        }
+        *active = Some(ActiveHistorySearch {
+            search_id: request.search_id.clone(),
+            cancel: Arc::clone(&cancel),
+        });
+    }
+
+    let search_id = request.search_id.clone();
+    let query = request.query.clone();
+    let limit = request.limit;
+    let app_for_task = app.clone();
+    let task_cancel = Arc::clone(&cancel);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = search_history_parallel_in_data_dir(
+            &data_dir,
+            &query,
+            limit,
+            Arc::clone(&task_cancel),
+            |chunk| {
+                let results =
+                    serde_json::to_value(&chunk.results).map_err(std::io::Error::other)?;
+                emit_history_search_event(
+                    &app_for_task,
+                    json!({
+                        "type": "historySearchChunk",
+                        "searchId": search_id,
+                        "workerId": chunk.worker_id,
+                        "results": results,
+                    }),
+                );
+                Ok(())
+            },
+        );
+        let success = result.is_ok() && !task_cancel.load(Ordering::Relaxed);
+        let error = result.err().map(|error| error.to_string());
+        emit_history_search_event(
+            &app_for_task,
+            json!({
+                "type": "historySearchDone",
+                "searchId": search_id,
+                "success": success,
+                "cancelled": task_cancel.load(Ordering::Relaxed),
+                "error": error,
+            }),
+        );
+        let state = app_for_task.state::<DesktopState>();
+        let mut active = state
+            .active_history_search
+            .lock()
+            .expect("active history search state poisoned");
+        if active
+            .as_ref()
+            .is_some_and(|active| active.search_id == search_id)
+        {
+            *active = None;
+        }
+    });
+
+    Ok(json!({ "success": true, "searchId": request.search_id }))
+}
+
+#[tauri::command]
+async fn cancel_history_search(
+    app: AppHandle,
+    request: CancelSearchRequest,
+) -> Result<serde_json::Value, String> {
+    let state = app.state::<DesktopState>();
+    let mut cancelled = false;
+    {
+        let mut active = state
+            .active_history_search
+            .lock()
+            .expect("active history search state poisoned");
+        if active
+            .as_ref()
+            .is_some_and(|active| active.search_id == request.search_id)
+        {
+            if let Some(active) = active.take() {
+                active.cancel.store(true, Ordering::Relaxed);
+                cancelled = true;
+            }
+        }
+    }
+    Ok(json!({ "success": true, "cancelled": cancelled }))
+}
+
+#[tauri::command]
 fn search_notes(app: AppHandle, request: SearchRequest) -> Result<serde_json::Value, String> {
     let data_dir = shell_data_dir(&app)?;
     let hits: Vec<NoteSearchHit> =
@@ -1599,6 +1715,8 @@ fn main() {
             resume_shell_service,
             open_shell_path,
             search_history,
+            search_history_stream,
+            cancel_history_search,
             search_notes,
             search_snapshots,
             bridge_storage_get,
@@ -1660,6 +1778,7 @@ fn main() {
                     sync_notify.clone(),
                 ),
                 storage_bridge: Mutex::new(StorageBridgeState::default()),
+                active_history_search: Mutex::new(None),
                 status_item,
                 logging,
                 quit_requested: Mutex::new(false),

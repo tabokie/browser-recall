@@ -279,6 +279,17 @@ pub enum ConnectorMessage {
         #[serde(default)]
         limit: Option<usize>,
     },
+    SearchHistoryStream {
+        #[serde(rename = "searchId")]
+        search_id: String,
+        query: String,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    CancelHistorySearch {
+        #[serde(rename = "searchId")]
+        search_id: String,
+    },
     SearchNotes {
         query: String,
         #[serde(default)]
@@ -514,6 +525,22 @@ pub enum DaemonMessage {
         success: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         results: Vec<HistorySearchResult>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    HistorySearchChunk {
+        #[serde(rename = "searchId")]
+        search_id: String,
+        #[serde(rename = "workerId")]
+        worker_id: usize,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        results: Vec<HistorySearchResult>,
+    },
+    HistorySearchDone {
+        #[serde(rename = "searchId")]
+        search_id: String,
+        success: bool,
+        cancelled: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

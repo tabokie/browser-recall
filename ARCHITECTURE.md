@@ -156,7 +156,9 @@ Search is daemon-owned.
 
 - `crates/search/` provides native full-text helpers.
 - `crates/daemon/src/search.rs` wires those helpers into command/query paths.
-- Desktop UI search requests go through Tauri commands.
+- Desktop UI history search goes through cancellable Tauri streaming commands. The daemon search adapter splits history JSONL work across a fixed worker pool, emits result chunks as workers finish, and cooperatively stops when the UI starts a newer search or leaves search mode.
+- The connector websocket protocol also exposes daemon history search streaming and cancellation messages (`search_history_stream`, `cancel_history_search`, `history_search_chunk`, `history_search_done`). The legacy `search_history` request/response message remains for compatibility but uses the same parallel daemon search helper.
+- Desktop UI note and snapshot search still use daemon-owned request/response commands.
 - The connector popup only requests page-scoped summaries; it does not run local full-text search.
 
 Shared query parsing and ranking helpers used by the UI live in `packages/core/`.

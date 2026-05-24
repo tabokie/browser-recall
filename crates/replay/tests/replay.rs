@@ -705,11 +705,7 @@ async fn rate_page_skips_duplicate_device_timestamp() {
     .await
     .expect("rate replay succeeds");
 
-    let page = result
-        .get(&key)
-        .and_then(EntityEffect::as_page)
-        .expect("page updated");
-    assert_eq!(page.likes, Some(3));
+    assert!(result.is_empty());
 }
 
 #[tokio::test]
@@ -735,11 +731,7 @@ async fn rate_page_preserves_higher_existing_timestamp() {
     .await
     .expect("rate replay succeeds");
 
-    let page = result
-        .get(&key)
-        .and_then(EntityEffect::as_page)
-        .expect("page updated");
-    assert_eq!(page.timestamps.get("test-device"), Some(&500));
+    assert!(result.is_empty());
 }
 
 #[tokio::test]
@@ -1438,7 +1430,10 @@ async fn permanent_delete_snapshot_unlinks_page_and_deletes_unretained_checkpoin
     .await
     .expect("permanent snapshot delete replay succeeds");
 
-    assert!(result.get(&snapshot_key).expect("snapshot delete").is_delete());
+    assert!(result
+        .get(&snapshot_key)
+        .expect("snapshot delete")
+        .is_delete());
     assert!(result.get(&page_key).expect("page delete").is_delete());
     let orphaned = result
         .get("manifest:orphaned")
@@ -1505,7 +1500,10 @@ async fn permanent_delete_list_cleans_pages_tree_and_name_manifest() {
         (target_list_key.clone(), Entity::List(target_list)),
         (pinned_page_key.clone(), Entity::Page(pinned_page)),
         (retained_page_key.clone(), Entity::Page(retained_page)),
-        ("manifest:name-to-id".to_string(), Entity::NameToId(name_map)),
+        (
+            "manifest:name-to-id".to_string(),
+            Entity::NameToId(name_map),
+        ),
         (
             "manifest:list-order".to_string(),
             Entity::ListOrder(list_order),
@@ -1545,10 +1543,7 @@ async fn permanent_delete_list_cleans_pages_tree_and_name_manifest() {
         .expect("name map updated");
     assert_eq!(
         name_map.paths,
-        BTreeMap::from([(
-            "test-device/Sibling".to_string(),
-            "sibling-id".to_string()
-        )])
+        BTreeMap::from([("test-device/Sibling".to_string(), "sibling-id".to_string())])
     );
     assert_eq!(name_map.timestamps.get("test-device"), Some(&300));
 
@@ -1595,7 +1590,10 @@ async fn permanent_delete_page_removes_matching_list_pins() {
     let store = BTreeMap::from([
         ("list:first".to_string(), Entity::List(first)),
         ("list:second".to_string(), Entity::List(second)),
-        ("manifest:name-to-id".to_string(), Entity::NameToId(name_map)),
+        (
+            "manifest:name-to-id".to_string(),
+            Entity::NameToId(name_map),
+        ),
     ]);
 
     let result = effect_of(

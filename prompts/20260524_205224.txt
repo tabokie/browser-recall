@@ -1,0 +1,21 @@
+- For page URL and page snapshot, the hover cursor should be a hand pointer and single click to open. This applies to both desktop app's page detail, and extension's popup.
+- Run all tests and fix any failures
+- An improvement task: when extension is just installed, should open the options
+- Does list UI employs virtual scroller? I anticipate it to not do that because we need to support Ctrl-A select all
+- We should remove virtual scroller in list view.
+- I noticed you mentioned "#relatedResults", what is it? I thought the concept of "related pages" are already removed
+- I noticed we still use the uFuzzy library, but desktop app has already been ported to Rust, is it still suitable to use a JS library like uFuzzy?
+- So the UI still can't directly interface with Rust code? Because I thought we already implemented responsive chunked search in Rust search code, if UI can just directly use that the response should be fast.
+- Check if there's actually streaming search on Rust side, my memory could be wrong
+- Does Rust search at least have parallel search?
+- Could you trace back the last commit that overhaul the search implementation when the app is pure extension? I think both streaming and parallelizing was implemented then.
+- Does the UI frontend already runs merge sort over responses from history search, note search, and highlight searches?
+- Then I think it make sense to (1) parallelize history searches on Rust side, (2) return each parallel task's response immediately to UI (streaming), and let UI handle the merge, (3) set a fixed parallelism for now
+- Good, let's implement decent cancellation for daemon too.
+- $gap
+- Fix them all
+- Why is uFuzzy still present in the codebase?
+- Remove it entirely
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix them all
+- $finish model=GPT-5.5 Codex

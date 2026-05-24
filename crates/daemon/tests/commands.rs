@@ -1224,31 +1224,26 @@ async fn command_workflow_combines_bookmark_import_bulk_pins_restore_and_relatio
     let pages_payload = load_all_pages_payload(&storage)
         .await
         .expect("load all pages payload");
-    assert!(
-        pages_payload
-            .as_object()
-            .expect("pages payload is object")
-            .contains_key(&bulk_a_slug)
-    );
+    assert!(pages_payload
+        .as_object()
+        .expect("pages payload is object")
+        .contains_key(&bulk_a_slug));
 
     let relations = page_relations_payload(&storage, "https://example.com/bulk-a")
         .await
         .expect("page relations");
-    assert!(
-        relations["parents"]["lists"]
-            .as_array()
-            .expect("list parents")
-            .iter()
-            .any(|value| value.get("slug").and_then(|slug| slug.as_str())
-                == Some(research_id.as_str()))
-    );
-    assert!(
-        relations["parents"]["referrers"]
-            .as_array()
-            .expect("referrer parents")
-            .iter()
-            .any(|value| value.as_str() == Some("https://example.com/referrer"))
-    );
+    assert!(relations["parents"]["lists"]
+        .as_array()
+        .expect("list parents")
+        .iter()
+        .any(
+            |value| value.get("slug").and_then(|slug| slug.as_str()) == Some(research_id.as_str())
+        ));
+    assert!(relations["parents"]["referrers"]
+        .as_array()
+        .expect("referrer parents")
+        .iter()
+        .any(|value| value.as_str() == Some("https://example.com/referrer")));
 
     let mut renamed_rule = BTreeMap::new();
     renamed_rule.insert(
@@ -1300,7 +1295,10 @@ async fn command_workflow_combines_bookmark_import_bulk_pins_restore_and_relatio
     let deleted = delete_list(&storage, "device-a", &research_id)
         .await
         .expect("delete list command");
-    assert_eq!(deleted.get("listId").and_then(|value| value.as_str()), Some(research_id.as_str()));
+    assert_eq!(
+        deleted.get("listId").and_then(|value| value.as_str()),
+        Some(research_id.as_str())
+    );
     assert!(
         deleted
             .get("urls")
@@ -1322,7 +1320,11 @@ async fn command_workflow_combines_bookmark_import_bulk_pins_restore_and_relatio
 
     let snapshot_ts = 1_710_001_000_200;
     storage
-        .save_snapshot_html(&bulk_a_slug, snapshot_ts, "<html><body>bulk snapshot</body></html>")
+        .save_snapshot_html(
+            &bulk_a_slug,
+            snapshot_ts,
+            "<html><body>bulk snapshot</body></html>",
+        )
         .await
         .expect("save snapshot html");
     replay_entry(
@@ -1450,15 +1452,24 @@ async fn command_error_and_normalization_paths_are_explicit() {
     );
 
     assert_eq!(
-        save_settings_key(&storage, "device-a", "unknownSetting", serde_json::json!(true))
-            .await
-            .expect_err("unknown settings key fails"),
+        save_settings_key(
+            &storage,
+            "device-a",
+            "unknownSetting",
+            serde_json::json!(true)
+        )
+        .await
+        .expect_err("unknown settings key fails"),
         "Unknown settings key: unknownSetting"
     );
     assert_eq!(
-        create_note(&storage, "device-a", &serde_json::json!({"excerpt": [" ", null]}))
-            .await
-            .expect_err("missing note URL fails"),
+        create_note(
+            &storage,
+            "device-a",
+            &serde_json::json!({"excerpt": [" ", null]})
+        )
+        .await
+        .expect_err("missing note URL fails"),
         "Cannot determine page URL for note"
     );
     let note_response = create_note(
@@ -1537,7 +1548,12 @@ async fn command_error_and_normalization_paths_are_explicit() {
     )
     .await
     .expect("empty list update is no-op");
-    assert_eq!(no_name_update.get("success").and_then(|value| value.as_bool()), Some(true));
+    assert_eq!(
+        no_name_update
+            .get("success")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
     let same_name_update = save_list_meta(
         &storage,
         "device-a",
@@ -1657,7 +1673,10 @@ async fn command_error_and_normalization_paths_are_explicit() {
     );
     let missing_url_slug = "snapshot-missing-url";
     storage
-        .save_page(missing_url_slug, &PageEntity::new(missing_url_slug.to_string()))
+        .save_page(
+            missing_url_slug,
+            &PageEntity::new(missing_url_slug.to_string()),
+        )
         .await
         .expect("save URL-less page");
     assert_eq!(
@@ -1682,17 +1701,16 @@ async fn command_error_and_normalization_paths_are_explicit() {
             "snapshot:s1-1".to_string(),
         ]
     );
-    assert!(permanent_delete_keys(&storage, "device-a", &["manifest:orphaned".to_string()])
-        .await
-        .expect("no permanent candidates")
-        .is_empty());
+    assert!(
+        permanent_delete_keys(&storage, "device-a", &["manifest:orphaned".to_string()])
+            .await
+            .expect("no permanent candidates")
+            .is_empty()
+    );
 
     let invalid_rule = RulePayload {
         rule_type: "keyword".to_string(),
-        config: BTreeMap::from([(
-            "case_sensitive".to_string(),
-            serde_json::Value::Bool(true),
-        )]),
+        config: BTreeMap::from([("case_sensitive".to_string(), serde_json::Value::Bool(true))]),
     };
     let preview = preview_rule_payload(
         invalid_rule.clone(),
@@ -1706,7 +1724,10 @@ async fn command_error_and_normalization_paths_are_explicit() {
         }],
     )
     .expect("invalid preview returns payload");
-    assert_eq!(preview.get("success").and_then(|value| value.as_bool()), Some(false));
+    assert_eq!(
+        preview.get("success").and_then(|value| value.as_bool()),
+        Some(false)
+    );
     let add_rule_result = add_rule(&storage, "device-a", &child_list_id, invalid_rule)
         .await
         .expect("invalid add rule returns payload");
@@ -1723,9 +1744,15 @@ async fn command_error_and_normalization_paths_are_explicit() {
         "List not found"
     );
     assert_eq!(
-        update_rule(&storage, "device-a", "missing-list", "rule", BTreeMap::new())
-            .await
-            .expect_err("missing update rule list fails"),
+        update_rule(
+            &storage,
+            "device-a",
+            "missing-list",
+            "rule",
+            BTreeMap::new()
+        )
+        .await
+        .expect_err("missing update rule list fails"),
         "List not found"
     );
 

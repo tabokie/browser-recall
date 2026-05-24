@@ -53,6 +53,16 @@ struct HistoryData {
     slug: Option<String>,
 }
 
+/// Deduplicated history record prepared by a storage/query adapter.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SearchRecord {
+    pub timestamp: i64,
+    pub url: String,
+    pub title: String,
+    #[serde(default)]
+    pub slug: Option<String>,
+}
+
 /// Search result ranking algorithms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RankingAlgorithm {
@@ -488,8 +498,25 @@ where
         }
     }
 
+    search_records(
+        pages_dir,
+        query,
+        entries.into_iter().map(SearchRecord::from).collect(),
+    )
+}
+
+/// Search prepared history records + their page markdown content.
+pub fn search_records<P>(
+    pages_dir: P,
+    query: &str,
+    records: Vec<SearchRecord>,
+) -> io::Result<Vec<SearchResult>>
+where
+    P: AsRef<Path>,
+{
+    let pages_dir = pages_dir.as_ref();
     let mut content_by_slug = HashMap::new();
-    let slugs: HashSet<&str> = entries
+    let slugs: HashSet<&str> = records
         .iter()
         .filter_map(|entry| entry.slug.as_deref())
         .collect();
@@ -502,7 +529,7 @@ where
     }
 
     let mut engine = SearchEngine::new();
-    for entry in entries {
+    for entry in records {
         let content = entry
             .slug
             .as_deref()
@@ -520,6 +547,17 @@ where
     }
 
     Ok(engine.search(query, RankingAlgorithm::Content))
+}
+
+impl From<HistoryData> for SearchRecord {
+    fn from(value: HistoryData) -> Self {
+        Self {
+            timestamp: value.timestamp,
+            url: value.url,
+            title: value.title,
+            slug: value.slug,
+        }
+    }
 }
 
 /// Search all note JSON files in a directory for query matches.

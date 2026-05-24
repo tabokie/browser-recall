@@ -255,6 +255,9 @@ async function installDesktopBridgeMock(page, options = {}) {
       pairedBrowsers,
       deleteSnapshotFails,
       searchHistoryResults,
+      searchHistoryChunks,
+      searchHistoryResultsByQuery,
+      searchNotesResultsByQuery,
     }) => {
       const listeners = new Map();
       const stores = {
@@ -262,6 +265,8 @@ async function installDesktopBridgeMock(page, options = {}) {
         local: new Map(Object.entries(seed.local)),
       };
       const openedExternalUrls = [];
+      const openedSnapshots = [];
+      const cancelledHistorySearchIds = [];
 
       function clone(value) {
         return value === undefined
@@ -368,6 +373,25 @@ async function installDesktopBridgeMock(page, options = {}) {
         }
       }
 
+      function emitTauriEvent(eventName, payload) {
+        for (const handler of listeners.get(eventName) || []) {
+          handler({ payload: clone(payload) });
+        }
+      }
+
+      const cancelledHistorySearches = new Set();
+
+      function chunksForHistorySearch(query) {
+        const keyed = searchHistoryResultsByQuery?.[query];
+        const configured = keyed || searchHistoryChunks;
+        if (configured) {
+          return configured.map((chunk) =>
+            Array.isArray(chunk) ? { delay: 0, results: chunk } : chunk,
+          );
+        }
+        return [{ delay: 0, results: searchHistoryResults || [] }];
+      }
+
       function removeListFromTree(nodes = [], listId) {
         const listEntityId = `list:${listId}`;
         const next = [];
@@ -402,6 +426,15 @@ async function installDesktopBridgeMock(page, options = {}) {
         },
         openedExternalUrls() {
           return clone(openedExternalUrls);
+        },
+        openedSnapshots() {
+          return clone(openedSnapshots);
+        },
+        cancelledHistorySearchIds() {
+          return clone(cancelledHistorySearchIds);
+        },
+        listenerCount(eventName) {
+          return (listeners.get(eventName) || []).length;
         },
       };
 
@@ -463,6 +496,11 @@ async function installDesktopBridgeMock(page, options = {}) {
               success: true,
               results: clone(searchHistoryResults || []),
             };
+          case 'searchNotes':
+            return {
+              success: true,
+              results: clone(searchNotesResultsByQuery?.[request.query] || []),
+            };
           case 'loadPageNotes':
             return {
               success: true,
@@ -504,6 +542,12 @@ async function installDesktopBridgeMock(page, options = {}) {
                   deletedAt: Date.now(),
                 },
               ],
+            });
+            return { success: true };
+          case 'openSnapshot':
+            openedSnapshots.push({
+              slug: request.slug,
+              timestamp: request.timestamp,
             });
             return { success: true };
           case 'permanentDeleteAll': {
@@ -660,6 +704,58 @@ async function installDesktopBridgeMock(page, options = {}) {
           async invoke(command, payload = {}) {
             if (command === 'bridge_action')
               return bridgeAction(payload.request);
+            if (command === 'search_history_stream') {
+              const request = payload.request || {};
+              cancelledHistorySearches.delete(request.searchId);
+              const chunks = chunksForHistorySearch(request.query);
+              for (const [index, chunk] of chunks.entries()) {
+                setTimeout(() => {
+                  if (cancelledHistorySearches.has(request.searchId)) return;
+                  emitTauriEvent('bridge-search-history', {
+                    type: 'historySearchChunk',
+                    searchId: request.searchId,
+                    workerId: index,
+                    results: chunk.results || [],
+                  });
+                  if (index === chunks.length - 1) {
+                    emitTauriEvent('bridge-search-history', {
+                      type: 'historySearchDone',
+                      searchId: request.searchId,
+                      success: true,
+                      cancelled: false,
+                      error: null,
+                    });
+                  }
+                }, chunk.delay || 0);
+              }
+              if (chunks.length === 0) {
+                setTimeout(() => {
+                  emitTauriEvent('bridge-search-history', {
+                    type: 'historySearchDone',
+                    searchId: request.searchId,
+                    success: true,
+                    cancelled: false,
+                    error: null,
+                  });
+                }, 0);
+              }
+              return { success: true, searchId: request.searchId };
+            }
+            if (command === 'cancel_history_search') {
+              const request = payload.request || {};
+              cancelledHistorySearchIds.push(request.searchId);
+              cancelledHistorySearches.add(request.searchId);
+              setTimeout(() => {
+                emitTauriEvent('bridge-search-history', {
+                  type: 'historySearchDone',
+                  searchId: request.searchId,
+                  success: false,
+                  cancelled: true,
+                  error: null,
+                });
+              }, 0);
+              return { success: true, cancelled: true };
+            }
             if (command === 'bridge_storage_get')
               return storageGet(payload.request);
             if (command === 'bridge_storage_set')
@@ -693,6 +789,9 @@ async function installDesktopBridgeMock(page, options = {}) {
       pairedBrowsers: options.pairedBrowsers || [],
       deleteSnapshotFails: Boolean(options.deleteSnapshotFails),
       searchHistoryResults: options.searchHistoryResults || [],
+      searchHistoryChunks: options.searchHistoryChunks || null,
+      searchHistoryResultsByQuery: options.searchHistoryResultsByQuery || null,
+      searchNotesResultsByQuery: options.searchNotesResultsByQuery || null,
     },
   );
 }
@@ -1020,6 +1119,7 @@ test.describe('desktop visual regression', () => {
 
       const detailUrl = page.locator('.detail-url a');
       await expect(detailUrl).toHaveText(url);
+      await expect(detailUrl).toHaveCSS('cursor', 'pointer');
       await detailUrl.click();
 
       await expect
@@ -1029,6 +1129,40 @@ test.describe('desktop visual regression', () => {
           ),
         )
         .toEqual([url]);
+    });
+  });
+
+  test('page detail snapshot opens on single click', async ({ page }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        includeDetailListMembership: true,
+      });
+
+      const row = page.locator(
+        '.result-row[data-url="https://example.com/product-research"]',
+      );
+      await row.locator('.att-ctrl-btn').click({ force: true });
+
+      const snapshotRow = page.locator('.detail-snapshot-row');
+      await expect(snapshotRow).toBeVisible();
+      await expect(snapshotRow).toHaveCSS('cursor', 'pointer');
+      const snapshotRequest = await snapshotRow.evaluate((el) => {
+        const section = el.closest('.detail-snapshots');
+        return {
+          slug: section.dataset.slug,
+          timestamp: Number(el.dataset.ts),
+        };
+      });
+
+      await snapshotRow.click();
+
+      await expect
+        .poll(() =>
+          page.evaluate(() => window.__desktopVisualHarness.openedSnapshots()),
+        )
+        .toEqual([snapshotRequest]);
     });
   });
 
@@ -1296,6 +1430,162 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('desktop history search streams chunks and cancels stale searches', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        searchHistoryResultsByQuery: {
+          'stream first': [
+            {
+              delay: 0,
+              results: [
+                {
+                  url: 'https://example.com/stream-first',
+                  title: 'Stream first chunk',
+                  timestamp: now - 2000,
+                  score: 3,
+                },
+              ],
+            },
+            {
+              delay: 10_000,
+              results: [
+                {
+                  url: 'https://example.com/stream-stale',
+                  title: 'Stream stale late chunk',
+                  timestamp: now - 1000,
+                  score: 4,
+                },
+              ],
+            },
+          ],
+          'stream second': [
+            {
+              delay: 0,
+              results: [
+                {
+                  url: 'https://example.com/stream-second',
+                  title: 'Stream second fresh',
+                  timestamp: now,
+                  score: 5,
+                },
+              ],
+            },
+          ],
+          'stream duplicate': [
+            {
+              delay: 0,
+              results: [
+                {
+                  url: 'https://example.com/stream-duplicate',
+                  title: 'Stream duplicate older',
+                  timestamp: now - 4000,
+                  score: 3,
+                },
+              ],
+            },
+            {
+              delay: 20,
+              results: [
+                {
+                  url: 'https://example.com/stream-duplicate',
+                  title: 'Stream duplicate newer',
+                  timestamp: now,
+                  score: 3,
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+      await page.locator('#searchDraftInput').fill('stream first');
+      await expect(page.getByText('Stream first chunk')).toBeVisible();
+      await expect(page.getByText('Stream stale late chunk')).toHaveCount(0, {
+        timeout: 100,
+      });
+
+      await page.locator('#searchDraftInput').fill('stream second');
+      await expect(page.getByText('Stream second fresh')).toBeVisible();
+      await expect(page.getByText('Stream stale late chunk')).toHaveCount(0, {
+        timeout: 250,
+      });
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.cancelledHistorySearchIds(),
+          ),
+        )
+        .toHaveLength(1);
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.listenerCount(
+              'bridge-search-history',
+            ),
+          ),
+        )
+        .toBe(0);
+
+      await page.locator('#searchDraftInput').fill('stream duplicate');
+      await expect(page.getByText('Stream duplicate newer')).toBeVisible();
+      await expect(page.getByText('Stream duplicate older')).toHaveCount(0);
+    });
+  });
+
+  test('note search merge preserves history visit recency', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const oldUrl = 'https://example.com/note-recency-old';
+    const recentUrl = 'https://example.com/note-recency-recent';
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        searchHistoryResultsByQuery: {
+          'recency note': [
+            {
+              delay: 0,
+              results: [
+                {
+                  url: oldUrl,
+                  title: 'Recency note old',
+                  timestamp: now - 10 * 86_400_000,
+                  score: 1,
+                },
+                {
+                  url: recentUrl,
+                  title: 'Recency note recent',
+                  timestamp: now - 86_400_000,
+                  score: 1,
+                },
+              ],
+            },
+          ],
+        },
+        searchNotesResultsByQuery: {
+          'recency note': [{ url: oldUrl, noteSlug: 'note-recency-old' }],
+        },
+      });
+
+      await page.locator('#searchDraftInput').fill('recency note');
+      await expect(page.getByText('Recency note recent')).toBeVisible();
+      await expect(page.getByText('Recency note old')).toBeVisible();
+
+      const titles = await page
+        .locator('.result-row .result-title')
+        .evaluateAll((nodes) =>
+          nodes.slice(0, 2).map((node) => node.textContent.trim()),
+        );
+      expect(titles).toEqual(['Recency note recent', 'Recency note old']);
+    });
+  });
+
   test('equal relevance search results sort by most recent visit first', async ({
     page,
   }) => {
@@ -1472,7 +1762,7 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('list view render starts at the top after previous scroll state', async ({
+  test('list view renders all pins directly and starts at the top after previous scroll state', async ({
     page,
   }) => {
     const now = Date.now();
@@ -1512,14 +1802,15 @@ test.describe('desktop visual regression', () => {
       );
       const state = await page.evaluate(() => {
         const main = document.querySelector('.main');
-        const scroller =
-          document.getElementById('relatedResults')._virtualScroller;
         return {
           scrollTop: main.scrollTop,
           paddingTop: getComputedStyle(
             document.getElementById('relatedResults'),
           ).paddingTop,
-          range: scroller.renderedRange,
+          hasVirtualScroller: Boolean(
+            document.getElementById('relatedResults')._virtualScroller,
+          ),
+          renderedRows: document.querySelectorAll('.result-row').length,
           firstTitle: document
             .querySelector('.result-row .result-title')
             ?.textContent?.trim(),
@@ -1529,8 +1820,17 @@ test.describe('desktop visual regression', () => {
       expect(state).toMatchObject({
         scrollTop: 0,
         paddingTop: '0px',
+        hasVirtualScroller: false,
+        renderedRows: VIRTUALIZED_ENTRY_COUNT,
         firstTitle: 'List top 0',
       });
+
+      await page.keyboard.press(
+        process.platform === 'darwin' ? 'Meta+A' : 'Control+A',
+      );
+      await expect(page.locator('.result-row.selected')).toHaveCount(
+        VIRTUALIZED_ENTRY_COUNT,
+      );
     });
   });
 

@@ -295,7 +295,10 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
                 }))
                 .expect("old log json"),
             ),
-            ("logs/device-a/readme.txt".to_string(), "ignored".to_string()),
+            (
+                "logs/device-a/readme.txt".to_string(),
+                "ignored".to_string(),
+            ),
             (
                 "logs/device-b/not-a-date.jsonl".to_string(),
                 serde_json::to_string(&json!({
@@ -321,7 +324,10 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
                 })
                 .expect("note json"),
             ),
-            ("objects/notes/ignored.tmp".to_string(), "ignored".to_string()),
+            (
+                "objects/notes/ignored.tmp".to_string(),
+                "ignored".to_string(),
+            ),
             (
                 "views/lists/remote.json".to_string(),
                 serde_json::to_string(&ListEntity {
@@ -371,11 +377,13 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
         ]
     );
     let sizes = sizes.expect("history sizes");
-    assert!(sizes
-        .get(&format!("{today}.jsonl"))
-        .copied()
-        .unwrap_or_default()
-        > 0);
+    assert!(
+        sizes
+            .get(&format!("{today}.jsonl"))
+            .copied()
+            .unwrap_or_default()
+            > 0
+    );
 
     let batch = storage
         .load_history_batch(&[format!("{today}.jsonl"), "not-a-date.jsonl".to_string()])

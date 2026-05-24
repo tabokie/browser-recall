@@ -817,6 +817,104 @@ async function runPool(tasks, concurrency, onResult) {
   await Promise.all(workers);
 }
 
+let latestHistorySearchId = null;
+
+function tauriCoreInvoke(command, payload) {
+  if (window.__TAURI__?.core?.invoke) {
+    return window.__TAURI__.core.invoke(command, payload);
+  }
+  if (window.__TAURI_INTERNALS__?.invoke) {
+    return window.__TAURI_INTERNALS__.invoke(command, payload);
+  }
+  return null;
+}
+
+function tauriEventListen(eventName, handler) {
+  if (window.__TAURI__?.event?.listen) {
+    return window.__TAURI__.event.listen(eventName, handler);
+  }
+  if (window.__TAURI_INTERNALS__?.event?.listen) {
+    return window.__TAURI_INTERNALS__.event.listen(eventName, handler);
+  }
+  return null;
+}
+
+function canStreamDesktopHistorySearch() {
+  return Boolean(
+    window.__BROWSER_RECALL_DESKTOP__ &&
+    (window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke) &&
+    (window.__TAURI__?.event?.listen ||
+      window.__TAURI_INTERNALS__?.event?.listen),
+  );
+}
+
+function cancelActiveHistorySearch() {
+  if (!latestHistorySearchId || !canStreamDesktopHistorySearch()) return;
+  const searchId = latestHistorySearchId;
+  latestHistorySearchId = null;
+  Promise.resolve(
+    tauriCoreInvoke('cancel_history_search', {
+      request: { searchId },
+    }),
+  ).catch((error) => {
+    logDebug('[search] cancel history search failed:', error.message);
+  });
+}
+
+async function runStreamingHistorySearch(query, gen) {
+  if (!canStreamDesktopHistorySearch()) return false;
+
+  const searchId = `${gen}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  latestHistorySearchId = searchId;
+  let completed = false;
+  let unlisten = null;
+  const finish = ({ completePhase } = { completePhase: true }) => {
+    if (completed) return;
+    completed = true;
+    if (latestHistorySearchId === searchId) latestHistorySearchId = null;
+    Promise.resolve(unlisten?.()).catch((error) => {
+      logDebug('[search] history listener cleanup failed:', error.message);
+    });
+    if (completePhase) phaseComplete(gen);
+  };
+
+  unlisten = await tauriEventListen('bridge-search-history', async (event) => {
+    const payload = event?.payload || {};
+    if (payload.searchId !== searchId) return;
+    if (payload.type === 'historySearchChunk') {
+      if (gen !== searchState.generation) return;
+      mergeSearchResults(
+        buildDesktopHistoryResults(payload.results),
+        'history',
+        gen,
+      );
+      await renderProgressiveResults(gen);
+      return;
+    }
+    if (payload.type === 'historySearchDone') {
+      const current = gen === searchState.generation;
+      if (current && !payload.success && !payload.cancelled && payload.error) {
+        logDebug(
+          '[Phase1] Desktop streaming history search failed:',
+          payload.error,
+        );
+      }
+      finish({ completePhase: current });
+    }
+  });
+
+  try {
+    await tauriCoreInvoke('search_history_stream', {
+      request: { searchId, query },
+    });
+    return true;
+  } catch (error) {
+    if (latestHistorySearchId === searchId) latestHistorySearchId = null;
+    Promise.resolve(unlisten?.()).catch(() => {});
+    throw error;
+  }
+}
+
 // Merge new results into searchState.results. Dedup by URL, take max score, track sources.
 function mergeSearchResults(newResults, source, gen) {
   if (gen !== searchState.generation) return; // stale generation — discard
@@ -825,7 +923,45 @@ function mergeSearchResults(newResults, source, gen) {
     const idx = searchState.resultIndex.get(r.url);
     if (idx !== undefined) {
       const existing = searchState.results[idx];
-      if ((r.score || 0) > (existing.score || 0)) existing.score = r.score;
+      const nextScore = r.score || 0;
+      const existingScore = existing.score || 0;
+      const isVisitSource = source === 'history' || source === 'title';
+      const existingHasVisitSource =
+        existing.matchSources?.has('history') ||
+        existing.matchSources?.has('title');
+      if (isVisitSource) {
+        const nextTimestamp = r.timestamp || existing.timestamp || Date.now();
+        const existingTimestamp = existingHasVisitSource
+          ? existing.timestamp || 0
+          : 0;
+        if (
+          !existingHasVisitSource ||
+          nextScore > existingScore ||
+          (nextScore === existingScore && nextTimestamp > existingTimestamp)
+        ) {
+          existing.score = Math.max(nextScore, existingScore);
+          existing.timestamp = nextTimestamp;
+          existing.latestTs = nextTimestamp;
+          existing.title = r.title || existing.title || '';
+          existing.timestamps = r.timestamps || [nextTimestamp];
+          delete existing._maxTs;
+          delete existing._minTs;
+        } else if (nextTimestamp > existingTimestamp) {
+          existing.timestamp = nextTimestamp;
+          existing.latestTs = nextTimestamp;
+          if (!existing.title && r.title) existing.title = r.title;
+          if (Array.isArray(r.timestamps)) {
+            existing.timestamps = [
+              ...new Set([...(existing.timestamps || []), ...r.timestamps]),
+            ].sort((left, right) => right - left);
+          }
+          delete existing._maxTs;
+          delete existing._minTs;
+        }
+      } else if (nextScore > existingScore) {
+        existing.score = nextScore;
+        if (!existing.title && r.title) existing.title = r.title;
+      }
       if (
         r.createdAt &&
         (!existing.createdAt || r.createdAt < existing.createdAt)
@@ -1002,6 +1138,7 @@ async function buildSnapshotSearchResults(matches) {
 
 // Phase 1: daemon-backed history search plus pending connector queue search.
 async function runPhase1(query, gen) {
+  let streamingStarted = false;
   try {
     const { desktopCommandBuffer = [] } = await chrome.storage.local.get([
       'desktopCommandBuffer',
@@ -1022,6 +1159,16 @@ async function runPhase1(query, gen) {
     }
 
     try {
+      streamingStarted = await runStreamingHistorySearch(query, gen);
+    } catch (error) {
+      logDebug(
+        '[Phase1] Desktop streaming history search unavailable:',
+        error.message,
+      );
+    }
+    if (streamingStarted) return;
+
+    try {
       const desktopResp = await sendAction({
         action: 'searchHistory',
         query,
@@ -1040,7 +1187,7 @@ async function runPhase1(query, gen) {
   } catch (e) {
     logDebug('[Phase1] JSONL search failed:', e.message);
   } finally {
-    phaseComplete(gen);
+    if (!streamingStarted) phaseComplete(gen);
   }
 }
 
@@ -1110,16 +1257,16 @@ function phase0Score(item, words) {
     } else {
       if (title.includes(ql)) score += 2.0;
       else if (url.includes(ql)) score += 0.5;
-      else score += 0.3; // fuzzy-only match (Phase 0 already filtered to matches)
     }
   }
   return words.length > 0 ? score / words.length : 0;
 }
 
 // Four-phase progressive search orchestrator.
-// Phase 0: instant in-memory matching. Phase 1: JSONL streaming.
+// Phase 0: instant exact/substring in-memory matching. Phase 1: JSONL streaming.
 // Phase 2a: notes. Phase 2b: snapshots streaming.
 async function runProgressiveSearch(allQueries) {
+  cancelActiveHistorySearch();
   const gen = ++searchState.generation;
   searchState.results = [];
   searchState.resultIndex.clear();
@@ -1127,26 +1274,10 @@ async function runProgressiveSearch(allQueries) {
   showSearchSpinner();
   const query = allQueries.join(' ');
 
-  // Phase 0: instant in-memory matching with fuzzy support for unquoted words
-  const matchedUrls = new Set();
+  // Phase 0: instant exact/substring matching over already-loaded rows.
   const words = parseSearchWords(query);
-  if (words.length > 0) {
-    // Build haystack: one string per entry combining all searchable fields
-    const haystack = historyState.allEntries.map((item) =>
-      [item.user_title || '', item.title || '', item.url || ''].join(' '),
-    );
-    const matchedIndices = fuzzyMatchPhase0(
-      words,
-      haystack,
-      historyState.allEntries,
-    );
-    for (const idx of matchedIndices) {
-      const item = historyState.allEntries[idx];
-      if (item.url) matchedUrls.add(item.url);
-    }
-  }
   const phase0Entries = historyState.allEntries.filter(
-    (item) => item.url && matchedUrls.has(item.url),
+    (item) => item.url && wordsMatchItem(words, item),
   );
   const phase0Results = processHistoryForDisplay(phase0Entries, {
     globalDedup: true,
@@ -1284,6 +1415,7 @@ function resetHistory() {
   allListPins = {};
 
   queueContentMap = {};
+  cancelActiveHistorySearch();
   searchState.generation++; // invalidate any in-flight progressive search
   searchState.results = [];
   searchState.pendingPhases = 0;
@@ -1710,50 +1842,6 @@ function wordsMatchItem(words, item) {
       return f.toLowerCase().includes(q.toLowerCase());
     });
   });
-}
-
-// Phase 0 fuzzy matching: uses uFuzzy for unquoted words, exact boundary for quoted.
-// Returns Set of matching indices into historyState.allEntries.
-// Falls back to substring matching when uFuzzy is not loaded (e.g. in tests).
-function fuzzyMatchPhase0(words, haystack, entries) {
-  const hasFuzzy = typeof uFuzzy !== 'undefined';
-  const uf = hasFuzzy ? new uFuzzy({ intraMode: 1 }) : null;
-  let matchingIndices = null;
-  for (const { q, exact } of words) {
-    let wordMatches;
-    if (exact) {
-      wordMatches = new Set();
-      for (let i = 0; i < entries.length; i++) {
-        const item = entries[i];
-        const fields = [item.user_title, item.title, item.url];
-        if (fields.some((f) => f && matchesExactWithBoundary(f, q))) {
-          wordMatches.add(i);
-        }
-      }
-    } else if (uf) {
-      const [idxs] = uf.search(haystack, q);
-      wordMatches = new Set(idxs || []);
-    } else {
-      // Fallback: substring matching (original behavior)
-      const ql = q.toLowerCase();
-      wordMatches = new Set();
-      for (let i = 0; i < entries.length; i++) {
-        const item = entries[i];
-        const fields = [item.user_title, item.title, item.url];
-        if (fields.some((f) => f && f.toLowerCase().includes(ql))) {
-          wordMatches.add(i);
-        }
-      }
-    }
-    if (matchingIndices === null) {
-      matchingIndices = wordMatches;
-    } else {
-      for (const i of matchingIndices) {
-        if (!wordMatches.has(i)) matchingIndices.delete(i);
-      }
-    }
-  }
-  return matchingIndices || new Set();
 }
 
 function isDefaultFilterState(state) {
@@ -3234,9 +3322,22 @@ async function runListPinFilter() {
   renderFilteredPins(filtered, listPinsListId, allQueries.join(' '));
 }
 
-// Render filtered pin results into the virtual scroller + time chart
+function disableRelatedVirtualScrollerForDirectRender(container) {
+  if (container._virtualScroller) {
+    container._virtualScroller.data = [];
+    container._virtualScroller._fullData = [];
+    container._virtualScroller.renderedRange = { start: -1, end: -1 };
+    container._virtualScroller.onLoadMore = null;
+  }
+  container._virtualScroller = null;
+  container.style.paddingTop = '0px';
+  container.style.paddingBottom = '0px';
+}
+
+// Render filtered pin results directly so list selection can operate on every row.
 function renderFilteredPins(pins, listId, searchQuery) {
   const relatedContainer = document.getElementById('relatedResults');
+  disableRelatedVirtualScrollerForDirectRender(relatedContainer);
 
   if (pins.length === 0) {
     consumeRelatedTopReset();
@@ -3253,34 +3354,35 @@ function renderFilteredPins(pins, listId, searchQuery) {
   const sorted = applySortOrder([...pins], effectiveSort);
   const maxAtt = Math.max(...sorted.map((r) => r.attScore), 0.1);
 
-  const vs = getOrCreateRelatedScroller();
-  vs._headerHtml = '';
-  vs.onLoadMore = null; // Clear stale explore demand-loader
   const preserveScroll = preserveRelatedScrollOnNextRender;
   preserveRelatedScrollOnNextRender = false;
   const renderAtTop = preserveScroll ? false : consumeRelatedTopReset();
-  const renderRow = (r) =>
-    resultRowHtml(r.user_title || r.title, r.url, {
-      pinned: true,
-      attScore: r.attScore,
-      maxAtt,
-      attDetail: r.attDetail,
-      notes: r.notes,
-      timestamps: r.timestamps,
-      context: 'related',
-      pinnedAt: r.pinnedAt,
-      pinSource: r.pinSource,
-      childIds: r.childIds,
-      parentIds: r.parentIds,
-      excludeListId: listId,
-      likes: r.likes,
-      hasHighlightNotes: r.hasHighlightNotes,
-    });
   if (renderAtTop) {
-    vs.updateDataAtTop(sorted, renderRow);
-  } else {
-    vs.updateData(sorted, renderRow, { preserveScroll });
+    document.querySelector('.main').scrollTop = 0;
   }
+  const previousScrollTop = document.querySelector('.main').scrollTop;
+  relatedContainer.innerHTML = sorted
+    .map((r) =>
+      resultRowHtml(r.user_title || r.title, r.url, {
+        pinned: true,
+        attScore: r.attScore,
+        maxAtt,
+        attDetail: r.attDetail,
+        notes: r.notes,
+        timestamps: r.timestamps,
+        context: 'related',
+        pinnedAt: r.pinnedAt,
+        pinSource: r.pinSource,
+        childIds: r.childIds,
+        parentIds: r.parentIds,
+        excludeListId: listId,
+        likes: r.likes,
+        hasHighlightNotes: r.hasHighlightNotes,
+      }),
+    )
+    .join('');
+  if (preserveScroll)
+    document.querySelector('.main').scrollTop = previousScrollTop;
   bindPinClicks(relatedContainer, listId);
 
   // Time chart for pins
@@ -3843,7 +3945,7 @@ function openDetailNoteEditor(entry, noteSlug) {
 
 function bindSnapshotClickHandlers(container) {
   container.querySelectorAll('.detail-snapshot-row').forEach((row) => {
-    row.addEventListener('dblclick', async (e) => {
+    row.addEventListener('click', async (e) => {
       e.stopPropagation();
       const slug = row.closest('.detail-snapshots')?.dataset.slug;
       const ts = parseInt(row.dataset.ts, 10);
@@ -7209,6 +7311,7 @@ async function runSearchFilterPipeline() {
     return;
   }
 
+  cancelActiveHistorySearch();
   // No search queries → show all history (demand-loaded)
   const hasActiveFilters = !isDefaultFilterState(filterState);
 
@@ -7970,7 +8073,9 @@ document.addEventListener('keydown', async (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   if (isTextEditingTarget()) return;
 
-  if (e.key === 'c') {
+  const key = e.key.toLowerCase();
+
+  if (key === 'c') {
     // Copy selected rows as readable text with angle-bracket URLs
     const selected = selectedRowsInActiveContainer();
     if (selected.length === 0) return;
@@ -7984,7 +8089,7 @@ document.addEventListener('keydown', async (e) => {
     await navigator.clipboard.writeText(lines.join('\n'));
   }
 
-  if (e.key === 'v') {
+  if (key === 'v') {
     if (activeView.type !== 'list') {
       e.preventDefault();
       showInfoBubble('Can only paste into a list');
@@ -8015,10 +8120,13 @@ document.addEventListener('keydown', async (e) => {
     refreshPins();
   }
 
-  if (e.key === 'a') {
+  if (key === 'a') {
     e.preventDefault();
     if (activeView.type === 'list') {
-      relatedVirtualScroller?.selectAll();
+      getActiveContainer()
+        ?.querySelectorAll('.result-row')
+        .forEach((row) => row.classList.add('selected'));
+      syncChartHighlights();
     } else if (
       activeView.type === 'explore' &&
       searchState.results.length > 0

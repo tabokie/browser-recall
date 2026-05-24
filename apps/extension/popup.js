@@ -611,9 +611,8 @@ function renderSnapshots(snapshots) {
     });
   });
 
-  // Double-click to open snapshot in new tab
   container.querySelectorAll('.snapshot-row').forEach((row) => {
-    row.addEventListener('dblclick', async () => {
+    row.addEventListener('click', async () => {
       const ts = parseInt(row.dataset.ts, 10);
       await chrome.runtime.sendMessage({
         action: 'openSnapshot',
@@ -1316,6 +1315,11 @@ function startEditingTitle() {
 document
   .getElementById('pageTitle')
   .addEventListener('click', startEditingTitle);
+
+document.getElementById('pageUrl').addEventListener('click', async () => {
+  if (!currentUrl) return;
+  await chrome.tabs.create({ url: currentUrl });
+});
 
 // Open the desktop app to Explore. Page detail can be inaccurate before checkpointing.
 document.querySelector('.recording-copy').addEventListener('click', () => {

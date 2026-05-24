@@ -259,11 +259,22 @@ test.describe('Snapshot slug meta tag', () => {
       title: 'Popup Open Snapshot',
     });
 
+    const pageUrl = popup.locator('#pageUrl');
+    await expect(pageUrl).toHaveText(originalUrl);
+    await expect(pageUrl).toHaveCSS('cursor', 'pointer');
+
+    const openedOriginalPromise = extContext.waitForEvent('page');
+    await pageUrl.click();
+    const originalPage = await openedOriginalPromise;
+    expect(originalPage.url()).toBe(originalUrl);
+    await originalPage.close();
+
     const snapshotRow = popup.locator('.snapshot-row').first();
     await expect(snapshotRow).toBeVisible();
+    await expect(snapshotRow).toHaveCSS('cursor', 'pointer');
 
     const openedPromise = extContext.waitForEvent('page');
-    await snapshotRow.dblclick();
+    await snapshotRow.click();
     const viewer = await openedPromise;
     await viewer.waitForLoadState('domcontentloaded');
 

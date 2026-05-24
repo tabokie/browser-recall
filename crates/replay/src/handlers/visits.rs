@@ -156,6 +156,9 @@ where
         .get(&context.device_id)
         .copied()
         .unwrap_or(0);
+    if timestamp <= prior_device_ts {
+        return Ok(EntityMap::new());
+    }
     touch_timestamp(&mut page, &context.device_id, timestamp);
     page.url = Some(url.to_string());
     if created {
@@ -163,9 +166,7 @@ where
             page.title = Some(title_value.to_string());
         }
     }
-    if timestamp > prior_device_ts {
-        page.likes = Some(page.likes.unwrap_or(0) + likes);
-    }
+    page.likes = Some(page.likes.unwrap_or(0) + likes);
 
     let mut result = EntityMap::new();
     result.insert(page_key, EntityEffect::Upsert(Entity::Page(page)));

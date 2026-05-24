@@ -1,9 +1,15 @@
-use browser_recall::{search_batch, search_notes, search_snapshots};
+use browser_recall::{search_batch, search_notes, search_records, search_snapshots, SearchRecord};
+use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc,
+};
+use std::thread;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +31,15 @@ pub struct NoteSearchHit {
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotSearchHit {
     pub slug: String,
+}
+
+pub const HISTORY_SEARCH_PARALLELISM: usize = 4;
+const HISTORY_SEARCH_RECORDS_PER_TASK: usize = 4;
+
+#[derive(Debug, Clone)]
+pub struct HistorySearchChunk {
+    pub worker_id: usize,
+    pub results: Vec<HistorySearchHit>,
 }
 
 pub fn search_history_in_data_dir(
@@ -74,6 +89,121 @@ pub fn search_history_in_data_dir(
             .then_with(|| left.url.cmp(&right.url))
     });
     apply_limit(hits, limit)
+}
+
+pub fn search_history_parallel_in_data_dir<F>(
+    data_dir: &Path,
+    query: &str,
+    limit: Option<usize>,
+    cancel: Arc<AtomicBool>,
+    mut on_chunk: F,
+) -> io::Result<Vec<HistorySearchHit>>
+where
+    F: FnMut(HistorySearchChunk) -> io::Result<()>,
+{
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let logs_root = data_dir.join("logs");
+    let pages_dir = data_dir.join("views").join("pages");
+    if !logs_root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut tasks = Vec::new();
+    for device_dir in list_subdirs(&logs_root)? {
+        let records = latest_history_records_for_device(&device_dir)?;
+        for chunk in records.chunks(HISTORY_SEARCH_RECORDS_PER_TASK) {
+            tasks.push(SearchTask {
+                records: chunk.to_vec(),
+            });
+        }
+    }
+
+    if tasks.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let worker_count = HISTORY_SEARCH_PARALLELISM.min(tasks.len());
+    let mut worker_tasks = vec![Vec::new(); worker_count];
+    for (index, task) in tasks.into_iter().enumerate() {
+        worker_tasks[index % worker_count].push(task);
+    }
+
+    let (tx, rx) = mpsc::channel();
+    thread::scope(|scope| {
+        for (worker_id, tasks) in worker_tasks.into_iter().enumerate() {
+            let tx = tx.clone();
+            let pages_dir = pages_dir.clone();
+            let query = query.to_string();
+            let cancel = Arc::clone(&cancel);
+            scope.spawn(move || {
+                for task in tasks {
+                    if cancel.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let result = search_records(&pages_dir, &query, task.records).map(|results| {
+                        HistorySearchChunk {
+                            worker_id,
+                            results: results
+                                .into_iter()
+                                .map(|result| HistorySearchHit {
+                                    url: result.url,
+                                    title: result.title,
+                                    timestamp: result.timestamp,
+                                    score: result.score,
+                                })
+                                .collect(),
+                        }
+                    });
+                    if tx.send(result).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(tx);
+
+        let mut merged_by_url: HashMap<String, HistorySearchHit> = HashMap::new();
+        for result in rx {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            let chunk = result?;
+            if chunk.results.is_empty() {
+                continue;
+            }
+            for result in &chunk.results {
+                match merged_by_url.get_mut(&result.url) {
+                    Some(existing) => merge_history_hit(existing, result.clone()),
+                    None => {
+                        merged_by_url.insert(result.url.clone(), result.clone());
+                    }
+                }
+            }
+            if limit.is_none() {
+                on_chunk(chunk)?;
+            }
+        }
+
+        let mut hits: Vec<_> = merged_by_url.into_values().collect();
+        hits.sort_by(|left, right| {
+            right
+                .score
+                .total_cmp(&left.score)
+                .then_with(|| right.timestamp.cmp(&left.timestamp))
+                .then_with(|| left.url.cmp(&right.url))
+        });
+        let hits = apply_limit(hits, limit)?;
+        if limit.is_some() && !cancel.load(Ordering::Relaxed) && !hits.is_empty() {
+            on_chunk(HistorySearchChunk {
+                worker_id: 0,
+                results: hits.clone(),
+            })?;
+        }
+        Ok(hits)
+    })
 }
 
 pub fn search_notes_in_data_dir(
@@ -131,6 +261,51 @@ fn list_subdirs(root: &Path) -> io::Result<Vec<PathBuf>> {
     }
     dirs.sort();
     Ok(dirs)
+}
+
+#[derive(Debug, Clone)]
+struct SearchTask {
+    records: Vec<SearchRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawHistoryRecord {
+    timestamp: i64,
+    url: String,
+    title: String,
+    #[serde(default)]
+    slug: Option<String>,
+}
+
+fn latest_history_records_for_device(device_dir: &Path) -> io::Result<Vec<SearchRecord>> {
+    let file_names = list_jsonl_files(device_dir)?;
+    let mut seen_urls = HashSet::new();
+    let mut records = Vec::new();
+
+    for file_name in file_names {
+        let path = device_dir.join(file_name);
+        let Ok(text) = fs::read_to_string(path) else {
+            continue;
+        };
+        for line in text.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(item) = serde_json::from_str::<RawHistoryRecord>(line) else {
+                continue;
+            };
+            if seen_urls.insert(item.url.clone()) {
+                records.push(SearchRecord {
+                    timestamp: item.timestamp,
+                    url: item.url,
+                    title: item.title,
+                    slug: item.slug,
+                });
+            }
+        }
+    }
+
+    Ok(records)
 }
 
 fn list_jsonl_files(dir: &Path) -> io::Result<Vec<String>> {
@@ -284,6 +459,179 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].url, "https://example.com/article");
         assert_eq!(hits[0].timestamp, 200);
+    }
+
+    #[test]
+    fn search_history_parallel_matches_sequential_results() {
+        let temp_dir = tempdir().unwrap();
+        let data_dir = temp_dir.path();
+        let device_a = data_dir.join("logs/device-a");
+        let device_b = data_dir.join("logs/device-b");
+        fs::create_dir_all(&device_a).unwrap();
+        fs::create_dir_all(&device_b).unwrap();
+        fs::create_dir_all(data_dir.join("views/pages")).unwrap();
+
+        for index in 0..6 {
+            let url = format!("https://example.com/parallel-{index}");
+            let slug = format!("parallel-{index}");
+            let target = if index % 2 == 0 { &device_a } else { &device_b };
+            fs::write(
+                target.join(format!("2026-04-{:02}.jsonl", index + 1)),
+                json!({
+                    "timestamp": 1000 + index,
+                    "url": url,
+                    "title": format!("Parallel banana {index}"),
+                    "slug": slug,
+                })
+                .to_string(),
+            )
+            .unwrap();
+        }
+
+        let sequential = search_history_in_data_dir(data_dir, "banana", None).unwrap();
+        let mut chunks = Vec::new();
+        let parallel = search_history_parallel_in_data_dir(
+            data_dir,
+            "banana",
+            None,
+            Arc::new(AtomicBool::new(false)),
+            |chunk| {
+                chunks.push(chunk);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(parallel, sequential);
+        assert!(!chunks.is_empty());
+    }
+
+    #[test]
+    fn search_history_parallel_suppresses_older_duplicate_urls_before_search() {
+        let temp_dir = tempdir().unwrap();
+        let data_dir = temp_dir.path();
+        let device = data_dir.join("logs/device-a");
+        fs::create_dir_all(&device).unwrap();
+        fs::create_dir_all(data_dir.join("views/pages")).unwrap();
+
+        fs::write(
+            device.join("2026-04-19.jsonl"),
+            json!({
+                "timestamp": 200,
+                "url": "https://example.com/duplicate",
+                "title": "Newest title without match",
+                "slug": "duplicate",
+            })
+            .to_string(),
+        )
+        .unwrap();
+        for index in 0..3 {
+            fs::write(
+                device.join(format!("2026-04-1{index}.jsonl")),
+                json!({
+                    "timestamp": 150 - index,
+                    "url": format!("https://example.com/filler-{index}"),
+                    "title": format!("Filler {index}"),
+                    "slug": format!("filler-{index}"),
+                })
+                .to_string(),
+            )
+            .unwrap();
+        }
+        fs::write(
+            device.join("2026-04-09.jsonl"),
+            json!({
+                "timestamp": 100,
+                "url": "https://example.com/duplicate",
+                "title": "Older needle title",
+                "slug": "duplicate",
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let sequential = search_history_in_data_dir(data_dir, "needle", None).unwrap();
+        let parallel = search_history_parallel_in_data_dir(
+            data_dir,
+            "needle",
+            None,
+            Arc::new(AtomicBool::new(false)),
+            |_| Ok(()),
+        )
+        .unwrap();
+
+        assert!(sequential.is_empty());
+        assert!(parallel.is_empty());
+    }
+
+    #[test]
+    fn search_history_parallel_emits_only_limited_final_chunk_when_limited() {
+        let temp_dir = tempdir().unwrap();
+        let data_dir = temp_dir.path();
+        let device = data_dir.join("logs/device-a");
+        fs::create_dir_all(&device).unwrap();
+        fs::create_dir_all(data_dir.join("views/pages")).unwrap();
+
+        for index in 0..6 {
+            fs::write(
+                device.join(format!("2026-04-{:02}.jsonl", index + 1)),
+                json!({
+                    "timestamp": 1000 + index,
+                    "url": format!("https://example.com/limited-{index}"),
+                    "title": format!("Limited needle {index}"),
+                    "slug": format!("limited-{index}"),
+                })
+                .to_string(),
+            )
+            .unwrap();
+        }
+
+        let mut chunks = Vec::new();
+        let hits = search_history_parallel_in_data_dir(
+            data_dir,
+            "needle",
+            Some(2),
+            Arc::new(AtomicBool::new(false)),
+            |chunk| {
+                chunks.push(chunk);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(hits.len(), 2);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].results, hits);
+    }
+
+    #[test]
+    fn search_history_parallel_honors_pre_cancelled_token() {
+        let temp_dir = tempdir().unwrap();
+        let data_dir = temp_dir.path();
+        let device = data_dir.join("logs/device-a");
+        fs::create_dir_all(&device).unwrap();
+        fs::write(
+            device.join("2026-04-18.jsonl"),
+            json!({
+                "timestamp": 100,
+                "url": "https://example.com/cancelled",
+                "title": "Cancelled banana",
+                "slug": "cancelled",
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let cancel = Arc::new(AtomicBool::new(true));
+        let mut chunks = Vec::new();
+        let hits = search_history_parallel_in_data_dir(data_dir, "banana", None, cancel, |chunk| {
+            chunks.push(chunk);
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(hits.is_empty());
+        assert!(chunks.is_empty());
     }
 
     #[test]

@@ -111,7 +111,11 @@ function createStorageArea(areaName, storageChanged, seed = {}) {
   };
 }
 
-function createFirefoxWebExtensionApi({ sendMessage, onSendMessage } = {}) {
+function createFirefoxWebExtensionApi({
+  sendMessage,
+  onOpenOptionsPage,
+  onSendMessage,
+} = {}) {
   const storageChanged = createEvent();
   const runtimeMessage = createEvent();
   const runtimeInstalled = createEvent();
@@ -232,7 +236,9 @@ function createFirefoxWebExtensionApi({ sendMessage, onSendMessage } = {}) {
       getURL(resourcePath) {
         return `moz-extension://browser-recall.invalid/${resourcePath}`;
       },
-      async openOptionsPage() {},
+      async openOptionsPage() {
+        onOpenOptionsPage?.();
+      },
       reload() {},
       sendMessage: runtimeSendMessage,
     },
@@ -744,6 +750,52 @@ test.describe('Firefox extension smoke', () => {
           );
           expect(api.browserApi.webNavigation.onCommitted.listenerCount()).toBe(
             1,
+          );
+        },
+      );
+
+      for (const timer of timers) clearTimeout(timer);
+    });
+  });
+
+  test('staged background opens options only on fresh install', async () => {
+    await withStagedFirefoxExtension(async (outDir) => {
+      let optionsOpenCount = 0;
+      const api = createFirefoxWebExtensionApi({
+        onOpenOptionsPage() {
+          optionsOpenCount += 1;
+        },
+      });
+      const timers = new Set();
+      const nativeSetTimeout = globalThis.setTimeout;
+      const unrefSetTimeout = (callback, ms, ...args) => {
+        const timer = nativeSetTimeout(callback, ms, ...args);
+        timer.unref?.();
+        timers.add(timer);
+        return timer;
+      };
+
+      await withPatchedGlobals(
+        {
+          browser: api.browserApi,
+          chrome: api.chromeCompat,
+          navigator: navigatorWithUserAgent(
+            globalThis.navigator,
+            FIREFOX_USER_AGENT,
+          ),
+          WebSocket: FailingWebSocket,
+          setTimeout: unrefSetTimeout,
+        },
+        async () => {
+          await import(pathToFileURL(path.join(outDir, 'background.js')).href);
+
+          await api.events.runtimeInstalled.dispatch({ reason: 'update' });
+          expect(optionsOpenCount).toBe(0);
+
+          await api.events.runtimeInstalled.dispatch({ reason: 'install' });
+          await waitFor(
+            () => optionsOpenCount === 1,
+            'options page opened after install',
           );
         },
       );

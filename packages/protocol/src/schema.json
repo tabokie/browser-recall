@@ -92,6 +92,22 @@
           "limit": "number"
         }
       },
+      "search_history_stream": {
+        "required": ["type", "searchId", "query"],
+        "properties": {
+          "type": "string",
+          "searchId": "string",
+          "query": "string",
+          "limit": "number"
+        }
+      },
+      "cancel_history_search": {
+        "required": ["type", "searchId"],
+        "properties": {
+          "type": "string",
+          "searchId": "string"
+        }
+      },
       "search_notes": {
         "required": ["type", "query"],
         "properties": {
@@ -284,6 +300,25 @@
           "type": "string",
           "success": "boolean",
           "results": "array",
+          "error": "string"
+        }
+      },
+      "history_search_chunk": {
+        "required": ["type", "searchId", "workerId", "results"],
+        "properties": {
+          "type": "string",
+          "searchId": "string",
+          "workerId": "number",
+          "results": "array"
+        }
+      },
+      "history_search_done": {
+        "required": ["type", "searchId", "success", "cancelled"],
+        "properties": {
+          "type": "string",
+          "searchId": "string",
+          "success": "boolean",
+          "cancelled": "boolean",
           "error": "string"
         }
       },

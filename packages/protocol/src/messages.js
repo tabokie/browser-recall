@@ -169,6 +169,23 @@ export function searchHistory(query, limit) {
   return payload;
 }
 
+export function searchHistoryStream(searchId, query, limit) {
+  const payload = {
+    type: 'search_history_stream',
+    searchId,
+    query,
+  };
+  if (limit !== undefined) payload.limit = limit;
+  return payload;
+}
+
+export function cancelHistorySearch(searchId) {
+  return {
+    type: 'cancel_history_search',
+    searchId,
+  };
+}
+
 export function searchNotes(query, limit) {
   const payload = {
     type: 'search_notes',
@@ -372,6 +389,26 @@ export function searchHistoryResult(success, results = [], error) {
     success,
   };
   if (results !== undefined) payload.results = results;
+  if (error !== undefined) payload.error = error;
+  return payload;
+}
+
+export function historySearchChunk(searchId, workerId, results = []) {
+  return {
+    type: 'history_search_chunk',
+    searchId,
+    workerId,
+    results,
+  };
+}
+
+export function historySearchDone(searchId, success, cancelled, error) {
+  const payload = {
+    type: 'history_search_done',
+    searchId,
+    success,
+    cancelled,
+  };
   if (error !== undefined) payload.error = error;
   return payload;
 }

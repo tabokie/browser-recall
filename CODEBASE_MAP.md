@@ -98,7 +98,10 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 ### Search
 
-- `crates/search/` and `crates/daemon/src/search.rs` implement history/note/snapshot search.
+- `crates/search/` and `crates/daemon/src/search.rs` implement history/note/snapshot search. History search also exposes a fixed-parallelism chunk callback for desktop streaming and cancellation.
+- `apps/desktop/src-tauri/src/main.rs` exposes `search_history_stream` / `cancel_history_search` Tauri commands and emits `bridge-search-history` chunks to the UI.
+- `crates/daemon/src/ws_server.rs` exposes equivalent websocket `search_history_stream` / `cancel_history_search` support and keeps legacy `search_history` on the same parallel helper.
+- `apps/desktop/ui/index.js` merges streamed history chunks with note/snapshot result phases and cancels stale history searches when a newer search starts.
 - `packages/core/search-helpers.js` and `packages/core/search-runtime.js` provide UI-facing helpers shared by the desktop UI and tests.
 
 ### Pairing and Live Updates

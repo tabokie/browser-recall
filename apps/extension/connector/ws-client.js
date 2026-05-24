@@ -38,6 +38,7 @@ let alarmListenerInstalled = false;
 let connectorStorageCache = {};
 let connectorStatsCache = {};
 const connectorStateListeners = new Set();
+const daemonMutationListeners = new Set();
 
 function cachedConnectorState() {
   return connectorStateFromStorage(connectorStorageCache, connectorStatsCache);
@@ -57,6 +58,11 @@ function notifyConnectorStateListeners() {
 export function subscribeConnectorBridgeState(listener) {
   connectorStateListeners.add(listener);
   return () => connectorStateListeners.delete(listener);
+}
+
+export function subscribeDaemonMutations(listener) {
+  daemonMutationListeners.add(listener);
+  return () => daemonMutationListeners.delete(listener);
 }
 
 function mergeConnectorStorageCache(patch) {
@@ -89,6 +95,13 @@ function broadcastDaemonMutations(mutations) {
   if (!Array.isArray(mutations)) return;
   for (const mutation of mutations) {
     if (!mutation || typeof mutation.type !== 'string') continue;
+    for (const listener of [...daemonMutationListeners]) {
+      try {
+        listener(mutation);
+      } catch (error) {
+        logDebug('[connector] daemon mutation listener failed:', error.message);
+      }
+    }
     chrome.runtime
       .sendMessage({ action: 'mutation', ...mutation })
       .catch(() => {});

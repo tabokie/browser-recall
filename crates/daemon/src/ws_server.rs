@@ -16,7 +16,7 @@ use crate::rules::{
 };
 use crate::runtime::{effect_with_overlay, EntityMapView};
 use crate::search::{
-    search_history_in_data_dir, search_notes_in_data_dir, search_snapshots_in_data_dir,
+    search_history_parallel_in_data_dir, search_notes_in_data_dir, search_snapshots_in_data_dir,
 };
 use crate::storage::Storage;
 use browser_recall_replay::entities::{Entity, ListOrderManifest, TreeNode};
@@ -30,11 +30,11 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::panic::AssertUnwindSafe;
 use std::path::Component;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, oneshot, watch, Mutex, RwLock};
+use tokio::sync::{broadcast, mpsc, oneshot, watch, Mutex, RwLock};
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{accept_hdr_async_with_config, tungstenite::protocol::WebSocketConfig};
@@ -406,9 +406,20 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
     let mut change_rx = shared.change_message_tx.subscribe();
     let mut connected_connector = None::<ConnectedConnector>;
     let mut authenticated = false;
+    let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel::<DaemonMessage>();
+    let mut active_history_searches = HashMap::<String, Arc<AtomicBool>>::new();
 
     loop {
         let message = tokio::select! {
+            outgoing = outgoing_rx.recv(), if authenticated => {
+                if let Some(outgoing) = outgoing {
+                    if let DaemonMessage::HistorySearchDone { search_id, .. } = &outgoing {
+                        active_history_searches.remove(search_id);
+                    }
+                    send_json(&mut write, &outgoing).await?;
+                }
+                continue;
+            }
             revoked = revoke_rx.recv(), if authenticated => {
                 match revoked {
                     Ok(key) => {
@@ -691,6 +702,38 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     &handle_search_history(&shared, query, limit).await,
                 )
                 .await?;
+            }
+            ConnectorMessage::SearchHistoryStream {
+                search_id,
+                query,
+                limit,
+            } => {
+                if !authenticated {
+                    send_json(&mut write, &unauthorized_error()).await?;
+                    continue;
+                }
+                if let Some(previous) = active_history_searches.remove(&search_id) {
+                    previous.store(true, Ordering::Relaxed);
+                }
+                let cancel = Arc::new(AtomicBool::new(false));
+                active_history_searches.insert(search_id.clone(), Arc::clone(&cancel));
+                spawn_history_search_stream(
+                    shared.clone(),
+                    search_id,
+                    query,
+                    limit,
+                    cancel,
+                    outgoing_tx.clone(),
+                );
+            }
+            ConnectorMessage::CancelHistorySearch { search_id } => {
+                if !authenticated {
+                    send_json(&mut write, &unauthorized_error()).await?;
+                    continue;
+                }
+                if let Some(cancel) = active_history_searches.remove(&search_id) {
+                    cancel.store(true, Ordering::Relaxed);
+                }
             }
             ConnectorMessage::SearchNotes { query, limit } => {
                 if !authenticated {
@@ -1019,6 +1062,9 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
         }
     }
 
+    for cancel in active_history_searches.into_values() {
+        cancel.store(true, Ordering::Relaxed);
+    }
     if let Some(connector) = connected_connector {
         set_connected(&shared, connection_id, connector, false).await;
     }
@@ -2525,8 +2571,16 @@ async fn handle_search_history(
         let config = shared.config.lock().await;
         config.data_dir.clone()
     };
-    match tokio::task::spawn_blocking(move || search_history_in_data_dir(&data_dir, &query, limit))
-        .await
+    match tokio::task::spawn_blocking(move || {
+        search_history_parallel_in_data_dir(
+            &data_dir,
+            &query,
+            limit,
+            Arc::new(AtomicBool::new(false)),
+            |_| Ok(()),
+        )
+    })
+    .await
     {
         Ok(Ok(results)) => DaemonMessage::SearchHistoryResult {
             success: true,
@@ -2552,6 +2606,67 @@ async fn handle_search_history(
             error: Some(error.to_string()),
         },
     }
+}
+
+fn spawn_history_search_stream(
+    shared: SharedState,
+    search_id: String,
+    query: String,
+    limit: Option<usize>,
+    cancel: Arc<AtomicBool>,
+    outgoing_tx: mpsc::UnboundedSender<DaemonMessage>,
+) {
+    tokio::spawn(async move {
+        let data_dir = {
+            let config = shared.config.lock().await;
+            config.data_dir.clone()
+        };
+        let search_id_for_task = search_id.clone();
+        let cancel_for_task = Arc::clone(&cancel);
+        let task_tx = outgoing_tx.clone();
+        let task = tokio::task::spawn_blocking(move || {
+            search_history_parallel_in_data_dir(
+                &data_dir,
+                &query,
+                limit,
+                Arc::clone(&cancel_for_task),
+                |chunk| {
+                    task_tx
+                        .send(DaemonMessage::HistorySearchChunk {
+                            search_id: search_id_for_task.clone(),
+                            worker_id: chunk.worker_id,
+                            results: chunk
+                                .results
+                                .into_iter()
+                                .map(|result| HistorySearchResult {
+                                    url: result.url,
+                                    title: result.title,
+                                    timestamp: result.timestamp,
+                                    score: result.score,
+                                })
+                                .collect(),
+                        })
+                        .map_err(|error| {
+                            std::io::Error::new(std::io::ErrorKind::BrokenPipe, error.to_string())
+                        })?;
+                    Ok(())
+                },
+            )
+        })
+        .await;
+
+        let (success, error) = match task {
+            Ok(Ok(_)) => (!cancel.load(Ordering::Relaxed), None),
+            Ok(Err(error)) => (false, Some(error.to_string())),
+            Err(error) => (false, Some(error.to_string())),
+        };
+        let _ = outgoing_tx.send(DaemonMessage::HistorySearchDone {
+            search_id,
+            success,
+            cancelled: cancel.load(Ordering::Relaxed),
+            error,
+        });
+    });
 }
 
 async fn handle_search_notes(
@@ -2978,10 +3093,15 @@ async fn handle_test_seed_data(
     };
 
     let result = async {
-        let _guard = shared.storage.write_guard().await;
-        shared.storage.flush_checkpoints().await?;
-        shared.storage.write_sync_files(&files).await?;
-        shared.storage.reset_cache();
+        {
+            let _guard = shared.storage.write_guard().await;
+            shared.storage.flush_checkpoints().await?;
+            shared.storage.write_sync_files(&files).await?;
+            shared.storage.reset_cache();
+        }
+        commands::recover_checkpoint_tail(&shared.storage)
+            .await
+            .map_err(WsServerError::Ingest)?;
         Ok::<(), WsServerError>(())
     }
     .await;

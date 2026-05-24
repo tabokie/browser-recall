@@ -621,9 +621,11 @@ async fn connector_source_errors_are_protocol_errors_not_socket_disconnects() {
     let slug = generate_slug_from_url("https://example.com/bad-source").expect("slug");
     assert!(!page_path(&data_dir, &slug).exists());
     assert!(!note_path(&data_dir, "bad-source-note").exists());
-    assert!(!snapshot_base_path(&data_dir, "bad-source-page", 1_710_000_000_200)
-        .with_extension("html")
-        .exists());
+    assert!(
+        !snapshot_base_path(&data_dir, "bad-source-page", 1_710_000_000_200)
+            .with_extension("html")
+            .exists()
+    );
 
     handle.shutdown().await;
 }
@@ -720,8 +722,8 @@ async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable()
         ))
         .await
         .expect("send seed");
-    let seed: DaemonMessage =
-        serde_json::from_str(&next_text_message(&mut unauthenticated).await).expect("seed response");
+    let seed: DaemonMessage = serde_json::from_str(&next_text_message(&mut unauthenticated).await)
+        .expect("seed response");
     match seed {
         DaemonMessage::TestSeedDataResult { success, error } => {
             assert!(success, "expected seed success: {error:?}");
@@ -735,8 +737,8 @@ async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable()
         ))
         .await
         .expect("send reset");
-    let reset: DaemonMessage =
-        serde_json::from_str(&next_text_message(&mut unauthenticated).await).expect("reset response");
+    let reset: DaemonMessage = serde_json::from_str(&next_text_message(&mut unauthenticated).await)
+        .expect("reset response");
     match reset {
         DaemonMessage::TestResetDataResult {
             success,
@@ -744,7 +746,10 @@ async fn websocket_auth_control_and_error_matrix_keeps_connections_predictable()
             error,
         } => {
             assert!(success, "expected reset success: {error:?}");
-            assert_eq!(device_id, config_store.load_or_create().expect("config").device_id);
+            assert_eq!(
+                device_id,
+                config_store.load_or_create().expect("config").device_id
+            );
         }
         other => panic!("expected reset result, got {other:?}"),
     }
@@ -910,7 +915,10 @@ async fn websocket_unauthenticated_matrix_rejects_privileged_messages_without_cl
     }
 
     send_connector(&mut socket, ConnectorMessage::Ping).await;
-    assert!(matches!(next_daemon(&mut socket).await, DaemonMessage::Pong));
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::Pong
+    ));
 
     handle.shutdown().await;
 }
@@ -1021,7 +1029,10 @@ async fn websocket_command_and_rule_error_matrix_is_structured() {
         } => {
             assert!(success);
             assert!(error.is_none());
-            assert_eq!(response.get("title").and_then(Value::as_str), Some("API Guide"));
+            assert_eq!(
+                response.get("title").and_then(Value::as_str),
+                Some("API Guide")
+            );
         }
         other => panic!("expected trim title response, got {other:?}"),
     }
@@ -1307,7 +1318,10 @@ async fn websocket_paused_and_invalid_payload_matrix_stays_structured() {
 
     handle.resume().await;
     send_connector(&mut socket, ConnectorMessage::GetStatus).await;
-    assert!(matches!(next_daemon(&mut socket).await, DaemonMessage::Status { .. }));
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::Status { .. }
+    ));
 
     handle.shutdown().await;
 }
@@ -1353,7 +1367,10 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         } => {
             assert!(success);
             assert!(error.is_none());
-            assert_eq!(response.get("created").and_then(Value::as_bool), Some(false));
+            assert_eq!(
+                response.get("created").and_then(Value::as_bool),
+                Some(false)
+            );
         }
         other => panic!("expected ensureDefaultLists no-op, got {other:?}"),
     }
@@ -1448,11 +1465,13 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         } => {
             assert!(success);
             assert!(error.is_none());
-            assert!(response
-                .get("deletedCount")
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-                > 0);
+            assert!(
+                response
+                    .get("deletedCount")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+                    > 0
+            );
         }
         other => panic!("expected command clearAllData, got {other:?}"),
     }
@@ -1543,9 +1562,12 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
     tokio::fs::remove_dir_all(data_dir.join("objects").join("snapshots"))
         .await
         .expect("remove snapshots");
-    tokio::fs::write(data_dir.join("objects").join("snapshots"), "not a directory")
-        .await
-        .expect("write snapshots file");
+    tokio::fs::write(
+        data_dir.join("objects").join("snapshots"),
+        "not a directory",
+    )
+    .await
+    .expect("write snapshots file");
     send_connector(
         &mut socket,
         ConnectorMessage::SearchSnapshots {
@@ -1615,9 +1637,7 @@ async fn websocket_get_entity_covers_manifest_and_child_entities() {
         .await
         .expect("settings entity");
     assert_eq!(
-        settings
-            .get("titleCleanupEnabled")
-            .and_then(Value::as_bool),
+        settings.get("titleCleanupEnabled").and_then(Value::as_bool),
         Some(false)
     );
 
@@ -1686,7 +1706,10 @@ async fn websocket_get_entity_covers_manifest_and_child_entities() {
     let note = get_entity(&mut socket, &format!("note:{note_slug}"))
         .await
         .expect("note entity");
-    assert_eq!(note.get("note").and_then(Value::as_str), Some("entity note"));
+    assert_eq!(
+        note.get("note").and_then(Value::as_str),
+        Some("entity note")
+    );
 
     send_raw(
         &mut socket,
@@ -1973,6 +1996,41 @@ async fn search_messages_return_history_note_and_snapshot_hits() {
         }
         other => panic!("expected history search result, got {other:?}"),
     }
+
+    send_connector(
+        &mut socket,
+        ConnectorMessage::SearchHistoryStream {
+            search_id: "history-stream-1".to_string(),
+            query: "banana".to_string(),
+            limit: None,
+        },
+    )
+    .await;
+    let mut streamed_urls = Vec::new();
+    loop {
+        match next_daemon(&mut socket).await {
+            DaemonMessage::HistorySearchChunk {
+                search_id, results, ..
+            } => {
+                assert_eq!(search_id, "history-stream-1");
+                streamed_urls.extend(results.into_iter().map(|result| result.url));
+            }
+            DaemonMessage::HistorySearchDone {
+                search_id,
+                success,
+                cancelled,
+                error,
+            } => {
+                assert_eq!(search_id, "history-stream-1");
+                assert!(success);
+                assert!(!cancelled);
+                assert!(error.is_none());
+                break;
+            }
+            other => panic!("expected streamed history search message, got {other:?}"),
+        }
+    }
+    assert_eq!(streamed_urls, vec!["https://example.com/page"]);
 
     send_connector(
         &mut socket,
@@ -2354,7 +2412,10 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
     let (mut socket, data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
 
     send_connector(&mut socket, ConnectorMessage::Ping).await;
-    assert!(matches!(next_daemon(&mut socket).await, DaemonMessage::Pong));
+    assert!(matches!(
+        next_daemon(&mut socket).await,
+        DaemonMessage::Pong
+    ));
 
     send_connector(&mut socket, ConnectorMessage::GetDirectoryInfo).await;
     match next_daemon(&mut socket).await {
@@ -2460,7 +2521,10 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         } => {
             assert!(success);
             assert!(error.is_none());
-            assert_eq!(response.get("title").and_then(Value::as_str), Some("Matrix Page"));
+            assert_eq!(
+                response.get("title").and_then(Value::as_str),
+                Some("Matrix Page")
+            );
         }
         other => panic!("expected trimTitle result, got {other:?}"),
     }
@@ -2736,8 +2800,13 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
     ));
 
     let page_slug = generate_slug_from_url("https://example.com/matrix").expect("page slug");
-    send_snapshot_and_ack(&mut socket, &page_slug, "https://example.com/matrix", 1_710_030_010_000)
-        .await;
+    send_snapshot_and_ack(
+        &mut socket,
+        &page_slug,
+        "https://example.com/matrix",
+        1_710_030_010_000,
+    )
+    .await;
 
     send_raw(
         &mut socket,

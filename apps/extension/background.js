@@ -17,6 +17,7 @@ import {
   initConnectorBridge,
   refreshConnectorBridgeState,
   subscribeConnectorBridgeState,
+  subscribeDaemonMutations,
   requestDesktopHistoryFiles,
   requestDesktopHistoryBatch,
   requestDesktopPageInfo,
@@ -399,6 +400,10 @@ subscribeConnectorBridgeState((connector) => {
   badgeController.scheduleConnectorBadgeRefresh(connector);
 });
 
+subscribeDaemonMutations((mutation) => {
+  handleRuntimeMutation(mutation);
+});
+
 async function applyCachedConnectorBadge(reason) {
   const connector = await getConnectorBridgeState();
   syncDesktopConnectorPauseState(connector);
@@ -595,7 +600,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 // ─── Initialization ───────────────────────────────────────────────────
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details = {}) => {
   logDebug('browser-recall extension installed');
 
   chrome.contextMenus.create({
@@ -603,6 +608,12 @@ chrome.runtime.onInstalled.addListener(async () => {
     title: 'Highlight Selected',
     contexts: ['selection'],
   });
+
+  if (details.reason === 'install') {
+    await chrome.runtime.openOptionsPage().catch((error) => {
+      logDebug('[install] open options page failed:', error.message);
+    });
+  }
 
   logDebug('Extension installed');
 
@@ -1417,7 +1428,6 @@ async function handleResetForTest() {
     drainNotifyTimer = null;
   }
   resumeService();
-  await ensureDefaultLists();
   return { success: true };
 }
 
@@ -1446,7 +1456,7 @@ async function handleFlushDesktopQueueForTest(request) {
 
 function seedDeviceId(files) {
   for (const file of files || []) {
-    const match = file?.path?.match(/^data\/logs\/([^/]+)\//);
+    const match = file?.path?.match(/^(?:data\/)?logs\/([^/]+)\//);
     if (match?.[1]) return match[1];
   }
   return null;
@@ -1495,6 +1505,22 @@ async function handleGetDesktopQueueForTest() {
     length: connector.pendingCommands || 0,
     watermark: connector.lastDrainedAt || 0,
   };
+}
+
+function handleRuntimeMutation(request) {
+  const urls = new Set();
+  if (typeof request.url === 'string' && request.url) urls.add(request.url);
+  if (Array.isArray(request.urls)) {
+    for (const url of request.urls) {
+      if (typeof url === 'string' && url) urls.add(url);
+    }
+  }
+  if (urls.size > 0) {
+    void badgeController.refreshBadgesForUrls([...urls]);
+  } else {
+    void badgeController.refreshActiveTabBadge();
+  }
+  return { success: true };
 }
 
 // ─── Message Dispatch ────────────────────────────────────────────────
@@ -1562,6 +1588,9 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'getPopupAccessState':
           sendResponse(await handleGetPopupAccessState(request));
+          break;
+        case 'mutation':
+          sendResponse(handleRuntimeMutation(request));
           break;
         // Entity reads
         case 'loadPageNotes':
