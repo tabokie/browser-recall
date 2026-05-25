@@ -366,6 +366,102 @@ function notifyMutation(type, detail) {
     .catch(() => {});
 }
 
+function isExtensionRuntimeFailure(error) {
+  return Boolean(
+    globalThis.browserRecallWebExtension?.isRuntimeFailure?.(error),
+  );
+}
+
+function userActionErrorMessage(error, fallback = 'Action failed') {
+  if (isExtensionRuntimeFailure(error)) {
+    return 'Browser Recall extension reloaded. Please reload the page and try again.';
+  }
+  return String(error?.message || error || fallback);
+}
+
+async function injectUserActionErrorNotification(tabId, message) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (displayMessage) => {
+      const existing = document.getElementById(
+        'browser-recall-user-action-error',
+      );
+      if (existing) existing.remove();
+      const host = document.createElement('div');
+      host.id = 'browser-recall-user-action-error';
+      host.setAttribute('role', 'status');
+      host.setAttribute('aria-label', displayMessage);
+      host.style.cssText =
+        'position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
+      const shadow = host.attachShadow({ mode: 'closed' });
+      const escaped = String(displayMessage).replace(
+        /[&<>"']/g,
+        (char) =>
+          ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+          })[char],
+      );
+      shadow.innerHTML = `
+        <style>
+          .bubble {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.92);
+            z-index: 2147483647;
+            min-width: 180px;
+            max-width: min(360px, calc(100vw - 32px));
+            background: #fffaf3;
+            color: #b3261e;
+            border: 1px solid #d93025;
+            border-radius: 2px;
+            font: 900 11px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            letter-spacing: 0.08em;
+            padding: 9px 12px;
+            pointer-events: none;
+            text-align: center;
+            text-transform: uppercase;
+            opacity: 1;
+          }
+        </style>
+        <div class="bubble">${escaped}</div>
+      `;
+      document.documentElement.appendChild(host);
+      setTimeout(() => host.remove(), 5000);
+    },
+    args: [message],
+  });
+}
+
+async function notifyTabUserActionError(
+  tabId,
+  error,
+  fallback = 'Action failed',
+) {
+  if (!tabId || tabId <= 0) return;
+  const message = userActionErrorMessage(error, fallback);
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      action: 'showErrorNotification',
+      message,
+    });
+  } catch (sendError) {
+    try {
+      await injectUserActionErrorNotification(tabId, message);
+    } catch (injectError) {
+      logDebug(
+        '[notification] user action error notification failed:',
+        sendError.message,
+        injectError.message,
+      );
+    }
+  }
+}
+
 // ─── Connector Queue Flush ───────────────────────────────────────────
 let drainNotifyTimer = null;
 
@@ -721,6 +817,7 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
       if (pdfCheck?.isPdf) throw new Error('Cannot capture PDF pages');
     } catch (e) {
       if (e.message === 'Cannot capture PDF pages') throw e;
+      if (isExtensionRuntimeFailure(e)) throw e;
       // Content script might not be loaded — proceed with capture
     }
     const mdResp = await chrome.tabs.sendMessage(tabId, {
@@ -810,22 +907,22 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 
   try {
-    await handleContextMenuHighlight(
+    const response = await handleContextMenuHighlight(
       activeTab.url,
       activeTab.title,
       info.selectionText.trim(),
       activeTab.id,
     );
+    if (response?.success === false) {
+      await notifyTabUserActionError(
+        activeTab.id,
+        response.error,
+        'Highlight failed',
+      );
+    }
   } catch (error) {
     logDebug('[context-menu] Highlight error:', error.message);
-    if (activeTab.id > 0) {
-      chrome.tabs
-        .sendMessage(activeTab.id, {
-          action: 'showErrorNotification',
-          message: error.message,
-        })
-        .catch(() => {});
-    }
+    await notifyTabUserActionError(activeTab.id, error, 'Highlight failed');
   }
 });
 
@@ -866,12 +963,7 @@ chrome.commands.onCommand.addListener(async (command) => {
       chrome.tabs
         .sendMessage(tab.id, { action: 'hideCaptureSpinner' })
         .catch(() => {});
-      chrome.tabs
-        .sendMessage(tab.id, {
-          action: 'showErrorNotification',
-          message: error.message,
-        })
-        .catch(() => {});
+      await notifyTabUserActionError(tab.id, error, 'Capture failed');
     }
   } else if (command === 'highlight-selection') {
     try {
@@ -880,8 +972,12 @@ chrome.commands.onCommand.addListener(async (command) => {
         action: 'highlightSelection',
       });
       logDebug('[background] highlightSelection response:', resp);
+      if (resp?.success === false) {
+        await notifyTabUserActionError(tab.id, resp.error, 'Highlight failed');
+      }
     } catch (error) {
       logDebug('[background] Could not highlight selection:', error.message);
+      await notifyTabUserActionError(tab.id, error, 'Highlight failed');
     }
   } else if (command === 'like-page' || command === 'dislike-page') {
     const delta = command === 'like-page' ? 1 : -1;

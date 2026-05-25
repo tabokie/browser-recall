@@ -1,0 +1,17 @@
+- I see a few issues with desktop app's scrolling. (1) It is difficult and sometimes not able to use  mouse scroll wheel to scroll. Trackpad works no problem. (2) The scroll bar doesn't hide itself when not being scrolled.
+- Another issue, in extension pop UI, when creating new list, 输入法窗口出现时，回车不仅仅导致输入法 flush out text, it also cause the popup to confirm the list naming. The confirmation is unintended consequence of typing "Enter" once.
+- With the newest version, the extension popup sometimes flickers once when I click a list toggle
+- Let's add a quick punch in for popup. When user open the popup, and start typing words, we immediately enter the list search menu
+- You remember the warning window when extension is reloaded and port connection if broken? I observe it only occurs just before I refresh the page, but never when I operate on the page but the op silently fails (e.g. creating a snapshot capture). The former warning is not really useful because we are already refreshing the page, the latter is a case that user needs to be notified.
+- I see an old issue reoccuring on the desktop app. When scrolled all the way down to the bottom, the page item's bottom padding is zero. But it should be the same as the left sidebar and align to the bottom of the sidebar.
+- Another issue, for the extension popup's list selection menu, I should be able to use up/down arrow to select, including the option to create new list as the last item
+- $gap
+- Fix them all, including smaller gaps, thoroughly
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix them all
+- resume
+- I think the extension's warning notification during port disconnect is still not done right. The desired result is, when port is disconnected, and user tries to capture snapshot or highlight, a warning pops up to notify user to refresh. But right now, no warning is shown and the op is silently ignored.
+- > how desktop bridge/port failures are represented
+I don't mean desktop port disconnect though, I meant exactly that the extension worker is disconnected. For the desktop disconnect issue, you are right to fix it if it is a real one.
+- $finish model=GPT-5.5 Codex
+- skip

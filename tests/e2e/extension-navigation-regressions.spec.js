@@ -396,6 +396,58 @@ test.describe('extension same-tab navigation regressions', () => {
     await helper.close();
   });
 
+  test('content script shows reload hint when highlight save returns a port failure', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    localServer.addPage('/runtime-failed-response-highlight', {
+      title: 'Runtime Failed Response Highlight',
+      body: '<main><p id="target">Port failure highlighted text</p></main>',
+    });
+    const url = localServer.url('/runtime-failed-response-highlight');
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await waitForContentScript(helper, page, url);
+    await page.evaluate(() => {
+      const target = document.getElementById('target');
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'ISOLATED',
+        func: () => {
+          chrome.runtime.sendMessage = () =>
+            Promise.resolve({
+              success: false,
+              error:
+                'Could not establish connection. Receiving end does not exist.',
+            });
+        },
+      });
+      await chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
+    }, url);
+
+    await expect(page.locator('[aria-label*="reload the page"]')).toBeVisible();
+    await expect(page.locator('mark.portal-highlight')).toHaveCount(0);
+
+    await page.close();
+    await helper.close();
+  });
+
   test('content script shows reload hint when page note cannot load after runtime reload', async ({
     extContext,
     extensionId,

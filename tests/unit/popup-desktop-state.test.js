@@ -416,6 +416,66 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('blacklistSettingsLink')).toBeTruthy();
   });
 
+  it('falls back to a popup bubble when blacklisted capture cannot notify the page', async () => {
+    const tab = {
+      id: 41,
+      url: 'https://blocked.example.com/capture-failure',
+      title: 'Blocked Capture Failure',
+    };
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        getPopupAccessState: {
+          success: true,
+          blacklisted: true,
+          hasVisitHistory: false,
+        },
+        recordPageActivity: { success: true },
+        captureCurrentPageFromPopup: {
+          success: false,
+          error: 'Blacklisted capture failed',
+        },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: {
+          success: true,
+          url: tab.url,
+          page: {
+            slug: generateSlugFromUrl(tab.url),
+            url: tab.url,
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: [],
+        },
+        getPopupLists: { success: true, lists: [] },
+      },
+    });
+    chrome.tabs.sendMessage.mockRejectedValue(
+      new Error('Receiving end does not exist.'),
+    );
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.getElementById('captureOnceBtn'));
+    document.getElementById('captureOnceBtn').click();
+
+    await waitFor(() => document.getElementById('errorBubble'));
+    expect(document.getElementById('errorBubble').textContent).toContain(
+      'Blacklisted capture failed',
+    );
+  });
+
   it('shows connector diagnostics while desktop is not connected', async () => {
     const tab = {
       id: 43,
@@ -637,7 +697,7 @@ describe('popup desktop state rendering', () => {
     expect(inputRule?.style.color).toBe('var(--text-primary)');
   });
 
-  it('shows a popup error bubble when capture fails because the extension context was invalidated', async () => {
+  it('notifies the active page when popup capture fails because the extension context was invalidated', async () => {
     const tab = {
       id: 49,
       url: 'https://example.com/context-invalidated',
@@ -676,10 +736,6 @@ describe('popup desktop state rendering', () => {
         },
       },
     });
-    chrome.tabs.sendMessage.mockRejectedValue(
-      new Error('Extension context invalidated.'),
-    );
-
     await import('../../apps/extension/popup.js');
 
     await waitFor(
@@ -687,9 +743,13 @@ describe('popup desktop state rendering', () => {
     );
     document.getElementById('captureBtn').click();
 
-    await waitFor(() => document.getElementById('errorBubble'));
-    expect(document.getElementById('errorBubble').textContent).toContain(
-      'refresh the page',
+    await waitFor(() => chrome.tabs.sendMessage.mock.calls.length > 0);
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
+      tab.id,
+      expect.objectContaining({
+        action: 'showErrorNotification',
+        message: expect.stringContaining('Reload this page'),
+      }),
     );
   });
 
@@ -776,6 +836,182 @@ describe('popup desktop state rendering', () => {
     await waitFor(() => document.querySelector('.list-chip.selected'));
     expect(document.getElementById('pageTitle').textContent).toBe(
       'Trimmed Title',
+    );
+  });
+
+  it('does not blank list chips while refreshing after a list toggle', async () => {
+    const tab = {
+      id: 51,
+      url: 'https://example.com/no-list-toggle-flicker',
+      title: 'No List Toggle Flicker',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    let pinned = false;
+    let summaryCalls = 0;
+    let popupListCalls = 0;
+    const secondSummary = deferred();
+    const secondPopupLists = deferred();
+    const currentLists = () => [
+      {
+        slug: 'reading',
+        name: 'Reading',
+        pins: pinned
+          ? [
+              {
+                id: `page:${pageSlug}`,
+                pinnedAt: Date.now(),
+              },
+            ]
+          : [],
+      },
+    ];
+
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () => {
+          summaryCalls++;
+          if (summaryCalls === 2) return secondSummary.promise;
+          return {
+            success: true,
+            url: tab.url,
+            page: {
+              slug: pageSlug,
+              url: tab.url,
+              title: tab.title,
+              visitDates: [],
+            },
+            notes: [],
+            snapshots: [],
+            lists: currentLists(),
+          };
+        },
+        getPopupLists: () => {
+          popupListCalls++;
+          if (popupListCalls === 2) return secondPopupLists.promise;
+          return { success: true, lists: currentLists() };
+        },
+        toggleListPin: () => {
+          pinned = true;
+          return { success: true, pinned: true };
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.querySelector('.list-chip'));
+    const listChips = document.getElementById('listChips');
+    expect(listChips.textContent).toContain('Reading');
+
+    document.querySelector('.list-chip').click();
+    await waitFor(() => summaryCalls === 2);
+    secondSummary.resolve({
+      success: true,
+      url: tab.url,
+      page: {
+        slug: pageSlug,
+        url: tab.url,
+        title: tab.title,
+        visitDates: [],
+      },
+      notes: [],
+      snapshots: [],
+      lists: currentLists(),
+    });
+    await waitFor(() => popupListCalls === 2);
+
+    expect(listChips.textContent).toContain('Reading');
+    expect(listChips.querySelectorAll('.list-chip')).toHaveLength(1);
+
+    secondPopupLists.resolve({ success: true, lists: currentLists() });
+    await waitFor(() => document.querySelector('.list-chip.selected'));
+  });
+
+  it('refreshes visible chips after toggling a list from the picker even if summary refresh stalls', async () => {
+    const tab = {
+      id: 52,
+      url: 'https://example.com/picker-chip-refresh',
+      title: 'Picker Chip Refresh',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    let pinned = false;
+    let summaryCalls = 0;
+    const stalledSummary = deferred();
+    const currentLists = () => [
+      {
+        slug: 'reading',
+        name: 'Reading',
+        pins: pinned
+          ? [
+              {
+                id: `page:${pageSlug}`,
+                pinnedAt: Date.now(),
+              },
+            ]
+          : [],
+      },
+    ];
+
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () => {
+          summaryCalls++;
+          if (summaryCalls === 2) return stalledSummary.promise;
+          return {
+            success: true,
+            url: tab.url,
+            page: {
+              slug: pageSlug,
+              url: tab.url,
+              title: tab.title,
+              visitDates: [],
+            },
+            notes: [],
+            snapshots: [],
+            lists: currentLists(),
+          };
+        },
+        getPopupLists: () => ({ success: true, lists: currentLists() }),
+        toggleListPin: () => {
+          pinned = true;
+          return { success: true, pinned: true };
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.getElementById('listAddBtn'));
+    document.getElementById('listAddBtn').click();
+    await waitFor(() => document.querySelector('.list-picker-row'));
+    document.querySelector('.list-picker-row').click();
+    await waitFor(() => summaryCalls === 2);
+
+    await waitFor(() => document.querySelector('.list-chip.selected'));
+    expect(document.getElementById('listChips').textContent).toContain(
+      'Reading',
     );
   });
 });

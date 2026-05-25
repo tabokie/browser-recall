@@ -1825,6 +1825,29 @@ test.describe('desktop visual regression', () => {
         firstTitle: 'List top 0',
       });
 
+      const bottomVisibility = await page.evaluate(async () => {
+        const main = document.querySelector('.main');
+        main.scrollTop = main.scrollHeight;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        main.scrollTop = main.scrollHeight;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const item = document.querySelector('.result-item:last-child');
+        const sidebar = document.querySelector('.sidebar');
+        const itemRect = item.getBoundingClientRect();
+        const mainRect = main.getBoundingClientRect();
+        const sidebarRect = sidebar.getBoundingClientRect();
+        return {
+          itemBottom: itemRect.bottom,
+          sidebarBottom: sidebarRect.bottom,
+          bottomGutter: mainRect.bottom - itemRect.bottom,
+        };
+      });
+      expect(
+        Math.abs(bottomVisibility.itemBottom - bottomVisibility.sidebarBottom),
+      ).toBeLessThanOrEqual(1);
+      expect(bottomVisibility.bottomGutter).toBeGreaterThanOrEqual(11);
+      expect(bottomVisibility.bottomGutter).toBeLessThanOrEqual(13);
+
       await page.keyboard.press(
         process.platform === 'darwin' ? 'Meta+A' : 'Control+A',
       );
@@ -1867,6 +1890,132 @@ test.describe('desktop visual regression', () => {
       });
 
       expect(defaultPrevented).toBe(false);
+    });
+  });
+
+  test('wheel at a nested scroller edge does not bubble into the main pane', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const historyEntries = Array.from({ length: 120 }, (_, i) => ({
+      url: `https://example.com/nested-edge-${i}`,
+      title: `Nested edge ${i}`,
+      timestamp: now - i * 1000,
+      deviceId: 'device-a',
+    }));
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyFileBatch: 1,
+        historyEntries,
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll('.result-row').length > 0,
+      );
+
+      const defaultPrevented = await page.evaluate(() => {
+        const main = document.querySelector('.main');
+        const nested = document.createElement('div');
+        nested.style.cssText =
+          'height:40px; overflow-y:auto; overscroll-behavior:auto;';
+        nested.innerHTML = '<div style="height:160px"></div>';
+        document.querySelector('.result-item').appendChild(nested);
+        nested.scrollTop = nested.scrollHeight;
+        const beforeMainScrollTop = main.scrollTop;
+        const event = new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 48,
+        });
+        const dispatched = nested.dispatchEvent(event);
+        return {
+          prevented: !dispatched,
+          mainScrollTop: main.scrollTop,
+          beforeMainScrollTop,
+        };
+      });
+
+      expect(defaultPrevented.prevented).toBe(true);
+      expect(defaultPrevented.mainScrollTop).toBe(
+        defaultPrevented.beforeMainScrollTop,
+      );
+    });
+  });
+
+  test('mouse wheel scrolls the main results pane', async ({ page }) => {
+    const now = Date.now();
+    const historyEntries = Array.from({ length: 120 }, (_, i) => ({
+      url: `https://example.com/mouse-wheel-${i}`,
+      title: `Mouse wheel ${i}`,
+      timestamp: now - i * 1000,
+      deviceId: 'device-a',
+    }));
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyFileBatch: 1,
+        historyEntries,
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll('.result-row').length > 0,
+      );
+
+      const main = page.locator('.main');
+      const firstRow = page.locator('.result-row').first();
+      const rowBox = await firstRow.boundingBox();
+      expect(rowBox).not.toBeNull();
+      await page.mouse.move(rowBox.x + rowBox.width / 2, rowBox.y + 8);
+      await page.mouse.wheel(0, 480);
+      await expect
+        .poll(async () => main.evaluate((el) => el.scrollTop))
+        .toBeGreaterThan(0);
+    });
+  });
+
+  test('main scrollbar hides after wheel scrolling settles', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const historyEntries = Array.from({ length: 120 }, (_, i) => ({
+      url: `https://example.com/scrollbar-hide-${i}`,
+      title: `Scrollbar hide ${i}`,
+      timestamp: now - i * 1000,
+      deviceId: 'device-a',
+    }));
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyFileBatch: 1,
+        historyEntries,
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll('.result-row').length > 0,
+      );
+
+      const main = page.locator('.main');
+      const mainBox = await main.boundingBox();
+      expect(mainBox).not.toBeNull();
+      await page.mouse.move(mainBox.x + mainBox.width / 2, mainBox.y + 160);
+      await page.mouse.wheel(0, 480);
+      await expect
+        .poll(async () =>
+          main.evaluate((el) => el.classList.contains('is-scrolling')),
+        )
+        .toBe(true);
+      await expect
+        .poll(async () =>
+          main.evaluate((el) => el.classList.contains('is-scrolling')),
+        )
+        .toBe(false);
+
+      const thumbColor = await main.evaluate(
+        (el) =>
+          getComputedStyle(el, '::-webkit-scrollbar-thumb').backgroundColor,
+      );
+      expect(thumbColor).toBe('rgba(0, 0, 0, 0)');
     });
   });
 
@@ -2064,13 +2213,20 @@ test.describe('desktop visual regression', () => {
             ...document.querySelectorAll('.result-row[data-url]'),
           ].find((row) => row.dataset.url === lastUrl);
           if (!row) return { found: false };
+          const item = row.closest('.result-item');
           const main = document.querySelector('.main');
+          const sidebar = document.querySelector('.sidebar');
           const rowRect = row.getBoundingClientRect();
+          const itemRect = item.getBoundingClientRect();
           const mainRect = main.getBoundingClientRect();
+          const sidebarRect = sidebar.getBoundingClientRect();
           return {
             found: true,
             rowBottom: rowRect.bottom,
+            itemBottom: itemRect.bottom,
             mainBottom: mainRect.bottom,
+            sidebarBottom: sidebarRect.bottom,
+            bottomGutter: mainRect.bottom - itemRect.bottom,
           };
         },
         { lastUrl },
@@ -2079,6 +2235,11 @@ test.describe('desktop visual regression', () => {
       expect(visibility.rowBottom).toBeLessThanOrEqual(
         visibility.mainBottom + 1,
       );
+      expect(
+        Math.abs(visibility.itemBottom - visibility.sidebarBottom),
+      ).toBeLessThanOrEqual(1);
+      expect(visibility.bottomGutter).toBeGreaterThanOrEqual(11);
+      expect(visibility.bottomGutter).toBeLessThanOrEqual(13);
     });
   });
 

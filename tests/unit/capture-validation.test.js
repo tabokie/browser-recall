@@ -48,6 +48,15 @@ describe('captureAndLog content validation', () => {
       'captureAndLog should validate content before saving',
     ).toBe(true);
   });
+
+  it('does not ignore extension runtime failures while probing the content script', () => {
+    const captureAndLogMatch = bgSource.match(
+      /async function captureAndLog[\s\S]*?^}/m,
+    );
+    expect(captureAndLogMatch).not.toBeNull();
+    expect(captureAndLogMatch[0]).toContain('isExtensionRuntimeFailure(e)');
+    expect(captureAndLogMatch[0]).toContain('throw e');
+  });
 });
 
 describe('error notification bubble in content.js', () => {
@@ -62,15 +71,40 @@ describe('error notification bubble in content.js', () => {
       "request.action === 'showErrorNotification'",
     );
   });
+
+  it('does not show global runtime reload warnings outside user actions', () => {
+    expect(contentSource).not.toContain(
+      "addEventListener('unhandledrejection'",
+    );
+    expect(contentSource).not.toContain("addEventListener('error'");
+  });
 });
 
 describe('capture paths send error notifications', () => {
   const bgSource = readFileSync(resolve(extDir, 'background.js'), 'utf-8');
 
   it('keyboard shortcut path sends error bubble on failure', () => {
-    // The command handler for capture-snapshot should send showErrorNotification
-    // on catch
-    expect(bgSource).toContain("action: 'showErrorNotification'");
+    // The command handler for capture-snapshot should normalize user-action
+    // failures and notify the active page on catch.
+    const captureCommandMatch = bgSource.match(
+      /if\s*\(command === 'capture-snapshot'\)[\s\S]*?}\s*else if\s*\(command === 'highlight-selection'\)/,
+    );
+    expect(captureCommandMatch).not.toBeNull();
+    expect(captureCommandMatch[0]).toContain('notifyTabUserActionError');
+  });
+
+  it('keyboard highlight path notifies the page when highlight fails', () => {
+    const highlightCommandMatch = bgSource.match(
+      /else if\s*\(command === 'highlight-selection'\)[\s\S]*?}\s*else if\s*\(command === 'like-page'/,
+    );
+    expect(highlightCommandMatch).not.toBeNull();
+    expect(highlightCommandMatch[0]).toContain('notifyTabUserActionError');
+  });
+
+  it('background notification falls back to direct page injection', () => {
+    expect(bgSource).toContain('function injectUserActionErrorNotification');
+    expect(bgSource).toContain('chrome.scripting.executeScript');
+    expect(bgSource).toContain('notifyTabUserActionError');
   });
 
   it('popup path delegates error display to popup.js (no duplicate notification)', () => {
@@ -84,26 +118,26 @@ describe('capture paths send error notifications', () => {
   });
 });
 
-describe('popup.js shows capture errors via showErrorNotification', () => {
+describe('popup.js shows capture errors via page notifications', () => {
   const popupSource = readFileSync(resolve(extDir, 'popup.js'), 'utf-8');
 
-  it('capture button sends showErrorNotification on failure response', () => {
+  it('capture button notifies the active page on failure response', () => {
     // When captureCurrentPageFromPopup returns { success: false }, popup should
-    // send showErrorNotification to the content script rather than silently logging
+    // notify the content script rather than silently logging
     const captureHandler = popupSource.match(
       /captureBtn[\s\S]*?btn\.textContent\s*=\s*['"]CAPTURE FRAME['"]/,
     );
     expect(captureHandler).not.toBeNull();
-    expect(captureHandler[0]).toContain('showErrorNotification');
+    expect(captureHandler[0]).toContain('notifyActivePageError');
   });
 
-  it('"Capture It" button sends showErrorNotification on failure', () => {
-    // The blacklist bypass "Capture It" button should also show errors to user
+  it('"Capture It" button uses the shared page notification fallback on failure', () => {
+    // The blacklist bypass "Capture It" button should also show errors to user.
     const captureOnceHandler = popupSource.match(
       /captureOnceBtn[\s\S]*?showDashboard/,
     );
     expect(captureOnceHandler).not.toBeNull();
-    expect(captureOnceHandler[0]).toContain('showErrorNotification');
+    expect(captureOnceHandler[0]).toContain('notifyPageError');
   });
 });
 

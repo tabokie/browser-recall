@@ -51,6 +51,25 @@ async function getBadgeForUrl(helper, url) {
   }, url);
 }
 
+async function waitForContentScript(helper, page, url) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const ready = await helper.evaluate(async (pageUrl) => {
+      const tabs = await chrome.tabs.query({ url: pageUrl });
+      if (!tabs.length) return false;
+      try {
+        await chrome.tabs.sendMessage(tabs[0].id, { action: 'isPdfPage' });
+        return true;
+      } catch {
+        return false;
+      }
+    }, url);
+    if (ready) return;
+    await page.reload();
+    await page.waitForLoadState('domcontentloaded');
+  }
+  throw new Error(`content script did not load for ${url}`);
+}
+
 test.describe('Popup list chip behavior', () => {
   test('popup opened after a list already exists shows it as available', async ({
     extContext,
@@ -489,6 +508,89 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
+  test('typing on the open popup starts list search', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    localServer.addPage('/popup-type-list-search', {
+      title: 'Popup Type List Search',
+      body: '<main>Popup type list search page</main>',
+    });
+    const url = localServer.url('/popup-type-list-search');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:reading' }, { id: 'list:archive' }],
+        },
+      },
+      {
+        path: 'views/lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'views/lists/archive.json',
+        data: {
+          slug: 'archive',
+          name: 'Archive',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Popup Type List Search',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Popup Type List Search',
+    });
+
+    await popup.keyboard.type('re');
+    const input = popup.locator('#listPickerInput');
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue('re');
+    await expect(popup.locator('#listPickerList')).toContainText('Reading');
+    await expect(popup.locator('#listPickerList')).not.toContainText('Archive');
+
+    await popup.locator('#pageTitle').click();
+    const titleInput = popup.locator('.page-title-input');
+    await expect(titleInput).toBeVisible();
+    await titleInput.fill('');
+    await popup.keyboard.type('abc');
+    await expect(titleInput).toHaveValue('abc');
+    await expect(popup.locator('#listPicker')).toHaveCount(0);
+
+    await popup.close();
+    await page.close();
+  });
+
   test(`popup refreshes notes, list chips, and badge from live desktop mutations seed=${POPUP_MUTATION_SEED}`, async ({
     extContext,
     extensionId,
@@ -740,7 +842,7 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test('capture invalidated response shows a refresh-page error bubble', async ({
+  test('capture invalidated response notifies the page', async ({
     extContext,
     extensionId,
     setupDir,
@@ -772,12 +874,30 @@ test.describe('Popup list chip behavior', () => {
     const page = await extContext.newPage();
     await page.goto(url);
     await page.waitForLoadState('domcontentloaded');
+    const helper = await openHelperPage(extContext, extensionId);
+    await waitForContentScript(helper, page, url);
+    const activeTabId = await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      return tab.id;
+    }, url);
     const popup = await openPopupForUrl(extContext, extensionId, {
       url,
       title: 'Capture Invalidated',
     });
-    await popup.evaluate(() => {
+    await popup.evaluate((tabId) => {
       const original = chrome.runtime.sendMessage.bind(chrome.runtime);
+      chrome.tabs.query = async (queryInfo) => {
+        if (queryInfo?.active && queryInfo?.currentWindow) {
+          return [
+            {
+              id: tabId,
+              url: location.href,
+              title: 'Capture Invalidated',
+            },
+          ];
+        }
+        return [];
+      };
       chrome.runtime.sendMessage = async (request, ...rest) => {
         if (request?.action === 'captureCurrentPageFromPopup') {
           return {
@@ -787,13 +907,14 @@ test.describe('Popup list chip behavior', () => {
         }
         return original(request, ...rest);
       };
-    });
+    }, activeTabId);
 
     await popup.locator('#captureBtn').click();
-    await expect(popup.locator('#errorBubble')).toContainText(
-      'refresh the page',
-    );
+    await expect(page.locator('[aria-label*="Reload this page"]')).toBeVisible({
+      timeout: 5000,
+    });
 
+    await helper.close();
     await popup.close();
     await page.close();
   });
@@ -954,6 +1075,199 @@ test.describe('Popup list chip behavior', () => {
 
     await popup.close();
     await helper.close();
+    await page.close();
+  });
+
+  test('IME composition Enter does not confirm popup list naming', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    localServer.addPage('/popup-ime-list-name', {
+      title: 'Popup IME List Name',
+      body: '<main>Popup IME list name page</main>',
+    });
+    const url = localServer.url('/popup-ime-list-name');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: { timestamp: now, tree: [] },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Popup IME List Name',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Popup IME List Name',
+    });
+    await popup.evaluate(() => {
+      const original = chrome.runtime.sendMessage.bind(chrome.runtime);
+      window.__saveListMetaRequests = [];
+      chrome.runtime.sendMessage = async (request, ...rest) => {
+        if (request?.action === 'saveListMeta') {
+          window.__saveListMetaRequests.push(request);
+        }
+        return original(request, ...rest);
+      };
+    });
+
+    await popup.locator('#listAddBtn').click();
+    const input = popup.locator('#listPickerInput');
+    await input.fill('阅读');
+    await input.evaluate((el) => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 229,
+        bubbles: true,
+        cancelable: true,
+        isComposing: true,
+      });
+      el.dispatchEvent(event);
+    });
+
+    await expect(popup.locator('#listPicker')).toBeVisible();
+    await expect(popup.locator('#listPickerCreate')).toContainText(
+      'Create "阅读"',
+    );
+    expect(
+      await popup.evaluate(() => window.__saveListMetaRequests.length),
+    ).toBe(0);
+
+    await popup.close();
+    await page.close();
+  });
+
+  test('list picker arrow keys select rows and the create option', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    localServer.addPage('/popup-list-keyboard-menu', {
+      title: 'Popup List Keyboard Menu',
+      body: '<main>Popup list keyboard menu page</main>',
+    });
+    const url = localServer.url('/popup-list-keyboard-menu');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:keyboard-alpha' }, { id: 'list:keyboard-beta' }],
+        },
+      },
+      {
+        path: 'views/lists/keyboard-alpha.json',
+        data: {
+          slug: 'keyboard-alpha',
+          name: 'Keyboard Alpha',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'views/lists/keyboard-beta.json',
+        data: {
+          slug: 'keyboard-beta',
+          name: 'Keyboard Beta',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Popup List Keyboard Menu',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+      {
+        path: 'views/manifest/list-name-to-id.json',
+        data: {
+          timestamp: now,
+          paths: {
+            'test-device/Keyboard Alpha': 'keyboard-alpha',
+            'test-device/Keyboard Beta': 'keyboard-beta',
+          },
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Popup List Keyboard Menu',
+    });
+
+    await popup.locator('#listAddBtn').click();
+    const input = popup.locator('#listPickerInput');
+    await input.fill('Keyboard');
+    await expect(input).toHaveAttribute('role', 'combobox');
+    await expect(input).toHaveAttribute('aria-controls', 'listPickerList');
+    await expect(
+      popup.locator('.list-picker-option').first(),
+    ).not.toHaveAttribute('tabindex', '0');
+
+    const activeText = async () =>
+      popup
+        .locator('.list-picker-option.active')
+        .evaluate((node) => node.textContent.trim());
+
+    await input.press('ArrowDown');
+    await expect.poll(activeText).toBe('Keyboard Alpha');
+    await expect(input).toHaveAttribute(
+      'aria-activedescendant',
+      /listPickerOption-/,
+    );
+
+    await input.press('ArrowDown');
+    await expect.poll(activeText).toBe('Keyboard Beta');
+
+    await input.press('ArrowUp');
+    await expect.poll(activeText).toBe('Keyboard Alpha');
+
+    await input.press('ArrowUp');
+    await expect.poll(activeText).toBe('Create "Keyboard"');
+
+    await input.press('Enter');
+
+    await expect(popup.locator('#listPicker')).toHaveCount(0);
+    await expect(popup.locator('.list-chip.selected')).toContainText(
+      'Keyboard',
+    );
+
+    await popup.close();
     await page.close();
   });
 });

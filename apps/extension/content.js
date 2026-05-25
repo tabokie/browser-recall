@@ -487,6 +487,9 @@ function initContentScript() {
                 note,
               })
               .then((resp) => {
+                if (showUserActionFailureFromResponse(resp, 'Update failed')) {
+                  return;
+                }
                 if (resp?.noteSlug) existingNoteSlug = resp.noteSlug;
               })
               .catch((error) => {
@@ -501,6 +504,9 @@ function initContentScript() {
                 excerpt: null,
                 note,
                 cssPath: null,
+              })
+              .then((resp) => {
+                showUserActionFailureFromResponse(resp, 'Create note failed');
               })
               .catch((error) => {
                 showExtensionReloadNotification(error);
@@ -807,7 +813,12 @@ function initContentScript() {
       chrome.runtime
         .sendMessage({ action: 'loadPageNotes', slug: pageSlug })
         .then((resp) => {
-          if (resp?.success === false) {
+          if (
+            showUserActionFailureFromResponse(
+              resp,
+              'Could not load highlight note',
+            )
+          ) {
             console.warn('[content] loadPageNotes failed:', resp.error);
             return;
           }
@@ -894,6 +905,9 @@ function initContentScript() {
               noteSlug,
               note,
             });
+            if (showUserActionFailureFromResponse(resp, 'Update failed')) {
+              return;
+            }
             if (resp?.noteSlug) mark.dataset.noteSlug = resp.noteSlug;
           } catch (error) {
             showExtensionReloadNotification(error);
@@ -1214,13 +1228,14 @@ function initContentScript() {
     return true;
   }
 
-  window.addEventListener('unhandledrejection', (event) => {
-    if (showExtensionReloadNotification(event.reason)) event.preventDefault();
-  });
-
-  window.addEventListener('error', (event) => {
-    showExtensionReloadNotification(event.error || event.message);
-  });
+  function showUserActionFailureFromResponse(resp, fallback) {
+    if (resp?.success !== false) return false;
+    const message = resp.error || fallback || 'Action failed';
+    if (!showExtensionReloadNotification(message)) {
+      showErrorNotification(message);
+    }
+    return true;
+  }
 
   // ─── Highlights Panel (for pages where visual marks can't render) ─────
 
@@ -1308,6 +1323,9 @@ function initContentScript() {
           chrome.runtime
             .sendMessage({ action: 'updateNote', noteSlug, note: ta.value })
             .then((resp) => {
+              if (showUserActionFailureFromResponse(resp, 'Update failed')) {
+                return;
+              }
               if (resp?.noteSlug) {
                 const oldSlug = noteSlug;
                 noteSlug = resp.noteSlug;
@@ -1425,6 +1443,11 @@ function initContentScript() {
                 cssPath,
               })
               .then((resp) => {
+                if (
+                  showUserActionFailureFromResponse(resp, 'Highlight failed')
+                ) {
+                  return;
+                }
                 const noteSlug = resp?.noteSlug;
                 // Highlight each chunk scoped to its block element
                 const marks = [];
@@ -1464,6 +1487,9 @@ function initContentScript() {
               cssPath,
             })
             .then((resp) => {
+              if (showUserActionFailureFromResponse(resp, 'Highlight failed')) {
+                return;
+              }
               const noteSlug = resp?.noteSlug;
               // Try browser's selection range first, fall back to text search
               let mark = wrapRangeWithMark(range, selectedText, timestamp);
@@ -1500,7 +1526,12 @@ function initContentScript() {
         chrome.runtime
           .sendMessage({ action: 'loadPageNotes', slug })
           .then((resp) => {
-            if (resp?.success === false) {
+            if (
+              showUserActionFailureFromResponse(
+                resp,
+                'Could not load page note',
+              )
+            ) {
               console.warn('[content] loadPageNotes failed:', resp.error);
               return;
             }
@@ -1579,7 +1610,12 @@ function initContentScript() {
         chrome.runtime
           .sendMessage({ action: 'loadPageNotes', slug: pdfSlug })
           .then((resp) => {
-            if (resp?.success === false) {
+            if (
+              showUserActionFailureFromResponse(
+                resp,
+                'Could not load highlights',
+              )
+            ) {
               showHighlightsPanel([], pdfSlug, {
                 hint: 'Select text and right-click to highlight',
               });

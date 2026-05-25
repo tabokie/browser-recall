@@ -79,7 +79,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 ### Connector Popup
 
-- `apps/extension/popup.js` requests page summaries, submits popup mutations, and refreshes the current page dashboard from background mutation broadcasts.
+- `apps/extension/popup.js` requests page summaries, submits popup mutations, refreshes the current page dashboard from background mutation broadcasts, and owns the transient list-picker/search keyboard UI.
 - `apps/extension/background.js` resolves popup actions through the daemon connection.
 - `apps/extension/options-stub.js` only opens the desktop app; it is not a settings surface.
 
@@ -87,7 +87,8 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 - `apps/extension/content.js` captures visit/attention signals.
 - `apps/extension/savepage-bridge.js` performs snapshot capture.
-- `apps/extension/background.js` buffers and forwards capture events to the daemon.
+- `apps/extension/background.js` buffers and forwards capture events to the daemon, and injects a page reload warning when shortcut/context-menu actions cannot reach a stale content script.
+- `apps/extension/popup.js` surfaces popup-initiated capture failures through page notifications with popup-bubble fallback.
 
 ### Replay and Storage
 

@@ -76,6 +76,23 @@ function scrollableForAxis(start, axis) {
   return null;
 }
 
+function isScrollableElement(el) {
+  if (!(el instanceof Element)) return false;
+  return (
+    el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1
+  );
+}
+
+function wheelDeltaPixels(event, axis) {
+  let delta = axis === 'x' ? event.deltaX : event.deltaY;
+  if (event.deltaMode === 1) {
+    delta *= 16;
+  } else if (event.deltaMode === 2) {
+    delta *= axis === 'x' ? window.innerWidth : window.innerHeight;
+  }
+  return delta;
+}
+
 function canScrollInDirection(el, axis, delta) {
   if (!el || delta === 0) return false;
   if (axis === 'y') {
@@ -100,36 +117,50 @@ function consumeRelatedTopReset() {
   return shouldReset;
 }
 
-function wheelDeltaPixels(event, axis) {
-  let delta = axis === 'x' ? event.deltaX : event.deltaY;
-  if (event.deltaMode === 1) {
-    delta *= 16;
-  } else if (event.deltaMode === 2) {
-    delta *= axis === 'x' ? window.innerWidth : window.innerHeight;
-  }
-  return delta;
-}
-
 function preventDesktopOverscroll(event) {
   const wantsX = event.deltaX !== 0;
   const wantsY = event.deltaY !== 0;
   if (!wantsX && !wantsY) return;
 
-  const deltaX = wheelDeltaPixels(event, 'x');
-  const deltaY = wheelDeltaPixels(event, 'y');
   const scrollableX = wantsX ? scrollableForAxis(event.target, 'x') : null;
   const scrollableY = wantsY ? scrollableForAxis(event.target, 'y') : null;
-  const canScrollX = wantsX && canScrollInDirection(scrollableX, 'x', deltaX);
-  const canScrollY = wantsY && canScrollInDirection(scrollableY, 'y', deltaY);
+  const canScrollX =
+    wantsX &&
+    canScrollInDirection(scrollableX, 'x', wheelDeltaPixels(event, 'x'));
+  const canScrollY =
+    wantsY &&
+    canScrollInDirection(scrollableY, 'y', wheelDeltaPixels(event, 'y'));
 
   if (canScrollX || canScrollY) return;
 
   event.preventDefault();
 }
 
+const scrollActivityTimers = new WeakMap();
+
+function markActiveScrollbar(event) {
+  const el = event.target;
+  if (!isScrollableElement(el)) return;
+
+  el.classList.add('is-scrolling');
+  const existingTimer = scrollActivityTimers.get(el);
+  if (existingTimer) clearTimeout(existingTimer);
+  scrollActivityTimers.set(
+    el,
+    setTimeout(() => {
+      el.classList.remove('is-scrolling');
+      scrollActivityTimers.delete(el);
+    }, 700),
+  );
+}
+
 document.addEventListener('wheel', preventDesktopOverscroll, {
   capture: true,
   passive: false,
+});
+document.addEventListener('scroll', markActiveScrollbar, {
+  capture: true,
+  passive: true,
 });
 
 // ─── Error UI ────────────────────────────────────────────────────────
@@ -3331,7 +3362,7 @@ function disableRelatedVirtualScrollerForDirectRender(container) {
   }
   container._virtualScroller = null;
   container.style.paddingTop = '0px';
-  container.style.paddingBottom = '0px';
+  container.style.paddingBottom = '';
 }
 
 // Render filtered pin results directly so list selection can operate on every row.

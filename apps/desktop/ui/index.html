@@ -11,6 +11,7 @@
         --results-padding: 18px;
         --results-gap: 8px;
         --desktop-titlebar-space: 38px;
+        --desktop-panel-bottom-space: 12px;
         --desktop-paper-surface: #fffaf3;
         --desktop-paper-border: #fffefd;
       }
@@ -42,8 +43,29 @@
 
       html,
       body,
-      * {
+      .main,
+      .sidebar-content {
         overscroll-behavior: none;
+      }
+
+      .main,
+      .sidebar-content {
+        scrollbar-color: transparent transparent;
+      }
+
+      .main.is-scrolling,
+      .sidebar-content.is-scrolling {
+        scrollbar-color: var(--scrollbar-thumb) transparent;
+      }
+
+      .main::-webkit-scrollbar-thumb,
+      .sidebar-content::-webkit-scrollbar-thumb {
+        background: transparent;
+      }
+
+      .main.is-scrolling::-webkit-scrollbar-thumb,
+      .sidebar-content.is-scrolling::-webkit-scrollbar-thumb {
+        background: var(--scrollbar-thumb);
       }
 
       body {
@@ -61,8 +83,12 @@
         width: 256px;
         min-width: 180px;
         max-width: 500px;
-        height: calc(100vh - var(--desktop-titlebar-space) - 12px);
-        margin: var(--desktop-titlebar-space) 0 12px 16px;
+        height: calc(
+          100vh - var(--desktop-titlebar-space) -
+            var(--desktop-panel-bottom-space)
+        );
+        margin: var(--desktop-titlebar-space) 0
+          var(--desktop-panel-bottom-space) 16px;
         background: var(--bg-sidebar);
         backdrop-filter: blur(16px);
         -webkit-backdrop-filter: blur(16px);
@@ -710,7 +736,7 @@
         position: relative;
         z-index: 1;
         min-width: 0;
-        padding: 0 var(--results-padding) var(--results-gap);
+        padding: 0 var(--results-padding) var(--desktop-panel-bottom-space);
         overflow-anchor: none;
       }
 
