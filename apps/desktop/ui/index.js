@@ -9,14 +9,17 @@ import {
 import {
   generateSlugFromUrl,
   generateSlugFromTitle,
-  loadSettingsValue,
-  saveSettingsValue,
-  readDesktopValue,
-  sendAction,
   escapeHtml,
   BODY_WORD_LIMIT,
   DEFAULT_URL_BLACKLIST,
 } from './utils.js';
+import {
+  loadSettingsValue,
+  saveSettingsValue,
+  readDesktopValue,
+  reloadApp,
+  sendAction,
+} from './desktop-bridge.js';
 import { matchKeywordRule } from './rule-engine.js';
 import { attentionStrength, aggregateAttention } from './attention-utils.js';
 import {
@@ -189,10 +192,10 @@ function showServiceErrorBanner(svcErr) {
   reloadBtn.style.display = info.action === 'reload' ? '' : 'none';
   resumeBtn.style.display = info.action === 'resume' ? '' : 'none';
 
-  reloadBtn.onclick = () => chrome.runtime.reload();
+  reloadBtn.onclick = () => reloadApp();
   resumeBtn.onclick = async () => {
     try {
-      await chrome.runtime.sendMessage({ action: 'resumeService' });
+      await sendAction({ action: 'resumeService' });
       await refreshDesktopConnectorState();
       banner.style.display = 'none';
     } catch {}
@@ -1562,7 +1565,7 @@ async function loadPinContext(pins) {
 }
 
 async function toggleResultPin(listId, url, title) {
-  await chrome.runtime.sendMessage({ action: 'toggleListPin', listId, url });
+  await sendAction({ action: 'toggleListPin', listId, url });
   // Invalidate local cache — the entity now has the authoritative pin state.
   // The mutation notification will also invalidate, but callers that call
   // refreshPins() inline need the cache cleared before that runs.
@@ -2564,7 +2567,7 @@ async function showList(list) {
         currentName,
         async (newName) => {
           list.name = newName;
-          await chrome.runtime.sendMessage({
+          await sendAction({
             action: 'saveListMeta',
             listId: list.slug,
             name: newName,
@@ -3888,7 +3891,7 @@ function bindNoteDeleteButtons(container) {
         if (!noteSlug) return;
 
         try {
-          await chrome.runtime.sendMessage({
+          await sendAction({
             action: 'deleteNote',
             noteSlug,
           });
@@ -3981,7 +3984,7 @@ function bindSnapshotClickHandlers(container) {
       const slug = row.closest('.detail-snapshots')?.dataset.slug;
       const ts = parseInt(row.dataset.ts, 10);
       if (!slug || !ts) return;
-      await chrome.runtime.sendMessage({
+      await sendAction({
         action: 'openSnapshot',
         slug,
         timestamp: ts,
@@ -4845,7 +4848,7 @@ function createSidebarItemDOM(node, depth) {
 
   item.querySelector('.remove-list').addEventListener('click', async (e) => {
     e.stopPropagation();
-    await chrome.runtime.sendMessage({
+    await sendAction({
       action: 'deleteList',
       listId: node.slug,
     });
@@ -4907,7 +4910,7 @@ async function handleSidebarDrop(draggedId, targetSlug, relY, tree) {
     if (!insertNear(tree)) tree.push(draggedNode);
   }
 
-  await chrome.runtime.sendMessage({ action: 'updateListTree', tree });
+  await sendAction({ action: 'updateListTree', tree });
   await renderLists();
 }
 
@@ -5082,7 +5085,7 @@ function bindSidebarItemDragDrop(item, node) {
             urls: newUrls,
           };
           if (titles.some(Boolean)) msg.titles = titles;
-          await chrome.runtime.sendMessage(msg);
+          await sendAction(msg);
           if (activeView.type === 'list' && activeView.id === node.slug) {
             showList(node);
           }
@@ -5499,16 +5502,12 @@ document
     btn.textContent = 'Flushing...';
 
     try {
-      const resp = await chrome.runtime.sendMessage({
+      const resp = await sendAction({
         action: 'flushDesktopQueue',
       });
-      if (resp?.success) {
-        btn.textContent =
-          resp.remaining > 0 ? `${resp.remaining} remaining` : 'Flushed!';
-        await updateStatistics();
-      } else {
-        btn.textContent = 'Failed: ' + (resp?.error || 'unknown');
-      }
+      btn.textContent =
+        resp.remaining > 0 ? `${resp.remaining} remaining` : 'Flushed!';
+      await updateStatistics();
     } catch (e) {
       btn.textContent = 'Error: ' + e.message;
     }
@@ -5527,7 +5526,7 @@ document.getElementById('clearCacheBtn').addEventListener('click', async () => {
     const sessionKeysToRemove = SESSION_CACHE_KEYS.map((c) => c.key);
     await chrome.storage.session.remove(sessionKeysToRemove);
 
-    await chrome.runtime.sendMessage({ action: 'flushDesktopQueue' });
+    await sendAction({ action: 'flushDesktopQueue' });
 
     // Reload the page to reflect new data
     location.reload();
@@ -7204,8 +7203,8 @@ function bindFilterEvents(container) {
 // sufficient to answer all filters without loading raw event logs.
 async function runEntityScanFilter(pinnedSlugs) {
   showSearchSpinner();
-  const resp = await chrome.runtime.sendMessage({ action: 'loadAllPages' });
-  if (!resp?.success || !resp.pages) {
+  const resp = await sendAction({ action: 'loadAllPages' });
+  if (!resp.pages) {
     hideSearchSpinner();
     return null;
   }
@@ -7520,16 +7519,10 @@ async function openFocusPanel(url, title) {
   overlay.classList.add('visible');
 
   try {
-    const resp = await chrome.runtime.sendMessage({
+    const resp = await sendAction({
       action: 'getPageRelations',
       url,
     });
-    if (!resp?.success) {
-      content.innerHTML =
-        '<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">Could not load relations</div></div></div>';
-      return;
-    }
-
     // Compute similar pages from loaded history
     const seedEntry = historyState.byUrl.get(url);
     let similar = [];
@@ -7871,7 +7864,7 @@ async function initialize() {
   // Apply theme before any rendering to minimize flash
   let currentTheme = await applyTheme();
 
-  const deviceResp = await chrome.runtime.sendMessage({
+  const deviceResp = await sendAction({
     action: 'getDeviceId',
   });
   if (!deviceResp?.deviceId) {
@@ -7910,7 +7903,7 @@ async function initializeMain(currentTheme) {
   } catch {}
 
   // Verify device identity from daemon app config.
-  const deviceResp = await chrome.runtime.sendMessage({
+  const deviceResp = await sendAction({
     action: 'getDeviceId',
   });
   if (!deviceResp?.deviceId) {
@@ -8143,7 +8136,7 @@ document.addEventListener('keydown', async (e) => {
     if (urls.length === 0) return;
 
     const listId = activeView.id;
-    await chrome.runtime.sendMessage({
+    await sendAction({
       action: 'addListPins',
       listId,
       urls: urls,

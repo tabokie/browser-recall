@@ -12,6 +12,11 @@ const extensionSourceDir = path.join(repoRoot, 'apps/extension');
 const desktopUiSourceDir = path.join(repoRoot, 'apps/desktop/ui');
 const sharedCoreDir = path.join(repoRoot, 'packages/core');
 
+const extensionProductionExcludes = new Set([
+  'background-test-actions.js',
+  'background-test-control.js',
+]);
+
 const targets = {
   extension: {
     sourceDir: extensionSourceDir,
@@ -33,7 +38,17 @@ function copyDir(sourceDir, outDir) {
   fs.cpSync(sourceDir, outDir, {
     recursive: true,
     dereference: true,
-    filter: (source) => path.basename(source) !== 'package.json',
+    filter: (source) => {
+      const basename = path.basename(source);
+      if (basename === 'package.json') return false;
+      if (
+        sourceDir === extensionSourceDir &&
+        extensionProductionExcludes.has(basename)
+      ) {
+        return false;
+      }
+      return true;
+    },
   });
 }
 

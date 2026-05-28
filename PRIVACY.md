@@ -17,19 +17,17 @@ browser-recall records the following data as you browse:
 
 ## Where your data is stored
 
-All data is stored in a **local folder on your device** that you choose during setup. browser-recall uses the File System Access API to read and write files directly to this folder. No data is sent to any server by default.
+All product data is stored in a **local folder on your device** that you choose during desktop setup. Browser Recall Desktop writes JSONL logs, JSON checkpoints, notes, and snapshots directly through its local daemon. No data is sent to any server by default.
 
-A small amount of session state (UI preferences, in-flight log entries) is kept in Chrome's built-in extension storage (`chrome.storage.session` and `chrome.storage.local`). This data never leaves your browser.
+A small amount of connector state is kept in Chrome's built-in extension storage (`chrome.storage.session` and `chrome.storage.local`), such as pairing identity, connection state, and short-lived commands waiting for the desktop app. Product settings and durable history live in the desktop data folder.
 
 ## Optional sync
 
-browser-recall offers optional multi-device sync through transports you configure yourself:
+browser-recall offers optional multi-device sync through a transport you configure yourself:
 
 - **GitHub** — syncs to a repository you own, using a personal access token you provide
-- **Filesystem** — syncs to a shared folder (e.g., cloud drive) you designate
-- **WebDAV** — syncs to a WebDAV server you control
 
-When sync is enabled, your browsing data is transmitted only to the service you configure. browser-recall never sends data to Anthropic, the extension developer, or any third party.
+When sync is enabled, your browsing data is transmitted only to the GitHub repository you configure. browser-recall never sends data to Anthropic, the extension developer, or any Browser Recall cloud service.
 
 ## What browser-recall does NOT do
 
@@ -46,15 +44,13 @@ browser-recall requests the following Chrome permissions:
 
 | Permission | Purpose |
 |---|---|
-| `storage` | Store session state and pending log entries |
+| `storage` | Store connector pairing/session state and short-lived pending commands |
 | `tabs` | Read the URL and title of the active tab |
 | `activeTab` | Interact with the current page for highlights and snapshots |
-| `history` | Detect revisits to previously seen pages |
-| `offscreen` | Run filesystem I/O in a background document |
 | `scripting` | Inject content scripts for highlights and snapshots |
 | `webNavigation` | Detect page navigations for history tracking |
 | `contextMenus` | Add right-click menu items (highlight, snapshot, etc.) |
-| `alarms` | Schedule periodic sync and drain timers |
+| `alarms` | Retry local desktop connector reconnection and queue draining |
 | `<all_urls>` | Content scripts run on all pages to enable highlighting and snapshots |
 
 ## Data export

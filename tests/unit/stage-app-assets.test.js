@@ -198,6 +198,8 @@ describe('extension staged assets', () => {
     expect(readFileSync(join(outDir, 'background.js'), 'utf8')).toContain(
       "import './browser-api.js';",
     );
+    expect(existsSync(join(outDir, 'background-test-actions.js'))).toBe(false);
+    expect(existsSync(join(outDir, 'background-test-control.js'))).toBe(false);
   });
 
   it('can stage a Firefox manifest with background module scripts', () => {
@@ -250,5 +252,42 @@ describe('extension staged assets', () => {
       `globalThis.__BROWSER_RECALL_CONNECTOR_PORTS = ${JSON.stringify(DAEMON_PORTS)};`,
     );
     expect(DAEMON_PORTS).not.toContain(28471);
+
+    const manifest = JSON.parse(readFileSync(join(outDir, 'manifest.json')));
+    expect(manifest.background.service_worker).toBe('background-test.js');
+    const testBackground = readFileSync(
+      join(outDir, 'background-test.js'),
+      'utf8',
+    );
+    expect(testBackground).toBe(
+      "import './background-test-actions.js';\nimport './background.js';\nimport './background-test-control.js';\n",
+    );
+    expect(existsSync(join(outDir, 'background-test-actions.js'))).toBe(true);
+    expect(existsSync(join(outDir, 'background-test-control.js'))).toBe(true);
+    expect(
+      testBackground.indexOf("import './background-test-actions.js';"),
+    ).toBeLessThan(testBackground.indexOf("import './background.js';"));
+    expect(testBackground).toContain("import './background-test-control.js';");
+    const testActions = readFileSync(
+      join(outDir, 'background-test-actions.js'),
+      'utf8',
+    );
+    expect(testActions).toContain('BACKGROUND_TEST_ACTIONS');
+    const testControl = readFileSync(
+      join(outDir, 'background-test-control.js'),
+      'utf8',
+    );
+    expect(testControl).toContain(
+      "import { BACKGROUND_TEST_ACTIONS } from './background-test-actions.js';",
+    );
+    const productionBackground = readFileSync(
+      join(outDir, 'background.js'),
+      'utf8',
+    );
+    expect(productionBackground).toContain(
+      'browserRecallBackgroundTestActions?.has(request.action)',
+    );
+    expect(productionBackground).not.toContain("case 'resetForTest'");
+    expect(productionBackground).not.toContain("case 'seedTestData'");
   });
 });

@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   renderTimeChartInto,
   bindChartBarClick,
+  applyDateFilter,
 } from '../../apps/extension/time-chart.js';
 
 // Helper: create chart DOM structure matching the shared history chart UI.
@@ -240,5 +241,39 @@ describe('bindChartBarClick with estimated bars', () => {
     const items = resultsContainer.querySelectorAll('.result-item');
     expect(items[0].style.display).toBe('');
     expect(items[1].style.display).toBe('none');
+  });
+
+  it('filters virtual-scrolled items by local chart date', () => {
+    const selectedDate = '2026-03-05';
+    const localTimestamp = new Date(2026, 2, 5, 0, 30).getTime();
+    const utcDate = new Date(localTimestamp).toISOString().slice(0, 10);
+    if (utcDate === selectedDate) return;
+
+    renderTimeChartInto(
+      chartEl,
+      barsEl,
+      [{ url: 'https://example.com/local', timestamp: localTimestamp }],
+      'Test',
+    );
+    const group = barsEl.querySelector(`[data-date="${selectedDate}"]`);
+    expect(group).not.toBeNull();
+    group.classList.add('active');
+
+    let filterFn = null;
+    resultsContainer._virtualScroller = {
+      applyFilter(fn) {
+        filterFn = fn;
+      },
+    };
+
+    applyDateFilter(chartEl, resultsContainer);
+
+    expect(filterFn).toBeTypeOf('function');
+    expect(
+      filterFn({
+        url: 'https://example.com/local',
+        timestamps: [localTimestamp],
+      }),
+    ).toBe(true);
   });
 });

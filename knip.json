@@ -1,23 +1,45 @@
 {
-  "entry": [
-    "apps/extension/background.js",
-    "apps/extension/content.js",
-    "apps/extension/popup.js",
-    "apps/extension/snapshot-viewer.js",
-    "apps/extension/options-stub.js",
-    "apps/extension/savepage/content.js",
-    "apps/extension/savepage/content-frame.js",
-    "apps/extension/savepage/content-fontface.js",
-    "apps/extension/savepage/content-fontface-intercept.js",
-    "apps/extension/savepage/shadowloader.js",
-    "apps/desktop/ui/index.js",
-    "tests/**/*.test.js"
-  ],
-  "project": [
-    "apps/extension/**/*.js",
-    "apps/desktop/ui/**/*.js",
-    "packages/**/*.js",
-    "tests/**/*.js"
-  ],
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/**/*.mjs",
+        "tests/**/*.test.js",
+        "tests/**/*.spec.js",
+        "tests/fixtures/**/*.mjs"
+      ],
+      "project": ["scripts/**/*.mjs", "tests/**/*.{js,mjs}"]
+    },
+    "apps/desktop": {
+      "entry": ["ui/index.js"],
+      "project": ["ui/**/*.{js,d.ts}"],
+      "ignore": ["ui/extension-api-shim.js", "ui/search-runtime.d.ts"]
+    },
+    "apps/extension": {
+      "entry": [
+        "background.js",
+        "background-test-control.js",
+        "content.js",
+        "popup.js",
+        "snapshot-viewer.js",
+        "options-stub.js",
+        "spa-navigation-bridge.js",
+        "page-spa-navigation.js",
+        "browser-api.js",
+        "extension-surface.js",
+        "savepage-bridge.js",
+        "savepage/content.js",
+        "savepage/content-frame.js",
+        "savepage/content-fontface.js",
+        "savepage/content-fontface-intercept.js",
+        "savepage/shadowloader.js"
+      ],
+      "project": ["**/*.{js,d.ts}"],
+      "ignore": ["search-runtime.d.ts", "virtual-scroller.js"]
+    },
+    "packages/core": {
+      "project": ["**/*.{js,d.ts}"],
+      "ignore": ["search-runtime.d.ts"]
+    }
+  },
   "ignore": []
 }

@@ -1,0 +1,9 @@
+- Let's take a deep scrutiny over the entire project. Find things that could be removed, simplified, or reorganized to fit together more tightly. The purpose is to keep the project lean and easy to maintain. Do so without compromising any existing functionalities or features. Include documents as well as code.
+- Fix 1-8 except for 6. Do them thoroughly and progressively
+- There are a few issues with desktop app: (1) The scroll bar disappear when I hover on it, and reappears only when I start dragging it. (2) The bar chart's select date functionality is broken, when I select a date bar, the results become empty, and when I scroll the results reappear but remain unfiltered.
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix it
+- $gap
+- Fix them all, thoroughly
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- $finish model=GPT-5.5 Codex

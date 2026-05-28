@@ -2,7 +2,7 @@ const STORAGE_KEYS = {
   browserId: 'connectorBrowserId',
 };
 
-export async function ensureBrowserInstallId() {
+async function ensureBrowserInstallId() {
   const stored = await chrome.storage.local.get([STORAGE_KEYS.browserId]);
   if (stored[STORAGE_KEYS.browserId]) {
     return stored[STORAGE_KEYS.browserId];
@@ -28,7 +28,7 @@ export async function detectBrowserName() {
   return 'Chromium';
 }
 
-export function detectBrowserProfile() {
+function detectBrowserProfile() {
   return 'Default profile';
 }
 

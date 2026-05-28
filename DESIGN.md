@@ -40,13 +40,13 @@ Each search query can be **pinned** to become a **materialized view** (a "list")
 
 All data is stored as human-readable files on the user's local machine:
 
-- **JSONL event logs** (`data/logs/<device>/YYYY-MM-DD.jsonl`) — source of truth
-- **Entity checkpoints** (`pages/`, `lists/`, `notes/`) — derived state, rebuildable from logs
-- **Snapshots** (`data/snapshots/`) — self-contained HTML and markdown archives
+- **JSONL event logs** (`logs/<device>/YYYY-MM-DD.jsonl`) — source of truth
+- **Replay-derived checkpoints** (`views/pages/`, `views/lists/`, `views/manifest/`) — rebuildable from logs
+- **User artifacts** (`objects/notes/`, `objects/snapshots/`) — note bodies and self-contained HTML/markdown snapshots
 
-No cloud, no database, no export step. The data directory is a portable, inspectable archive that other tools can read. The `data/` folder is explicitly public (immutable/append-only); internal structures (`pages/`, `lists/`, `manifest/`) are private derived state.
+No cloud, no database, no export step. The data directory is a portable, inspectable archive that other tools can read. Logs are authoritative; `views/` checkpoints are private derived state that the daemon can rebuild.
 
-This design means the extension is an event-sourced system. The JSONL log is the authoritative record. Entity files are caches that can be rebuilt by full replay. This gives us:
+This design means Browser Recall is an event-sourced system. The desktop daemon owns storage, replay, search, and sync; the browser extension is a connector for capture and current-page actions. The JSONL log is the authoritative record. Entity files are caches that can be rebuilt by full replay. This gives us:
 
 - **Audit trail**: every mutation is a log entry with a timestamp and device ID.
 - **Multi-device merge**: each device appends to its own log. Sync = exchanging log files.
@@ -56,7 +56,7 @@ This design means the extension is an event-sourced system. The JSONL log is the
 
 Not every visited page becomes an entity. Page entities are created only by explicit user actions: capturing a snapshot, creating a note, pinning to a list, renaming, or rating. Passive visits exist only as JSONL history entries. This keeps the entity store lean — only pages the user has expressed interest in.
 
-Entities reference each other via typed keys (`page:<slug>`, `note:<slug>`, `snap:<slug>-<ts>`, `list:<id>`). Events never use typed references — they use raw URLs and relative paths. The replay layer (`effectOf`) translates between the two representations.
+Entities reference each other via typed keys (`page:<slug>`, `note:<slug>`, `snap:<slug>-<ts>`, `list:<id>`). Events use canonical replay fields such as URLs, slugs, and relative artifact references. The Rust replay layer translates between logs and materialized entities.
 
 ## Deletion Model
 
@@ -70,11 +70,12 @@ Attention data (scroll depth, time on page, click count, text selections) is acc
 
 ## Privacy Model
 
-All data stays on the user's machine. There is no telemetry, no analytics, no server. Optional multi-device sync uses the user's own GitHub repository as a transport layer — each device pushes to its own branch, and pulls from peers. The extension never has access to any third-party server.
+All data stays on the user's machine. There is no telemetry, no analytics, no Browser Recall server. Optional multi-device sync uses the user's own GitHub repository as a transport layer and is handled by the desktop daemon. The extension does not hold sync tokens.
 
 ## Technology Choices
 
-- **Vanilla JavaScript** — no frameworks, no build step for the extension itself. Minimizes bundle size and startup time. The options page, popup, and content script are plain HTML/JS.
-- **Rust/WASM** — search engine compiled to WebAssembly for performance. Reads JSONL files directly from `FileSystemDirectoryHandle` refs — zero JS-WASM data copying.
-- **Chrome MV3** — service worker for business logic, offscreen document for filesystem I/O (File System Access API needs a document context).
+- **Vanilla JavaScript** — no frameworks. The desktop UI and connector surfaces are plain HTML/JS staged with local shared modules.
+- **Rust daemon and replay crates** — storage, replay, search, sync, and websocket pairing live on the desktop side.
+- **Tauri desktop shell** — app window, tray, deep links, pairing approval, and OS integration.
+- **Chrome MV3 connector** — service worker, popup, content scripts, context menus, and short-lived command buffering.
 - **Event sourcing** — JSONL logs as source of truth, entity files as derived checkpoints. Chosen for auditability, multi-device merge simplicity, and disaster recovery.

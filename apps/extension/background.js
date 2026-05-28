@@ -25,10 +25,7 @@ import {
   requestDesktopEntity,
   requestDesktopCommand,
   requestDesktopPopupLists,
-  requestDesktopSetDeviceId,
   requestDesktopSnapshotHtml,
-  requestDesktopTestReset,
-  requestDesktopTestSeed,
   connectDesktopBridge,
 } from './connector/ws-client.js';
 import {
@@ -1510,12 +1507,13 @@ async function handleDeleteSnapshot(request) {
   return response;
 }
 
-// ─── Message Handlers: Test ──────────────────────────────────────────
+async function handleResumeService() {
+  resumeService();
+  scheduleDrainNotify();
+  return { success: true };
+}
 
-async function handleResetForTest() {
-  const resetResp = await requestDesktopTestReset();
-  if (!resetResp?.success) return resetResp;
-  await clearDesktopBuffer();
+async function resetEphemeralConnectorStateForTest() {
   localDeviceId = null;
   tabReportedUrls.clear();
   serviceError = null;
@@ -1524,84 +1522,18 @@ async function handleResetForTest() {
     drainNotifyTimer = null;
   }
   resumeService();
-  return { success: true };
 }
 
-async function handleResumeService() {
-  resumeService();
-  scheduleDrainNotify();
-  return { success: true };
-}
-
-async function handleFlushDesktopQueueForTest(request) {
-  if (!request.keepDesktopQueue) {
-    await clearDesktopBuffer();
-  }
-  localDeviceId = null;
-  if (drainNotifyTimer) {
-    clearTimeout(drainNotifyTimer);
-    drainNotifyTimer = null;
-  }
-  await flushDesktopBuffer().catch((error) => {
-    logDebug('[connector] test queue flush failed:', error.message);
-    return null;
-  });
-  await ensureDefaultLists();
-  return { success: true };
-}
-
-function seedDeviceId(files) {
-  for (const file of files || []) {
-    const match = file?.path?.match(/^(?:data\/)?logs\/([^/]+)\//);
-    if (match?.[1]) return match[1];
-  }
-  return null;
-}
-
-function serializeTestSeedFile(file) {
-  if (!file?.path) return null;
-  if (typeof file.content === 'string') {
-    return { path: file.path, content: file.content };
-  }
-  if (Object.prototype.hasOwnProperty.call(file, 'data')) {
-    return {
-      path: file.path,
-      content: `${JSON.stringify(file.data, null, 2)}\n`,
-    };
-  }
-  if (Array.isArray(file.lines)) {
-    return {
-      path: file.path,
-      content: `${file.lines.map((line) => JSON.stringify(line)).join('\n')}\n`,
-    };
-  }
-  throw new Error(`Unsupported test seed payload for ${file.path}`);
-}
-
-async function handleSeedTestData(request) {
-  const deviceId = request.deviceId || seedDeviceId(request.files);
-  if (deviceId) {
-    const setDeviceResp = await requestDesktopSetDeviceId(deviceId);
-    if (!setDeviceResp?.success) return setDeviceResp;
-    localDeviceId = deviceId;
-  }
-  const files = (request.files || [])
-    .map(serializeTestSeedFile)
-    .filter(Boolean);
-  if (files.length === 0) {
-    return { success: true };
-  }
-  return requestDesktopTestSeed(files);
-}
-
-async function handleGetDesktopQueueForTest() {
-  const connector = await getConnectorBridgeState();
-  return {
-    success: true,
-    length: connector.pendingCommands || 0,
-    watermark: connector.lastDrainedAt || 0,
-  };
-}
+globalThis.browserRecallBackgroundTestControl = {
+  clearDesktopBuffer,
+  ensureDefaultLists,
+  flushDesktopBuffer,
+  getConnectorBridgeState,
+  resetEphemeralConnectorState: resetEphemeralConnectorStateForTest,
+  setLocalDeviceIdForTest(deviceId) {
+    localDeviceId = deviceId || null;
+  },
+};
 
 function handleRuntimeMutation(request) {
   const urls = new Set();
@@ -1624,6 +1556,9 @@ function handleRuntimeMutation(request) {
 chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
   // Skip Save Page WE messages (they use `type` field, handled by separate listener)
   if (request.type && !request.action) return false;
+  if (globalThis.browserRecallBackgroundTestActions?.has(request.action)) {
+    return false;
+  }
 
   const usePromiseResponse = BROWSER_CAPABILITIES.supportsPromiseOnMessage;
   let resolveResponse;
@@ -1744,21 +1679,8 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
         case 'deleteSnapshot':
           sendResponse(await handleDeleteSnapshot(request));
           break;
-        // Test helpers
-        case 'resetForTest':
-          sendResponse(await handleResetForTest());
-          break;
         case 'resumeService':
           sendResponse(await handleResumeService());
-          break;
-        case 'flushDesktopQueueForTest':
-          sendResponse(await handleFlushDesktopQueueForTest(request));
-          break;
-        case 'seedTestData':
-          sendResponse(await handleSeedTestData(request));
-          break;
-        case 'getDesktopQueueForTest':
-          sendResponse(await handleGetDesktopQueueForTest());
           break;
         default:
           sendResponse({

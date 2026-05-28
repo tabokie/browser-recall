@@ -82,16 +82,17 @@ Key consequences:
 
 ### UI Runtime
 
-`apps/desktop/ui/index.html` and `apps/desktop/ui/index.js` are the main product surface. The UI is a near-verbatim port of the old extension UI, but it now runs inside Tauri with `apps/desktop/ui/extension-api-shim.js` providing the `chrome.*` surfaces the port still expects.
+`apps/desktop/ui/index.html` and `apps/desktop/ui/index.js` are the main product surface. The UI is a near-verbatim port of the old extension UI, but it now runs inside Tauri with `apps/desktop/ui/desktop-bridge.js` handling direct Tauri command calls and `apps/desktop/ui/extension-api-shim.js` providing the remaining `chrome.*` surfaces the port still expects.
 
 The desktop shell scrolls the main results pane and sidebar independently. Results containers keep a bottom gutter aligned to the sidebar bottom edge, and the virtual scroller preserves that gutter as part of its base padding.
 
 The shim currently covers:
 
-- `chrome.runtime.sendMessage` → Tauri invoke bridge
 - `chrome.storage.session` / `chrome.storage.local`
 - `chrome.storage.onChanged` cross-window propagation
 - tab/open helpers needed by the ported UI
+
+Desktop product actions should use `desktop-bridge.js` directly. The `chrome.*` shim is compatibility scaffolding for storage and tab APIs that have not yet been removed from the ported UI.
 
 ### Shell Bridge
 
@@ -126,7 +127,7 @@ The extension is intentionally thin and no longer owns the main product UI.
 
 - `apps/extension/content.js` captures visit and attention signals.
 - `apps/extension/savepage-bridge.js` orchestrates snapshot capture.
-- `apps/extension/background.js` buffers semantic connector commands, serves popup requests, manages pairing, and forwards RPC to the daemon.
+- `apps/extension/background.js` buffers semantic connector commands, serves popup requests, manages pairing, and forwards RPC to the daemon. Test-only reset/seed/queue RPC handlers live in `apps/extension/background-test-control.js` and are staged only by the test fixture.
 - `apps/extension/popup.js` is the current-page dashboard backed by daemon RPC; its list picker is a short-lived popup control, not extension persistence.
 - `apps/extension/connector/` contains the websocket client, pairing helpers, and command buffer.
 - `apps/extension/options-stub.html` exists only to direct the user to the desktop app.
@@ -195,7 +196,7 @@ Rules remain part of the main desktop UI product surface.
 - shared styling/theme modules
 - logger, rule helpers, entity helpers, and search-runtime glue
 
-`packages/protocol/` holds the protocol schema/message definitions shared across JS and Rust boundaries.
+The connector websocket protocol is represented by the Rust message enums in `crates/daemon/src/protocol.rs`. The JS connector constructs the subset it sends in `apps/extension/connector/ws-client.js`; daemon-side parsing and authority stay Rust-owned.
 
 ## Testing Model
 

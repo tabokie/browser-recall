@@ -9,7 +9,7 @@ The codebase is organized around one main app plus one thin browser connector:
 - `apps/desktop/` — desktop shell and main UI
 - `apps/extension/` — Chrome connector and popup
 - `crates/` — replay, search, and daemon back end
-- `packages/` — shared JS/CSS/protocol modules
+- `packages/` — shared JS/CSS modules
 
 This map intentionally excludes removed extension-only storage/sync internals.
 
@@ -24,7 +24,6 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `crates/replay/` | Authoritative replay engine and replay verifier |
 | `crates/search/` | Native search helpers |
 | `packages/core/` | Shared JS helpers, theme, CSS, runtime utilities |
-| `packages/protocol/` | Shared protocol schema/message definitions |
 | `tests/` | Unit, integration, and e2e coverage |
 | `plans/` | Phase plans 29–34 for the desktop split |
 
@@ -34,6 +33,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 |------|------|
 | `apps/desktop/ui/index.html` | Main desktop UI document |
 | `apps/desktop/ui/index.js` | Ported main UI logic: history, lists, search, settings, recycle bin |
+| `apps/desktop/ui/desktop-bridge.js` | Direct Tauri invoke helpers for desktop product actions and settings |
 | `apps/desktop/ui/extension-api-shim.js` | Tauri-backed `chrome.*` compatibility layer for the ported UI |
 | `apps/desktop/ui/bookmark-parser.js` | Desktop bookmark import parser |
 | `apps/desktop/src-tauri/src/main.rs` | Tauri entry point, invoke bridge, daemon write routing, desktop events, window/deep-link handling |
@@ -41,6 +41,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/desktop/src-tauri/src/login_item.rs` | Login-item integration for desktop startup behavior |
 | `apps/desktop/src-tauri/src/search.rs` | Desktop-side search adapters/helpers |
 | `apps/extension/background.js` | Thin connector runtime: popup RPC, buffering, pairing, snapshot/capture forwarding |
+| `apps/extension/background-test-control.js` | Test-only background RPC handlers staged by `tests/fixtures/test-extension.mjs` |
 | `apps/extension/content.js` | Visit/attention capture from pages |
 | `apps/extension/popup.js` | Current-tab popup UI |
 | `apps/extension/extension-surface.css` | Shared dark ledger styling for extension pages |
@@ -67,20 +68,20 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `packages/core/time-chart.js` | Shared history chart rendering helpers |
 | `packages/core/virtual-scroller.js` | Shared virtual scrolling helper |
 | `packages/core/theme.js` | Shared theme/session helpers |
-| `packages/protocol/src/messages.js` | Protocol message definitions shared across boundaries |
 
 ## Feature → Code Map
 
 ### Desktop UI
 
 - `apps/desktop/ui/index.js` owns history rendering, lists, search, settings, recycle bin, imports, and mutation dispatch.
-- `apps/desktop/ui/extension-api-shim.js` makes the ported UI work without rewriting every `chrome.*` call site.
+- `apps/desktop/ui/desktop-bridge.js` owns direct Tauri command dispatch for desktop product actions.
+- `apps/desktop/ui/extension-api-shim.js` keeps only the remaining `chrome.*` compatibility surfaces needed by the ported UI.
 - `apps/desktop/src-tauri/src/main.rs` forwards command results, change events, and storage updates into the webview.
 
 ### Connector Popup
 
 - `apps/extension/popup.js` requests page summaries, submits popup mutations, refreshes the current page dashboard from background mutation broadcasts, and owns the transient list-picker/search keyboard UI.
-- `apps/extension/background.js` resolves popup actions through the daemon connection.
+- `apps/extension/background.js` resolves popup actions through the daemon connection. Test-only background RPCs are split into `apps/extension/background-test-control.js` and included only in staged test extensions.
 - `apps/extension/options-stub.js` only opens the desktop app; it is not a settings surface.
 
 ### Capture Path

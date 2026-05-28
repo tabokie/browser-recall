@@ -7,7 +7,6 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-async-trait = "0.1"
 browser-recall-daemon = { path = "../../../crates/daemon" }
 browser-recall-replay = { path = "../../../crates/replay" }
 chrono = "0.4"

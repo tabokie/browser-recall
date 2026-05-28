@@ -130,7 +130,7 @@ npx playwright install chromium
 Use the coverage monitor to find uncovered production lines worth reviewing and to track the long-term test investment mix:
 
 ```bash
-npm run coverage:js       # generate per-line JS coverage data for stable unit/protocol tests
+npm run coverage:js       # generate per-line JS coverage data for stable JS tests
 npm run coverage:rust     # generate Rust llvm-cov coverage data for the workspace
 npm run coverage:monitor  # print uncovered line ranges and suite LoC mix
 npm run coverage          # run JS coverage, Rust coverage, then the monitor

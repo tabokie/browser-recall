@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT = process.cwd();
-const JS_UNIT_TEST_LOC_BASELINE = 5050;
-const INLINE_RUST_UNIT_TEST_LOC_BASELINE = 967;
+const JS_UNIT_TEST_LOC_BASELINE = 5586;
+const INLINE_RUST_UNIT_TEST_LOC_BASELINE = 1140;
 const COVERAGE_GAP_LIMIT = Number(process.env.COVERAGE_GAP_LIMIT || 25);
 const COVERAGE_GAP_RANGES_PER_FILE = Number(
   process.env.COVERAGE_GAP_RANGES_PER_FILE || 12,
@@ -283,7 +283,7 @@ const rustSupportFiles = walk(
 );
 
 const categories = [
-  ['JS unit + protocol conformance', sumLines(jsUnitFiles)],
+  ['JS unit', sumLines(jsUnitFiles)],
   ['JS integration', sumLines(jsIntegrationFiles)],
   ['Extension E2E specs', sumLines(extensionE2eFiles)],
   ['Desktop visual E2E', sumLines(desktopVisualFiles)],
