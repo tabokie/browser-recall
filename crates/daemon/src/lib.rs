@@ -1,6 +1,8 @@
+pub mod capture_policy;
 pub mod commands;
 pub mod config;
 pub mod connectors;
+pub mod mutations;
 pub mod pairing;
 pub mod protocol;
 pub mod rules;

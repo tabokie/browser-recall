@@ -1,8 +1,10 @@
+use crate::capture_policy::{blacklist_prefixes, should_record_visit, trim_title_from_settings};
 use crate::commands::{self, permanent_delete_candidates};
 use crate::config::{random_string, ApprovedConnector, ConfigStore, Token};
 use crate::connectors::{
     connector_key, current_local_day_start_unix, prune_inactive_connectors, ConnectorKey,
 };
+use crate::mutations::{build_mutations, dedupe_mutations};
 use crate::pairing::{with_timeout, PairingApprover, PairingDecision, PairingRequest};
 use crate::protocol::{
     ConnectorMessage, DaemonMessage, DirectoryInfoPayload, HistorySearchResult, MutationPayload,
@@ -23,7 +25,6 @@ use browser_recall_replay::entities::{Entity, ListOrderManifest, TreeNode};
 use browser_recall_replay::{
     generate_slug_from_url, Context as ReplayContext, EntityEffect, LogEntry,
 };
-use chrono::{Local, TimeZone};
 use futures_util::{FutureExt, SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -43,8 +44,6 @@ use tracing::{info, warn};
 const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 const CONNECTOR_SOURCE_EXTENSION: &str = "extension";
 const UNAUTHENTICATED_IDLE_TIMEOUT: Duration = Duration::from_secs(3);
-const DEFAULT_URL_BLACKLIST: &[&str] = &["chrome://", "edge://", "about:"];
-
 #[derive(Debug)]
 pub enum WsServerError {
     Io(std::io::Error),
@@ -1235,51 +1234,8 @@ async fn ingest_typed_entry(
                 let config = shared.config.lock().await;
                 config.device_id.clone()
             };
-            let replay_context = ReplayContext {
-                device_id: device_id.clone(),
-            };
-            let mut effects = effect_with_overlay(
-                entry.clone(),
-                &shared.storage,
-                &EntityMapView::default(),
-                &replay_context,
-            )
-            .await
-            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
-            let synthetic_entries = synthesize_auto_pin_entries(
-                &entry,
-                &raw_entry,
-                &shared.storage,
-                &effects,
-                &device_id,
-            )
-            .await
-            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
-
-            for synthetic in &synthetic_entries {
-                let next_effects = effect_with_overlay(
-                    synthetic.parsed.clone(),
-                    &shared.storage,
-                    &effects,
-                    &replay_context,
-                )
-                .await
-                .map_err(|error| WsServerError::Ingest(error.to_string()))?;
-                effects.extend(next_effects);
-            }
-
-            let mut entries = Vec::with_capacity(synthetic_entries.len() + 1);
-            entries.push((entry.clone(), raw_entry.clone()));
-            entries.extend(
-                synthetic_entries
-                    .iter()
-                    .map(|synthetic| (synthetic.parsed.clone(), synthetic.raw.clone())),
-            );
-            commands::commit_effects_locked(&shared.storage, &device_id, &entries, effects.clone())
-                .await
-                .map_err(WsServerError::Ingest)?;
-
-            effects
+            commit_entry_with_auto_pins_locked(shared, &device_id, entry.clone(), raw_entry.clone())
+                .await?
         };
 
         let mutations = build_mutations(&entry, &raw_entry, &effects);
@@ -1301,6 +1257,54 @@ async fn ingest_typed_entry(
     let mut ingest = shared.ingest_status.lock().await;
     ingest.buffer_depth = ingest.buffer_depth.saturating_sub(1);
     outcome
+}
+
+async fn commit_entry_with_auto_pins_locked(
+    shared: &SharedState,
+    device_id: &str,
+    entry: LogEntry,
+    raw_entry: Value,
+) -> Result<EntityMapView, WsServerError> {
+    let replay_context = ReplayContext {
+        device_id: device_id.to_string(),
+    };
+    let mut effects = effect_with_overlay(
+        entry.clone(),
+        &shared.storage,
+        &EntityMapView::default(),
+        &replay_context,
+    )
+    .await
+    .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+    let synthetic_entries =
+        synthesize_auto_pin_entries(&entry, &raw_entry, &shared.storage, &effects, device_id)
+            .await
+            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+
+    for synthetic in &synthetic_entries {
+        let next_effects = effect_with_overlay(
+            synthetic.parsed.clone(),
+            &shared.storage,
+            &effects,
+            &replay_context,
+        )
+        .await
+        .map_err(|error| WsServerError::Ingest(error.to_string()))?;
+        effects.extend(next_effects);
+    }
+
+    let mut entries = Vec::with_capacity(synthetic_entries.len() + 1);
+    entries.push((entry, raw_entry));
+    entries.extend(
+        synthetic_entries
+            .iter()
+            .map(|synthetic| (synthetic.parsed.clone(), synthetic.raw.clone())),
+    );
+    commands::commit_effects_locked(&shared.storage, device_id, &entries, effects.clone())
+        .await
+        .map_err(WsServerError::Ingest)?;
+
+    Ok(effects)
 }
 
 async fn synthesize_auto_pin_entries(
@@ -1599,125 +1603,6 @@ async fn record_connector_buffer(
     status.buffer_bytes = buffer_bytes.unwrap_or(0);
 }
 
-fn settings_bool(settings: Option<&Entity>, key: &str) -> Option<bool> {
-    let Some(Entity::Settings(settings)) = settings else {
-        return None;
-    };
-    settings.values.get(key).and_then(Value::as_bool)
-}
-
-fn settings_array<'a>(settings: Option<&'a Entity>, key: &str) -> Option<&'a Vec<Value>> {
-    let Some(Entity::Settings(settings)) = settings else {
-        return None;
-    };
-    settings.values.get(key).and_then(Value::as_array)
-}
-
-fn strip_balanced_segments(input: &str, open: char, close: char) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut depth = 0usize;
-    for ch in input.chars() {
-        if ch == open {
-            depth += 1;
-            output.push(' ');
-        } else if ch == close && depth > 0 {
-            depth -= 1;
-            output.push(' ');
-        } else if depth == 0 {
-            output.push(ch);
-        }
-    }
-    output
-}
-
-fn trim_title_from_settings(settings: Option<&Entity>, raw_title: &str, url: &str) -> String {
-    let mut title = raw_title.to_string();
-    if settings_bool(settings, "titleCleanupEnabled") == Some(false) {
-        return title.trim().to_string();
-    }
-    for rule in settings_array(settings, "titleTrimRules")
-        .into_iter()
-        .flatten()
-    {
-        let prefix = rule.get("urlPrefix").and_then(Value::as_str).unwrap_or("");
-        if prefix.is_empty() || !url.starts_with(prefix) {
-            continue;
-        }
-        match rule.get("action").and_then(Value::as_str).unwrap_or("") {
-            "remove_after_pipe" => {
-                if let Some(index) = title.find('|').filter(|index| *index > 0) {
-                    title.truncate(index);
-                }
-            }
-            "remove_brackets" => title = strip_balanced_segments(&title, '[', ']'),
-            "remove_parens" => title = strip_balanced_segments(&title, '(', ')'),
-            _ => {}
-        }
-    }
-    title.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn blacklist_prefixes(settings: Option<&Entity>) -> Vec<String> {
-    if settings_bool(settings, "blacklistEnabled") == Some(false) {
-        return DEFAULT_URL_BLACKLIST
-            .iter()
-            .map(|value| value.to_string())
-            .collect();
-    }
-    settings_array(settings, "urlBlacklist")
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .filter(|values| !values.is_empty())
-        .unwrap_or_else(|| {
-            DEFAULT_URL_BLACKLIST
-                .iter()
-                .map(|value| value.to_string())
-                .collect()
-        })
-}
-
-async fn should_record_visit(
-    storage: &Storage,
-    settings: Option<&Entity>,
-    url: &str,
-    timestamp: i64,
-    bypass_blacklist: bool,
-) -> Result<bool, WsServerError> {
-    if bypass_blacklist {
-        return Ok(true);
-    }
-    if !blacklist_prefixes(settings)
-        .iter()
-        .any(|prefix| url.starts_with(prefix))
-    {
-        return Ok(true);
-    }
-
-    let date_file = format!("{}.jsonl", date_key_from_timestamp(timestamp));
-    let entries = storage.load_history_batch(&[date_file]).await?;
-    if entries.iter().any(|entry| {
-        entry
-            .get("url")
-            .and_then(Value::as_str)
-            .map(|entry_url| entry_url == url)
-            .unwrap_or(false)
-    }) {
-        return Ok(true);
-    }
-
-    let slug =
-        generate_slug_from_url(url).map_err(|error| WsServerError::Ingest(error.to_string()))?;
-    Ok(storage
-        .load_entity(&format!("page:{slug}"))
-        .await?
-        .is_some())
-}
-
 async fn commit_report_entry(
     shared: &SharedState,
     entry: LogEntry,
@@ -1727,43 +1612,9 @@ async fn commit_report_entry(
         let config = shared.config.lock().await;
         config.device_id.clone()
     };
-    let replay_context = ReplayContext {
-        device_id: device_id.clone(),
-    };
-    let mut effects = effect_with_overlay(
-        entry.clone(),
-        &shared.storage,
-        &EntityMapView::default(),
-        &replay_context,
-    )
-    .await
-    .map_err(|error| WsServerError::Ingest(error.to_string()))?;
-    let synthetic_entries =
-        synthesize_auto_pin_entries(&entry, &raw_entry, &shared.storage, &effects, &device_id)
-            .await
-            .map_err(|error| WsServerError::Ingest(error.to_string()))?;
-    for synthetic in &synthetic_entries {
-        let next_effects = effect_with_overlay(
-            synthetic.parsed.clone(),
-            &shared.storage,
-            &effects,
-            &replay_context,
-        )
-        .await
-        .map_err(|error| WsServerError::Ingest(error.to_string()))?;
-        effects.extend(next_effects);
-    }
-
-    let mut entries = Vec::with_capacity(synthetic_entries.len() + 1);
-    entries.push((entry.clone(), raw_entry.clone()));
-    entries.extend(
-        synthetic_entries
-            .iter()
-            .map(|synthetic| (synthetic.parsed.clone(), synthetic.raw.clone())),
-    );
-    commands::commit_effects_locked(&shared.storage, &device_id, &entries, effects.clone())
-        .await
-        .map_err(WsServerError::Ingest)?;
+    let effects =
+        commit_entry_with_auto_pins_locked(shared, &device_id, entry.clone(), raw_entry.clone())
+            .await?;
 
     Ok((
         json!({ "success": true, "timestamp": entry.timestamp() }),
@@ -1796,7 +1647,8 @@ async fn report_visit_command(
             .and_then(Value::as_bool)
             .unwrap_or(false),
     )
-    .await?
+    .await
+    .map_err(WsServerError::Ingest)?
     {
         return Ok((
             json!({ "success": true, "skipped": true, "timestamp": timestamp }),
@@ -2349,201 +2201,6 @@ fn broadcast_mutations(shared: &SharedState, mutations: Vec<MutationPayload>) {
     }
     let message = DaemonMessage::Change { mutations };
     let _ = shared.change_message_tx.send(message);
-}
-
-fn dedupe_mutations(mutations: Vec<MutationPayload>) -> Vec<MutationPayload> {
-    let mut seen = HashSet::new();
-    let mut deduped = Vec::new();
-    for mutation in mutations {
-        let key = format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}",
-            mutation.mutation_type,
-            mutation.list_id.as_deref().unwrap_or(""),
-            mutation.page_slug.as_deref().unwrap_or(""),
-            mutation.note_slug.as_deref().unwrap_or(""),
-            mutation.old_note_slug.as_deref().unwrap_or(""),
-            mutation.slug.as_deref().unwrap_or(""),
-            mutation.url.as_deref().unwrap_or(""),
-            mutation.key.as_deref().unwrap_or(""),
-        );
-        if seen.insert(key) {
-            deduped.push(mutation);
-        }
-    }
-    deduped
-}
-
-fn mutation(mutation_type: &str) -> MutationPayload {
-    MutationPayload {
-        mutation_type: mutation_type.to_string(),
-        list_id: None,
-        page_slug: None,
-        note_slug: None,
-        old_note_slug: None,
-        slug: None,
-        url: None,
-        key: None,
-    }
-}
-
-fn note_slug_from_path(path: &str) -> Option<String> {
-    path.strip_prefix("objects/notes/")
-        .and_then(|value| value.strip_suffix(".json"))
-        .map(str::to_string)
-}
-
-fn snapshot_slug_from_path(path: &str) -> Option<String> {
-    path.strip_prefix("objects/snapshots/")
-        .and_then(|value| value.rsplit_once('/').map(|(_, stem)| stem).or(Some(value)))
-        .and_then(|value| value.rsplit_once('-').map(|(slug, _)| slug.to_string()))
-}
-
-fn page_slug_from_url(url: Option<&str>) -> Option<String> {
-    url.and_then(|value| generate_slug_from_url(value).ok())
-}
-
-fn first_list_id_from_effects(effects: &EntityMapView) -> Option<String> {
-    effects
-        .keys()
-        .find_map(|key| key.strip_prefix("list:").map(str::to_string))
-}
-
-fn build_mutations(
-    entry: &LogEntry,
-    raw_entry: &Value,
-    effects: &EntityMapView,
-) -> Vec<MutationPayload> {
-    let mut mutations = Vec::new();
-
-    match entry {
-        LogEntry::VisitPage { url, .. }
-        | LogEntry::LeavePage { url, .. }
-        | LogEntry::RenamePage { url, .. }
-        | LogEntry::RatePage { url, .. } => {
-            mutations.push(MutationPayload {
-                url: Some(url.clone()),
-                ..mutation("history")
-            });
-        }
-        LogEntry::UpdateSetting { key, .. } => {
-            mutations.push(MutationPayload {
-                key: Some(key.clone()),
-                ..mutation("settings")
-            });
-        }
-        LogEntry::PinToList { urls, .. } | LogEntry::UnpinFromList { urls, .. } => {
-            let list_id = first_list_id_from_effects(effects);
-            mutations.push(MutationPayload {
-                list_id,
-                url: urls.first().cloned(),
-                ..mutation("pins")
-            });
-        }
-        LogEntry::AddRule { .. } | LogEntry::RemoveRule { .. } | LogEntry::UpdateRule { .. } => {
-            mutations.push(MutationPayload {
-                list_id: first_list_id_from_effects(effects),
-                ..mutation("rules")
-            });
-        }
-        LogEntry::CreateList { .. }
-        | LogEntry::UpdateList { .. }
-        | LogEntry::UpdateListTree { .. }
-        | LogEntry::DeleteList { .. }
-        | LogEntry::RestoreList { .. } => {
-            mutations.push(mutation("lists"));
-        }
-        LogEntry::CreateNote { path, url, .. } => {
-            mutations.push(MutationPayload {
-                page_slug: page_slug_from_url(Some(url.as_str())),
-                note_slug: note_slug_from_path(path),
-                url: Some(url.clone()),
-                ..mutation("note")
-            });
-        }
-        LogEntry::DeleteNote { url, path, .. } | LogEntry::RestoreNote { url, path, .. } => {
-            mutations.push(MutationPayload {
-                page_slug: page_slug_from_url(url.as_deref()),
-                note_slug: note_slug_from_path(path),
-                url: url.clone(),
-                ..mutation("note")
-            });
-        }
-        LogEntry::ReplaceNote {
-            url,
-            path,
-            old_path,
-            ..
-        } => {
-            mutations.push(MutationPayload {
-                page_slug: page_slug_from_url(url.as_deref()),
-                note_slug: note_slug_from_path(path),
-                old_note_slug: note_slug_from_path(old_path),
-                url: url.clone(),
-                ..mutation("note")
-            });
-        }
-        LogEntry::CreateSnapshot { url, path, .. }
-        | LogEntry::DeleteSnapshot { url, path, .. }
-        | LogEntry::RestoreSnapshot { url, path, .. } => {
-            mutations.push(MutationPayload {
-                page_slug: page_slug_from_url(Some(url.as_str())),
-                slug: snapshot_slug_from_path(path),
-                url: Some(url.clone()),
-                ..mutation("snapshot")
-            });
-        }
-        LogEntry::PermanentDelete { keys, .. } => {
-            if keys.iter().any(|key| key.starts_with("note:")) {
-                mutations.push(mutation("note"));
-            }
-            if keys.iter().any(|key| key.starts_with("snapshot:")) {
-                mutations.push(mutation("snapshot"));
-            }
-            if keys
-                .iter()
-                .any(|key| key.starts_with("list:") || key.starts_with("page:"))
-            {
-                mutations.push(mutation("lists"));
-            }
-        }
-    }
-
-    if effects.contains_key("manifest:orphaned") {
-        mutations.push(mutation("orphaned"));
-    }
-    if effects.contains_key("manifest:list-order") || effects.contains_key("manifest:name-to-id") {
-        mutations.push(mutation("lists"));
-    }
-    if raw_entry
-        .get("source")
-        .and_then(Value::as_str)
-        .is_some_and(|value| value == "auto")
-    {
-        mutations.push(MutationPayload {
-            list_id: first_list_id_from_effects(effects),
-            ..mutation("pins")
-        });
-    }
-
-    let mut deduped = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    for item in mutations {
-        let signature = format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}",
-            item.mutation_type,
-            item.list_id.as_deref().unwrap_or_default(),
-            item.page_slug.as_deref().unwrap_or_default(),
-            item.note_slug.as_deref().unwrap_or_default(),
-            item.old_note_slug.as_deref().unwrap_or_default(),
-            item.slug.as_deref().unwrap_or_default(),
-            item.url.as_deref().unwrap_or_default(),
-            item.key.as_deref().unwrap_or_default()
-        );
-        if seen.insert(signature) {
-            deduped.push(item);
-        }
-    }
-    deduped
 }
 
 async fn build_status_message(shared: &SharedState) -> DaemonMessage {
@@ -3562,19 +3219,6 @@ fn current_timestamp_millis() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
-}
-
-fn date_key_from_timestamp(timestamp: i64) -> String {
-    let datetime = Local
-        .timestamp_millis_opt(timestamp)
-        .single()
-        .unwrap_or_else(|| {
-            Local
-                .with_ymd_and_hms(1970, 1, 1, 0, 0, 0)
-                .earliest()
-                .expect("epoch exists")
-        });
-    datetime.format("%Y-%m-%d").to_string()
 }
 
 #[cfg(test)]

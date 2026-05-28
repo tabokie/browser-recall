@@ -1003,7 +1003,9 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     expect((await nextMessage(socket)).type).toBe('ack');
 
     const dataRoot = path.join(dir, 'portal-data');
-    const noteRaw = await waitForFileContent(notePath(dataRoot, 'n1'));
+    const noteRaw = await waitForFileContent(notePath(dataRoot, 'n1'), (raw) =>
+      raw.includes('"excerpt": "hello"'),
+    );
     expect(noteRaw).toContain('"excerpt": "hello"');
     expect(noteRaw).toContain('"note": "world"');
 
