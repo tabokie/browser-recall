@@ -471,9 +471,10 @@ describe('popup desktop state rendering', () => {
     document.getElementById('captureOnceBtn').click();
 
     await waitFor(() => document.getElementById('errorBubble'));
-    expect(document.getElementById('errorBubble').textContent).toContain(
-      'Blacklisted capture failed',
-    );
+    const errorBubble = document.getElementById('errorBubble');
+    expect(errorBubble.textContent).toContain('Blacklisted capture failed');
+    expect(errorBubble.style.backgroundColor).toBe('rgb(247, 244, 234)');
+    expect(errorBubble.style.color).toBe('rgb(255, 45, 32)');
   });
 
   it('shows connector diagnostics while desktop is not connected', async () => {

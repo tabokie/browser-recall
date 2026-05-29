@@ -6,42 +6,43 @@
     <link rel="stylesheet" href="shared.css" />
     <style>
       body {
-        --bg-base: #0f0f0d;
-        --bg-ambient: #0f0f0d;
+        color-scheme: light;
+        --bg-base: #f7f4ea;
+        --bg-ambient: #f7f4ea;
         --bg-surface: transparent;
-        --bg-surface-solid: #151512;
-        --bg-surface-hover: rgba(238, 238, 223, 0.07);
-        --bg-surface-active: rgba(238, 238, 223, 0.1);
+        --bg-surface-solid: #f7f4ea;
+        --bg-surface-hover: rgba(23, 23, 19, 0.055);
+        --bg-surface-active: rgba(23, 23, 19, 0.08);
         --bg-sidebar: transparent;
         --bg-frosted: transparent;
-        --bg-frosted-strong: #151512;
+        --bg-frosted-strong: #f7f4ea;
         --bg-input: transparent;
         --bg-warm-tint: transparent;
-        --bg-warm-hover: rgba(238, 238, 223, 0.07);
-        --bg-tab-active: rgba(238, 238, 223, 0.1);
-        --border-glass: rgba(238, 238, 223, 0.18);
-        --border-glass-strong: rgba(238, 238, 223, 0.28);
-        --border-subtle: rgba(238, 238, 223, 0.12);
-        --border-hover: rgba(238, 238, 223, 0.55);
-        --border-section: rgba(238, 238, 223, 0.18);
-        --scrollbar-thumb: rgba(238, 238, 223, 0.22);
-        --text-primary: #eeeedf;
-        --text-secondary: #c7c7b7;
-        --text-muted: #8b8b7e;
+        --bg-warm-hover: rgba(23, 23, 19, 0.055);
+        --bg-tab-active: rgba(23, 23, 19, 0.08);
+        --border-glass: rgba(23, 23, 19, 0.22);
+        --border-glass-strong: rgba(23, 23, 19, 0.32);
+        --border-subtle: rgba(23, 23, 19, 0.12);
+        --border-hover: rgba(23, 23, 19, 0.45);
+        --border-section: rgba(23, 23, 19, 0.22);
+        --scrollbar-thumb: rgba(23, 23, 19, 0.24);
+        --text-primary: #171713;
+        --text-secondary: #4b4b45;
+        --text-muted: #77746a;
         --shadow-color: 0, 0, 0;
-        --accent-primary: #eeeedf;
-        --accent-primary-hover: #fff;
-        --accent-primary-glow: rgba(238, 238, 223, 0.14);
-        --accent-primary-soft: rgba(238, 238, 223, 0.09);
-        --accent-on-primary: #0f0f0d;
-        --accent-blue: #eeeedf;
-        --accent-blue-soft: rgba(238, 238, 223, 0.09);
-        --accent-green: #eeeedf;
-        --accent-green-soft: rgba(238, 238, 223, 0.09);
-        --accent-red: #e33b32;
-        --accent-red-soft: rgba(227, 59, 50, 0.16);
-        --recording-hot: #e33b32;
-        --recording-hot-soft: rgba(227, 59, 50, 0.16);
+        --accent-primary: #171713;
+        --accent-primary-hover: #000000;
+        --accent-primary-glow: rgba(23, 23, 19, 0.14);
+        --accent-primary-soft: rgba(23, 23, 19, 0.055);
+        --accent-on-primary: #f7f4ea;
+        --accent-blue: #171713;
+        --accent-blue-soft: rgba(23, 23, 19, 0.055);
+        --accent-green: #171713;
+        --accent-green-soft: rgba(23, 23, 19, 0.08);
+        --accent-red: #ff2d20;
+        --accent-red-soft: rgba(255, 45, 32, 0.14);
+        --recording-hot: #ff2d20;
+        --recording-hot-soft: rgba(255, 45, 32, 0.14);
         --shadow-float: none;
         --shadow-float-hover: none;
         --shadow-elevated: none;
@@ -71,28 +72,29 @@
       }
 
       html[data-theme='dark'] body {
-        --bg-base: #0f0f0d;
-        --bg-ambient: #0f0f0d;
+        color-scheme: light;
+        --bg-base: #f7f4ea;
+        --bg-ambient: #f7f4ea;
         --bg-surface: transparent;
-        --bg-surface-solid: #151512;
-        --bg-surface-hover: rgba(238, 238, 223, 0.07);
-        --bg-surface-active: rgba(238, 238, 223, 0.1);
-        --bg-frosted-strong: #151512;
+        --bg-surface-solid: #f7f4ea;
+        --bg-surface-hover: rgba(23, 23, 19, 0.055);
+        --bg-surface-active: rgba(23, 23, 19, 0.08);
+        --bg-frosted-strong: #f7f4ea;
         --bg-input: transparent;
         --bg-warm-tint: transparent;
-        --bg-warm-hover: rgba(255, 255, 255, 0.08);
-        --bg-tab-active: rgba(255, 255, 255, 0.09);
-        --border-glass: rgba(238, 238, 223, 0.18);
-        --border-glass-strong: rgba(238, 238, 223, 0.28);
-        --border-subtle: rgba(238, 238, 223, 0.12);
-        --border-hover: rgba(238, 238, 223, 0.55);
-        --border-section: rgba(238, 238, 223, 0.18);
-        --scrollbar-thumb: rgba(238, 238, 223, 0.22);
-        --text-primary: #eeeedf;
-        --text-secondary: #c7c7b7;
-        --text-muted: #8b8b7e;
-        --accent-primary: #eeeedf;
-        --accent-primary-hover: #fff;
+        --bg-warm-hover: rgba(23, 23, 19, 0.055);
+        --bg-tab-active: rgba(23, 23, 19, 0.08);
+        --border-glass: rgba(23, 23, 19, 0.22);
+        --border-glass-strong: rgba(23, 23, 19, 0.32);
+        --border-subtle: rgba(23, 23, 19, 0.12);
+        --border-hover: rgba(23, 23, 19, 0.45);
+        --border-section: rgba(23, 23, 19, 0.22);
+        --scrollbar-thumb: rgba(23, 23, 19, 0.24);
+        --text-primary: #171713;
+        --text-secondary: #4b4b45;
+        --text-muted: #77746a;
+        --accent-primary: #171713;
+        --accent-primary-hover: #000000;
       }
 
       .popup-shell {
@@ -296,7 +298,7 @@
       }
 
       .delete-btn:hover {
-        color: var(--accent-red);
+        color: var(--text-primary);
       }
 
       .attention-grid {
@@ -438,8 +440,8 @@
       }
 
       .note-action-btn.delete:hover {
-        background: var(--accent-red-soft);
-        color: var(--accent-red);
+        background: var(--bg-surface-active);
+        color: var(--text-primary);
       }
 
       /* Highlight cards */
@@ -1015,9 +1017,9 @@
       }
 
       .setup-action-btn:hover {
-        background: var(--recording-hot);
-        border-color: var(--recording-hot);
-        color: var(--accent-primary);
+        background: var(--text-primary);
+        border-color: var(--text-primary);
+        color: var(--bg-base);
       }
 
       .setup-action-btn:disabled {

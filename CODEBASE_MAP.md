@@ -44,8 +44,9 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/extension/background-test-control.js` | Test-only background RPC handlers staged by `tests/fixtures/test-extension.mjs` |
 | `apps/extension/content.js` | Visit/attention capture from pages |
 | `apps/extension/popup.js` | Current-tab popup UI |
-| `apps/extension/extension-surface.css` | Shared dark ledger styling for extension pages |
+| `apps/extension/extension-surface.css` | Shared light paper styling for extension pages |
 | `apps/extension/extension-surface.js` | Shared shadow-DOM styling and overlay placement helpers for extension content surfaces |
+| `apps/extension/extension-ui-tokens.js` | Shared extension paper/error tokens and transient error popout styling |
 | `apps/extension/savepage-bridge.js` | Save Page WE capture bridge |
 | `apps/extension/connector/ws-client.js` | Connector websocket transport to daemon |
 | `apps/extension/connector/pairing.js` | Pairing bootstrap and session helpers |
@@ -129,6 +130,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `tests/integration/event-flow.test.js` | Connector event flow into the daemon |
 | `tests/e2e/popup-lists.spec.js` | Popup list interactions in the shipped connector |
 | `tests/e2e/badge.spec.js` | Popup/badge behavior in the shipped connector |
+| `tests/e2e/extension-error-popouts.spec.js` | Browser-level extension popup and snapshot error popout styling |
 | `tests/e2e/seeded-combination-workflows.spec.js` | Seeded randomized extension workflow combining visits, notes, list pins, and popup reads |
 | `scripts/test-coverage-monitor.mjs` | Test-suite LoC mix and JS/Rust uncovered production line reporting |
 | `crates/daemon/tests/commands.rs` | Desktop command-surface coverage |

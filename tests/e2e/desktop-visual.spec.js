@@ -1346,6 +1346,21 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('settings marks the Sync addon experimental', async ({ page }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+      });
+
+      await page.locator('#settingsBtn').click();
+      const syncHeader = page.locator('.addon-header', { hasText: 'Sync' });
+      await expect(syncHeader.locator('.addon-experimental-badge')).toHaveText(
+        'Experimental',
+      );
+    });
+  });
+
   test('single-clicking a list title enters rename mode', async ({ page }) => {
     await serveDesktopUi(async (desktopUrl) => {
       await openDesktopUi(page, desktopUrl, {
@@ -1427,6 +1442,71 @@ test.describe('desktop visual regression', () => {
 
       await expect(page.getByText('Needle daemon A')).toBeVisible();
       await expect(page.getByText('Needle daemon B')).toHaveCount(0);
+    });
+  });
+
+  test('device filter does not duplicate a multi-device site by other-device visits', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const sharedUrl = 'https://example.com/shared-device-site';
+    const sharedSlug = generateSlugFromUrl(sharedUrl);
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [],
+        historyEntriesByDate: {
+          '2026-05-27': [
+            {
+              url: sharedUrl,
+              title: 'Shared device site',
+              timestamp: now - 2 * 86400000,
+              deviceId: 'device-b',
+            },
+          ],
+          '2026-05-28': [
+            {
+              url: sharedUrl,
+              title: 'Shared device site',
+              timestamp: now - 86400000,
+              deviceId: 'device-b',
+            },
+          ],
+          '2026-05-29': [
+            {
+              url: sharedUrl,
+              title: 'Shared device site',
+              timestamp: now - 10_000,
+              deviceId: 'device-a',
+            },
+            {
+              url: 'https://example.com/device-b-marker',
+              title: 'Device B marker',
+              timestamp: now - 5_000,
+              deviceId: 'device-b',
+            },
+          ],
+        },
+        extraSession: {
+          [pageKey(sharedSlug)]: {
+            slug: sharedSlug,
+            url: sharedUrl,
+            title: 'Shared device site',
+            timestamps: {
+              'device-a': now - 10_000,
+              'device-b': now - 86400000,
+            },
+          },
+        },
+      });
+
+      await page.locator('#filterToggleBtn').click();
+      await page.locator('.filter-bubble[data-device-id="device-a"]').click();
+
+      await expect(
+        page.locator(`.result-row[data-url="${sharedUrl}"]`),
+      ).toHaveCount(1);
     });
   });
 
@@ -1974,7 +2054,7 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('main scrollbar hides after wheel scrolling settles', async ({
+  test('main scrollbar hides after idle and reveals only over scrollbar area', async ({
     page,
   }) => {
     const now = Date.now();
@@ -1998,6 +2078,12 @@ test.describe('desktop visual regression', () => {
       const main = page.locator('.main');
       const mainBox = await main.boundingBox();
       expect(mainBox).not.toBeNull();
+      const thumbColor = () =>
+        main.evaluate(
+          (el) =>
+            getComputedStyle(el, '::-webkit-scrollbar-thumb').backgroundColor,
+        );
+
       await page.mouse.move(mainBox.x + mainBox.width / 2, mainBox.y + 160);
       await page.mouse.wheel(0, 480);
       await expect
@@ -2011,11 +2097,16 @@ test.describe('desktop visual regression', () => {
         )
         .toBe(false);
 
-      const thumbColor = await main.evaluate(
-        (el) =>
-          getComputedStyle(el, '::-webkit-scrollbar-thumb').backgroundColor,
-      );
-      expect(thumbColor).toBe('rgba(0, 0, 0, 0)');
+      await expect.poll(thumbColor).toBe('rgba(0, 0, 0, 0)');
+
+      await page.mouse.move(mainBox.x + mainBox.width / 2, mainBox.y + 220);
+      await expect.poll(thumbColor).toBe('rgba(0, 0, 0, 0)');
+
+      await page.mouse.move(mainBox.x + mainBox.width - 2, mainBox.y + 220);
+      await expect.poll(thumbColor).not.toBe('rgba(0, 0, 0, 0)');
+
+      await page.mouse.move(mainBox.x + mainBox.width / 2, mainBox.y + 220);
+      await expect.poll(thumbColor).toBe('rgba(0, 0, 0, 0)');
     });
   });
 

@@ -886,7 +886,7 @@ function initContentScript() {
       positionStyle: 'position: absolute; visibility: hidden;',
       extraCss: `
       .delete-btn { flex-shrink:0; width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:none; border:1px solid var(--br-border-section); border-radius:2px; cursor:pointer; color:var(--br-text-muted); padding:0; }
-      .delete-btn:hover { background:var(--br-accent-red-soft); border-color:var(--br-accent-red); color:var(--br-accent-red); }
+      .delete-btn:hover { background:var(--br-bg-surface-active); border-color:var(--br-text-primary); color:var(--br-text-primary); }
       .delete-btn svg { width:16px; height:16px; fill:currentColor; }`,
       beforeTextareaHtml: extensionSurface.trashButtonHtml(),
       bodyHtml: extensionSurface.noteOverlayHtml({
@@ -1268,7 +1268,7 @@ function initContentScript() {
       textarea::placeholder { color: var(--br-text-muted); }
       textarea:focus { outline: none; border-color: var(--br-accent-primary); box-shadow: 0 0 0 3px var(--br-accent-soft); }
       .delete-btn { flex-shrink: 0; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 2px; cursor: pointer; color: var(--br-text-muted); padding: 0; }
-      .delete-btn:hover { background: var(--br-accent-red-soft); color: var(--br-accent-red); }
+      .delete-btn:hover { background: var(--br-bg-surface-active); color: var(--br-text-primary); }
       .delete-btn svg { width: 14px; height: 14px; fill: currentColor; }
       .highlight-body { min-width: 0; }
       .hint { padding: 8px 12px; border-top: 1px solid var(--br-border-section); font-size: 11px; color: var(--br-text-muted); line-height: 1.4; }

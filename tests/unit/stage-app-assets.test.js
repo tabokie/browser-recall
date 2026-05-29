@@ -62,6 +62,11 @@ describe('extension staged assets', () => {
     stageExtensionAssets(outDir);
 
     const popupHtml = readFileSync(join(outDir, 'popup.html'), 'utf8');
+    const popupSource = readFileSync(join(outDir, 'popup.js'), 'utf8');
+    const extensionUiTokensSource = readFileSync(
+      join(outDir, 'extension-ui-tokens.js'),
+      'utf8',
+    );
     expect(popupHtml).not.toContain('Desktop Shell');
     expect(popupHtml).not.toContain('Setup Required');
     expect(popupHtml).not.toContain('Connection');
@@ -70,6 +75,26 @@ describe('extension staged assets', () => {
     expect(popupHtml).toContain(
       'Start Browser Recall Desktop to resume live capture.',
     );
+    expect(popupHtml).toContain('--bg-base: #f7f4ea');
+    expect(popupHtml).toContain('--text-primary: #171713');
+    expect(popupHtml).not.toContain(
+      '.setup-action-btn:hover {\n        background: var(--recording-hot);',
+    );
+    expect(popupHtml).not.toContain(
+      '.delete-btn:hover {\n        color: var(--accent-red);',
+    );
+    expect(popupHtml).not.toContain(
+      '.note-action-btn.delete:hover {\n        background: var(--accent-red-soft);',
+    );
+    expect(popupSource).toContain("from './extension-ui-tokens.js'");
+    expect(extensionUiTokensSource).toContain(
+      "EXTENSION_PAPER_COLOR = '#f7f4ea'",
+    );
+    expect(extensionUiTokensSource).toContain(
+      "EXTENSION_ERROR_COLOR = '#ff2d20'",
+    );
+    expect(popupSource).not.toContain('background:rgba(180,30,30,0.92)');
+    expect(popupHtml).toContain('.recording-toggle:hover');
     expect(popupHtml).toContain('Check Again');
     expect(popupHtml).not.toContain('Pair with desktop');
     expect(popupHtml).not.toContain('Try to reconnect');
@@ -104,9 +129,11 @@ describe('extension staged assets', () => {
     expect(optionsHtml).toContain('Keyboard Shortcuts');
     expect(optionsHtml).toContain('extension-surface.css');
     expect(optionsHtml).toContain('class="extension-page"');
-    expect(extensionSurfaceCss).toContain('--bg-base: #0f0f0d');
+    expect(extensionSurfaceCss).toContain('--bg-base: #f7f4ea');
+    expect(extensionSurfaceCss).toContain('--text-primary: #171713');
     expect(extensionSurfaceCss).toContain('width: min(380px');
     expect(extensionSurfaceCss).toContain('.extension-button');
+    expect(extensionSurfaceCss).not.toContain('background: var(--accent-red);');
     expect(optionsHtml).toContain('id="customizeShortcuts"');
     expect(optionsSource).toContain('chrome.commands.getAll()');
     expect(optionsSource).toContain('chrome://extensions/shortcuts');
@@ -143,16 +170,27 @@ describe('extension staged assets', () => {
     expect(extensionSurfaceSource).toContain(
       'globalThis.browserRecallExtensionSurface',
     );
-    expect(extensionSurfaceSource).toContain('--br-bg-base: #0f0f0d');
+    expect(extensionSurfaceSource).toContain('--br-bg-base: #f7f4ea');
+    expect(extensionSurfaceSource).toContain('--br-text-primary: #171713');
     expect(extensionSurfaceSource).toContain('br-note-label');
     expect(extensionSurfaceSource).toContain('br-note-excerpt');
     expect(extensionSurfaceSource).toContain('positionNearRect');
     expect(contentSource).toContain('data-note-index');
     expect(contentSource).toContain('var(--br-border-section)');
+    expect(contentSource).not.toContain(
+      '.delete-btn:hover { background: var(--br-accent-red-soft)',
+    );
     expect(contentSource).not.toContain('SCHEME_PALETTES');
     expect(contentSource).not.toContain('EXTENSION_SURFACE_CSS');
     expect(contentSource).toContain('extensionSurface.positionNearRect');
     expect(snapshotViewerSource).toContain('extensionSurface.positionNearRect');
+    expect(snapshotViewerSource).toContain("from './extension-ui-tokens.js'");
+    expect(snapshotViewerSource).not.toContain(
+      'background:rgba(180,30,30,0.92)',
+    );
+    expect(snapshotViewerSource).not.toContain(
+      '.delete-btn:hover { background: var(--br-accent-red-soft)',
+    );
     expect(snapshotViewerSource).not.toContain('EXTENSION_SURFACE_CSS');
     expect(snapshotViewerSource).not.toContain('getSchemePalette');
   });

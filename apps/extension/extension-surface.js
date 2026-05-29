@@ -2,16 +2,16 @@
   const SHADOW_CSS = `
     :host {
       all: initial;
-      color-scheme: dark;
-      --br-bg-base: #0f0f0d;
-      --br-bg-surface-active: rgba(238, 238, 223, 0.1);
-      --br-border-section: rgba(238, 238, 223, 0.18);
-      --br-text-primary: #eeeedf;
-      --br-text-muted: #8b8b7e;
-      --br-accent-primary: #eeeedf;
-      --br-accent-soft: rgba(238, 238, 223, 0.09);
-      --br-accent-red: #e33b32;
-      --br-accent-red-soft: rgba(227, 59, 50, 0.16);
+      color-scheme: light;
+      --br-bg-base: #f7f4ea;
+      --br-bg-surface-active: rgba(23, 23, 19, 0.08);
+      --br-border-section: rgba(23, 23, 19, 0.22);
+      --br-text-primary: #171713;
+      --br-text-muted: #77746a;
+      --br-accent-primary: #171713;
+      --br-accent-soft: rgba(23, 23, 19, 0.055);
+      --br-accent-red: #ff2d20;
+      --br-accent-red-soft: rgba(255, 45, 32, 0.14);
       --br-font-body: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
       --br-ease-smooth: cubic-bezier(0.25, 0.1, 0.25, 1);
     }

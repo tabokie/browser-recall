@@ -140,6 +140,7 @@ function preventDesktopOverscroll(event) {
 }
 
 const scrollActivityTimers = new WeakMap();
+const MAIN_SCROLLBAR_HOVER_WIDTH = 12;
 
 function markActiveScrollbar(event) {
   const el = event.target;
@@ -157,6 +158,28 @@ function markActiveScrollbar(event) {
   );
 }
 
+function updateMainScrollbarHover(event) {
+  const main = document.querySelector('.main');
+  if (!main) return;
+  const rect = main.getBoundingClientRect();
+  const isScrollable = main.scrollHeight > main.clientHeight + 1;
+  const insideMain =
+    event.clientX >= rect.left &&
+    event.clientX <= rect.right &&
+    event.clientY >= rect.top &&
+    event.clientY <= rect.bottom;
+  const inScrollbarArea =
+    insideMain && event.clientX >= rect.right - MAIN_SCROLLBAR_HOVER_WIDTH;
+  main.classList.toggle(
+    'is-scrollbar-hovered',
+    isScrollable && inScrollbarArea,
+  );
+}
+
+function clearMainScrollbarHover() {
+  document.querySelector('.main')?.classList.remove('is-scrollbar-hovered');
+}
+
 document.addEventListener('wheel', preventDesktopOverscroll, {
   capture: true,
   passive: false,
@@ -165,6 +188,15 @@ document.addEventListener('scroll', markActiveScrollbar, {
   capture: true,
   passive: true,
 });
+document.addEventListener('pointermove', updateMainScrollbarHover, {
+  capture: true,
+  passive: true,
+});
+document.addEventListener('pointerleave', clearMainScrollbarHover, {
+  capture: true,
+  passive: true,
+});
+window.addEventListener('blur', clearMainScrollbarHover);
 
 // ─── Error UI ────────────────────────────────────────────────────────
 
@@ -3601,11 +3633,16 @@ async function enrichForFilters(entries) {
     }
     if (page.parentIds) entry.parentIds = page.parentIds;
     if (page.timestamps && Object.keys(page.timestamps).length > 0) {
-      entry.deviceIds = new Set(Object.keys(page.timestamps));
+      if (!entry.deviceIds || entry.deviceIds.size === 0) {
+        entry.deviceIds = new Set(Object.keys(page.timestamps));
+      }
       const tsValues = Object.values(page.timestamps).filter(
         (ts) => typeof ts === 'number',
       );
-      if (tsValues.length > 0) {
+      if (
+        tsValues.length > 0 &&
+        (!Array.isArray(entry.timestamps) || entry.timestamps.length === 0)
+      ) {
         entry.timestamps = tsValues.sort((a, b) => b - a);
         entry.latestTs = entry.timestamps[0];
         entry.timestamp = entry.latestTs;

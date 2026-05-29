@@ -129,6 +129,7 @@ The extension is intentionally thin and no longer owns the main product UI.
 - `apps/extension/savepage-bridge.js` orchestrates snapshot capture.
 - `apps/extension/background.js` buffers semantic connector commands, serves popup requests, manages pairing, and forwards RPC to the daemon. Test-only reset/seed/queue RPC handlers live in `apps/extension/background-test-control.js` and are staged only by the test fixture.
 - `apps/extension/popup.js` is the current-page dashboard backed by daemon RPC; its list picker is a short-lived popup control, not extension persistence.
+- `apps/extension/extension-surface.css`, `apps/extension/extension-surface.js`, and `apps/extension/extension-ui-tokens.js` keep connector pages, content overlays, and transient error popouts on the shared light paper visual system.
 - `apps/extension/connector/` contains the websocket client, pairing helpers, and command buffer.
 - `apps/extension/options-stub.html` exists only to direct the user to the desktop app.
 
@@ -148,7 +149,7 @@ The daemon owns the browser pairing state and websocket server.
 
 - The connector pairs once, then sends capture observations and mutation commands over the websocket channel.
 - The popup requests page summaries and mutation helpers through the same daemon connection.
-- Popup user-action failures that need user attention notify the active page when possible and fall back to the popup bubble when the page cannot receive extension messages.
+- Popup user-action failures that need user attention notify the active page when possible and fall back to the shared paper-colored popup bubble when the page cannot receive extension messages.
 - Background shortcut/context-menu actions that hit a stale content-script runtime inject the same reload warning directly into the page so capture/highlight failures are not silent.
 - The daemon broadcasts change notifications back to the desktop shell and authenticated connector sockets.
 - The Tauri shell forwards daemon notifications into the desktop UI so connector-originated changes appear live; connector sockets receive daemon-originated mutations so open popups and tab badges can refresh.

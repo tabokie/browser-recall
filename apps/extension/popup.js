@@ -14,6 +14,10 @@ import {
   requestConnectorBridgeConnect,
   requestConnectorState,
 } from './connector/state.js';
+import {
+  applyPaperErrorPopoutStyle,
+  paperErrorPopoutCss,
+} from './extension-ui-tokens.js';
 
 let currentSlug = '';
 let currentNotes = [];
@@ -174,8 +178,8 @@ function showErrorBubble(message, options = {}) {
   if (!bubble) {
     bubble = document.createElement('div');
     bubble.id = 'errorBubble';
-    bubble.style.cssText =
-      'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:999999;background:rgba(180,30,30,0.92);color:#fff;font:12px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:6px 14px;border-radius:6px;opacity:0;transition:opacity 0.25s;pointer-events:none;max-width:360px;text-align:center;';
+    bubble.style.cssText = paperErrorPopoutCss({ includeFade: true });
+    applyPaperErrorPopoutStyle(bubble);
     document.body.appendChild(bubble);
   }
   bubble.textContent = displayMessage;

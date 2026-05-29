@@ -1,18 +1,18 @@
 :root {
-  color-scheme: dark;
-  --bg-base: #0f0f0d;
-  --bg-surface: #151512;
-  --bg-surface-hover: rgba(238, 238, 223, 0.07);
-  --border-section: rgba(238, 238, 223, 0.18);
-  --border-subtle: rgba(238, 238, 223, 0.12);
-  --border-hover: rgba(238, 238, 223, 0.55);
-  --text-primary: #eeeedf;
-  --text-secondary: #c7c7b7;
-  --text-muted: #8b8b7e;
-  --accent-primary: #eeeedf;
-  --accent-on-primary: #0f0f0d;
-  --accent-red: #e33b32;
-  --accent-red-soft: rgba(227, 59, 50, 0.16);
+  color-scheme: light;
+  --bg-base: #f7f4ea;
+  --bg-surface: #f7f4ea;
+  --bg-surface-hover: rgba(23, 23, 19, 0.055);
+  --border-section: rgba(23, 23, 19, 0.22);
+  --border-subtle: rgba(23, 23, 19, 0.12);
+  --border-hover: rgba(23, 23, 19, 0.45);
+  --text-primary: #171713;
+  --text-secondary: #4b4b45;
+  --text-muted: #77746a;
+  --accent-primary: #171713;
+  --accent-on-primary: #f7f4ea;
+  --accent-red: #ff2d20;
+  --accent-red-soft: rgba(255, 45, 32, 0.14);
   --font-display:
     ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   --font-body:
@@ -134,9 +134,9 @@ button {
 }
 
 .extension-button:hover {
-  background: var(--accent-red);
-  border-color: var(--accent-red);
-  color: var(--accent-primary);
+  background: var(--text-primary);
+  border-color: var(--text-primary);
+  color: var(--bg-base);
 }
 
 .extension-notice {

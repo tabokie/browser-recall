@@ -9,6 +9,10 @@ describe('desktop scrollbar styling', () => {
     expect(html).not.toContain('.main:hover::-webkit-scrollbar-thumb');
     expect(html).toContain('.main.is-scrolling,');
     expect(html).toContain('.main.is-scrolling::-webkit-scrollbar-thumb');
+    expect(html).toContain('.main.is-scrollbar-hovered');
+    expect(html).toContain(
+      '.main.is-scrollbar-hovered::-webkit-scrollbar-thumb',
+    );
     expect(html).toContain('.sidebar-content:hover');
     expect(html).toContain('.sidebar-content:hover::-webkit-scrollbar-thumb');
   });

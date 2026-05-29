@@ -1,5 +1,9 @@
 import { logDebug } from './logger.js';
 import { findTextRange } from './highlight-helpers.js';
+import {
+  applyPaperErrorPopoutStyle,
+  paperErrorPopoutCss,
+} from './extension-ui-tokens.js';
 
 const extensionSurface = globalThis.browserRecallExtensionSurface;
 
@@ -18,8 +22,13 @@ function showSnapshotRuntimeError(error) {
     banner = document.createElement('div');
     banner.id = 'snapshotRuntimeError';
     banner.setAttribute('role', 'status');
-    banner.style.cssText =
-      'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2147483647;background:rgba(180,30,30,0.92);color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:8px 14px;border-radius:6px;max-width:420px;text-align:center;';
+    banner.style.cssText = paperErrorPopoutCss({
+      zIndex: 2147483647,
+      fontSize: '13px',
+      padding: '8px 14px',
+      maxWidth: '420px',
+    });
+    applyPaperErrorPopoutStyle(banner);
     document.body.appendChild(banner);
   }
   banner.textContent = message;
@@ -223,7 +232,7 @@ const OVERLAY_STYLE = `
     border: 1px solid var(--br-border-section); border-radius: 2px;
     cursor: pointer; color: var(--br-text-muted); padding: 0;
   }
-  .delete-btn:hover { background: var(--br-accent-red-soft); border-color: var(--br-accent-red); color: var(--br-accent-red); }
+  .delete-btn:hover { background: var(--br-bg-surface-active); border-color: var(--br-text-primary); color: var(--br-text-primary); }
   .delete-btn svg { width: 16px; height: 16px; fill: currentColor; }
   textarea {
     width: 100%; min-height: 30px; height: 30px;

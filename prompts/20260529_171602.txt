@@ -1,0 +1,13 @@
+- - When filter by device, a site that has been visited on multiple devices shows up multiple times even though it has only been visited once on the selected device
+- There were two issues in the past, you fixed the first and introduced the second, and then you fixed the second and the first resurfaced. I want to know what went wrong with the testing to cause this bouncing situation. The first issue is, when scroll is not being used, the scroll bar should hide automatically. The second issue is, when user hovers hover the scroll bar area, the scroll should become visible again.
+- Fix the issue, TDD, true E2E behavior tests
+- Mark the "Sync" addon as experimental.
+- I'm thinking, maybe light mode makes more sense for extension UI? I.e use the background and foreground color in demos/option-e-thermal-receipt.html
+- No need to use "#d8d8d2 as the surrounding background". Just the paper color.
+- resume
+- Buttons except for the recording button shouldn't use red hover color, it stands out too much
+- The error message pop out should use paper color background as well.
+- $gap
+- Fix them all thoroughly, except the desktop showErrorBubble stays unchanged
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- $finish model=GPT-5.5 Codex
