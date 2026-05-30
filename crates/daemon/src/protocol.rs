@@ -274,11 +274,6 @@ pub enum ConnectorMessage {
         rule: RulePayload,
         entries: Vec<RuleBatchEntry>,
     },
-    SearchHistory {
-        query: String,
-        #[serde(default)]
-        limit: Option<usize>,
-    },
     SearchHistoryStream {
         #[serde(rename = "searchId")]
         search_id: String,
@@ -424,6 +419,8 @@ pub enum DaemonMessage {
         success: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         files: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        devices: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sizes: Option<BTreeMap<String, u64>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -518,13 +515,6 @@ pub enum DaemonMessage {
         success: bool,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         results: Vec<PreviewRuleHit>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    SearchHistoryResult {
-        success: bool,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        results: Vec<HistorySearchResult>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

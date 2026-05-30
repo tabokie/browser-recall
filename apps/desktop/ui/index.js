@@ -646,11 +646,12 @@ const DEFAULT_AVG_ENTRY_SIZE = 200;
 const historyState = {
   fileBatch: 10, // files per load (configurable in settings)
   files: [], // all JSONL filenames, newest-first
-  loadedCount: 0, // how many files loaded so far
+  loadedFiles: new Set(), // filenames already merged into allEntries
   byUrl: new Map(), // url → history entry (deduped, newest wins)
   allEntries: [], // all loaded entries (not deduped), for date-boundary rendering
   loading: false, // guard against concurrent loads
   fileSizes: {}, // filename → total byte size (for chart estimation)
+  devices: [], // device IDs discovered from logs/<device> directories
   avgEntrySize: DEFAULT_AVG_ENTRY_SIZE, // calibrated from loaded batches
   batchRawCount: 0, // total raw entries from loaded JSONL files
   _mutationWatermark: 0, // newest history log timestamp merged from live mutations
@@ -1224,32 +1225,8 @@ async function runPhase1(query, gen) {
       await renderProgressiveResults(gen);
     }
 
-    try {
-      streamingStarted = await runStreamingHistorySearch(query, gen);
-    } catch (error) {
-      logDebug(
-        '[Phase1] Desktop streaming history search unavailable:',
-        error.message,
-      );
-    }
+    streamingStarted = await runStreamingHistorySearch(query, gen);
     if (streamingStarted) return;
-
-    try {
-      const desktopResp = await sendAction({
-        action: 'searchHistory',
-        query,
-      });
-      if (Array.isArray(desktopResp.results)) {
-        mergeSearchResults(
-          buildDesktopHistoryResults(desktopResp.results),
-          'history',
-          gen,
-        );
-        await renderProgressiveResults(gen);
-      }
-    } catch (error) {
-      logDebug('[Phase1] Desktop history search unavailable:', error.message);
-    }
   } catch (e) {
     logDebug('[Phase1] JSONL search failed:', e.message);
   } finally {
@@ -1364,21 +1341,20 @@ async function runProgressiveSearch(allQueries) {
 // --- Demand-loaded history ---
 
 async function initHistoryFiles() {
-  if (historyState.files.length > 0) return;
-
-  // Always get the authoritative history file list from the daemon.
-  try {
-    const resp = await sendAction({
-      action: 'listHistoryFiles',
-      includeSizes: true,
-    });
-    historyState.files = resp.files;
-    historyState.fileSizes = resp.sizes || {};
-  } catch (error) {
-    logDebug('History file list unavailable:', error.message);
-  }
+  await refreshHistoryMetadata();
 
   queueContentMap = {};
+}
+
+async function refreshHistoryMetadata() {
+  const resp = await sendAction({
+    action: 'listHistoryFiles',
+    includeSizes: true,
+  });
+  historyState.files = Array.isArray(resp.files) ? resp.files : [];
+  historyState.fileSizes = resp.sizes || {};
+  historyState.devices = Array.isArray(resp.devices) ? resp.devices : [];
+  return resp;
 }
 
 async function loadHistoryEntriesForDate(dateStr) {
@@ -1390,17 +1366,17 @@ async function loadHistoryEntriesForDate(dateStr) {
 }
 
 async function loadHistoryBatch() {
+  const nextFiles = historyState.files
+    .filter((file) => !historyState.loadedFiles.has(file))
+    .slice(0, HISTORY_MAX_FILES - historyState.loadedFiles.size);
   if (
     historyState.loading ||
-    historyState.loadedCount >= historyState.files.length ||
-    historyState.loadedCount >= HISTORY_MAX_FILES
+    nextFiles.length === 0 ||
+    historyState.loadedFiles.size >= HISTORY_MAX_FILES
   )
     return [];
   historyState.loading = true;
-  const batch = historyState.files.slice(
-    historyState.loadedCount,
-    historyState.loadedCount + historyState.fileBatch,
-  );
+  const batch = nextFiles.slice(0, historyState.fileBatch);
   try {
     const t0 = performance.now();
     const resp = await sendAction({ action: 'loadHistoryBatch', files: batch });
@@ -1436,13 +1412,14 @@ async function loadHistoryBatch() {
     logDebug(
       `[I/O] loadHistoryBatch: ${batch.length} files, ${batchEntries.length} items, ${newItems.length} new in ${(performance.now() - t0).toFixed(1)}ms`,
     );
-    historyState.loadedCount += batch.length;
+    for (const file of batch) historyState.loadedFiles.add(file);
     if (newItems.length > 0) cachedFieldRanges = null;
     // Calibrate avg entry size from loaded file data
     historyState.batchRawCount += batchEntries.length;
-    const loadedSize = historyState.files
-      .slice(0, historyState.loadedCount)
-      .reduce((sum, f) => sum + (historyState.fileSizes[f] || 0), 0);
+    const loadedSize = [...historyState.loadedFiles].reduce(
+      (sum, f) => sum + (historyState.fileSizes[f] || 0),
+      0,
+    );
     if (loadedSize > 0 && historyState.batchRawCount > 0) {
       historyState.avgEntrySize = loadedSize / historyState.batchRawCount;
     }
@@ -1459,8 +1436,10 @@ async function loadHistoryBatch() {
 async function loadHistoryUntilDate(dateStr) {
   const targetFile = dateStr + '.jsonl';
   const targetIdx = historyState.files.indexOf(targetFile);
-  if (targetIdx < 0 || targetIdx < historyState.loadedCount) return; // already loaded or not found
-  const needed = targetIdx - historyState.loadedCount + 1;
+  if (targetIdx < 0 || historyState.loadedFiles.has(targetFile)) return; // already loaded or not found
+  const needed = historyState.files
+    .slice(0, targetIdx + 1)
+    .filter((file) => !historyState.loadedFiles.has(file)).length;
   const saved = historyState.fileBatch;
   historyState.fileBatch = needed;
   await loadHistoryBatch();
@@ -1469,11 +1448,12 @@ async function loadHistoryUntilDate(dateStr) {
 
 function resetHistory() {
   historyState.files = [];
-  historyState.loadedCount = 0;
+  historyState.loadedFiles = new Set();
   historyState.byUrl.clear();
   historyState.allEntries = [];
   historyState.loading = false;
   historyState.fileSizes = {};
+  historyState.devices = [];
   historyState.avgEntrySize = DEFAULT_AVG_ENTRY_SIZE;
   historyState.batchRawCount = 0;
   historyState._mutationWatermark = 0;
@@ -1492,11 +1472,8 @@ function resetHistory() {
 // Returns Map<dateStr, estimatedCount> for dates not yet loaded.
 function getEstimatedByDay() {
   const estimated = new Map();
-  const loadedSet = new Set(
-    historyState.files.slice(0, historyState.loadedCount),
-  );
   for (const filename of historyState.files) {
-    if (loadedSet.has(filename)) continue;
+    if (historyState.loadedFiles.has(filename)) continue;
     const dateStr = filename.replace('.jsonl', '');
     const size = historyState.fileSizes[filename] || 0;
     if (size > 0) {
@@ -3869,7 +3846,7 @@ function renderExtraDetailHtml(extra, cardTimestamp) {
       const noteSlug = n.slug || '';
       const noteText = n.note || '';
       const rawQuote = Array.isArray(n.excerpt)
-        ? n.excerpt.join(' ')
+        ? n.excerpt.join('\n')
         : n.excerpt || '';
       const noteBody = noteText
         ? `<span class="detail-note-content">${escapeHtml(noteText)}</span>`
@@ -4753,7 +4730,7 @@ async function buildTreeFromManifest(treeNodes) {
   }
   return nodes;
 }
-// Flatten tree for backward-compatible usage
+// Flatten the list tree for filter and lookup code that needs a linear view.
 async function loadLists() {
   const tree = await loadListTree();
   const flat = [];
@@ -6690,14 +6667,7 @@ chrome.runtime.onMessage.addListener((request) => {
     clearTimeout(mutationRefreshTimer);
     mutationRefreshTimer = setTimeout(async () => {
       try {
-        const filesResp = await sendAction({
-          action: 'listHistoryFiles',
-          includeSizes: true,
-        });
-        if (Array.isArray(filesResp.files)) {
-          historyState.files = filesResp.files;
-          historyState.fileSizes = filesResp.sizes || historyState.fileSizes;
-        }
+        await refreshHistoryMetadata();
       } catch (error) {
         logDebug('history mutation file refresh failed:', error.message);
       }
@@ -6788,16 +6758,12 @@ document.addEventListener('visibilitychange', async () => {
   // Re-list history files and merge any history written while this window was hidden.
   let historyChanged = false;
   try {
-    const filesResp = await sendAction({
-      action: 'listHistoryFiles',
-      includeSizes: true,
-    });
+    const previousFiles = historyState.files;
+    const filesResp = await refreshHistoryMetadata();
     const allFiles = filesResp.files;
-    const existingFiles = new Set(historyState.files);
+    const existingFiles = new Set(previousFiles);
     const newFiles = allFiles.filter((f) => !existingFiles.has(f));
     if (newFiles.length > 0) {
-      historyState.files = allFiles;
-      historyState.fileSizes = filesResp.sizes || historyState.fileSizes;
       const batchResp = await sendAction({
         action: 'loadHistoryBatch',
         files: newFiles,
@@ -6824,10 +6790,7 @@ document.addEventListener('visibilitychange', async () => {
           historyChanged = true;
         }
       }
-      historyState.loadedCount = Math.min(
-        historyState.loadedCount + newFiles.length,
-        historyState.files.length,
-      );
+      for (const file of newFiles) historyState.loadedFiles.add(file);
     }
 
     const todayEntries = await loadHistoryEntriesForDate(
@@ -6942,9 +6905,7 @@ async function renderFilterPanelHtml() {
   }
 
   // Device bubbles
-  const deviceIds = [
-    ...new Set(historyState.allEntries.map((e) => e.deviceId).filter(Boolean)),
-  ].sort();
+  const deviceIds = [...new Set(historyState.devices || [])].sort();
   if (deviceIds.length > 1) {
     html +=
       '<div class="filter-section"><div class="filter-section-label">Devices</div>';
@@ -7392,7 +7353,10 @@ async function runSearchFilterPipeline() {
     } else {
       // Fallback: load all JSONL batches (e.g. filesystem not available)
       showSearchSpinner();
-      while (historyState.loadedCount < historyState.files.length) {
+      while (
+        historyState.loadedFiles.size <
+        Math.min(historyState.files.length, HISTORY_MAX_FILES)
+      ) {
         await loadHistoryBatch();
         await new Promise((r) => setTimeout(r, 0));
       }
@@ -7500,7 +7464,8 @@ async function runSearchFilterPipeline() {
         } while (
           hasActiveFilters &&
           loaded &&
-          historyState.loadedCount < historyState.files.length
+          historyState.loadedFiles.size <
+            Math.min(historyState.files.length, HISTORY_MAX_FILES)
         );
         if (hasActiveFilters) hideSearchSpinner();
       };
@@ -7527,11 +7492,8 @@ async function runSearchFilterPipeline() {
   // Demand-load data when an unloaded date bar is clicked
   relatedChart._onDateSelect = async (activeDates) => {
     if (activeDates.size === 0) return;
-    const loadedFiles = new Set(
-      historyState.files.slice(0, historyState.loadedCount),
-    );
     const unloaded = [...activeDates].filter(
-      (d) => !loadedFiles.has(d + '.jsonl'),
+      (d) => !historyState.loadedFiles.has(d + '.jsonl'),
     );
     if (unloaded.length === 0) return;
     // Save active dates — runSearchFilterPipeline re-renders chart, destroying DOM state

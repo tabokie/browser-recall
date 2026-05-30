@@ -115,6 +115,9 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
   if (options.extraSession) {
     Object.assign(base.session, options.extraSession);
   }
+  if (options.logDevices) {
+    base.session['manifest:log-devices'] = options.logDevices;
+  }
   if (options.includeRecycleBin) {
     base.session['manifest:orphaned'] = {
       timestamp: now,
@@ -197,7 +200,7 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
           },
           {
             slug: 'highlight-product-research',
-            excerpt: 'Important highlighted passage',
+            excerpt: 'Important highlighted passage\nwith original line break',
             note: 'Highlight note',
           },
         ],
@@ -343,6 +346,9 @@ async function installDesktopBridgeMock(page, options = {}) {
           .map((key) => `${key.slice('log:'.length)}.jsonl`)
           .sort()
           .reverse();
+        const devices = new Set(
+          stores.session.get('manifest:log-devices') || [],
+        );
         const sizes = {};
         if (includeSizes) {
           for (const file of files) {
@@ -351,7 +357,14 @@ async function installDesktopBridgeMock(page, options = {}) {
             sizes[file] = JSON.stringify(entries).length;
           }
         }
-        return { files, sizes };
+        for (const key of stores.session.keys()) {
+          if (!key.startsWith('log:')) continue;
+          const entries = stores.session.get(key) || [];
+          for (const entry of entries) {
+            if (entry.deviceId) devices.add(entry.deviceId);
+          }
+        }
+        return { files, sizes, devices: [...devices].sort() };
       }
 
       function loadHistoryBatch(files = []) {
@@ -490,11 +503,6 @@ async function installDesktopBridgeMock(page, options = {}) {
             return {
               success: true,
               entries: loadHistoryBatch(request.files),
-            };
-          case 'searchHistory':
-            return {
-              success: true,
-              results: clone(searchHistoryResults || []),
             };
           case 'searchNotes':
             return {
@@ -1072,6 +1080,16 @@ test.describe('desktop visual regression', () => {
       await expect(page.locator('.detail-notes-section')).toContainText(
         'Important highlighted passage',
       );
+      const excerptStyle = await page
+        .locator('.detail-note-excerpt')
+        .evaluate((el) => ({
+          text: el.textContent,
+          whiteSpace: getComputedStyle(el).whiteSpace,
+        }));
+      expect(excerptStyle).toEqual({
+        text: 'Important highlighted passage\nwith original line break',
+        whiteSpace: 'pre-wrap',
+      });
       await expect(page.locator('.detail-snapshot-badge.html')).toHaveText(
         'HTML',
       );
@@ -1442,6 +1460,47 @@ test.describe('desktop visual regression', () => {
 
       await expect(page.getByText('Needle daemon A')).toBeVisible();
       await expect(page.getByText('Needle daemon B')).toHaveCount(0);
+    });
+  });
+
+  test('explore device filters render from log device directories', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        logDevices: ['device-a', 'device-b'],
+        historyEntries: [
+          {
+            url: 'https://example.com/local-device-marker',
+            title: 'Only loaded device marker',
+            timestamp: now - 30_000,
+            deviceId: 'device-a',
+          },
+        ],
+      });
+
+      await page.locator('#filterToggleBtn').click();
+      await expect(
+        page
+          .locator('#filterPanel .filter-section-label')
+          .filter({ hasText: /^Devices$/ }),
+      ).toBeVisible();
+      await expect(
+        page.locator('.filter-bubble[data-device-id="device-a"]'),
+      ).toBeVisible();
+      await expect(
+        page.locator('.filter-bubble[data-device-id="device-b"]'),
+      ).toBeVisible();
+      await page.locator('.filter-bubble[data-device-id="device-b"]').click();
+      await expect(
+        page.locator(
+          '.result-row[data-url="https://example.com/local-device-marker"]',
+        ),
+      ).toHaveCount(0);
+      await expect(page.locator('#relatedResults')).toContainText('No results');
     });
   });
 
@@ -1839,6 +1898,58 @@ test.describe('desktop visual regression', () => {
             ?.length > entriesPerDay,
         { entriesPerDay },
       );
+    });
+  });
+
+  test('history metadata refresh preserves demand-load cursor for new front files', async ({
+    page,
+  }) => {
+    const dayMs = 86_400_000;
+    const base = Date.now();
+    const nextDay = base + dayMs;
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyFileBatch: 1,
+        historyEntries: [
+          {
+            url: 'https://example.com/already-loaded-day',
+            title: 'Already loaded day',
+            timestamp: base,
+            deviceId: 'device-a',
+          },
+        ],
+      });
+
+      await expect(page.getByText('Already loaded day')).toBeVisible();
+      await page.evaluate(
+        ({ nextDay }) => {
+          window.__desktopVisualHarness.appendHistoryEntry({
+            url: 'https://example.com/new-front-day',
+            title: 'New front day',
+            timestamp: nextDay,
+            deviceId: 'device-a',
+          });
+          Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            value: 'visible',
+          });
+          document.dispatchEvent(new Event('visibilitychange'));
+        },
+        { nextDay },
+      );
+
+      await expect(page.getByText('New front day')).toBeVisible({
+        timeout: 3000,
+      });
+      await page.evaluate(async () => {
+        const main = document.querySelector('.main');
+        main.scrollTop = main.scrollHeight;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      });
+      await expect(page.getByText('Already loaded day')).toHaveCount(1);
+      await expect(page.getByText('New front day')).toHaveCount(1);
     });
   });
 

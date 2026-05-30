@@ -1,0 +1,10 @@
+- The highlight should preserve newlines. I don't see the original newlines in the page detail's highlight section.
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- The explore
+- The explore's device filtering section is gone, why is that? Trace the commit that did it
+- I think the device lists should come from the available directories, each directory under ./logs is a device
+- $gap
+- All worth fixing. But 4 is unneeded, we should remove any backward-compat or fallback code, this product is not released yet. In fact, scan the codebase for any other unnecessary compatibility code and remove them.
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix it
+- $finish model=GPT-5.5 Codex

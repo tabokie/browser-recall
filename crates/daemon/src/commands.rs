@@ -1,8 +1,6 @@
 use crate::connectors::{current_local_day_start_unix, prune_inactive_connectors};
-use crate::search::{
-    search_history_in_data_dir, search_notes_in_data_dir, search_snapshots_in_data_dir,
-};
-use crate::storage::Storage;
+use crate::search::{search_notes_in_data_dir, search_snapshots_in_data_dir};
+use crate::storage::{HistoryFileListing, Storage};
 use crate::{
     protocol::{RuleBatchEntry, RulePayload},
     rules::{preview_rule, validate_rule, PageData, RuleSpec},
@@ -282,12 +280,15 @@ pub async fn get_snapshot_html(
 pub async fn list_history_files(
     storage: &Storage,
     include_sizes: bool,
-) -> Result<(Vec<String>, BTreeMap<String, u64>), String> {
-    let (files, sizes) = storage
+) -> Result<HistoryFileListing, String> {
+    let mut listing = storage
         .list_history_files(include_sizes)
         .await
         .map_err(|error| error.to_string())?;
-    Ok((files, sizes.unwrap_or_default()))
+    if listing.sizes.is_none() {
+        listing.sizes = Some(BTreeMap::new());
+    }
+    Ok(listing)
 }
 
 pub async fn load_history_batch(storage: &Storage, files: &[String]) -> Result<Vec<Value>, String> {
@@ -295,13 +296,6 @@ pub async fn load_history_batch(storage: &Storage, files: &[String]) -> Result<V
         .load_history_batch(files)
         .await
         .map_err(|error| error.to_string())
-}
-
-pub fn search_history(
-    storage: &Storage,
-    query: &str,
-) -> Result<Vec<crate::search::HistorySearchHit>, String> {
-    search_history_in_data_dir(storage.root(), query, None).map_err(|error| error.to_string())
 }
 
 pub fn search_notes(

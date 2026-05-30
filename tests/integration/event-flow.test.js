@@ -416,16 +416,29 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     );
     expect((await nextMessage(socket)).type).toBe('ack');
 
-    socket.send(JSON.stringify({ type: 'search_history', query: 'banana' }));
-    await expect(nextMessage(socket)).resolves.toMatchObject({
-      type: 'search_history_result',
-      success: true,
+    socket.send(
+      JSON.stringify({
+        type: 'search_history_stream',
+        searchId: 'integration-history-search',
+        query: 'banana',
+      }),
+    );
+    const historyChunk = await nextMessage(socket);
+    expect(historyChunk).toMatchObject({
+      type: 'history_search_chunk',
+      searchId: 'integration-history-search',
       results: [
         {
           url: 'https://example.com/searchable',
           title: 'Banana Searchable',
         },
       ],
+    });
+    await expect(nextMessage(socket)).resolves.toMatchObject({
+      type: 'history_search_done',
+      searchId: 'integration-history-search',
+      success: true,
+      cancelled: false,
     });
 
     socket.send(JSON.stringify({ type: 'search_notes', query: 'banana' }));
@@ -1454,9 +1467,10 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     });
 
     socket.send(JSON.stringify({ type: 'list_history_files' }));
-    await expect(nextMessage(socket)).resolves.toEqual({
+    await expect(nextMessage(socket)).resolves.toMatchObject({
       type: 'history_files_result',
       success: true,
+      devices: [expect.any(String)],
     });
 
     const pagesDir = path.join(dir, 'portal-data', 'views', 'pages');

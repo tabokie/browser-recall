@@ -38,6 +38,13 @@ struct StorageInner {
 pub type CheckpointBatch = BTreeMap<String, EntityEffect>;
 pub type ReplayProgress = BTreeMap<String, i64>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryFileListing {
+    pub files: Vec<String>,
+    pub sizes: Option<BTreeMap<String, u64>>,
+    pub devices: Vec<String>,
+}
+
 #[derive(Debug)]
 pub struct CheckpointBatchWork {
     pub effects: CheckpointBatch,
@@ -768,16 +775,18 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn list_history_files(
-        &self,
-        include_sizes: bool,
-    ) -> io::Result<(Vec<String>, Option<BTreeMap<String, u64>>)> {
+    pub async fn list_history_files(&self, include_sizes: bool) -> io::Result<HistoryFileListing> {
         let logs_root = self.root().join("logs");
         let mut names = BTreeMap::new();
+        let mut device_ids = Vec::new();
         let mut devices = match fs::read_dir(&logs_root).await {
             Ok(entries) => entries,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok((Vec::new(), include_sizes.then(BTreeMap::new)));
+                return Ok(HistoryFileListing {
+                    files: Vec::new(),
+                    sizes: include_sizes.then(BTreeMap::new),
+                    devices: Vec::new(),
+                });
             }
             Err(error) => return Err(error),
         };
@@ -786,6 +795,10 @@ impl Storage {
             if !device_entry.file_type().await?.is_dir() {
                 continue;
             }
+            let Some(device_id) = device_entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            device_ids.push(device_id);
             let mut files = fs::read_dir(device_entry.path()).await?;
             while let Some(file_entry) = files.next_entry().await? {
                 if !file_entry.file_type().await?.is_file() {
@@ -804,8 +817,13 @@ impl Storage {
 
         let mut files: Vec<_> = names.keys().cloned().collect();
         files.reverse();
+        device_ids.sort();
         let sizes = include_sizes.then_some(names);
-        Ok((files, sizes))
+        Ok(HistoryFileListing {
+            files,
+            sizes,
+            devices: device_ids,
+        })
     }
 
     pub async fn load_history_batch(&self, filenames: &[String]) -> io::Result<Vec<Value>> {

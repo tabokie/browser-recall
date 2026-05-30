@@ -691,17 +691,6 @@ async fn handle_connection(stream: TcpStream, shared: SharedState) -> Result<(),
                     }
                 }
             }
-            ConnectorMessage::SearchHistory { query, limit } => {
-                if !authenticated {
-                    send_json(&mut write, &unauthorized_error()).await?;
-                    continue;
-                }
-                send_json(
-                    &mut write,
-                    &handle_search_history(&shared, query, limit).await,
-                )
-                .await?;
-            }
             ConnectorMessage::SearchHistoryStream {
                 search_id,
                 query,
@@ -2219,52 +2208,6 @@ async fn build_status_message(shared: &SharedState) -> DaemonMessage {
     }
 }
 
-async fn handle_search_history(
-    shared: &SharedState,
-    query: String,
-    limit: Option<usize>,
-) -> DaemonMessage {
-    let data_dir = {
-        let config = shared.config.lock().await;
-        config.data_dir.clone()
-    };
-    match tokio::task::spawn_blocking(move || {
-        search_history_parallel_in_data_dir(
-            &data_dir,
-            &query,
-            limit,
-            Arc::new(AtomicBool::new(false)),
-            |_| Ok(()),
-        )
-    })
-    .await
-    {
-        Ok(Ok(results)) => DaemonMessage::SearchHistoryResult {
-            success: true,
-            results: results
-                .into_iter()
-                .map(|result| HistorySearchResult {
-                    url: result.url,
-                    title: result.title,
-                    timestamp: result.timestamp,
-                    score: result.score,
-                })
-                .collect(),
-            error: None,
-        },
-        Ok(Err(error)) => DaemonMessage::SearchHistoryResult {
-            success: false,
-            results: Vec::new(),
-            error: Some(error.to_string()),
-        },
-        Err(error) => DaemonMessage::SearchHistoryResult {
-            success: false,
-            results: Vec::new(),
-            error: Some(error.to_string()),
-        },
-    }
-}
-
 fn spawn_history_search_stream(
     shared: SharedState,
     search_id: String,
@@ -2799,15 +2742,17 @@ fn validate_test_seed_path(path: String) -> Result<String, WsServerError> {
 
 async fn handle_list_history_files(shared: &SharedState, include_sizes: bool) -> DaemonMessage {
     match shared.storage.list_history_files(include_sizes).await {
-        Ok((files, sizes)) => DaemonMessage::HistoryFilesResult {
+        Ok(listing) => DaemonMessage::HistoryFilesResult {
             success: true,
-            files,
-            sizes,
+            files: listing.files,
+            devices: listing.devices,
+            sizes: listing.sizes,
             error: None,
         },
         Err(error) => DaemonMessage::HistoryFilesResult {
             success: false,
             files: Vec::new(),
+            devices: Vec::new(),
             sizes: None,
             error: Some(error.to_string()),
         },

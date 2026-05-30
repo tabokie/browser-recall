@@ -313,17 +313,6 @@ describe('matchKeywordRule', () => {
     ).toBe(0);
   });
 
-  it('ignores legacy fields config and still checks title only', () => {
-    const rule = { config: { pattern: 'github', fields: ['url', 'body'] } };
-    expect(
-      matchKeywordRule(rule, {
-        title: 'Repo',
-        url: 'https://github.com/foo',
-        body: 'github appears here',
-      }),
-    ).toBe(0);
-  });
-
   it('returns 0 on no match', () => {
     const rule = { config: { pattern: 'xyz' } };
     expect(
@@ -334,14 +323,6 @@ describe('matchKeywordRule', () => {
   it('matches case-insensitively by default', () => {
     const rule = { config: { pattern: 'HELLO' } };
     expect(matchKeywordRule(rule, { title: 'hello world', url: '' })).toBe(1);
-  });
-
-  it('ignores stale caseSensitive config and remains case-insensitive', () => {
-    const rule = {
-      config: { pattern: 'HELLO', caseSensitive: true },
-    };
-    expect(matchKeywordRule(rule, { title: 'hello world', url: '' })).toBe(1);
-    expect(matchKeywordRule(rule, { title: 'HELLO world', url: '' })).toBe(1);
   });
 
   it('checks title when fields are not specified', () => {

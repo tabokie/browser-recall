@@ -869,7 +869,6 @@ async fn websocket_unauthenticated_matrix_rejects_privileged_messages_without_cl
         json!({ "type": "permanent_delete", "keys": ["note:missing"] }),
         json!({ "type": "get_popup_lists" }),
         json!({ "type": "run_command", "action": "trimTitle", "request": {} }),
-        json!({ "type": "search_history", "query": "x" }),
         json!({ "type": "search_notes", "query": "x" }),
         json!({ "type": "search_snapshots", "query": "x" }),
         json!({
@@ -1505,33 +1504,6 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
         other => panic!("expected invalid page summary, got {other:?}"),
     }
 
-    tokio::fs::remove_dir_all(data_dir.join("logs"))
-        .await
-        .expect("remove logs");
-    tokio::fs::write(data_dir.join("logs"), "not a directory")
-        .await
-        .expect("write logs file");
-    send_connector(
-        &mut socket,
-        ConnectorMessage::SearchHistory {
-            query: "secondary".to_string(),
-            limit: Some(10),
-        },
-    )
-    .await;
-    match next_daemon(&mut socket).await {
-        DaemonMessage::SearchHistoryResult {
-            success,
-            results,
-            error: Some(error),
-        } => {
-            assert!(!success);
-            assert!(results.is_empty());
-            assert!(!error.trim().is_empty());
-        }
-        other => panic!("expected history search error, got {other:?}"),
-    }
-
     tokio::fs::remove_dir_all(data_dir.join("objects").join("notes"))
         .await
         .expect("remove notes");
@@ -1975,30 +1947,6 @@ async fn search_messages_return_history_note_and_snapshot_hits() {
 
     send_connector(
         &mut socket,
-        ConnectorMessage::SearchHistory {
-            query: "banana".to_string(),
-            limit: None,
-        },
-    )
-    .await;
-    let history = next_daemon(&mut socket).await;
-    match history {
-        DaemonMessage::SearchHistoryResult {
-            success,
-            results,
-            error,
-        } => {
-            assert!(success);
-            assert!(error.is_none());
-            assert_eq!(results.len(), 1);
-            assert_eq!(results[0].url, "https://example.com/page");
-            assert_eq!(results[0].title, "Banana Example");
-        }
-        other => panic!("expected history search result, got {other:?}"),
-    }
-
-    send_connector(
-        &mut socket,
         ConnectorMessage::SearchHistoryStream {
             search_id: "history-stream-1".to_string(),
             query: "banana".to_string(),
@@ -2409,7 +2357,7 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         .await
         .expect("server starts");
 
-    let (mut socket, data_dir, _device_id) = paired_socket(handle.port(), &config_store).await;
+    let (mut socket, data_dir, device_id) = paired_socket(handle.port(), &config_store).await;
 
     send_connector(&mut socket, ConnectorMessage::Ping).await;
     assert!(matches!(
@@ -2918,11 +2866,13 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
         DaemonMessage::HistoryFilesResult {
             success,
             files,
+            devices,
             sizes: Some(sizes),
             error,
         } => {
             assert!(success);
             assert!(error.is_none());
+            assert!(devices.contains(&device_id));
             assert!(!sizes.is_empty());
             files
         }

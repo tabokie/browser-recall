@@ -364,19 +364,23 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
         .expect("missing lists dir returns empty");
     assert!(missing_lists.is_empty());
 
-    let (history_files, sizes) = storage
+    let listing = storage
         .list_history_files(true)
         .await
         .expect("list history files");
     assert_eq!(
-        history_files,
+        listing.files,
         vec![
             "not-a-date.jsonl".to_string(),
             format!("{today}.jsonl"),
             "1999-01-01.jsonl".to_string(),
         ]
     );
-    let sizes = sizes.expect("history sizes");
+    assert_eq!(
+        listing.devices,
+        vec!["device-a".to_string(), "device-b".to_string()]
+    );
+    let sizes = listing.sizes.expect("history sizes");
     assert!(
         sizes
             .get(&format!("{today}.jsonl"))

@@ -395,28 +395,6 @@ mod tests {
     }
 
     #[test]
-    fn keyword_rules_ignore_legacy_fields_config() {
-        let list = list_with_rule(RuleEntity {
-            id: "rule-k-1".to_string(),
-            rule_type: "keyword".to_string(),
-            config: BTreeMap::from([
-                ("pattern".to_string(), json!("ai")),
-                ("fields".to_string(), json!(["url", "body"])),
-            ]),
-            created_at: 1,
-        });
-
-        assert!(!list_matches_page(
-            &list,
-            &PageData {
-                title: "Introducing Essential Voice - YouTube".to_string(),
-                url: "https://example.ai/video".to_string(),
-                body: Some("ai appears in page body".to_string()),
-            }
-        ));
-    }
-
-    #[test]
     fn keyword_rule_validation_rejects_fields_config() {
         let result = validate_rule(&RuleSpec {
             rule_type: "keyword".to_string(),
@@ -440,28 +418,6 @@ mod tests {
         });
 
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn keyword_rules_ignore_stale_case_sensitive_config() {
-        let list = list_with_rule(RuleEntity {
-            id: "rule-k-1".to_string(),
-            rule_type: "keyword".to_string(),
-            config: BTreeMap::from([
-                ("pattern".to_string(), json!("AI")),
-                ("caseSensitive".to_string(), json!(true)),
-            ]),
-            created_at: 1,
-        });
-
-        assert!(list_matches_page(
-            &list,
-            &PageData {
-                title: "ai research".to_string(),
-                url: "https://example.com/page".to_string(),
-                body: None,
-            }
-        ));
     }
 
     #[test]

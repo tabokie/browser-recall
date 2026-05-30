@@ -7,8 +7,7 @@ use browser_recall_daemon::commands::{
     list_history_files, list_paired_browsers, load_all_pages_payload, load_history_batch,
     load_page_notes_payload, load_page_snapshot_payload, page_relations_payload,
     pair_browser_revoke, preview_rule_payload, read_desktop_value,
-    search_history as command_search_history, search_notes as command_search_notes,
-    search_snapshots as command_search_snapshots,
+    search_notes as command_search_notes, search_snapshots as command_search_snapshots,
 };
 use browser_recall_daemon::pairing::{
     ApprovalFuture, PairingApprover, PairingDecision, PairingRequest,
@@ -17,8 +16,8 @@ use browser_recall_daemon::protocol::{
     DaemonMessage, MutationPayload, RuleBatchEntry, RulePayload,
 };
 use browser_recall_daemon::search::{
-    search_history_in_data_dir, search_history_parallel_in_data_dir, search_notes_in_data_dir,
-    search_snapshots_in_data_dir, HistorySearchHit, NoteSearchHit, SnapshotSearchHit,
+    search_history_parallel_in_data_dir, search_notes_in_data_dir, search_snapshots_in_data_dir,
+    NoteSearchHit, SnapshotSearchHit,
 };
 use browser_recall_daemon::storage::Storage;
 use browser_recall_daemon::sync::{
@@ -1262,11 +1261,12 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 .get("includeSizes")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-            let (files, sizes) = list_history_files(&storage, include_sizes).await?;
+            let listing = list_history_files(&storage, include_sizes).await?;
             json!({
                 "success": true,
-                "files": files,
-                "sizes": sizes,
+                "files": listing.files,
+                "sizes": listing.sizes.unwrap_or_default(),
+                "devices": listing.devices,
             })
         }
         "loadHistoryBatch" => {
@@ -1282,17 +1282,6 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
             json!({
                 "success": true,
                 "entries": entries,
-            })
-        }
-        "searchHistory" => {
-            let query = request
-                .get("query")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "searchHistory missing query".to_string())?;
-            let results = command_search_history(&storage, query)?;
-            json!({
-                "success": true,
-                "results": results,
             })
         }
         "searchNotes" => {
@@ -1534,15 +1523,6 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
 }
 
 #[tauri::command]
-fn search_history(app: AppHandle, request: SearchRequest) -> Result<serde_json::Value, String> {
-    let data_dir = shell_data_dir(&app)?;
-    let hits: Vec<HistorySearchHit> =
-        search_history_in_data_dir(&data_dir, &request.query, request.limit)
-            .map_err(|error| error.to_string())?;
-    serde_json::to_value(hits).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 async fn search_history_stream(
     app: AppHandle,
     request: StreamingSearchRequest,
@@ -1714,7 +1694,6 @@ fn main() {
             update_shell_settings,
             resume_shell_service,
             open_shell_path,
-            search_history,
             search_history_stream,
             cancel_history_search,
             search_notes,

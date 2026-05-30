@@ -6,9 +6,8 @@ use browser_recall_daemon::commands::{
     pair_browser_revoke, permanent_delete_candidates, permanent_delete_keys, preview_rule_payload,
     read_desktop_value, recover_checkpoint_tail, remove_rule, rename_page, replay_entries,
     replay_entry, restore_list, restore_note, restore_snapshot, save_list_meta, save_settings_key,
-    search_history, search_notes, search_snapshots, submit_event, toggle_list_pin, update_note,
-    update_rule, BookmarkImportEntry, BookmarkImportNode, BookmarkImportSkipped,
-    HistoryImportEntry,
+    search_notes, search_snapshots, submit_event, toggle_list_pin, update_note, update_rule,
+    BookmarkImportEntry, BookmarkImportNode, BookmarkImportSkipped, HistoryImportEntry,
 };
 use browser_recall_daemon::protocol::{RuleBatchEntry, RulePayload};
 use browser_recall_daemon::storage::Storage;
@@ -72,9 +71,10 @@ async fn import_history_creates_pages_and_log_entries() {
     assert_eq!(page.url.as_deref(), Some("https://example.com/page"));
     assert_eq!(page.title.as_deref(), Some("Example Page"));
 
-    let (files, _) = list_history_files(&storage, false)
+    let files = list_history_files(&storage, false)
         .await
-        .expect("history files");
+        .expect("history files")
+        .files;
     let batch = load_history_batch(&storage, &files)
         .await
         .expect("history batch");
@@ -273,7 +273,7 @@ async fn replay_appends_log_before_checkpoint_visibility_is_required() {
     let files = list_history_files(&storage, false)
         .await
         .expect("history files")
-        .0;
+        .files;
     let batch = load_history_batch(&storage, &files)
         .await
         .expect("history batch");
@@ -689,9 +689,10 @@ async fn submit_event_rejects_non_canonical_log_schema() {
         "submit_event accepts canonical log entries only; transient command fields must be stripped before append"
     );
 
-    let (files, _) = list_history_files(&storage, false)
+    let files = list_history_files(&storage, false)
         .await
-        .expect("history files");
+        .expect("history files")
+        .files;
     assert!(files.is_empty());
 }
 
@@ -1756,10 +1757,6 @@ async fn command_error_and_normalization_paths_are_explicit() {
         "List not found"
     );
 
-    assert!(search_history(&storage, "Trimmed")
-        .expect("search history")
-        .iter()
-        .any(|hit| hit.url == "https://example.com/trimmed"));
     assert!(search_notes(&storage, "Alpha Beta")
         .expect("search notes")
         .iter()

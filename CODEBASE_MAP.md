@@ -95,7 +95,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 ### Replay and Storage
 
 - `crates/replay/` is the production replay engine and owns replay-derived checkpoint policy used by verification and daemon persistence.
-- `crates/daemon/src/storage.rs` owns coordinated cache-miss reads, serialized write coordination, synchronous log append helpers, checkpoint-capacity reservation, ordered async checkpoint persistence, replay progress, and the current `logs/`, `objects/`, `views/` path layout.
+- `crates/daemon/src/storage.rs` owns coordinated cache-miss reads, serialized write coordination, synchronous log append helpers, history file/device-directory listing, checkpoint-capacity reservation, ordered async checkpoint persistence, replay progress, and the current `logs/`, `objects/`, `views/` path layout.
 - `crates/daemon/src/commands.rs` exposes replay-backed reads and mutations to the desktop shell, canonicalizes log entries before append, and keeps command-only fields out of JSONL.
 - `crates/daemon/src/runtime.rs` provides shared replay overlay helpers used by command, websocket, and sync write paths.
 
@@ -103,8 +103,8 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 - `crates/search/` and `crates/daemon/src/search.rs` implement history/note/snapshot search. History search also exposes a fixed-parallelism chunk callback for desktop streaming and cancellation.
 - `apps/desktop/src-tauri/src/main.rs` exposes `search_history_stream` / `cancel_history_search` Tauri commands and emits `bridge-search-history` chunks to the UI.
-- `crates/daemon/src/ws_server.rs` exposes equivalent websocket `search_history_stream` / `cancel_history_search` support and keeps legacy `search_history` on the same parallel helper.
-- `apps/desktop/ui/index.js` merges streamed history chunks with note/snapshot result phases and cancels stale history searches when a newer search starts.
+- `crates/daemon/src/ws_server.rs` exposes equivalent websocket `search_history_stream` / `cancel_history_search` support.
+- `apps/desktop/ui/index.js` merges streamed history chunks with note/snapshot result phases, renders Explore device filters from daemon-reported `logs/<device>/` directories, and cancels stale history searches when a newer search starts.
 - `packages/core/search-helpers.js` and `packages/core/search-runtime.js` provide UI-facing helpers shared by the desktop UI and tests.
 
 ### Pairing and Live Updates
