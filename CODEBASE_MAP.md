@@ -24,6 +24,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `crates/replay/` | Authoritative replay engine and replay verifier |
 | `crates/search/` | Native search helpers |
 | `packages/core/` | Shared JS helpers, theme, CSS, runtime utilities |
+| `icons/` | Root SVG sources for desktop and extension runtime icons |
 | `tests/` | Unit, integration, and e2e coverage |
 | `plans/` | Phase plans 29–34 for the desktop split |
 
@@ -41,6 +42,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/desktop/src-tauri/src/login_item.rs` | Login-item integration for desktop startup behavior |
 | `apps/desktop/src-tauri/src/search.rs` | Desktop-side search adapters/helpers |
 | `apps/extension/background.js` | Thin connector runtime: popup RPC, buffering, pairing, snapshot/capture forwarding |
+| `apps/extension/icon-paths.js` | Packaged default, stop-recording, and special-state toolbar icon paths |
 | `apps/extension/background-test-control.js` | Test-only background RPC handlers staged by `tests/fixtures/test-extension.mjs` |
 | `apps/extension/content.js` | Visit/attention capture from pages |
 | `apps/extension/popup.js` | Current-tab popup UI |
@@ -63,6 +65,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `crates/replay/src/bin/replay-verify.rs` | Full-log checkpoint verifier using the production replay and checkpoint policy |
 | `crates/search/src/lib.rs` | Native search primitives |
 | `scripts/test-coverage-monitor.mjs` | Test investment and JS/Rust uncovered-line monitor; enforces no JS or inline Rust unit-test LoC growth |
+| `scripts/generate-icons.mjs` | Renders root SVG icon sources into opaque desktop/extension icons, the transparent tray icon, and the macOS `.icns` pack |
 | `packages/core/index.js` | Shared package exports |
 | `packages/core/rule-engine.js` | Shared rule validation/matching helpers; keyword rules are title-only |
 | `packages/core/search-helpers.js` | Shared query parsing/search helper logic |
@@ -83,6 +86,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 - `apps/extension/popup.js` requests page summaries, submits popup mutations, refreshes the current page dashboard from background mutation broadcasts, and owns the transient list-picker/search keyboard UI.
 - `apps/extension/background.js` resolves popup actions through the daemon connection. Test-only background RPCs are split into `apps/extension/background-test-control.js` and included only in staged test extensions.
+- `apps/extension/icon-paths.js` defines packaged toolbar icon sets for normal capture, paused recording, and special page-marker states; `apps/extension/badge-controller.js` applies those icons at runtime.
 - `apps/extension/options-stub.js` only opens the desktop app; it is not a settings surface.
 
 ### Capture Path

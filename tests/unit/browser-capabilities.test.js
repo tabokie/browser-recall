@@ -7,7 +7,7 @@ afterEach(() => {
 });
 
 describe('browser capabilities', () => {
-  it('uses Firefox-only icon page markers for Firefox', () => {
+  it('uses promise message responses for Firefox', () => {
     vi.stubGlobal('browserRecallWebExtension', { engine: 'firefox' });
     vi.stubGlobal('chrome', {
       storage: {
@@ -20,11 +20,10 @@ describe('browser capabilities', () => {
     expect(getBrowserCapabilities()).toMatchObject({
       engine: 'firefox',
       supportsPromiseOnMessage: true,
-      usesIconPageMarker: true,
     });
   });
 
-  it('keeps non-Firefox browsers on the Chrome-style badge marker path', () => {
+  it('uses callback message responses for Chromium browsers', () => {
     vi.stubGlobal('browserRecallWebExtension', { engine: 'chromium' });
     vi.stubGlobal('chrome', {
       storage: {
@@ -37,7 +36,6 @@ describe('browser capabilities', () => {
     expect(getBrowserCapabilities()).toMatchObject({
       engine: 'chromium',
       supportsPromiseOnMessage: false,
-      usesIconPageMarker: false,
     });
   });
 });

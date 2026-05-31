@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Browser Recall two round glasses icon variant">
+  <rect width="128" height="128" rx="28" fill="#f4f0df" />
+  <circle cx="43" cy="64" r="15" fill="#a9edf2" fill-opacity="0.42" stroke="#171815" stroke-width="6" />
+  <circle cx="85" cy="64" r="15" fill="#a9edf2" fill-opacity="0.42" stroke="#171815" stroke-width="6" />
+  <path d="M58 64c0-8 12-8 12 0" fill="none" stroke="#171815" stroke-width="6" stroke-linecap="round" />
+  <path d="M25 64h-8" fill="none" stroke="#171815" stroke-width="6" stroke-linecap="round" />
+  <path d="M103 64h8" fill="none" stroke="#171815" stroke-width="6" stroke-linecap="round" />
+</svg>

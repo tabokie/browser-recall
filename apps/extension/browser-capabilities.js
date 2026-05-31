@@ -4,6 +4,5 @@ export function getBrowserCapabilities() {
   return {
     engine,
     supportsPromiseOnMessage: isFirefox,
-    usesIconPageMarker: isFirefox,
   };
 }

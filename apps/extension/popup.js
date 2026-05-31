@@ -1262,10 +1262,9 @@ async function loadRecordingState() {
 }
 
 async function saveRecordingState(paused) {
-  await chrome.storage.session.set({
-    workspace: {
-      mode: paused ? 'private' : 'default',
-    },
+  await chrome.runtime.sendMessage({
+    action: 'setRecordingPaused',
+    paused,
   });
 }
 

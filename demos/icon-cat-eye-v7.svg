@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Browser Recall natural rounded cat eye icon variant 7">
+  <rect width="128" height="128" rx="28" fill="#f4f0df" />
+  <path
+    d="M14 64c0-7 8-12.6 18-16 9.9-3.2 21-4 32-4s22.1.8 32 4c10 3.4 18 9 18 16s-8 12.6-18 16c-9.9 3.2-21 4-32 4s-22.1-.8-32-4c-10-3.4-18-9-18-16Z"
+    fill="#171815"
+  />
+  <path
+    d="M23.5 64c0-5.3 6.8-9.3 15.9-11.7 8-2.1 16.5-3.1 24.6-3.1s16.6 1 24.6 3.1c9.1 2.4 15.9 6.4 15.9 11.7s-6.8 9.3-15.9 11.7c-8 2.1-16.5 3.1-24.6 3.1s-16.6-1-24.6-3.1c-9.1-2.4-15.9-6.4-15.9-11.7Z"
+    fill="#f4f0df"
+  />
+  <rect x="54" y="46" width="20" height="36" rx="10" fill="#171815" />
+</svg>

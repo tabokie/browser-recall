@@ -174,7 +174,7 @@ fn create_tray(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
     let logs = MenuItemBuilder::with_id("logs", "Logs").build(app)?;
     let settings = MenuItemBuilder::with_id("settings", "Settings").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
-    let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
+    let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?;
     let menu = MenuBuilder::new(app)
         .item(&open)
         .item(&status)
@@ -186,6 +186,7 @@ fn create_tray(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(tray_icon)
+        .icon_as_template(true)
         .menu(&menu)
         .tooltip("Browser Recall")
         .show_menu_on_left_click(true)

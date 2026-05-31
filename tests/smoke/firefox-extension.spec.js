@@ -1350,13 +1350,17 @@ test.describe('Firefox extension smoke', () => {
             );
 
             await waitFor(
-              () => api.badgeState.tabs.get(activeTab.id)?.text === ' ',
-              'Orion first-load page marker badge',
+              () =>
+                api.badgeState.tabs.get(activeTab.id)?.icon?.[16] ===
+                'icons/icon16-special-lists.png',
+              'Orion first-load page marker icon',
             );
-            expect(api.badgeState.tabs.get(activeTab.id).color).toBe('#4CAF50');
-            expect(
-              api.badgeState.tabs.get(activeTab.id).icon?.[16]?.width,
-            ).toBeUndefined();
+            expect(api.badgeState.tabs.get(activeTab.id).text).toBe('');
+            expect(api.badgeState.tabs.get(activeTab.id).icon).toEqual({
+              16: 'icons/icon16-special-lists.png',
+              48: 'icons/icon48-special-lists.png',
+              128: 'icons/icon128-special-lists.png',
+            });
           },
         );
       } finally {
@@ -1428,13 +1432,17 @@ test.describe('Firefox extension smoke', () => {
             });
 
             await waitFor(
-              () => api.badgeState.tabs.get(activeTab.id)?.text === ' ',
-              'Orion page marker badge',
+              () =>
+                api.badgeState.tabs.get(activeTab.id)?.icon?.[16] ===
+                'icons/icon16-special-lists.png',
+              'Orion page marker icon',
             );
-            expect(api.badgeState.tabs.get(activeTab.id).color).toBe('#4CAF50');
-            expect(
-              api.badgeState.tabs.get(activeTab.id).icon?.[16]?.width,
-            ).toBeUndefined();
+            expect(api.badgeState.tabs.get(activeTab.id).text).toBe('');
+            expect(api.badgeState.tabs.get(activeTab.id).icon).toEqual({
+              16: 'icons/icon16-special-lists.png',
+              48: 'icons/icon48-special-lists.png',
+              128: 'icons/icon128-special-lists.png',
+            });
           },
         );
       } finally {

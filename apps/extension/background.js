@@ -9,6 +9,13 @@ import { logDebug, logError } from './logger.js';
 import { createBadgeController } from './badge-controller.js';
 import { getBrowserCapabilities } from './browser-capabilities.js';
 import {
+  DEFAULT_ICON_PATHS,
+  SPECIAL_LIST_ICON_PATHS,
+  SPECIAL_MIXED_ICON_PATHS,
+  SPECIAL_NOTE_ICON_PATHS,
+  STOP_RECORDING_ICON_PATHS,
+} from './icon-paths.js';
+import {
   clearDesktopBuffer,
   enqueueDesktopCommand,
   enqueueDesktopSnapshot,
@@ -42,12 +49,6 @@ const CONNECTOR_STATE_REFRESH_TIMEOUT_MS = 1000;
 const BROWSER_CAPABILITIES = getBrowserCapabilities();
 
 let lastLogTimestamp = 0;
-
-const NORMAL_ICON_PATHS = {
-  16: 'icons/icon16.png',
-  48: 'icons/icon48.png',
-  128: 'icons/icon128.png',
-};
 
 // tabId → URL from the content script's initial recordPageActivity.
 // Used by popup to avoid slug mismatch when tab.url drifts (SPA pushState, etc.).
@@ -133,11 +134,18 @@ chrome.storage.session.setAccessLevel({
 });
 
 const badgeController = createBadgeController({
-  capabilities: BROWSER_CAPABILITIES,
   logDebug,
-  normalIconPaths: NORMAL_ICON_PATHS,
+  normalIconPaths: DEFAULT_ICON_PATHS,
+  stoppedRecordingIconPaths: STOP_RECORDING_ICON_PATHS,
+  specialListIconPaths: SPECIAL_LIST_ICON_PATHS,
+  specialNoteIconPaths: SPECIAL_NOTE_ICON_PATHS,
+  specialMixedIconPaths: SPECIAL_MIXED_ICON_PATHS,
   syncDesktopConnectorPauseState,
   readDesktopValue,
+  readRecordingPausedState: async () => {
+    const workspace = await getWorkspaceState();
+    return workspace?.mode === 'private';
+  },
   generateSlugFromUrl,
   pageKey,
   notePrefix: NOTE_PREFIX,
@@ -1551,6 +1559,21 @@ function handleRuntimeMutation(request) {
   return { success: true };
 }
 
+async function handleSetRecordingPaused(request) {
+  const paused = request.paused === true;
+  await chrome.storage.session.set({
+    workspace: {
+      mode: paused ? 'private' : 'default',
+    },
+  });
+  if (paused) {
+    await badgeController.setRecordingPaused(true);
+    return { success: true };
+  }
+  await badgeController.setRecordingPaused(false);
+  return { success: true };
+}
+
 // ─── Message Dispatch ────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
@@ -1593,6 +1616,9 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'captureCurrentPageFromPopup':
           sendResponse(await handleCaptureCurrentPageFromPopup());
+          break;
+        case 'setRecordingPaused':
+          sendResponse(await handleSetRecordingPaused(request));
           break;
         // Page lifecycle
         case 'recordPageActivity':

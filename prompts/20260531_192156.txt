@@ -1,0 +1,124 @@
+- Take a look at the ./cat.jpg, I want to redesign the icon to be similar to the cat eye in this picture. Let's draw it in SVG first and then convert to PNGs.
+- Don't do the conversion just yet, we will need to tweak the icon and draw some more variants before committing to it
+- Don't draw cat, just the cat eye. And the eye is simplistic and minimalistic, just one black capsule shaped eye frame with a black pupil that is shaped using a tall rectangle
+- Only v2 is slightly good. But the eye frame is too thick, the eye's height to width is roughly 2:5, and the pupil width to eye width is 1:5
+- You shouldn't change the pointed shape of the eye
+- Actually, keep the rounded version, make another version with pointed shape in the same dimension
+- Could you make another version that's somewhere in between? i.e. rounded but not a perfect capsule of straight lines and spheres, a shape with curviture just like in the ./cat.jpg.
+- This is still pointed, could you create another version that has absolute no pointed shape but has natural shape?
+- No, the shape in v7 is awful, it's like a peanut.. the shape should resemble the old almond, just without the discontiguous endpoints
+- But still, it has sharp meeting points
+- Much better, can you draw another version based on this but slightly fatter around the endpoints?
+- Again, it's slightly segmented like peanut, it might be a bezier curve limitation?
+- v9 is exactly like v7, without the fatter endpoint requested
+- Not much different, just the inner frame slightly larger, but the outer frame is unchanged
+- Can we try one more time with v8? Split the eye frame into three segments: two bezier curves at left and right, use straight line to connect the two curve so that there's no peanut segmentation
+- Why did you change the curve shape from v8?
+- Let's continue using v2, v6, v7. First, reduce the eye frame stroke width even more
+- Slightly thicker
+- For each version, draw a variant that is eye closed, four eye brows growing underneath the bottom side of the eye, draw another variant that is a square colored lens placed on the eye, the part of eye within the lens is slightly amplified
+- The closed eye is as simple as only drawing the lower frame of the open eye, no puple and upper frame. The frame width is unchanged. And the eye brows is distributed evenly along the lower frame, directed vertically with the frame
+- For the lens variant, the lens is way too small, it should be roughtly 4:5 to the eye width
+- Too large, change to 3:5
+- Make the lens slightly taller, it is visually too fat
+- Change the lens frame to black
+- Slightly increase the amplify ratio
+- Make the pupil slightly curved on left and right
+- I couldn't see any difference
+- Try even larger
+- Slightly increase the manification ratio
+- Try 1.25
+- Use a thicker line width for the lens
+- Use a very bold varient of the lens color as the lens' frame color
+- Use brighter color
+- Draw a minimalist cassette tape icon in SVG
+- Reproduce the look of ./tape.png
+- The lower half of it is wrong, and the dimension is too high too
+- Lower half is better but still not good enough. And the reel rings is too large
+- The feedback loop is too loose. If you have trouble visualizing the svg, please render it in png and then compare it to the reference image
+- It's still not the same, the lower half has no trapezoid shape
+- I don't understand, the two images are still vastly different, why you can't see the difference?
+- Let's go back to the eye series, Work on another iteration of the v6 into another version, where the lens becomes a telescope - the telescope leans slightly towards the right, with the magnified eye shifting along it, and the telescope tube is visible and 3D like a trapezoid.
+- Nah, you are making the thing tilt. What I want is similar to the magnifier UI in desktop OS, where the part of amplified eye is the same shape and not tilt, but shift to the right or to the bottom-right, and amplification is illustrated by drawing how that amplified slice projects from the original eye, the projection is drawn like perspective lines, but also like the tube of a telescope
+- Let's take another iteration based on v6, this time make the lens frame bold, bolder than eye frames, and make the lens looks a bit like glass, with two little vertical lines stretching out of left and right edge
+- The lens frame is black BTW
+- I don't see the edge marks, the left and right is supposed to emulate glass horizontal frame, not vertically strengthen the glass frame
+- Make the arm extend beyond the eye width, and make the lens shrink the eye instead of manifying it
+- Before we proceed, is it possible for chrome/firefox/orion extension to use different icons depending on runtime state? Not just rendering different badges?
+- Take another approach, in a brand new version, draw two eyes, using simply dot in a cycle
+- The shape is right, let's experiment with different outer frame thickness, inner pupil thickness, and distance between the eyes
+- Move the pupil downwards, as if the eye is looking down
+- Make pupil in icon-cat-eye-v14-thin-wide larger
+- In a separate version
+- Larger
+- Move the pupil slightly to the left, as if the eye is looking left down
+- Too much, slightly less left
+- Good, based on icon-cat-eye-v14-thin-wide-large-dot, let's do two alterations: (1) replace the eye with Steve Jobs style glasses, the glass len is the same size and shape like the eye, (2) close the eye, using the same lower half eye frame and draw eyebrows under it, the eyebrows flow naturally along the curviture
+- The glass lens are too close to each other, and there should be a bridge between the lens, use ./glass.jpg as a reference image
+- Could you size the glass version so that the center of the glass align roughly to the center of the eye?
+- Only change size proportionally, don't change the relative size or position of the elements
+- Now work on the closed eye version, Use the exact bottom half shape of the original eye, including their relative position, right now the closed eye is larger and too close to each other
+- No, it's clearly not the same position and shape as the
+- No, it's clearly not the same position and shape as the icon-cat-eye-v14-thin-wide-large-dot, the radius is larger and distance closer on the glass version
+- The center is good, but it appears for the closed eye you are using larger radius still, so that the two closed eyes made contact with each other, but for the original eyes the eyes don't contact
+- The eye brows needs more work, they are tilting randomly and messy
+- Increase the thickness of eyebrow to be the same as eye frame, make the leftmost and rightmost (4 in total) brows slightly longer and curve outwards
+- Oh, revert the thickness, and the curve should be in opposite direction
+- Increase to five lashes each eye
+- SLightly move the closed eye version higher as a whole, it is visually bottom heavy
+- Good, let's using the three as final version. Do these things:
+1. Move the icons to a root level folder
+2. Use icon-cat-eye-v14-thin-wide-large-dot as the desktop icon as well as the extension default icon
+3. Use icon-cat-eye-v14-thin-wide-closed as the stop-recording extension icon
+4. Use icon-cat-eye-v14-thin-wide-glasses with custom glass color fill as the special state extension icon
+- 1. Size and position is off. The eye occupies a tiny corner at the uppoer left of the whole icon
+2. For extension icon and for desktop tray icon, it should have transparent background, only the desktop full sized icon has a opague background
+- 1. The extension's icon16 and icon48 is wrong, almost black, I presume you didn't transform the size properly when casting to a smaller canvas
+2. The open eye shouldn't have opague inner fill
+3. The color of the glass version should be vibrant and opague, and it should have multiple versions corresponding to the different state badges before
+- What is "icon128-special" being used for?
+- Remove it from both generation and from code
+- Change the mixed version to use both colors from notes and lists but on different glass
+- Use #e86886 and #4969F6 as two special colors
+- The eye is too small for tray icon and for extension icon, let's make it larger, extend closely to the border of icon real state
+- Scale all variants (glass and eye) using the exact same ratio, glasses version is wider so make sure it takes the precedence
+- Remove the old extension special badges now that we already use glass color to indicate the state
+- Why is "set only badgeText: ''" still necessary?
+- The visibility is still not great, and I noticed there is a frame around the desktop icon, but other apps don't have similar frame, that noticeably reduces the realstate for icon. Why is that?
+- Make it full canvas
+- Let's shorten the arms of the glass version, so that there's more room to enlarge the all variants, right now the extension icon is still too small to notice
+- Cannot build:
+
+error: proc macro panicked
+    --> apps/desktop/src-tauri/src/main.rs:1793:16
+     |
+1793 |         .build(tauri::generate_context!())
+     |                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: message: icon /Users/xyt/dev/browser-recall/apps/desktop/src-tauri/icons/icon.png is not RGBA
+- There is a way to provide a dark mode and a light mode tray icon to macos? Because I see other apps dynamically change to white or black when the wallpaper changes
+- What do you mean "black artwork"? It is a solit black shape isn't it?
+- Go ahead use template, it shouldn't have partial alpha given we are generating from SVG
+- The desktop full icon is not ideal, the native MacOS icon is rounded rectangle, but our icon is a square, the result is there's a gap between the two shapes and that's filled with uninitialized grey
+- Is this the idiomatic way? Because MacOS could change the icon silhouette any time in the future, we would have to push updates of icon for that. Also, what about Windows icon?
+- Actually, the icon regressed after the rounded shape, now it shows a grey border again. I want you to generate MacOS icon in idiomatic way and see if that improves things
+- The frame is gone, but I noticed the eye color is not pure black, it's slightly greyed out
+- Let's pass the same opaque background to extension icon, because extension icon doesn't have dark mode detection and it looks off on a dark background. Unless Chrome has a similar "template" api?
+- Looks good. I noticed the scroll bar in extension's popup has visible gutter. Can we make the gutter invisible?
+- Let's move the eyes (all variants) slightly higher, change the SVGs only and only generate after I ok it
+- A slight touch higher
+- Cool, go ahead and generate
+- Some of the icons in MacOS icon pack is wrong, the bottom half is truncated
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix them all
+- $gap
+- Fix them all
+- The glass icon conveys poorly on extension's small icon, let's do these:
+- Remove the glass variant icon.
+- Use the background color to indicate special states, use #ffe6f0 for "has snapshots", use #ff5f19 for "has list", when both states are present, render two colors and divide them using vertical line.
+- Now the glass variant is removed, we can enlarge the icon size even further, but let's only do the enlarge to extension icon and trap icon. The full desktop icon looks good in current version.
+- The two-color version is wrong, I misword before, should use a diagonal line to device them
+- Looks ugly, let's use the old approach, use #6932e6 when both states are present. And the internal of the eye should be white uncolored
+- "paper white" to be precise, the exact color as normal background
+- $finish model=GPT-5.5 Codex
+- Add the lesson, and commit demos too

@@ -1,14 +1,14 @@
-import { getBrowserCapabilities } from './browser-capabilities.js';
-
-const FIREFOX_PAGE_MARKER_ICON_SIZES = [16, 48, 128];
-
 export function createBadgeController({
   api = chrome,
-  capabilities = getBrowserCapabilities(),
   logDebug = () => {},
   normalIconPaths,
+  stoppedRecordingIconPaths = normalIconPaths,
+  specialListIconPaths = normalIconPaths,
+  specialNoteIconPaths = normalIconPaths,
+  specialMixedIconPaths = normalIconPaths,
   syncDesktopConnectorPauseState,
   readDesktopValue,
+  readRecordingPausedState = async () => false,
   generateSlugFromUrl,
   pageKey,
   notePrefix,
@@ -19,10 +19,53 @@ export function createBadgeController({
 }) {
   let connectorState = { state: 'starting' };
   let globalConnectorBadgeActive = false;
+  let recordingPaused = false;
+  let recordingPauseHydrated = false;
   let servicePaused = false;
   let servicePauseTitle = 'Browser Recall is paused';
   let spinnerInterval = null;
-  const firefoxPageMarkerIconCache = new Map();
+
+  async function applyRecordingPausedBadge(tabId) {
+    await api.action.setTitle({
+      title: 'Browser Recall recording is paused',
+      ...(tabId ? { tabId } : {}),
+    });
+    await api.action.setBadgeText({ text: '', ...(tabId ? { tabId } : {}) });
+    await api.action.setIcon({
+      path: stoppedRecordingIconPaths,
+      ...(tabId ? { tabId } : {}),
+    });
+  }
+
+  async function applyServicePausedBadge(tabId) {
+    await api.action.setTitle({
+      title: servicePauseTitle,
+      ...(tabId ? { tabId } : {}),
+    });
+    await api.action.setIcon({
+      path: normalIconPaths,
+      ...(tabId ? { tabId } : {}),
+    });
+    await api.action.setBadgeBackgroundColor({
+      color: '#B85040',
+      ...(tabId ? { tabId } : {}),
+    });
+    await api.action.setBadgeText({
+      text: '!',
+      ...(tabId ? { tabId } : {}),
+    });
+  }
+
+  async function hydrateRecordingPauseState() {
+    if (recordingPauseHydrated) return;
+    try {
+      recordingPaused = (await readRecordingPausedState()) === true;
+      recordingPauseHydrated = true;
+      if (recordingPaused) await applyRecordingPausedBadge();
+    } catch (error) {
+      logDebug('[badge] recording pause hydrate failed:', error.message);
+    }
+  }
 
   function isConnectorUsable(connector = connectorState) {
     return (
@@ -76,6 +119,8 @@ export function createBadgeController({
   }
 
   async function clearGlobalConnectorBadge() {
+    await hydrateRecordingPauseState();
+    if (recordingPaused) return;
     if (servicePaused) return;
     await api.action.setTitle({ title: 'Browser Recall' });
     await api.action.setBadgeText({ text: '' });
@@ -97,6 +142,8 @@ export function createBadgeController({
   }
 
   async function applyGlobalConnectorBadge(connector) {
+    await hydrateRecordingPauseState();
+    if (recordingPaused) return;
     if (servicePaused) return;
     await api.action.setTitle({
       title: desktopConnectorBadgeTitle(connector),
@@ -116,6 +163,8 @@ export function createBadgeController({
 
   async function setConnectorState(connector = {}) {
     connectorState = connector;
+    await hydrateRecordingPauseState();
+    if (recordingPaused) return;
     if (servicePaused) return;
     if (shouldShowConnectorBadge(connector)) {
       await applyGlobalConnectorBadge(connector);
@@ -131,14 +180,14 @@ export function createBadgeController({
     tabId,
     { inheritGlobalBadge = false } = {},
   ) {
+    await hydrateRecordingPauseState();
+    if (recordingPaused) {
+      await applyRecordingPausedBadge(tabId);
+      return;
+    }
+
     if (servicePaused) {
-      await api.action.setTitle({ title: servicePauseTitle, tabId });
-      await api.action.setBadgeBackgroundColor({
-        color: '#B85040',
-        tabId,
-      });
-      await api.action.setBadgeText({ text: '!', tabId });
-      await api.action.setIcon({ path: normalIconPaths, tabId });
+      await applyServicePausedBadge(tabId);
       return;
     }
 
@@ -167,94 +216,22 @@ export function createBadgeController({
     await api.action.setIcon({ path: normalIconPaths, tabId });
   }
 
-  async function applyPageMarkerBadge(tabId, color) {
-    if (servicePaused) return;
-    if (capabilities.usesIconPageMarker && supportsIconPageMarker()) {
-      const imageData = await firefoxPageMarkerIconData(color);
-      await api.action.setBadgeText({ text: '', tabId });
-      await api.action.setIcon({ imageData, tabId });
+  function pageMarkerIconPaths({ hasNotes, hasLists } = {}) {
+    if (hasNotes && hasLists) return specialMixedIconPaths;
+    if (hasNotes) return specialNoteIconPaths;
+    if (hasLists) return specialListIconPaths;
+    return normalIconPaths;
+  }
+
+  async function applyPageMarkerBadge(tabId, iconPaths) {
+    await hydrateRecordingPauseState();
+    if (recordingPaused) {
+      await applyRecordingPausedBadge(tabId);
       return;
     }
-    await api.action.setBadgeBackgroundColor({ color, tabId });
-    await api.action.setBadgeText({ text: ' ', tabId });
-  }
-
-  function supportsIconPageMarker() {
-    return (
-      typeof OffscreenCanvas === 'function' ||
-      (typeof document !== 'undefined' &&
-        typeof document.createElement === 'function')
-    );
-  }
-
-  async function firefoxPageMarkerIconData(color) {
-    if (firefoxPageMarkerIconCache.has(color)) {
-      return firefoxPageMarkerIconCache.get(color);
-    }
-    const imageData = {};
-    for (const size of FIREFOX_PAGE_MARKER_ICON_SIZES) {
-      imageData[size] = await drawFirefoxPageMarkerIcon(size, color);
-    }
-    firefoxPageMarkerIconCache.set(color, imageData);
-    return imageData;
-  }
-
-  async function drawFirefoxPageMarkerIcon(size, color) {
-    const canvas =
-      typeof OffscreenCanvas === 'function'
-        ? new OffscreenCanvas(size, size)
-        : document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, size, size);
-    drawBaseIcon(ctx, size);
-    const radius = Math.max(4, Math.round(size * 0.21));
-    const border = Math.max(1, Math.round(size * 0.04));
-    const center = size - radius - border;
-    ctx.fillStyle = 'rgba(15, 15, 13, 0.95)';
-    ctx.beginPath();
-    ctx.arc(center, center, radius + border, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(center, center, radius, 0, Math.PI * 2);
-    ctx.fill();
-    return ctx.getImageData(0, 0, size, size);
-  }
-
-  function drawBaseIcon(ctx, size) {
-    const scale = size / 128;
-    const px = (value) => value * scale;
-    ctx.fillStyle = '#078C9B';
-    ctx.beginPath();
-    ctx.arc(px(64), px(64), px(57), 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = '#F2E8C9';
-    ctx.lineWidth = Math.max(2, px(8));
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(px(43), px(78));
-    ctx.lineTo(px(64), px(52));
-    ctx.lineTo(px(88), px(69));
-    ctx.stroke();
-
-    drawIconNode(ctx, px(43), px(78), px(14), px(5));
-    drawIconNode(ctx, px(64), px(52), px(12), px(4.5));
-    drawIconNode(ctx, px(88), px(69), px(13), px(5));
-  }
-
-  function drawIconNode(ctx, x, y, outerRadius, innerRadius) {
-    ctx.fillStyle = '#F2E8C9';
-    ctx.beginPath();
-    ctx.arc(x, y, outerRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#078C9B';
-    ctx.beginPath();
-    ctx.arc(x, y, innerRadius, 0, Math.PI * 2);
-    ctx.fill();
+    if (servicePaused) return;
+    await api.action.setBadgeText({ text: '', tabId });
+    await api.action.setIcon({ path: iconPaths, tabId });
   }
 
   function isPageBadgeUrl(url) {
@@ -296,9 +273,10 @@ export function createBadgeController({
         await clearPageMarkerBadge(tabId);
         return;
       }
-      const color =
-        hasNotes && hasLists ? '#9C27B0' : hasNotes ? '#4A90D9' : '#4CAF50';
-      await applyPageMarkerBadge(tabId, color);
+      await applyPageMarkerBadge(
+        tabId,
+        pageMarkerIconPaths({ hasNotes, hasLists }),
+      );
     } catch {
       // Non-critical; badge updates should never break navigation.
     }
@@ -373,18 +351,40 @@ export function createBadgeController({
   }
 
   async function setServicePaused({ title } = {}) {
+    await hydrateRecordingPauseState();
     servicePaused = true;
     servicePauseTitle = title || servicePauseTitle;
-    await api.action.setTitle({ title: servicePauseTitle });
-    await api.action.setIcon({ path: normalIconPaths });
-    await api.action.setBadgeBackgroundColor({ color: '#B85040' });
-    await api.action.setBadgeText({ text: '!' });
+    if (recordingPaused) {
+      await applyRecordingPausedBadge();
+      await clearActivePageMarker();
+      return;
+    }
+    await applyServicePausedBadge();
     await clearActivePageMarker();
   }
 
   async function setServiceActive() {
+    await hydrateRecordingPauseState();
     servicePaused = false;
     await clearGlobalConnectorBadge();
+    await setConnectorState(connectorState);
+    if (isConnectorUsable(connectorState)) await refreshActiveTabBadge();
+  }
+
+  async function setRecordingPaused(paused) {
+    recordingPauseHydrated = true;
+    recordingPaused = paused === true;
+    if (recordingPaused) {
+      await applyRecordingPausedBadge();
+      await clearActivePageMarker();
+      return;
+    }
+    if (servicePaused) {
+      await applyServicePausedBadge();
+      await clearActivePageMarker();
+      return;
+    }
+    await api.action.setIcon({ path: normalIconPaths });
     await setConnectorState(connectorState);
     if (isConnectorUsable(connectorState)) await refreshActiveTabBadge();
   }
@@ -430,6 +430,7 @@ export function createBadgeController({
     refreshBadgesForUrls,
     scheduleConnectorBadgeRefresh,
     setConnectorState,
+    setRecordingPaused,
     setServiceActive,
     setServicePaused,
     startSpinnerBadge,

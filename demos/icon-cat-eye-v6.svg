@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Browser Recall curved cat eye icon variant 6">
+  <rect width="128" height="128" rx="28" fill="#f4f0df" />
+  <path
+    d="M14 64C24.8 49.1 41 44 64 44s39.2 5.1 50 20c-10.8 14.9-27 20-50 20S24.8 78.9 14 64Z"
+    fill="#171815"
+  />
+  <path
+    d="M23 64C31.7 53.8 45.4 49 64 49s32.3 4.8 41 15c-8.7 10.2-22.4 15-41 15s-32.3-4.8-41-15Z"
+    fill="#f4f0df"
+  />
+  <rect x="54" y="46" width="20" height="36" rx="10" fill="#171815" />
+</svg>

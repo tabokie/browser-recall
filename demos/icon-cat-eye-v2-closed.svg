@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Browser Recall closed cat eye icon variant 2">
+  <rect width="128" height="128" rx="28" fill="#f4f0df" />
+  <path
+    d="M14 64c0 11 9 20 20 20h60c11 0 20-9 20-20h-5c0 8.3-6.7 15-15 15H34c-8.3 0-15-6.7-15-15Z"
+    fill="#171815"
+  />
+  <path d="M40 80v12" fill="none" stroke="#171815" stroke-width="4" stroke-linecap="round" />
+  <path d="M56 82v12" fill="none" stroke="#171815" stroke-width="4" stroke-linecap="round" />
+  <path d="M72 82v12" fill="none" stroke="#171815" stroke-width="4" stroke-linecap="round" />
+  <path d="M88 80v12" fill="none" stroke="#171815" stroke-width="4" stroke-linecap="round" />
+</svg>

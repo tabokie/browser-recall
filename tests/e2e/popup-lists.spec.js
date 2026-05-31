@@ -697,7 +697,7 @@ test.describe('Popup list chip behavior', () => {
     await expect(popup.locator('.list-chip.selected')).toContainText(listName);
     await expect
       .poll(() => getBadgeForUrl(helper, url))
-      .toMatchObject({ text: ' ', color: [156, 39, 176, 255] });
+      .toMatchObject({ text: '' });
 
     await popup.close();
     await helper.close();
@@ -828,7 +828,7 @@ test.describe('Popup list chip behavior', () => {
 
     await expect
       .poll(() => getBadgeForUrl(helper, url))
-      .toMatchObject({ text: ' ', color: [76, 175, 80, 255] });
+      .toMatchObject({ text: '' });
 
     const popup = await openPopupForUrl(extContext, extensionId, {
       url,
@@ -992,7 +992,7 @@ test.describe('Popup list chip behavior', () => {
     await expect(popup.locator('#pageTitle')).toHaveText('Readable Title');
     await expect
       .poll(() => getBadgeForUrl(helper, url))
-      .toMatchObject({ text: ' ', color: [76, 175, 80, 255] });
+      .toMatchObject({ text: '' });
 
     await popup.close();
     await helper.close();

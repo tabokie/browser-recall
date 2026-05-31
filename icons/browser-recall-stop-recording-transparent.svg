@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Browser Recall transparent closed eyes icon">
+  <g transform="translate(0 -6) translate(64 64) scale(1.34) translate(-64 -64)">
+    <g transform="translate(0 -4)">
+      <path d="M28 64a15 15 0 0 0 30 0" fill="none" stroke="#000000" stroke-width="6" stroke-linecap="butt" />
+      <path d="M70 64a15 15 0 0 0 30 0" fill="none" stroke="#000000" stroke-width="6" stroke-linecap="butt" />
+      <path d="M31 73c-1.1 3.2-2.5 5.9-4.2 8.2" fill="none" stroke="#000000" stroke-width="3.5" stroke-linecap="round" />
+      <path d="M36.5 77c-.6 3-1.4 5.6-2.6 7.8" fill="none" stroke="#000000" stroke-width="3.5" stroke-linecap="round" />
+      <path d="M43 79v6.5" fill="none" stroke="#000000" stroke-width="3.5" stroke-linecap="round" />
+      <path d="M49.5 77c.6 3 1.4 5.6 2.6 7.8" fill="none" stroke="#000000" stroke-width="3.5" stroke-linecap="round" />
+      <path d="M55 73c1.1 3.2 2.5 5.9 4.2 8.2" fill="none" stroke="#000000" stroke-width="3.5" stroke-linecap="round" />
+      <path d="M73 73c-1.1 3.2-2.5 5.9-4.2 8.2" fill="none" stroke="#000000" stroke-width="3.5" stroke-linecap="round" />
+      <path d="M78.5 77c-.6 3-1.4 5.6-2.6 7.8" fill="none" stroke="#000000" stroke-width="3.5" stroke-linecap="round" />
+      <path d="M85 79v6.5" fill="none" stroke="#000000" stroke-width="3.5" stroke-linecap="round" />
+      <path d="M91.5 77c.6 3 1.4 5.6 2.6 7.8" fill="none" stroke="#000000" stroke-width="3.5" stroke-linecap="round" />
+      <path d="M97 73c1.1 3.2 2.5 5.9 4.2 8.2" fill="none" stroke="#000000" stroke-width="3.5" stroke-linecap="round" />
+    </g>
+  </g>
+</svg>

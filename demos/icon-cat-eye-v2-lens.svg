@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Browser Recall lens cat eye icon variant 2">
+  <defs>
+    <g id="eye">
+      <rect x="14" y="44" width="100" height="40" rx="20" fill="#171815" />
+      <rect x="19" y="49" width="90" height="30" rx="15" fill="#f4f0df" />
+      <rect x="54" y="46" width="20" height="36" rx="10" fill="#171815" />
+    </g>
+    <clipPath id="lens-clip">
+      <rect x="34" y="30" width="60" height="68" rx="4" />
+    </clipPath>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="#f4f0df" />
+  <use href="#eye" />
+  <g clip-path="url(#lens-clip)">
+    <use href="#eye" transform="translate(64 64) scale(1.25) translate(-64 -64)" />
+    <rect x="34" y="30" width="60" height="68" fill="#19a7b8" opacity="0.18" />
+  </g>
+  <rect x="34" y="30" width="60" height="68" rx="4" fill="none" stroke="#00aeca" stroke-width="5" />
+</svg>

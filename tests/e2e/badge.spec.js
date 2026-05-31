@@ -18,7 +18,7 @@ async function getBadgeForUrl(helper, url) {
 }
 
 test.describe('Extension badge', () => {
-  test('shows blue dot for page with notes', async ({
+  test('clears badge text for page with notes because the icon carries state', async ({
     extContext,
     extensionId,
     setupDir,
@@ -77,15 +77,13 @@ test.describe('Extension badge', () => {
       return { text, color };
     }, url);
 
-    expect(badge.text).toBe(' ');
-    // Blue: [74, 144, 217, 255] (#4A90D9)
-    expect(badge.color).toEqual([74, 144, 217, 255]);
+    expect(badge.text).toBe('');
 
     await page.close();
     await helper.close();
   });
 
-  test('shows green dot for page pinned in lists', async ({
+  test('clears badge text for page pinned in lists because the icon carries state', async ({
     extContext,
     extensionId,
     setupDir,
@@ -126,9 +124,7 @@ test.describe('Extension badge', () => {
       return { text, color };
     }, url);
 
-    expect(badge.text).toBe(' ');
-    // Green: [76, 175, 80, 255] (#4CAF50)
-    expect(badge.color).toEqual([76, 175, 80, 255]);
+    expect(badge.text).toBe('');
 
     await page.close();
     await helper.close();
@@ -191,14 +187,13 @@ test.describe('Extension badge', () => {
       return { text, color };
     }, url);
 
-    expect(badge.text).toBe(' ');
-    expect(badge.color).toEqual([76, 175, 80, 255]);
+    expect(badge.text).toBe('');
 
     await page.close();
     await helper.close();
   });
 
-  test('shows purple dot for page with both notes and lists', async ({
+  test('clears badge text for page with both notes and lists because the icon carries state', async ({
     extContext,
     extensionId,
     setupDir,
@@ -236,9 +231,7 @@ test.describe('Extension badge', () => {
       return { text, color };
     }, url);
 
-    expect(badge.text).toBe(' ');
-    // Purple: [156, 39, 176, 255] (#9C27B0)
-    expect(badge.color).toEqual([156, 39, 176, 255]);
+    expect(badge.text).toBe('');
 
     await page.close();
     await helper.close();
@@ -278,7 +271,7 @@ test.describe('Extension badge', () => {
 
     const helper = await openHelperPage(extContext, extensionId);
 
-    // Badge should be blue (has snapshot, no list)
+    // Badge text stays empty because the state-colored icon background carries state.
     const badgeBefore = await helper.evaluate(async (pageUrl) => {
       const tabs = await chrome.tabs.query({ url: pageUrl });
       if (!tabs.length) return { text: '', color: '' };
@@ -287,8 +280,7 @@ test.describe('Extension badge', () => {
       const color = await chrome.action.getBadgeBackgroundColor({ tabId });
       return { text, color };
     }, url);
-    expect(badgeBefore.text).toBe(' ');
-    expect(badgeBefore.color).toEqual([74, 144, 217, 255]);
+    expect(badgeBefore.text).toBe('');
 
     // Delete the snapshot
     await helper.evaluate(
@@ -362,7 +354,7 @@ test.describe('Extension badge', () => {
     const helper = await openHelperPage(extContext, extensionId);
     await expect
       .poll(() => getBadgeForUrl(helper, url))
-      .toMatchObject({ text: ' ', color: [74, 144, 217, 255] });
+      .toMatchObject({ text: '' });
 
     const deleteResp = await helper.evaluate(
       (slugToDelete) =>
@@ -444,7 +436,7 @@ test.describe('Extension badge', () => {
     const helper = await openHelperPage(extContext, extensionId);
     await expect
       .poll(() => getBadgeForUrl(helper, url))
-      .toMatchObject({ text: ' ', color: [76, 175, 80, 255] });
+      .toMatchObject({ text: '' });
 
     const deleteResp = await helper.evaluate(() =>
       chrome.runtime.sendMessage({

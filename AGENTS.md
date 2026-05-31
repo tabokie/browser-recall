@@ -64,6 +64,7 @@ Project name: **browser-recall** (display name "Browser Recall"). Version 1.0 ta
 
 ## CSS Lessons
 
+- Inspect generated raster assets at actual target sizes before judging SVG icon changes; 16px toolbar icons and macOS `.icns` slots can diverge from source previews.
 - Use CSS pseudo-element shapes instead of text characters for small icons; text glyphs render inconsistently across fonts/colors.
 - Match container size to visual element size for seamless edges.
 - Avoid unnecessary `flex: 1` chains when content should be content-sized.

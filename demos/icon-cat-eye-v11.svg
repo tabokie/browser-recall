@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Browser Recall full-ended cat eye icon variant 11">
+  <rect width="128" height="128" rx="28" fill="#f4f0df" />
+  <path
+    d="M22 55C31 47 45 44 64 44s33 3 42 11c7 6 7 12 0 18-9 8-23 11-42 11s-33-3-42-11c-7-6-7-12 0-18Z"
+    fill="#171815"
+  />
+  <path
+    d="M34 60C41.1 53.5 51.4 50.5 64 50.5S86.9 53.5 94 60c4.6 4.2 4.6 3.8 0 8-7.1 6.5-17.4 9.5-30 9.5S41.1 74.5 34 68c-4.6-4.2-4.6-3.8 0-8Z"
+    fill="#f4f0df"
+  />
+  <rect x="54" y="46" width="20" height="36" fill="#171815" />
+</svg>

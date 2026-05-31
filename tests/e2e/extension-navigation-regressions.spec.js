@@ -227,7 +227,7 @@ test.describe('extension same-tab navigation regressions', () => {
 
     await expect
       .poll(() => getBadgeForUrl(helper, listedUrl))
-      .toMatchObject({ text: ' ', color: [76, 175, 80, 255] });
+      .toMatchObject({ text: '' });
 
     await page.click('#go');
     await expect(page).toHaveURL(normalUrl);
@@ -291,7 +291,7 @@ test.describe('extension same-tab navigation regressions', () => {
 
     await expect
       .poll(() => getBadgeForUrl(helper, originalUrl))
-      .toMatchObject({ text: ' ', color: [76, 175, 80, 255] });
+      .toMatchObject({ text: '' });
 
     const tabId = await helper.evaluate(async (pageUrl) => {
       const tabs = await chrome.tabs.query({ url: pageUrl });

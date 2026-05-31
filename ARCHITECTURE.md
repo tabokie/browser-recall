@@ -129,6 +129,8 @@ The extension is intentionally thin and no longer owns the main product UI.
 - `apps/extension/savepage-bridge.js` orchestrates snapshot capture.
 - `apps/extension/background.js` buffers semantic connector commands, serves popup requests, manages pairing, and forwards RPC to the daemon. Test-only reset/seed/queue RPC handlers live in `apps/extension/background-test-control.js` and are staged only by the test fixture.
 - `apps/extension/popup.js` is the current-page dashboard backed by daemon RPC; its list picker is a short-lived popup control, not extension persistence.
+- `apps/extension/icon-paths.js` and `apps/extension/badge-controller.js` switch packaged toolbar icons at runtime: the default icon is used for normal capture, the closed-eye icon for session-only recording pause, and state-colored backgrounds indicate special page-marker states.
+- Icon PNGs are generated from root SVG sources by `scripts/generate-icons.mjs`: the full desktop app and extension toolbar icons keep an opaque background, while the desktop tray icon is transparent for macOS template rendering.
 - `apps/extension/extension-surface.css`, `apps/extension/extension-surface.js`, and `apps/extension/extension-ui-tokens.js` keep connector pages, content overlays, and transient error popouts on the shared light paper visual system.
 - `apps/extension/connector/` contains the websocket client, pairing helpers, and command buffer.
 - `apps/extension/options-stub.html` exists only to direct the user to the desktop app.

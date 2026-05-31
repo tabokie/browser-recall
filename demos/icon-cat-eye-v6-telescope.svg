@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Browser Recall telescope cat eye icon variant 6">
+  <defs>
+    <g id="eye">
+      <path
+        d="M14 64C24.8 49.1 41 44 64 44s39.2 5.1 50 20c-10.8 14.9-27 20-50 20S24.8 78.9 14 64Z"
+        fill="#171815"
+      />
+      <path
+        d="M23 64C31.7 53.8 45.4 49 64 49s32.3 4.8 41 15c-8.7 10.2-22.4 15-41 15s-32.3-4.8-41-15Z"
+        fill="#f4f0df"
+      />
+      <rect x="54" y="46" width="20" height="36" rx="10" fill="#171815" />
+    </g>
+    <clipPath id="projected-slice">
+      <rect x="75" y="39" width="35" height="52" rx="5" />
+    </clipPath>
+  </defs>
+
+  <rect width="128" height="128" rx="28" fill="#f4f0df" />
+  <use href="#eye" />
+
+  <path d="M52 48L75 39H110L76 48Z" fill="#25c2d8" opacity="0.52" />
+  <path d="M52 80L75 91H110L76 80Z" fill="#006b7d" opacity="0.45" />
+  <path d="M52 48L75 39" fill="none" stroke="#00aeca" stroke-width="3.5" stroke-linecap="round" />
+  <path d="M76 48L110 39" fill="none" stroke="#00aeca" stroke-width="3.5" stroke-linecap="round" />
+  <path d="M52 80L75 91" fill="none" stroke="#006b7d" stroke-width="3.5" stroke-linecap="round" />
+  <path d="M76 80L110 91" fill="none" stroke="#006b7d" stroke-width="3.5" stroke-linecap="round" />
+
+  <rect x="52" y="48" width="24" height="32" rx="4" fill="#19a7b8" opacity="0.16" />
+  <rect x="52" y="48" width="24" height="32" rx="4" fill="none" stroke="#00aeca" stroke-width="3" />
+
+  <g clip-path="url(#projected-slice)">
+    <use href="#eye" transform="translate(92 66) scale(1.32) translate(-64 -64)" />
+    <rect x="75" y="39" width="35" height="52" fill="#19a7b8" opacity="0.16" />
+  </g>
+  <rect x="75" y="39" width="35" height="52" rx="5" fill="none" stroke="#00aeca" stroke-width="5" />
+</svg>

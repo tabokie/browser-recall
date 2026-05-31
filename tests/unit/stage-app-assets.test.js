@@ -195,17 +195,37 @@ describe('extension staged assets', () => {
     expect(snapshotViewerSource).not.toContain('getSchemePalette');
   });
 
-  it('uses the desktop app icon and no removed down-state icons', () => {
+  it('stages every packaged runtime icon and no removed down-state icons', async () => {
     const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
     stagedDirs.push(outDir);
     stageExtensionAssets(outDir);
 
-    const desktopIcon = readFileSync(
-      join(process.cwd(), 'apps/desktop/src-tauri/icons/icon.png'),
+    const {
+      DEFAULT_ICON_PATHS,
+      SPECIAL_LIST_ICON_PATHS,
+      SPECIAL_MIXED_ICON_PATHS,
+      SPECIAL_NOTE_ICON_PATHS,
+      STOP_RECORDING_ICON_PATHS,
+    } = await import('../../apps/extension/icon-paths.js');
+    const runtimeIconPaths = [
+      DEFAULT_ICON_PATHS,
+      STOP_RECORDING_ICON_PATHS,
+      SPECIAL_LIST_ICON_PATHS,
+      SPECIAL_NOTE_ICON_PATHS,
+      SPECIAL_MIXED_ICON_PATHS,
+    ];
+    const generatedExtensionIcon = readFileSync(
+      join(process.cwd(), 'apps/extension/icons/icon128.png'),
     );
     const extensionIcon = readFileSync(join(outDir, 'icons/icon128.png'));
-    expect(extensionIcon.equals(desktopIcon)).toBe(true);
+    expect(extensionIcon.equals(generatedExtensionIcon)).toBe(true);
+    for (const iconPaths of runtimeIconPaths) {
+      for (const iconPath of Object.values(iconPaths)) {
+        expect(existsSync(join(outDir, iconPath))).toBe(true);
+      }
+    }
     expect(existsSync(join(outDir, 'icons/icon128-down.png'))).toBe(false);
+    expect(existsSync(join(outDir, 'icons/icon128-special.png'))).toBe(false);
   });
 
   it('stages browser API shim before first-party extension entry points', () => {

@@ -8,6 +8,30 @@ const NORMAL_ICON_PATHS = {
   128: 'icons/icon128.png',
 };
 
+const SPECIAL_LIST_ICON_PATHS = {
+  16: 'icons/icon16-special-lists.png',
+  48: 'icons/icon48-special-lists.png',
+  128: 'icons/icon128-special-lists.png',
+};
+
+const SPECIAL_NOTE_ICON_PATHS = {
+  16: 'icons/icon16-special-notes.png',
+  48: 'icons/icon48-special-notes.png',
+  128: 'icons/icon128-special-notes.png',
+};
+
+const SPECIAL_MIXED_ICON_PATHS = {
+  16: 'icons/icon16-special-mixed.png',
+  48: 'icons/icon48-special-mixed.png',
+  128: 'icons/icon128-special-mixed.png',
+};
+
+const STOP_RECORDING_ICON_PATHS = {
+  16: 'icons/icon16-stop-recording.png',
+  48: 'icons/icon48-stop-recording.png',
+  128: 'icons/icon128-stop-recording.png',
+};
+
 function createApi({
   activeTab = { id: 7, url: 'https://example.test/' },
 } = {}) {
@@ -36,11 +60,16 @@ function createController(overrides = {}) {
     api,
     controller: createBadgeController({
       api,
-      capabilities: overrides.capabilities || { usesIconPageMarker: false },
       logDebug: () => {},
       normalIconPaths: NORMAL_ICON_PATHS,
+      stoppedRecordingIconPaths: STOP_RECORDING_ICON_PATHS,
+      specialListIconPaths: SPECIAL_LIST_ICON_PATHS,
+      specialNoteIconPaths: SPECIAL_NOTE_ICON_PATHS,
+      specialMixedIconPaths: SPECIAL_MIXED_ICON_PATHS,
       syncDesktopConnectorPauseState: vi.fn(),
       readDesktopValue: overrides.readDesktopValue || vi.fn(async () => null),
+      readRecordingPausedState:
+        overrides.readRecordingPausedState || vi.fn(async () => false),
       generateSlugFromUrl: (url) => new URL(url).hostname,
       pageKey: (slug) => `page:${slug}`,
       notePrefix: 'note:',
@@ -104,8 +133,8 @@ describe('badge controller', () => {
       text: '!',
       tabId: 12,
     });
-    expect(api.action.setBadgeBackgroundColor).not.toHaveBeenCalledWith({
-      color: '#9C27B0',
+    expect(api.action.setIcon).not.toHaveBeenCalledWith({
+      path: SPECIAL_MIXED_ICON_PATHS,
       tabId: 12,
     });
   });
@@ -125,7 +154,7 @@ describe('badge controller', () => {
     });
   });
 
-  it('applies page marker color from page relations only when connected', async () => {
+  it('applies the mixed special icon without a legacy badge overlay', async () => {
     const { api, controller } = createController({
       readDesktopValue: vi.fn(async () => ({
         childIds: ['note:1'],
@@ -139,17 +168,20 @@ describe('badge controller', () => {
 
     await controller.updateBadgeForTab(22, 'https://example.test/page');
 
-    expect(api.action.setBadgeBackgroundColor).toHaveBeenCalledWith({
-      color: '#9C27B0',
-      tabId: 22,
-    });
     expect(api.action.setBadgeText).toHaveBeenCalledWith({
-      text: ' ',
+      text: '',
       tabId: 22,
     });
+    expect(api.action.setIcon).toHaveBeenCalledWith({
+      path: SPECIAL_MIXED_ICON_PATHS,
+      tabId: 22,
+    });
+    expect(api.action.setBadgeBackgroundColor).not.toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 22 }),
+    );
   });
 
-  it('uses resolved tab identity before applying a Chrome-style page marker', async () => {
+  it('uses resolved tab identity before applying a list special icon', async () => {
     const readDesktopValue = vi.fn(async (key) =>
       key === 'page:original.example.test'
         ? {
@@ -174,12 +206,8 @@ describe('badge controller', () => {
     await controller.refreshActiveTabBadge();
 
     expect(readDesktopValue).toHaveBeenCalledWith('page:original.example.test');
-    expect(api.action.setBadgeBackgroundColor).toHaveBeenCalledWith({
-      color: '#4CAF50',
-      tabId: 22,
-    });
     expect(api.action.setBadgeText).toHaveBeenCalledWith({
-      text: ' ',
+      text: '',
       tabId: 22,
     });
     expect(api.action.setIcon).not.toHaveBeenCalledWith(
@@ -188,6 +216,10 @@ describe('badge controller', () => {
         tabId: 22,
       }),
     );
+    expect(api.action.setIcon).toHaveBeenCalledWith({
+      path: SPECIAL_LIST_ICON_PATHS,
+      tabId: 22,
+    });
   });
 
   it('refreshes the active page marker after clearing the global connected badge', async () => {
@@ -207,7 +239,7 @@ describe('badge controller', () => {
       ([details]) => details.text === '' && details.tabId == null,
     );
     const pageMarkerIndex = api.action.setBadgeText.mock.calls.findIndex(
-      ([details]) => details.text === ' ' && details.tabId === 7,
+      ([details]) => details.text === '' && details.tabId === 7,
     );
     expect(globalClearIndex).toBeGreaterThanOrEqual(0);
     expect(pageMarkerIndex).toBeGreaterThan(globalClearIndex);
@@ -227,13 +259,17 @@ describe('badge controller', () => {
 
     await controller.updateBadgeForTab(27, 'https://example.test/page');
 
-    expect(api.action.setBadgeBackgroundColor).toHaveBeenCalledWith({
-      color: '#4A90D9',
+    expect(api.action.setBadgeText).toHaveBeenCalledWith({
+      text: '',
+      tabId: 27,
+    });
+    expect(api.action.setIcon).toHaveBeenCalledWith({
+      path: SPECIAL_NOTE_ICON_PATHS,
       tabId: 27,
     });
   });
 
-  it('uses combined marker color for a list and visible snapshot cleanup ref', async () => {
+  it('uses the mixed special icon for a list and visible snapshot cleanup ref', async () => {
     const { api, controller } = createController({
       readDesktopValue: vi.fn(async () => ({
         childIds: ['snapshot:example.test-1710000000000'],
@@ -247,48 +283,24 @@ describe('badge controller', () => {
 
     await controller.updateBadgeForTab(28, 'https://example.test/page');
 
-    expect(api.action.setBadgeBackgroundColor).toHaveBeenCalledWith({
-      color: '#9C27B0',
+    expect(api.action.setBadgeText).toHaveBeenCalledWith({
+      text: '',
+      tabId: 28,
+    });
+    expect(api.action.setIcon).toHaveBeenCalledWith({
+      path: SPECIAL_MIXED_ICON_PATHS,
       tabId: 28,
     });
   });
 
-  it('generates Firefox page marker icons without fetching extension resources', async () => {
-    const originalOffscreenCanvas = globalThis.OffscreenCanvas;
+  it('uses the packaged special icon without fetching extension resources', async () => {
     const originalFetch = globalThis.fetch;
     const fetchMock = vi.fn(async () => {
       throw new Error('scheme handler failed');
     });
-
-    class FakeOffscreenCanvas {
-      constructor(width, height) {
-        this.width = width;
-        this.height = height;
-      }
-
-      getContext() {
-        return {
-          beginPath: vi.fn(),
-          arc: vi.fn(),
-          clearRect: vi.fn(),
-          fill: vi.fn(),
-          lineTo: vi.fn(),
-          moveTo: vi.fn(),
-          stroke: vi.fn(),
-          getImageData: vi.fn(() => ({
-            width: this.width,
-            height: this.height,
-            data: new Uint8ClampedArray(this.width * this.height * 4),
-          })),
-        };
-      }
-    }
-
-    globalThis.OffscreenCanvas = FakeOffscreenCanvas;
     globalThis.fetch = fetchMock;
     try {
       const { api, controller } = createController({
-        capabilities: { usesIconPageMarker: true },
         readDesktopValue: vi.fn(async () => ({
           childIds: ['note:1'],
           parentIds: [],
@@ -307,17 +319,147 @@ describe('badge controller', () => {
         tabId: 26,
       });
       expect(api.action.setIcon).toHaveBeenCalledWith({
-        imageData: {
-          16: expect.objectContaining({ width: 16, height: 16 }),
-          48: expect.objectContaining({ width: 48, height: 48 }),
-          128: expect.objectContaining({ width: 128, height: 128 }),
-        },
+        path: SPECIAL_NOTE_ICON_PATHS,
         tabId: 26,
       });
     } finally {
-      globalThis.OffscreenCanvas = originalOffscreenCanvas;
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('uses the stopped recording icon while recording is paused', async () => {
+    const { api, controller } = createController({
+      readDesktopValue: vi.fn(async () => ({
+        childIds: ['note:1'],
+        parentIds: [],
+      })),
+    });
+    await controller.setConnectorState({
+      state: 'connected',
+      deviceId: 'device-1',
+    });
+    api.action.setBadgeText.mockClear();
+    api.action.setIcon.mockClear();
+
+    await controller.setRecordingPaused(true);
+    await controller.updateBadgeForTab(7, 'https://example.test/page');
+
+    expect(api.action.setIcon).toHaveBeenCalledWith({
+      path: STOP_RECORDING_ICON_PATHS,
+    });
+    expect(api.action.setIcon).toHaveBeenCalledWith({
+      path: STOP_RECORDING_ICON_PATHS,
+      tabId: 7,
+    });
+    expect(api.action.setIcon).not.toHaveBeenCalledWith({
+      path: SPECIAL_NOTE_ICON_PATHS,
+      tabId: 7,
+    });
+  });
+
+  it('replaces a stale special icon on a background tab while recording is paused', async () => {
+    const { api, controller } = createController({
+      activeTab: { id: 7, url: 'https://active.example.test/' },
+      readDesktopValue: vi.fn(async () => ({
+        childIds: ['note:1'],
+        parentIds: [],
+      })),
+    });
+    await controller.setConnectorState({
+      state: 'connected',
+      deviceId: 'device-1',
+    });
+    await controller.updateBadgeForTab(12, 'https://example.test/page');
+    expect(api.action.setIcon).toHaveBeenCalledWith({
+      path: SPECIAL_NOTE_ICON_PATHS,
+      tabId: 12,
+    });
+    api.action.setIcon.mockClear();
+
+    await controller.setRecordingPaused(true);
+    await controller.updateBadgeForTab(12, 'https://example.test/page');
+
+    expect(api.action.setIcon).toHaveBeenCalledWith({
+      path: STOP_RECORDING_ICON_PATHS,
+      tabId: 12,
+    });
+    expect(api.action.setIcon).not.toHaveBeenCalledWith({
+      path: SPECIAL_NOTE_ICON_PATHS,
+      tabId: 12,
+    });
+  });
+
+  it('hydrates recording pause state before startup connector badge refreshes', async () => {
+    const { api, controller } = createController({
+      readRecordingPausedState: vi.fn(async () => true),
+      readDesktopValue: vi.fn(async () => ({
+        childIds: ['note:1'],
+        parentIds: [],
+      })),
+    });
+
+    await controller.setConnectorState({
+      state: 'connected',
+      deviceId: 'device-1',
+    });
+    await controller.updateBadgeForTab(7, 'https://example.test/page');
+
+    expect(api.action.setTitle).toHaveBeenCalledWith({
+      title: 'Browser Recall recording is paused',
+    });
+    expect(api.action.setIcon).toHaveBeenCalledWith({
+      path: STOP_RECORDING_ICON_PATHS,
+    });
+    expect(api.action.setIcon).toHaveBeenCalledWith({
+      path: STOP_RECORDING_ICON_PATHS,
+      tabId: 7,
+    });
+    expect(api.action.setIcon).not.toHaveBeenCalledWith({
+      path: SPECIAL_NOTE_ICON_PATHS,
+      tabId: 7,
+    });
+  });
+
+  it('keeps the recording pause icon when service pause starts while recording is paused', async () => {
+    const { api, controller } = createController();
+
+    await controller.setRecordingPaused(true);
+    api.action.setIcon.mockClear();
+    api.action.setBadgeText.mockClear();
+
+    await controller.setServicePaused({ title: 'Storage full' });
+
+    expect(api.action.setIcon).toHaveBeenCalledWith({
+      path: STOP_RECORDING_ICON_PATHS,
+    });
+    expect(api.action.setBadgeText).toHaveBeenCalledWith({ text: '' });
+    expect(api.action.setIcon).not.toHaveBeenCalledWith({
+      path: NORMAL_ICON_PATHS,
+    });
+    expect(api.action.setBadgeText).not.toHaveBeenCalledWith({ text: '!' });
+  });
+
+  it('restores the service pause badge when recording resumes during service pause', async () => {
+    const { api, controller } = createController();
+
+    await controller.setServicePaused({ title: 'Storage full' });
+    await controller.setRecordingPaused(true);
+    api.action.setIcon.mockClear();
+    api.action.setBadgeText.mockClear();
+    api.action.setTitle.mockClear();
+
+    await controller.setRecordingPaused(false);
+
+    expect(api.action.setIcon).toHaveBeenCalledWith({
+      path: NORMAL_ICON_PATHS,
+    });
+    expect(api.action.setBadgeBackgroundColor).toHaveBeenCalledWith({
+      color: '#B85040',
+    });
+    expect(api.action.setBadgeText).toHaveBeenCalledWith({ text: '!' });
+    expect(api.action.setTitle).toHaveBeenCalledWith({
+      title: 'Storage full',
+    });
   });
 
   it('leaves the global badge unchanged during startup or connecting without offline evidence', async () => {
