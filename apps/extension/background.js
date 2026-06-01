@@ -1000,6 +1000,7 @@ chrome.commands.onCommand.addListener(async (command) => {
         .catch(() => {});
     } catch (error) {
       logDebug(`[${command}] ERROR:`, error.message, error);
+      await notifyTabUserActionError(tab.id, error, 'Like failed');
     }
   }
 });

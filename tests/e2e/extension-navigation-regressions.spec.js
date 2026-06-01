@@ -98,6 +98,13 @@ async function waitForContentScript(helper, page, url) {
   throw new Error(`content script did not load for ${url}`);
 }
 
+async function countReloadWarnings(page) {
+  return page
+    .locator('[aria-label*="reload the page"]')
+    .count()
+    .catch(() => 0);
+}
+
 test.describe('extension same-tab navigation regressions', () => {
   test('records a new page visit after same-tab history navigation', async ({
     extContext,
@@ -488,6 +495,109 @@ test.describe('extension same-tab navigation regressions', () => {
 
     await expect(page.locator('[aria-label*="reload the page"]')).toBeVisible();
     await expect(page.locator('#portal-highlight-overlay')).toHaveCount(0);
+
+    await page.close();
+    await helper.close();
+  });
+
+  test('passive page activity failure after extension reload does not show reload warning', async ({
+    extContext,
+    extensionId,
+    localServer,
+  }) => {
+    localServer.addPage('/passive-runtime-failure', {
+      title: 'Passive Runtime Failure',
+      body: '<main><p>Passive runtime failure page</p></main>',
+    });
+    const url = localServer.url('/passive-runtime-failure');
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await waitForContentScript(helper, page, url);
+    await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'ISOLATED',
+        func: () => {
+          chrome.runtime.sendMessage = () =>
+            Promise.reject(
+              new Error('Extension context invalidated. Please refresh.'),
+            );
+        },
+      });
+    }, url);
+
+    await page.reload();
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(300);
+
+    expect(await countReloadWarnings(page)).toBe(0);
+
+    await page.close();
+    await helper.close();
+  });
+
+  test('successful like command after extension reload does not warn on stale page channel or refresh', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    localServer.addPage('/like-runtime-failure', {
+      title: 'Like Runtime Failure',
+      body: '<main><p>Like runtime failure page</p></main>',
+    });
+    const url = localServer.url('/like-runtime-failure');
+    const slug = getSlugForUrl(url);
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await waitForContentScript(helper, page, url);
+    await helper.evaluate(async (pageUrl) => {
+      const [tab] = await chrome.tabs.query({ url: pageUrl });
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'ISOLATED',
+        func: () => {
+          chrome.runtime.sendMessage = () =>
+            Promise.reject(
+              new Error('Extension context invalidated. Please refresh.'),
+            );
+        },
+      });
+    }, url);
+    await page.bringToFront();
+
+    const commandResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'triggerCommandForTest',
+        command: 'like-page',
+      }),
+    );
+    expect(commandResp.success).toBe(true);
+
+    await page.waitForTimeout(300);
+    expect(await countReloadWarnings(page)).toBe(0);
+    await page.reload();
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(300);
+    expect(await countReloadWarnings(page)).toBe(0);
+
+    const pageEntity = await helper.evaluate(
+      (key) => chrome.runtime.sendMessage({ action: 'readDesktopValue', key }),
+      `page:${slug}`,
+    );
+    expect(pageEntity?.value?.likes || 0).toBe(1);
 
     await page.close();
     await helper.close();

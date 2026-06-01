@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { generateSlugFromUrl } from '../../apps/extension/utils.js';
+import {
+  canonicalizePageRequest,
+  canonicalizePageUrl,
+  generateSlugFromUrl,
+} from '../../apps/extension/utils.js';
 
 describe('generateSlugFromUrl', () => {
   it('produces a slug from a simple URL', () => {
@@ -16,6 +20,26 @@ describe('generateSlugFromUrl', () => {
   it('differentiates URLs with different query params', () => {
     const a = generateSlugFromUrl('https://example.com/page?a=1');
     const b = generateSlugFromUrl('https://example.com/page?a=2');
+    expect(a).not.toBe(b);
+  });
+
+  it('ignores underscore-prefixed query params for page identity', () => {
+    const a = generateSlugFromUrl(
+      'https://www.douban.com/people/49804423/status/8969603475/?_spm_id=NDk4MDQ0MjM&dt_dapp=1&_i=0303152dQy1M97,0303244dQy1M97',
+    );
+    const b = generateSlugFromUrl(
+      'https://www.douban.com/people/49804423/status/8969603475/?_spm_id=NDk4MDQ0MjM&dt_dapp=1&_i=0303244dQy1M97,0303254dQy1M97',
+    );
+    expect(a).toBe(b);
+  });
+
+  it('keeps ordinary query params in page identity', () => {
+    const a = generateSlugFromUrl(
+      'https://example.com/page?article=1&_trace=old',
+    );
+    const b = generateSlugFromUrl(
+      'https://example.com/page?article=2&_trace=new',
+    );
     expect(a).not.toBe(b);
   });
 
@@ -38,6 +62,31 @@ describe('generateSlugFromUrl', () => {
   it('is deterministic', () => {
     const url = 'https://example.com/test?q=hello';
     expect(generateSlugFromUrl(url)).toBe(generateSlugFromUrl(url));
+  });
+});
+
+describe('canonicalizePageUrl', () => {
+  it('removes only underscore-prefixed query params', () => {
+    expect(
+      canonicalizePageUrl('https://example.com/page?_trace=old&a=1&_i=x'),
+    ).toBe('https://example.com/page?a=1');
+  });
+
+  it('canonicalizes page URL fields in extension desktop requests', () => {
+    expect(
+      canonicalizePageRequest({
+        url: 'https://example.com/page?_trace=old&a=1',
+        referrer: 'https://example.com/ref?_i=x',
+        urls: [
+          'https://example.com/list?_spm_id=x&keep=1',
+          'objects/notes/note.json',
+        ],
+      }),
+    ).toEqual({
+      url: 'https://example.com/page?a=1',
+      referrer: 'https://example.com/ref',
+      urls: ['https://example.com/list?keep=1', 'objects/notes/note.json'],
+    });
   });
 });
 

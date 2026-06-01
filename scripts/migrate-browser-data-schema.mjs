@@ -50,6 +50,7 @@ for (let index = 0; index < args.length; index += 1) {
 const operations = [];
 const writes = new Map();
 const removals = new Set();
+const permanentDeleteKeyMoves = new Map();
 
 function shard(value) {
   return createHash('sha256').update(value).digest('hex').slice(0, 2);
@@ -96,13 +97,16 @@ function queueWrite(path, content, reason) {
 }
 
 function queueRemove(path, reason) {
-  if (!exists(path)) return;
+  if (!exists(path) && !writes.has(path)) return;
+  writes.delete(path);
   removals.add(path);
   operations.push({ type: 'remove', path, reason });
 }
 
 function queueCopyFile(from, to, transform, reason) {
-  const input = readFileSync(from, 'utf8');
+  const input = writes.has(from)
+    ? writes.get(from)
+    : readFileSync(from, 'utf8');
   const output = transform ? transform(input, from) : input;
   queueWrite(
     to,
@@ -144,6 +148,90 @@ function normalizeArtifactPath(path) {
   return path;
 }
 
+function generateSlug(text, hashInput) {
+  if (!text || text.trim() === '') {
+    throw new Error('generateSlug: text must be non-empty');
+  }
+  const base = text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .substring(0, 30)
+    .replace(/-+$/, '');
+
+  let hash = 0;
+  for (let index = 0; index < hashInput.length; index += 1) {
+    hash = ((hash << 5) - hash + hashInput.charCodeAt(index)) | 0;
+  }
+  return `${base}-${Math.abs(hash).toString(36)}`.substring(0, 80);
+}
+
+function pageIdentityHashInput(url) {
+  const parsed = new URL(url);
+  const keptParams = [];
+  let removedParam = false;
+  for (const [key, value] of parsed.searchParams.entries()) {
+    if (key.startsWith('_')) {
+      removedParam = true;
+      continue;
+    }
+    keptParams.push([key, value]);
+  }
+  if (!removedParam) return url;
+  parsed.search = '';
+  for (const [key, value] of keptParams) {
+    parsed.searchParams.append(key, value);
+  }
+  return parsed.href;
+}
+
+function slugTextFromUrl(url) {
+  const parsed = new URL(url);
+  let domain = parsed.hostname.toLowerCase();
+  if (domain.startsWith('www.')) domain = domain.slice(4);
+  const lastDot = domain.lastIndexOf('.');
+  if (lastDot > 0) domain = domain.slice(0, lastDot);
+  return domain + parsed.pathname;
+}
+
+function generateSlugFromUrl(url) {
+  return generateSlug(slugTextFromUrl(url), pageIdentityHashInput(url));
+}
+
+function generateRawSlugFromUrl(url) {
+  return generateSlug(slugTextFromUrl(url), url);
+}
+
+function canonicalizePageUrl(url) {
+  if (typeof url !== 'string') return url;
+  try {
+    return pageIdentityHashInput(url);
+  } catch {
+    return url;
+  }
+}
+
+function snapshotStemFromPath(path) {
+  if (typeof path !== 'string') return null;
+  const normalized = normalizeArtifactPath(path);
+  if (!normalized.startsWith('objects/snapshots/')) return null;
+  return normalized.slice('objects/snapshots/'.length).split('/').pop() || null;
+}
+
+function splitSnapshotStem(stem) {
+  if (typeof stem !== 'string') return null;
+  const lastDash = stem.lastIndexOf('-');
+  if (lastDash <= 0) return null;
+  const timestamp = stem.slice(lastDash + 1);
+  if (!/^\d+$/.test(timestamp)) return null;
+  return { slug: stem.slice(0, lastDash), timestamp };
+}
+
+function snapshotPathForSlug(slug, timestamp, extension = '') {
+  const stem = `${slug}-${timestamp}`;
+  return `objects/snapshots/${shard(stem)}/${stem}${extension}`;
+}
+
 function normalizePinEntry(entry) {
   if (entry.action !== 'pin_to_list' && entry.action !== 'unpin_from_list') {
     return;
@@ -159,7 +247,7 @@ function normalizePinEntry(entry) {
   const titles = [];
   rawUrls.forEach((url, index) => {
     if (typeof url !== 'string') return;
-    const normalizedUrl = normalizeArtifactPath(url);
+    const normalizedUrl = canonicalizePageUrl(normalizeArtifactPath(url));
     urls.push(normalizedUrl);
     if (entry.action === 'pin_to_list') {
       if (Array.isArray(rawTitles)) {
@@ -203,9 +291,39 @@ function normalizeListView(raw) {
   return `${JSON.stringify(list, null, 2)}\n`;
 }
 
+function normalizeNoteObject(raw) {
+  const note = JSON.parse(raw);
+  if (typeof note.url === 'string') {
+    note.url = canonicalizePageUrl(note.url);
+  }
+  return `${JSON.stringify(note, null, 2)}\n`;
+}
+
+function normalizeManifestView(raw, path) {
+  if (!path.endsWith('orphaned.json')) return raw;
+  const orphaned = JSON.parse(raw);
+  if (Array.isArray(orphaned.entries)) {
+    for (const entry of orphaned.entries) {
+      if (typeof entry.url === 'string') {
+        entry.url = canonicalizePageUrl(entry.url);
+      }
+    }
+  }
+  return `${JSON.stringify(orphaned, null, 2)}\n`;
+}
+
 function normalizeLogEntry(entry) {
   delete entry.checkpoint;
   delete entry.bodyPreview;
+  if (typeof entry.url === 'string') entry.url = canonicalizePageUrl(entry.url);
+  if (typeof entry.referrerUrl === 'string') {
+    entry.referrerUrl = canonicalizePageUrl(entry.referrerUrl);
+  }
+  if (entry.action === 'permanent_delete' && Array.isArray(entry.keys)) {
+    entry.keys = entry.keys.map(
+      (key) => permanentDeleteKeyMoves.get(key) || key,
+    );
+  }
   normalizePinEntry(entry);
   if (entry.action === 'add_rule') {
     normalizeRuleConfig(entry.rule);
@@ -213,6 +331,20 @@ function normalizeLogEntry(entry) {
   for (const key of ['path', 'oldPath']) {
     if (entry[key] !== undefined)
       entry[key] = normalizeArtifactPath(entry[key]);
+  }
+  if (
+    ['create_snapshot', 'delete_snapshot', 'restore_snapshot'].includes(
+      entry.action,
+    ) &&
+    typeof entry.url === 'string' &&
+    typeof entry.path === 'string'
+  ) {
+    const stem = snapshotStemFromPath(entry.path);
+    const parts = splitSnapshotStem(stem);
+    if (parts) {
+      const slug = generateSlugFromUrl(entry.url);
+      entry.path = snapshotPathForSlug(slug, parts.timestamp);
+    }
   }
   return entry;
 }
@@ -285,34 +417,279 @@ function copyDirectoryFiles(
   }
 }
 
+function detectsUrlIdentityChangeInEntry(entry) {
+  for (const key of ['url', 'referrerUrl']) {
+    if (
+      typeof entry[key] === 'string' &&
+      canonicalizePageUrl(entry[key]) !== entry[key]
+    ) {
+      return true;
+    }
+  }
+  if (Array.isArray(entry.urls)) {
+    return entry.urls.some(
+      (url) => typeof url === 'string' && canonicalizePageUrl(url) !== url,
+    );
+  }
+  if (Array.isArray(entry.items)) {
+    return entry.items.some(
+      (url) => typeof url === 'string' && canonicalizePageUrl(url) !== url,
+    );
+  }
+  return false;
+}
+
+function urlIdentityMigrationNeeded() {
+  for (const logsRoot of [join(root, 'data', 'logs'), join(root, 'logs')]) {
+    for (const file of walkFiles(logsRoot)) {
+      if (extname(file) !== '.jsonl') continue;
+      const raw = readFileSync(file, 'utf8');
+      for (const [index, line] of raw.split('\n').entries()) {
+        if (!line.trim()) continue;
+        let entry;
+        try {
+          entry = JSON.parse(line);
+        } catch (error) {
+          throw new Error(`${file}:${index + 1}: ${error.message}`);
+        }
+        if (detectsUrlIdentityChangeInEntry(entry)) return true;
+      }
+    }
+  }
+  for (const file of walkFiles(join(root, 'views', 'pages'))) {
+    if (extname(file) !== '.json') continue;
+    const page = readJson(file);
+    if (
+      typeof page?.url === 'string' &&
+      canonicalizePageUrl(page.url) !== page.url
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function collectSnapshotMovesFromLogs() {
+  const moves = new Map();
+  for (const logsRoot of [join(root, 'data', 'logs'), join(root, 'logs')]) {
+    for (const file of walkFiles(logsRoot)) {
+      if (extname(file) !== '.jsonl') continue;
+      const raw = readFileSync(file, 'utf8');
+      for (const [index, line] of raw.split('\n').entries()) {
+        if (!line.trim()) continue;
+        let original;
+        let normalized;
+        try {
+          original = JSON.parse(line);
+          normalized = normalizeLogEntry(JSON.parse(line));
+        } catch (error) {
+          throw new Error(`${file}:${index + 1}: ${error.message}`);
+        }
+        if (
+          !['create_snapshot', 'delete_snapshot', 'restore_snapshot'].includes(
+            original.action,
+          ) ||
+          typeof original.path !== 'string' ||
+          typeof normalized.path !== 'string'
+        ) {
+          continue;
+        }
+        const fromStem = snapshotStemFromPath(original.path);
+        const toStem = snapshotStemFromPath(normalized.path);
+        if (!fromStem || !toStem || fromStem === toStem) continue;
+        moves.set(fromStem, toStem);
+      }
+    }
+  }
+  return moves;
+}
+
+function collectPageMovesFromLogs() {
+  const moves = new Map();
+  const visitUrl = (url) => {
+    if (typeof url !== 'string') return;
+    const canonicalUrl = canonicalizePageUrl(url);
+    if (canonicalUrl === url) return;
+    moves.set(generateRawSlugFromUrl(url), generateSlugFromUrl(url));
+  };
+  for (const logsRoot of [join(root, 'data', 'logs'), join(root, 'logs')]) {
+    for (const file of walkFiles(logsRoot)) {
+      if (extname(file) !== '.jsonl') continue;
+      const raw = readFileSync(file, 'utf8');
+      for (const [index, line] of raw.split('\n').entries()) {
+        if (!line.trim()) continue;
+        let entry;
+        try {
+          entry = JSON.parse(line);
+        } catch (error) {
+          throw new Error(`${file}:${index + 1}: ${error.message}`);
+        }
+        visitUrl(entry.url);
+        visitUrl(entry.referrerUrl);
+        if (Array.isArray(entry.urls)) {
+          for (const url of entry.urls) visitUrl(url);
+        }
+        if (Array.isArray(entry.items)) {
+          for (const url of entry.items) visitUrl(url);
+        }
+      }
+    }
+  }
+  return moves;
+}
+
+function preparePermanentDeleteKeyMoves(pageMoves, snapshotMoves) {
+  permanentDeleteKeyMoves.clear();
+  for (const [fromSlug, toSlug] of pageMoves) {
+    permanentDeleteKeyMoves.set(`page:${fromSlug}`, `page:${toSlug}`);
+  }
+  for (const [fromStem, toStem] of snapshotMoves) {
+    permanentDeleteKeyMoves.set(`snapshot:${fromStem}`, `snapshot:${toStem}`);
+    const fromParts = splitSnapshotStem(fromStem);
+    const toParts = splitSnapshotStem(toStem);
+    if (fromParts && toParts) {
+      permanentDeleteKeyMoves.set(
+        `page:${fromParts.slug}`,
+        `page:${toParts.slug}`,
+      );
+    }
+  }
+}
+
+function transformPageCheckpoint(raw, fromSlug, toSlug) {
+  const page = JSON.parse(raw);
+  page.slug = toSlug;
+  if (typeof page.url === 'string') {
+    page.url = canonicalizePageUrl(page.url);
+  }
+  if (Array.isArray(page.parentIds)) {
+    page.parentIds = page.parentIds.map((id) =>
+      id === `page:${fromSlug}` ? `page:${toSlug}` : id,
+    );
+  }
+  if (Array.isArray(page.childIds)) {
+    page.childIds = page.childIds.map((id) =>
+      id === `page:${fromSlug}` ? `page:${toSlug}` : id,
+    );
+  }
+  return `${JSON.stringify(page, null, 2)}\n`;
+}
+
+function planCanonicalPageCheckpointMigration() {
+  for (const file of walkFiles(join(root, 'views', 'pages'))) {
+    if (extname(file) !== '.json') continue;
+    const page = readJson(file);
+    if (typeof page?.url !== 'string') continue;
+    const canonicalUrl = canonicalizePageUrl(page.url);
+    const toSlug = generateSlugFromUrl(canonicalUrl);
+    const fromSlug =
+      page.slug ||
+      file
+        .split('/')
+        .pop()
+        .replace(/\.json$/, '');
+    if (fromSlug === toSlug && page.url === canonicalUrl) continue;
+    queueWrite(
+      join(root, 'views', 'pages', shard(toSlug), `${toSlug}.json`),
+      transformPageCheckpoint(readFileSync(file, 'utf8'), fromSlug, toSlug),
+      'page checkpoint canonical slug rewrite',
+    );
+    queueRemove(file, 'remove non-canonical page checkpoint');
+  }
+}
+
+function queueRemoveFilesInDirectory(path, reason, filter = () => true) {
+  for (const file of walkFiles(path)) {
+    const rel = relative(path, file);
+    if (filter(rel)) queueRemove(file, reason);
+  }
+}
+
+function planReplayDerivedCheckpointRebuild() {
+  queueRemoveFilesInDirectory(
+    join(root, 'views', 'pages'),
+    'remove replay-derived page checkpoints for URL identity rebuild',
+    (rel) => extname(rel) === '.json',
+  );
+  queueRemoveFilesInDirectory(
+    join(root, 'views', 'lists'),
+    'remove replay-derived list checkpoints for URL identity rebuild',
+    (rel) => extname(rel) === '.json',
+  );
+  for (const name of [
+    'list-order.json',
+    'list-name-to-id.json',
+    'orphaned.json',
+    'replay-progress.json',
+  ]) {
+    queueRemove(
+      join(root, 'views', 'manifest', name),
+      'remove replay-derived manifest checkpoint for URL identity rebuild',
+    );
+  }
+}
+
+function planSnapshotSidecarMoves(snapshotMoves) {
+  for (const [fromStem, toStem] of snapshotMoves) {
+    for (const extension of ['.html', '.md']) {
+      const from = join(
+        root,
+        'objects',
+        'snapshots',
+        shard(fromStem),
+        `${fromStem}${extension}`,
+      );
+      if (!exists(from) && !writes.has(from)) continue;
+      const to = join(
+        root,
+        'objects',
+        'snapshots',
+        shard(toStem),
+        `${toStem}${extension}`,
+      );
+      queueCopyFile(from, to, null, 'snapshot sidecar canonical slug rewrite');
+      queueRemove(from, 'remove non-canonical snapshot sidecar');
+    }
+  }
+}
+
 function planMigration() {
   if (!exists(root)) {
     throw new Error(`Data root does not exist: ${root}`);
   }
+  const pageMoves = collectPageMovesFromLogs();
+  const snapshotMoves = collectSnapshotMovesFromLogs();
+  preparePermanentDeleteKeyMoves(pageMoves, snapshotMoves);
+  const rebuildForUrlIdentity =
+    urlIdentityMigrationNeeded() || snapshotMoves.size > 0;
   const migratesLegacyCheckpoints =
     exists(join(root, 'pages')) || exists(join(root, 'data', 'logs'));
 
-  copyDirectoryFiles(
-    join(root, 'pages'),
-    join(root, 'views', 'pages'),
-    (rel) => {
-      const slug = rel.replace(/\.json$/, '');
-      return join(shard(slug), `${slug}.json`);
-    },
-    null,
-    'page checkpoint shard',
-    (rel) => extname(rel) === '.json',
-  );
+  if (!rebuildForUrlIdentity) {
+    copyDirectoryFiles(
+      join(root, 'pages'),
+      join(root, 'views', 'pages'),
+      (rel) => {
+        const slug = rel.replace(/\.json$/, '');
+        return join(shard(slug), `${slug}.json`);
+      },
+      null,
+      'page checkpoint shard',
+      (rel) => extname(rel) === '.json',
+    );
+  }
   queueRemove(join(root, 'pages'), 'remove old page checkpoint directory');
 
-  copyDirectoryFiles(
-    join(root, 'lists'),
-    join(root, 'views', 'lists'),
-    null,
-    normalizeListView,
-    'list view move',
-    (rel) => extname(rel) === '.json',
-  );
+  if (!rebuildForUrlIdentity) {
+    copyDirectoryFiles(
+      join(root, 'lists'),
+      join(root, 'views', 'lists'),
+      null,
+      normalizeListView,
+      'list view move',
+      (rel) => extname(rel) === '.json',
+    );
+  }
   queueRemove(join(root, 'lists'), 'remove old list view directory');
 
   const oldSettings = join(root, 'manifest', 'settings.json');
@@ -342,7 +719,7 @@ function planMigration() {
     queueCopyFile(
       file,
       join(root, 'views', 'manifest', outputName),
-      null,
+      normalizeManifestView,
       'manifest view move',
     );
   }
@@ -366,14 +743,17 @@ function planMigration() {
     queueRemove(oldReplayProgress, 'remove old replay progress filename');
   }
 
-  copyDirectoryFiles(
-    join(root, 'views', 'lists'),
-    join(root, 'views', 'lists'),
-    null,
-    normalizeListView,
-    'list rule schema rewrite in place',
-    (rel) => extname(rel) === '.json',
-  );
+  if (!rebuildForUrlIdentity) {
+    copyDirectoryFiles(
+      join(root, 'views', 'lists'),
+      join(root, 'views', 'lists'),
+      null,
+      normalizeListView,
+      'list rule schema rewrite in place',
+      (rel) => extname(rel) === '.json',
+    );
+    planCanonicalPageCheckpointMigration();
+  }
 
   copyDirectoryFiles(
     join(root, 'data', 'logs'),
@@ -414,8 +794,16 @@ function planMigration() {
     join(root, 'data', 'notes'),
     join(root, 'objects', 'notes'),
     null,
-    null,
+    normalizeNoteObject,
     'note object move',
+    (rel) => extname(rel) === '.json',
+  );
+  copyDirectoryFiles(
+    join(root, 'objects', 'notes'),
+    join(root, 'objects', 'notes'),
+    null,
+    normalizeNoteObject,
+    'note object canonical URL rewrite in place',
     (rel) => extname(rel) === '.json',
   );
 
@@ -430,9 +818,11 @@ function planMigration() {
     'snapshot object shard',
     (rel) => extname(rel) === '.html' || extname(rel) === '.md',
   );
+  planSnapshotSidecarMoves(snapshotMoves);
 
   queueRemove(join(root, 'data'), 'remove old data directory');
   queueRemove(join(root, 'deleted'), 'remove legacy deleted directory');
+  if (rebuildForUrlIdentity) planReplayDerivedCheckpointRebuild();
 }
 
 function printPlan() {

@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Browser Recall transparent closed eyes icon">
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="Browser Recall transparent sleeping face icon">
   <g transform="translate(0 -6) translate(64 64) scale(1.34) translate(-64 -64)">
     <g transform="translate(64 64) scale(1.105263) translate(-64 -64) translate(0 -2)">
       <path d="M34 61c0 9 4.4 14 11 14s11 -5 11 -14" fill="none" stroke="#000000" stroke-width="6" stroke-linecap="round" />
       <path d="M72 61c0 9 4.4 14 11 14s11 -5 11 -14" fill="none" stroke="#000000" stroke-width="6" stroke-linecap="round" />
+      <path d="M47 87c4.5 3.8 10.5 5.8 17 5.8s12.5 -2 17 -5.8" fill="none" stroke="#000000" stroke-width="6" stroke-linecap="round" />
     </g>
   </g>
 </svg>

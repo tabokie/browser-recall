@@ -338,8 +338,8 @@ async fn replay_entries_locked(
         return Ok(());
     }
     let entries = entries
-        .iter()
-        .map(|entry| serde_json::to_value(entry).map(|raw| (entry.clone(), raw)))
+        .into_iter()
+        .map(|entry| serde_json::to_value(&entry).map(|raw| (entry, raw)))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
 

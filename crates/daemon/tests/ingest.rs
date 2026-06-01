@@ -164,6 +164,14 @@ async fn send_event_and_ack(socket: &mut TestSocket, entry: Value) {
     expect_ack(socket).await;
 }
 
+fn log_entries(logs: &[String]) -> Vec<Value> {
+    logs.iter()
+        .flat_map(|log| log.lines())
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).expect("log entry json"))
+        .collect()
+}
+
 async fn send_note_and_ack(
     socket: &mut TestSocket,
     slug: &str,
@@ -2227,6 +2235,8 @@ async fn remote_replay_materializes_entities_without_appending_local_logs() {
         .expect("server starts");
 
     let (mut socket, data_dir, device_id) = paired_socket(handle.port(), &config_store).await;
+    let url =
+        "https://www.douban.com/people/49804423/status/8969603475/?_spm_id=x&dt_dapp=1&_i=a,b";
     send_connector(
         &mut socket,
         ConnectorMessage::ReplayRemoteEntries {
@@ -2235,13 +2245,13 @@ async fn remote_replay_materializes_entities_without_appending_local_logs() {
                 json!({
                     "timestamp": 1_710_000_020_000i64,
                     "action": "visit_page",
-                    "url": "https://example.com/remote",
+                    "url": url,
                     "title": "Remote Page",
                 }),
                 json!({
                     "timestamp": 1_710_000_020_100i64,
                     "action": "create_note",
-                    "url": "https://example.com/remote",
+                    "url": url,
                     "path": "objects/notes/remote-note.json",
                     "excerpt": "remote excerpt",
                     "note": "remote note body"
@@ -2265,18 +2275,26 @@ async fn remote_replay_materializes_entities_without_appending_local_logs() {
         other => panic!("expected remote replay result, got {other:?}"),
     }
 
-    let slug = generate_slug_from_url("https://example.com/remote").expect("slug");
+    let slug = generate_slug_from_url(url).expect("slug");
     let page_path = page_path(&data_dir, &slug);
     let page_raw = wait_for_text(&page_path, |raw| raw.contains("\"note:remote-note\"")).await;
     assert!(page_raw.contains("\"title\": \"Remote Page\""));
     assert!(page_raw.contains("\"note:remote-note\""));
+    assert!(page_raw.contains(url));
 
     let remote_note_path = note_path(&data_dir, "remote-note");
     let note_raw = wait_for_text(&remote_note_path, |raw| raw.contains("remote note body")).await;
     assert!(note_raw.contains("\"remote note body\""));
+    assert!(note_raw.contains(url));
 
     let logs = read_log_files(&log_dir(&data_dir, &device_id)).await;
     assert!(logs.is_empty());
+    let peer_logs = read_log_files(&log_dir(&data_dir, "peer-sync")).await;
+    let peer_entries = log_entries(&peer_logs);
+    assert_eq!(peer_entries.len(), 2);
+    for entry in peer_entries {
+        assert_eq!(entry.get("url").and_then(Value::as_str), Some(url));
+    }
 
     handle.shutdown().await;
 }
@@ -3727,6 +3745,8 @@ async fn run_rule_batch_persists_matches_and_returns_hits() {
         send_event_and_ack(&mut socket, entry).await;
     }
 
+    let matching_url =
+        "https://github.com/example/repo?_spm_id=x&utm_source=keep&_i=a,b";
     socket
         .send(Message::Text(
             json!({
@@ -3734,7 +3754,7 @@ async fn run_rule_batch_persists_matches_and_returns_hits() {
                 "listIds": ["reading"],
                 "entries": [
                     {
-                        "url": "https://github.com/example/repo",
+                        "url": matching_url,
                         "title": "Repo"
                     },
                     {
@@ -3759,7 +3779,7 @@ async fn run_rule_batch_persists_matches_and_returns_hits() {
             assert!(error.is_none());
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].list_id, "reading");
-            assert_eq!(results[0].url, "https://github.com/example/repo");
+            assert_eq!(results[0].url, matching_url);
             assert_eq!(results[0].matches[0].rule_id, "rule-k-reading");
         }
         other => panic!("expected batch result, got {other:?}"),
@@ -3768,6 +3788,12 @@ async fn run_rule_batch_persists_matches_and_returns_hits() {
     let list_path = list_path(&data_dir, "reading");
     let list_raw = wait_for_text(&list_path, |raw| raw.contains("\"source\": \"auto\"")).await;
     assert!(list_raw.contains("\"source\": \"auto\""));
+    let page_slug = generate_slug_from_url(matching_url).expect("page slug");
+    let page_raw = wait_for_text(&page_path(&data_dir, &page_slug), |raw| {
+        raw.contains(matching_url)
+    })
+    .await;
+    assert!(page_raw.contains(matching_url));
 
     let log_dir = log_dir(&data_dir, &device_id);
     let logs = read_log_files(&log_dir).await;
@@ -3775,6 +3801,18 @@ async fn run_rule_batch_persists_matches_and_returns_hits() {
         logs.iter()
             .any(|log| log.contains("\"action\":\"pin_to_list\"")),
         "expected pin_to_list in at least one log file"
+    );
+    let entries = log_entries(&logs);
+    let pin = entries
+        .iter()
+        .find(|entry| entry.get("action").and_then(Value::as_str) == Some("pin_to_list"))
+        .expect("pin_to_list log");
+    assert_eq!(
+        pin.get("urls")
+            .and_then(Value::as_array)
+            .and_then(|urls| urls.first())
+            .and_then(Value::as_str),
+        Some(matching_url)
     );
 
     handle.shutdown().await;

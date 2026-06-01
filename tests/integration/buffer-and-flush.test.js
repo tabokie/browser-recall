@@ -520,20 +520,24 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       return state.state === 'offline';
     });
 
+    const rawOfflineUrl = 'https://example.com/offline?_spm_id=x&keep=1&_i=a,b';
+    const canonicalOfflineUrl = 'https://example.com/offline?keep=1';
     await wsClient.enqueueDesktopCommand('reportVisit', {
       timestamp: 1710000002400,
-      url: 'https://example.com/offline',
+      url: rawOfflineUrl,
       title: 'Offline Page',
     });
     await wsClient.enqueueDesktopCommand('createNote', {
       excerpt: 'offline highlight',
       note: 'offline note body',
       cssPath: null,
-      url: 'https://example.com/offline',
+      url: rawOfflineUrl,
       title: 'Offline Page',
     });
     expect(store.desktopPendingCommands).toBe(2);
     expect(store.desktopCommandBuffer).toHaveLength(2);
+    expect(store.desktopCommandBuffer[0].request.url).toBe(canonicalOfflineUrl);
+    expect(store.desktopCommandBuffer[1].request.url).toBe(canonicalOfflineUrl);
 
     child = launchDaemon(dir, 'allow');
     childProcesses.push(child);
@@ -555,7 +559,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
     expect(noteRaw).toContain('"note": "offline note body"');
 
     const offlinePageRaw = readFileSync(
-      pagePath(dataRoot, 'https://example.com/offline'),
+      pagePath(dataRoot, canonicalOfflineUrl),
       'utf8',
     );
     expect(offlinePageRaw).toContain('"note:');

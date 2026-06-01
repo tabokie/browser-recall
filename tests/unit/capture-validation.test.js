@@ -101,6 +101,14 @@ describe('capture paths send error notifications', () => {
     expect(highlightCommandMatch[0]).toContain('notifyTabUserActionError');
   });
 
+  it('keyboard like path notifies the page when rating fails', () => {
+    const likeCommandMatch = bgSource.match(
+      /else if\s*\(command === 'like-page' \|\| command === 'dislike-page'\)[\s\S]*?}\s*\}\s*\);/,
+    );
+    expect(likeCommandMatch).not.toBeNull();
+    expect(likeCommandMatch[0]).toContain('notifyTabUserActionError');
+  });
+
   it('background notification falls back to direct page injection', () => {
     expect(bgSource).toContain('function injectUserActionErrorNotification');
     expect(bgSource).toContain('chrome.scripting.executeScript');

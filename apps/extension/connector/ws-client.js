@@ -17,6 +17,7 @@ import {
   isTerminalConnectorState,
 } from './state.js';
 import { logDebug } from '../logger.js';
+import { canonicalizePageRequest, canonicalizePageUrl } from '../utils.js';
 
 const DEFAULT_PORTS = [28471, 28472, 28473];
 const RECONNECT_ALARM_NAME = 'browserRecallConnectorReconnect';
@@ -952,10 +953,11 @@ export async function connectDesktopBridge() {
 }
 
 export async function enqueueDesktopCommand(action, request = {}) {
+  const canonicalRequest = canonicalizePageRequest(request);
   const stats = await enqueueBufferedMessage({
     kind: 'command',
     action,
-    request,
+    request: canonicalRequest,
   });
   await syncBufferStats();
   if (currentSocket?._authenticated) {
@@ -967,11 +969,12 @@ export async function enqueueDesktopCommand(action, request = {}) {
 }
 
 export async function enqueueDesktopSnapshot(snapshot) {
+  const canonicalUrl = canonicalizePageUrl(snapshot.url);
   const message = {
     kind: 'snapshot',
     slug: snapshot.slug,
     ts: snapshot.ts,
-    url: snapshot.url,
+    url: canonicalUrl,
     title: snapshot.title,
     markdown: snapshot.markdown,
     html: snapshot.html,
@@ -1017,11 +1020,12 @@ export async function requestDesktopPageInfo(slug) {
 }
 
 export async function requestDesktopPageSummary(url) {
+  const canonicalUrl = canonicalizePageUrl(url);
   await waitForIdleBridge();
   return sendBridgeMessage(
     {
       type: 'get_page_summary',
-      url,
+      url: canonicalUrl,
     },
     ['page_summary_result', 'error'],
   );
@@ -1127,12 +1131,13 @@ export async function requestDesktopPopupLists() {
 }
 
 export async function requestDesktopCommand(action, request = {}) {
+  const canonicalRequest = canonicalizePageRequest(request);
   await waitForIdleBridge();
   const payload = await sendBridgeMessage(
     {
       type: 'run_command',
       action,
-      request,
+      request: canonicalRequest,
     },
     ['command_result', 'error'],
   );

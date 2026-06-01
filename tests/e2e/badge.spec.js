@@ -17,6 +17,21 @@ async function getBadgeForUrl(helper, url) {
   }, url);
 }
 
+async function getActionIconForUrl(helper, url) {
+  return helper.evaluate(async (pageUrl) => {
+    const tabs = await chrome.tabs.query({ url: pageUrl });
+    if (!tabs.length) return null;
+    const response = await chrome.runtime.sendMessage({
+      action: 'getActionIconForTest',
+      tabId: tabs[0].id,
+    });
+    if (!response?.success) {
+      throw new Error(response?.error || 'getActionIconForTest failed');
+    }
+    return response.path;
+  }, url);
+}
+
 test.describe('Extension badge', () => {
   test('clears badge text for page with notes because the icon carries state', async ({
     extContext,
@@ -78,6 +93,62 @@ test.describe('Extension badge', () => {
     }, url);
 
     expect(badge.text).toBe('');
+
+    await page.close();
+    await helper.close();
+  });
+
+  test('uses the snapshot marker icon after capturing a snapshot on the current page', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/snapshot-capture-badge', {
+      title: 'Snapshot Capture Badge',
+      body: '<p>Capture this page</p>',
+    });
+    const url = localServer.url('/snapshot-capture-badge');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('load');
+
+    const helper = await openHelperPage(extContext, extensionId);
+    await page.bringToFront();
+
+    const captureResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({ action: 'captureCurrentPageFromPopup' }),
+    );
+    expect(captureResp.success).toBe(true);
+
+    await expect
+      .poll(() =>
+        helper.evaluate(
+          (key) =>
+            chrome.runtime.sendMessage({ action: 'readDesktopValue', key }),
+          `page:${slug}`,
+        ),
+      )
+      .toMatchObject({
+        success: true,
+        value: {
+          childIds: [expect.stringMatching(/^snapshot:/)],
+        },
+      });
+
+    await expect
+      .poll(() => getActionIconForUrl(helper, url))
+      .toMatchObject({
+        16: 'icons/icon16-special-notes.png',
+        48: 'icons/icon48-special-notes.png',
+        128: 'icons/icon128-special-notes.png',
+      });
 
     await page.close();
     await helper.close();

@@ -75,16 +75,62 @@ function generateSlug(text, hashInput) {
   return slug.substring(0, 80);
 }
 
+export function canonicalizePageUrl(url) {
+  const parsed = new URL(url);
+  const keptParams = [];
+  let removedParam = false;
+  for (const [key, value] of parsed.searchParams.entries()) {
+    if (key.startsWith('_')) {
+      removedParam = true;
+      continue;
+    }
+    keptParams.push([key, value]);
+  }
+  if (!removedParam) return url;
+  parsed.search = '';
+  for (const [key, value] of keptParams) {
+    parsed.searchParams.append(key, value);
+  }
+  return parsed.href;
+}
+
+function canonicalizePageUrlIfValid(url) {
+  try {
+    return canonicalizePageUrl(url);
+  } catch {
+    return url;
+  }
+}
+
+export function canonicalizePageRequest(request = {}) {
+  const output = { ...request };
+  for (const key of ['url', 'referrer', 'referrerUrl']) {
+    if (typeof output[key] === 'string') {
+      output[key] = canonicalizePageUrlIfValid(output[key]);
+    }
+  }
+  for (const key of ['urls', 'items']) {
+    if (Array.isArray(output[key])) {
+      output[key] = output[key].map((url) =>
+        typeof url === 'string' ? canonicalizePageUrlIfValid(url) : url,
+      );
+    }
+  }
+  return output;
+}
+
 // Generate slug from URL for content file naming
 export function generateSlugFromUrl(url) {
-  const parsed = new URL(url);
+  const canonicalUrl = canonicalizePageUrl(url);
+  const parsed = new URL(canonicalUrl);
   let domain = parsed.hostname.toLowerCase();
   if (domain.startsWith('www.')) domain = domain.slice(4);
   const lastDot = domain.lastIndexOf('.');
   if (lastDot > 0) domain = domain.slice(0, lastDot);
   const text = domain + parsed.pathname;
-  // Hash the full URL for uniqueness (includes query params, fragments, etc.)
-  return generateSlug(text, url);
+  // Hash canonical page identity: ordinary query params and fragments count,
+  // underscore-prefixed tracking params do not.
+  return generateSlug(text, canonicalUrl);
 }
 
 // Generate slug from list title for list file naming

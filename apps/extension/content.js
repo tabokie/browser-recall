@@ -957,7 +957,7 @@ function initContentScript() {
     chrome.runtime
       .sendMessage({ action: 'recordPageActivity', url, ...delta })
       .catch((error) => {
-        showExtensionReloadNotification(error);
+        console.debug('[content] passive page activity report failed:', error);
       });
   }
 

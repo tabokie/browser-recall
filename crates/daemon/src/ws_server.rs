@@ -1382,23 +1382,6 @@ fn build_auto_pin_entry(
     list_name: &str,
     list_owner: &str,
 ) -> SyntheticLogEntry {
-    let mut raw = serde_json::Map::new();
-    raw.insert("timestamp".to_string(), Value::from(timestamp));
-    raw.insert("action".to_string(), Value::from("pin_to_list"));
-    raw.insert("name".to_string(), Value::from(list_name.to_string()));
-    raw.insert("listOwner".to_string(), Value::from(list_owner.to_string()));
-    raw.insert(
-        "urls".to_string(),
-        Value::Array(vec![Value::from(url.to_string())]),
-    );
-    raw.insert("source".to_string(), Value::from("auto"));
-    if let Some(title) = title.filter(|value| !value.is_empty()) {
-        raw.insert(
-            "titles".to_string(),
-            Value::Array(vec![Value::from(title.to_string())]),
-        );
-    }
-
     let parsed = LogEntry::PinToList {
         timestamp,
         name: list_name.to_string(),
@@ -1409,9 +1392,10 @@ fn build_auto_pin_entry(
             .map(|value| vec![Some(value.to_string())]),
         source: Some("auto".to_string()),
     };
+    let raw = serde_json::to_value(&parsed).expect("synthetic pin serializes");
     SyntheticLogEntry {
         parsed,
-        raw: Value::Object(raw),
+        raw,
     }
 }
 

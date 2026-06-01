@@ -1,0 +1,45 @@
+- The extension icon is not colored when the page has a snapshot
+- I don't think it is a problem with the color, let's revert the color, I hand pick the colors myself don't mess them up without my consent
+- I see the issue, a url is counted as two distinct pages:
+Oberkampf的广播 <https://www.douban.com/people/49804423/status/8969603475/?_spm_id=NDk4MDQ0MjM&dt_dapp=1&_i=0303152dQy1M97,0303244dQy1M97>
+Oberkampf的广播 <https://www.douban.com/people/49804423/status/8969603475/?_spm_id=NDk4MDQ0MjM&dt_dapp=1&_i=0303244dQy1M97,0303254dQy1M97>
+
+I remember we have the different hashes maps to one url, what is the exact rule of it?
+- Let's remove any params starting with '_' when calculating hashes, we will need to migrate existing data at "~/browser-data"
+- Are you sure the migration is done thoroughly?
+- Change the less visible state color (snapshot state) to #4969F6
+- The user experience around extension reload warning is not good, and this is an reoccuring issue that I asked you to fix multiple times with no avail. You check thoroughly what is missing from tests.
+The desired behavior is: When extension is reloaded and worker connection broken, (1) user tries to perform an operation but failed due to broken connection, a warning showed up and the operation does not take effect, (2) if user doesn't interact with the extension (e.g. highlight, like, capture), no warning is shown.
+The current behavior is, when extension is reloaded and I like the page, the like takes effect, but a warning is still produced when I refresh the page (which doesn't count as an interaction with extension).
+- Great. Now let's polish the closed eye extension icon. Let's draw SVG only and only generate icons after I ack. I think the eyebrows are not very visible in the small icon, let's change to closed eye only, but draw a small smiley curve as the month to indicate the person is sleeping
+- Let's shrink the eye a little, only the radius, don't change their centers. And make the mouth wider and slightly lower (don't contact the eyes)
+- Move the eyes slightly closer, and the mouth slightly narrower
+- Make the mouth curve less, and make the eye curve more and longer vertically (not a perfect circle)
+- Take a look at ./emoji.png, I want you to recreate its eye and mouth shape
+- I think the mouth in SVG is more curved than the original, what do you think?
+- go
+- Use the same line thickness for mouth?
+- Enlarge it as a whole, so that the eye center matches the open eyes
+- Maybe move it downward a little? It feels the eye's lower edge in two versions should align
+- Good, let's generate icon packs
+- Let's draw a version in SVG that uses hand to close the eye. The hand is minimalistic, just a rounded arm shape
+- That's not what I meant, there are two arms, in fact, it the exact same gesture as in emoji 🙈
+- The line thickness is way off, and you should remove the mouth. You should render it and see for yourself if the result is easy to understand
+- Take a look at ./hide-and-seek.jpg, the third variant, that hand-arm is the direction we are going for. Your version would never come up as the impression of two handes
+- You should try to reproduce the hand-arm in the third variant of ./hide-and-seek.jpg, rather than depending on your idea to draw the shape.
+- You clearly don't have the capability to reproduce complex shapes in SVG. Let's just focus on simple ones. Draw a variant of the closed eye version just without the mouth
+- Use that to generate icon packs again
+- Restore the version with a mouth, in a separate file
+- SVG
+- $gap
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix them all
+- $gap
+- Where is URL canonicalization performed in current version?
+- Why not do it once in extension frontend?
+- Is it true that all urls are treated as if the params are trimmed?
+- I still think extension should handle the canonicalization, the data should arrive at desktop clean.
+- Remove canonicalization from desktop completely, move it to a shared function in extension side. Also, fix the P2 issue you mentioned before
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix them all
+- $finish model=GPT-5.5 Codex

@@ -56,6 +56,7 @@ daemon websocket server
 - `views/lists` and `views/manifest` are replay-derived checkpoints. `views/pages` is a selective replay-derived checkpoint set: only pages with durable user state are persisted there.
 - `objects/notes` and `objects/snapshots` are durable user artifacts referenced by replay state.
 - Page and snapshot files are sharded by the first two hex characters of the SHA-256 hash of the logical slug/stem. Logical entity IDs do not include the shard.
+- Page slugs are derived from the page URL the replay layer receives. The readable slug prefix uses domain and path; the hash input is the full received URL. Extension-originated browser observations are canonicalized before they are sent to desktop: query params whose names start with `_` are removed, while ordinary query params and fragments still distinguish pages. The browser-data migration applies the same canonicalization to existing logs and objects.
 
 Mutation commands reserve checkpoint-worker capacity before durable changes, append logs before changing the daemon cache, then apply replay effects to the in-memory projection cache. The reserved checkpoint work is submitted while the write is still serialized, so checkpoint files persist in accepted write order. Checkpoint files may lag briefly; current reads use the daemon cache and only fall through to disk on coordinated cache misses. Shutdown flushes accepted checkpoint work before returning.
 
@@ -75,6 +76,7 @@ Key consequences:
 - A `visit_page` event materializes the page entity during replay when needed; callers do not decide checkpoint creation through log fields. Page checkpoint persistence is decided centrally from the replayed page state: list parent, note/snapshot child, user title, or rating. Daemon persistence and replay verification call the same Rust policy.
 - Replay log deserialization denies unknown fields so accidental command-only fields cannot persist silently.
 - `pin_to_list` and `unpin_from_list` use `urls`; `pin_to_list.titles`, when present, is an index-aligned array with the same length as `urls`.
+- Extension-side URL identity for page slugs ignores underscore-prefixed query params, so analytics parameters such as `_spm_id` or `_i` do not split one page into multiple replay entities when data arrives through the extension connector. Rust replay hashes the URL it is given; non-extension producers must send canonical page URLs if they want the same identity behavior.
 - Replay branches must stay idempotent.
 - Desktop UI, extension popup, and sync ingestion all converge on the same replay model.
 
@@ -113,7 +115,7 @@ The Tauri layer is intentionally thin; storage/search/replay behavior lives in `
 - bookmark import and history import
 - note/list/snapshot/settings mutations
 - rule preview and rule updates
-- canonical log generation for browser observations such as visits/leaves
+- replay-backed log generation for browser observations such as visits/leaves
 
 The shell wraps these commands with desktop-specific concerns such as event emission and OS integration.
 

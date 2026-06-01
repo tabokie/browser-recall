@@ -91,6 +91,30 @@ async function handleGetDesktopQueueForTest() {
   };
 }
 
+async function handleGetActionIconForTest(request) {
+  const state = globalThis.browserRecallActionIconStateForTest;
+  if (!state) return { success: false, error: 'Action icon state unavailable' };
+  const tabId = Number(request.tabId);
+  const path =
+    Number.isFinite(tabId) && tabId > 0 ? state.tabs.get(tabId) : state.global;
+  return { success: true, path: path || null };
+}
+
+async function handleTriggerCommandForTest(request) {
+  const command = request.command;
+  if (typeof command !== 'string' || !command) {
+    return { success: false, error: 'triggerCommandForTest missing command' };
+  }
+  const listeners = globalThis.browserRecallCommandListenersForTest || [];
+  if (!listeners.length) {
+    return { success: false, error: 'No command listeners registered' };
+  }
+  for (const listener of listeners) {
+    await listener(command);
+  }
+  return { success: true };
+}
+
 chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
   if (request.type && !request.action) return false;
   if (!BACKGROUND_TEST_ACTIONS.includes(request.action)) {
@@ -121,6 +145,12 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'getDesktopQueueForTest':
           sendResponse(await handleGetDesktopQueueForTest());
+          break;
+        case 'getActionIconForTest':
+          sendResponse(await handleGetActionIconForTest(request));
+          break;
+        case 'triggerCommandForTest':
+          sendResponse(await handleTriggerCommandForTest(request));
           break;
       }
     } catch (error) {

@@ -322,6 +322,7 @@ impl LogEntry {
             | Self::PermanentDelete { timestamp, .. } => *timestamp,
         }
     }
+
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1279,5 +1280,15 @@ mod tests {
 
         page.likes = Some(1);
         assert!(is_page_eligible(&page));
+    }
+
+    #[test]
+    fn url_slug_keeps_ordinary_query_params() {
+        let first = generate_slug_from_url("https://example.com/page?article=1&_trace=old")
+            .expect("first slug");
+        let second = generate_slug_from_url("https://example.com/page?article=2&_trace=new")
+            .expect("second slug");
+
+        assert_ne!(first, second);
     }
 }
