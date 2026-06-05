@@ -12,6 +12,7 @@ import {
   escapeHtml,
   BODY_WORD_LIMIT,
   DEFAULT_URL_BLACKLIST,
+  collectVisitDateKeys,
 } from './utils.js';
 import {
   loadSettingsValue,
@@ -1111,6 +1112,7 @@ async function renderProgressiveResults(gen) {
       attDetail: r.attDetail,
       notes: r.notes,
       timestamps: r.timestamps,
+      visitDates: r.visitDates,
       context: 'related',
       childIds: r.childIds,
       parentIds: r.parentIds,
@@ -1124,6 +1126,8 @@ async function renderProgressiveResults(gen) {
   const chartData = sorted.map((r) => ({
     url: r.url,
     timestamp: r.timestamps?.[0] || Date.now(),
+    timestamps: r.timestamps,
+    visitDates: r.visitDates,
     attention: '',
   }));
   const relatedChart = prepareRelatedChartDateFilter(
@@ -2376,7 +2380,9 @@ async function showCategory(category) {
         const newEntries = processHistoryForDisplay(newFiltered);
         vs.appendData(applySortOrder(newEntries, sort));
         // Enrich in background — re-render visible rows when done
-        enrichFromEntityStorage(newEntries).then(() => vs.refreshVisible());
+        enrichFromEntityStorage(newEntries, { includeVisitDates: false }).then(
+          () => vs.refreshVisible(),
+        );
       }
       // Re-render chart with all loaded history + updated estimates
       const allLoaded = [...historyState.allEntries];
@@ -2493,6 +2499,7 @@ function enrichPinResult(r, pins, pageSnap) {
     attDetail: attSource,
     notes: source.notes || r.notes || [],
     timestamps: [source.watermark || r.watermark || r.pinnedAt || Date.now()],
+    visitDates: cached?.visitDates || source.visitDates || r.visitDates,
     pinnedAt: pin ? pin.pinnedAt : r.pinnedAt || null,
     pinSource: pin?.source || r.pinSource || null,
   };
@@ -3413,6 +3420,7 @@ function renderFilteredPins(pins, listId, searchQuery) {
         attDetail: r.attDetail,
         notes: r.notes,
         timestamps: r.timestamps,
+        visitDates: r.visitDates,
         context: 'related',
         pinnedAt: r.pinnedAt,
         pinSource: r.pinSource,
@@ -3432,6 +3440,8 @@ function renderFilteredPins(pins, listId, searchQuery) {
   const chartData = sorted.map((r) => ({
     url: r.url,
     timestamp: r.timestamps?.[0] || r.pinnedAt || Date.now(),
+    timestamps: r.timestamps,
+    visitDates: r.visitDates,
     attention: '',
   }));
   const relatedChart = prepareRelatedChartDateFilter(
@@ -3506,13 +3516,15 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
       timestamps: [item.timestamp],
       latestTs: item.timestamp,
       deviceIds,
+      dateScope: globalDedup ? 'page' : 'row',
     });
   }
   return results;
 }
 
 // Batch-fetch page entities for all unique slugs in entries, enrich with entity titles.
-async function enrichFromEntityStorage(entries) {
+async function enrichFromEntityStorage(entries, opts = {}) {
+  const { includeVisitDates = true } = opts;
   const allSlugs = [...new Set(entries.map((r) => r.slug).filter(Boolean))];
   if (allSlugs.length === 0) return;
   const loaded = await Promise.all(
@@ -3553,6 +3565,9 @@ async function enrichFromEntityStorage(entries) {
     if (page.parentIds) entry.parentIds = page.parentIds;
     if (page.likes) entry.likes = page.likes;
     if (page.createdAt && !entry.createdAt) entry.createdAt = page.createdAt;
+    if (includeVisitDates && entry.dateScope !== 'row' && page.visitDates) {
+      entry.visitDates = page.visitDates;
+    }
     // Check if any child note is a non-deleted highlight note (excerpt !== null)
     const noteRefs = (page.childIds || []).filter((id) =>
       id.startsWith(NOTE_PREFIX),
@@ -3609,6 +3624,9 @@ async function enrichForFilters(entries) {
       if (notes.length > 0) entry.notes = notes;
     }
     if (page.parentIds) entry.parentIds = page.parentIds;
+    if (entry.dateScope !== 'row' && page.visitDates) {
+      entry.visitDates = page.visitDates;
+    }
     if (page.timestamps && Object.keys(page.timestamps).length > 0) {
       if (!entry.deviceIds || entry.deviceIds.size === 0) {
         entry.deviceIds = new Set(Object.keys(page.timestamps));
@@ -3673,7 +3691,9 @@ async function displayHistoryRows(entries) {
   vs.setData(sorted, renderFn);
 
   // Enrich in background — mutates entries in place, then re-render visible rows
-  enrichFromEntityStorage(displayEntries).then(() => vs.refreshVisible());
+  enrichFromEntityStorage(displayEntries, { includeVisitDates: false }).then(
+    () => vs.refreshVisible(),
+  );
 }
 
 const PIN_SVG =
@@ -4155,6 +4175,7 @@ function resultRowHtml(title, url, opts = {}) {
     attDetail = null,
     notes = [],
     timestamps = [],
+    visitDates = [],
     context = 'global',
     pinnedAt,
     pinSource,
@@ -4182,9 +4203,7 @@ function resultRowHtml(title, url, opts = {}) {
 
   const safeTitle = escapeHtml(title || site || url || '<unknown>');
 
-  const dates = [
-    ...new Set(timestamps.map((ts) => new Date(ts).toISOString().slice(0, 10))),
-  ].join(',');
+  const dates = collectVisitDateKeys({ visitDates, timestamps }).join(',');
 
   const hasNotes = hasHighlightNotes === true;
   const hasSnaps = childIds.some((id) => id.startsWith(SNAPSHOT_PREFIX));
@@ -7273,6 +7292,7 @@ async function runEntityScanFilter(pinnedSlugs) {
         deviceTimestamps.length > 0
           ? deviceTimestamps.sort((a, b) => b - a)
           : [latestTs],
+      visitDates: page.visitDates || [],
       latestTs,
       deviceIds: new Set(Object.keys(timestamps)),
       childIds: page.childIds,
@@ -7312,6 +7332,7 @@ async function runEntityScanFilter(pinnedSlugs) {
       attDetail: item,
       notes: [],
       timestamps: [item.timestamp],
+      visitDates: [],
       latestTs: item.timestamp,
       deviceIds,
       relevance: 0,
@@ -7404,6 +7425,7 @@ async function runSearchFilterPipeline() {
       attDetail: r.attDetail,
       notes: r.notes,
       timestamps: r.timestamps,
+      visitDates: r.dateScope === 'row' ? undefined : r.visitDates,
       context: 'related',
       childIds: r.childIds,
       parentIds: r.parentIds,
@@ -7418,7 +7440,9 @@ async function runSearchFilterPipeline() {
 
   // When no active filters, enrich in background and refresh visible rows
   if (!hasActiveFilters) {
-    enrichFromEntityStorage(results).then(() => vs.refreshVisible());
+    enrichFromEntityStorage(results, { includeVisitDates: false }).then(() =>
+      vs.refreshVisible(),
+    );
   }
 
   // Demand-load more history when scrolling (for all-history mode).
@@ -7454,9 +7478,9 @@ async function runSearchFilterPipeline() {
                 : { column: 'lastVisit', direction: 'desc' };
               vs.appendData(applySortOrder(newResults, sort));
               if (!hasActiveFilters) {
-                enrichFromEntityStorage(newResults).then(() =>
-                  vs.refreshVisible(),
-                );
+                enrichFromEntityStorage(newResults, {
+                  includeVisitDates: false,
+                }).then(() => vs.refreshVisible());
               }
               loaded = false;
             }
@@ -7474,6 +7498,8 @@ async function runSearchFilterPipeline() {
   const chartData = results.map((r) => ({
     url: r.url,
     timestamp: r.timestamps?.[0] || Date.now(),
+    timestamps: r.timestamps,
+    visitDates: r.dateScope === 'row' ? undefined : r.visitDates,
     attention: '',
   }));
   const relatedChart = prepareRelatedChartDateFilter(
@@ -7592,6 +7618,7 @@ async function openListFocusPanel(listId, listName) {
             attScore: 0,
             maxAtt,
             timestamps: [r.pinnedAt || Date.now()],
+            visitDates: r.visitDates,
             context: 'global',
             pinSource: r.source || null,
             childIds: r.childIds,
@@ -7637,6 +7664,7 @@ function renderFocusWaterfall(content, url, title, parents, children, similar) {
       ...focusOpts,
       attScore,
       timestamps,
+      visitDates: hist?.visitDates,
       ...opts,
     });
   }

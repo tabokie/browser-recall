@@ -62,6 +62,32 @@ describe('renderTimeChartInto', () => {
     expect(estimated.length).toBe(0);
   });
 
+  it('renders bars from durable visit dates before latest timestamps', () => {
+    renderTimeChartInto(
+      chartEl,
+      barsEl,
+      [
+        {
+          url: 'https://example.com/revisited',
+          title: 'Revisited',
+          visitDates: [20260301, '2026-03-03'],
+          timestamps: [new Date('2026-03-10T12:00:00Z').getTime()],
+        },
+      ],
+      'Test',
+    );
+
+    expect(
+      barsEl.querySelector('[data-date="2026-03-01"] .chart-bar'),
+    ).not.toBeNull();
+    expect(
+      barsEl.querySelector('[data-date="2026-03-03"] .chart-bar'),
+    ).not.toBeNull();
+    expect(
+      barsEl.querySelector('[data-date="2026-03-10"] .chart-bar'),
+    ).toBeNull();
+  });
+
   it('renders estimated bars uniformly with real bars', () => {
     const entries = makeEntries('2026-03-10', 5);
     const estimatedByDay = new Map([
@@ -275,5 +301,50 @@ describe('bindChartBarClick with estimated bars', () => {
         timestamps: [localTimestamp],
       }),
     ).toBe(true);
+  });
+
+  it('filters virtual-scrolled items by durable visit dates before latest timestamps', () => {
+    const selectedDate = '2026-03-05';
+
+    renderTimeChartInto(
+      chartEl,
+      barsEl,
+      [
+        {
+          url: 'https://example.com/revisited',
+          visitDates: [20260305],
+          timestamps: [new Date('2026-03-10T12:00:00Z').getTime()],
+        },
+      ],
+      'Test',
+    );
+    const group = barsEl.querySelector(`[data-date="${selectedDate}"]`);
+    expect(group).not.toBeNull();
+    group.classList.add('active');
+
+    let filterFn = null;
+    resultsContainer._virtualScroller = {
+      applyFilter(fn) {
+        filterFn = fn;
+      },
+    };
+
+    applyDateFilter(chartEl, resultsContainer);
+
+    expect(filterFn).toBeTypeOf('function');
+    expect(
+      filterFn({
+        url: 'https://example.com/revisited',
+        visitDates: [20260305],
+        timestamps: [new Date('2026-03-10T12:00:00Z').getTime()],
+      }),
+    ).toBe(true);
+    expect(
+      filterFn({
+        url: 'https://example.com/latest-only',
+        visitDates: [20260310],
+        timestamps: [new Date('2026-03-05T12:00:00Z').getTime()],
+      }),
+    ).toBe(false);
   });
 });

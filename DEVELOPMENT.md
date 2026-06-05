@@ -107,9 +107,14 @@ Config: `vitest.config.js`. Tests: `tests/**/*.test.js`.
 npx playwright test                          # run all E2E tests
 npx playwright test tests/e2e/lists.spec.js  # run a specific file
 npx playwright test --headed                 # visible browser
+npm run test:visual                          # build desktop UI and run desktop visual E2E
 ```
 
 Config: `playwright.config.js`. Tests: `tests/e2e/*.spec.js`. Single worker, chromium channel.
+
+`npm run test:visual` is the canonical full desktop visual check. It first stages `dist/desktop-ui/`, then runs `tests/e2e/desktop-visual.spec.js`.
+
+When running under a filesystem/process sandbox, Chromium launch may require an unsandboxed command approval. If every visual test fails at `0ms` with `browserType.launch: Target page, context or browser has been closed`, `SIGABRT`, or `kill EPERM`, rerun the same command with browser-launch permissions instead of changing the tests or package script. A focused `npx playwright test ... -g "<name>"` run can pass while the sandboxed npm visual script fails, because the failure is at browser launch before any test code runs.
 
 If tests fail with Chrome process errors:
 

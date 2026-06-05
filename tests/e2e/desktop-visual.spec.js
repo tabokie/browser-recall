@@ -29,6 +29,10 @@ function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function visitDateInt(dateKey) {
+  return Number(dateKey.replaceAll('-', ''));
+}
+
 function desktopVisualSeed(colorScheme = 'amber', options = {}) {
   const now = Date.now();
   const productResearchUrl = 'https://example.com/product-research';
@@ -380,6 +384,15 @@ async function installDesktopBridgeMock(page, options = {}) {
         return entries;
       }
 
+      function loadAllPages() {
+        const pages = {};
+        for (const [key, value] of stores.session.entries()) {
+          if (!key.startsWith('page:') || value?.deleted) continue;
+          pages[key.slice('page:'.length)] = clone(value);
+        }
+        return pages;
+      }
+
       function emitRuntimeMessage(message) {
         for (const handler of listeners.get('bridge-runtime-message') || []) {
           handler({ payload: clone(message) });
@@ -503,6 +516,11 @@ async function installDesktopBridgeMock(page, options = {}) {
             return {
               success: true,
               entries: loadHistoryBatch(request.files),
+            };
+          case 'loadAllPages':
+            return {
+              success: true,
+              pages: loadAllPages(),
             };
           case 'searchNotes':
             return {
@@ -2756,6 +2774,238 @@ test.describe('desktop visual regression', () => {
       });
 
       expect(chartMetrics.barTop).toBeGreaterThan(chartMetrics.rowTop);
+    });
+  });
+
+  test('explore chart date click keeps per-day duplicate rows scoped to their row date', async ({
+    page,
+  }) => {
+    const selectedDate = new Date(Date.now() - 4 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const otherDate = new Date(Date.now() - 2 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const selectedTimestamp = new Date(`${selectedDate}T12:00:00Z`).getTime();
+    const otherTimestamp = new Date(`${otherDate}T12:00:00Z`).getTime();
+    const url = 'https://example.com/history-chart-per-day-duplicate';
+    const slug = generateSlugFromUrl(url);
+    const extraSession = {
+      [pageKey(slug)]: {
+        slug,
+        url,
+        title: 'History chart per-day duplicate',
+        parentIds: [],
+        childIds: [],
+        visitDates: [visitDateInt(selectedDate), visitDateInt(otherDate)],
+        timestamps: {
+          'device-a': otherTimestamp,
+        },
+      },
+    };
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntriesByDate: {
+          [selectedDate]: [
+            {
+              url,
+              title: 'History chart per-day duplicate',
+              timestamp: selectedTimestamp,
+              deviceId: 'device-a',
+            },
+          ],
+          [otherDate]: [
+            {
+              url,
+              title: 'History chart per-day duplicate',
+              timestamp: otherTimestamp,
+              deviceId: 'device-a',
+            },
+          ],
+        },
+        extraSession,
+      });
+
+      await page.waitForFunction(() =>
+        document
+          .getElementById('relatedResults')
+          ?._virtualScroller?._fullData?.some(
+            (item) =>
+              item.url ===
+                'https://example.com/history-chart-per-day-duplicate' &&
+              Array.isArray(item.parentIds),
+          ),
+      );
+
+      const selectedBar = page.locator(
+        `#relatedChartBars .chart-bar-group[data-date="${selectedDate}"] .chart-bar`,
+      );
+      await expect(selectedBar).toBeVisible();
+      await selectedBar.click();
+
+      const visibleDuplicateTimestamps = await page.evaluate((rowUrl) => {
+        const scroller =
+          document.getElementById('relatedResults')._virtualScroller;
+        return scroller.data
+          .filter((item) => item.url === rowUrl)
+          .map((item) => item.timestamps[0])
+          .sort((left, right) => left - right);
+      }, url);
+      expect(visibleDuplicateTimestamps).toEqual([selectedTimestamp]);
+    });
+  });
+
+  test('explore chart date click filters rows by durable visit dates', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const selectedDate = new Date(now - 3 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const otherDate = new Date(now - 2 * 86_400_000).toISOString().slice(0, 10);
+    const todayVisitDate = visitDateInt(todayKey());
+    const revisitedUrl = 'https://example.com/chart-filter-revisited';
+    const otherRevisitedUrl =
+      'https://example.com/chart-filter-other-revisited';
+    const revisitedSlug = generateSlugFromUrl(revisitedUrl);
+    const otherRevisitedSlug = generateSlugFromUrl(otherRevisitedUrl);
+    const extraSession = {
+      [pageKey(revisitedSlug)]: {
+        slug: revisitedSlug,
+        url: revisitedUrl,
+        title: 'Chart filter revisited',
+        parentIds: [],
+        childIds: [],
+        visitDates: [visitDateInt(selectedDate), todayVisitDate],
+        timestamps: {
+          'device-a': now,
+        },
+      },
+      [pageKey(otherRevisitedSlug)]: {
+        slug: otherRevisitedSlug,
+        url: otherRevisitedUrl,
+        title: 'Chart filter other revisited',
+        parentIds: [],
+        childIds: [],
+        visitDates: [visitDateInt(otherDate), todayVisitDate],
+        timestamps: {
+          'device-a': now - 1000,
+        },
+      },
+    };
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [],
+        extraSession,
+      });
+
+      await page.locator('#filterToggleBtn').click();
+      await page
+        .locator('.filter-checkbox input[data-key="visitedMultipleTimes"]')
+        .click();
+      await expect(
+        page.locator(`.result-row[data-url="${revisitedUrl}"]`),
+      ).toBeVisible();
+      await expect(
+        page.locator(`.result-row[data-url="${otherRevisitedUrl}"]`),
+      ).toBeVisible();
+
+      const selectedBar = page.locator(
+        `#relatedChartBars .chart-bar-group[data-date="${selectedDate}"] .chart-bar`,
+      );
+      await expect(selectedBar).toBeVisible();
+      await selectedBar.click();
+
+      await expect(
+        page.locator(`.result-row[data-url="${revisitedUrl}"]`),
+      ).toBeVisible();
+      await expect(
+        page.locator(`.result-row[data-url="${otherRevisitedUrl}"]`),
+      ).toHaveCount(0);
+
+      const visibleUrls = await page.evaluate(() => {
+        const scroller =
+          document.getElementById('relatedResults')._virtualScroller;
+        return scroller.data.map((item) => item.url);
+      });
+      expect(visibleUrls).toEqual([revisitedUrl]);
+    });
+  });
+
+  test('list chart date click filters pinned rows by page visit dates', async ({
+    page,
+  }) => {
+    const selectedDate = new Date(Date.now() - 5 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const now = Date.now();
+    const pinnedUrl = 'https://example.com/list-chart-visit-date';
+    const pinnedSlug = generateSlugFromUrl(pinnedUrl);
+    const otherUrl = 'https://example.com/list-chart-other-date';
+    const otherSlug = generateSlugFromUrl(otherUrl);
+    const extraSession = {
+      [pageKey(pinnedSlug)]: {
+        slug: pinnedSlug,
+        url: pinnedUrl,
+        title: 'List chart visit date',
+        parentIds: [listKey('research')],
+        childIds: [],
+        visitDates: [visitDateInt(selectedDate)],
+        timestamps: {
+          'device-a': now,
+        },
+      },
+      [pageKey(otherSlug)]: {
+        slug: otherSlug,
+        url: otherUrl,
+        title: 'List chart other date',
+        parentIds: [listKey('research')],
+        childIds: [],
+        visitDates: [visitDateInt(todayKey())],
+        timestamps: {
+          'device-a': now - 1000,
+        },
+      },
+      [listKey('research')]: {
+        slug: 'research',
+        name: 'Research',
+        pins: [
+          { id: pageKey(pinnedSlug), pinnedAt: now },
+          { id: pageKey(otherSlug), pinnedAt: now - 1000 },
+        ],
+      },
+    };
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        extraSession,
+      });
+
+      await page.locator('.sidebar-item[data-list-id="research"]').click();
+      await expect(
+        page.locator(`.result-row[data-url="${pinnedUrl}"]`),
+      ).toBeVisible();
+
+      const selectedBar = page.locator(
+        `#relatedChartBars .chart-bar-group[data-date="${selectedDate}"] .chart-bar`,
+      );
+      await expect(selectedBar).toBeVisible();
+      await selectedBar.click();
+
+      await expect(
+        page.locator(`.result-row[data-url="${pinnedUrl}"]`),
+      ).toBeVisible();
+      await expect(
+        page.locator(`.result-row[data-url="${otherUrl}"]`),
+      ).toBeHidden();
     });
   });
 

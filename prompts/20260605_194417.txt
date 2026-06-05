@@ -1,0 +1,11 @@
+- The bar chart filtering is broken again, when clicking a bar, the results still shows the latest visits or no visit. We already fix the exact same issue before. Figure out why the regression is not caught by tests and why it is so easy to break.
+- You didn't answer my question thoroughly. (1) Trace the last commit that tries to fix this bug, study why the tests added then are not adequate. (2) Trace the last commit that regressed the code, study what was the intended purpose of that change.
+- But I remember after the last fix, the app behaves correctly when I click a bar to filter results.
+- $gap
+- Fix them all, thoroughly
+- Fix the tests.
+- Update documents for the testing method
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix them all, thoroughly
+- $finish model=GPT-5.5 Codex
+- skip it

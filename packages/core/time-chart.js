@@ -1,18 +1,13 @@
 // Time chart — rendering, tooltips, bar click filtering, and highlight sync
-import { dateKeyFromTimestamp } from './utils.js';
-
-function timestampDateKey(timestamp) {
-  const numeric = Number(timestamp);
-  if (!Number.isFinite(numeric)) return null;
-  return dateKeyFromTimestamp(numeric);
-}
+import { collectVisitDateKeys, dateKeyFromTimestamp } from './utils.js';
 
 function aggregateVisitsByDay(entries) {
   const byDay = new Map();
   for (const i of entries) {
-    const dayKey = dateKeyFromTimestamp(i.timestamp);
-    const prev = byDay.get(dayKey) || 0;
-    byDay.set(dayKey, prev + 1); // count visits per day
+    for (const dayKey of collectVisitDateKeys(i)) {
+      const prev = byDay.get(dayKey) || 0;
+      byDay.set(dayKey, prev + 1); // count visits per day
+    }
   }
   // Sort by date
   const sorted = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0]));
@@ -236,8 +231,7 @@ export function applyDateFilter(chartEl, resultsContainer) {
       vs.applyFilter(null);
     } else {
       vs.applyFilter((item) => {
-        const ts = item.timestamps || [];
-        return ts.some((t) => activeDates.has(timestampDateKey(t)));
+        return collectVisitDateKeys(item).some((date) => activeDates.has(date));
       });
     }
     return;

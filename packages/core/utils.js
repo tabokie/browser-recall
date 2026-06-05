@@ -149,6 +149,61 @@ export function dateKeyFromTimestamp(ts) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function dateKeyFromVisitDate(visitDate) {
+  if (typeof visitDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(visitDate)) {
+    const [year, month, day] = visitDate.split('-').map(Number);
+    const d = new Date(year, month - 1, day);
+    if (
+      d.getFullYear() !== year ||
+      d.getMonth() !== month - 1 ||
+      d.getDate() !== day
+    ) {
+      return null;
+    }
+    return visitDate;
+  }
+  const value =
+    typeof visitDate === 'number'
+      ? visitDate
+      : typeof visitDate === 'string'
+        ? Number(visitDate)
+        : NaN;
+  if (!Number.isInteger(value)) return null;
+  const year = Math.floor(value / 10000);
+  const month = Math.floor((value % 10000) / 100);
+  const day = value % 100;
+  const d = new Date(year, month - 1, day);
+  if (
+    d.getFullYear() !== year ||
+    d.getMonth() !== month - 1 ||
+    d.getDate() !== day
+  ) {
+    return null;
+  }
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+export function collectVisitDateKeys(item = {}) {
+  const keys = new Set();
+  const visitDates = Array.isArray(item.visitDates) ? item.visitDates : [];
+  for (const visitDate of visitDates) {
+    const key = dateKeyFromVisitDate(visitDate);
+    if (key) keys.add(key);
+  }
+  if (visitDates.length > 0) return [...keys].sort();
+
+  const timestamps =
+    Array.isArray(item.timestamps) && item.timestamps.length > 0
+      ? item.timestamps
+      : [item.timestamp];
+  for (const timestamp of timestamps) {
+    const numeric = Number(timestamp);
+    if (!Number.isFinite(numeric)) continue;
+    keys.add(dateKeyFromTimestamp(numeric));
+  }
+  return [...keys].sort();
+}
+
 // Escape HTML entities for safe insertion into innerHTML
 export function escapeHtml(text) {
   const div = document.createElement('div');
