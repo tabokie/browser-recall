@@ -84,8 +84,9 @@ test.describe('Snapshot slug meta tag', () => {
         path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
-          excerpt: highlightText,
+          excerpt: [highlightText],
           note: '',
+          cssPath: ['body > p'],
           url: originalUrl,
         },
       },
@@ -141,8 +142,9 @@ test.describe('Snapshot slug meta tag', () => {
         path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
-          excerpt: highlightText,
+          excerpt: [highlightText],
           note: 'snapshot popup note',
+          cssPath: ['body > p'],
           url: originalUrl,
         },
       },
@@ -228,8 +230,9 @@ test.describe('Snapshot slug meta tag', () => {
         path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
-          excerpt: highlightText,
+          excerpt: [highlightText],
           note: 'snapshot note',
+          cssPath: ['body > p'],
           url: originalUrl,
         },
       },
@@ -301,6 +304,144 @@ test.describe('Snapshot slug meta tag', () => {
     await viewerPopup.close();
     await viewer.close();
     await popup.close();
+  });
+
+  test('snapshot viewer creates highlight notes with array excerpt metadata', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
+    const originalUrl = 'https://example.com/snapshot-create-highlight';
+    const slug = getSlugForUrl(originalUrl);
+    const timestamp = Date.now();
+    const highlightText = 'new snapshot highlight';
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: originalUrl,
+          title: 'Snapshot Create Highlight',
+          parentIds: [],
+          childIds: [`snapshot:${slug}-${timestamp}`],
+          timestamps: { 'test-device': timestamp },
+        },
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'html'),
+        content: `<!doctype html><html><head><title>Snapshot Create Highlight</title></head><body><p>A saved page with ${highlightText} inside.</p></body></html>`,
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'md'),
+        content: `A saved page with ${highlightText} inside.`,
+      },
+    ]);
+
+    const viewer = await extContext.newPage();
+    await viewer.goto(
+      `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${encodeURIComponent(slug)}&ts=${timestamp}`,
+    );
+    await expect(viewer.locator('iframe')).toBeVisible();
+    const frame = viewer.frameLocator('iframe');
+    await expect(frame.locator('body')).toContainText(highlightText);
+
+    await frame.locator('body').evaluate((body) => {
+      const doc = body.ownerDocument;
+      const range = doc.createRange();
+      const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        const offset = node.textContent.indexOf('new snapshot highlight');
+        if (offset >= 0) {
+          range.setStart(node, offset);
+          range.setEnd(node, offset + 'new snapshot highlight'.length);
+          break;
+        }
+      }
+      const selection = doc.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      doc.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+
+    await expect(frame.locator('mark')).toHaveText(highlightText);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const notesResp = await helper.evaluate((pageSlug) => {
+      return chrome.runtime.sendMessage({
+        action: 'loadPageNotes',
+        slug: pageSlug,
+      });
+    }, slug);
+    expect(notesResp.success).toBe(true);
+    expect(notesResp.notes).toHaveLength(1);
+    expect(notesResp.notes[0].excerpt).toEqual([highlightText]);
+    expect(notesResp.notes[0].cssPath).toEqual(['']);
+
+    await helper.close();
+    await viewer.close();
+  });
+
+  test('snapshot viewer reapplies highlights within stored css path scope', async ({
+    extContext,
+    extensionId,
+    setupDir,
+  }) => {
+    const originalUrl = 'https://example.com/snapshot-scoped-highlight';
+    const slug = getSlugForUrl(originalUrl);
+    const noteSlug = 'snapshot-scoped-highlight-note';
+    const timestamp = Date.now();
+    const highlightText = 'duplicate highlight text';
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: originalUrl,
+          title: 'Snapshot Scoped Highlight',
+          parentIds: [],
+          childIds: [`snapshot:${slug}-${timestamp}`, `note:${noteSlug}`],
+          timestamps: { 'test-device': timestamp },
+        },
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: [highlightText],
+          note: '',
+          cssPath: ['body > section:nth-of-type(2) > p:nth-of-type(1)'],
+          url: originalUrl,
+        },
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'html'),
+        content: `<!doctype html><html><head><title>Snapshot Scoped Highlight</title></head><body><section><p>${highlightText}</p></section><section><p>${highlightText}</p></section></body></html>`,
+      },
+      {
+        path: snapshotSidecarPath(slug, timestamp, 'md'),
+        content: `${highlightText}\n\n${highlightText}`,
+      },
+    ]);
+
+    const viewer = await extContext.newPage();
+    await viewer.goto(
+      `chrome-extension://${extensionId}/snapshot-viewer.html?slug=${encodeURIComponent(slug)}&ts=${timestamp}`,
+    );
+    const frame = viewer.frameLocator('iframe');
+    await expect(frame.locator('mark')).toHaveCount(1);
+    await expect(frame.locator('section').nth(0).locator('mark')).toHaveCount(
+      0,
+    );
+    await expect(frame.locator('section').nth(1).locator('mark')).toHaveText(
+      highlightText,
+    );
+
+    await viewer.close();
   });
 
   // captureSnapshot strips portal highlight marks from captured HTML

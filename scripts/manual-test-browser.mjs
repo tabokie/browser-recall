@@ -385,9 +385,9 @@ if (seed) {
       entities: {
         'note:rust-note': {
           slug: 'rust-note',
-          excerpt: 'Memory safety without garbage collection',
+          excerpt: ['Memory safety without garbage collection'],
           note: 'Key insight: ownership + borrowing = memory safety without GC.',
-          cssPath: '',
+          cssPath: [''],
           url: WIKI_URL,
         },
       },

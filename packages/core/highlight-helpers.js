@@ -11,7 +11,11 @@ const MARK_STYLE =
  * Returns the <mark> element, or null on failure.
  */
 export function wrapRangeWithMark(range, text, timestamp) {
-  const mark = document.createElement('mark');
+  const doc =
+    range.startContainer?.ownerDocument ||
+    range.commonAncestorContainer?.ownerDocument ||
+    document;
+  const mark = doc.createElement('mark');
   mark.className = 'portal-highlight';
   mark.style.cssText = MARK_STYLE;
   mark.dataset.highlightText = text;
@@ -116,6 +120,62 @@ export function findTextRange(root, text, ownerDoc) {
   if (idx === -1) return null;
   const endIdx = idx + text.length;
 
+  return rangeFromConcatenatedOffsets(textNodes, offsets, idx, endIdx, doc);
+}
+
+function findWhitespaceEquivalentTextRange(root, text, ownerDoc) {
+  if (!text) return null;
+  const doc = ownerDoc || document;
+  const textNodes = collectTextNodes(root, doc);
+  let concat = '';
+  const offsets = [];
+  for (const tn of textNodes) {
+    offsets.push(concat.length);
+    concat += tn.textContent;
+  }
+
+  const haystack = normalizedTextWithMap(concat);
+  const needle = normalizedTextWithMap(text).text;
+  if (!needle) return null;
+  const normalizedIndex = haystack.text.indexOf(needle);
+  if (normalizedIndex === -1) return null;
+  const start = haystack.map[normalizedIndex];
+  const end = haystack.map[normalizedIndex + needle.length];
+  if (start == null || end == null || end <= start) return null;
+  return rangeFromConcatenatedOffsets(textNodes, offsets, start, end, doc);
+}
+
+function normalizedTextWithMap(text) {
+  let normalized = '';
+  const map = [];
+  let inWhitespace = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (/\s/.test(char)) {
+      if (!inWhitespace) {
+        map.push(index);
+        normalized += ' ';
+        inWhitespace = true;
+      }
+      continue;
+    }
+    map.push(index);
+    normalized += char;
+    inWhitespace = false;
+  }
+  map.push(text.length);
+  return { text: normalized.trim(), map: trimNormalizedMap(normalized, map) };
+}
+
+function trimNormalizedMap(normalized, map) {
+  let start = 0;
+  let end = normalized.length;
+  while (start < end && normalized[start] === ' ') start += 1;
+  while (end > start && normalized[end - 1] === ' ') end -= 1;
+  return map.slice(start, end + 1);
+}
+
+function rangeFromConcatenatedOffsets(textNodes, offsets, idx, endIdx, doc) {
   let startNode = null,
     startOffset = 0,
     endNode = null,
@@ -153,6 +213,46 @@ export function highlightTextInPage(root, text) {
   if (!range) return null;
 
   return wrapRangeWithMark(range, text);
+}
+
+function highlightTextInPageScoped(root, text) {
+  const exact = highlightTextInPage(root, text);
+  if (exact) return exact;
+  const range = findWhitespaceEquivalentTextRange(root, text);
+  if (!range) return null;
+  return wrapRangeWithMark(range, text);
+}
+
+export function highlightSavedExcerptPartsInPage(
+  root,
+  excerpts,
+  cssPaths = [],
+) {
+  if (!Array.isArray(excerpts) || excerpts.length === 0) return [];
+  const doc = root.ownerDocument || document;
+  const marks = [];
+  for (let index = 0; index < excerpts.length; index += 1) {
+    const text = String(excerpts[index] || '');
+    if (!text) continue;
+    const path = Array.isArray(cssPaths) ? cssPaths[index] : null;
+    const scopedRoot =
+      typeof path === 'string' && path ? resolveCssPath(doc, path) : root;
+    if (!scopedRoot) continue;
+    const mark = highlightTextInPageScoped(scopedRoot, text);
+    if (mark) {
+      mark.dataset.highlightText = excerpts.join('\n');
+      marks.push(mark);
+    }
+  }
+  return marks;
+}
+
+function resolveCssPath(doc, path) {
+  try {
+    return doc.querySelector(path);
+  } catch {
+    return null;
+  }
 }
 
 // --- Case 3: Cross-block helpers ---

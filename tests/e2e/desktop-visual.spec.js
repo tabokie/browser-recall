@@ -150,7 +150,7 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
     base.session['note:deleted-note'] = {
       slug: 'deleted-note',
       url: 'https://example.com/deleted-note',
-      excerpt: 'Deleted highlight',
+      excerpt: ['Deleted highlight'],
       note: 'Deleted note body',
       deleted: true,
       deletedTs: now - 4000,
@@ -158,7 +158,7 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
     base.session['note:replaced-note'] = {
       slug: 'replaced-note',
       url: 'https://example.com/replaced-note',
-      excerpt: 'Replaced highlight',
+      excerpt: ['Replaced highlight'],
       note: 'Replaced note body',
       deleted: true,
       deletedTs: now - 3000,
@@ -204,8 +204,15 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
           },
           {
             slug: 'highlight-product-research',
-            excerpt: 'Important highlighted passage\nwith original line break',
+            excerpt: [
+              'Important highlighted passage\nwith original line break',
+            ],
             note: 'Highlight note',
+          },
+          {
+            slug: 'highlight-product-research-array',
+            excerpt: ['Array highlighted passage', 'with grouped line break'],
+            note: 'Grouped highlight note',
           },
         ],
         [`detailSnapshots:${productResearchSlug}`]: [
@@ -274,6 +281,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       const openedExternalUrls = [];
       const openedSnapshots = [];
       const cancelledHistorySearchIds = [];
+      const searchHistoryInvocations = [];
 
       function clone(value) {
         return value === undefined
@@ -458,6 +466,9 @@ async function installDesktopBridgeMock(page, options = {}) {
         },
         cancelledHistorySearchIds() {
           return clone(cancelledHistorySearchIds);
+        },
+        searchHistoryInvocationCount() {
+          return searchHistoryInvocations.length;
         },
         listenerCount(eventName) {
           return (listeners.get(eventName) || []).length;
@@ -732,6 +743,7 @@ async function installDesktopBridgeMock(page, options = {}) {
               return bridgeAction(payload.request);
             if (command === 'search_history_stream') {
               const request = payload.request || {};
+              searchHistoryInvocations.push(clone(request));
               cancelledHistorySearches.delete(request.searchId);
               const chunks = chunksForHistorySearch(request.query);
               for (const [index, chunk] of chunks.entries()) {
@@ -1098,16 +1110,24 @@ test.describe('desktop visual regression', () => {
       await expect(page.locator('.detail-notes-section')).toContainText(
         'Important highlighted passage',
       );
-      const excerptStyle = await page
+      const excerptStyles = await page
         .locator('.detail-note-excerpt')
-        .evaluate((el) => ({
-          text: el.textContent,
-          whiteSpace: getComputedStyle(el).whiteSpace,
-        }));
-      expect(excerptStyle).toEqual({
-        text: 'Important highlighted passage\nwith original line break',
-        whiteSpace: 'pre-wrap',
-      });
+        .evaluateAll((nodes) =>
+          nodes.map((el) => ({
+            text: el.textContent,
+            whiteSpace: getComputedStyle(el).whiteSpace,
+          })),
+        );
+      expect(excerptStyles).toEqual([
+        {
+          text: 'Important highlighted passage\nwith original line break',
+          whiteSpace: 'pre-wrap',
+        },
+        {
+          text: 'Array highlighted passage\nwith grouped line break',
+          whiteSpace: 'pre-wrap',
+        },
+      ]);
       await expect(page.locator('.detail-snapshot-badge.html')).toHaveText(
         'HTML',
       );
@@ -1478,6 +1498,86 @@ test.describe('desktop visual regression', () => {
 
       await expect(page.getByText('Needle daemon A')).toBeVisible();
       await expect(page.getByText('Needle daemon B')).toHaveCount(0);
+    });
+  });
+
+  test('clear button resets active search filters', async ({ page }) => {
+    const now = Date.now();
+    const deviceAUrl = 'https://example.com/clear-filter-device-a';
+    const deviceBUrl = 'https://example.com/clear-filter-device-b';
+    const deviceASlug = generateSlugFromUrl(deviceAUrl);
+    const deviceBSlug = generateSlugFromUrl(deviceBUrl);
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [
+          {
+            url: 'https://example.com/clear-filter-local-marker',
+            title: 'Clear filter local marker',
+            timestamp: now - 30_000,
+            deviceId: 'device-a',
+          },
+          {
+            url: 'https://example.com/clear-filter-remote-marker',
+            title: 'Clear filter remote marker',
+            timestamp: now - 20_000,
+            deviceId: 'device-b',
+          },
+        ],
+        extraSession: {
+          [pageKey(deviceASlug)]: {
+            slug: deviceASlug,
+            url: deviceAUrl,
+            title: 'Clear filter daemon A',
+            timestamps: { 'device-a': now - 10_000 },
+          },
+          [pageKey(deviceBSlug)]: {
+            slug: deviceBSlug,
+            url: deviceBUrl,
+            title: 'Clear filter daemon B',
+            timestamps: { 'device-b': now - 5_000 },
+          },
+        },
+        searchHistoryResults: [
+          {
+            url: deviceAUrl,
+            title: 'Clear filter daemon A',
+            timestamp: now - 10_000,
+            score: 2,
+          },
+          {
+            url: deviceBUrl,
+            title: 'Clear filter daemon B',
+            timestamp: now - 5_000,
+            score: 2,
+          },
+        ],
+      });
+
+      await page.locator('#searchDraftInput').fill('clear filter');
+      await expect(page.getByText('Clear filter daemon A')).toBeVisible();
+      await expect(page.getByText('Clear filter daemon B')).toBeVisible();
+
+      await page.locator('#filterToggleBtn').click();
+      await expect(page.locator('#filterClearBtn')).toBeDisabled();
+
+      await page.locator('.filter-bubble[data-device-id="device-a"]').click();
+      await expect(page.locator('#filterToggleBtn')).toHaveClass(/has-filters/);
+      await expect(page.locator('#filterClearBtn')).toBeEnabled();
+      await expect(page.getByText('Clear filter daemon A')).toBeVisible();
+      await expect(page.getByText('Clear filter daemon B')).toHaveCount(0);
+
+      await page.locator('#filterClearBtn').click();
+      await expect(page.locator('#filterToggleBtn')).not.toHaveClass(
+        /has-filters/,
+      );
+      await expect(
+        page.locator('.filter-bubble[data-device-id="device-a"]'),
+      ).not.toHaveClass(/active/);
+      await expect(page.locator('#filterClearBtn')).toBeDisabled();
+      await expect(page.getByText('Clear filter daemon A')).toBeVisible();
+      await expect(page.getByText('Clear filter daemon B')).toBeVisible();
     });
   });
 
@@ -2263,7 +2363,7 @@ test.describe('desktop visual regression', () => {
         childIds.push(noteId);
         extraSession[noteId] = {
           slug: `slow-scroll-${i}`,
-          excerpt: 'highlighted text',
+          excerpt: ['highlighted text'],
           text: 'highlighted text',
         };
       }
@@ -3421,7 +3521,14 @@ test.describe('desktop visual regression', () => {
         const main = document.querySelector('.main');
         main.scrollTop = 1600;
         await new Promise((resolve) => requestAnimationFrame(resolve));
-        return main.scrollTop;
+        const mainTop = main.getBoundingClientRect().top;
+        const firstVisible = [...document.querySelectorAll('.result-row')].find(
+          (row) => row.getBoundingClientRect().bottom > mainTop + 1,
+        );
+        return {
+          scrollTop: main.scrollTop,
+          firstUrl: firstVisible?.dataset.url || '',
+        };
       });
       await page.evaluate(() => {
         const input = document.getElementById('searchDraftInput');
@@ -3436,12 +3543,143 @@ test.describe('desktop visual regression', () => {
 
       const after = await page.evaluate(() => {
         const main = document.querySelector('.main');
+        const mainTop = main.getBoundingClientRect().top;
+        const firstVisible = [...document.querySelectorAll('.result-row')].find(
+          (row) => row.getBoundingClientRect().bottom > mainTop + 1,
+        );
         return {
           scrollTop: main.scrollTop,
           maxScroll: main.scrollHeight - main.clientHeight,
+          firstUrl: firstVisible?.dataset.url || '',
         };
       });
-      expect(Math.abs(after.scrollTop - before)).toBeLessThanOrEqual(120);
+      expect(after.firstUrl).toBe(before.firstUrl);
+      expect(Math.abs(after.scrollTop - before.scrollTop)).toBeLessThanOrEqual(
+        120,
+      );
+      expect(after.scrollTop).toBeLessThan(after.maxScroll - 200);
+    });
+  });
+
+  test('reopening a hidden searched desktop window preserves result scroll position', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const searchHistoryResults = Array.from(
+      { length: VIRTUALIZED_ENTRY_COUNT },
+      (_, i) => ({
+        url: `https://example.com/search-reopen-${i}`,
+        title: `Search reopen ${i}`,
+        timestamp: now - i * 1000,
+        score: 1,
+      }),
+    );
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [
+          {
+            url: 'https://example.com/search-reopen-loaded-decoy',
+            title: 'Loaded decoy',
+            timestamp: now,
+            deviceId: 'device-a',
+          },
+        ],
+        searchHistoryResults,
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll('.result-row').length > 0,
+      );
+
+      await page.locator('#searchDraftInput').fill('Search reopen');
+      await page.waitForFunction(
+        () =>
+          Number(
+            document.getElementById('relatedResults').dataset.searchCount || 0,
+          ) > 0,
+      );
+
+      const before = await page.evaluate(async () => {
+        const main = document.querySelector('.main');
+        main.scrollTop = 1600;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const mainTop = main.getBoundingClientRect().top;
+        const firstVisible = [...document.querySelectorAll('.result-row')].find(
+          (row) => row.getBoundingClientRect().bottom > mainTop + 1,
+        );
+        return {
+          scrollTop: main.scrollTop,
+          firstUrl: firstVisible?.dataset.url || '',
+        };
+      });
+      const searchInvocationsBeforeReopen = await page.evaluate(() =>
+        window.__desktopVisualHarness.searchHistoryInvocationCount(),
+      );
+
+      await page.evaluate(
+        ({ now }) => {
+          const main = document.querySelector('.main');
+          Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            value: 'hidden',
+          });
+          document.dispatchEvent(new Event('visibilitychange'));
+          main.dataset.previousDisplay = main.style.display;
+          main.style.display = 'none';
+          window.__desktopVisualHarness.appendHistoryEntry({
+            url: 'https://example.com/search-reopen-new',
+            title: 'Search reopen new',
+            timestamp: now + 10_000,
+            deviceId: 'device-a',
+          });
+          Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            value: 'visible',
+          });
+          document.dispatchEvent(new Event('visibilitychange'));
+          setTimeout(() => {
+            main.style.display = main.dataset.previousDisplay || '';
+          }, 50);
+        },
+        { now },
+      );
+
+      await page.waitForFunction(
+        ({ previous }) =>
+          window.__desktopVisualHarness.searchHistoryInvocationCount() >
+          previous,
+        { previous: searchInvocationsBeforeReopen },
+      );
+      await page.waitForFunction(() => {
+        const related = document.getElementById('relatedResults');
+        const scroller = related?._virtualScroller;
+        return (
+          Number(related?.dataset.searchCount || 0) > 0 &&
+          scroller?.renderedRange?.start >= 0
+        );
+      });
+      await page.waitForFunction(
+        () => document.querySelector('.main')?.clientHeight > 0,
+      );
+
+      const after = await page.evaluate(() => {
+        const main = document.querySelector('.main');
+        const mainTop = main.getBoundingClientRect().top;
+        const firstVisible = [...document.querySelectorAll('.result-row')].find(
+          (row) => row.getBoundingClientRect().bottom > mainTop + 1,
+        );
+        return {
+          scrollTop: main.scrollTop,
+          maxScroll: main.scrollHeight - main.clientHeight,
+          firstUrl: firstVisible?.dataset.url || '',
+        };
+      });
+      expect(after.firstUrl).toBe(before.firstUrl);
+      expect(Math.abs(after.scrollTop - before.scrollTop)).toBeLessThanOrEqual(
+        120,
+      );
       expect(after.scrollTop).toBeLessThan(after.maxScroll - 200);
     });
   });
@@ -3489,12 +3727,16 @@ test.describe('desktop visual regression', () => {
       expect(before.maxScroll).toBe(0);
 
       await page.locator('#searchDraftInput').fill('Search enter');
+      await expect(
+        page.locator('.result-row .result-title').first(),
+      ).toHaveText('Search enter 0');
       await page.waitForFunction(
-        ({ expected }) =>
-          Number(
-            document.getElementById('relatedResults').dataset.searchCount || 0,
-          ) === expected,
-        { expected: VIRTUALIZED_ENTRY_COUNT },
+        () => {
+          const main = document.querySelector('.main');
+          return main && main.scrollHeight - main.clientHeight > 1000;
+        },
+        null,
+        { timeout: 5000 },
       );
 
       const after = await page.evaluate(() => {
@@ -3510,6 +3752,85 @@ test.describe('desktop visual regression', () => {
       expect(after.maxScroll).toBeGreaterThan(1000);
       expect(after.scrollTop).toBe(0);
       expect(after.firstTitle).toBe('Search enter 0');
+    });
+  });
+
+  test('search does not append unrelated history after matching results', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const searchHistoryResults = [
+      {
+        url: 'https://example.com/canon-result-one',
+        title: 'Canon result one',
+        timestamp: now - 1000,
+        score: 2,
+      },
+      {
+        url: 'https://example.com/canon-result-two',
+        title: 'Canon result two',
+        timestamp: now - 2000,
+        score: 2,
+      },
+    ];
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [
+          {
+            url: 'https://example.com/irrelevant-before-search',
+            title: 'Irrelevant before search',
+            timestamp: now,
+            deviceId: 'device-a',
+          },
+        ],
+        searchHistoryResults,
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll('.result-row').length > 0,
+      );
+      await page.evaluate(() => {
+        const scroller =
+          document.getElementById('relatedResults')._virtualScroller;
+        scroller.onLoadMore = async () => {
+          scroller.appendData([
+            {
+              url: 'https://example.com/irrelevant-stale-load-more',
+              title: 'Irrelevant stale load more',
+              timestamp: Date.now(),
+              score: 0,
+              timestamps: [Date.now()],
+            },
+          ]);
+        };
+      });
+
+      await page.locator('#searchDraftInput').fill('Canon');
+      await page.waitForFunction(
+        ({ expected }) =>
+          Number(
+            document.getElementById('relatedResults').dataset.searchCount || 0,
+          ) === expected,
+        { expected: searchHistoryResults.length },
+      );
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              document.getElementById('relatedResults')._virtualScroller
+                .onLoadMore === null,
+          ),
+        )
+        .toBe(true);
+
+      const resultTitles = await page.evaluate(() => {
+        const scroller =
+          document.getElementById('relatedResults')._virtualScroller;
+        return scroller.data.map((item) => item.title);
+      });
+      expect(resultTitles).toEqual(['Canon result one', 'Canon result two']);
     });
   });
 });

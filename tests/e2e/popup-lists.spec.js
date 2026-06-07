@@ -591,6 +591,219 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
+  test('popup highlight excerpts preserve original newlines', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    localServer.addPage('/popup-highlight-newlines', {
+      title: 'Popup Highlight Newlines',
+      body: '<main>Popup highlight newline page</main>',
+    });
+    const url = localServer.url('/popup-highlight-newlines');
+    const slug = getSlugForUrl(url);
+    const stringNoteSlug = 'popup-string-newline-note';
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: { timestamp: now, tree: [] },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Popup Highlight Newlines',
+          timestamp: now,
+          childIds: [`note:${stringNoteSlug}`],
+          parentIds: [],
+        },
+      },
+      {
+        path: `objects/notes/${stringNoteSlug}.json`,
+        data: {
+          slug: stringNoteSlug,
+          excerpt: ['String first line\nString second line'],
+          note: 'String note',
+          cssPath: [''],
+          url,
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const helper = await openHelperPage(extContext, extensionId);
+    const summary = await helper.evaluate(
+      (pageUrl) =>
+        chrome.runtime.sendMessage({ action: 'getPageSummary', url: pageUrl }),
+      url,
+    );
+    expect(summary.success, JSON.stringify(summary)).toBe(true);
+    expect(summary).toMatchObject({
+      success: true,
+      notes: [{ slug: stringNoteSlug }],
+    });
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Popup Highlight Newlines',
+    });
+
+    await expect(popup.locator('.highlight-item')).toHaveCount(1);
+    const excerpts = await popup
+      .locator('.highlight-excerpt')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => ({
+          text: node.textContent,
+          whiteSpace: getComputedStyle(node).whiteSpace,
+        })),
+      );
+
+    expect(excerpts).toEqual([
+      {
+        text: 'String first line\nString second line',
+        whiteSpace: 'pre-wrap',
+      },
+    ]);
+
+    await popup.close();
+    await helper.close();
+    await page.close();
+  });
+
+  test('CJK IME text opens list search without flushing raw keys or dropping composition updates', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    localServer.addPage('/popup-cjk-ime-list-search', {
+      title: 'Popup CJK IME List Search',
+      body: '<main>Popup CJK IME list search page</main>',
+    });
+    const url = localServer.url('/popup-cjk-ime-list-search');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:reading' }, { id: 'list:archive' }],
+        },
+      },
+      {
+        path: 'views/lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: '阅读',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'views/lists/archive.json',
+        data: {
+          slug: 'archive',
+          name: 'Archive',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Popup CJK IME List Search',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Popup CJK IME List Search',
+    });
+
+    const capture = popup.locator('#listSearchCaptureInput');
+    await expect(capture).toBeFocused();
+    const compositionTargetParent = await capture.evaluate((el) => {
+      el.dataset.compositionTarget = 'list-search';
+      return {
+        id: el.parentElement?.id || '',
+        className: el.parentElement?.className || '',
+      };
+    });
+    await capture.evaluate((el) => {
+      el.dispatchEvent(
+        new CompositionEvent('compositionstart', { bubbles: true }),
+      );
+    });
+    await expect(popup.locator('#listPicker')).toBeVisible();
+    const input = popup.locator('#listPickerInput');
+    await expect(input).toHaveAttribute(
+      'data-composition-target',
+      'list-search',
+    );
+    await expect
+      .poll(() =>
+        input.evaluate((el) => ({
+          id: el.parentElement?.id || '',
+          className: el.parentElement?.className || '',
+        })),
+      )
+      .toEqual(compositionTargetParent);
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue('');
+
+    await input.evaluate((el) => {
+      el.value = '阅';
+      el.dispatchEvent(
+        new InputEvent('input', {
+          inputType: 'insertCompositionText',
+          data: '阅',
+          bubbles: true,
+        }),
+      );
+    });
+
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue('阅');
+    await expect(input).not.toHaveValue('y');
+    await input.evaluate((el) => {
+      el.value = '阅读';
+      el.dispatchEvent(
+        new InputEvent('input', {
+          inputType: 'insertCompositionText',
+          data: '阅读',
+          bubbles: true,
+        }),
+      );
+    });
+
+    await expect(input).toHaveValue('阅读');
+    await expect(popup.locator('#listPickerList')).toContainText('阅读');
+    await expect(popup.locator('#listPickerList')).not.toContainText('Archive');
+
+    await popup.close();
+    await page.close();
+  });
+
   test(`popup refreshes notes, list chips, and badge from live desktop mutations seed=${POPUP_MUTATION_SEED}`, async ({
     extContext,
     extensionId,
@@ -671,9 +884,9 @@ test.describe('Popup list chip behavior', () => {
           action: 'createNote',
           url: pageUrl,
           title: pageTitle,
-          excerpt: pageExcerpt,
+          excerpt: [pageExcerpt],
           note: pageNote,
-          cssPath: null,
+          cssPath: [''],
         }),
       { pageUrl: url, pageTitle: title, pageExcerpt: excerpt, pageNote: note },
     );
@@ -748,7 +961,7 @@ test.describe('Popup list chip behavior', () => {
       const style = getComputedStyle(el);
       return { color: style.color, background: style.backgroundColor };
     });
-    expect(colors.color).toBe('rgb(238, 238, 223)');
+    expect(colors.color).toBe('rgb(23, 23, 19)');
     expect(colors.color).not.toBe('rgb(0, 0, 0)');
 
     await popup.close();
@@ -1151,6 +1364,78 @@ test.describe('Popup list chip behavior', () => {
     expect(
       await popup.evaluate(() => window.__saveListMetaRequests.length),
     ).toBe(0);
+
+    await popup.close();
+    await page.close();
+  });
+
+  test('reopened list picker does not duplicate Enter create actions', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    localServer.addPage('/popup-reopen-list-picker', {
+      title: 'Popup Reopen List Picker',
+      body: '<main>Popup reopen list picker page</main>',
+    });
+    const url = localServer.url('/popup-reopen-list-picker');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: { timestamp: now, tree: [] },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Popup Reopen List Picker',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Popup Reopen List Picker',
+    });
+    await popup.evaluate(() => {
+      const original = chrome.runtime.sendMessage.bind(chrome.runtime);
+      window.__saveListMetaRequests = [];
+      chrome.runtime.sendMessage = async (request, ...rest) => {
+        if (request?.action === 'saveListMeta') {
+          window.__saveListMetaRequests.push(request);
+        }
+        return original(request, ...rest);
+      };
+    });
+
+    for (let i = 0; i < 3; i += 1) {
+      await popup.locator('#listAddBtn').click();
+      await expect(popup.locator('#listPicker')).toBeVisible();
+      await popup.locator('#listPickerInput').focus();
+      await popup.keyboard.press('Escape');
+      await expect(popup.locator('#listPicker')).toHaveCount(0);
+    }
+
+    await popup.locator('#listAddBtn').click();
+    await popup.locator('#listPickerInput').fill('Solo Create');
+    await popup.keyboard.press('Enter');
+
+    await expect(popup.locator('#listPicker')).toHaveCount(0);
+    expect(
+      await popup.evaluate(() => window.__saveListMetaRequests.length),
+    ).toBe(1);
 
     await popup.close();
     await page.close();

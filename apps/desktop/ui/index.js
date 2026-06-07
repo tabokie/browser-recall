@@ -22,6 +22,7 @@ import {
   sendAction,
 } from './desktop-bridge.js';
 import { matchKeywordRule } from './rule-engine.js';
+import { formatHighlightExcerpt } from './highlight-format.js';
 import { attentionStrength, aggregateAttention } from './attention-utils.js';
 import {
   initCharts,
@@ -682,16 +683,7 @@ let onboardingDataFolderPath = '';
 // --- Search/filter state ---
 let savedSearches = []; // string[] — session-only, per-view UI state
 let currentSearchInput = ''; // unsaved draft (also participates in live search)
-let filterState = {
-  firstSeen: { lo: null, hi: null }, // null = unbounded (days ago)
-  lastSeen: { lo: null, hi: null },
-  devices: {}, // { deviceId: true } — only stores enabled devices; empty = show all
-  lists: {}, // { listSlug: true } — only stores enabled lists; empty = show all
-  hasHighlights: null, // null=any, true=require
-  hasSnapshots: null,
-  liked: null,
-  visitedMultipleTimes: null,
-};
+let filterState = createDefaultFilterState();
 let filterVisible = false;
 let exploreDebounceTimer = null;
 
@@ -1085,8 +1077,13 @@ async function renderProgressiveResults(gen) {
   }
 
   const relatedContainer = document.getElementById('relatedResults');
+  if (preserveRelatedScrollOnNextRender && searchState.pendingPhases > 0) {
+    return;
+  }
+
   // Show "No results" when all phases are done and nothing matched
   if (results.length === 0) {
+    preserveRelatedScrollOnNextRender = false;
     const vs = getOrCreateRelatedScroller();
     vs._headerHtml =
       searchState.pendingPhases <= 0
@@ -1105,21 +1102,26 @@ async function renderProgressiveResults(gen) {
 
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = '';
-  vs.updateData(sorted, (r) =>
-    resultRowHtml(r.user_title || r.title, r.url, {
-      attScore: r.attScore,
-      maxAtt,
-      attDetail: r.attDetail,
-      notes: r.notes,
-      timestamps: r.timestamps,
-      visitDates: r.visitDates,
-      context: 'related',
-      childIds: r.childIds,
-      parentIds: r.parentIds,
-      likes: r.likes,
-      matchSources: r.matchSources,
-      hasHighlightNotes: r.hasHighlightNotes,
-    }),
+  const preserveScroll = preserveRelatedScrollOnNextRender;
+  preserveRelatedScrollOnNextRender = false;
+  vs.updateData(
+    sorted,
+    (r) =>
+      resultRowHtml(r.user_title || r.title, r.url, {
+        attScore: r.attScore,
+        maxAtt,
+        attDetail: r.attDetail,
+        notes: r.notes,
+        timestamps: r.timestamps,
+        visitDates: r.visitDates,
+        context: 'related',
+        childIds: r.childIds,
+        parentIds: r.parentIds,
+        likes: r.likes,
+        matchSources: r.matchSources,
+        hasHighlightNotes: r.hasHighlightNotes,
+      }),
+    { preserveScroll },
   );
   relatedContainer.dataset.searchCount = String(searchState.results.length);
   // Update time chart
@@ -1152,6 +1154,16 @@ function hideSearchSpinner() {
   const el = document.getElementById('contentSearchSpinner');
   if (el) el.style.display = 'none';
 }
+
+async function waitForMainViewport() {
+  const main = document.querySelector('.main');
+  if (!main || main.clientHeight > 0) return;
+  for (let i = 0; i < 10; i++) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    if (main.clientHeight > 0) return;
+  }
+}
+
 function phaseComplete(gen) {
   if (gen !== searchState.generation) return;
   searchState.pendingPhases--;
@@ -1314,6 +1326,8 @@ function phase0Score(item, words) {
 // Phase 2a: notes. Phase 2b: snapshots streaming.
 async function runProgressiveSearch(allQueries) {
   cancelActiveHistorySearch();
+  const vs = document.getElementById('relatedResults')?._virtualScroller;
+  if (vs) vs.onLoadMore = null;
   const gen = ++searchState.generation;
   searchState.results = [];
   searchState.resultIndex.clear();
@@ -1539,7 +1553,7 @@ function resolvePageRef(refId, pageSnap, noteSnap) {
     if (!note) return null;
     return {
       url: null,
-      title: note.excerpt || 'Note',
+      title: formatHighlightExcerpt(note.excerpt) || 'Note',
       user_title: null,
       isNote: true,
       note,
@@ -1891,6 +1905,19 @@ function wordsMatchItem(words, item) {
   });
 }
 
+function createDefaultFilterState() {
+  return {
+    firstSeen: { lo: null, hi: null }, // null = unbounded (days ago)
+    lastSeen: { lo: null, hi: null },
+    devices: {}, // { deviceId: true } — only stores enabled devices; empty = show all
+    lists: {}, // { listSlug: true } — only stores enabled lists; empty = show all
+    hasHighlights: null, // null=any, true=require
+    hasSnapshots: null,
+    liked: null,
+    visitedMultipleTimes: null,
+  };
+}
+
 function isDefaultFilterState(state) {
   return (
     state.firstSeen.lo === null &&
@@ -2003,16 +2030,7 @@ async function loadFilterState() {
   } catch {
     /* session miss */
   }
-  filterState = {
-    firstSeen: { lo: null, hi: null },
-    lastSeen: { lo: null, hi: null },
-    devices: {},
-    lists: {},
-    hasHighlights: null,
-    hasSnapshots: null,
-    liked: null,
-    visitedMultipleTimes: null,
-  };
+  filterState = createDefaultFilterState();
 }
 
 // --- Sort helpers ---
@@ -2424,7 +2442,7 @@ function matchKeyword(item, field, value) {
     item.notes &&
     item.notes.some((n) => {
       if (n.excerpt === null) return false; // skip global notes
-      const quotes = Array.isArray(n.excerpt) ? n.excerpt : [n.excerpt || ''];
+      const quotes = Array.isArray(n.excerpt) ? n.excerpt : [];
       return quotes.some((t) => textMatches(t, q, exact));
     })
   )
@@ -3728,8 +3746,7 @@ function buildDetailHtml(url, attDetail, notes, likes = 0) {
     html += '<div class="detail-notes">';
     for (const n of notes.slice(0, 5)) {
       if (n.excerpt === null) continue; // skip global notes
-      const raw = n.excerpt || '';
-      const text = Array.isArray(raw) ? raw.join(' ') : raw || '';
+      const text = formatHighlightExcerpt(n.excerpt);
       if (text)
         html += `<div class="detail-note-item">${escapeHtml(text)}</div>`;
     }
@@ -3865,9 +3882,7 @@ function renderExtraDetailHtml(extra, cardTimestamp) {
     for (const n of highlightNotes.slice(0, 20)) {
       const noteSlug = n.slug || '';
       const noteText = n.note || '';
-      const rawQuote = Array.isArray(n.excerpt)
-        ? n.excerpt.join('\n')
-        : n.excerpt || '';
+      const rawQuote = formatHighlightExcerpt(n.excerpt);
       const noteBody = noteText
         ? `<span class="detail-note-content">${escapeHtml(noteText)}</span>`
         : `<em>No annotation</em>`;
@@ -6844,6 +6859,8 @@ document.addEventListener('visibilitychange', async () => {
   if (historyChanged) {
     cachedFieldRanges = null;
     if (activeView.type === 'explore' || activeView.type === 'list') {
+      await waitForMainViewport();
+      preserveRelatedScrollOnNextRender = true;
       runSearchFilterPipeline();
     } else {
       refreshCurrentView();
@@ -6901,7 +6918,8 @@ async function renderSearchPanel() {
 
 async function renderFilterPanelHtml() {
   await listsReadyPromise;
-  let html = '';
+  const hasFilters = !isDefaultFilterState(filterState);
+  let html = `<div class="filter-panel-header"><div class="filter-panel-title">Filters</div><button class="filter-clear-btn" id="filterClearBtn" type="button"${hasFilters ? '' : ' disabled'}>Clear</button></div>`;
   const isListView = activeView.type === 'list';
 
   // Sort toggle (list view only)
@@ -7026,6 +7044,14 @@ function renderCheckboxFilter(stateKey, label, value) {
   return `<label class="filter-checkbox"><input type="checkbox" data-key="${stateKey}"${checked}> ${escapeHtml(label)}</label>`;
 }
 
+function updateFilterPanelActions(container) {
+  const hasFilters = !isDefaultFilterState(filterState);
+  const filterBtn = container.querySelector('#filterToggleBtn');
+  if (filterBtn) filterBtn.classList.toggle('has-filters', hasFilters);
+  const clearBtn = container.querySelector('#filterClearBtn');
+  if (clearBtn) clearBtn.disabled = !hasFilters;
+}
+
 function bindSearchEvents(container) {
   // Saved search row inputs — edit inline
   container.querySelectorAll('.search-row-input').forEach((input) => {
@@ -7090,6 +7116,17 @@ function bindSearchEvents(container) {
 }
 
 function bindFilterEvents(container) {
+  const clearBtn = container.querySelector('#filterClearBtn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', async () => {
+      if (isDefaultFilterState(filterState)) return;
+      filterState = createDefaultFilterState();
+      saveFilterState();
+      await renderSearchPanel();
+      runActiveSearchPipeline();
+    });
+  }
+
   // Sort toggle (list view)
   container.querySelectorAll('.sort-toggle-option').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -7161,6 +7198,7 @@ function bindFilterEvents(container) {
           hi: hi < cfg.max ? hi : null,
         };
         saveFilterState();
+        updateFilterPanelActions(container);
         runActiveSearchPipeline();
       });
     });
@@ -7171,10 +7209,7 @@ function bindFilterEvents(container) {
       const key = input.dataset.key;
       filterState[key] = input.checked ? true : null;
       saveFilterState();
-      // Update filter-toggle-btn indicator
-      const btn = container.querySelector('#filterToggleBtn');
-      if (btn)
-        btn.classList.toggle('has-filters', !isDefaultFilterState(filterState));
+      updateFilterPanelActions(container);
       runActiveSearchPipeline();
     });
   });
@@ -7204,12 +7239,7 @@ function bindFilterEvents(container) {
         }
       }
       saveFilterState();
-      const toggleBtn = container.querySelector('#filterToggleBtn');
-      if (toggleBtn)
-        toggleBtn.classList.toggle(
-          'has-filters',
-          !isDefaultFilterState(filterState),
-        );
+      updateFilterPanelActions(container);
       runActiveSearchPipeline();
     });
   });

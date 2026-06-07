@@ -217,7 +217,7 @@ export function generateNoteSlug(timestamp, excerpt) {
   const yy = String(d.getFullYear()).slice(2);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
-  const text = (Array.isArray(excerpt) ? excerpt.join(' ') : excerpt) || 'note';
+  const text = Array.isArray(excerpt) ? excerpt.join(' ') || 'note' : 'note';
   const hashInput = text + String(timestamp);
   return `${yy}${mm}${dd}-${generateSlug(text, hashInput)}`;
 }

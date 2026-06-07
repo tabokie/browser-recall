@@ -401,7 +401,7 @@ async fn note_and_snapshot_payloads_reflect_storage_state() {
             url: "https://example.com/page".to_string(),
             path: "objects/notes/example-note.json".to_string(),
             title: Some("Example Page".to_string()),
-            excerpt: Some("excerpt text".to_string()),
+            excerpt: Some(serde_json::json!(["excerpt text"])),
             note: Some("note body".to_string()),
             css_path: None,
         },
@@ -532,7 +532,7 @@ async fn permanent_delete_repairs_note_and_list_relationship_metadata() {
             url: "https://example.com/page-a".to_string(),
             path: "objects/notes/n1.json".to_string(),
             title: Some("Page A".to_string()),
-            excerpt: Some("highlight".to_string()),
+            excerpt: Some(serde_json::json!(["highlight"])),
             note: Some("note body".to_string()),
             css_path: None,
         },
@@ -796,7 +796,7 @@ async fn migrated_note_and_list_commands_replay_entities() {
         "device-a",
         &serde_json::json!({
             "pageSlug": page_slug,
-            "excerpt": "selected text",
+            "excerpt": ["selected text"],
             "note": "first note",
         }),
     )
@@ -868,6 +868,66 @@ async fn migrated_note_and_list_commands_replay_entities() {
         .pins
         .iter()
         .any(|pin| pin.id == format!("page:{page_slug}")));
+}
+
+#[tokio::test]
+async fn create_note_preserves_structural_excerpt_and_css_path_arrays() {
+    let dir = tempdir().expect("tempdir");
+    let storage = Storage::new(dir.path());
+    storage
+        .ensure_layout("device-a")
+        .await
+        .expect("storage layout");
+
+    replay_entry(
+        &storage,
+        "device-a",
+        LogEntry::VisitPage {
+            timestamp: 1_710_000_500_000,
+            url: "https://example.com/highlight-arrays".to_string(),
+            title: Some("Highlight Arrays".to_string()),
+            referrer_url: None,
+        },
+    )
+    .await
+    .expect("visit page");
+    let page_slug = generate_slug_from_url("https://example.com/highlight-arrays").expect("slug");
+
+    let response = create_note(
+        &storage,
+        "device-a",
+        &serde_json::json!({
+            "pageSlug": page_slug,
+            "excerpt": ["First block", "Second block"],
+            "cssPath": ["body > p:nth-of-type(1)", "body > p:nth-of-type(2)"],
+            "note": "grouped note",
+        }),
+    )
+    .await
+    .expect("create note");
+    assert_eq!(
+        response.get("success").and_then(|value| value.as_bool()),
+        Some(true)
+    );
+
+    let notes = load_page_notes_payload(&storage, &page_slug)
+        .await
+        .expect("load notes");
+    let note = notes
+        .iter()
+        .find(|note| note.get("note").and_then(|value| value.as_str()) == Some("grouped note"))
+        .expect("grouped note");
+    assert_eq!(
+        note.get("excerpt"),
+        Some(&serde_json::json!(["First block", "Second block"]))
+    );
+    assert_eq!(
+        note.get("cssPath"),
+        Some(&serde_json::json!([
+            "body > p:nth-of-type(1)",
+            "body > p:nth-of-type(2)"
+        ]))
+    );
 }
 
 #[tokio::test]
@@ -1464,14 +1524,68 @@ async fn command_error_and_normalization_paths_are_explicit() {
         "Unknown settings key: unknownSetting"
     );
     assert_eq!(
+        create_note(&storage, "device-a", &serde_json::json!({"excerpt": [" "]}))
+            .await
+            .expect_err("missing note URL fails"),
+        "Cannot determine page URL for note"
+    );
+    assert_eq!(
         create_note(
             &storage,
             "device-a",
-            &serde_json::json!({"excerpt": [" ", null]})
+            &serde_json::json!({
+                "url": "https://example.com/legacy-string-note",
+                "excerpt": "legacy highlight",
+                "note": "",
+            })
         )
         .await
-        .expect_err("missing note URL fails"),
-        "Cannot determine page URL for note"
+        .expect_err("legacy string excerpt fails"),
+        "excerpt must be a string array or null"
+    );
+    assert_eq!(
+        create_note(
+            &storage,
+            "device-a",
+            &serde_json::json!({
+                "url": "https://example.com/legacy-string-path",
+                "excerpt": ["highlight"],
+                "cssPath": ".content",
+                "note": "",
+            })
+        )
+        .await
+        .expect_err("legacy string css path fails"),
+        "cssPath must be a string array or null"
+    );
+    assert_eq!(
+        create_note(
+            &storage,
+            "device-a",
+            &serde_json::json!({
+                "url": "https://example.com/non-string-excerpt-member",
+                "excerpt": ["highlight", 7],
+                "note": "",
+            })
+        )
+        .await
+        .expect_err("non-string excerpt array member fails"),
+        "excerpt array must contain strings only"
+    );
+    assert_eq!(
+        create_note(
+            &storage,
+            "device-a",
+            &serde_json::json!({
+                "url": "https://example.com/non-string-css-path-member",
+                "excerpt": ["highlight"],
+                "cssPath": [".content", false],
+                "note": "",
+            })
+        )
+        .await
+        .expect_err("non-string css path array member fails"),
+        "cssPath array must contain strings only"
     );
     let note_response = create_note(
         &storage,
@@ -1481,7 +1595,7 @@ async fn command_error_and_normalization_paths_are_explicit() {
             "title": "Direct Note",
             "excerpt": [" Alpha ", "", "Beta"],
             "note": "body",
-            "cssPath": ".content"
+            "cssPath": [".content"]
         }),
     )
     .await

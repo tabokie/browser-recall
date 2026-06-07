@@ -32,6 +32,33 @@ async function getActionIconForUrl(helper, url) {
   }, url);
 }
 
+async function openPopupForUrl(extContext, extensionId, { url, title }) {
+  const popup = await extContext.newPage();
+  await popup.addInitScript(
+    ({ url, title }) => {
+      const patchTabsQuery = () => {
+        if (!globalThis.chrome?.tabs?.query) {
+          setTimeout(patchTabsQuery, 0);
+          return;
+        }
+        const originalQuery = chrome.tabs.query.bind(chrome.tabs);
+        chrome.tabs.query = async (queryInfo) => {
+          if (queryInfo?.active && queryInfo?.currentWindow) {
+            return [{ id: 10001, url, title }];
+          }
+          return originalQuery(queryInfo);
+        };
+      };
+      patchTabsQuery();
+    },
+    { url, title },
+  );
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await expect(popup.locator('#dashboard')).toBeVisible();
+  await expect(popup.locator('#pageTitle')).not.toHaveText('—');
+  return popup;
+}
+
 test.describe('Extension badge', () => {
   test('clears badge text for page with notes because the icon carries state', async ({
     extContext,
@@ -62,9 +89,9 @@ test.describe('Extension badge', () => {
         path: 'objects/notes/test-note.json',
         data: {
           slug: 'test-note',
-          excerpt: 'hi',
+          excerpt: ['hi'],
           note: 'hi',
-          cssPath: '',
+          cssPath: [''],
           url,
         },
       },
@@ -410,9 +437,9 @@ test.describe('Extension badge', () => {
         path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
-          excerpt: 'Only note',
+          excerpt: ['Only note'],
           note: 'delete me',
-          cssPath: null,
+          cssPath: [''],
           url,
         },
       },
@@ -606,9 +633,9 @@ test.describe('Extension badge', () => {
         path: `objects/notes/${noteSlug1}.json`,
         data: {
           slug: noteSlug1,
-          excerpt: 'First highlight',
+          excerpt: ['First highlight'],
           note: 'note 1',
-          cssPath: null,
+          cssPath: [''],
           url,
         },
       },
@@ -616,9 +643,9 @@ test.describe('Extension badge', () => {
         path: `objects/notes/${noteSlug2}.json`,
         data: {
           slug: noteSlug2,
-          excerpt: 'Second highlight',
+          excerpt: ['Second highlight'],
           note: 'note 2',
-          cssPath: null,
+          cssPath: [''],
           url,
         },
       },
@@ -652,45 +679,19 @@ test.describe('Extension badge', () => {
     expect(info.success).toBe(true);
     expect(info.notes).toHaveLength(2);
     expect(info.notes.map((n) => n.excerpt).sort()).toEqual([
+      ['First highlight'],
+      ['Second highlight'],
+    ]);
+
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Page With Highlights',
+    });
+    await expect(popup.locator('.highlight-item')).toHaveCount(2);
+    await expect(popup.locator('.highlight-item')).toContainText([
       'First highlight',
       'Second highlight',
     ]);
-
-    // Now open popup.html in a new page — it queries the active tab.
-    // Since we can't simulate "active tab" in test, verify that renderNotes
-    // correctly shows excerpt notes by calling it via evaluate
-    const popup = await extContext.newPage();
-    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-    await popup.waitForFunction(
-      () => document.getElementById('highlightList'),
-      { timeout: 5000 },
-    );
-
-    // Inject notes into popup's renderNotes function
-    const noteCount = await popup.evaluate(async (testSlug) => {
-      const { generateSlugFromUrl } = await import('./utils.js');
-      // Call getPageInfo directly to get notes
-      const info = await chrome.runtime.sendMessage({
-        action: 'getPageInfo',
-        slug: testSlug,
-      });
-      if (!info?.success || !info.notes) return -1;
-      // Find and call renderNotes from popup module scope — we can't access it directly,
-      // but we can test the DOM rendering by injecting HTML manually
-      const container = document.getElementById('highlightList');
-      const textNotes = info.notes.filter((n) => n.excerpt !== null);
-      container.innerHTML = textNotes
-        .map((n) => {
-          const displayText = Array.isArray(n.excerpt)
-            ? n.excerpt.join(' ')
-            : n.excerpt;
-          return `<div class="highlight-item">"${displayText}"</div>`;
-        })
-        .join('');
-      return container.querySelectorAll('.highlight-item').length;
-    }, slug);
-
-    expect(noteCount).toBe(2);
 
     await page.close();
     await popup.close();
@@ -729,9 +730,9 @@ test.describe('Extension badge', () => {
         path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
-          excerpt: 'test excerpt',
+          excerpt: ['test excerpt'],
           note: 'test',
-          cssPath: null,
+          cssPath: [''],
           url,
         },
       },

@@ -291,11 +291,48 @@ function normalizeListView(raw) {
   return `${JSON.stringify(list, null, 2)}\n`;
 }
 
+function normalizeHighlightArray(value) {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((part) => (typeof part === 'string' ? part.trim() : ''))
+      .filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  return [];
+}
+
+function normalizeCssPathArray(value, targetLength) {
+  const paths = Array.isArray(value)
+    ? value.map((part) => (typeof part === 'string' ? part : ''))
+    : typeof value === 'string'
+      ? [value]
+      : [];
+  while (paths.length < targetLength) paths.push('');
+  return paths.slice(0, targetLength);
+}
+
+function normalizeNoteHighlightShape(note) {
+  if (!note || typeof note !== 'object') return;
+  if (!Object.prototype.hasOwnProperty.call(note, 'excerpt')) return;
+  if (note.excerpt === null) {
+    note.cssPath = null;
+    return;
+  }
+  const excerpt = normalizeHighlightArray(note.excerpt);
+  note.excerpt = excerpt;
+  note.cssPath = normalizeCssPathArray(note.cssPath, excerpt.length);
+}
+
 function normalizeNoteObject(raw) {
   const note = JSON.parse(raw);
   if (typeof note.url === 'string') {
     note.url = canonicalizePageUrl(note.url);
   }
+  normalizeNoteHighlightShape(note);
   return `${JSON.stringify(note, null, 2)}\n`;
 }
 
@@ -327,6 +364,9 @@ function normalizeLogEntry(entry) {
   normalizePinEntry(entry);
   if (entry.action === 'add_rule') {
     normalizeRuleConfig(entry.rule);
+  }
+  if (entry.action === 'create_note' || entry.action === 'replace_note') {
+    normalizeNoteHighlightShape(entry);
   }
   for (const key of ['path', 'oldPath']) {
     if (entry[key] !== undefined)

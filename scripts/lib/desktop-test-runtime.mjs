@@ -137,7 +137,22 @@ export async function waitForDesktopConnector(
 ) {
   const page = await extContext.newPage();
   try {
-    await page.goto(`chrome-extension://${extensionId}/test-helper.html`);
+    const helperUrl = `chrome-extension://${extensionId}/test-helper.html`;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await page.goto(helperUrl);
+        break;
+      } catch (error) {
+        const message = String(error?.message || error);
+        const retryableNavigation =
+          message.includes('options-stub.html') ||
+          (message.includes('is interrupted by another navigation') &&
+            message.includes(helperUrl));
+        if (attempt === 2 || !retryableNavigation) {
+          throw error;
+        }
+      }
+    }
     await page.waitForFunction(
       () => typeof chrome !== 'undefined' && chrome.runtime,
       { timeout: 5000 },

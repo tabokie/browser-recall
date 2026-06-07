@@ -107,9 +107,9 @@ test.describe('seeded randomized workflow combinations', () => {
             action: 'createNote',
             url,
             title,
-            excerpt,
+            excerpt: [excerpt],
             note,
-            cssPath: null,
+            cssPath: [''],
           }),
         pageInfo,
       );
@@ -150,9 +150,9 @@ test.describe('seeded randomized workflow combinations', () => {
         pageInfo.slug,
       );
       expect(notes.success).toBe(true);
-      expect(notes.notes.map((note) => note.excerpt)).toContain(
+      expect(notes.notes.map((note) => note.excerpt)).toContainEqual([
         pageInfo.excerpt,
-      );
+      ]);
     }
 
     for (const [index, listId] of listIds.entries()) {

@@ -60,11 +60,11 @@ impl PageEntity {
 pub struct NoteEntity {
     pub slug: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub excerpt: Option<String>,
+    pub excerpt: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     #[serde(default, rename = "cssPath", skip_serializing_if = "Option::is_none")]
-    pub css_path: Option<String>,
+    pub css_path: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]

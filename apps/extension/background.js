@@ -856,14 +856,56 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
 
 // ─── Context Menu ─────────────────────────────────────────────────────
 
+function collapseSelectionWhitespace(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function getContextMenuSelectionPayload(tabId, fallbackText) {
+  const fallback = String(fallbackText || '').trim();
+  if (!tabId || tabId <= 0) {
+    return { excerpt: fallback ? [fallback] : [], cssPath: [''] };
+  }
+
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, {
+      action: 'getStructuredSelectionText',
+    });
+    const structured = String(response?.selectionText || '').trim();
+    if (
+      structured &&
+      collapseSelectionWhitespace(structured) ===
+        collapseSelectionWhitespace(fallback)
+    ) {
+      return {
+        excerpt: Array.isArray(response.selectionExcerpt)
+          ? response.selectionExcerpt
+          : [structured],
+        cssPath: Array.isArray(response.selectionCssPath)
+          ? response.selectionCssPath
+          : [''],
+      };
+    }
+  } catch (error) {
+    logDebug('[context-menu] Structured selection unavailable:', error.message);
+  }
+
+  return { excerpt: fallback ? [fallback] : [], cssPath: [''] };
+}
+
 async function handleContextMenuHighlight(url, title, selectionText, tabId) {
   const slug = generateSlugFromUrl(url);
+  const { excerpt, cssPath } = await getContextMenuSelectionPayload(
+    tabId,
+    selectionText,
+  );
 
   const response = await runDesktopCommand('createNote', {
     pageSlug: slug,
-    excerpt: selectionText,
+    excerpt,
     note: '',
-    cssPath: null,
+    cssPath,
     url,
     title,
   });

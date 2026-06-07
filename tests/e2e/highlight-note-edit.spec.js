@@ -41,9 +41,9 @@ test.describe('Highlight note edit', () => {
         path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
-          excerpt: 'quick brown fox',
+          excerpt: ['quick brown fox'],
           note: '',
-          cssPath: null,
+          cssPath: [''],
           url: pageUrl,
         },
       },
@@ -152,9 +152,9 @@ test.describe('Highlight note edit', () => {
         path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
-          excerpt: 'edge highlight phrase',
+          excerpt: ['edge highlight phrase'],
           note: '',
-          cssPath: null,
+          cssPath: [''],
           url: pageUrl,
         },
       },
@@ -222,9 +222,9 @@ test.describe('Highlight note edit', () => {
         path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
-          excerpt: 'quick brown fox',
+          excerpt: ['quick brown fox'],
           note: 'my saved note',
-          cssPath: null,
+          cssPath: [''],
           url: pageUrl,
         },
       },
@@ -257,6 +257,504 @@ test.describe('Highlight note edit', () => {
       () => document.querySelector('mark.portal-highlight')?.dataset.noteSlug,
     );
     expect(markSlug).toBe(noteSlug);
+
+    await helper.close();
+    await page.close();
+  });
+
+  test('reapplies saved multiline highlight across visual block breaks after reload', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/hl-reapply-lines', {
+      title: 'Highlight Reapply Lines Test',
+      body: `<main>
+        <h1>煎诸君的跳蛋</h1>
+        <div>发布于 2026-06-03 17:41</div>
+        <p>我养的橘猫孩子已经走了一年半了。突然想起一件事</p>
+        <p>它平时很警觉的，但某天我发现它一条猫瘫着。</p>
+        <p>捞起来发现软绵绵一条，还温的，</p>
+      </main>`,
+    });
+    const pageUrl = localServer.url('/hl-reapply-lines');
+    const slug = getSlugForUrl(pageUrl);
+    const noteSlug = 'note-reapply-lines-test';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Highlight Reapply Lines Test',
+          timestamps: { 'test-device': now },
+          parentIds: [],
+          childIds: [`note:${noteSlug}`],
+        },
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: [
+            '煎诸君的跳蛋',
+            '发布于 2026-06-03 17:41',
+            '我养的橘猫孩子已经走了一年半了。突然想起一件事',
+            '它平时很警觉的，但某天我发现它一条猫瘫着。',
+            '捞起来发现软绵绵一条，还温的，',
+          ],
+          note: '',
+          cssPath: [
+            'body > main > h1',
+            'body > main > div',
+            'body > main > p:nth-of-type(1)',
+            'body > main > p:nth-of-type(2)',
+            'body > main > p:nth-of-type(3)',
+          ],
+          url: pageUrl,
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('domcontentloaded');
+
+    const marks = page.locator('mark.portal-highlight');
+    await expect(marks).toHaveCount(5, { timeout: 5000 });
+
+    const markDetails = await marks.evaluateAll((nodes) =>
+      nodes.map((el) => ({
+        text: el.textContent,
+        noteSlug: el.dataset.noteSlug,
+      })),
+    );
+    expect(markDetails).toEqual([
+      {
+        text: '煎诸君的跳蛋',
+        noteSlug,
+      },
+      {
+        text: '发布于 2026-06-03 17:41',
+        noteSlug,
+      },
+      {
+        text: '我养的橘猫孩子已经走了一年半了。突然想起一件事',
+        noteSlug,
+      },
+      {
+        text: '它平时很警觉的，但某天我发现它一条猫瘫着。',
+        noteSlug,
+      },
+      {
+        text: '捞起来发现软绵绵一条，还温的，',
+        noteSlug,
+      },
+    ]);
+
+    await page.reload();
+    await page.waitForLoadState('domcontentloaded');
+
+    await expect(marks).toHaveCount(5, { timeout: 5000 });
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          [...document.querySelectorAll('mark.portal-highlight')].map(
+            (mark) => mark.dataset.noteSlug,
+          ),
+        ),
+      )
+      .toEqual([noteSlug, noteSlug, noteSlug, noteSlug, noteSlug]);
+
+    await page.close();
+  });
+
+  test('highlight created across visual blocks stores excerpt and css paths as structural arrays', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/hl-create-visual-block-array', {
+      title: 'Highlight Visual Block Array Test',
+      body: `<main>
+        <div class="meta"><span>煎诸君的跳蛋</span> <span>发布于 2026-06-03 17:41</span></div>
+        <div class="body">我养的橘猫孩子已经走了一年半了。突然想起一件事</div>
+        <div class="body">它平时很警觉的，但某天我发现它一条猫瘫着。</div>
+      </main>`,
+    });
+    const pageUrl = localServer.url('/hl-create-visual-block-array');
+    const slug = getSlugForUrl(pageUrl);
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Highlight Visual Block Array Test',
+          timestamps: { 'test-device': now },
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('domcontentloaded');
+    await page.evaluate(() => {
+      const firstSpan = document.querySelector('.meta span');
+      const secondBody = document.querySelectorAll('.body')[1];
+      const range = document.createRange();
+      range.setStart(firstSpan.firstChild, 0);
+      range.setEnd(secondBody.firstChild, secondBody.textContent.length);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const highlightResp = await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      return chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
+    }, pageUrl);
+    expect(highlightResp.success).toBe(true);
+    await expect(page.locator('mark.portal-highlight')).toHaveCount(3);
+
+    const notesResp = await helper.evaluate(
+      (pageSlug) =>
+        chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: pageSlug }),
+      slug,
+    );
+
+    expect(notesResp.success).toBe(true);
+    expect(notesResp.notes).toHaveLength(1);
+    expect(notesResp.notes[0].excerpt).toEqual([
+      '煎诸君的跳蛋 发布于 2026-06-03 17:41',
+      '我养的橘猫孩子已经走了一年半了。突然想起一件事',
+      '它平时很警觉的，但某天我发现它一条猫瘫着。',
+    ]);
+    expect(notesResp.notes[0].cssPath).toEqual([
+      'body > main > div:nth-of-type(1)',
+      'body > main > div:nth-of-type(2)',
+      'body > main > div:nth-of-type(3)',
+    ]);
+
+    await helper.close();
+    await page.close();
+  });
+
+  test('highlight created inside one multiline element stores excerpt as one string', async ({
+    extContext,
+    extensionId,
+    localServer,
+  }) => {
+    localServer.addPage('/hl-create-single-multiline', {
+      title: 'Highlight Single Multiline Test',
+      body: `<main><pre><code><span class="token">Referer: https://developer.mozilla.org/en-US/docs/Web/JavaScript</span>
+<span class="token">Referer: https://example.com/page?q=123</span>
+<span class="token">Referer: https://example.com/</span></code></pre></main>`,
+    });
+    const pageUrl = localServer.url('/hl-create-single-multiline');
+    const slug = getSlugForUrl(pageUrl);
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Highlight Single Multiline Test',
+          timestamps: { 'test-device': now },
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('domcontentloaded');
+    await page.evaluate(() => {
+      const code = document.querySelector('code');
+      const range = document.createRange();
+      range.selectNodeContents(code);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const highlightResp = await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      return chrome.tabs.sendMessage(tab.id, { action: 'highlightSelection' });
+    }, pageUrl);
+    expect(highlightResp.success).toBe(true);
+    await expect(page.locator('mark.portal-highlight')).toHaveCount(1);
+
+    const notesResp = await helper.evaluate(
+      (pageSlug) =>
+        chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: pageSlug }),
+      slug,
+    );
+
+    expect(notesResp.success).toBe(true);
+    expect(notesResp.notes).toHaveLength(1);
+    expect(notesResp.notes[0].excerpt).toEqual([
+      'Referer: https://developer.mozilla.org/en-US/docs/Web/JavaScript\nReferer: https://example.com/page?q=123\nReferer: https://example.com/',
+    ]);
+    expect(notesResp.notes[0].cssPath).toEqual(['body > main > pre']);
+
+    await helper.close();
+    await page.close();
+  });
+
+  test('reapplies saved highlight using exact comment part paths after reload', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/hl-reapply-stale-metadata', {
+      title: 'Highlight Stale Metadata Test',
+      body: `<table><tbody><tr id="48419236"><td><table><tbody><tr><td></td><td></td><td>
+        <div><span><a>staticshock</a> <span>1 hour ago</span> | next [–]</span></div>
+        <br>
+        <div class="comment"><div class="commtext c00">Everything is search.
+          <p>Software development is search through the space of useful/interesting automations.</p>
+          <p>Business is search for product market fit.</p>
+        </div></div>
+      </td></tr></tbody></table></td></tr></tbody></table>`,
+    });
+    const pageUrl = localServer.url('/hl-reapply-stale-metadata');
+    const slug = getSlugForUrl(pageUrl);
+    const noteSlug = 'note-reapply-stale-metadata-test';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Highlight Stale Metadata Test',
+          timestamps: { 'test-device': now },
+          parentIds: [],
+          childIds: [`note:${noteSlug}`],
+        },
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: [
+            'staticshock 1 hour ago | next [–]',
+            'Everything is search.',
+            'Software development is search through the space of useful/interesting automations.',
+            'Business is search for product market fit.',
+          ],
+          note: '',
+          cssPath: [
+            'body > table > tbody > tr > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(1)',
+            'body > table > tbody > tr > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(2) > div',
+            'body > table > tbody > tr > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(2) > div > p:nth-of-type(1)',
+            'body > table > tbody > tr > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(2) > div > p:nth-of-type(2)',
+          ],
+          url: pageUrl,
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('domcontentloaded');
+
+    await expect(page.locator('mark.portal-highlight')).toHaveCount(4, {
+      timeout: 5000,
+    });
+    await expect(
+      page.locator('mark.portal-highlight', {
+        hasText: 'staticshock 1 hour ago | next [–]',
+      }),
+    ).toBeVisible();
+    await expect(
+      page.locator('mark.portal-highlight', {
+        hasText:
+          'Software development is search through the space of useful/interesting automations.',
+      }),
+    ).toBeVisible();
+    await expect(page.locator('mark.portal-highlight').first()).toHaveAttribute(
+      'data-note-slug',
+      noteSlug,
+    );
+
+    await page.reload();
+    await page.waitForLoadState('domcontentloaded');
+    await expect(page.locator('mark.portal-highlight')).toHaveCount(4, {
+      timeout: 5000,
+    });
+    await expect(
+      page.locator('mark.portal-highlight', {
+        hasText:
+          'Software development is search through the space of useful/interesting automations.',
+      }),
+    ).toBeVisible();
+
+    await page.close();
+  });
+
+  test('reapplies HN highlights saved with migrated escaped numeric row id paths', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/hl-reapply-hn-numeric-row-id', {
+      title: 'Highlight HN Numeric Row Id Test',
+      body: `<table><tbody><tr id="48419236"><td><table><tbody><tr><td></td><td></td><td>
+        <div><span><a>staticshock</a> <span>1 day ago</span> | next [–]</span></div>
+        <br>
+        <div class="comment"><div class="commtext c00">Everything is search.
+          <p>Software development is search through the space of useful/interesting automations.</p>
+          <p>Business is search for product market fit.</p>
+        </div></div>
+      </td></tr></tbody></table></td></tr></tbody></table>`,
+    });
+    const pageUrl = localServer.url('/hl-reapply-hn-numeric-row-id');
+    const slug = getSlugForUrl(pageUrl);
+    const noteSlug = 'note-reapply-hn-numeric-row-id-test';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Highlight HN Numeric Row Id Test',
+          timestamps: { 'test-device': now },
+          parentIds: [],
+          childIds: [`note:${noteSlug}`],
+        },
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: [
+            'staticshock 1 day ago  | next [–]',
+            'Everything is search.',
+            'Software development is search through the space of useful/interesting automations.',
+            'Business is search for product market fit.',
+          ],
+          note: '',
+          cssPath: [
+            'tr#\\34 8419236 > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(1)',
+            'tr#\\34 8419236 > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(2) > div:nth-of-type(1)',
+            'tr#\\34 8419236 > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(2) > div:nth-of-type(1) > p:nth-of-type(1)',
+            'tr#\\34 8419236 > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(2) > div:nth-of-type(1) > p:nth-of-type(2)',
+          ],
+          url: pageUrl,
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('domcontentloaded');
+
+    await expect(page.locator('mark.portal-highlight')).toHaveCount(4, {
+      timeout: 5000,
+    });
+    await expect(
+      page.locator('mark.portal-highlight', {
+        hasText: 'staticshock 1 day ago | next [–]',
+      }),
+    ).toBeVisible();
+    await expect(
+      page.locator('mark.portal-highlight', {
+        hasText: 'Everything is search.',
+      }),
+    ).toBeVisible();
+
+    await page.close();
+  });
+
+  test('deleting a grouped reapplied highlight removes every mark immediately', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/hl-delete-grouped-reapply', {
+      title: 'Highlight Delete Grouped Reapply Test',
+      body: `<main>
+        <h1>煎诸君的跳蛋</h1>
+        <div>发布于 2026-06-03 17:41</div>
+        <p>我养的橘猫孩子已经走了一年半了。突然想起一件事</p>
+      </main>`,
+    });
+    const pageUrl = localServer.url('/hl-delete-grouped-reapply');
+    const slug = getSlugForUrl(pageUrl);
+    const noteSlug = 'note-delete-grouped-reapply-test';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Highlight Delete Grouped Reapply Test',
+          timestamps: { 'test-device': now },
+          parentIds: [],
+          childIds: [`note:${noteSlug}`],
+        },
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: [
+            '煎诸君的跳蛋',
+            '发布于 2026-06-03 17:41',
+            '我养的橘猫孩子已经走了一年半了。突然想起一件事',
+          ],
+          note: '',
+          cssPath: ['body > main > h1', 'body > main > div', 'body > main > p'],
+          url: pageUrl,
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('domcontentloaded');
+
+    await expect(page.locator('mark.portal-highlight')).toHaveCount(3, {
+      timeout: 5000,
+    });
+    const helper = await openHelperPage(extContext, extensionId);
+    await helper.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      await chrome.tabs.sendMessage(tab.id, {
+        action: 'removeHighlightMark',
+        noteSlug: 'note-delete-grouped-reapply-test',
+      });
+    }, pageUrl);
+    await expect(page.locator('mark.portal-highlight')).toHaveCount(0);
 
     await helper.close();
     await page.close();

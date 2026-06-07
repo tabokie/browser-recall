@@ -43,9 +43,9 @@ async fn round_trips_all_entity_types_and_snapshot_artifacts() {
 
     let note = NoteEntity {
         slug: "note-a".into(),
-        excerpt: Some("highlight".into()),
+        excerpt: Some(serde_json::json!(["highlight"])),
         note: Some("annotation".into()),
-        css_path: Some("body > p".into()),
+        css_path: Some(serde_json::json!(["body > p"])),
         url: Some("https://example.com/page".into()),
         deleted: false,
         deleted_ts: None,
@@ -313,7 +313,7 @@ async fn sync_file_roundtrip_collects_expected_files_and_refreshes_reads() {
                 "objects/notes/sync-note.json".to_string(),
                 serde_json::to_string(&NoteEntity {
                     slug: "sync-note".to_string(),
-                    excerpt: Some("remote excerpt".to_string()),
+                    excerpt: Some(serde_json::json!(["remote excerpt"])),
                     note: Some("remote note".to_string()),
                     css_path: None,
                     url: Some("https://example.com/sync-a".to_string()),
@@ -530,7 +530,7 @@ async fn snapshot_child_cleanup_and_checkpoint_errors_are_visible() {
     let mut settings = SettingsEntity::new();
     settings
         .values
-        .insert("theme".to_string(), serde_json::json!("dark"));
+        .insert("theme".to_string(), serde_json::json!(["dark"]));
     checkpoint_storage
         .persist_checkpoint_effect(
             "manifest:settings",
@@ -617,7 +617,7 @@ async fn concurrent_writes_to_different_entities_do_not_corrupt_files() {
 
     let note = NoteEntity {
         slug: "note-a".into(),
-        excerpt: Some("concurrent".into()),
+        excerpt: Some(serde_json::json!(["concurrent"])),
         note: Some("annotation".into()),
         css_path: None,
         url: Some("https://example.com/page".into()),

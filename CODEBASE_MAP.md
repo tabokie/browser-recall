@@ -44,7 +44,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/extension/background.js` | Thin connector runtime: popup RPC, buffering, pairing, snapshot/capture forwarding |
 | `apps/extension/icon-paths.js` | Packaged default, stop-recording, and special-state toolbar icon paths |
 | `apps/extension/background-test-control.js` | Test-only background RPC handlers staged by `tests/fixtures/test-extension.mjs` |
-| `apps/extension/content.js` | Visit/attention capture from pages |
+| `apps/extension/content.js` | Visit/attention capture, highlight selection helpers, and saved highlight reapply from pages |
 | `apps/extension/popup.js` | Current-tab popup UI |
 | `apps/extension/extension-surface.css` | Shared light paper styling for extension pages |
 | `apps/extension/extension-surface.js` | Shared shadow-DOM styling and overlay placement helpers for extension content surfaces |
@@ -93,7 +93,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 ### Capture Path
 
-- `apps/extension/content.js` captures visit/attention signals.
+- `apps/extension/content.js` captures visit/attention signals and owns page-local highlight range work, including structured selection text for context-menu highlights and reapplying saved highlight notes into the DOM.
 - `apps/extension/savepage-bridge.js` performs snapshot capture.
 - `apps/extension/background.js` buffers and forwards capture events to the daemon, and injects a page reload warning when shortcut/context-menu actions cannot reach a stale content script.
 - `apps/extension/popup.js` surfaces popup-initiated capture failures through page notifications with popup-bubble fallback.

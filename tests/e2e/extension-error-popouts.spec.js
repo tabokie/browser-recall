@@ -127,8 +127,9 @@ test.describe('extension error popouts', () => {
         path: `objects/notes/${noteSlug}.json`,
         data: {
           slug: noteSlug,
-          excerpt: highlightText,
+          excerpt: [highlightText],
           note: 'snapshot note',
+          cssPath: ['body > p'],
           url: originalUrl,
         },
       },

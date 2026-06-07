@@ -184,7 +184,7 @@ async fn send_note_and_ack(
         socket,
         ConnectorMessage::Note {
             slug: slug.to_string(),
-            excerpt: Some("Hello".to_string()),
+            excerpt: Some(serde_json::json!(["Hello"])),
             note: note.to_string(),
             css_path: None,
             old_slug: old_slug.map(str::to_string),
@@ -557,7 +557,7 @@ async fn connector_source_errors_are_protocol_errors_not_socket_disconnects() {
         &mut socket,
         ConnectorMessage::Note {
             slug: "bad-source-note".to_string(),
-            excerpt: Some("bad source".to_string()),
+            excerpt: Some(serde_json::json!(["bad source"])),
             note: "should not persist".to_string(),
             css_path: None,
             old_slug: None,
@@ -1407,7 +1407,7 @@ async fn websocket_read_error_and_secondary_command_matrix_is_structured() {
             "request": {
                 "url": "https://example.com/secondary",
                 "title": "Secondary",
-                "excerpt": "secondary excerpt",
+                "excerpt": ["secondary excerpt"],
                 "note": "secondary note"
             }
         }),
@@ -1660,7 +1660,7 @@ async fn websocket_get_entity_covers_manifest_and_child_entities() {
             "request": {
                 "url": "https://example.com/entity-note",
                 "title": "Entity Note",
-                "excerpt": "entity excerpt",
+                "excerpt": ["entity excerpt"],
                 "note": "entity note"
             }
         }),
@@ -2077,7 +2077,7 @@ async fn popup_read_messages_return_page_info_and_lists() {
         &mut socket,
         ConnectorMessage::Note {
             slug: "popup-note".to_string(),
-            excerpt: Some("hello".to_string()),
+            excerpt: Some(serde_json::json!(["hello"])),
             note: "popup annotation".to_string(),
             css_path: None,
             old_slug: None,
@@ -2253,7 +2253,7 @@ async fn remote_replay_materializes_entities_without_appending_local_logs() {
                     "action": "create_note",
                     "url": url,
                     "path": "objects/notes/remote-note.json",
-                    "excerpt": "remote excerpt",
+                    "excerpt": ["remote excerpt"],
                     "note": "remote note body"
                 }),
             ],
@@ -2686,7 +2686,7 @@ async fn websocket_command_matrix_covers_desktop_reads_and_mutations() {
             "request": {
                 "url": "https://example.com/matrix",
                 "title": "Matrix Page",
-                "excerpt": "matrix excerpt",
+                "excerpt": ["matrix excerpt"],
                 "note": "matrix note"
             }
         }),
@@ -3311,7 +3311,8 @@ async fn note_ingest_persists_note_file_and_links_page() {
 
     let note_path = note_path(&data_dir, "n1");
     let note_raw = wait_for_text(&note_path, |raw| raw.contains("\"note\": \"World\"")).await;
-    assert!(note_raw.contains("\"excerpt\": \"Hello\""));
+    assert!(note_raw.contains("\"excerpt\": ["));
+    assert!(note_raw.contains("\"Hello\""));
     assert!(note_raw.contains("\"note\": \"World\""));
 
     let page_slug = generate_slug_from_url("https://example.com/notes").expect("slug");
@@ -3745,8 +3746,7 @@ async fn run_rule_batch_persists_matches_and_returns_hits() {
         send_event_and_ack(&mut socket, entry).await;
     }
 
-    let matching_url =
-        "https://github.com/example/repo?_spm_id=x&utm_source=keep&_i=a,b";
+    let matching_url = "https://github.com/example/repo?_spm_id=x&utm_source=keep&_i=a,b";
     socket
         .send(Message::Text(
             json!({

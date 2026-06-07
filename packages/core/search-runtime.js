@@ -259,9 +259,7 @@ function parseHistoryLine(line) {
 function extractNoteFields(note) {
   const fields = [];
 
-  if (typeof note.excerpt === 'string') {
-    fields.push(note.excerpt);
-  } else if (Array.isArray(note.excerpt)) {
+  if (Array.isArray(note.excerpt)) {
     for (const item of note.excerpt) {
       if (typeof item === 'string') fields.push(item);
     }

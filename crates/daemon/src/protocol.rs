@@ -126,11 +126,11 @@ pub struct PopupPageInfoEntry {
 pub struct PopupNoteResult {
     pub slug: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub excerpt: Option<String>,
+    pub excerpt: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     #[serde(default, rename = "cssPath", skip_serializing_if = "Option::is_none")]
-    pub css_path: Option<String>,
+    pub css_path: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 }
@@ -302,10 +302,10 @@ pub enum ConnectorMessage {
     Note {
         slug: String,
         #[serde(default)]
-        excerpt: Option<String>,
+        excerpt: Option<serde_json::Value>,
         note: String,
         #[serde(default, rename = "cssPath")]
-        css_path: Option<String>,
+        css_path: Option<serde_json::Value>,
         #[serde(default, rename = "oldSlug")]
         old_slug: Option<String>,
         url: String,

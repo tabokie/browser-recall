@@ -297,9 +297,9 @@ function initContentScript() {
     while (el && el !== document.body) {
       let selector = el.tagName.toLowerCase();
       if (el.id) {
-        selector += '#' + el.id;
+        selector += '#' + cssEscape(el.id);
         parts.unshift(selector);
-        break;
+        return parts.join(' > ');
       }
       const parent = el.parentElement;
       if (parent) {
@@ -315,6 +315,33 @@ function initContentScript() {
       el = parent;
     }
     return 'body > ' + parts.join(' > ');
+  }
+
+  function cssEscape(value) {
+    if (window.CSS && typeof window.CSS.escape === 'function') {
+      return window.CSS.escape(value);
+    }
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, (character) => {
+      return `\\${character.codePointAt(0).toString(16)} `;
+    });
+  }
+
+  function getCssPathsForChunks(chunks) {
+    return chunks.map((chunk) => getCssPath(chunk.block));
+  }
+
+  function valueParts(value) {
+    if (Array.isArray(value)) {
+      return value.map((part) => String(part || '')).filter(Boolean);
+    }
+    return [];
+  }
+
+  function cssPathParts(value) {
+    if (Array.isArray(value)) {
+      return value.map((part) => String(part || ''));
+    }
+    return [];
   }
 
   // ─── Note overlay factory ────────────────────────────────────────────
@@ -365,6 +392,7 @@ function initContentScript() {
         color: var(--br-text-muted);
         font-style: italic;
         line-height: 1.45;
+        white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
       .br-note-editor {
@@ -604,6 +632,62 @@ function initContentScript() {
     if (idx === -1) return null;
     const endIdx = idx + text.length;
 
+    return rangeFromConcatenatedOffsets(textNodes, offsets, idx, endIdx);
+  }
+
+  function findWhitespaceEquivalentTextRange(root, text) {
+    if (!text) return null;
+    const textNodes = collectTextNodes(root);
+
+    let concat = '';
+    const offsets = [];
+    for (const tn of textNodes) {
+      offsets.push(concat.length);
+      concat += tn.textContent;
+    }
+
+    const haystack = normalizedTextWithMap(concat);
+    const needle = normalizedTextWithMap(text).text;
+    if (!needle) return null;
+    const normalizedIndex = haystack.text.indexOf(needle);
+    if (normalizedIndex === -1) return null;
+    const start = haystack.map[normalizedIndex];
+    const end = haystack.map[normalizedIndex + needle.length];
+    if (start == null || end == null || end <= start) return null;
+    return rangeFromConcatenatedOffsets(textNodes, offsets, start, end);
+  }
+
+  function normalizedTextWithMap(text) {
+    let normalized = '';
+    const map = [];
+    let inWhitespace = false;
+    for (let index = 0; index < text.length; index += 1) {
+      const char = text[index];
+      if (/\s/.test(char)) {
+        if (!inWhitespace) {
+          map.push(index);
+          normalized += ' ';
+          inWhitespace = true;
+        }
+        continue;
+      }
+      map.push(index);
+      normalized += char;
+      inWhitespace = false;
+    }
+    map.push(text.length);
+    return { text: normalized.trim(), map: trimNormalizedMap(normalized, map) };
+  }
+
+  function trimNormalizedMap(normalized, map) {
+    let start = 0;
+    let end = normalized.length;
+    while (start < end && normalized[start] === ' ') start += 1;
+    while (end > start && normalized[end - 1] === ' ') end -= 1;
+    return map.slice(start, end + 1);
+  }
+
+  function rangeFromConcatenatedOffsets(textNodes, offsets, idx, endIdx) {
     let startNode = null,
       startOffset = 0,
       endNode = null,
@@ -638,6 +722,49 @@ function initContentScript() {
     const mark = wrapRangeWithMark(range, text);
     if (mark) attachMarkClickHandler(mark);
     return mark;
+  }
+
+  function highlightTextInScopedRoot(root, text) {
+    if (!text) return null;
+    const range =
+      findTextRange(root, text) ||
+      findWhitespaceEquivalentTextRange(root, text);
+    if (!range) return null;
+
+    const mark = wrapRangeWithMark(range, text);
+    if (mark) attachMarkClickHandler(mark);
+    return mark;
+  }
+
+  function highlightSavedNoteInPage(note) {
+    const excerptParts = Array.isArray(note.excerpt)
+      ? valueParts(note.excerpt)
+      : [];
+    if (excerptParts.length === 0) return [];
+    const paths = cssPathParts(note.cssPath);
+    const marks = [];
+    for (let i = 0; i < excerptParts.length; i++) {
+      const text = excerptParts[i];
+      const path = paths[i] || '';
+      const scopedRoot = path ? resolveCssPath(path) : document.body;
+      if (!scopedRoot) continue;
+      const mark = highlightTextInScopedRoot(scopedRoot, text);
+      if (mark) {
+        mark.dataset.highlightText = extensionSurface.formatHighlightExcerpt(
+          note.excerpt,
+        );
+        marks.push(mark);
+      }
+    }
+    return marks;
+  }
+
+  function resolveCssPath(path) {
+    try {
+      return document.querySelector(path);
+    } catch {
+      return null;
+    }
   }
 
   // --- Case 3: Cross-block helpers (mirrored from highlight-helpers.js) ---
@@ -755,9 +882,46 @@ function initContentScript() {
     return chunks;
   }
 
-  // Highlight text scoped to a block element, falling back to global search
-  function highlightTextInBlock(block, text) {
+  function getStructuredSelectionPayload() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      return {
+        selectionText: '',
+        selectionExcerpt: [],
+        selectionCssPath: [],
+      };
+    }
+    const range = selection.getRangeAt(0);
+    if (range.collapsed) {
+      return {
+        selectionText: '',
+        selectionExcerpt: [],
+        selectionCssPath: [],
+      };
+    }
+    const fallbackText = selection.toString().trim();
+    const chunks = splitSelectionByBlock(range);
+    if (chunks.length <= 1) {
+      const container = range.startContainer;
+      const element = getClosestBlock(container);
+      return {
+        selectionText: fallbackText,
+        selectionExcerpt: fallbackText ? [fallbackText] : [],
+        selectionCssPath: [element ? getCssPath(element) : ''],
+      };
+    }
+    const texts = chunks.map((chunk) => chunk.text);
+    return {
+      selectionText: texts.join('\n').trim(),
+      selectionExcerpt: texts,
+      selectionCssPath: getCssPathsForChunks(chunks),
+    };
+  }
+
+  // Highlight text scoped to a block element.
+  function highlightTextInBlock(block, text, options = {}) {
     if (!text) return null;
+    const { globalFallback = true } = options;
     // Try scoped search within the block first
     if (block) {
       const range = findTextRange(block, text);
@@ -769,6 +933,7 @@ function initContentScript() {
         }
       }
     }
+    if (!globalFallback) return null;
     // Fall back to global search
     return highlightTextInPage(text);
   }
@@ -825,9 +990,7 @@ function initContentScript() {
           const notes = resp?.notes || [];
           const match = notes.find((n) => n.slug === noteSlug);
           const displayText = match
-            ? Array.isArray(match.excerpt)
-              ? match.excerpt.join(' ')
-              : match.excerpt
+            ? extensionSurface.formatHighlightExcerpt(match.excerpt)
             : text;
           showHighlightEditOverlay(
             mark,
@@ -858,15 +1021,9 @@ function initContentScript() {
 
       for (const note of response.notes) {
         if (note.excerpt === null) continue; // Skip global page notes
-        // Normalize to array for Case 3 grouped highlights
-        const quotes = Array.isArray(note.excerpt)
-          ? note.excerpt
-          : [note.excerpt];
-        for (const text of quotes) {
-          const mark = highlightTextInPage(text);
-          if (mark && note.slug) {
-            mark.dataset.noteSlug = note.slug;
-          }
+        const marks = highlightSavedNoteInPage(note);
+        for (const mark of marks) {
+          if (note.slug) mark.dataset.noteSlug = note.slug;
         }
       }
     } catch (error) {
@@ -920,7 +1077,8 @@ function initContentScript() {
 
     shadow.querySelector('.delete-btn').addEventListener('click', (ev) => {
       ev.stopPropagation();
-      unwrapHighlightMark(mark);
+      if (noteSlug) removeHighlightMarksByNoteSlug(noteSlug);
+      else unwrapHighlightMark(mark);
       if (noteSlug)
         chrome.runtime
           .sendMessage({ action: 'deleteNote', noteSlug })
@@ -940,6 +1098,18 @@ function initContentScript() {
     }
     parent.removeChild(mark);
     parent.normalize();
+  }
+
+  function removeHighlightMarksByNoteSlug(noteSlug) {
+    document
+      .querySelectorAll(`mark.portal-highlight[data-note-slug="${noteSlug}"]`)
+      .forEach((mark) => unwrapHighlightMark(mark));
+    document.querySelectorAll('*').forEach((el) => {
+      if (!el.shadowRoot) return;
+      el.shadowRoot
+        .querySelectorAll(`mark.portal-highlight[data-note-slug="${noteSlug}"]`)
+        .forEach((mark) => unwrapHighlightMark(mark));
+    });
   }
 
   // ─── Page Reporting ───────────────────────────────────────────────────
@@ -1262,7 +1432,7 @@ function initContentScript() {
       .highlight-item { display: grid; grid-template-columns: 18px 1fr; column-gap: 8px; padding: 9px 12px; border-bottom: 1px dotted var(--br-border-section); }
       .highlight-item::before { content: attr(data-note-index); color: var(--br-accent-red); font-weight: 900; }
       .highlight-item:last-child { border-bottom: none; }
-      .excerpt { color: var(--br-text-muted); font-style: italic; line-height: 1.45; margin-bottom: 5px; word-break: break-word; }
+      .excerpt { color: var(--br-text-muted); font-style: italic; line-height: 1.45; margin-bottom: 5px; white-space: pre-wrap; word-break: break-word; }
       .note-row { display: flex; align-items: flex-start; gap: 6px; }
       textarea { flex: 1; min-height: 24px; height: 24px; border: 1px solid var(--br-border-section); border-radius: 2px; padding: 3px 6px; background: transparent; color: var(--br-text-primary); font-family: inherit; font-size: 11px; resize: none; box-sizing: border-box; line-height: 16px; overflow: hidden; }
       textarea::placeholder { color: var(--br-text-muted); }
@@ -1280,9 +1450,7 @@ function initContentScript() {
       </div>
       ${excerptNotes
         .map((n, index) => {
-          const text = Array.isArray(n.excerpt)
-            ? n.excerpt.join(' ')
-            : n.excerpt;
+          const text = extensionSurface.formatHighlightExcerpt(n.excerpt);
           return `<div class="highlight-item" data-note-slug="${n.slug}" data-note-index="${String(index + 1).padStart(2, '0')}">
           <div class="highlight-body">
           <div class="excerpt">${extensionSurface.escapeHtml(text)}</div>
@@ -1353,6 +1521,7 @@ function initContentScript() {
           .catch((error) => {
             showExtensionReloadNotification(error);
           });
+        removeHighlightMarksByNoteSlug(noteSlug);
         item.remove();
         const remaining = shadow.querySelectorAll('.highlight-item').length;
         shadow.querySelector('.panel-header span').textContent =
@@ -1402,6 +1571,12 @@ function initContentScript() {
       sendResponse({ success: true, markdown });
     } else if (request.action === 'getPageIdentity') {
       sendResponse({ success: true, ...getPageIdentity() });
+    } else if (request.action === 'getStructuredSelectionText') {
+      const payload = getStructuredSelectionPayload();
+      sendResponse({
+        success: true,
+        ...payload,
+      });
     } else if (request.action === 'highlightSelection') {
       // Highlight selected text or open global note (triggered by Alt+H)
       const selection = window.getSelection();
@@ -1413,8 +1588,7 @@ function initContentScript() {
       if (selectedText.length > 0 && selection.rangeCount > 0) {
         const range = selection.getRangeAt(0);
         const container = range.startContainer;
-        const element =
-          container.nodeType === 3 ? container.parentElement : container;
+        const element = getClosestBlock(container);
         const cssPath = getCssPath(element);
         const slug = getSlugForCurrentPage();
         if (!slug) {
@@ -1423,55 +1597,49 @@ function initContentScript() {
         }
         const timestamp = Date.now();
 
-        if (isCrossBlock(range)) {
-          // Case 3: cross-block selection — split into per-block chunks
+        const chunkInfos = splitSelectionByBlock(range);
+        if (chunkInfos.length > 1) {
+          // Cross-visual-block selection — split into per-block chunks.
           console.log(
-            `[content] Cross-block selection detected, splitting by block`,
+            `[content] Multi-block selection detected, splitting by block`,
           );
-          const chunkInfos = splitSelectionByBlock(range);
-          if (chunkInfos.length > 0) {
-            const texts = chunkInfos.map((c) => c.text);
-            // Store as array if multiple chunks, string if single
-            const storedText = texts.length === 1 ? texts[0] : texts;
-            chrome.runtime
-              .sendMessage({
-                action: 'createNote',
-                pageSlug: slug,
-                url: window.location.href,
-                excerpt: storedText,
-                note: '',
-                cssPath,
-              })
-              .then((resp) => {
-                if (
-                  showUserActionFailureFromResponse(resp, 'Highlight failed')
-                ) {
-                  return;
+          const texts = chunkInfos.map((c) => c.text);
+          const cssPaths = getCssPathsForChunks(chunkInfos);
+          chrome.runtime
+            .sendMessage({
+              action: 'createNote',
+              pageSlug: slug,
+              url: window.location.href,
+              excerpt: texts,
+              note: '',
+              cssPath: cssPaths,
+            })
+            .then((resp) => {
+              if (showUserActionFailureFromResponse(resp, 'Highlight failed')) {
+                return;
+              }
+              const noteSlug = resp?.noteSlug;
+              const marks = [];
+              for (const { text, block } of chunkInfos) {
+                const m = highlightTextInBlock(block, text);
+                if (m && noteSlug) {
+                  m.dataset.noteSlug = noteSlug;
+                  marks.push(m);
                 }
-                const noteSlug = resp?.noteSlug;
-                // Highlight each chunk scoped to its block element
-                const marks = [];
-                for (const { text, block } of chunkInfos) {
-                  const m = highlightTextInBlock(block, text);
-                  if (m && noteSlug) {
-                    m.dataset.noteSlug = noteSlug;
-                    marks.push(m);
-                  }
-                }
-                if (marks.length > 0) {
-                  showHighlightEditOverlay(
-                    marks[0],
-                    texts.join(' '),
-                    noteSlug,
-                    '',
-                    slug,
-                  );
-                }
-              })
-              .catch((error) => {
-                showExtensionReloadNotification(error);
-              });
-          }
+              }
+              if (marks.length > 0) {
+                showHighlightEditOverlay(
+                  marks[0],
+                  texts.join('\n'),
+                  noteSlug,
+                  '',
+                  slug,
+                );
+              }
+            })
+            .catch((error) => {
+              showExtensionReloadNotification(error);
+            });
         } else {
           // Case 1 & 2: same-block selection
           console.log(
@@ -1482,9 +1650,9 @@ function initContentScript() {
               action: 'createNote',
               pageSlug: slug,
               url: window.location.href,
-              excerpt: selectedText,
+              excerpt: [selectedText],
               note: '',
-              cssPath,
+              cssPath: [cssPath],
             })
             .then((resp) => {
               if (showUserActionFailureFromResponse(resp, 'Highlight failed')) {
@@ -1551,7 +1719,9 @@ function initContentScript() {
       }
     } else if (request.action === 'removeHighlightMark') {
       // Remove visual highlight marks — by timestamp for grouped highlights, by text for singles
-      if (request.timestamp) {
+      if (request.noteSlug) {
+        removeHighlightMarksByNoteSlug(request.noteSlug);
+      } else if (request.timestamp) {
         unwrapGroupedMarks(request.timestamp);
       } else {
         const marks = document.querySelectorAll('mark.portal-highlight');

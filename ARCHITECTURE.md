@@ -143,6 +143,10 @@ The connector keeps a short-lived command buffer so capture and popup actions ca
 
 For production use, persistence, blacklist/title policy, auto-pin synthesis, and replay log schema all belong to the daemon.
 
+### Highlights
+
+Highlight notes are persisted through daemon `createNote` commands like other notes. The connector content script owns only page-local selection and DOM range work. Same-block selections, including multiline code inside one block, store one string inside the `excerpt` array and one string inside the `cssPath` array; selections spanning distinct block elements store `excerpt` and `cssPath` as aligned string arrays. Reapply uses saved `cssPath` anchors to scope text matching; intentionally empty `cssPath` entries search the document root.
+
 ### Settings
 
 Persistent product settings are stored only in `views/manifest/settings.json` through daemon `saveSettingsKey` writes. The accepted keys are `theme`, `colorScheme`, `historyFileBatch`, `captureSnapshotVideo`, `blacklistEnabled`, `urlBlacklist`, `titleCleanupEnabled`, `titleTrimRules`, `syncEnabled`, `syncMethod`, `syncRepoUrl`, and `syncRetentionDays`. Runtime-only UI state may still live in `chrome.storage.session`.

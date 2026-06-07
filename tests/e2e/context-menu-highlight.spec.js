@@ -51,9 +51,87 @@ test.describe('Context menu highlight', () => {
     );
     expect(notesResp.success).toBe(true);
     expect(notesResp.notes).toHaveLength(1);
-    expect(notesResp.notes[0].excerpt).toBe('key finding from the paper');
+    expect(notesResp.notes[0].excerpt).toEqual(['key finding from the paper']);
 
     await helper.close();
+  });
+
+  test('contextMenuHighlight preserves cross-block selection newlines', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/ctx-lines', {
+      title: 'Ctx Lines',
+      body: '<main><p>first line</p><p>second line</p><p>third line</p></main>',
+    });
+    const pageUrl = localServer.url('/ctx-lines');
+    const slug = getSlugForUrl(pageUrl);
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Ctx Lines',
+          timestamps: { 'test-device': now },
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('domcontentloaded');
+    await page.evaluate(() => {
+      const paragraphs = document.querySelectorAll('p');
+      const range = document.createRange();
+      range.setStart(paragraphs[0].firstChild, 0);
+      range.setEnd(paragraphs[2].firstChild, paragraphs[2].textContent.length);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const resp = await helper.evaluate(
+      ({ url }) =>
+        chrome.runtime.sendMessage({
+          action: 'contextMenuHighlight',
+          url,
+          title: 'Ctx Lines',
+          selectionText: 'first line second line third line',
+        }),
+      { url: pageUrl },
+    );
+    expect(resp.success).toBe(true);
+    expect(resp.noteSlug).toBeTruthy();
+
+    const notesResp = await helper.evaluate(
+      (pageSlug) =>
+        chrome.runtime.sendMessage({ action: 'loadPageNotes', slug: pageSlug }),
+      slug,
+    );
+    expect(notesResp.success).toBe(true);
+    expect(notesResp.notes).toHaveLength(1);
+    expect(notesResp.notes[0].excerpt).toEqual([
+      'first line',
+      'second line',
+      'third line',
+    ]);
+    expect(notesResp.notes[0].cssPath).toEqual([
+      'body > main > p:nth-of-type(1)',
+      'body > main > p:nth-of-type(2)',
+      'body > main > p:nth-of-type(3)',
+    ]);
+
+    await helper.close();
+    await page.close();
   });
 
   test('highlights panel appears after context menu highlight', async ({
@@ -143,8 +221,9 @@ test.describe('Context menu highlight', () => {
         path: 'objects/notes/note-a.json',
         data: {
           slug: 'note-a',
-          excerpt: 'first',
+          excerpt: ['first line\nfirst second line'],
           note: 'my note',
+          cssPath: [''],
           url: pageUrl,
         },
       },
@@ -152,8 +231,9 @@ test.describe('Context menu highlight', () => {
         path: 'objects/notes/note-b.json',
         data: {
           slug: 'note-b',
-          excerpt: 'second',
+          excerpt: ['second'],
           note: '',
+          cssPath: [''],
           url: pageUrl,
         },
       },
@@ -176,11 +256,25 @@ test.describe('Context menu highlight', () => {
     );
 
     await page.waitForSelector('#portal-highlights-panel', { timeout: 5000 });
-    const count = await page.evaluate(() => {
+    const panelDetails = await page.evaluate(() => {
       const panel = document.getElementById('portal-highlights-panel');
-      return panel?.shadowRoot?.querySelectorAll('.highlight-item').length || 0;
+      const items = [
+        ...(panel?.shadowRoot?.querySelectorAll('.highlight-item') || []),
+      ];
+      const firstExcerpt = panel?.shadowRoot?.querySelector('.excerpt');
+      return {
+        count: items.length,
+        firstText: firstExcerpt?.textContent,
+        firstWhiteSpace: firstExcerpt
+          ? getComputedStyle(firstExcerpt).whiteSpace
+          : null,
+      };
     });
-    expect(count).toBe(3);
+    expect(panelDetails).toEqual({
+      count: 3,
+      firstText: 'first line\nfirst second line',
+      firstWhiteSpace: 'pre-wrap',
+    });
 
     await page.close();
     await helper.close();

@@ -490,9 +490,55 @@ pub async fn list_event_fields(
     )))
 }
 
-fn excerpt_text(value: Option<&Value>) -> Option<String> {
+fn note_text_value(field_name: &str, value: Option<&Value>) -> Result<Option<Value>, String> {
     match value {
-        Some(Value::String(text)) => Some(text.clone()),
+        Some(Value::Array(values)) => {
+            if !values.iter().all(Value::is_string) {
+                return Err(format!("{field_name} array must contain strings only"));
+            }
+            let parts = values
+                .iter()
+                .map(|value| value.as_str().expect("string array member"))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| Value::String(value.to_string()))
+                .collect::<Vec<_>>();
+            if parts.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(Value::Array(parts)))
+            }
+        }
+        Some(Value::Null) | None => Ok(None),
+        Some(_) => Err(format!("{field_name} must be a string array or null")),
+    }
+}
+
+fn note_css_path_value(value: Option<&Value>) -> Result<Option<Value>, String> {
+    match value {
+        Some(Value::Array(values)) => {
+            if !values.iter().all(Value::is_string) {
+                return Err("cssPath array must contain strings only".to_string());
+            }
+            let parts = values
+                .iter()
+                .map(|value| value.as_str().expect("string array member"))
+                .map(str::trim)
+                .map(|value| Value::String(value.to_string()))
+                .collect::<Vec<_>>();
+            if parts.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(Value::Array(parts)))
+            }
+        }
+        Some(Value::Null) | None => Ok(None),
+        Some(_) => Err("cssPath must be a string array or null".to_string()),
+    }
+}
+
+fn note_slug_text(value: Option<&Value>) -> Option<String> {
+    match value {
         Some(Value::Array(values)) => {
             let parts = values
                 .iter()
@@ -678,7 +724,8 @@ pub async fn create_note(
             .get("pageSlug")
             .and_then(Value::as_str)
             .map(str::to_string);
-        let excerpt = excerpt_text(request.get("excerpt"));
+        let excerpt = note_text_value("excerpt", request.get("excerpt"))?;
+        let css_path = note_css_path_value(request.get("cssPath"))?;
         let page = if let Some(slug) = page_slug.as_deref() {
             storage
                 .load_page(slug)
@@ -687,7 +734,8 @@ pub async fn create_note(
         } else {
             None
         };
-        let note_slug = generate_note_slug(timestamp, excerpt.as_deref());
+        let slug_text = note_slug_text(excerpt.as_ref());
+        let note_slug = generate_note_slug(timestamp, slug_text.as_deref());
         let page_url = page
             .as_ref()
             .and_then(|value| value.url.clone())
@@ -718,10 +766,7 @@ pub async fn create_note(
                     .get("note")
                     .and_then(Value::as_str)
                     .map(str::to_string),
-                css_path: request
-                    .get("cssPath")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
+                css_path,
             }],
         )
         .await?;
@@ -792,10 +837,11 @@ pub async fn update_note(
     }
 
     let mut timestamp = storage.next_command_timestamp_millis();
-    let mut new_note_slug = generate_note_slug(timestamp, old_note.excerpt.as_deref());
+    let slug_text = note_slug_text(old_note.excerpt.as_ref());
+    let mut new_note_slug = generate_note_slug(timestamp, slug_text.as_deref());
     while new_note_slug == note_slug {
         timestamp += 1;
-        new_note_slug = generate_note_slug(timestamp, old_note.excerpt.as_deref());
+        new_note_slug = generate_note_slug(timestamp, slug_text.as_deref());
     }
     replay_entries_locked(
         storage,

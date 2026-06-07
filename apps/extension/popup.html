@@ -525,6 +525,8 @@
         padding: 0;
         color: var(--text-muted);
         font-style: italic;
+        white-space: pre-wrap;
+        word-break: break-word;
       }
 
       .highlight-body {
@@ -715,6 +717,18 @@
         position: relative;
       }
 
+      .list-search-capture {
+        position: fixed;
+        left: -10000px;
+        top: 0;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        border: 0;
+        opacity: 0;
+        pointer-events: none;
+      }
+
       .list-picker {
         position: absolute;
         top: 100%;
@@ -730,15 +744,17 @@
       }
 
       .list-picker-input {
+        display: block;
         width: 100%;
         font-size: 11px;
+        margin-top: 5px;
         padding: 8px 12px;
-        border: none;
+        border: 1px solid var(--border-glass);
         border-bottom: 1px solid var(--border-section);
         outline: none;
         font-family: var(--font-body);
         box-sizing: border-box;
-        background: transparent;
+        background: var(--bg-surface-solid);
         color: var(--text-primary);
       }
 

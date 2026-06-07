@@ -1169,9 +1169,9 @@ async fn ingest_snapshot(
 async fn ingest_note(
     shared: &SharedState,
     slug: String,
-    excerpt: Option<String>,
+    excerpt: Option<Value>,
     note: String,
-    css_path: Option<String>,
+    css_path: Option<Value>,
     old_slug: Option<String>,
     url: String,
     title: Option<String>,
@@ -1393,10 +1393,7 @@ fn build_auto_pin_entry(
         source: Some("auto".to_string()),
     };
     let raw = serde_json::to_value(&parsed).expect("synthetic pin serializes");
-    SyntheticLogEntry {
-        parsed,
-        raw,
-    }
+    SyntheticLogEntry { parsed, raw }
 }
 
 async fn run_rule_batch(

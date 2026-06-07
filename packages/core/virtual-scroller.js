@@ -465,6 +465,23 @@ export class VirtualScroller {
     if (!this.data || this.data.length === 0) return null;
     const scrollTop = this.scrollEl.scrollTop || 0;
     if (scrollTop <= 0) return null;
+    const scrollRect = this.scrollEl.getBoundingClientRect?.();
+    if (scrollRect && this.containerEl.querySelectorAll) {
+      const rows = [...this.containerEl.querySelectorAll('.result-row')];
+      const row = rows.find(
+        (candidate) =>
+          candidate.getBoundingClientRect().bottom > scrollRect.top + 1,
+      );
+      const key = row?.dataset?.url;
+      if (key) {
+        return {
+          key,
+          offsetWithinViewport:
+            row.getBoundingClientRect().top - scrollRect.top,
+          fallbackTop: scrollTop,
+        };
+      }
+    }
     const viewportTop = this._viewportTopOffset();
     const firstVisible = this._firstVisibleIndex(viewportTop);
     const key = this._keyForIndex(firstVisible);
@@ -488,6 +505,30 @@ export class VirtualScroller {
       if (maxScrollTop == null) return false;
       this.scrollEl.scrollTop = Math.min(anchor.fallbackTop, maxScrollTop);
       return true;
+    }
+    if (Number.isFinite(anchor.offsetWithinViewport)) {
+      const escapedKey =
+        typeof CSS !== 'undefined' && CSS.escape
+          ? CSS.escape(anchor.key)
+          : String(anchor.key).replace(/["\\]/g, '\\$&');
+      const row = this.containerEl.querySelector(
+        `.result-row[data-url="${escapedKey}"]`,
+      );
+      const scrollRect = this.scrollEl.getBoundingClientRect?.();
+      if (row && scrollRect) {
+        const delta =
+          row.getBoundingClientRect().top -
+          scrollRect.top -
+          anchor.offsetWithinViewport;
+        this.scrollEl.scrollTop =
+          maxScrollTop == null
+            ? Math.max(0, this.scrollEl.scrollTop + delta)
+            : Math.min(
+                Math.max(0, this.scrollEl.scrollTop + delta),
+                maxScrollTop,
+              );
+        return true;
+      }
     }
     const containerScrollOffset =
       (this.scrollEl.scrollTop || 0) - this._viewportTopOffset();

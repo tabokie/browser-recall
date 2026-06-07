@@ -1011,6 +1011,7 @@ describe('popup desktop state rendering', () => {
     await waitFor(() => summaryCalls === 2);
 
     await waitFor(() => document.querySelector('.list-chip.selected'));
+    await waitFor(() => document.querySelector('.list-picker-row.selected'));
     expect(document.getElementById('listChips').textContent).toContain(
       'Reading',
     );

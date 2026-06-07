@@ -429,7 +429,6 @@ fn read_latest_markdown(slug_dir: &Path) -> io::Result<Option<String>> {
 fn extract_note_fields(note: &NoteData) -> Vec<String> {
     let mut fields = Vec::new();
     match &note.excerpt {
-        Value::String(text) => fields.push(text.clone()),
         Value::Array(items) => {
             for value in items {
                 if let Some(text) = value.as_str() {

@@ -1,0 +1,39 @@
+- There's an issue with using CJK in the extension popup UI. It automatically enters the search for list dropdown, correctly, but the first character is forcifully flushed out as an English character rather than buffered in the CJK IME.
+- Run every single test, and fix any failure there is
+- Here's another issue, and it should've been reported and fixed before: The highlight display doesn't respect the original newlines of the text. It converts them to spaces instead. The highlight in both desktop's page detail and extension's popup details should be rendered using original newlines.
+
+Before fixing it, trace the last commit that attempts to fix a similar issue. Figure out what went wrong and what could be improved about the tests and process.
+- $gap
+- Fix them all thoroughly
+- The CJK situation seems worse. When I type multiple chars through IME, the first character is still incorrectly flushed, and worse is the second character got lost
+- The regression is fixed alright, but the original issue is still there. The first character is flushed
+- Still not fixed, now the first character is lost instead of flushed
+- Fixed, one last issue: in desktop app, when I search a keyword, then minimize and reopen the window, it seems the search is reevaluated, and the scroll offset suddenly jumps
+- Add a "Clear" button to the search filter section
+- The search behavior is sort of weird. When I searched "canon" (exact), the results look good, only a few. When I searched Canon or "Canon", the results begin with good matches (they match the bar chart), but followed by irrelevant history.
+- Earlier in this session, we tried to fix the highlight text newline rendering issue. That has a few loose ends: (1) In some cases the newlines are still not rendered, e.g. https://jandan.net/t/6158278 and https://news.ycombinator.com/item?id=48402744 in my local data at ~/browser-data. (2) For multi-line highlights, the CSS markup is missing after I reload the page. The "mark" element is not applied to the site at all. Single-line highlight is fine.
+- Did you really check the local examples, including their CSS selector and the actual web source code? Because for both of them the situation is not improved:
+For https://news.ycombinator.com/item?id=48402744, the markup is still not applied after reload, and the second line "Software development is search through..." is not rendered as a new paragraph.
+For https://jandan.net/t/6158278, the "我养的橘猫孩子已经走了一年半了..." is not rendered as a new paragraph. The markup seems to apply (there is two small highlight element before and after the highlight, and I can click on the text), but there's no visual emphasis style over the actual text.
+- No, it absolutely doesn't work still.
+First of all, the newline rendering is not improved at all, previously I called out two specific spots where newline is not rendered, both of them are not fixed.
+Secondly, the markup is still a mess. Hacker News one is not caused by stale metadata alone, because I have deleted and recreated that highlight with latest metadata, markup is still not applied. Jandan one is wrong in a slightly different manner. The section heading and the first paragraph is not marked (marker is before and after the area, bloating up the original text formatting). The subsequent paragraphs are properly marked.
+- Jandan case is much better. Minor issues: (1) When deleting by clicking the text and delete, not all markups are removed. The special heading markup remains until a page reload. (2) In between the special heading and the text, there should be an artificial newline when rendering in page details or popup UI.
+HN case is still troublesome. (1) The markup only applies to the comment heading and the second+ paragraphs. The first paragraph "Everything is search." is not marked. (2) The newline rendering is not functioning. All newlines not just between heading and paragraphs are replaced with spaces.
+- Explain to me in details how you fixed all issues around highlighting in this session. Don't miss any diffs.
+- "Missing structural breaks are synthesized for ..." This is the wrong way to fix 4. For Jandan case, the heading "发布于 2026-06-03 17:41" is in a different div element than the other text, so it should've been stored as an individual array element and styled by joining "\n". In fact, hardcoding rules is a anti-pattern in any condition. It hides the real issue.
+Let's remove the hardcoded rules, and investigate why div element is not enough to render newline.
+- $gap
+- Tell me more about "the desktop search fix may still feel “irrelevant” by design", did we change the search pipeline when performing the fix?
+- I see. 1, 2, and 3 are worth fixing thoroughly. To make things clear, we should absolutely make the production aligned with tests. And leans towards using array to store highlights of different elements (and css paths), but don't manually break up a multi-line single element into multiple array elements.
+
+While we are at this, I want you to trace back the initial implementation of the highlighting. It was documented in prompts/20260214_163245.txt, where I asked to use a mozilla site with complex CSS styles to test the algorithm. And it was quite successful. I want you to understand the difference between algo of that version and our latest version. Take the best.
+- "the newer robust reapply fallbacks" what is this? Enumerate the difference against original in more details.
+- 1 and 2 seems strictly unnecessary. Explain 3 in more details. And I wonder does the original version works for 4 too, if it considers the block element one array element?
+- Sure, the cssPath array is an improvement, but I think 4 is unnecessary too. Also, we can migrate all legacy data at ~/browser-data, so there's no need for the 3 fallback, and there's no need to prepare for single element "excerpt". When migrating the data, if there's no cssPath provided, just use a empty cssPath or whatever path that's most compatible. If they broke the markup I will fix manually.
+- The HN case has regression, markup is not applied to any of the text. The data is at 260607-staticshock-1-day-ago-next-eve-lf9tc6.json
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix them all. There's no need to write fallback or backward compat code.
+- $gap
+- Fix them all thoroughly
+- $finish model=GPT-5.5 Codex

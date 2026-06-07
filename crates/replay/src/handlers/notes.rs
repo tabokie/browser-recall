@@ -1,5 +1,7 @@
 use std::future::Future;
 
+use serde_json::Value;
+
 use crate::{
     append_unique, default_note, ensure_page, entities::Entity, find_lists_with_pin, get_orphaned,
     is_page_eligible, load_note, note_slug_from_path, orphan_key, unorphan_key, Context,
@@ -11,9 +13,9 @@ pub(crate) struct CreateNoteRequest<'a> {
     pub url: &'a str,
     pub path: &'a str,
     pub title: Option<&'a str>,
-    pub excerpt: Option<&'a str>,
+    pub excerpt: Option<Value>,
     pub note_body: Option<&'a str>,
-    pub css_path: Option<&'a str>,
+    pub css_path: Option<Value>,
 }
 
 pub(crate) struct ReplaceNoteRequest<'a> {
@@ -21,9 +23,9 @@ pub(crate) struct ReplaceNoteRequest<'a> {
     pub url: Option<&'a str>,
     pub path: &'a str,
     pub old_path: &'a str,
-    pub excerpt: Option<&'a str>,
+    pub excerpt: Option<Value>,
     pub note_body: Option<&'a str>,
-    pub css_path: Option<&'a str>,
+    pub css_path: Option<Value>,
 }
 
 pub(crate) async fn handle_create_note<L, Fut>(
@@ -68,9 +70,9 @@ where
     let mut note = load_note(load, &note_key)
         .await
         .unwrap_or_else(|| default_note(note_slug));
-    note.excerpt = excerpt.map(str::to_string).or(note.excerpt);
+    note.excerpt = excerpt.or(note.excerpt);
     note.note = note_body.map(str::to_string).or(note.note);
-    note.css_path = css_path.map(str::to_string).or(note.css_path);
+    note.css_path = css_path.or(note.css_path);
     note.url = Some(url.to_string());
     note.deleted = false;
     note.deleted_ts = None;
@@ -236,9 +238,9 @@ where
     let mut new_note = load_note(load, &new_note_key)
         .await
         .unwrap_or_else(|| default_note(new_note_slug));
-    new_note.excerpt = excerpt.map(str::to_string).or(new_note.excerpt);
+    new_note.excerpt = excerpt.or(new_note.excerpt);
     new_note.note = note_body.map(str::to_string).or(new_note.note);
-    new_note.css_path = css_path.map(str::to_string).or(new_note.css_path);
+    new_note.css_path = css_path.or(new_note.css_path);
     new_note.url = note_url.clone();
     new_note.deleted = false;
     new_note.deleted_ts = None;

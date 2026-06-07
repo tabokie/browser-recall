@@ -392,7 +392,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         type: 'note',
         source: 'extension',
         slug: 'search-note',
-        excerpt: 'highlight',
+        excerpt: ['highlight'],
         note: 'banana note body',
         cssPath: null,
         url: 'https://example.com/searchable',
@@ -522,7 +522,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         type: 'note',
         source: 'extension',
         slug: 'popup-note',
-        excerpt: 'hello',
+        excerpt: ['hello'],
         note: 'popup annotation',
         cssPath: null,
         url: 'https://example.com/popup',
@@ -557,7 +557,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       notes: [
         {
           slug: 'popup-note',
-          excerpt: 'hello',
+          excerpt: ['hello'],
           note: 'popup annotation',
           url: 'https://example.com/popup',
         },
@@ -643,7 +643,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
       key: 'note:popup-note',
       entity: {
         slug: 'popup-note',
-        excerpt: 'hello',
+        excerpt: ['hello'],
         note: 'popup annotation',
         url: 'https://example.com/popup',
       },
@@ -785,7 +785,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         type: 'note',
         source: 'extension',
         slug: 'sync-note',
-        excerpt: 'sync excerpt',
+        excerpt: ['sync excerpt'],
         note: 'sync note body',
         cssPath: null,
         url: 'https://example.com/sync-page',
@@ -849,7 +849,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         type: 'note',
         source: 'extension',
         slug: 'n1',
-        excerpt: 'hello',
+        excerpt: ['hello'],
         note: 'delete me',
         cssPath: null,
         url,
@@ -1005,7 +1005,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         type: 'note',
         source: 'extension',
         slug: 'n1',
-        excerpt: 'hello',
+        excerpt: ['hello'],
         note: 'world',
         cssPath: null,
         url: 'https://example.com/note-page',
@@ -1017,9 +1017,10 @@ describe.sequential('phase 2 daemon event flow integration', () => {
 
     const dataRoot = path.join(dir, 'portal-data');
     const noteRaw = await waitForFileContent(notePath(dataRoot, 'n1'), (raw) =>
-      raw.includes('"excerpt": "hello"'),
+      raw.includes('"excerpt": ['),
     );
-    expect(noteRaw).toContain('"excerpt": "hello"');
+    expect(noteRaw).toContain('"excerpt": [');
+    expect(noteRaw).toContain('"hello"');
     expect(noteRaw).toContain('"note": "world"');
 
     const pageRaw = await waitForFileContent(
@@ -1046,7 +1047,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         type: 'note',
         source: 'extension',
         slug: 'n1',
-        excerpt: 'hello',
+        excerpt: ['hello'],
         note: 'world',
         cssPath: null,
         url: 'https://example.com/note-page',
@@ -1062,7 +1063,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         source: 'extension',
         slug: 'n2',
         oldSlug: 'n1',
-        excerpt: 'hello',
+        excerpt: ['hello'],
         note: 'updated world',
         cssPath: null,
         url: 'https://example.com/note-page',

@@ -1,5 +1,8 @@
 import { logDebug } from './logger.js';
-import { findTextRange } from './highlight-helpers.js';
+import {
+  highlightSavedExcerptPartsInPage,
+  wrapRangeWithMark as wrapSharedRangeWithMark,
+} from './highlight-helpers.js';
 import {
   applyPaperErrorPopoutStyle,
   paperErrorPopoutCss,
@@ -83,12 +86,14 @@ frame.addEventListener('load', async () => {
     const doc = frame.contentDocument;
     for (const note of resp.notes) {
       if (note.excerpt === null) continue;
-      const quotes = Array.isArray(note.excerpt)
-        ? note.excerpt
-        : [note.excerpt];
-      for (const text of quotes) {
-        const mark = highlightInDoc(doc, text, note.slug);
-        if (mark) attachMarkClickHandler(doc, mark);
+      const marks = highlightSavedExcerptPartsInPage(
+        doc.body,
+        note.excerpt,
+        note.cssPath,
+      );
+      for (const mark of marks) {
+        if (note.slug) mark.dataset.noteSlug = note.slug;
+        attachMarkClickHandler(doc, mark);
       }
     }
 
@@ -113,9 +118,9 @@ frame.addEventListener('load', async () => {
           action: 'createNote',
           pageSlug: slug,
           url: pageUrl,
-          excerpt: selectedText,
+          excerpt: [selectedText],
           note: '',
-          cssPath: null,
+          cssPath: [''],
         })
         .then((response) => {
           if (!response?.success) return;
@@ -137,31 +142,11 @@ frame.addEventListener('load', async () => {
   }
 });
 
-function highlightInDoc(doc, text, noteSlug) {
-  const range = findTextRange(doc.body, text, doc);
-  if (!range) return null;
-  return wrapRangeWithMark(doc, range, text, noteSlug);
-}
-
 function wrapRangeWithMark(doc, range, text, noteSlug) {
-  const mark = doc.createElement('mark');
-  mark.style.cssText =
-    'background: #fff3b0; border-bottom: 2px solid #f0c000; cursor: pointer;';
-  mark.dataset.highlightText = text;
+  const mark = wrapSharedRangeWithMark(range, text);
+  if (!mark) return null;
   if (noteSlug) mark.dataset.noteSlug = noteSlug;
-
-  try {
-    if (range.startContainer === range.endContainer) {
-      range.surroundContents(mark);
-    } else {
-      const fragment = range.extractContents();
-      mark.appendChild(fragment);
-      range.insertNode(mark);
-    }
-    return mark;
-  } catch {
-    return null;
-  }
+  return mark;
 }
 
 function unwrapHighlightMark(mark) {
@@ -170,6 +155,22 @@ function unwrapHighlightMark(mark) {
   while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
   parent.removeChild(mark);
   parent.normalize();
+}
+
+function removeHighlightMarksByNoteSlug(doc, noteSlug) {
+  const escaped = cssEscape(doc, noteSlug);
+  doc
+    .querySelectorAll(`mark.portal-highlight[data-note-slug="${escaped}"]`)
+    .forEach((mark) => unwrapHighlightMark(mark));
+}
+
+function cssEscape(doc, value) {
+  if (doc.defaultView.CSS && typeof doc.defaultView.CSS.escape === 'function') {
+    return doc.defaultView.CSS.escape(value);
+  }
+  return String(value).replace(/[^a-zA-Z0-9_-]/g, (character) => {
+    return `\\${character.codePointAt(0).toString(16)} `;
+  });
 }
 
 function attachMarkClickHandler(doc, mark) {
@@ -185,9 +186,7 @@ function attachMarkClickHandler(doc, mark) {
         const notes = resp?.notes || [];
         const match = notes.find((note) => note.slug === noteSlug);
         const displayText = match
-          ? Array.isArray(match.excerpt)
-            ? match.excerpt.join(' ')
-            : match.excerpt
+          ? extensionSurface.formatHighlightExcerpt(match.excerpt)
           : text;
         showHighlightEditOverlay(
           doc,
@@ -222,6 +221,7 @@ const OVERLAY_STYLE = `
     border-top: 1px dotted var(--br-border-section);
     border-bottom: 1px dotted var(--br-border-section);
     color: var(--br-text-muted); font-style: italic; line-height: 1.45;
+    white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
   .br-note-editor { display: flex; align-items: flex-start; gap: 8px; }
@@ -282,7 +282,8 @@ function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
 
   deleteBtn.addEventListener('click', (event) => {
     event.stopPropagation();
-    unwrapHighlightMark(mark);
+    if (noteSlug) removeHighlightMarksByNoteSlug(doc, noteSlug);
+    else unwrapHighlightMark(mark);
     if (noteSlug)
       chrome.runtime
         .sendMessage({ action: 'deleteNote', noteSlug })

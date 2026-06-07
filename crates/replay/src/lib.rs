@@ -15,7 +15,7 @@ use handlers::{
     handle_update_rule, handle_update_setting, handle_visit_page, CreateNoteRequest,
     ReplaceNoteRequest,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
@@ -33,6 +33,26 @@ pub(crate) const ORPHANED_KEY: &str = "manifest:orphaned";
 pub(crate) const REFERRER_CAP: usize = 50;
 
 pub type EntityMap = BTreeMap<String, EntityEffect>;
+
+fn deserialize_string_array_value<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(Value::Array(values)) => {
+            if values.iter().all(Value::is_string) {
+                Ok(Some(Value::Array(values)))
+            } else {
+                Err(serde::de::Error::custom(
+                    "array values must contain strings only",
+                ))
+            }
+        }
+        Some(_) => Err(serde::de::Error::custom("value must be a string array")),
+    }
+}
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,12 +258,16 @@ pub enum LogEntry {
         path: String,
         #[serde(default)]
         title: Option<String>,
-        #[serde(default)]
-        excerpt: Option<String>,
+        #[serde(default, deserialize_with = "deserialize_string_array_value")]
+        excerpt: Option<Value>,
         #[serde(default)]
         note: Option<String>,
-        #[serde(default, rename = "cssPath")]
-        css_path: Option<String>,
+        #[serde(
+            default,
+            rename = "cssPath",
+            deserialize_with = "deserialize_string_array_value"
+        )]
+        css_path: Option<Value>,
     },
     DeleteNote {
         timestamp: i64,
@@ -264,12 +288,16 @@ pub enum LogEntry {
         path: String,
         #[serde(rename = "oldPath")]
         old_path: String,
-        #[serde(default)]
-        excerpt: Option<String>,
+        #[serde(default, deserialize_with = "deserialize_string_array_value")]
+        excerpt: Option<Value>,
         #[serde(default)]
         note: Option<String>,
-        #[serde(default, rename = "cssPath")]
-        css_path: Option<String>,
+        #[serde(
+            default,
+            rename = "cssPath",
+            deserialize_with = "deserialize_string_array_value"
+        )]
+        css_path: Option<Value>,
     },
     CreateSnapshot {
         timestamp: i64,
@@ -322,7 +350,6 @@ impl LogEntry {
             | Self::PermanentDelete { timestamp, .. } => *timestamp,
         }
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -530,9 +557,9 @@ where
                     url: &url,
                     path: &path,
                     title: title.as_deref(),
-                    excerpt: excerpt.as_deref(),
+                    excerpt,
                     note_body: note.as_deref(),
-                    css_path: css_path.as_deref(),
+                    css_path,
                 },
                 &load,
                 &context,
@@ -564,9 +591,9 @@ where
                     url: url.as_deref(),
                     path: &path,
                     old_path: &old_path,
-                    excerpt: excerpt.as_deref(),
+                    excerpt,
                     note_body: note.as_deref(),
-                    css_path: css_path.as_deref(),
+                    css_path,
                 },
                 &load,
                 &context,

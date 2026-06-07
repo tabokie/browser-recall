@@ -39,6 +39,97 @@ describe('browser data URL identity migration', () => {
     tempRoot = null;
   });
 
+  it('normalizes highlight note excerpts and css paths to arrays', () => {
+    tempRoot = mkdtempSync(join(os.tmpdir(), 'browser-recall-migrate-'));
+    const root = join(tempRoot, 'browser-data');
+    const url = 'https://example.com/highlight';
+    const timestamp = 1_710_000_000_000;
+
+    writeJson(join(root, 'objects', 'notes', 'note-a.json'), {
+      slug: 'note-a',
+      url,
+      excerpt: 'first line\nsecond line',
+      cssPath: 'body > main > pre',
+      note: '',
+    });
+    writeJson(join(root, 'objects', 'notes', 'note-b.json'), {
+      slug: 'note-b',
+      url,
+      excerpt: ['first block', 'second block'],
+      note: '',
+    });
+    writeJson(join(root, 'objects', 'notes', 'page-note.json'), {
+      slug: 'page-note',
+      url,
+      excerpt: null,
+      cssPath: 'body',
+      note: 'page note',
+    });
+    writeText(
+      join(root, 'logs', 'device', '2026-06-07.jsonl'),
+      `${JSON.stringify({
+        timestamp,
+        action: 'create_note',
+        url,
+        path: 'objects/notes/note-a.json',
+        excerpt: 'first line\nsecond line',
+        cssPath: 'body > main > pre',
+        note: '',
+      })}\n${JSON.stringify({
+        timestamp: timestamp + 1,
+        action: 'create_note',
+        url,
+        path: 'objects/notes/page-note.json',
+        excerpt: null,
+        cssPath: 'body',
+        note: 'page note',
+      })}\n`,
+    );
+
+    execFileSync('node', [
+      'scripts/migrate-browser-data-schema.mjs',
+      '--root',
+      root,
+      '--apply',
+    ]);
+
+    expect(
+      JSON.parse(readFileSync(join(root, 'objects', 'notes', 'note-a.json'))),
+    ).toMatchObject({
+      excerpt: ['first line\nsecond line'],
+      cssPath: ['body > main > pre'],
+    });
+    expect(
+      JSON.parse(readFileSync(join(root, 'objects', 'notes', 'note-b.json'))),
+    ).toMatchObject({
+      excerpt: ['first block', 'second block'],
+      cssPath: ['', ''],
+    });
+    expect(
+      JSON.parse(
+        readFileSync(join(root, 'objects', 'notes', 'page-note.json')),
+      ),
+    ).toMatchObject({
+      excerpt: null,
+      cssPath: null,
+    });
+    const logLines = readFileSync(
+      join(root, 'logs', 'device', '2026-06-07.jsonl'),
+      'utf8',
+    )
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(logLines[0]).toMatchObject({
+      excerpt: ['first line\nsecond line'],
+      cssPath: ['body > main > pre'],
+    });
+    expect(logLines[1]).toMatchObject({
+      excerpt: null,
+      cssPath: null,
+    });
+  });
+
   it('canonicalizes underscore query params and moves snapshot sidecars', () => {
     tempRoot = mkdtempSync(join(os.tmpdir(), 'browser-recall-migrate-'));
     const root = join(tempRoot, 'browser-data');

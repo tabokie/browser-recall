@@ -4,6 +4,7 @@ import {
   escapeHtml,
   isInternalBrowserUrl,
 } from './utils.js';
+import { formatHighlightExcerpt } from './highlight-format.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
 import { pageKey } from './entity-types.js';
@@ -32,6 +33,7 @@ let _noteSaveTimeout = null;
 let desktopConnectInFlight = false;
 let dashboardGeneration = 0;
 let dashboardLoadInFlight = null;
+const boundListSearchCaptureInputs = new WeakSet();
 
 // ─── Error UI ────────────────────────────────────────────────────────
 
@@ -236,7 +238,8 @@ function isImeCompositionKeyEvent(event) {
 }
 
 function isEditableEventTarget(target) {
-  if (!(target instanceof Element)) return false;
+  const ElementCtor = target?.ownerDocument?.defaultView?.Element;
+  if (!ElementCtor || !(target instanceof ElementCtor)) return false;
   if (target.closest('input, textarea, select')) return true;
   return Boolean(
     target.closest('[contenteditable=""], [contenteditable="true"]'),
@@ -384,6 +387,7 @@ function hideSection(id) {
 }
 
 function resetDashboardSections() {
+  closeListPicker();
   for (const id of [
     'pageDiagnosticSection',
     'visitsLikesSection',
@@ -728,9 +732,7 @@ function renderNotes(notes) {
 
   container.innerHTML = textNotes
     .map((n, index) => {
-      const displayText = Array.isArray(n.excerpt)
-        ? n.excerpt.join(' ')
-        : n.excerpt;
+      const displayText = formatHighlightExcerpt(n.excerpt);
       const noteText = n.note || '';
       const noteDisplay = noteText
         ? `<span class="highlight-note-text">${escapeHtml(noteText)}</span>`
@@ -863,9 +865,62 @@ function isPagePinned(allPins, listId, url) {
   return pins.some((p) => p.id === pageId || p.url === url);
 }
 
-async function renderListChips() {
+function applyPinStateToLists(lists, listId, pinned) {
+  if (!Array.isArray(lists) || !currentUrl) return;
+  const list = lists.find((candidate) => candidate.slug === listId);
+  if (!list) return;
+  const slug = generateSlugFromUrl(currentUrl);
+  const id = pageKey(slug);
+  const pins = Array.isArray(list.pins) ? [...list.pins] : [];
+  const existingIndex = pins.findIndex(
+    (pin) => pin.id === id || pin.url === currentUrl,
+  );
+  if (pinned) {
+    if (existingIndex < 0) {
+      pins.push({
+        id,
+        url: currentUrl,
+        title: currentTitle || currentTab?.title || '',
+        pinnedAt: Date.now(),
+      });
+    }
+  } else if (existingIndex >= 0) {
+    pins.splice(existingIndex, 1);
+  }
+  list.pins = pins;
+}
+
+function applyPinStateToPinMap(allPins, listId, pinned) {
+  if (!allPins || !currentUrl) return;
+  const slug = generateSlugFromUrl(currentUrl);
+  const id = pageKey(slug);
+  const pins = Array.isArray(allPins[listId]) ? [...allPins[listId]] : [];
+  const existingIndex = pins.findIndex(
+    (pin) => pin.id === id || pin.url === currentUrl,
+  );
+  if (pinned) {
+    if (existingIndex < 0) {
+      pins.push({
+        id,
+        url: currentUrl,
+        title: currentTitle || currentTab?.title || '',
+        pinnedAt: Date.now(),
+      });
+    }
+  } else if (existingIndex >= 0) {
+    pins.splice(existingIndex, 1);
+  }
+  if (pins.length > 0) allPins[listId] = pins;
+  else delete allPins[listId];
+}
+
+function applyLocalListPinState(listId, pinned) {
+  applyPinStateToLists(currentPageSummary?.lists, listId, pinned);
+}
+
+async function renderListChips(listOverride = null) {
   const container = document.getElementById('listChips');
-  const lists = await loadLists();
+  const lists = listOverride || (await loadLists());
   const allPins = await loadListPins(lists);
 
   // Partition into lists containing this page vs. others
@@ -967,6 +1022,8 @@ async function renderListChips() {
     }
   });
   showSection('listSection');
+  ensureListSearchCapture();
+  focusListSearchCapture();
 }
 
 async function sendListPinToggle(listId) {
@@ -980,44 +1037,98 @@ async function sendListPinToggle(listId) {
 
 async function toggleListPin(listId) {
   const response = await sendListPinToggle(listId);
+  if (
+    response &&
+    response.success !== false &&
+    typeof response.pinned === 'boolean'
+  ) {
+    applyLocalListPinState(listId, response.pinned);
+  }
   await refreshCurrentPageSummary();
   return response;
 }
 
 function closeListPicker() {
   const existing = document.getElementById('listPicker');
+  const pickerInput = document.getElementById('listPickerInput');
+  const wrap = document.querySelector('.list-chips-wrap');
+  if (pickerInput && wrap) {
+    pickerInput.__browserRecallPickerAbort?.abort();
+    pickerInput.__browserRecallPickerAbort = null;
+    configureListSearchCaptureInput(pickerInput);
+    wrap.appendChild(pickerInput);
+  }
   if (existing) existing.remove();
   document.removeEventListener('click', pickerOutsideClickHandler);
+  ensureListSearchCapture();
+  focusListSearchCapture();
 }
 
 function pickerOutsideClickHandler(e) {
   const picker = document.getElementById('listPicker');
-  if (picker && !picker.contains(e.target) && e.target.id !== 'listAddBtn') {
+  if (
+    picker &&
+    !picker.contains(e.target) &&
+    e.target.id !== 'listPickerInput' &&
+    e.target.id !== 'listAddBtn'
+  ) {
     closeListPicker();
   }
 }
 
+function configureListPickerInput(input) {
+  input.__browserRecallPickerAbort?.abort();
+  const AbortControllerCtor =
+    input.ownerDocument?.defaultView?.AbortController ||
+    globalThis.AbortController;
+  input.__browserRecallPickerAbort = new AbortControllerCtor();
+  input.id = 'listPickerInput';
+  input.className = 'list-picker-input';
+  input.type = 'text';
+  input.tabIndex = 0;
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-controls', 'listPickerList');
+  input.setAttribute('aria-expanded', 'true');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.placeholder = 'Search or create...';
+  input.autocomplete = 'off';
+  input.autocapitalize = 'off';
+  input.spellcheck = false;
+  input.removeAttribute('aria-hidden');
+  return input;
+}
+
 function openListPicker(lists, allPins, options = {}) {
-  const { initialQuery = '' } = options;
+  const { initialQuery = '', loading = false, inputElement = null } = options;
   // Close if already open
   if (document.getElementById('listPicker')) {
     closeListPicker();
-    return;
+    return null;
   }
 
   const wrap = document.querySelector('.list-chips-wrap');
+  if (!wrap) return null;
+  const input =
+    inputElement || listSearchCaptureInput() || createListSearchCaptureInput();
+  const shouldRestoreFocus = document.activeElement !== input;
+  if (input.parentElement !== wrap) {
+    wrap.appendChild(input);
+  }
+  configureListPickerInput(input);
+
   const picker = document.createElement('div');
   picker.className = 'list-picker';
   picker.id = 'listPicker';
   picker.innerHTML = `
-    <input class="list-picker-input" id="listPickerInput" role="combobox" aria-controls="listPickerList" aria-expanded="true" aria-autocomplete="list" placeholder="Search or create..." />
     <div class="list-picker-list" id="listPickerList" role="listbox"></div>
   `;
   wrap.appendChild(picker);
 
-  const input = document.getElementById('listPickerInput');
   const listEl = document.getElementById('listPickerList');
-  input.value = initialQuery;
+  if (initialQuery) input.value = initialQuery;
+  let pickerLists = lists;
+  let pickerPins = allPins;
+  let isLoading = loading;
   let activePickerIndex = -1;
 
   function pickerOptions() {
@@ -1067,13 +1178,20 @@ function openListPicker(lists, allPins, options = {}) {
 
       const listId = option.dataset.listId;
       if (!listId) return true;
-      await sendListPinToggle(listId);
-      await renderListChips();
+      const response = await sendListPinToggle(listId);
+      if (
+        response &&
+        response.success !== false &&
+        typeof response.pinned === 'boolean'
+      ) {
+        applyLocalListPinState(listId, response.pinned);
+        applyPinStateToLists(pickerLists, listId, response.pinned);
+        applyPinStateToPinMap(pickerPins, listId, response.pinned);
+      }
+      await renderListChips(pickerLists);
       void refreshCurrentPageSummary().catch((err) =>
         showErrorBubble(err.message),
       );
-      const freshPins = await loadListPins();
-      Object.assign(allPins, freshPins);
       renderPickerRows();
       return true;
     } catch (err) {
@@ -1083,14 +1201,21 @@ function openListPicker(lists, allPins, options = {}) {
   }
 
   function renderPickerRows() {
+    if (isLoading) {
+      listEl.innerHTML = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">Loading...</div>`;
+      activePickerIndex = -1;
+      input.removeAttribute('aria-activedescendant');
+      return;
+    }
+
     const query = input.value.trim().toLowerCase();
     const filtered = query
-      ? lists.filter((c) => c.name.toLowerCase().includes(query))
-      : lists;
+      ? pickerLists.filter((c) => c.name.toLowerCase().includes(query))
+      : pickerLists;
 
     let rowsHtml = filtered
       .map((c) => {
-        const pinned = isPagePinned(allPins, c.slug, currentUrl);
+        const pinned = isPagePinned(pickerPins, c.slug, currentUrl);
         return `<div class="list-picker-option list-picker-row${pinned ? ' selected' : ''}" id="listPickerOption-list-${escapeHtml(c.slug)}" role="option" data-list-id="${c.slug}">
         <span class="list-picker-row-check">${pinned ? '&#10003;' : ''}</span>
         <span>${escapeHtml(c.name)}</span>
@@ -1101,7 +1226,7 @@ function openListPicker(lists, allPins, options = {}) {
     // Show create option if input doesn't exactly match any existing list
     const inputVal = input.value.trim();
     if (inputVal) {
-      const exactMatch = lists.some(
+      const exactMatch = pickerLists.some(
         (c) => c.name.toLowerCase() === inputVal.toLowerCase(),
       );
       if (!exactMatch) {
@@ -1136,85 +1261,191 @@ function openListPicker(lists, allPins, options = {}) {
   }
 
   renderPickerRows();
-  // Use setTimeout to avoid the click event that opened the picker from immediately focusing away
-  setTimeout(() => {
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
-  }, 0);
+  if (shouldRestoreFocus) {
+    // Use setTimeout to avoid the click event that opened the picker from immediately focusing away.
+    setTimeout(() => {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }, 0);
+  }
 
-  input.addEventListener('input', () => {
-    activePickerIndex = -1;
-    renderPickerRows();
-  });
+  input.addEventListener(
+    'input',
+    () => {
+      activePickerIndex = -1;
+      renderPickerRows();
+    },
+    { signal: input.__browserRecallPickerAbort.signal },
+  );
 
-  input.addEventListener('keydown', async (e) => {
-    if (isImeCompositionKeyEvent(e)) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveActivePickerIndex(1);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveActivePickerIndex(-1);
-    } else if (e.key === 'Enter') {
-      const activeOption = listEl.querySelector('.list-picker-option.active');
-      if (activeOption) {
+  input.addEventListener(
+    'keydown',
+    async (e) => {
+      if (isImeCompositionKeyEvent(e)) return;
+      if (e.key === 'ArrowDown') {
         e.preventDefault();
-        await activatePickerOption(activeOption);
-        return;
-      }
-      const inputVal = input.value.trim();
-      if (!inputVal) return;
-      try {
-        const exactMatch = lists.find(
-          (c) => c.name.toLowerCase() === inputVal.toLowerCase(),
-        );
-        if (exactMatch) {
-          await toggleListPin(exactMatch.slug);
-          closeListPicker();
-        } else {
-          await createListAndPin(inputVal);
-          closeListPicker();
+        moveActivePickerIndex(1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        moveActivePickerIndex(-1);
+      } else if (e.key === 'Enter') {
+        const activeOption = listEl.querySelector('.list-picker-option.active');
+        if (activeOption) {
+          e.preventDefault();
+          await activatePickerOption(activeOption);
+          return;
         }
-      } catch (err) {
-        showErrorBubble(err.message);
+        const inputVal = input.value.trim();
+        if (!inputVal) return;
+        try {
+          const exactMatch = pickerLists.find(
+            (c) => c.name.toLowerCase() === inputVal.toLowerCase(),
+          );
+          if (exactMatch) {
+            await toggleListPin(exactMatch.slug);
+            closeListPicker();
+          } else {
+            await createListAndPin(inputVal);
+            closeListPicker();
+          }
+        } catch (err) {
+          showErrorBubble(err.message);
+        }
+      } else if (e.key === 'Escape') {
+        closeListPicker();
       }
-    } else if (e.key === 'Escape') {
-      closeListPicker();
-    }
-  });
+    },
+    { signal: input.__browserRecallPickerAbort.signal },
+  );
 
   // Close on outside click (deferred to avoid catching the opening click)
   setTimeout(() => {
     document.addEventListener('click', pickerOutsideClickHandler);
   }, 0);
+
+  return {
+    input,
+    setData(nextLists, nextPins) {
+      pickerLists = nextLists;
+      pickerPins = nextPins;
+      isLoading = false;
+      renderPickerRows();
+    },
+  };
 }
 
 let listSearchShortcutOpening = false;
-let listSearchShortcutPendingQuery = '';
 
-async function openListPickerFromTyping(initialQuery) {
+function shouldFocusListSearchCapture() {
+  const doc = globalThis.document;
+  if (!doc) return false;
+  if (doc.getElementById('dashboard')?.style.display !== 'flex') return false;
+  if (!doc.getElementById('dashboardContent')) return false;
+  if (doc.getElementById('listPicker')) return false;
+  if (!currentUrl) return false;
+  if (isEditableEventTarget(doc.activeElement)) return false;
+  return true;
+}
+
+function listSearchCaptureInput() {
+  return document.getElementById('listSearchCaptureInput');
+}
+
+function focusListSearchCapture() {
+  if (!shouldFocusListSearchCapture()) return;
+  const input = listSearchCaptureInput();
+  if (!input) return;
+  input.value = '';
+  input.focus({ preventScroll: true });
+}
+
+function configureListSearchCaptureInput(input) {
+  input.id = 'listSearchCaptureInput';
+  input.className = 'list-search-capture';
+  input.type = 'text';
+  input.tabIndex = -1;
+  input.setAttribute('aria-hidden', 'true');
+  input.removeAttribute('role');
+  input.removeAttribute('aria-controls');
+  input.removeAttribute('aria-expanded');
+  input.removeAttribute('aria-autocomplete');
+  input.removeAttribute('aria-activedescendant');
+  input.removeAttribute('placeholder');
+  input.autocomplete = 'off';
+  input.autocapitalize = 'off';
+  input.spellcheck = false;
+  input.value = '';
+  return input;
+}
+
+function createListSearchCaptureInput() {
+  return configureListSearchCaptureInput(document.createElement('input'));
+}
+
+function bindListSearchCapture() {
+  const input = listSearchCaptureInput();
+  if (!input || boundListSearchCaptureInputs.has(input)) return;
+  boundListSearchCaptureInputs.add(input);
+  input.addEventListener('input', (event) => {
+    if (input.id !== 'listSearchCaptureInput') return;
+    if (!input.value) return;
+    void openListPickerFromTyping(input.value, input);
+  });
+  input.addEventListener('compositionstart', () => {
+    if (input.id !== 'listSearchCaptureInput') return;
+    void openListPickerFromTyping(input.value, input);
+  });
+}
+
+function ensureListSearchCapture() {
+  const wrap = document.querySelector('.list-chips-wrap');
+  if (!wrap) return null;
+  let input = listSearchCaptureInput();
+  if (!input) {
+    input = createListSearchCaptureInput();
+    wrap.appendChild(input);
+  }
+  bindListSearchCapture();
+  return input;
+}
+
+async function openListPickerFromTyping(
+  initialQuery = '',
+  inputElement = null,
+) {
   const existingInput = document.getElementById('listPickerInput');
   if (existingInput) {
-    existingInput.focus();
     if (initialQuery) {
-      existingInput.value += initialQuery;
+      existingInput.value = initialQuery;
       existingInput.dispatchEvent(new Event('input', { bubbles: true }));
+      existingInput.setSelectionRange(
+        existingInput.value.length,
+        existingInput.value.length,
+      );
     }
+    existingInput.focus();
     return;
   }
 
-  if (listSearchShortcutOpening) {
-    listSearchShortcutPendingQuery += initialQuery;
-    return;
-  }
+  if (listSearchShortcutOpening) return;
   listSearchShortcutOpening = true;
-  listSearchShortcutPendingQuery = initialQuery;
+  const pickerController = openListPicker(
+    [],
+    {},
+    { loading: true, inputElement },
+  );
+  if (initialQuery && pickerController?.input && !inputElement) {
+    pickerController.input.value = initialQuery;
+    pickerController.input.dispatchEvent(new Event('input', { bubbles: true }));
+    pickerController.input.setSelectionRange(
+      initialQuery.length,
+      initialQuery.length,
+    );
+  }
   try {
     const lists = await loadLists();
     const allPins = await loadListPins(lists);
-    const query = listSearchShortcutPendingQuery;
-    listSearchShortcutPendingQuery = '';
-    openListPicker(lists, allPins, { initialQuery: query });
+    pickerController?.setData(lists, allPins);
   } catch (err) {
     showErrorBubble(err.message);
   } finally {
@@ -1225,12 +1456,13 @@ async function openListPickerFromTyping(initialQuery) {
 function handleListSearchShortcut(event) {
   if (event.defaultPrevented) return;
   if (!isPrintableKeyEvent(event)) return;
+  if (isImeCompositionKeyEvent(event)) return;
   if (isEditableEventTarget(event.target)) return;
   if (document.getElementById('dashboard')?.style.display !== 'flex') return;
   if (!document.getElementById('dashboardContent')) return;
 
   event.preventDefault();
-  void openListPickerFromTyping(event.key);
+  void openListPickerFromTyping();
 }
 
 async function createListAndPin(name) {
@@ -1569,6 +1801,8 @@ function renderPageDashboardShell() {
 
 function showDashboardUI() {
   renderPageDashboardShell();
+  ensureListSearchCapture();
+  focusListSearchCapture();
   const frame =
     globalThis.requestAnimationFrame ||
     globalThis.window?.requestAnimationFrame ||
@@ -1580,6 +1814,7 @@ function showDashboardUI() {
         '.page-note-edit-textarea, .highlight-note-edit-textarea',
       )
       .forEach((ta) => autoResizeTextarea(ta));
+    focusListSearchCapture();
   });
 }
 

@@ -644,7 +644,7 @@ mod tests {
             json!({
                 "slug": "note-a",
                 "url": "https://example.com/article",
-                "excerpt": "banana excerpt"
+                "excerpt": ["banana excerpt"]
             })
             .to_string(),
         )

@@ -224,7 +224,7 @@ describe.sequential('popup rpc integration', () => {
         type: 'note',
         source: 'extension',
         slug: noteSlug,
-        excerpt: 'Summary highlight',
+        excerpt: ['Summary highlight'],
         note: 'Summary note body',
         url,
         title: 'Popup Summary',
@@ -270,7 +270,7 @@ describe.sequential('popup rpc integration', () => {
     expect(summary.notes).toEqual([
       expect.objectContaining({
         slug: noteSlug,
-        excerpt: 'Summary highlight',
+        excerpt: ['Summary highlight'],
         note: 'Summary note body',
         url,
       }),

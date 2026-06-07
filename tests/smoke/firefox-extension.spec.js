@@ -942,14 +942,21 @@ test.describe('Firefox extension smoke', () => {
 
           await waitFor(
             () =>
-              api.browserApi.badgeState.tabs.get(activeTab.id)?.icon?.[16]
-                ?.width === 16,
+              api.browserApi.badgeState.tabs.get(activeTab.id)?.icon?.[16] ===
+              'icons/icon16-special-notes.png',
             'tab page marker icon',
           );
 
           expect(fetchCalls).toEqual([]);
           expect(api.browserApi.badgeState.tabs.get(activeTab.id).text).toBe(
             '',
+          );
+          expect(api.browserApi.badgeState.tabs.get(activeTab.id).icon).toEqual(
+            {
+              16: 'icons/icon16-special-notes.png',
+              48: 'icons/icon48-special-notes.png',
+              128: 'icons/icon128-special-notes.png',
+            },
           );
         },
       );

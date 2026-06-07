@@ -233,6 +233,37 @@ fn pin_to_list_log_schema_uses_urls_and_aligned_titles() {
     assert!(legacy.is_err());
 }
 
+#[test]
+fn note_log_schema_accepts_only_string_array_text_values() {
+    let parsed: LogEntry = serde_json::from_value(json!({
+        "timestamp": 100,
+        "action": "create_note",
+        "url": "https://a.com",
+        "path": "objects/notes/n1.json",
+        "excerpt": ["first", "second"],
+        "cssPath": ["body > p:nth-of-type(1)", "body > p:nth-of-type(2)"]
+    }))
+    .expect("note schema parses arrays");
+    let value = serde_json::to_value(parsed).expect("note serializes");
+    assert_eq!(value.get("excerpt"), Some(&json!(["first", "second"])));
+    assert_eq!(
+        value.get("cssPath"),
+        Some(&json!([
+            "body > p:nth-of-type(1)",
+            "body > p:nth-of-type(2)"
+        ]))
+    );
+
+    let invalid = serde_json::from_value::<LogEntry>(json!({
+        "timestamp": 100,
+        "action": "create_note",
+        "url": "https://a.com",
+        "path": "objects/notes/n1.json",
+        "excerpt": "first"
+    }));
+    assert!(invalid.is_err());
+}
+
 #[tokio::test]
 async fn pin_to_list_rejects_misaligned_titles() {
     let result = effect_of(
@@ -744,9 +775,9 @@ async fn create_note_creates_page_and_links_note_entity() {
             url: "https://a.com".to_string(),
             path: "objects/notes/n1.json".to_string(),
             title: Some("Note Page".to_string()),
-            excerpt: Some("hello".to_string()),
+            excerpt: Some(serde_json::json!(["hello"])),
             note: Some("world".to_string()),
-            css_path: Some("body > p".to_string()),
+            css_path: Some(serde_json::json!(["body > p"])),
         },
         |_| ready(None),
         context(),
@@ -765,9 +796,57 @@ async fn create_note_creates_page_and_links_note_entity() {
     assert!(page.child_ids.contains(&"note:n1".to_string()));
     assert_eq!(page.title.as_deref(), Some("Note Page"));
     assert_eq!(note.url.as_deref(), Some("https://a.com"));
-    assert_eq!(note.excerpt.as_deref(), Some("hello"));
+    assert_eq!(note.excerpt.as_ref(), Some(&serde_json::json!(["hello"])));
     assert_eq!(note.note.as_deref(), Some("world"));
-    assert_eq!(note.css_path.as_deref(), Some("body > p"));
+    assert_eq!(
+        note.css_path.as_ref(),
+        Some(&serde_json::json!(["body > p"]))
+    );
+}
+
+#[tokio::test]
+async fn create_note_preserves_structural_excerpt_and_css_path_arrays() {
+    let slug = generate_slug_from_url("https://a.com").expect("slug");
+    let key = format!("page:{slug}");
+    let result = effect_of(
+        LogEntry::CreateNote {
+            timestamp: 100,
+            url: "https://a.com".to_string(),
+            path: "objects/notes/n1.json".to_string(),
+            title: Some("Note Page".to_string()),
+            excerpt: Some(serde_json::json!(["First block", "Second block"])),
+            note: Some("world".to_string()),
+            css_path: Some(serde_json::json!([
+                "body > p:nth-of-type(1)",
+                "body > p:nth-of-type(2)"
+            ])),
+        },
+        |_| ready(None),
+        context(),
+    )
+    .await
+    .expect("note replay succeeds");
+
+    let page = result
+        .get(&key)
+        .and_then(EntityEffect::as_page)
+        .expect("page created");
+    let note = result
+        .get("note:n1")
+        .and_then(EntityEffect::as_note)
+        .expect("note created");
+    assert!(page.child_ids.contains(&"note:n1".to_string()));
+    assert_eq!(
+        note.excerpt.as_ref(),
+        Some(&serde_json::json!(["First block", "Second block"]))
+    );
+    assert_eq!(
+        note.css_path.as_ref(),
+        Some(&serde_json::json!([
+            "body > p:nth-of-type(1)",
+            "body > p:nth-of-type(2)"
+        ]))
+    );
 }
 
 #[tokio::test]
@@ -847,7 +926,7 @@ async fn delete_note_unlinks_note_and_tombstones_ineligible_page() {
         "note:n1".to_string(),
         Entity::Note(NoteEntity {
             slug: "n1".to_string(),
-            excerpt: Some("hello".to_string()),
+            excerpt: Some(serde_json::json!(["hello"])),
             note: Some("world".to_string()),
             css_path: None,
             url: Some("https://a.com".to_string()),
@@ -992,7 +1071,7 @@ async fn restore_note_relinks_and_clears_deleted_flag() {
         "note:n1".to_string(),
         Entity::Note(NoteEntity {
             slug: "n1".to_string(),
-            excerpt: Some("hello".to_string()),
+            excerpt: Some(serde_json::json!(["hello"])),
             note: Some("world".to_string()),
             css_path: None,
             url: Some("https://a.com".to_string()),
@@ -1055,9 +1134,9 @@ async fn replace_note_links_new_note_and_deletes_old_note() {
         "note:n1".to_string(),
         Entity::Note(NoteEntity {
             slug: "n1".to_string(),
-            excerpt: Some("old excerpt".to_string()),
+            excerpt: Some(serde_json::json!(["old excerpt"])),
             note: Some("old body".to_string()),
-            css_path: Some("body > p".to_string()),
+            css_path: Some(serde_json::json!(["body > p"])),
             url: Some("https://a.com".to_string()),
             deleted: false,
             deleted_ts: None,
@@ -1071,9 +1150,9 @@ async fn replace_note_links_new_note_and_deletes_old_note() {
             url: Some("https://a.com".to_string()),
             path: "objects/notes/n2.json".to_string(),
             old_path: "objects/notes/n1.json".to_string(),
-            excerpt: Some("old excerpt".to_string()),
+            excerpt: Some(serde_json::json!(["old excerpt"])),
             note: Some("new body".to_string()),
-            css_path: Some("body > p".to_string()),
+            css_path: Some(serde_json::json!(["body > p"])),
         },
         load_from(store),
         context(),
@@ -1093,9 +1172,15 @@ async fn replace_note_links_new_note_and_deletes_old_note() {
     assert!(page.child_ids.contains(&"note:n2".to_string()));
     assert!(result.get("note:n1").expect("old note deleted").is_delete());
     assert_eq!(new_note.url.as_deref(), Some("https://a.com"));
-    assert_eq!(new_note.excerpt.as_deref(), Some("old excerpt"));
+    assert_eq!(
+        new_note.excerpt.as_ref(),
+        Some(&serde_json::json!(["old excerpt"]))
+    );
     assert_eq!(new_note.note.as_deref(), Some("new body"));
-    assert_eq!(new_note.css_path.as_deref(), Some("body > p"));
+    assert_eq!(
+        new_note.css_path.as_ref(),
+        Some(&serde_json::json!(["body > p"]))
+    );
 }
 
 #[tokio::test]
@@ -1139,9 +1224,9 @@ async fn replace_note_transfers_pins_and_removes_old_note_from_recycle_bin() {
             url: Some("https://a.com".to_string()),
             path: "objects/notes/n2.json".to_string(),
             old_path: "objects/notes/n1.json".to_string(),
-            excerpt: Some("new excerpt".to_string()),
+            excerpt: Some(serde_json::json!(["new excerpt"])),
             note: Some("new body".to_string()),
-            css_path: Some("body > p".to_string()),
+            css_path: Some(serde_json::json!(["body > p"])),
         },
         load_from(store),
         context(),
@@ -1199,9 +1284,9 @@ async fn replace_note_proceeds_when_old_note_was_already_deleted() {
             url: Some("https://a.com".to_string()),
             path: "objects/notes/n2.json".to_string(),
             old_path: "objects/notes/n1.json".to_string(),
-            excerpt: Some("new excerpt".to_string()),
+            excerpt: Some(serde_json::json!(["new excerpt"])),
             note: Some("new body".to_string()),
-            css_path: Some("body > p".to_string()),
+            css_path: Some(serde_json::json!(["body > p"])),
         },
         load_from(store),
         context(),
@@ -1249,9 +1334,9 @@ async fn replace_note_replay_is_idempotent() {
         url: Some("https://a.com".to_string()),
         path: "objects/notes/n2.json".to_string(),
         old_path: "objects/notes/n1.json".to_string(),
-        excerpt: Some("new excerpt".to_string()),
+        excerpt: Some(serde_json::json!(["new excerpt"])),
         note: Some("new body".to_string()),
-        css_path: Some("body > p".to_string()),
+        css_path: Some(serde_json::json!(["body > p"])),
     };
 
     let replayed =
@@ -3491,7 +3576,7 @@ async fn note_delete_then_restore_converges_to_restored_state() {
             "note:n1".to_string(),
             Entity::Note(NoteEntity {
                 slug: "n1".to_string(),
-                excerpt: Some("hello".to_string()),
+                excerpt: Some(serde_json::json!(["hello"])),
                 note: Some("world".to_string()),
                 css_path: None,
                 url: Some("https://a.com".to_string()),
@@ -3664,7 +3749,7 @@ async fn note_restore_then_delete_converges_to_deleted_state() {
             "note:n1".to_string(),
             Entity::Note(NoteEntity {
                 slug: "n1".to_string(),
-                excerpt: Some("hello".to_string()),
+                excerpt: Some(serde_json::json!(["hello"])),
                 note: Some("world".to_string()),
                 css_path: None,
                 url: Some("https://a.com".to_string()),

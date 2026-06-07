@@ -8,12 +8,15 @@ import {
   getClosestBlock,
   isCrossBlock,
   splitSelectionByBlock,
+  highlightSavedExcerptPartsInPage,
 } from '../../apps/extension/highlight-helpers.js';
 
 // Set up a fresh jsdom for each test
 let dom;
 beforeEach(() => {
-  dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
+  dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
+    url: 'https://example.test/',
+  });
   global.document = dom.window.document;
   global.NodeFilter = dom.window.NodeFilter;
   global.Node = dom.window.Node;
@@ -176,6 +179,15 @@ describe('Code blocks', () => {
     const mark = highlightTextInPage(document.body, 'line1\nline2\nline3');
     expect(mark).not.toBeNull();
     expect(mark.textContent).toBe('line1\nline2\nline3');
+  });
+
+  it('does not synthesize line breaks between separate paragraph blocks', () => {
+    setBody('<div><p>first line</p><p>second line</p><p>third line</p></div>');
+    const mark = highlightTextInPage(
+      document.body,
+      'first line\nsecond line\nthird line',
+    );
+    expect(mark).toBeNull();
   });
 });
 
@@ -577,6 +589,76 @@ describe('Case 3: cross-block selection', () => {
       expect(chunks.map((c) => c.text)).toEqual(['Block A', 'Block B']);
     });
 
+    it('splits heading metadata divs from following body text', () => {
+      setBody(`<main>
+        <h1>煎诸君的跳蛋</h1>
+        <div>发布于 2026-06-03 17:41</div>
+        <p>我养的橘猫孩子已经走了一年半了。突然想起一件事</p>
+      </main>`);
+      const h1 = document.querySelector('h1');
+      const paragraph = document.querySelector('p');
+      const range = document.createRange();
+      range.setStart(h1.firstChild, 0);
+      range.setEnd(paragraph.firstChild, paragraph.textContent.length);
+
+      const chunks = splitSelectionByBlock(range);
+      expect(chunks.map((c) => c.text)).toEqual([
+        '煎诸君的跳蛋',
+        '发布于 2026-06-03 17:41',
+        '我养的橘猫孩子已经走了一年半了。突然想起一件事',
+      ]);
+      expect(chunks.map((c) => c.block.tagName)).toEqual(['H1', 'DIV', 'P']);
+    });
+
+    it('splits visual block children when selection starts inside inline metadata', () => {
+      setBody(`<main>
+        <div class="meta"><span>煎诸君的跳蛋</span> <span>发布于 2026-06-03 17:41</span></div>
+        <div class="body">我养的橘猫孩子已经走了一年半了。突然想起一件事</div>
+        <div class="body">它平时很警觉的，但某天我发现它一条猫瘫着。</div>
+      </main>`);
+      const firstSpan = document.querySelector('.meta span');
+      const secondBody = document.querySelectorAll('.body')[1];
+      const range = document.createRange();
+      range.setStart(firstSpan.firstChild, 0);
+      range.setEnd(secondBody.firstChild, secondBody.textContent.length);
+
+      const chunks = splitSelectionByBlock(range);
+      expect(chunks.map((c) => c.text)).toEqual([
+        '煎诸君的跳蛋 发布于 2026-06-03 17:41',
+        '我养的橘猫孩子已经走了一年半了。突然想起一件事',
+        '它平时很警觉的，但某天我发现它一条猫瘫着。',
+      ]);
+      expect(chunks.map((c) => c.block.className)).toEqual([
+        'meta',
+        'body',
+        'body',
+      ]);
+    });
+
+    it('splits direct text before child paragraphs in mixed comment blocks', () => {
+      setBody(`<div class="commtext c00">Everything is search.
+        <p>Software development is search through the space of useful/interesting automations.</p>
+        <p>Business is search for product market fit.</p>
+      </div>`);
+      const commtext = document.querySelector('.commtext');
+      const lastParagraph = document.querySelectorAll('p')[1];
+      const range = document.createRange();
+      range.setStart(commtext.firstChild, 0);
+      range.setEnd(lastParagraph.firstChild, lastParagraph.textContent.length);
+
+      const chunks = splitSelectionByBlock(range);
+      expect(chunks.map((c) => c.text)).toEqual([
+        'Everything is search.',
+        'Software development is search through the space of useful/interesting automations.',
+        'Business is search for product market fit.',
+      ]);
+      expect(chunks.map((c) => c.block)).toEqual([
+        commtext,
+        document.querySelectorAll('p')[0],
+        lastParagraph,
+      ]);
+    });
+
     it('trims whitespace from chunks', () => {
       setBody('<div><p>  Padded text  </p><p>  More text  </p></div>');
       const p1 = document.querySelectorAll('p')[0];
@@ -667,5 +749,172 @@ describe('Case 3: cross-block selection', () => {
         .filter(Boolean);
       expect(marks.length).toBe(2);
     });
+  });
+});
+
+describe('Saved highlight reapply', () => {
+  it('reapplies array excerpt parts to their aligned css paths', () => {
+    setBody(
+      '<article><p>Author Meta First selected line</p><p>Second selected line</p><p>Third selected line</p></article>',
+    );
+
+    const marks = highlightSavedExcerptPartsInPage(
+      document.body,
+      [
+        'Author Meta First selected line',
+        'Second selected line',
+        'Third selected line',
+      ],
+      [
+        'article > p:nth-of-type(1)',
+        'article > p:nth-of-type(2)',
+        'article > p:nth-of-type(3)',
+      ],
+    );
+
+    expect(marks).toHaveLength(3);
+    expect([...getMarks()].map((mark) => mark.textContent)).toEqual([
+      'Author Meta First selected line',
+      'Second selected line',
+      'Third selected line',
+    ]);
+    expect([...getMarks()].map((mark) => mark.dataset.highlightText)).toEqual([
+      'Author Meta First selected line\nSecond selected line\nThird selected line',
+      'Author Meta First selected line\nSecond selected line\nThird selected line',
+      'Author Meta First selected line\nSecond selected line\nThird selected line',
+    ]);
+  });
+
+  it('keeps cross-element highlights as explicit array parts without synthesized breaks', () => {
+    setBody(`<article>
+      <h1>煎诸君的跳蛋</h1>
+      <div>发布于 2026-06-03 17:41</div>
+      <p>我养的橘猫孩子已经走了一年半了。突然想起一件事</p>
+      <p>它平时很警觉的，但某天我发现它一条猫瘫着。</p>
+      <p>捞起来发现软绵绵一条，还温的，</p>
+    </article>`);
+
+    const marks = highlightSavedExcerptPartsInPage(
+      document.body,
+      [
+        '煎诸君的跳蛋',
+        '发布于 2026-06-03 17:41',
+        '我养的橘猫孩子已经走了一年半了。突然想起一件事',
+        '它平时很警觉的，但某天我发现它一条猫瘫着。',
+        '捞起来发现软绵绵一条，还温的，',
+      ],
+      [
+        'article > h1',
+        'article > div',
+        'article > p:nth-of-type(1)',
+        'article > p:nth-of-type(2)',
+        'article > p:nth-of-type(3)',
+      ],
+    );
+
+    expect(marks).toHaveLength(5);
+    expect([...getMarks()].map((mark) => mark.textContent)).toEqual([
+      '煎诸君的跳蛋',
+      '发布于 2026-06-03 17:41',
+      '我养的橘猫孩子已经走了一年半了。突然想起一件事',
+      '它平时很警觉的，但某天我发现它一条猫瘫着。',
+      '捞起来发现软绵绵一条，还温的，',
+    ]);
+  });
+
+  it('uses css paths to avoid marking an earlier duplicate elsewhere on the page', () => {
+    setBody(`<main>
+      <section class="unrelated"><p>Everything is search.</p></section>
+      <section class="comment"><p>Everything is search.</p></section>
+    </main>`);
+
+    const marks = highlightSavedExcerptPartsInPage(
+      document.body,
+      ['Everything is search.'],
+      ['main > section:nth-of-type(2) > p'],
+    );
+
+    expect(marks).toHaveLength(1);
+    expect(document.querySelector('.unrelated mark')).toBeNull();
+    expect(document.querySelector('.comment mark')?.textContent).toBe(
+      'Everything is search.',
+    );
+  });
+
+  it('does not search globally when a non-empty css path no longer resolves', () => {
+    setBody(`<main>
+      <section class="unrelated"><p>Everything is search.</p></section>
+      <section class="comment"><p>Everything is search.</p></section>
+    </main>`);
+
+    const marks = highlightSavedExcerptPartsInPage(
+      document.body,
+      ['Everything is search.'],
+      ['main > section:nth-of-type(3) > p'],
+    );
+
+    expect(marks).toHaveLength(0);
+    expect(getMarks()).toHaveLength(0);
+  });
+
+  it('reapplies table row highlights with migrated escaped numeric id selectors', () => {
+    setBody(`<table><tbody><tr id="48419236"><td><table><tbody><tr><td></td><td></td><td>
+      <div><span><a>staticshock</a> <span>1 day ago</span> | next [–]</span></div>
+      <br>
+      <div class="comment"><div class="commtext c00">Everything is search.
+        <p>Software development is search through the space of useful/interesting automations.</p>
+        <p>Business is search for product market fit.</p>
+      </div></div>
+    </td></tr></tbody></table></td></tr></tbody></table>`);
+
+    const marks = highlightSavedExcerptPartsInPage(
+      document.body,
+      [
+        'staticshock 1 day ago  | next [–]',
+        'Everything is search.',
+        'Software development is search through the space of useful/interesting automations.',
+        'Business is search for product market fit.',
+      ],
+      [
+        'tr#\\34 8419236 > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(1)',
+        'tr#\\34 8419236 > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(2) > div:nth-of-type(1)',
+        'tr#\\34 8419236 > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(2) > div:nth-of-type(1) > p:nth-of-type(1)',
+        'tr#\\34 8419236 > td > table > tbody > tr > td:nth-of-type(3) > div:nth-of-type(2) > div:nth-of-type(1) > p:nth-of-type(2)',
+      ],
+    );
+
+    expect(marks).toHaveLength(4);
+    expect([...getMarks()].map((mark) => mark.textContent)).toEqual([
+      'staticshock 1 day ago | next [–]',
+      'Everything is search.',
+      'Software development is search through the space of useful/interesting automations.',
+      'Business is search for product market fit.',
+    ]);
+  });
+
+  it('uses document root only for intentionally empty migrated css paths', () => {
+    setBody('<main><p>Everything is search.</p></main>');
+
+    const marks = highlightSavedExcerptPartsInPage(
+      document.body,
+      ['Everything is search.'],
+      [''],
+    );
+
+    expect(marks).toHaveLength(1);
+    expect(getMarks()[0].textContent).toBe('Everything is search.');
+  });
+
+  it('reapplies a single multiline element as one excerpt part', () => {
+    setBody('<main><pre>line one\nline two\nline three</pre></main>');
+
+    const marks = highlightSavedExcerptPartsInPage(
+      document.body,
+      ['line one\nline two\nline three'],
+      ['main > pre'],
+    );
+
+    expect(marks).toHaveLength(1);
+    expect(getMarks()[0].textContent).toBe('line one\nline two\nline three');
   });
 });

@@ -528,7 +528,7 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       title: 'Offline Page',
     });
     await wsClient.enqueueDesktopCommand('createNote', {
-      excerpt: 'offline highlight',
+      excerpt: ['offline highlight'],
       note: 'offline note body',
       cssPath: null,
       url: rawOfflineUrl,
@@ -555,7 +555,8 @@ describe.sequential('phase 2 connector buffer and flush integration', () => {
       path.join(dataRoot, 'objects', 'notes', noteFiles[0]),
       'utf8',
     );
-    expect(noteRaw).toContain('"excerpt": "offline highlight"');
+    expect(noteRaw).toContain('"excerpt": [');
+    expect(noteRaw).toContain('"offline highlight"');
     expect(noteRaw).toContain('"note": "offline note body"');
 
     const offlinePageRaw = readFileSync(

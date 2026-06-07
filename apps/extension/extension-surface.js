@@ -38,6 +38,16 @@
       .replace(/"/g, '&quot;');
   }
 
+  function formatHighlightExcerpt(excerpt) {
+    return highlightExcerptParts(excerpt).join('\n');
+  }
+
+  function highlightExcerptParts(excerpt) {
+    return Array.isArray(excerpt)
+      ? excerpt.map((part) => String(part || '')).filter(Boolean)
+      : [];
+  }
+
   function positionNearRect(host, rect, win = window, options = {}) {
     const gap = options.gap ?? 4;
     const margin = options.margin ?? 8;
@@ -98,6 +108,8 @@
 
   globalThis.browserRecallExtensionSurface = {
     escapeHtml,
+    formatHighlightExcerpt,
+    highlightExcerptParts,
     noteOverlayHtml,
     positionNearRect,
     shadowCss: SHADOW_CSS,
