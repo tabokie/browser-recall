@@ -681,11 +681,10 @@ let onboardingDataFolderPath = '';
 // Keys: 'page:{slug}' for pages.
 
 // --- Search/filter state ---
-let savedSearches = []; // string[] — session-only, per-view UI state
-let currentSearchInput = ''; // unsaved draft (also participates in live search)
+let committedSearchQuery = ''; // committed query that participates in search/filtering
+let draftSearchInput = ''; // uncommitted text; becomes active only on Enter
 let filterState = createDefaultFilterState();
 let filterVisible = false;
-let exploreDebounceTimer = null;
 
 const KEYWORD_FIELDS = ['title', 'url', 'captures', 'highlights', 'notes'];
 const KEYWORD_FIELD_LABELS = {
@@ -857,7 +856,7 @@ function applyPersistedRelatedDateFilter() {
 }
 
 function exploreDateFilterContext() {
-  return `explore:${savedSearches.join('\u0000')}:${currentSearchInput.trim()}`;
+  return `explore:${committedSearchQuery.trim()}`;
 }
 
 // Run a limited-concurrency pool of async tasks, calling onResult after each completes.
@@ -1103,6 +1102,9 @@ async function renderProgressiveResults(gen) {
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = '';
   const preserveScroll = preserveRelatedScrollOnNextRender;
+  if (preserveScroll) {
+    await waitForMainViewport();
+  }
   preserveRelatedScrollOnNextRender = false;
   vs.updateData(
     sorted,
@@ -2462,8 +2464,8 @@ function matchKeyword(item, field, value) {
 // Deduplicates per-day: the same URL visited on different days produces separate
 // results. Consumers must not assume results are unique by URL/slug.
 
-// Save search queries to session storage (per-view, ephemeral)
-function saveSearchQueries() {
+// Save the committed search query to session storage (per-view, ephemeral)
+function saveSearchQuery() {
   const viewKey =
     activeView.type === 'explore'
       ? 'explore'
@@ -2472,12 +2474,12 @@ function saveSearchQueries() {
         : null;
   if (!viewKey) return;
   chrome.storage.session
-    .set({ [`searchQueries:${viewKey}`]: savedSearches })
+    .set({ [`searchQueries:${viewKey}`]: committedSearchQuery.trim() })
     .catch(() => {});
 }
 
-// Load search queries from session storage for the current view
-async function loadSearchQueries() {
+// Load the committed search query from session storage for the current view
+async function loadSearchQuery() {
   const viewKey =
     activeView.type === 'explore'
       ? 'explore'
@@ -2487,6 +2489,13 @@ async function loadSearchQueries() {
   if (!viewKey) return [];
   const data = await chrome.storage.session.get(`searchQueries:${viewKey}`);
   return data[`searchQueries:${viewKey}`] || [];
+}
+
+function committedQueryFromSession(value) {
+  if (Array.isArray(value)) {
+    return value.find((query) => String(query || '').trim())?.trim() || '';
+  }
+  return String(value || '').trim();
 }
 
 // --- Query builder: Rendering ---
@@ -2545,8 +2554,8 @@ async function showExplore() {
   renderListSkeleton();
 
   try {
-    savedSearches = await loadSearchQueries();
-    currentSearchInput = '';
+    committedSearchQuery = committedQueryFromSession(await loadSearchQuery());
+    draftSearchInput = committedSearchQuery;
 
     await renderListSearchFilters();
     _timer('renderListSearchFilters');
@@ -2588,8 +2597,8 @@ async function refreshPins() {
 async function showList(list) {
   const displayName = listDisplayName(list);
   activeView = { type: 'list', id: list.slug, name: list.name || null };
-  savedSearches = await loadSearchQueries();
-  currentSearchInput = '';
+  committedSearchQuery = committedQueryFromSession(await loadSearchQuery());
+  draftSearchInput = committedSearchQuery;
   updateSidebarActive();
   updateMainTitle(displayName);
 
@@ -3344,17 +3353,13 @@ async function renderListPinView(allPins, listId) {
   await runListPinFilter();
 }
 
-// Run the active view's search pipeline (debounced for explore, immediate for list)
+// Run the active view's search pipeline after an explicit commit/filter change.
 function runActiveSearchPipeline() {
   if (activeView.type === 'explore') {
-    if (exploreDebounceTimer) clearTimeout(exploreDebounceTimer);
-    const preserveScroll = Boolean(runActiveSearchPipeline._preserveScroll);
-    exploreDebounceTimer = setTimeout(() => {
-      if (preserveScroll) {
-        preserveRelatedScrollOnNextRender = true;
-      }
-      runSearchFilterPipeline();
-    }, 300);
+    if (runActiveSearchPipeline._preserveScroll) {
+      preserveRelatedScrollOnNextRender = true;
+    }
+    runSearchFilterPipeline();
   } else if (activeView.type === 'list') {
     if (runActiveSearchPipeline._preserveScroll) {
       preserveRelatedScrollOnNextRender = true;
@@ -3364,10 +3369,11 @@ function runActiveSearchPipeline() {
   runActiveSearchPipeline._preserveScroll = false;
 }
 
-// Filter list pins by current queries + draft input, then apply filters
+// Filter list pins by the committed query, then apply filters
 async function runListPinFilter() {
-  const allQueries = [...savedSearches];
-  if (currentSearchInput.trim()) allQueries.push(currentSearchInput.trim());
+  const allQueries = committedSearchQuery.trim()
+    ? [committedSearchQuery.trim()]
+    : [];
 
   let filtered;
   if (allQueries.length === 0 || allQueries.every((q) => !q.trim())) {
@@ -6876,22 +6882,10 @@ async function renderSearchPanel() {
   const isExplore = activeView.type === 'explore';
   const placeholder = isExplore ? 'Search...' : 'Filter pins...';
 
-  const removeSvg =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
   const filterSvg =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
 
   let html = '<div class="search-filters-panel" id="searchFiltersPanel">';
-  if (savedSearches.length > 0) {
-    html += '<div class="search-rows" id="searchRows">';
-    for (let i = 0; i < savedSearches.length; i++) {
-      html += `<div class="search-row" data-index="${i}">`;
-      html += `<input type="search" class="search-row-input" data-index="${i}" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="none">`;
-      html += `<button class="search-row-remove" data-index="${i}" title="Remove">${removeSvg}</button>`;
-      html += `</div>`;
-    }
-    html += '</div>';
-  }
   html += '<div class="search-draft">';
   html += `<input type="search" class="search-draft-input" id="searchDraftInput" placeholder="${placeholder}" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="none">`;
   html += `<button class="filter-toggle-btn${filterVisible ? ' active' : ''}${!isDefaultFilterState(filterState) ? ' has-filters' : ''}" id="filterToggleBtn" title="Filters">${filterSvg}</button>`;
@@ -6904,14 +6898,8 @@ async function renderSearchPanel() {
   html += '</div>';
 
   container.innerHTML = html;
-  // Set input values via DOM property (not HTML attribute) to avoid
-  // escaping issues with quotes and Chrome backdrop-filter paint bugs.
-  container.querySelectorAll('.search-row-input').forEach((input) => {
-    const idx = parseInt(input.dataset.index);
-    if (savedSearches[idx] != null) input.value = savedSearches[idx];
-  });
   const draftEl = container.querySelector('#searchDraftInput');
-  if (draftEl && currentSearchInput) draftEl.value = currentSearchInput;
+  if (draftEl) draftEl.value = draftSearchInput;
   bindSearchEvents(container);
   if (filterVisible) bindFilterEvents(container);
 }
@@ -7053,49 +7041,29 @@ function updateFilterPanelActions(container) {
 }
 
 function bindSearchEvents(container) {
-  // Saved search row inputs — edit inline
-  container.querySelectorAll('.search-row-input').forEach((input) => {
-    input.addEventListener('input', () => {
-      const idx = parseInt(input.dataset.index);
-      savedSearches[idx] = input.value;
-      runActiveSearchPipeline();
-    });
-    input.addEventListener('change', () => {
-      saveSearchQueries();
-    });
-  });
-
-  // Remove buttons
-  container.querySelectorAll('.search-row-remove').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const idx = parseInt(btn.dataset.index);
-      savedSearches.splice(idx, 1);
-      await renderSearchPanel();
-      saveSearchQueries();
-      runActiveSearchPipeline();
-    });
-  });
-
-  // Draft input — live search
+  // Draft input — search/filter only after Enter commits the query.
   const draftInput = container.querySelector('#searchDraftInput');
   if (draftInput) {
     draftInput.addEventListener('input', () => {
-      const hadInput = Boolean(currentSearchInput.trim());
-      currentSearchInput = draftInput.value;
-      if (hadInput && !currentSearchInput.trim()) {
-        runActiveSearchPipeline._preserveScroll = true;
-      }
-      runActiveSearchPipeline();
+      draftSearchInput = draftInput.value;
     });
     draftInput.addEventListener('keydown', async (e) => {
-      if (e.key === 'Enter' && draftInput.value.trim()) {
-        savedSearches.push(draftInput.value.trim());
-        currentSearchInput = '';
+      if (e.key === 'Enter') {
+        const nextQuery = draftInput.value.trim();
+        e.preventDefault();
+        if (nextQuery === committedSearchQuery.trim()) return;
+        const hadQuery = Boolean(committedSearchQuery.trim());
+        committedSearchQuery = nextQuery;
+        draftSearchInput = nextQuery;
+        if (hadQuery && !committedSearchQuery) {
+          runActiveSearchPipeline._preserveScroll = true;
+        }
         await renderSearchPanel();
-        saveSearchQueries();
+        saveSearchQuery();
         runActiveSearchPipeline();
-        // Focus the new draft input
-        document.querySelector('#searchDraftInput')?.focus();
+        document
+          .querySelector('#searchDraftInput')
+          ?.focus({ preventScroll: true });
       }
     });
   }
@@ -7379,9 +7347,9 @@ async function runSearchFilterPipeline() {
 
   const pinnedSlugs = new Set();
 
-  // Collect all queries: saved searches + current draft
-  const allQueries = [...savedSearches];
-  if (currentSearchInput.trim()) allQueries.push(currentSearchInput.trim());
+  const allQueries = committedSearchQuery.trim()
+    ? [committedSearchQuery.trim()]
+    : [];
 
   if (allQueries.length > 0 && allQueries.some((q) => q.trim())) {
     // Progressive multi-phase search: Phase 0 (in-memory) renders instantly,

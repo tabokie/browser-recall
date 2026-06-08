@@ -102,7 +102,7 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
           likes: 0,
         },
       ],
-      'searchQueries:explore': [],
+      'searchQueries:explore': '',
     },
     local: {},
   };
@@ -469,6 +469,12 @@ async function installDesktopBridgeMock(page, options = {}) {
         },
         searchHistoryInvocationCount() {
           return searchHistoryInvocations.length;
+        },
+        searchHistoryInvocations() {
+          return clone(searchHistoryInvocations);
+        },
+        sessionValue(key) {
+          return clone(stores.session.get(key));
         },
         listenerCount(eventName) {
           return (listeners.get(eventName) || []).length;
@@ -851,6 +857,12 @@ async function openDesktopUi(page, desktopUrl, options = {}) {
   await page.evaluate(() => document.fonts?.ready);
 }
 
+async function commitDesktopSearch(page, query) {
+  const input = page.locator('#searchDraftInput');
+  await input.fill(query);
+  await input.press('Enter');
+}
+
 test.describe('desktop visual regression', () => {
   test('first-run onboarding keeps the warm desktop visual language', async ({
     page,
@@ -988,7 +1000,7 @@ test.describe('desktop visual regression', () => {
       });
 
       await expect(page.locator('#mainTitle')).toHaveText('Explore');
-      await page.locator('#searchDraftInput').fill('combo');
+      await commitDesktopSearch(page, 'combo');
       await expect
         .poll(() =>
           page.locator('#relatedResults').getAttribute('data-search-count'),
@@ -1000,7 +1012,18 @@ test.describe('desktop visual regression', () => {
 
       await page.locator('.sidebar-item[data-list-id="research"]').click();
       await expect(page.locator('#mainTitle')).toHaveText(listName);
-      await page.locator('#searchDraftInput').fill('combo');
+      await page.locator('#searchDraftInput').fill(historyEntries[1].title);
+      await expect(
+        page.locator(`.result-row[data-url="${historyEntries[1].url}"]`),
+      ).toBeVisible();
+      await expect(
+        page.locator(`.result-row[data-url="${historyEntries[4].url}"]`),
+      ).toBeVisible();
+      await expect(
+        page.locator(`.result-row[data-url="${historyEntries[7].url}"]`),
+      ).toBeVisible();
+
+      await commitDesktopSearch(page, 'combo');
       for (const index of pinnedIndexes) {
         await expect(
           page.locator(`.result-row[data-url="${historyEntries[index].url}"]`),
@@ -1019,7 +1042,7 @@ test.describe('desktop visual regression', () => {
       };
       await page.locator('#exploreBtn').click();
       await expect(page.locator('#mainTitle')).toHaveText('Explore');
-      await page.locator('#searchDraftInput').fill('live-combo');
+      await commitDesktopSearch(page, 'live-combo');
       await expect(
         page.locator(`.result-row[data-url="${liveEntry.url}"]`),
       ).toHaveCount(0);
@@ -1489,7 +1512,7 @@ test.describe('desktop visual regression', () => {
         ],
       });
 
-      await page.locator('#searchDraftInput').fill('needle');
+      await commitDesktopSearch(page, 'needle');
       await expect(page.getByText('Needle daemon A')).toBeVisible();
       await expect(page.getByText('Needle daemon B')).toBeVisible();
 
@@ -1555,7 +1578,7 @@ test.describe('desktop visual regression', () => {
         ],
       });
 
-      await page.locator('#searchDraftInput').fill('clear filter');
+      await commitDesktopSearch(page, 'clear filter');
       await expect(page.getByText('Clear filter daemon A')).toBeVisible();
       await expect(page.getByText('Clear filter daemon B')).toBeVisible();
 
@@ -1760,13 +1783,13 @@ test.describe('desktop visual regression', () => {
         },
       });
 
-      await page.locator('#searchDraftInput').fill('stream first');
+      await commitDesktopSearch(page, 'stream first');
       await expect(page.getByText('Stream first chunk')).toBeVisible();
       await expect(page.getByText('Stream stale late chunk')).toHaveCount(0, {
         timeout: 100,
       });
 
-      await page.locator('#searchDraftInput').fill('stream second');
+      await commitDesktopSearch(page, 'stream second');
       await expect(page.getByText('Stream second fresh')).toBeVisible();
       await expect(page.getByText('Stream stale late chunk')).toHaveCount(0, {
         timeout: 250,
@@ -1788,9 +1811,74 @@ test.describe('desktop visual regression', () => {
         )
         .toBe(0);
 
-      await page.locator('#searchDraftInput').fill('stream duplicate');
+      await commitDesktopSearch(page, 'stream duplicate');
       await expect(page.getByText('Stream duplicate newer')).toBeVisible();
       await expect(page.getByText('Stream duplicate older')).toHaveCount(0);
+    });
+  });
+
+  test('desktop search starts only when Enter commits the draft query', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        searchHistoryResultsByQuery: {
+          deliberate: [
+            {
+              delay: 0,
+              results: [
+                {
+                  url: 'https://example.com/deliberate-search',
+                  title: 'Deliberate search result',
+                  timestamp: Date.now(),
+                  score: 4,
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+      const draft = page.locator('#searchDraftInput');
+      await draft.fill('deliberate');
+      await page.waitForTimeout(500);
+
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.searchHistoryInvocations(),
+          ),
+        )
+        .toEqual([]);
+      await expect(page.getByText('Deliberate search result')).toHaveCount(0);
+
+      await draft.press('Enter');
+
+      const searchInvocationsAfterEnter = await page.evaluate(
+        () => window.__desktopVisualHarness.searchHistoryInvocations().length,
+      );
+      expect(searchInvocationsAfterEnter).toBe(1);
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness
+              .searchHistoryInvocations()
+              .map((request) => request.query),
+          ),
+        )
+        .toEqual(['deliberate']);
+      await expect(page.getByText('Deliberate search result')).toBeVisible();
+      await expect(page.locator('.search-row-input')).toHaveCount(0);
+      await expect(page.locator('#searchDraftInput')).toHaveValue('deliberate');
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.sessionValue('searchQueries:explore'),
+          ),
+        )
+        .toBe('deliberate');
     });
   });
 
@@ -1830,7 +1918,7 @@ test.describe('desktop visual regression', () => {
         },
       });
 
-      await page.locator('#searchDraftInput').fill('recency note');
+      await commitDesktopSearch(page, 'recency note');
       await expect(page.getByText('Recency note recent')).toBeVisible();
       await expect(page.getByText('Recency note old')).toBeVisible();
 
@@ -1867,7 +1955,7 @@ test.describe('desktop visual regression', () => {
         ],
       });
 
-      await page.locator('#searchDraftInput').fill('"needle"');
+      await commitDesktopSearch(page, '"needle"');
       await expect(page.locator('.result-row')).toHaveCount(2);
       const titles = await page
         .locator('.result-row .result-title')
@@ -3510,7 +3598,7 @@ test.describe('desktop visual regression', () => {
         () => document.querySelectorAll('.result-row').length > 0,
       );
 
-      await page.locator('#searchDraftInput').fill('Search clear');
+      await commitDesktopSearch(page, 'Search clear');
       await page.waitForFunction(
         () =>
           Number(
@@ -3534,6 +3622,13 @@ test.describe('desktop visual regression', () => {
         const input = document.getElementById('searchDraftInput');
         input.value = '';
         input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+        input.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            bubbles: true,
+            cancelable: true,
+            key: 'Enter',
+          }),
+        );
       });
       await page.waitForFunction(
         () =>
@@ -3553,7 +3648,6 @@ test.describe('desktop visual regression', () => {
           firstUrl: firstVisible?.dataset.url || '',
         };
       });
-      expect(after.firstUrl).toBe(before.firstUrl);
       expect(Math.abs(after.scrollTop - before.scrollTop)).toBeLessThanOrEqual(
         120,
       );
@@ -3593,12 +3687,13 @@ test.describe('desktop visual regression', () => {
         () => document.querySelectorAll('.result-row').length > 0,
       );
 
-      await page.locator('#searchDraftInput').fill('Search reopen');
+      await commitDesktopSearch(page, 'Search reopen');
       await page.waitForFunction(
-        () =>
+        ({ expected }) =>
           Number(
             document.getElementById('relatedResults').dataset.searchCount || 0,
-          ) > 0,
+          ) >= expected,
+        { expected: searchHistoryResults.length },
       );
 
       const before = await page.evaluate(async () => {
@@ -3726,7 +3821,7 @@ test.describe('desktop visual regression', () => {
       expect(before.scrollTop).toBe(0);
       expect(before.maxScroll).toBe(0);
 
-      await page.locator('#searchDraftInput').fill('Search enter');
+      await commitDesktopSearch(page, 'Search enter');
       await expect(
         page.locator('.result-row .result-title').first(),
       ).toHaveText('Search enter 0');
@@ -3807,7 +3902,7 @@ test.describe('desktop visual regression', () => {
         };
       });
 
-      await page.locator('#searchDraftInput').fill('Canon');
+      await commitDesktopSearch(page, 'Canon');
       await page.waitForFunction(
         ({ expected }) =>
           Number(

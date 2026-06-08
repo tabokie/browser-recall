@@ -1,0 +1,6 @@
+- Remove multiple searches and immediate query. The current behavior is, when user types in query, search is initiated immediately as he types, and when user presses "Enter", the query is saved to a list of queries. The desired behavior is, when user presses "Enter" after typing the query, the search begin.
+- $gap
+- Go ahead and fix them thoroughly, save one string is enough
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix them thoroughly
+- $finish model=GPT-5.5 Codex

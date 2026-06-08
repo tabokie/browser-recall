@@ -170,6 +170,7 @@ Search is daemon-owned.
 
 - `crates/search/` provides native full-text helpers.
 - `crates/daemon/src/search.rs` wires those helpers into command/query paths.
+- Desktop search/filter input keeps typed text as a local draft and starts the daemon search or list filter only when Enter commits the query.
 - Desktop UI history search goes through cancellable Tauri streaming commands. The daemon search adapter splits history JSONL work across a fixed worker pool, emits result chunks as workers finish, and cooperatively stops when the UI starts a newer search or leaves search mode.
 - Explore device filter choices come from the authoritative `logs/<device>/` directories returned by the daemon history-file listing, not from whichever history rows the UI has demand-loaded.
 - The connector websocket protocol exposes daemon history search streaming and cancellation messages (`search_history_stream`, `cancel_history_search`, `history_search_chunk`, `history_search_done`).

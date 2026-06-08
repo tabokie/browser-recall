@@ -544,6 +544,40 @@ describe('VirtualScroller', () => {
       expect(scrollEl.scrollTop).toBe(500);
     });
 
+    it('restores viewport-relative anchors when the row is outside the rendered window', () => {
+      const items = Array.from({ length: 100 }, (_, i) => ({
+        id: i,
+        url: `https://example.com/${i}`,
+      }));
+      vs = new VirtualScroller(scrollEl, containerEl, 50);
+      vs.setData(items, (item) => `<div>${item.id}</div>`);
+
+      scrollEl._top = 0;
+      scrollEl.scrollTop = 500;
+      containerEl._top = -500;
+      const anchorRow = {
+        dataset: { url: 'https://example.com/10' },
+        getBoundingClientRect: () => ({ top: 75, bottom: 125 }),
+      };
+      containerEl.querySelectorAll = (selector) =>
+        selector === '.result-row' ? [anchorRow] : [];
+      containerEl.querySelector = () => null;
+
+      vs.updateData(
+        [
+          ...Array.from({ length: 40 }, (_, i) => ({
+            id: `new-${i}`,
+            url: `https://example.com/new-${i}`,
+          })),
+          ...items,
+        ],
+        (item) => `<div>${item.id}</div>`,
+        { preserveScroll: true },
+      );
+
+      expect(scrollEl.scrollTop).toBe(2575);
+    });
+
     it('preserves scroll when DOM teardown temporarily clamps scrollTop to zero', () => {
       const items = Array.from({ length: 100 }, (_, i) => ({
         id: i,

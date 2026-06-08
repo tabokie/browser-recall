@@ -530,10 +530,15 @@ export class VirtualScroller {
         return true;
       }
     }
-    const containerScrollOffset =
-      (this.scrollEl.scrollTop || 0) - this._viewportTopOffset();
-    const target =
-      containerScrollOffset + this._offsetForIndex(index) + anchor.offsetWithin;
+    const target = Number.isFinite(anchor.offsetWithinViewport)
+      ? (this.scrollEl.scrollTop || 0) +
+        this._offsetForIndex(index) -
+        this._viewportTopOffset() +
+        anchor.offsetWithinViewport
+      : (this.scrollEl.scrollTop || 0) -
+        this._viewportTopOffset() +
+        this._offsetForIndex(index) +
+        (Number.isFinite(anchor.offsetWithin) ? anchor.offsetWithin : 0);
     this.scrollEl.scrollTop =
       maxScrollTop == null
         ? Math.max(0, target)
