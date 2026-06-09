@@ -201,6 +201,7 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
             slug: 'page-note-product-research',
             excerpt: null,
             note: 'Page note for product research',
+            url: productResearchUrl,
           },
           {
             slug: 'highlight-product-research',
@@ -208,13 +209,36 @@ function desktopVisualSeed(colorScheme = 'amber', options = {}) {
               'Important highlighted passage\nwith original line break',
             ],
             note: 'Highlight note',
+            url: productResearchUrl,
           },
           {
             slug: 'highlight-product-research-array',
             excerpt: ['Array highlighted passage', 'with grouped line break'],
             note: 'Grouped highlight note',
+            url: productResearchUrl,
           },
         ],
+        'note:page-note-product-research': {
+          slug: 'page-note-product-research',
+          excerpt: null,
+          note: 'Page note for product research',
+          url: productResearchUrl,
+          deleted: false,
+        },
+        'note:highlight-product-research': {
+          slug: 'highlight-product-research',
+          excerpt: ['Important highlighted passage\nwith original line break'],
+          note: 'Highlight note',
+          url: productResearchUrl,
+          deleted: false,
+        },
+        'note:highlight-product-research-array': {
+          slug: 'highlight-product-research-array',
+          excerpt: ['Array highlighted passage', 'with grouped line break'],
+          note: 'Grouped highlight note',
+          url: productResearchUrl,
+          deleted: false,
+        },
         [`detailSnapshots:${productResearchSlug}`]: [
           {
             timestamp: now - 30_000,
@@ -272,6 +296,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       searchHistoryChunks,
       searchHistoryResultsByQuery,
       searchNotesResultsByQuery,
+      readDesktopValueDelayMs,
     }) => {
       const listeners = new Map();
       const stores = {
@@ -446,6 +471,46 @@ async function installDesktopBridgeMock(page, options = {}) {
         return null;
       }
 
+      function putOrphanedEntry(key) {
+        const orphaned = stores.session.get('manifest:orphaned') || {
+          timestamp: 0,
+          entries: [],
+        };
+        stores.session.set('manifest:orphaned', {
+          timestamp: Date.now(),
+          entries: [
+            ...(orphaned.entries || []).filter((entry) => entry.key !== key),
+            { key, deletedAt: Date.now() },
+          ],
+        });
+      }
+
+      function deleteNoteRecord(noteSlug) {
+        const noteKey = `note:${noteSlug}`;
+        const note = stores.session.get(noteKey);
+        if (note) {
+          stores.session.set(noteKey, {
+            ...note,
+            deleted: true,
+            deletedTs: Date.now(),
+          });
+        }
+        for (const [key, notes] of stores.session.entries()) {
+          if (!key.startsWith('detailNotes:') || !Array.isArray(notes)) {
+            continue;
+          }
+          stores.session.set(
+            key,
+            notes.filter((note) => note.slug !== noteSlug).map(clone),
+          );
+        }
+        putOrphanedEntry(noteKey);
+      }
+
+      function emitMutation(type, detail = {}) {
+        emitRuntimeMessage({ action: 'mutation', type, ...detail });
+      }
+
       window.__desktopVisualHarness = {
         appendHistoryEntry(entry) {
           const date = new Date(entry.timestamp).toISOString().slice(0, 10);
@@ -478,6 +543,11 @@ async function installDesktopBridgeMock(page, options = {}) {
         },
         listenerCount(eventName) {
           return (listeners.get(eventName) || []).length;
+        },
+        deleteNoteExternally(noteSlug) {
+          deleteNoteRecord(noteSlug);
+          emitMutation('note', { noteSlug });
+          emitMutation('orphaned');
         },
       };
 
@@ -570,23 +640,13 @@ async function installDesktopBridgeMock(page, options = {}) {
                 .filter((snapshot) => snapshot.timestamp !== request.timestamp)
                 .map(clone),
             );
-            stores.session.set('manifest:orphaned', {
-              timestamp: Date.now(),
-              entries: [
-                ...(
-                  stores.session.get('manifest:orphaned')?.entries || []
-                ).filter(
-                  (entry) =>
-                    entry.key !==
-                    `snapshot:${request.slug}-${request.timestamp}`,
-                ),
-                {
-                  key: `snapshot:${request.slug}-${request.timestamp}`,
-                  deletedAt: Date.now(),
-                },
-              ],
-            });
+            putOrphanedEntry(`snapshot:${request.slug}-${request.timestamp}`);
             return { success: true };
+          case 'deleteNote': {
+            const noteSlug = request.noteSlug;
+            deleteNoteRecord(noteSlug);
+            return { success: true, noteSlug };
+          }
           case 'openSnapshot':
             openedSnapshots.push({
               slug: request.slug,
@@ -610,6 +670,11 @@ async function installDesktopBridgeMock(page, options = {}) {
           case 'getDirectorySize':
             return { success: true, size: 4096 };
           case 'readDesktopValue':
+            if (readDesktopValueDelayMs > 0) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, readDesktopValueDelayMs),
+              );
+            }
             return { success: true, value: readDesktopValue(request.key) };
           case 'saveSettingsKey': {
             const settings = readDesktopValue('manifest:settings') || {};
@@ -670,19 +735,7 @@ async function installDesktopBridgeMock(page, options = {}) {
               ...order,
               tree: removeListFromTree(order.tree || [], listId),
             });
-            const orphaned = stores.session.get('manifest:orphaned') || {
-              timestamp: 0,
-              entries: [],
-            };
-            stores.session.set('manifest:orphaned', {
-              timestamp: Date.now(),
-              entries: [
-                ...(orphaned.entries || []).filter(
-                  (entry) => entry.key !== key,
-                ),
-                { key, deletedAt: Date.now() },
-              ],
-            });
+            putOrphanedEntry(key);
             return { success: true };
           }
           case 'toggleListPin': {
@@ -836,6 +889,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       searchHistoryChunks: options.searchHistoryChunks || null,
       searchHistoryResultsByQuery: options.searchHistoryResultsByQuery || null,
       searchNotesResultsByQuery: options.searchNotesResultsByQuery || null,
+      readDesktopValueDelayMs: options.readDesktopValueDelayMs || 0,
     },
   );
 }
@@ -1308,6 +1362,117 @@ test.describe('desktop visual regression', () => {
           ),
         )
         .toEqual([snapshotKey]);
+    });
+  });
+
+  test('recycle bin updates immediately after deleting a note', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        includeDetailListMembership: true,
+      });
+
+      await expect(page.locator('#recycleBinBtn')).toBeHidden();
+      const row = page.locator(
+        '.result-row[data-url="https://example.com/product-research"]',
+      );
+      await row.locator('.att-ctrl-btn').click({ force: true });
+
+      const noteEntry = page
+        .locator('.detail-note-entry')
+        .filter({ hasText: 'Important highlighted passage' });
+      await expect(noteEntry).toBeVisible();
+      const noteKey = await noteEntry.evaluate(
+        (el) => `note:${el.dataset.noteSlug}`,
+      );
+
+      await noteEntry.locator('.detail-note-action-btn.delete').click();
+
+      await expect(page.locator('#recycleBinBtn')).toBeVisible();
+      await expect(page.locator('#recycleBinCount')).toHaveText('1');
+      await page.keyboard.press('Escape');
+      await page.locator('#recycleBinBtn').click();
+      await expect(page.locator('.recycle-card-key')).toHaveText(noteKey);
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness
+              .recycleBinKeys()
+              .map((entry) => entry.key),
+          ),
+        )
+        .toEqual([noteKey]);
+    });
+  });
+
+  test('recycle bin refreshes from daemon orphaned mutations', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        includeDetailListMembership: true,
+      });
+
+      await expect(page.locator('#recycleBinBtn')).toBeHidden();
+      await page.evaluate(() =>
+        window.__desktopVisualHarness.deleteNoteExternally(
+          'highlight-product-research',
+        ),
+      );
+
+      await expect(page.locator('#recycleBinBtn')).toBeVisible();
+      await expect(page.locator('#recycleBinCount')).toHaveText('1');
+      await page.locator('#recycleBinBtn').click();
+      await expect(page.locator('.recycle-card-key')).toHaveText(
+        'note:highlight-product-research',
+      );
+
+      await page.evaluate(() =>
+        window.__desktopVisualHarness.deleteNoteExternally(
+          'highlight-product-research-array',
+        ),
+      );
+
+      await expect(page.locator('#recycleBinCount')).toHaveText('2');
+      await expect(page.locator('.recycle-card-key')).toHaveText([
+        'note:highlight-product-research',
+        'note:highlight-product-research-array',
+      ]);
+    });
+  });
+
+  test('delayed recycle refresh does not reopen recycle bin after navigating away', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        includeRecycleBin: true,
+        readDesktopValueDelayMs: 80,
+      });
+
+      await expect(page.locator('#recycleBinBtn')).toBeVisible();
+      await page.locator('#recycleBinBtn').click();
+      await expect(page.locator('#recycleBinLayout.visible')).toBeVisible();
+
+      await page.evaluate(() =>
+        window.__desktopVisualHarness.deleteNoteExternally('deleted-note'),
+      );
+      await page.locator('#exploreBtn').click();
+
+      await expect(page.locator('#exploreBtn')).toHaveClass(/active/);
+      await expect(page.locator('#recycleBinLayout.visible')).toHaveCount(0);
+      await expect(page.locator('#relatedChart.visible')).toBeVisible();
+
+      await page.waitForTimeout(160);
+      await expect(page.locator('#exploreBtn')).toHaveClass(/active/);
+      await expect(page.locator('#recycleBinLayout.visible')).toHaveCount(0);
     });
   });
 
@@ -2962,6 +3127,103 @@ test.describe('desktop visual regression', () => {
       });
 
       expect(chartMetrics.barTop).toBeGreaterThan(chartMetrics.rowTop);
+    });
+  });
+
+  test('chart to result gap remains stable after selecting rows and resizing', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const historyEntries = Array.from({ length: 80 }, (_, i) => ({
+      url: `https://example.com/stable-layout-${i}`,
+      title: `Stable layout ${i}`,
+      timestamp: now - i * 1000,
+      deviceId: 'device-a',
+    }));
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+      });
+      await expect(page.locator('#relatedChart.visible')).toBeVisible();
+      await page.waitForFunction(
+        () => document.querySelectorAll('#relatedResults .result-row').length,
+      );
+
+      const measureGap = async () =>
+        page.evaluate(() => {
+          const chart = document.getElementById('relatedChart');
+          const firstItem = document.querySelector(
+            '#relatedResults .result-item',
+          );
+          const chartRect = chart.getBoundingClientRect();
+          const itemRect = firstItem.getBoundingClientRect();
+          return Math.round(itemRect.top - chartRect.bottom);
+        });
+
+      const initialGap = await measureGap();
+      expect(initialGap).toBeGreaterThanOrEqual(0);
+      expect(initialGap).toBeLessThanOrEqual(12);
+
+      await page.locator('#relatedResults .result-row').first().click();
+      await expect(
+        page.locator('#relatedResults .result-row.selected'),
+      ).toHaveCount(1);
+      await expect.poll(measureGap).toBe(initialGap);
+
+      await page.setViewportSize({ width: 900, height: 560 });
+      await expect.poll(measureGap).toBe(initialGap);
+
+      await page.setViewportSize({ width: 1280, height: 820 });
+      await expect.poll(measureGap).toBe(initialGap);
+    });
+  });
+
+  test('explore page list fills the remaining main pane height', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const historyEntries = [
+      {
+        url: 'https://example.com/sparse-layout',
+        title: 'Sparse layout',
+        timestamp: now,
+        deviceId: 'device-a',
+      },
+    ];
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+      });
+      await expect(page.locator('#relatedChart.visible')).toBeVisible();
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(1);
+
+      const metrics = await page.evaluate(() => {
+        const main = document.querySelector('.main').getBoundingClientRect();
+        const list = document
+          .getElementById('listLayout')
+          .getBoundingClientRect();
+        const wrapper = document
+          .getElementById('relatedResultsWrapper')
+          .getBoundingClientRect();
+        return {
+          mainBottom: Math.round(main.bottom),
+          listBottom: Math.round(list.bottom),
+          wrapperBottom: Math.round(wrapper.bottom),
+        };
+      });
+
+      expect(
+        Math.abs(metrics.listBottom - metrics.mainBottom),
+      ).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(metrics.wrapperBottom - metrics.mainBottom),
+      ).toBeLessThanOrEqual(1);
     });
   });
 

@@ -1818,8 +1818,7 @@ async function showRecycleBin() {
           const id = entitySlug(key);
           await sendAction({ action: 'restoreList', listId: id });
         }
-        await updateRecycleBinBadge();
-        await showRecycleBin();
+        await refreshRecycleBinUi({ render: true });
       } catch (error) {
         button.disabled = false;
         showErrorBubble(`Failed to restore item: ${error.message}`, {
@@ -1851,8 +1850,7 @@ function bindRecycleBinEmptyButton() {
       const badge = document.getElementById('recycleBinCount');
       badge.textContent = '';
       btn.style.display = 'none';
-      await updateRecycleBinBadge();
-      if (activeView.type === 'recycle-bin') await showRecycleBin();
+      await refreshRecycleBinUi();
     } catch (error) {
       emptyBtn.disabled = false;
       showErrorBubble(`Failed to empty recycle bin: ${error.message}`, {
@@ -1874,6 +1872,13 @@ async function updateRecycleBinBadge() {
   const badge = document.getElementById('recycleBinCount');
   badge.textContent = count > 0 ? String(count) : '';
   btn.style.display = count > 0 ? 'flex' : 'none';
+}
+
+async function refreshRecycleBinUi({ render = null } = {}) {
+  await updateRecycleBinBadge();
+  const shouldRender =
+    render === null ? activeView.type === 'recycle-bin' : render;
+  if (shouldRender) await showRecycleBin();
 }
 
 // Search parsing and matching functions
@@ -3962,6 +3967,7 @@ function bindNoteDeleteButtons(container) {
         ) {
           section.remove();
         }
+        await refreshRecycleBinUi();
       });
     });
 
@@ -4071,8 +4077,7 @@ function bindSnapshotClickHandlers(container) {
       ) {
         section.closest('.detail-section')?.remove();
       }
-      await updateRecycleBinBadge();
-      if (activeView.type === 'recycle-bin') await showRecycleBin();
+      await refreshRecycleBinUi();
     });
   });
 }
@@ -4908,8 +4913,7 @@ function createSidebarItemDOM(node, depth) {
     });
     delete allListPins[node.slug];
     await renderLists();
-    await updateRecycleBinBadge();
-    if (activeView.type === 'recycle-bin') await showRecycleBin();
+    await refreshRecycleBinUi();
     if (activeView.type === 'list' && activeView.id === node.slug) {
       showExplore();
     }
@@ -6779,8 +6783,7 @@ chrome.runtime.onMessage.addListener((request) => {
     }
   } else if (type === 'orphaned') {
     // Orphaned list changed — refresh recycle bin if active, update badge
-    updateRecycleBinBadge();
-    if (activeView.type === 'recycle-bin') showRecycleBin();
+    refreshRecycleBinUi();
   }
   // highlight, snapshot: Desktop-backed reads are refreshed on demand
 });

@@ -38,8 +38,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use tauri::menu::{MenuBuilder, MenuItem, MenuItemBuilder};
-use tauri::tray::TrayIconBuilder;
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
@@ -76,7 +76,6 @@ struct DesktopState {
     sync: SyncController,
     storage_bridge: Mutex<StorageBridgeState>,
     active_history_search: Mutex<Option<ActiveHistorySearch>>,
-    status_item: MenuItem<tauri::Wry>,
     logging: logging::LoggingHandle,
     quit_requested: Mutex<bool>,
 }
@@ -168,16 +167,15 @@ fn pairing_approver(app: AppHandle) -> PairingApprover {
     })
 }
 
-fn create_tray(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
+fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItemBuilder::with_id("open", "Open").build(app)?;
-    let status = MenuItemBuilder::with_id("status", "No browsers connected").build(app)?;
     let logs = MenuItemBuilder::with_id("logs", "Logs").build(app)?;
     let settings = MenuItemBuilder::with_id("settings", "Settings").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
     let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?;
     let menu = MenuBuilder::new(app)
         .item(&open)
-        .item(&status)
+        .separator()
         .item(&logs)
         .item(&settings)
         .separator()
@@ -189,7 +187,14 @@ fn create_tray(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
         .icon_as_template(true)
         .menu(&menu)
         .tooltip("Browser Recall")
-        .show_menu_on_left_click(true)
+        .show_menu_on_left_click(tray_menu_shows_on_left_click())
+        .on_tray_icon_event(|tray, event| {
+            if tray_event_opens_main_window(&event) {
+                let app = tray.app_handle();
+                update_shell_state(app, |state| state.route = Some("open".to_string()));
+                show_main_window(app);
+            }
+        })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => {
                 update_shell_state(app, |state| state.route = Some("open".to_string()));
@@ -223,7 +228,27 @@ fn create_tray(app: &AppHandle) -> tauri::Result<MenuItem<tauri::Wry>> {
             _ => {}
         })
         .build(app)?;
-    Ok(status)
+    Ok(())
+}
+
+fn tray_menu_shows_on_left_click() -> bool {
+    false
+}
+
+#[cfg(test)]
+fn tray_menu_shows_on_right_click() -> bool {
+    true
+}
+
+fn tray_event_opens_main_window(event: &TrayIconEvent) -> bool {
+    matches!(
+        event,
+        TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+        }
+    )
 }
 
 fn set_dock_visible(app: &AppHandle, visible: bool) {
@@ -327,18 +352,6 @@ impl UiModel {
     }
 }
 
-fn tray_status_text(model: &UiModel) -> String {
-    if model.is_paused {
-        return "Error".to_string();
-    }
-
-    match model.browsers.len() {
-        0 => "No browsers connected".to_string(),
-        1 => "1 browser connected".to_string(),
-        count => format!("{count} browsers connected"),
-    }
-}
-
 fn window_title(model: &UiModel) -> String {
     if model.is_paused {
         "Browser Recall - Error".to_string()
@@ -378,6 +391,16 @@ mod tests {
         let model = ui_model(true, vec!["Firefox".to_string()]);
         assert_eq!(window_title(&model), "Browser Recall - Error");
     }
+
+    #[test]
+    fn tray_left_click_opens_window_instead_of_menu() {
+        assert!(!tray_menu_shows_on_left_click());
+    }
+
+    #[test]
+    fn tray_right_click_keeps_menu_available() {
+        assert!(tray_menu_shows_on_right_click());
+    }
 }
 
 fn apply_shell_state(app: &AppHandle) {
@@ -386,7 +409,6 @@ fn apply_shell_state(app: &AppHandle) {
     };
     let shell = state.shell.lock().expect("shell state poisoned").clone();
     let model = UiModel::from_state(&shell);
-    let _ = state.status_item.set_text(tray_status_text(&model));
 
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_title(None::<&str>);
@@ -1735,7 +1757,7 @@ fn main() {
                 } else {
                     (None, inactive_server_snapshot(&bootstrap.config), None)
                 };
-            let status_item = create_tray(app.handle())?;
+            create_tray(app.handle())?;
             let sync_notify = Arc::new(Notify::new());
             app.manage(DesktopState {
                 _server: Mutex::new(server_handle),
@@ -1759,7 +1781,6 @@ fn main() {
                 ),
                 storage_bridge: Mutex::new(StorageBridgeState::default()),
                 active_history_search: Mutex::new(None),
-                status_item,
                 logging,
                 quit_requested: Mutex::new(false),
             });

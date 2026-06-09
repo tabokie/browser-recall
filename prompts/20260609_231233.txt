@@ -1,0 +1,10 @@
+- When I left-click the tray icon, directly open the app window instead of showing the menu.
+- Left-click opens window, right-click still opens menu
+- Remove the "n browser connected" entry in tray menu. And add a divider line between "Open" and others.
+- Note deletion sometimes isn't immediately reflected in recycle bin, only after a restart. I am not sure if this issue is associated with an old version and already fixed though. Please check the related code to be sure.
+- The desktop page list layout is no stable. Sometimes when I select a page, the gap between bar chart and page results is widened. Sometimes when I minimize and reopen the window, the layout flickers, probably due to the gap changing as well.
+- $gap
+- Refactor the recycle logic. If there're test improvements that can exercise more real world and more E2E code paths, do them.
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix it
+- $finish model=GPT-5.5 Codex
