@@ -3,11 +3,24 @@ export const RankingAlgorithm: Readonly<{
   0: 'Content';
 }>;
 
+export type SearchQueryWord = {
+  text: string;
+  exact: boolean;
+};
+
+export function parseSearchQueryWords(query: string): SearchQueryWord[];
+
+export function scoreSearchFields(
+  words: SearchQueryWord[],
+  fields: Array<{ text?: string | null; weight: number }>,
+): number | null;
+
 export class HistoryEntry {
   constructor(url: string, title: string);
   content: string;
   timestamp: bigint;
   title: string;
+  userTitle: string;
   url: string;
   free(): void;
   setContent(content: string): void;
@@ -49,10 +62,10 @@ export function searchBatch(
 export function searchNotes(
   notes_dir: any,
   query: string,
-): Promise<Array<{ url: string; noteSlug: string }>>;
+): Promise<Array<{ url: string; noteSlug: string; score: number }>>;
 
 export function searchSnapshots(
   snapshots_dir: any,
   query: string,
   file_names: string[],
-): Promise<Array<{ slug: string }>>;
+): Promise<Array<{ slug: string; timestamp: number; score: number }>>;

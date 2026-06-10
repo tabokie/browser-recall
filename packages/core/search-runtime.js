@@ -28,7 +28,7 @@ function isAsciiAlphanumeric(char) {
   );
 }
 
-function parseQueryWords(query) {
+export function parseSearchQueryWords(query) {
   const words = [];
   const input = normalizeText(query);
   let index = 0;
@@ -153,57 +153,61 @@ function wordMatchQuality(word, text) {
   return null;
 }
 
-function wordsMatchFields(words, fields) {
-  return words.every((word) =>
-    fields.some((field) => wordMatchQuality(word, field) !== null),
-  );
+function matchQualityScore(quality) {
+  if (quality.kind === 'exact') return 1;
+  return Math.max(1 - quality.distance * 0.3, 0.1);
 }
 
-function fieldMatchQuality(words, text) {
+export function scoreSearchFields(words, fields) {
+  if (!Array.isArray(words) || words.length === 0) return null;
+
   let total = 0;
   for (const word of words) {
-    const quality = wordMatchQuality(word, text);
-    if (!quality) return null;
-    if (quality.kind === 'exact') {
-      total += 1;
-    } else {
-      total += Math.max(1 - quality.distance * 0.3, 0.1);
+    let best = null;
+    for (const field of fields) {
+      const text = normalizeText(field?.text);
+      const weight = Number(field?.weight || 0);
+      if (!text || weight <= 0) continue;
+      const quality = wordMatchQuality(word, text);
+      if (!quality) continue;
+      const score = weight * matchQualityScore(quality);
+      best = best == null ? score : Math.max(best, score);
     }
+    if (best == null) return null;
+    total += best;
   }
-  return total / Math.max(words.length, 1);
+
+  return total / words.length;
 }
 
-function contentScore(entry, words) {
-  let score = 0;
-  const titleQuality = fieldMatchQuality(words, entry.title);
-  if (titleQuality != null) score += 2 * titleQuality;
+function identityFields(entry) {
+  return [
+    { text: entry.title, weight: 2 },
+    { text: entry.userTitle || entry.user_title, weight: 2 },
+    { text: entry.url, weight: 0.5 },
+  ];
+}
 
-  const content = normalizeText(entry.content);
-  if (content) {
-    const contentQuality = fieldMatchQuality(words, content);
-    if (contentQuality != null) score += contentQuality;
-  }
-
-  return score;
+function identityScore(entry, words) {
+  return scoreSearchFields(words, identityFields(entry));
 }
 
 function buildSearchResults(entries, query) {
-  const words = parseQueryWords(query);
+  const words = parseSearchQueryWords(query);
   if (words.length === 0) return [];
 
   const results = entries
-    .filter((entry) =>
-      wordsMatchFields(words, [
-        normalizeText(entry.title),
-        normalizeText(entry.content),
-      ]),
-    )
-    .map((entry) => ({
-      url: normalizeText(entry.url),
-      title: normalizeText(entry.title),
-      timestamp: toTimestampNumber(entry.timestamp),
-      score: contentScore(entry, words),
-    }));
+    .map((entry) => {
+      const score = identityScore(entry, words);
+      if (score == null) return null;
+      return {
+        url: normalizeText(entry.url),
+        title: normalizeText(entry.title),
+        timestamp: toTimestampNumber(entry.timestamp),
+        score,
+      };
+    })
+    .filter(Boolean);
 
   results.sort(
     (left, right) =>
@@ -218,24 +222,24 @@ async function readFileText(fileHandle) {
   return file.text();
 }
 
-async function readLatestMarkdown(pagesDir, slug) {
+async function sha256Shard(value) {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return null;
+  const bytes = new TextEncoder().encode(value);
+  const digest = await subtle.digest('SHA-256', bytes);
+  const first = new Uint8Array(digest)[0];
+  return first.toString(16).padStart(2, '0');
+}
+
+async function readPageUserTitle(pagesDir, slug) {
   try {
-    const slugDir = await pagesDir.getDirectoryHandle(slug);
-    let latestName = '';
-    let latestTimestamp = Number.NEGATIVE_INFINITY;
-
-    for await (const entry of slugDir.values()) {
-      if (entry.kind !== 'file' || !entry.name.endsWith('.md')) continue;
-      const timestamp = Number.parseInt(entry.name.slice(0, -3), 10);
-      if (Number.isFinite(timestamp) && timestamp > latestTimestamp) {
-        latestTimestamp = timestamp;
-        latestName = entry.name;
-      }
-    }
-
-    if (!latestName) return '';
-    const fileHandle = await slugDir.getFileHandle(latestName);
-    return await readFileText(fileHandle);
+    const shard = await sha256Shard(slug);
+    if (!shard) return '';
+    const shardDir = await pagesDir.getDirectoryHandle(shard);
+    const fileHandle = await shardDir.getFileHandle(`${slug}.json`);
+    const text = await readFileText(fileHandle);
+    const page = JSON.parse(text);
+    return typeof page.user_title === 'string' ? page.user_title.trim() : '';
   } catch {
     return '';
   }
@@ -249,6 +253,7 @@ function parseHistoryLine(line) {
       timestamp: toTimestampNumber(item.timestamp),
       url: item.url,
       title: normalizeText(item.title),
+      user_title: normalizeText(item.user_title),
       slug: typeof item.slug === 'string' ? item.slug : null,
     };
   } catch {
@@ -270,9 +275,9 @@ function extractNoteFields(note) {
   return fields;
 }
 
-function extractSlugFromSnapshotName(name) {
-  const match = /^(.+)-(\d{13})\.md$/.exec(name);
-  return match ? match[1] : null;
+function extractSnapshotPartsFromName(name) {
+  const match = /^(.+)-(\d{13})\.(?:md|html)$/.exec(name);
+  return match ? { slug: match[1], timestamp: Number(match[2]) } : null;
 }
 
 export class HistoryEntry {
@@ -280,6 +285,7 @@ export class HistoryEntry {
     this.timestamp = BigInt(Date.now());
     this.url = normalizeText(url);
     this.title = normalizeText(title);
+    this.userTitle = '';
     this.content = '';
   }
 
@@ -343,20 +349,19 @@ export async function searchBatch(historyDir, pagesDir, query, fileNames) {
     }
   }
 
-  const contentBySlug = new Map();
+  const userTitleBySlug = new Map();
   for (const slug of new Set(
     entries.map((entry) => entry.slug).filter(Boolean),
   )) {
-    contentBySlug.set(slug, await readLatestMarkdown(pagesDir, slug));
+    userTitleBySlug.set(slug, await readPageUserTitle(pagesDir, slug));
   }
 
   const engine = new SearchEngine();
   for (const entry of entries) {
     const historyEntry = new HistoryEntry(entry.url, entry.title);
     historyEntry.timestamp = BigInt(entry.timestamp);
-    historyEntry.setContent(
-      entry.slug ? contentBySlug.get(entry.slug) || '' : '',
-    );
+    historyEntry.userTitle =
+      entry.user_title || (entry.slug ? userTitleBySlug.get(entry.slug) : '');
     engine.addEntry(historyEntry);
   }
 
@@ -364,7 +369,7 @@ export async function searchBatch(historyDir, pagesDir, query, fileNames) {
 }
 
 export async function searchNotes(notesDir, query) {
-  const words = parseQueryWords(query);
+  const words = parseSearchQueryWords(query);
   if (words.length === 0) return [];
 
   const matches = [];
@@ -387,7 +392,11 @@ export async function searchNotes(notesDir, query) {
     }
 
     const fields = extractNoteFields(note);
-    if (!fields.length || !wordsMatchFields(words, fields)) continue;
+    const score = scoreSearchFields(
+      words,
+      fields.map((field) => ({ text: field, weight: 1 })),
+    );
+    if (score == null) continue;
     if (typeof note.url !== 'string' || !note.url) continue;
 
     matches.push({
@@ -396,6 +405,7 @@ export async function searchNotes(notesDir, query) {
         typeof note.slug === 'string' && note.slug
           ? note.slug
           : entry.name.replace(/\.json$/, ''),
+      score,
     });
   }
 
@@ -403,13 +413,13 @@ export async function searchNotes(notesDir, query) {
 }
 
 export async function searchSnapshots(snapshotsDir, query, fileNames) {
-  const words = parseQueryWords(query);
+  const words = parseSearchQueryWords(query);
   if (words.length === 0) return [];
 
   const matches = [];
   for (const name of fileNames) {
-    const slug = extractSlugFromSnapshotName(name);
-    if (!slug) continue;
+    const parts = extractSnapshotPartsFromName(name);
+    if (!parts) continue;
 
     let fileHandle;
     try {
@@ -419,8 +429,9 @@ export async function searchSnapshots(snapshotsDir, query, fileNames) {
     }
 
     const text = await readFileText(fileHandle).catch(() => '');
-    if (wordsMatchFields(words, [text])) {
-      matches.push({ slug });
+    const score = scoreSearchFields(words, [{ text, weight: 1 }]);
+    if (score != null) {
+      matches.push({ ...parts, score });
     }
   }
 

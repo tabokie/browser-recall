@@ -20,17 +20,20 @@ pub struct HistorySearchHit {
     pub score: f64,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteSearchHit {
     pub url: String,
     pub note_slug: String,
+    pub score: f64,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotSearchHit {
     pub slug: String,
+    pub timestamp: i64,
+    pub score: f64,
 }
 
 pub const HISTORY_SEARCH_PARALLELISM: usize = 4;
@@ -221,6 +224,7 @@ pub fn search_notes_in_data_dir(
         .map(|hit| NoteSearchHit {
             url: hit.url,
             note_slug: hit.note_slug,
+            score: hit.score,
         })
         .collect();
     apply_limit(hits, limit)
@@ -243,7 +247,11 @@ pub fn search_snapshots_in_data_dir(
     let file_names = list_snapshot_files(&snapshots_dir)?;
     let hits = search_snapshots(&snapshots_dir, query, &file_names)?
         .into_iter()
-        .map(|hit| SnapshotSearchHit { slug: hit.slug })
+        .map(|hit| SnapshotSearchHit {
+            slug: hit.slug,
+            timestamp: hit.timestamp,
+            score: hit.score,
+        })
         .collect();
     apply_limit(hits, limit)
 }
@@ -299,6 +307,7 @@ fn latest_history_records_for_device(device_dir: &Path) -> io::Result<Vec<Search
                     timestamp: item.timestamp,
                     url: item.url,
                     title: item.title,
+                    user_title: None,
                     slug: item.slug,
                 });
             }
@@ -657,6 +666,7 @@ mod tests {
             vec![NoteSearchHit {
                 url: "https://example.com/article".into(),
                 note_slug: "note-a".into(),
+                score: 1.0,
             }]
         );
     }
@@ -678,6 +688,8 @@ mod tests {
             hits,
             vec![SnapshotSearchHit {
                 slug: "my-page".into(),
+                timestamp: 1_709_251_200_000,
+                score: 1.0,
             }]
         );
     }
@@ -699,6 +711,8 @@ mod tests {
             hits,
             vec![SnapshotSearchHit {
                 slug: "my-page".into(),
+                timestamp: 1_709_251_200_000,
+                score: 1.0,
             }]
         );
     }

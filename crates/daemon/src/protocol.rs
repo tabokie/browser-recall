@@ -81,16 +81,19 @@ pub struct HistorySearchResult {
     pub score: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NoteSearchResult {
     pub url: String,
     #[serde(rename = "noteSlug")]
     pub note_slug: String,
+    pub score: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SnapshotSearchResult {
     pub slug: String,
+    pub timestamp: i64,
+    pub score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -296,6 +296,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       searchHistoryChunks,
       searchHistoryResultsByQuery,
       searchNotesResultsByQuery,
+      searchSnapshotsResultsByQuery,
       readDesktopValueDelayMs,
     }) => {
       const listeners = new Map();
@@ -614,6 +615,13 @@ async function installDesktopBridgeMock(page, options = {}) {
               success: true,
               results: clone(searchNotesResultsByQuery?.[request.query] || []),
             };
+          case 'searchSnapshots':
+            return {
+              success: true,
+              results: clone(
+                searchSnapshotsResultsByQuery?.[request.query] || [],
+              ),
+            };
           case 'loadPageNotes':
             return {
               success: true,
@@ -889,6 +897,8 @@ async function installDesktopBridgeMock(page, options = {}) {
       searchHistoryChunks: options.searchHistoryChunks || null,
       searchHistoryResultsByQuery: options.searchHistoryResultsByQuery || null,
       searchNotesResultsByQuery: options.searchNotesResultsByQuery || null,
+      searchSnapshotsResultsByQuery:
+        options.searchSnapshotsResultsByQuery || null,
       readDesktopValueDelayMs: options.readDesktopValueDelayMs || 0,
     },
   );
@@ -2096,6 +2106,211 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('note-only search result uses the page timestamp', async ({ page }) => {
+    const noteTime = Date.now() - 4 * 86_400_000;
+    const url = 'https://example.com/note-result-timestamp';
+    const slug = generateSlugFromUrl(url);
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [],
+        extraSession: {
+          [pageKey(slug)]: {
+            slug,
+            url,
+            title: 'Note result timestamp',
+            childIds: ['note:note-result-timestamp'],
+            parentIds: [],
+            visitDates: [],
+            timestamps: { 'device-a': noteTime },
+          },
+        },
+        searchNotesResultsByQuery: {
+          'note timestamp': [
+            {
+              url,
+              noteSlug: 'note-result-timestamp',
+              score: 1,
+            },
+          ],
+        },
+      });
+
+      await commitDesktopSearch(page, 'note timestamp');
+
+      const row = page.locator(`.result-row[data-url="${url}"]`);
+      await expect(row).toBeVisible();
+      await expect(row.locator('.result-title')).toHaveText(
+        'Note result timestamp',
+      );
+      await expect(row.locator('.result-time')).toHaveText('4d ago');
+      await expect(page.locator('.card-tag-match-note')).toBeVisible();
+    });
+  });
+
+  test('snapshot search result uses the matched snapshot timestamp', async ({
+    page,
+  }) => {
+    const snapshotTime = Date.now() - 3 * 86_400_000;
+    const url = 'https://example.com/snapshot-result-timestamp';
+    const slug = generateSlugFromUrl(url);
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [],
+        extraSession: {
+          [pageKey(slug)]: {
+            slug,
+            url,
+            title: 'Snapshot result timestamp',
+            childIds: [`snapshot:${slug}-${snapshotTime}`],
+            parentIds: [],
+            visitDates: [],
+          },
+        },
+        searchSnapshotsResultsByQuery: {
+          'snapshot timestamp': [{ slug, timestamp: snapshotTime }],
+        },
+      });
+
+      await commitDesktopSearch(page, 'snapshot timestamp');
+
+      const row = page.locator(`.result-row[data-url="${url}"]`);
+      await expect(row).toBeVisible();
+      await expect(row.locator('.result-title')).toHaveText(
+        'Snapshot result timestamp',
+      );
+      await expect(row.locator('.result-time')).toHaveText('3d ago');
+      await expect(page.locator('.card-tag-match-snap')).toBeVisible();
+    });
+  });
+
+  test('snapshot matches do not boost pages that already match by url', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const query = 'orderingtoken';
+    const newerUrl = `https://example.com/url-order-newer/${query}`;
+    const olderUrl = `https://example.com/url-order-older/${query}`;
+    const noteOnlyUrl = 'https://example.com/note-only-ordering';
+    const snapshotOnlyUrl = 'https://example.com/snapshot-only-ordering';
+    const olderSlug = generateSlugFromUrl(olderUrl);
+    const noteOnlySlug = generateSlugFromUrl(noteOnlyUrl);
+    const snapshotOnlySlug = generateSlugFromUrl(snapshotOnlyUrl);
+    const snapshotTime = now - 5 * 86_400_000;
+    const snapshotOnlyTime = now - 30_000;
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [
+          {
+            url: newerUrl,
+            title: 'Newer URL match',
+            timestamp: now - 60_000,
+            deviceId: 'device-a',
+          },
+          {
+            url: olderUrl,
+            title: 'Older URL and snapshot match',
+            timestamp: now - 3_600_000,
+            deviceId: 'device-a',
+          },
+        ],
+        extraSession: {
+          [pageKey(olderSlug)]: {
+            slug: olderSlug,
+            url: olderUrl,
+            title: 'Older URL and snapshot match',
+            childIds: [`snapshot:${olderSlug}-${snapshotTime}`],
+            parentIds: [],
+            visitDates: [],
+          },
+          [pageKey(noteOnlySlug)]: {
+            slug: noteOnlySlug,
+            url: noteOnlyUrl,
+            title: 'Note only match',
+            childIds: ['note:note-only-ordering'],
+            parentIds: [],
+            visitDates: [],
+            timestamps: { 'device-a': now - 2 * 86_400_000 },
+          },
+          [pageKey(snapshotOnlySlug)]: {
+            slug: snapshotOnlySlug,
+            url: snapshotOnlyUrl,
+            title: 'Snapshot only match',
+            childIds: [`snapshot:${snapshotOnlySlug}-${snapshotOnlyTime}`],
+            parentIds: [],
+            visitDates: [],
+          },
+        },
+        searchNotesResultsByQuery: {
+          [query]: [{ url: noteOnlyUrl, noteSlug: 'note-only-ordering' }],
+        },
+        searchSnapshotsResultsByQuery: {
+          [query]: [
+            { slug: olderSlug, timestamp: snapshotTime },
+            { slug: snapshotOnlySlug, timestamp: snapshotOnlyTime },
+          ],
+        },
+      });
+
+      await commitDesktopSearch(page, query);
+      await expect(page.locator('.card-tag-match-snap')).toHaveCount(2);
+
+      const titles = await page
+        .locator('.result-row .result-title')
+        .evaluateAll((nodes) =>
+          nodes.slice(0, 4).map((node) => node.textContent.trim()),
+        );
+      expect(titles).toEqual([
+        'Newer URL match',
+        'Older URL and snapshot match',
+        'Note only match',
+        'Snapshot only match',
+      ]);
+    });
+  });
+
+  test('phase 0 search preserves shared relevance scores', async ({ page }) => {
+    const now = Date.now();
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [
+          {
+            url: 'https://example.com/phase-zero/relevance',
+            title: 'Recent URL-only hit',
+            timestamp: now - 5_000,
+            deviceId: 'device-a',
+          },
+          {
+            url: 'https://example.com/phase-zero/older',
+            title: 'Older relevance title hit',
+            timestamp: now - 10 * 86_400_000,
+            deviceId: 'device-a',
+          },
+        ],
+      });
+
+      await commitDesktopSearch(page, 'relevance');
+      await expect(page.locator('.result-row')).toHaveCount(2);
+      const titles = await page
+        .locator('.result-row .result-title')
+        .evaluateAll((nodes) =>
+          nodes.slice(0, 2).map((node) => node.textContent.trim()),
+        );
+      expect(titles).toEqual([
+        'Older relevance title hit',
+        'Recent URL-only hit',
+      ]);
+    });
+  });
+
   test('equal relevance search results sort by most recent visit first', async ({
     page,
   }) => {
@@ -2916,6 +3131,77 @@ test.describe('desktop visual regression', () => {
       ]);
       expect(dragResult.dragImage.text).toContain('Drag selected 0');
       expect(dragResult.dragImage.text).toContain('Drag selected 1');
+    });
+  });
+
+  test('marquee selection intersects the full page card bounds', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const historyEntries = Array.from({ length: 4 }, (_, i) => {
+      const url = `https://example.com/marquee-card-bounds-${i}`;
+      return {
+        url,
+        title: `Marquee card bounds ${i}`,
+        timestamp: now - i * 1000,
+        deviceId: 'device-a',
+      };
+    });
+    const extraSession = {};
+    for (const entry of historyEntries) {
+      const slug = generateSlugFromUrl(entry.url);
+      extraSession[pageKey(slug)] = {
+        slug,
+        url: entry.url,
+        title: entry.title,
+        likes: 1,
+        parentIds: [],
+        childIds: [],
+        visitDates: [],
+      };
+    }
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+        extraSession,
+      });
+      await page.waitForFunction(
+        () => document.querySelectorAll('.result-item').length >= 4,
+      );
+      await expect(page.locator('.card-tag-liked')).toHaveCount(4);
+
+      const drag = await page.evaluate(() => {
+        const wrapper = document.querySelector('#relatedResultsWrapper');
+        const items = [...document.querySelectorAll('.result-item')];
+        const firstItemRect = items[0].getBoundingClientRect();
+        const thirdItemRect = items[2].getBoundingClientRect();
+        const wrapperRect = wrapper.getBoundingClientRect();
+        return {
+          startX:
+            firstItemRect.left -
+            Math.min(8, firstItemRect.left - wrapperRect.left - 2),
+          endX: firstItemRect.left + firstItemRect.width / 2,
+          startY: firstItemRect.bottom - 4,
+          endY: thirdItemRect.top + 4,
+        };
+      });
+
+      await page.mouse.move(drag.startX, drag.startY);
+      await page.mouse.down();
+      await page.mouse.move(drag.endX, drag.endY, { steps: 8 });
+      await page.mouse.up();
+
+      await expect(page.locator('.result-row.selected')).toHaveCount(3);
+      await expect(
+        page.locator('.result-row.selected .result-title'),
+      ).toHaveText([
+        'Marquee card bounds 0',
+        'Marquee card bounds 1',
+        'Marquee card bounds 2',
+      ]);
     });
   });
 

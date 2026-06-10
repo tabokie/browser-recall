@@ -170,6 +170,7 @@ Search is daemon-owned.
 
 - `crates/search/` provides native full-text helpers.
 - `crates/daemon/src/search.rs` wires those helpers into command/query paths.
+- History search matches page identity fields (`title`, `user_title`, `url`). Note and snapshot body text are searched by their dedicated daemon phases and return their own match scores and timestamps.
 - Desktop search/filter input keeps typed text as a local draft and starts the daemon search or list filter only when Enter commits the query.
 - Desktop UI history search goes through cancellable Tauri streaming commands. The daemon search adapter splits history JSONL work across a fixed worker pool, emits result chunks as workers finish, and cooperatively stops when the UI starts a newer search or leaves search mode.
 - Explore device filter choices come from the authoritative `logs/<device>/` directories returned by the daemon history-file listing, not from whichever history rows the UI has demand-loaded.
@@ -177,7 +178,7 @@ Search is daemon-owned.
 - Desktop UI note and snapshot search still use daemon-owned request/response commands.
 - The connector popup only requests page-scoped summaries; it does not run local full-text search.
 
-Shared query parsing and ranking helpers used by the UI live in `packages/core/`.
+Shared query parsing and identity ranking helpers used by the UI phase-0 preview live in `packages/core/`.
 
 ## Sync
 

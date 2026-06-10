@@ -1,0 +1,22 @@
+- There's an issue with the desktop pages' marquee selection. It is not using the page card bounding box to calculate intersection. Sometimes it causes the select to miss the first or last item.
+- Move on to search, it has a few issues. The first one is result timestamp. A page matched in snapshot from days ago is marked "Just now".
+- Ordering is not user-friendly in this case: multiple sites with url match, some of them have additional snapshot matches. The desired behavior is url match supersedes snapshot matches (not sure how to model this, maybe a factor to reduce the snapshot match's score?), and the scoring from url and snapshot doesn't accumulate, they max. So these multiple sites should end up having the same scores and ordered by timestamps. Also, it would be nice if we don't perform snapshot search for those already having title or url matches, only if adding this doesn't complicate the existing search pipeline.
+- > a later snapshot hit can add the snapshot match marker but cannot raise that page’s score
+How did you accomplish that? Why not just make the min of a url/title hit >= the max of a snapshot hit? In fact, the priority should be url/title >= note >= snapshot
+- Why the factor is enough for enforcing the constraints? (i.e. min of a >= max of b)
+- Your reasoning is unclear to me. What is the lowerbound and uppoerbound of scores for a title or url match before applying a factor?
+- Isn't the title matching a fuzz search? Why is it being calculated as a binary predicate?
+- Explain phase 0 search and its necessity when we already have a history search.
+- What do you mean by "2. URL matching"? The history search doesn't do url matching?
+- What is "content"?
+- I see two issues:
+- Background search should search user_title, url
+- Background search should converge the snapshot search. Either use the html snapshot or use the markdown snapshot. Don't mix the markdown snapshot as a vague "content" field and interfere with the first priority scoring.
+- $gap
+- Fix 1, 2.
+3 is a genuinely important issue. We should allow the matches to distribute among all fields, including notes and snapshots.
+For 4, it would be better if phase-0 shares the same search algorithm function as background, if it is convenient to do so.
+Skip 5.
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix it
+- $finish model=GPT-5.5 Codex

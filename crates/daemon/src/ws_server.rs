@@ -2269,6 +2269,7 @@ async fn handle_search_notes(
                 .map(|result| NoteSearchResult {
                     url: result.url,
                     note_slug: result.note_slug,
+                    score: result.score,
                 })
                 .collect(),
             error: None,
@@ -2304,7 +2305,11 @@ async fn handle_search_snapshots(
             success: true,
             results: results
                 .into_iter()
-                .map(|result| SnapshotSearchResult { slug: result.slug })
+                .map(|result| SnapshotSearchResult {
+                    slug: result.slug,
+                    timestamp: result.timestamp,
+                    score: result.score,
+                })
                 .collect(),
             error: None,
         },

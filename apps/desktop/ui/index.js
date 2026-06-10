@@ -1,6 +1,11 @@
 // Options page for Browser Recall
 // Bookmark-manager style UI with sidebar navigation, search, and settings modal
-import { HistoryEntry, SearchEngine } from './search-runtime.js';
+import {
+  HistoryEntry,
+  SearchEngine,
+  parseSearchQueryWords,
+  scoreSearchFields,
+} from './search-runtime.js';
 import {
   getQueueContentMap,
   buildHistoryForEngine,
@@ -645,6 +650,15 @@ let relatedExtraColumns = [];
 // --- Demand-loaded history ---
 const HISTORY_MAX_FILES = 100; // cap total loaded files
 const DEFAULT_AVG_ENTRY_SIZE = 200;
+const URL_SEARCH_SCORE = 0.5;
+const NOTE_SEARCH_SCORE = 0.375;
+const SNAPSHOT_SEARCH_SCORE = 0.25;
+const SEARCH_SOURCE_PRIORITY = Object.freeze({
+  snapshot: 1,
+  note: 2,
+  history: 3,
+  title: 3,
+});
 const historyState = {
   fileBatch: 10, // files per load (configurable in settings)
   files: [], // all JSONL filenames, newest-first
@@ -974,14 +988,20 @@ async function runStreamingHistorySearch(query, gen) {
   }
 }
 
+function searchSourcePriority(source) {
+  return SEARCH_SOURCE_PRIORITY[source] || 0;
+}
+
 // Merge new results into searchState.results. Dedup by URL, take max score, track sources.
 function mergeSearchResults(newResults, source, gen) {
   if (gen !== searchState.generation) return; // stale generation — discard
+  const nextSourcePriority = searchSourcePriority(source);
   for (const r of newResults) {
     if (!r.url) continue;
     const idx = searchState.resultIndex.get(r.url);
     if (idx !== undefined) {
       const existing = searchState.results[idx];
+      const existingPriority = existing.sourcePriority || 0;
       const nextScore = r.score || 0;
       const existingScore = existing.score || 0;
       const isVisitSource = source === 'history' || source === 'title';
@@ -998,7 +1018,10 @@ function mergeSearchResults(newResults, source, gen) {
           nextScore > existingScore ||
           (nextScore === existingScore && nextTimestamp > existingTimestamp)
         ) {
-          existing.score = Math.max(nextScore, existingScore);
+          existing.score =
+            nextSourcePriority > existingPriority
+              ? nextScore
+              : Math.max(nextScore, existingScore);
           existing.timestamp = nextTimestamp;
           existing.latestTs = nextTimestamp;
           existing.title = r.title || existing.title || '';
@@ -1017,8 +1040,23 @@ function mergeSearchResults(newResults, source, gen) {
           delete existing._maxTs;
           delete existing._minTs;
         }
-      } else if (nextScore > existingScore) {
-        existing.score = nextScore;
+      } else if (nextSourcePriority >= existingPriority) {
+        const nextTimestamp = r.timestamp || existing.timestamp || Date.now();
+        const existingTimestamp = existing.timestamp || 0;
+        const shouldPromote =
+          nextSourcePriority > existingPriority ||
+          nextScore > existingScore ||
+          (nextScore === existingScore && nextTimestamp > existingTimestamp);
+        if (shouldPromote) {
+          existing.score = nextScore;
+          if (Number.isFinite(nextTimestamp) && nextTimestamp > 0) {
+            existing.timestamp = nextTimestamp;
+            existing.latestTs = nextTimestamp;
+            existing.timestamps = r.timestamps || [nextTimestamp];
+          }
+          delete existing._maxTs;
+          delete existing._minTs;
+        }
         if (!existing.title && r.title) existing.title = r.title;
       }
       if (
@@ -1028,6 +1066,7 @@ function mergeSearchResults(newResults, source, gen) {
         existing.createdAt = r.createdAt;
       if (!existing.matchSources) existing.matchSources = new Set();
       existing.matchSources.add(source);
+      existing.sourcePriority = Math.max(existingPriority, nextSourcePriority);
       if (r.deviceIds) {
         if (!existing.deviceIds) existing.deviceIds = new Set();
         for (const id of r.deviceIds) existing.deviceIds.add(id);
@@ -1047,6 +1086,7 @@ function mergeSearchResults(newResults, source, gen) {
         timestamps: r.timestamps || [r.timestamp || Date.now()],
         latestTs: r.timestamp || Date.now(),
         deviceIds: r.deviceIds,
+        sourcePriority: nextSourcePriority,
         matchSources: new Set([source]),
       };
       searchState.resultIndex.set(r.url, searchState.results.length);
@@ -1186,36 +1226,68 @@ function buildDesktopHistoryResults(results) {
   }));
 }
 
-function buildNoteSearchResults(results) {
-  const now = Date.now();
-  return (results || []).map((result) => ({
-    url: result.url,
-    title: '',
-    slug: generateSlugFromUrl(result.url),
-    timestamp: now,
-    score: 1.0,
-    timestamps: [now],
-  }));
+function latestTimestampFromPage(page) {
+  const timestamps = Object.values(page?.timestamps || {})
+    .map(Number)
+    .filter((timestamp) => Number.isFinite(timestamp) && timestamp > 0);
+  if (timestamps.length > 0) return Math.max(...timestamps);
+
+  const createdAt = Number(page?.createdAt);
+  return Number.isFinite(createdAt) && createdAt > 0 ? createdAt : null;
+}
+
+async function buildNoteSearchResults(results) {
+  const validResults = (results || []).filter((result) => result?.url);
+  if (validResults.length === 0) return [];
+  const pages = await Promise.all(
+    validResults.map((result) =>
+      readDesktopValue(pageKey(generateSlugFromUrl(result.url))),
+    ),
+  );
+  const built = [];
+  for (let i = 0; i < validResults.length; i++) {
+    const result = validResults[i];
+    const page = pages[i];
+    const timestamp = Number(result.timestamp) || latestTimestampFromPage(page);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) {
+      logDebug('[Phase2a] Note search hit missing page timestamp:', result.url);
+      continue;
+    }
+    built.push({
+      url: result.url,
+      title: page?.user_title || page?.title || '',
+      slug: generateSlugFromUrl(result.url),
+      timestamp,
+      score: Number(result.score) || NOTE_SEARCH_SCORE,
+      timestamps: [timestamp],
+    });
+  }
+  return built;
 }
 
 async function buildSnapshotSearchResults(matches) {
-  const slugs = (matches || []).map((match) => match.slug).filter(Boolean);
-  if (slugs.length === 0) return [];
+  const validMatches = (matches || []).filter((match) => match?.slug);
+  if (validMatches.length === 0) return [];
   const pages = await Promise.all(
-    slugs.map((slug) => readDesktopValue(pageKey(slug))),
+    validMatches.map((match) => readDesktopValue(pageKey(match.slug))),
   );
-  const now = Date.now();
   const results = [];
-  for (let i = 0; i < slugs.length; i++) {
+  for (let i = 0; i < validMatches.length; i++) {
+    const match = validMatches[i];
     const page = pages[i];
     if (!page?.url) continue;
+    const timestamp = Number(match.timestamp);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) {
+      logDebug('[Phase2b] Snapshot search hit missing timestamp:', match.slug);
+      continue;
+    }
     results.push({
       url: page.url,
       title: page.title || '',
-      slug: slugs[i],
-      timestamp: now,
-      score: 1.0,
-      timestamps: [now],
+      slug: match.slug,
+      timestamp,
+      score: Number(match.score) || SNAPSHOT_SEARCH_SCORE,
+      timestamps: [timestamp],
     });
   }
   return results;
@@ -1261,11 +1333,8 @@ async function runPhase2a(query, gen) {
         query,
       });
       if (Array.isArray(desktopResp.results)) {
-        mergeSearchResults(
-          buildNoteSearchResults(desktopResp.results),
-          'note',
-          gen,
-        );
+        const noteResults = await buildNoteSearchResults(desktopResp.results);
+        mergeSearchResults(noteResults, 'note', gen);
         await renderProgressiveResults(gen);
       }
     } catch (error) {
@@ -1303,24 +1372,13 @@ async function runPhase2b(query, gen) {
   }
 }
 
-// Lightweight title/URL scorer for Phase 0 (mirrors the search module content-score weights).
+// Lightweight identity scorer for Phase 0 using the shared search-runtime matcher.
 function phase0Score(item, words) {
-  let score = 0;
-  const title = (item.user_title || item.title || '').toLowerCase();
-  const url = (item.url || '').toLowerCase();
-  for (const { q, exact } of words) {
-    const ql = q.toLowerCase();
-    if (exact) {
-      const escaped = ql.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re = new RegExp(`\\b${escaped}\\b`);
-      if (re.test(title)) score += 2.0;
-      else if (re.test(url)) score += 0.5;
-    } else {
-      if (title.includes(ql)) score += 2.0;
-      else if (url.includes(ql)) score += 0.5;
-    }
-  }
-  return words.length > 0 ? score / words.length : 0;
+  return scoreSearchFields(words, [
+    { text: item.title, weight: 2.0 },
+    { text: item.user_title, weight: 2.0 },
+    { text: item.url, weight: URL_SEARCH_SCORE },
+  ]);
 }
 
 // Four-phase progressive search orchestrator.
@@ -1337,16 +1395,19 @@ async function runProgressiveSearch(allQueries) {
   showSearchSpinner();
   const query = allQueries.join(' ');
 
-  // Phase 0: instant exact/substring matching over already-loaded rows.
-  const words = parseSearchWords(query);
-  const phase0Entries = historyState.allEntries.filter(
-    (item) => item.url && wordsMatchItem(words, item),
-  );
+  // Phase 0: instant shared-runtime matching over already-loaded rows.
+  const phase0Words = parseSearchQueryWords(query);
+  const phase0Entries = historyState.allEntries
+    .map((item) => {
+      if (!item.url) return null;
+      const score = phase0Score(item, phase0Words);
+      return score == null ? null : { ...item, score };
+    })
+    .filter(Boolean);
   const phase0Results = processHistoryForDisplay(phase0Entries, {
     globalDedup: true,
   }).map((item) => ({
     ...item,
-    score: phase0Score(item, words),
     matchSources: new Set(['title']),
   }));
   mergeSearchResults(phase0Results, 'title', gen);
@@ -2132,6 +2193,9 @@ function applySortOrder(items, sortState) {
         bv = b.visitCount || (b.timestamps ? b.timestamps.length : 0);
         return dir * (av - bv);
       case 'relevance':
+        av = a.sourcePriority || 0;
+        bv = b.sourcePriority || 0;
+        if (av !== bv) return dir * (av - bv);
         av = a.score || 0;
         bv = b.score || 0;
         if (av !== bv) return dir * (av - bv);
@@ -3519,6 +3583,9 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
       if (globalIndex.has(item.url)) {
         const existing = results[globalIndex.get(item.url)];
         existing.timestamps.push(item.timestamp);
+        if (Number.isFinite(item.score)) {
+          existing.score = Math.max(existing.score || 0, item.score);
+        }
         if (item.deviceId) existing.deviceIds.add(item.deviceId);
         continue;
       }
@@ -3540,6 +3607,7 @@ function processHistoryForDisplay(entries, { globalDedup = false } = {}) {
       timestamp: item.timestamp,
       day,
       attScore: attentionStrength(item),
+      score: Number.isFinite(item.score) ? item.score : undefined,
       attDetail: item,
       notes: [],
       timestamps: [item.timestamp],
@@ -5289,11 +5357,19 @@ function initMarqueeForElements(wrapper, container) {
       b.style.height = maxY - minY + 'px';
 
       container.querySelectorAll('.result-row').forEach((row) => {
-        const rowRect = row.getBoundingClientRect();
-        const rowTop = rowRect.top - currentWrapperRect.top;
-        const rowBottom = rowTop + rowRect.height;
+        const card = row.closest('.result-item') || row;
+        const cardRect = card.getBoundingClientRect();
+        const cardTop = cardRect.top - currentWrapperRect.top;
+        const cardBottom = cardTop + cardRect.height;
+        const cardLeft = cardRect.left - currentWrapperRect.left;
+        const cardRight = cardLeft + cardRect.width;
 
-        if (rowBottom > minY && rowTop < maxY) {
+        if (
+          cardRight > minX &&
+          cardLeft < maxX &&
+          cardBottom > minY &&
+          cardTop < maxY
+        ) {
           row.classList.add('selected');
         } else if (!additive) {
           row.classList.remove('selected');

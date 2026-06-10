@@ -449,6 +449,7 @@ describe.sequential('phase 2 daemon event flow integration', () => {
         {
           url: 'https://example.com/searchable',
           noteSlug: 'search-note',
+          score: 1,
         },
       ],
     });
@@ -457,7 +458,9 @@ describe.sequential('phase 2 daemon event flow integration', () => {
     await expect(nextMessage(socket)).resolves.toEqual({
       type: 'search_snapshots_result',
       success: true,
-      results: [{ slug: 'searchable-page' }],
+      results: [
+        { slug: 'searchable-page', timestamp: 1710000000200, score: 1 },
+      ],
     });
 
     socket.close();

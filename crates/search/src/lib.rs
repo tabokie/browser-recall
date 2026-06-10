@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -12,6 +13,8 @@ pub struct HistoryEntry {
     pub timestamp: i64,
     pub url: String,
     pub title: String,
+    #[serde(default)]
+    pub user_title: Option<String>,
     pub content: String,
 }
 
@@ -25,6 +28,7 @@ impl HistoryEntry {
             timestamp,
             url,
             title,
+            user_title: None,
             content: String::new(),
         }
     }
@@ -50,6 +54,8 @@ struct HistoryData {
     url: String,
     title: String,
     #[serde(default)]
+    user_title: Option<String>,
+    #[serde(default)]
     slug: Option<String>,
 }
 
@@ -59,6 +65,8 @@ pub struct SearchRecord {
     pub timestamp: i64,
     pub url: String,
     pub title: String,
+    #[serde(default)]
+    pub user_title: Option<String>,
     #[serde(default)]
     pub slug: Option<String>,
 }
@@ -101,12 +109,14 @@ impl SearchEngine {
         let mut results: Vec<SearchResult> = self
             .entries
             .iter()
-            .filter(|entry| words_match_fields(&words, &[&entry.title, &entry.content]))
-            .map(|entry| SearchResult {
-                url: entry.url.clone(),
-                title: entry.title.clone(),
-                timestamp: entry.timestamp,
-                score: content_score(entry, &words),
+            .filter_map(|entry| {
+                let score = identity_score_opt(entry, &words)?;
+                Some(SearchResult {
+                    url: entry.url.clone(),
+                    title: entry.title.clone(),
+                    timestamp: entry.timestamp,
+                    score,
+                })
             })
             .collect();
 
@@ -133,17 +143,20 @@ struct QueryWord {
 }
 
 /// Search all note JSON files in a directory for query matches.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct NoteMatch {
     pub url: String,
     #[serde(rename = "noteSlug")]
     pub note_slug: String,
+    pub score: f64,
 }
 
-/// Search a batch of snapshot markdown files for query matches.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+/// Search a batch of snapshot files for query matches.
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SnapshotMatch {
     pub slug: String,
+    pub timestamp: i64,
+    pub score: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,6 +169,12 @@ struct NoteData {
     note: Option<String>,
     #[serde(default)]
     url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PageData {
+    #[serde(default)]
+    user_title: Option<String>,
 }
 
 /// Parse a query string into words, matching JS `parseSearchWords` semantics.
@@ -338,16 +357,7 @@ fn word_match_quality(word: &QueryWord, text: &str) -> Option<MatchQuality> {
     }
 }
 
-fn word_matches_text(word: &QueryWord, text: &str) -> bool {
-    word_match_quality(word, text).is_some()
-}
-
-fn words_match_fields(words: &[QueryWord], fields: &[&str]) -> bool {
-    words
-        .iter()
-        .all(|word| fields.iter().any(|field| word_matches_text(word, field)))
-}
-
+#[cfg(test)]
 fn field_match_quality(words: &[QueryWord], text: &str) -> Option<f64> {
     let mut total = 0.0;
     for word in words {
@@ -360,67 +370,55 @@ fn field_match_quality(words: &[QueryWord], text: &str) -> Option<f64> {
     Some(total / words.len().max(1) as f64)
 }
 
-fn content_score(entry: &HistoryEntry, words: &[QueryWord]) -> f64 {
-    let mut score = 0.0;
+fn match_quality_score(quality: MatchQuality) -> f64 {
+    match quality {
+        MatchQuality::Exact => 1.0,
+        MatchQuality::Fuzzy(distance) => (1.0 - distance as f64 * 0.3).max(0.1),
+    }
+}
 
-    if let Some(quality) = field_match_quality(words, &entry.title) {
-        score += 2.0 * quality;
+fn weighted_fields_score(words: &[QueryWord], fields: &[(&str, f64)]) -> Option<f64> {
+    if words.is_empty() {
+        return None;
     }
 
-    if !entry.content.is_empty() {
-        if let Some(quality) = field_match_quality(words, &entry.content) {
-            score += 1.0 * quality;
+    let mut total = 0.0;
+    for word in words {
+        let mut best: Option<f64> = None;
+        for (field, weight) in fields {
+            if *weight <= 0.0 {
+                continue;
+            }
+            if let Some(quality) = word_match_quality(word, field) {
+                let score = *weight * match_quality_score(quality);
+                best = Some(best.map_or(score, |current| current.max(score)));
+            }
         }
+        total += best?;
     }
 
-    score
+    Some(total / words.len() as f64)
+}
+
+fn identity_score_opt(entry: &HistoryEntry, words: &[QueryWord]) -> Option<f64> {
+    weighted_fields_score(
+        words,
+        &[
+            (&entry.title, 2.0),
+            (entry.user_title.as_deref().unwrap_or_default(), 2.0),
+            (&entry.url, 0.5),
+        ],
+    )
+}
+
+#[cfg(test)]
+fn identity_score(entry: &HistoryEntry, words: &[QueryWord]) -> f64 {
+    identity_score_opt(entry, words).unwrap_or(0.0)
 }
 
 fn read_dir_if_exists(path: &Path) -> io::Result<Option<fs::ReadDir>> {
     match fs::read_dir(path) {
         Ok(entries) => Ok(Some(entries)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
-    }
-}
-
-fn read_latest_markdown(slug_dir: &Path) -> io::Result<Option<String>> {
-    let Some(entries) = read_dir_if_exists(slug_dir)? else {
-        return Ok(None);
-    };
-
-    let mut latest_timestamp = i64::MIN;
-    let mut latest_path = None;
-
-    for entry in entries {
-        let Ok(entry) = entry else {
-            continue;
-        };
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if !name.ends_with(".md") {
-            continue;
-        }
-        let Ok(timestamp) = name.trim_end_matches(".md").parse::<i64>() else {
-            continue;
-        };
-        if timestamp > latest_timestamp {
-            latest_timestamp = timestamp;
-            latest_path = Some(path);
-        }
-    }
-
-    let Some(path) = latest_path else {
-        return Ok(None);
-    };
-
-    match fs::read_to_string(path) {
-        Ok(content) => Ok(Some(content)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
@@ -444,7 +442,28 @@ fn extract_note_fields(note: &NoteData) -> Vec<String> {
     fields
 }
 
-fn extract_slug_from_snapshot_name(name: &str) -> Option<String> {
+fn shard_for(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    format!("{:02x}", digest[0])
+}
+
+fn read_page_user_title(pages_dir: &Path, slug: &str) -> io::Result<Option<String>> {
+    let path = pages_dir.join(shard_for(slug)).join(format!("{slug}.json"));
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let page: PageData = serde_json::from_str(&text).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid page checkpoint: {error}"),
+        )
+    })?;
+    Ok(page.user_title.filter(|title| !title.trim().is_empty()))
+}
+
+fn extract_snapshot_parts_from_name(name: &str) -> Option<(String, i64)> {
     let basename = Path::new(name)
         .file_name()
         .and_then(|name| name.to_str())
@@ -455,13 +474,13 @@ fn extract_slug_from_snapshot_name(name: &str) -> Option<String> {
     let last_dash = name.rfind('-')?;
     let timestamp = &name[last_dash + 1..];
     if timestamp.len() == 13 && timestamp.chars().all(|char| char.is_ascii_digit()) {
-        Some(name[..last_dash].to_string())
+        Some((name[..last_dash].to_string(), timestamp.parse().ok()?))
     } else {
         None
     }
 }
 
-/// Search a batch of JSONL files + their page markdown content.
+/// Search a batch of JSONL files by page identity fields.
 pub fn search_batch<P1, P2, S>(
     history_dir: P1,
     pages_dir: P2,
@@ -474,8 +493,6 @@ where
     S: AsRef<str>,
 {
     let history_dir = history_dir.as_ref();
-    let pages_dir = pages_dir.as_ref();
-
     let mut seen_urls = HashSet::new();
     let mut entries = Vec::new();
 
@@ -504,7 +521,7 @@ where
     )
 }
 
-/// Search prepared history records + their page markdown content.
+/// Search prepared history records by title, user title, and URL.
 pub fn search_records<P>(
     pages_dir: P,
     query: &str,
@@ -514,34 +531,24 @@ where
     P: AsRef<Path>,
 {
     let pages_dir = pages_dir.as_ref();
-    let mut content_by_slug = HashMap::new();
-    let slugs: HashSet<&str> = records
-        .iter()
-        .filter_map(|entry| entry.slug.as_deref())
-        .collect();
-    for slug in slugs {
-        if let Some(markdown) = read_latest_markdown(&pages_dir.join(slug))? {
-            if !markdown.is_empty() {
-                content_by_slug.insert(slug.to_string(), markdown);
-            }
-        }
-    }
-
     let mut engine = SearchEngine::new();
     for entry in records {
-        let content = entry
-            .slug
-            .as_deref()
-            .and_then(|slug| content_by_slug.get(slug))
-            .cloned()
-            .unwrap_or_default();
-        let mut history_entry = HistoryEntry {
+        let user_title = match entry.user_title {
+            Some(user_title) if !user_title.trim().is_empty() => Some(user_title),
+            _ => entry
+                .slug
+                .as_deref()
+                .map(|slug| read_page_user_title(pages_dir, slug))
+                .transpose()?
+                .flatten(),
+        };
+        let history_entry = HistoryEntry {
             timestamp: entry.timestamp,
             url: entry.url,
             title: entry.title,
+            user_title,
             content: String::new(),
         };
-        history_entry.set_content(content);
         engine.add_entry(history_entry);
     }
 
@@ -554,6 +561,7 @@ impl From<HistoryData> for SearchRecord {
             timestamp: value.timestamp,
             url: value.url,
             title: value.title,
+            user_title: value.user_title,
             slug: value.slug,
         }
     }
@@ -593,10 +601,11 @@ pub fn search_notes<P: AsRef<Path>>(notes_dir: P, query: &str) -> io::Result<Vec
         };
 
         let fields = extract_note_fields(&note);
-        let field_refs: Vec<&str> = fields.iter().map(String::as_str).collect();
-        if fields.is_empty() || !words_match_fields(&words, &field_refs) {
+        let field_refs: Vec<(&str, f64)> =
+            fields.iter().map(|field| (field.as_str(), 1.0)).collect();
+        let Some(score) = weighted_fields_score(&words, &field_refs) else {
             continue;
-        }
+        };
 
         let Some(url) = note.url else {
             continue;
@@ -604,13 +613,17 @@ pub fn search_notes<P: AsRef<Path>>(notes_dir: P, query: &str) -> io::Result<Vec
         let note_slug = note
             .slug
             .unwrap_or_else(|| name.trim_end_matches(".json").to_string());
-        matches.push(NoteMatch { url, note_slug });
+        matches.push(NoteMatch {
+            url,
+            note_slug,
+            score,
+        });
     }
 
     Ok(matches)
 }
 
-/// Search a batch of snapshot markdown files for query matches.
+/// Search a batch of snapshot files for query matches.
 pub fn search_snapshots<P: AsRef<Path>, S: AsRef<str>>(
     snapshots_dir: P,
     query: &str,
@@ -624,15 +637,19 @@ pub fn search_snapshots<P: AsRef<Path>, S: AsRef<str>>(
     let mut matches = Vec::new();
     for file_name in file_names {
         let file_name = file_name.as_ref();
-        let Some(slug) = extract_slug_from_snapshot_name(file_name) else {
+        let Some((slug, timestamp)) = extract_snapshot_parts_from_name(file_name) else {
             continue;
         };
         let path = snapshots_dir.as_ref().join(file_name);
         let Ok(content) = fs::read_to_string(path) else {
             continue;
         };
-        if words_match_fields(&words, &[&content]) {
-            matches.push(SnapshotMatch { slug });
+        if let Some(score) = weighted_fields_score(&words, &[(&content, 1.0)]) {
+            matches.push(SnapshotMatch {
+                slug,
+                timestamp,
+                score,
+            });
         }
     }
 
@@ -835,11 +852,12 @@ mod tests {
     }
 
     #[test]
-    fn content_score_exact_title() {
+    fn identity_score_exact_title() {
         let entry = HistoryEntry {
             timestamp: 1,
             url: "https://example.com".into(),
             title: "React Hooks".into(),
+            user_title: None,
             content: String::new(),
         };
         let words = vec![
@@ -852,28 +870,52 @@ mod tests {
                 exact: false,
             },
         ];
-        assert!((content_score(&entry, &words) - 2.0).abs() < f64::EPSILON);
+        assert!((identity_score(&entry, &words) - 2.0).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn content_score_fuzzy_title() {
+    fn identity_score_fuzzy_title() {
         let entry = HistoryEntry {
             timestamp: 1,
             url: "https://example.com".into(),
             title: "React Hooks".into(),
+            user_title: None,
             content: String::new(),
         };
         let words = vec![QueryWord {
             text: "raect".into(),
             exact: false,
         }];
-        let score = content_score(&entry, &words);
+        let score = identity_score(&entry, &words);
         assert!(score > 0.0);
         assert!(score < 2.0);
     }
 
     #[test]
-    fn search_batch_dedupes_urls_and_reads_latest_markdown() {
+    fn identity_score_distributes_words_across_identity_fields() {
+        let entry = HistoryEntry {
+            timestamp: 1,
+            url: "https://example.com/research".into(),
+            title: "React Hooks".into(),
+            user_title: Some("Custom name".into()),
+            content: String::new(),
+        };
+        let words = vec![
+            QueryWord {
+                text: "react".into(),
+                exact: false,
+            },
+            QueryWord {
+                text: "research".into(),
+                exact: false,
+            },
+        ];
+
+        assert!((identity_score(&entry, &words) - 1.25).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn search_batch_dedupes_urls_without_matching_page_markdown() {
         let temp_dir = tempdir().unwrap();
         let history_dir = temp_dir.path().join("logs");
         let pages_dir = temp_dir.path().join("pages");
@@ -927,15 +969,101 @@ mod tests {
         )
         .unwrap();
 
+        assert!(results.is_empty());
+
+        let results = search_batch(
+            &history_dir,
+            &pages_dir,
+            "article",
+            &["2026-04-18.jsonl", "2026-04-17.jsonl"],
+        )
+        .unwrap();
+
         assert_eq!(
             results,
             vec![SearchResult {
                 url: "https://example.com/article".into(),
                 title: "Unread title".into(),
                 timestamp: 200,
-                score: 1.0,
+                score: 0.5,
             }]
         );
+    }
+
+    #[test]
+    fn search_records_matches_user_title_and_url() {
+        let temp_dir = tempdir().unwrap();
+        let results = search_records(
+            temp_dir.path(),
+            "custom",
+            vec![SearchRecord {
+                timestamp: 200,
+                url: "https://example.com/plain".into(),
+                title: "Original title".into(),
+                user_title: Some("Custom title".into()),
+                slug: None,
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].url, "https://example.com/plain");
+
+        let results = search_records(
+            temp_dir.path(),
+            "url-needle",
+            vec![SearchRecord {
+                timestamp: 200,
+                url: "https://example.com/url-needle".into(),
+                title: "Original title".into(),
+                user_title: None,
+                slug: None,
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].url, "https://example.com/url-needle");
+    }
+
+    #[test]
+    fn search_batch_matches_page_checkpoint_user_title() {
+        let temp_dir = tempdir().unwrap();
+        let history_dir = temp_dir.path().join("logs");
+        let pages_dir = temp_dir.path().join("pages");
+        let slug = "renamed-page";
+        let page_dir = pages_dir.join(shard_for(slug));
+        fs::create_dir_all(&history_dir).unwrap();
+        fs::create_dir_all(&page_dir).unwrap();
+
+        fs::write(
+            history_dir.join("2026-04-18.jsonl"),
+            json!({
+                "timestamp": 200,
+                "url": "https://example.com/renamed",
+                "title": "Original title",
+                "slug": slug
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            page_dir.join(format!("{slug}.json")),
+            json!({
+                "slug": slug,
+                "url": "https://example.com/renamed",
+                "title": "Original title",
+                "user_title": "Custom banana title"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let results =
+            search_batch(&history_dir, &pages_dir, "banana", &["2026-04-18.jsonl"]).unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].url, "https://example.com/renamed");
     }
 
     #[test]
@@ -965,13 +1093,14 @@ mod tests {
         )
         .unwrap();
 
-        let results = search_notes(&notes_dir, "batching").unwrap();
+        let results = search_notes(&notes_dir, "first batching").unwrap();
 
         assert_eq!(
             results,
             vec![NoteMatch {
                 url: "https://example.com/react".into(),
                 note_slug: "react-note".into(),
+                score: 1.0,
             }]
         );
     }
@@ -1003,7 +1132,9 @@ mod tests {
         assert_eq!(
             results,
             vec![SnapshotMatch {
-                slug: "my-page".into()
+                slug: "my-page".into(),
+                timestamp: 1_709_251_200_000,
+                score: 1.0,
             }]
         );
     }

@@ -62,7 +62,7 @@ class FakeDirectoryHandle {
 }
 
 describe('search runtime compatibility module', () => {
-  it('searches in-memory history entries with exact and fuzzy matches', async () => {
+  it('searches in-memory history entries by title, user title, and URL', async () => {
     const engine = new SearchEngine();
 
     const exact = new HistoryEntry(
@@ -79,8 +79,16 @@ describe('search runtime compatibility module', () => {
     fuzzy.timestamp = BigInt(5);
     fuzzy.setContent('A typo-tolerant search target');
 
+    const renamed = new HistoryEntry(
+      'https://example.com/custom-research',
+      'Original title',
+    );
+    renamed.timestamp = BigInt(20);
+    renamed.userTitle = 'Custom title';
+
     engine.addEntry(exact);
     engine.addEntry(fuzzy);
+    engine.addEntry(renamed);
 
     const exactResults = await engine.search('"react hooks"');
     expect(exactResults).toHaveLength(1);
@@ -90,6 +98,19 @@ describe('search runtime compatibility module', () => {
     expect(fuzzyResults.map((result) => result.url)).toContain(
       'https://example.com/react-patterns',
     );
+
+    const userTitleResults = await engine.search('custom');
+    expect(userTitleResults.map((result) => result.url)).toEqual([
+      'https://example.com/custom-research',
+    ]);
+
+    const urlResults = await engine.search('custom-research');
+    expect(urlResults.map((result) => result.url)).toEqual([
+      'https://example.com/custom-research',
+    ]);
+
+    const contentResults = await engine.search('useEffectEvent');
+    expect(contentResults).toEqual([]);
   });
 
   it('sorts equal-score search results by timestamp descending', async () => {
@@ -113,7 +134,7 @@ describe('search runtime compatibility module', () => {
     ]);
   });
 
-  it('searchBatch deduplicates URLs and loads page markdown content', async () => {
+  it('searchBatch deduplicates URLs without matching page markdown content', async () => {
     const historyDir = new FakeDirectoryHandle({
       '2026-04-18.jsonl': new FakeFileHandle(
         [
@@ -152,12 +173,55 @@ describe('search runtime compatibility module', () => {
       '2026-04-17.jsonl',
     ]);
 
-    expect(results).toEqual([
+    expect(results).toEqual([]);
+
+    const urlResults = await searchBatch(historyDir, pagesDir, 'article', [
+      '2026-04-18.jsonl',
+      '2026-04-17.jsonl',
+    ]);
+
+    expect(urlResults).toEqual([
       {
         url: 'https://example.com/article',
         title: 'Unread title',
         timestamp: 200,
-        score: 1,
+        score: 0.5,
+      },
+    ]);
+  });
+
+  it('searchBatch matches checkpoint user titles', async () => {
+    const historyDir = new FakeDirectoryHandle({
+      '2026-04-18.jsonl': new FakeFileHandle(
+        JSON.stringify({
+          timestamp: 200,
+          url: 'https://example.com/renamed',
+          title: 'Original title',
+          slug: 'renamed-page',
+        }),
+      ),
+    });
+    const pagesDir = new FakeDirectoryHandle({
+      27: new FakeDirectoryHandle({
+        'renamed-page.json': new FakeFileHandle(
+          JSON.stringify({
+            slug: 'renamed-page',
+            user_title: 'Custom banana title',
+          }),
+        ),
+      }),
+    });
+
+    const results = await searchBatch(historyDir, pagesDir, 'banana', [
+      '2026-04-18.jsonl',
+    ]);
+
+    expect(results).toEqual([
+      {
+        url: 'https://example.com/renamed',
+        title: 'Original title',
+        timestamp: 200,
+        score: 2,
       },
     ]);
   });
@@ -186,6 +250,7 @@ describe('search runtime compatibility module', () => {
       {
         url: 'https://example.com/react',
         noteSlug: 'react-note',
+        score: 1,
       },
     ]);
   });
@@ -203,6 +268,8 @@ describe('search runtime compatibility module', () => {
       'other-page-1709251200001.md',
     ]);
 
-    expect(results).toEqual([{ slug: 'my-page' }]);
+    expect(results).toEqual([
+      { slug: 'my-page', timestamp: 1709251200000, score: 1 },
+    ]);
   });
 });

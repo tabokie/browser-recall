@@ -2008,6 +2008,7 @@ async fn search_messages_return_history_note_and_snapshot_hits() {
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].url, "https://example.com/page");
             assert_eq!(results[0].note_slug, "note-search");
+            assert_eq!(results[0].score, 1.0);
         }
         other => panic!("expected notes search result, got {other:?}"),
     }
@@ -2031,6 +2032,8 @@ async fn search_messages_return_history_note_and_snapshot_hits() {
             assert!(error.is_none());
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].slug, "example-page");
+            assert_eq!(results[0].timestamp, 1_710_000_000_200i64);
+            assert_eq!(results[0].score, 1.0);
         }
         other => panic!("expected snapshots search result, got {other:?}"),
     }
