@@ -452,6 +452,15 @@ async function installDesktopBridgeMock(page, options = {}) {
         return [{ delay: 0, results: searchHistoryResults || [] }];
       }
 
+      async function configuredSearchResults(resultsByQuery, query) {
+        const configured = resultsByQuery?.[query] || [];
+        if (Array.isArray(configured)) return clone(configured);
+        if (configured.delay > 0) {
+          await new Promise((resolve) => setTimeout(resolve, configured.delay));
+        }
+        return clone(configured.results || []);
+      }
+
       function removeListFromTree(nodes = [], listId) {
         const listEntityId = `list:${listId}`;
         const next = [];
@@ -613,13 +622,17 @@ async function installDesktopBridgeMock(page, options = {}) {
           case 'searchNotes':
             return {
               success: true,
-              results: clone(searchNotesResultsByQuery?.[request.query] || []),
+              results: await configuredSearchResults(
+                searchNotesResultsByQuery,
+                request.query,
+              ),
             };
           case 'searchSnapshots':
             return {
               success: true,
-              results: clone(
-                searchSnapshotsResultsByQuery?.[request.query] || [],
+              results: await configuredSearchResults(
+                searchSnapshotsResultsByQuery,
+                request.query,
               ),
             };
           case 'loadPageNotes':
@@ -1076,16 +1089,30 @@ test.describe('desktop visual regression', () => {
 
       await page.locator('.sidebar-item[data-list-id="research"]').click();
       await expect(page.locator('#mainTitle')).toHaveText(listName);
+      await expect(page.locator('#searchDraftInput')).toHaveAttribute(
+        'placeholder',
+        'Search...',
+      );
       await page.locator('#searchDraftInput').fill(historyEntries[1].title);
-      await expect(
-        page.locator(`.result-row[data-url="${historyEntries[1].url}"]`),
-      ).toBeVisible();
-      await expect(
-        page.locator(`.result-row[data-url="${historyEntries[4].url}"]`),
-      ).toBeVisible();
-      await expect(
-        page.locator(`.result-row[data-url="${historyEntries[7].url}"]`),
-      ).toBeVisible();
+      await expect(page.locator('#searchDraftClearBtn')).toBeVisible();
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
+      await page.locator('#searchDraftClearBtn').click();
+      await expect(page.locator('#searchDraftInput')).toHaveValue('');
+      for (const index of pinnedIndexes) {
+        await expect(
+          page.locator(`.result-row[data-url="${historyEntries[index].url}"]`),
+        ).toBeVisible();
+      }
+
+      await page.locator('#searchDraftInput').fill(historyEntries[1].title);
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
+      await page.locator('#searchDraftInput').press('Escape');
+      await expect(page.locator('#searchDraftInput')).toHaveValue('');
+      for (const index of pinnedIndexes) {
+        await expect(
+          page.locator(`.result-row[data-url="${historyEntries[index].url}"]`),
+        ).toBeVisible();
+      }
 
       await commitDesktopSearch(page, 'combo');
       for (const index of pinnedIndexes) {
@@ -1995,10 +2022,23 @@ test.describe('desktop visual regression', () => {
   test('desktop search starts only when Enter commits the draft query', async ({
     page,
   }) => {
+    const staleUrl = 'https://example.com/stale-cleared-note';
+    const staleSlug = generateSlugFromUrl(staleUrl);
     await serveDesktopUi(async (desktopUrl) => {
       await openDesktopUi(page, desktopUrl, {
         setupComplete: true,
         colorScheme: 'amber',
+        extraSession: {
+          [pageKey(staleSlug)]: {
+            slug: staleSlug,
+            url: staleUrl,
+            title: 'Stale cleared note result',
+            childIds: ['note:stale-cleared-note'],
+            parentIds: [],
+            visitDates: [],
+            timestamps: { 'device-a': Date.now() },
+          },
+        },
         searchHistoryResultsByQuery: {
           deliberate: [
             {
@@ -2014,10 +2054,31 @@ test.describe('desktop visual regression', () => {
             },
           ],
         },
+        searchNotesResultsByQuery: {
+          'stale note': {
+            delay: 250,
+            results: [
+              {
+                url: staleUrl,
+                noteSlug: 'stale-cleared-note',
+                score: 5,
+              },
+            ],
+          },
+        },
       });
 
       const draft = page.locator('#searchDraftInput');
+      const clearDraft = page.locator('#searchDraftClearBtn');
+      await expect(draft).toHaveAttribute('placeholder', 'Search...');
+      await expect(page.getByText('Product research notes')).toBeVisible();
+      await expect(clearDraft).toBeHidden();
+      await draft.click();
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
+
       await draft.fill('deliberate');
+      await expect(clearDraft).toBeVisible();
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
       await page.waitForTimeout(500);
 
       await expect
@@ -2054,6 +2115,40 @@ test.describe('desktop visual regression', () => {
           ),
         )
         .toBe('deliberate');
+
+      await clearDraft.click();
+      await expect(draft).toHaveValue('');
+      await expect(clearDraft).toBeHidden();
+      await expect(page.getByText('Deliberate search result')).toHaveCount(0);
+      await expect(page.getByText('Product research notes')).toBeVisible();
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            window.__desktopVisualHarness.sessionValue('searchQueries:explore'),
+          ),
+        )
+        .toBe('');
+
+      await draft.fill('draft escape');
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
+      await draft.press('Escape');
+      await expect(draft).toHaveValue('');
+      await expect(page.getByText('Product research notes')).toBeVisible();
+
+      await draft.fill('draft blur');
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
+      await page.locator('#mainTitle').click();
+      await expect(draft).toHaveValue('');
+      await expect(page.getByText('Product research notes')).toBeVisible();
+
+      await draft.fill('stale note');
+      await draft.press('Enter');
+      await clearDraft.click();
+      await expect(draft).toHaveValue('');
+      await expect(page.getByText('Product research notes')).toBeVisible();
+      await page.waitForTimeout(400);
+      await expect(page.getByText('Stale cleared note result')).toHaveCount(0);
+      await expect(page.getByText('Product research notes')).toBeVisible();
     });
   });
 

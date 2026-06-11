@@ -697,8 +697,11 @@ let onboardingDataFolderPath = '';
 // --- Search/filter state ---
 let committedSearchQuery = ''; // committed query that participates in search/filtering
 let draftSearchInput = ''; // uncommitted text; becomes active only on Enter
+let searchDraftPreviewActive = false;
+let suppressSearchDraftEmptyOnFocus = false;
 let filterState = createDefaultFilterState();
 let filterVisible = false;
+const SEARCH_INPUT_PLACEHOLDER = 'Search...';
 
 const KEYWORD_FIELDS = ['title', 'url', 'captures', 'highlights', 'notes'];
 const KEYWORD_FIELD_LABELS = {
@@ -3424,6 +3427,7 @@ async function renderListPinView(allPins, listId) {
 
 // Run the active view's search pipeline after an explicit commit/filter change.
 function runActiveSearchPipeline() {
+  searchDraftPreviewActive = false;
   if (activeView.type === 'explore') {
     if (runActiveSearchPipeline._preserveScroll) {
       preserveRelatedScrollOnNextRender = true;
@@ -6955,18 +6959,27 @@ document.addEventListener('visibilitychange', async () => {
 
 // --- Explore Search ---
 
+function renderSearchDraftControlHtml() {
+  const clearSvg =
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.25 4.25l7.5 7.5M11.75 4.25l-7.5 7.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
+  return `
+    <div class="search-draft-control">
+      <input type="search" class="search-draft-input" id="searchDraftInput" placeholder="${SEARCH_INPUT_PLACEHOLDER}" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="none">
+      <button class="search-draft-clear" id="searchDraftClearBtn" type="button" title="Clear search" aria-label="Clear search">${clearSvg}</button>
+    </div>
+  `;
+}
+
 async function renderSearchPanel() {
   const container = document.getElementById('listQueryBuilder');
   container.style.display = 'block';
-  const isExplore = activeView.type === 'explore';
-  const placeholder = isExplore ? 'Search...' : 'Filter pins...';
 
   const filterSvg =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
 
   let html = '<div class="search-filters-panel" id="searchFiltersPanel">';
   html += '<div class="search-draft">';
-  html += `<input type="search" class="search-draft-input" id="searchDraftInput" placeholder="${placeholder}" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="none">`;
+  html += renderSearchDraftControlHtml();
   html += `<button class="filter-toggle-btn${filterVisible ? ' active' : ''}${!isDefaultFilterState(filterState) ? ' has-filters' : ''}" id="filterToggleBtn" title="Filters">${filterSvg}</button>`;
   html += '</div>';
 
@@ -6979,6 +6992,7 @@ async function renderSearchPanel() {
   container.innerHTML = html;
   const draftEl = container.querySelector('#searchDraftInput');
   if (draftEl) draftEl.value = draftSearchInput;
+  updateSearchDraftClearButton(container);
   bindSearchEvents(container);
   if (filterVisible) bindFilterEvents(container);
 }
@@ -7119,31 +7133,133 @@ function updateFilterPanelActions(container) {
   if (clearBtn) clearBtn.disabled = !hasFilters;
 }
 
+function updateSearchDraftClearButton(container = document) {
+  const draftInput = container.querySelector('#searchDraftInput');
+  const clearBtn = container.querySelector('#searchDraftClearBtn');
+  if (!draftInput || !clearBtn) return;
+  clearBtn.classList.toggle('visible', Boolean(draftInput.value));
+}
+
+function showSearchDraftEmptyResults() {
+  if (activeView.type !== 'explore' && activeView.type !== 'list') return;
+  searchDraftPreviewActive = true;
+  cancelActiveHistorySearch();
+  searchState.generation++;
+  searchState.results = [];
+  searchState.resultIndex.clear();
+  searchState.pendingPhases = 0;
+  hideSearchSpinner();
+
+  const relatedContainer = document.getElementById('relatedResults');
+  if (relatedContainer) {
+    disableRelatedVirtualScrollerForDirectRender(relatedContainer);
+    relatedContainer.dataset.searchCount = '0';
+    relatedContainer.innerHTML = '';
+  }
+  const relatedChart = document.getElementById('relatedChart');
+  if (relatedChart) relatedChart.classList.remove('visible');
+}
+
+function focusSearchDraftInputWithoutDraftMode() {
+  const nextInput = document.querySelector('#searchDraftInput');
+  if (!nextInput) return;
+  if (document.activeElement === nextInput) return;
+  suppressSearchDraftEmptyOnFocus = true;
+  nextInput.focus({ preventScroll: true });
+}
+
+async function clearSearchDraft(container) {
+  await restoreDefaultSearchResults(container, { focusInput: true });
+}
+
+async function restoreDefaultSearchResults(
+  container,
+  { focusInput = false } = {},
+) {
+  committedSearchQuery = '';
+  draftSearchInput = '';
+  searchDraftPreviewActive = false;
+  cancelActiveHistorySearch();
+  searchState.generation++;
+  searchState.results = [];
+  searchState.resultIndex.clear();
+  searchState.pendingPhases = 0;
+  hideSearchSpinner();
+  const draftInput = container.querySelector('#searchDraftInput');
+  if (draftInput) draftInput.value = '';
+  updateSearchDraftClearButton(container);
+  saveSearchQuery();
+  runActiveSearchPipeline();
+  if (focusInput) focusSearchDraftInputWithoutDraftMode();
+}
+
+async function commitSearchDraft(draftInput) {
+  const nextQuery = draftInput.value.trim();
+  const previousQuery = committedSearchQuery.trim();
+  const hadQuery = Boolean(previousQuery);
+  if (nextQuery === previousQuery && !searchDraftPreviewActive) return;
+  committedSearchQuery = nextQuery;
+  draftSearchInput = nextQuery;
+  searchDraftPreviewActive = false;
+  if (hadQuery && !committedSearchQuery) {
+    runActiveSearchPipeline._preserveScroll = true;
+  }
+  await renderSearchPanel();
+  saveSearchQuery();
+  runActiveSearchPipeline();
+  focusSearchDraftInputWithoutDraftMode();
+}
+
 function bindSearchEvents(container) {
   // Draft input — search/filter only after Enter commits the query.
   const draftInput = container.querySelector('#searchDraftInput');
   if (draftInput) {
+    draftInput.addEventListener('focus', () => {
+      if (suppressSearchDraftEmptyOnFocus) {
+        suppressSearchDraftEmptyOnFocus = false;
+        return;
+      }
+      showSearchDraftEmptyResults();
+    });
+    draftInput.addEventListener('click', () => {
+      showSearchDraftEmptyResults();
+    });
     draftInput.addEventListener('input', () => {
       draftSearchInput = draftInput.value;
+      updateSearchDraftClearButton(container);
+      showSearchDraftEmptyResults();
     });
     draftInput.addEventListener('keydown', async (e) => {
-      if (e.key === 'Enter') {
-        const nextQuery = draftInput.value.trim();
+      if (e.key === 'Escape') {
         e.preventDefault();
-        if (nextQuery === committedSearchQuery.trim()) return;
-        const hadQuery = Boolean(committedSearchQuery.trim());
-        committedSearchQuery = nextQuery;
-        draftSearchInput = nextQuery;
-        if (hadQuery && !committedSearchQuery) {
-          runActiveSearchPipeline._preserveScroll = true;
-        }
-        await renderSearchPanel();
-        saveSearchQuery();
-        runActiveSearchPipeline();
-        document
-          .querySelector('#searchDraftInput')
-          ?.focus({ preventScroll: true });
+        await restoreDefaultSearchResults(container, { focusInput: true });
+        return;
       }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        await commitSearchDraft(draftInput);
+      }
+    });
+    draftInput.addEventListener('blur', () => {
+      setTimeout(() => {
+        if (!searchDraftPreviewActive) return;
+        const nextFocus = document.activeElement;
+        if (nextFocus?.closest?.('.search-draft-control')) return;
+        restoreDefaultSearchResults(container).catch((error) => {
+          logDebug(
+            '[search] restore default after blur failed:',
+            error.message,
+          );
+        });
+      }, 0);
+    });
+  }
+
+  const clearDraftBtn = container.querySelector('#searchDraftClearBtn');
+  if (clearDraftBtn) {
+    clearDraftBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    clearDraftBtn.addEventListener('click', async () => {
+      await clearSearchDraft(container);
     });
   }
 

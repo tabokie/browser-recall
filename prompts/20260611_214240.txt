@@ -1,0 +1,6 @@
+- Improve the desktop search UI. (1) When user is typing (click on the input box), show empty result. (2) Add a frameless delete button inside the search input box to clear the query. (3) Make the hint text inside input box consistent across list and explore view. (stick to "Search..."). The search bar in these two UIs should reuse most of the code.
+- $gap
+- (1) Remove dead code. (2) When clear query, restore to default unfiltered results. When user press "Esc" while focusing on input box, or focus on outside the search bar, restore to unfiltered results as well.
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix it
+- $finish model=GPT-5.5 Codex
