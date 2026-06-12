@@ -73,6 +73,24 @@ export class VirtualScroller {
     containerEl._virtualScroller = this;
   }
 
+  destroy() {
+    this.scrollEl.removeEventListener('scroll', this._scrollHandler);
+    if (this.containerEl._virtualScroller === this) {
+      this.containerEl._virtualScroller = null;
+    }
+    this.data = [];
+    this._fullData = [];
+    this.renderRow = null;
+    this.onLoadMore = null;
+    this.renderedRange = { start: -1, end: -1 };
+    this._savedNodes.clear();
+    this._loadMorePending = false;
+    this._appendRenderPending = false;
+    this._scrollRenderPending = false;
+    this._pendingBottomAnchor = null;
+    this._topLockFrames = 0;
+  }
+
   setData(items, renderRowFn) {
     this._fullData = items;
     this.data = items;

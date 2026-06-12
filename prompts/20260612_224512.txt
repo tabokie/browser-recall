@@ -1,0 +1,16 @@
+- The search bar focusing has issues: (1) When I press "Esc" and exit search focus, the text cursor is still activated. (2) When I'm in focus and click on below the search bar, I should've exit the focus mode.
+- $gap
+- When the search query is empty and user clicks outside, exit the search. When the search is non-empty and user clicks outside, do nothing (still focusing).
+- resume
+- Does the behavior of "click below" apply to click outside the text box in other directions?
+- Yes, generalize it
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix it
+- The search experience is still bumpy. When I enter a simple query and scroll down, there still seem to be full volume history after the relevant pages. And when I select a time bar (to narrow down) and scroll down, sometimes it enters an extremely long scroll with no actual result.
+- Honestly I am not sure about the current way of implementating search results rendering. It is simply too error-prone. Why don't we just render the search the same way as we render the list, no virtual scrolling, because the results are already fetched into the memory anyway
+- Go ahead
+- $gap
+- Fix the two issues. And clean up thoroughly
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix it
+- $finish model=GPT-5.5 Codex

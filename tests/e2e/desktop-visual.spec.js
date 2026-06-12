@@ -1108,11 +1108,68 @@ test.describe('desktop visual regression', () => {
       await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
       await page.locator('#searchDraftInput').press('Escape');
       await expect(page.locator('#searchDraftInput')).toHaveValue('');
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => document.activeElement?.id === 'searchDraftInput',
+          ),
+        )
+        .toBe(false);
       for (const index of pinnedIndexes) {
         await expect(
           page.locator(`.result-row[data-url="${historyEntries[index].url}"]`),
         ).toBeVisible();
       }
+
+      await page.locator('#searchDraftInput').click();
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
+      await page
+        .locator('#relatedResultsWrapper')
+        .click({ position: { x: 20, y: 20 } });
+      await expect(page.locator('#searchDraftInput')).toHaveValue('');
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => document.activeElement?.id === 'searchDraftInput',
+          ),
+        )
+        .toBe(false);
+      for (const index of pinnedIndexes) {
+        await expect(
+          page.locator(`.result-row[data-url="${historyEntries[index].url}"]`),
+        ).toBeVisible();
+      }
+
+      await page.locator('#searchDraftInput').fill(historyEntries[1].title);
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
+      await page
+        .locator('#relatedResultsWrapper')
+        .click({ position: { x: 20, y: 20 } });
+      await expect(page.locator('#searchDraftInput')).toHaveValue(
+        historyEntries[1].title,
+      );
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => document.activeElement?.id === 'searchDraftInput',
+          ),
+        )
+        .toBe(true);
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
+      await page.locator('#settingsBtn').click();
+      await expect(page.locator('#searchDraftInput')).toHaveValue(
+        historyEntries[1].title,
+      );
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => document.activeElement?.id === 'searchDraftInput',
+          ),
+        )
+        .toBe(true);
+      await expect(page.locator('#settingsModal.open')).toHaveCount(0);
+      await expect(page.locator('#settingsModal')).toBeHidden();
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
 
       await commitDesktopSearch(page, 'combo');
       for (const index of pinnedIndexes) {
@@ -2138,8 +2195,15 @@ test.describe('desktop visual regression', () => {
       await draft.fill('draft blur');
       await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
       await page.locator('#mainTitle').click();
-      await expect(draft).toHaveValue('');
-      await expect(page.getByText('Product research notes')).toBeVisible();
+      await expect(draft).toHaveValue('draft blur');
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => document.activeElement?.id === 'searchDraftInput',
+          ),
+        )
+        .toBe(true);
+      await expect(page.locator('#relatedResults .result-row')).toHaveCount(0);
 
       await draft.fill('stale note');
       await draft.press('Enter');
@@ -3769,6 +3833,158 @@ test.describe('desktop visual regression', () => {
     });
   });
 
+  test('committed search renders directly and date filters visible rows', async ({
+    page,
+  }) => {
+    const selectedDate = new Date(Date.now() - 8 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const otherDate = new Date(Date.now() - 2 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const selectedTimestamp = new Date(`${selectedDate}T12:00:00Z`).getTime();
+    const otherTimestamp = new Date(`${otherDate}T12:00:00Z`).getTime();
+    const searchResults = Array.from({ length: 40 }, (_, i) => ({
+      url: `https://example.com/search-date-filter-${i}`,
+      title: `Search date filter ${i}`,
+      timestamp: i === 0 ? selectedTimestamp : otherTimestamp - i * 1000,
+      score: 4,
+    }));
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [],
+        searchHistoryResults: searchResults,
+      });
+
+      await commitDesktopSearch(page, 'date filter');
+      await page.waitForFunction(
+        ({ expected }) =>
+          Number(
+            document.getElementById('relatedResults').dataset.searchCount || 0,
+          ) >= expected,
+        { expected: searchResults.length },
+      );
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => document.getElementById('relatedResults')._virtualScroller,
+          ),
+        )
+        .toBe(null);
+
+      await page.evaluate(async () => {
+        const main = document.querySelector('.main');
+        main.scrollTop = main.scrollHeight;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      });
+
+      const selectedBar = page.locator(
+        `#relatedChartBars .chart-bar-group[data-date="${selectedDate}"] .chart-bar`,
+      );
+      await expect(selectedBar).toBeVisible();
+      await selectedBar.click();
+
+      const metrics = await page.evaluate(() => {
+        const main = document.querySelector('.main');
+        const rows = [
+          ...document.querySelectorAll('#relatedResults .result-row'),
+        ];
+        const visibleRows = rows.filter((row) => row.offsetParent !== null);
+        return {
+          scroller: document.getElementById('relatedResults')._virtualScroller,
+          renderedCount: rows.length,
+          visibleUrls: visibleRows.map((row) => row.dataset.url),
+          scrollTop: main.scrollTop,
+          maxScroll: main.scrollHeight - main.clientHeight,
+          bottomPadding:
+            parseFloat(
+              getComputedStyle(document.getElementById('relatedResults'))
+                .paddingBottom,
+            ) || 0,
+        };
+      });
+      expect(metrics.scroller).toBe(null);
+      expect(metrics.renderedCount).toBeGreaterThanOrEqual(
+        searchResults.length,
+      );
+      expect(metrics.visibleUrls).toEqual([
+        'https://example.com/search-date-filter-0',
+      ]);
+      expect(metrics.scrollTop).toBeLessThanOrEqual(metrics.maxScroll + 1);
+      expect(metrics.bottomPadding).toBeLessThan(200);
+    });
+  });
+
+  test('select-all keyboard shortcut selects direct committed search rows', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const searchHistoryResults = [
+      {
+        url: 'https://example.com/search-select-all-one',
+        title: 'Search select all one',
+        timestamp: now - 1000,
+        score: 4,
+      },
+      {
+        url: 'https://example.com/search-select-all-two',
+        title: 'Search select all two',
+        timestamp: now - 2000,
+        score: 4,
+      },
+    ];
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries: [],
+        searchHistoryResults,
+      });
+
+      await commitDesktopSearch(page, 'select all');
+      await page.waitForFunction(
+        ({ expected }) =>
+          Number(
+            document.getElementById('relatedResults').dataset.searchCount || 0,
+          ) === expected,
+        { expected: searchHistoryResults.length },
+      );
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => document.getElementById('relatedResults')._virtualScroller,
+          ),
+        )
+        .toBe(null);
+
+      await page.locator('#relatedResults .result-row').first().click();
+      await expect(
+        page.locator('#relatedResults .result-row.selected'),
+      ).toHaveCount(1);
+      await page.evaluate(() => {
+        document.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'a',
+            metaKey: true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+
+      await expect(
+        page.locator('#relatedResults .result-row.selected'),
+      ).toHaveCount(searchHistoryResults.length);
+      await expect(
+        page.locator('#relatedResults .result-row.selected .result-title'),
+      ).toHaveText(['Search select all one', 'Search select all two']);
+    });
+  });
+
   test('list chart date click filters pinned rows by page visit dates', async ({
     page,
   }) => {
@@ -4392,10 +4608,9 @@ test.describe('desktop visual regression', () => {
       );
       await page.waitForFunction(() => {
         const related = document.getElementById('relatedResults');
-        const scroller = related?._virtualScroller;
         return (
           Number(related?.dataset.searchCount || 0) > 0 &&
-          scroller?.renderedRange?.start >= 0
+          document.querySelectorAll('#relatedResults .result-row').length > 0
         );
       });
       await page.waitForFunction(
@@ -4529,21 +4744,6 @@ test.describe('desktop visual regression', () => {
       await page.waitForFunction(
         () => document.querySelectorAll('.result-row').length > 0,
       );
-      await page.evaluate(() => {
-        const scroller =
-          document.getElementById('relatedResults')._virtualScroller;
-        scroller.onLoadMore = async () => {
-          scroller.appendData([
-            {
-              url: 'https://example.com/irrelevant-stale-load-more',
-              title: 'Irrelevant stale load more',
-              timestamp: Date.now(),
-              score: 0,
-              timestamps: [Date.now()],
-            },
-          ]);
-        };
-      });
 
       await commitDesktopSearch(page, 'Canon');
       await page.waitForFunction(
@@ -4556,17 +4756,15 @@ test.describe('desktop visual regression', () => {
       await expect
         .poll(() =>
           page.evaluate(
-            () =>
-              document.getElementById('relatedResults')._virtualScroller
-                .onLoadMore === null,
+            () => document.getElementById('relatedResults')._virtualScroller,
           ),
         )
-        .toBe(true);
+        .toBe(null);
 
       const resultTitles = await page.evaluate(() => {
-        const scroller =
-          document.getElementById('relatedResults')._virtualScroller;
-        return scroller.data.map((item) => item.title);
+        return [
+          ...document.querySelectorAll('#relatedResults .result-title'),
+        ].map((item) => item.textContent.trim());
       });
       expect(resultTitles).toEqual(['Canon result one', 'Canon result two']);
     });

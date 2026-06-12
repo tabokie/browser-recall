@@ -30,6 +30,11 @@ function mockElement(tag, opts = {}) {
       if (!el._listeners[evt]) el._listeners[evt] = [];
       el._listeners[evt].push(fn);
     },
+    removeEventListener(evt, fn) {
+      el._listeners[evt] = (el._listeners[evt] || []).filter(
+        (candidate) => candidate !== fn,
+      );
+    },
     appendChild() {},
     insertAdjacentHTML(_position, html) {
       el.innerHTML += html;
@@ -70,6 +75,18 @@ describe('VirtualScroller', () => {
   });
 
   describe('_render guard when data is empty', () => {
+    it('destroy detaches the scroll listener and clears the container scroller reference', () => {
+      expect(scrollEl._listeners.scroll).toHaveLength(1);
+      expect(containerEl._virtualScroller).toBe(vs);
+
+      vs.destroy();
+
+      expect(scrollEl._listeners.scroll).toHaveLength(0);
+      expect(containerEl._virtualScroller).toBe(null);
+      expect(vs.data).toEqual([]);
+      expect(vs.onLoadMore).toBe(null);
+    });
+
     it('force=true with empty data clears the container', () => {
       containerEl.innerHTML = '<div>old content</div>';
       vs._headerHtml = '<div class="header">H</div>';

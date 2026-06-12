@@ -127,6 +127,48 @@ function consumeRelatedTopReset() {
   return shouldReset;
 }
 
+function captureRelatedDomScrollAnchor(container) {
+  const main = document.querySelector('.main');
+  if (!main || !container || main.scrollTop <= 0) return null;
+  const mainTop = main.getBoundingClientRect().top;
+  const row = [...container.querySelectorAll('.result-row')].find(
+    (candidate) => candidate.getBoundingClientRect().bottom > mainTop + 1,
+  );
+  if (!row?.dataset?.url) return { fallbackTop: main.scrollTop };
+  return {
+    key: row.dataset.url,
+    offsetWithinViewport: row.getBoundingClientRect().top - mainTop,
+    fallbackTop: main.scrollTop,
+  };
+}
+
+function restoreRelatedDomScrollAnchor(container, anchor) {
+  if (!anchor) return false;
+  const main = document.querySelector('.main');
+  if (!main || !container) return false;
+  if (anchor.key) {
+    const escapedKey =
+      typeof CSS !== 'undefined' && CSS.escape
+        ? CSS.escape(anchor.key)
+        : String(anchor.key).replace(/["\\]/g, '\\$&');
+    const row = container.querySelector(
+      `.result-row[data-url="${escapedKey}"]`,
+    );
+    if (row) {
+      const mainTop = main.getBoundingClientRect().top;
+      const delta =
+        row.getBoundingClientRect().top - mainTop - anchor.offsetWithinViewport;
+      main.scrollTop = Math.max(0, main.scrollTop + delta);
+      return true;
+    }
+  }
+  if (Number.isFinite(anchor.fallbackTop)) {
+    main.scrollTop = Math.max(0, anchor.fallbackTop);
+    return true;
+  }
+  return false;
+}
+
 function preventDesktopOverscroll(event) {
   const wantsX = event.deltaX !== 0;
   const wantsY = event.deltaY !== 0;
@@ -699,6 +741,8 @@ let committedSearchQuery = ''; // committed query that participates in search/fi
 let draftSearchInput = ''; // uncommitted text; becomes active only on Enter
 let searchDraftPreviewActive = false;
 let suppressSearchDraftEmptyOnFocus = false;
+let searchDraftOutsideClickBound = false;
+let pendingSearchClearScrollAnchor = null;
 let filterState = createDefaultFilterState();
 let filterVisible = false;
 const SEARCH_INPUT_PLACEHOLDER = 'Search...';
@@ -1118,21 +1162,7 @@ async function renderProgressiveResults(gen) {
     results = await applyFilters([...results]);
   }
 
-  const relatedContainer = document.getElementById('relatedResults');
   if (preserveRelatedScrollOnNextRender && searchState.pendingPhases > 0) {
-    return;
-  }
-
-  // Show "No results" when all phases are done and nothing matched
-  if (results.length === 0) {
-    preserveRelatedScrollOnNextRender = false;
-    const vs = getOrCreateRelatedScroller();
-    vs._headerHtml =
-      searchState.pendingPhases <= 0
-        ? '<div class="no-results">No results</div>'
-        : '';
-    vs.updateData([], () => '');
-    document.getElementById('relatedChart').classList.remove('visible');
     return;
   }
 
@@ -1140,55 +1170,7 @@ async function renderProgressiveResults(gen) {
     ? relatedSortState
     : { column: 'relevance', direction: 'desc' };
   const sorted = applySortOrder(results, effectiveSort);
-  const maxAtt = Math.max(...sorted.map((r) => r.attScore), 0.1);
-
-  const vs = getOrCreateRelatedScroller();
-  vs._headerHtml = '';
-  const preserveScroll = preserveRelatedScrollOnNextRender;
-  if (preserveScroll) {
-    await waitForMainViewport();
-  }
-  preserveRelatedScrollOnNextRender = false;
-  vs.updateData(
-    sorted,
-    (r) =>
-      resultRowHtml(r.user_title || r.title, r.url, {
-        attScore: r.attScore,
-        maxAtt,
-        attDetail: r.attDetail,
-        notes: r.notes,
-        timestamps: r.timestamps,
-        visitDates: r.visitDates,
-        context: 'related',
-        childIds: r.childIds,
-        parentIds: r.parentIds,
-        likes: r.likes,
-        matchSources: r.matchSources,
-        hasHighlightNotes: r.hasHighlightNotes,
-      }),
-    { preserveScroll },
-  );
-  relatedContainer.dataset.searchCount = String(searchState.results.length);
-  // Update time chart
-  const chartData = sorted.map((r) => ({
-    url: r.url,
-    timestamp: r.timestamps?.[0] || Date.now(),
-    timestamps: r.timestamps,
-    visitDates: r.visitDates,
-    attention: '',
-  }));
-  const relatedChart = prepareRelatedChartDateFilter(
-    exploreDateFilterContext(),
-  );
-  relatedChart._onDateSelect = null;
-  renderTimeChartInto(
-    relatedChart,
-    document.getElementById('relatedChartBars'),
-    chartData,
-    'Explore results',
-  );
-  bindChartBarClick(relatedChart, document.getElementById('relatedResults'));
-  applyPersistedRelatedDateFilter();
+  renderDirectSearchResults(sorted);
 }
 
 function showSearchSpinner() {
@@ -3471,14 +3453,94 @@ async function runListPinFilter() {
 
 function disableRelatedVirtualScrollerForDirectRender(container) {
   if (container._virtualScroller) {
-    container._virtualScroller.data = [];
-    container._virtualScroller._fullData = [];
-    container._virtualScroller.renderedRange = { start: -1, end: -1 };
-    container._virtualScroller.onLoadMore = null;
+    container._virtualScroller.destroy();
   }
-  container._virtualScroller = null;
+  relatedVirtualScroller = null;
   container.style.paddingTop = '0px';
   container.style.paddingBottom = '';
+}
+
+function renderDirectSearchResults(results) {
+  const relatedContainer = document.getElementById('relatedResults');
+  disableRelatedVirtualScrollerForDirectRender(relatedContainer);
+  bindResultDelegation(relatedContainer);
+  bindColumnHeaderClicks(relatedContainer);
+  bindPinClicks(relatedContainer, getActivePinListId());
+
+  const showNoResults = results.length === 0 && searchState.pendingPhases <= 0;
+  relatedContainer.dataset.searchCount = String(results.length);
+
+  if (results.length === 0) {
+    if (searchState.pendingPhases > 0) {
+      if (!preserveRelatedScrollOnNextRender) {
+        relatedContainer.innerHTML = '';
+      }
+      document.getElementById('relatedChart').classList.remove('visible');
+      return;
+    }
+    preserveRelatedScrollOnNextRender = false;
+    consumeRelatedTopReset();
+    relatedContainer.innerHTML = showNoResults
+      ? '<div class="no-results">No results</div>'
+      : '';
+    document.getElementById('relatedChart').classList.remove('visible');
+    return;
+  }
+
+  const maxAtt = Math.max(...results.map((r) => r.attScore), 0.1);
+  const preserveScroll = preserveRelatedScrollOnNextRender;
+  preserveRelatedScrollOnNextRender = false;
+  const renderAtTop = preserveScroll ? false : consumeRelatedTopReset();
+  const main = document.querySelector('.main');
+  const anchor = preserveScroll
+    ? captureRelatedDomScrollAnchor(relatedContainer)
+    : null;
+  if (renderAtTop && main) main.scrollTop = 0;
+  const previousScrollTop = main?.scrollTop || 0;
+
+  relatedContainer.innerHTML = results
+    .map((r) =>
+      resultRowHtml(r.user_title || r.title, r.url, {
+        attScore: r.attScore,
+        maxAtt,
+        attDetail: r.attDetail,
+        notes: r.notes,
+        timestamps: r.timestamps,
+        visitDates: r.visitDates,
+        context: 'related',
+        childIds: r.childIds,
+        parentIds: r.parentIds,
+        likes: r.likes,
+        matchSources: r.matchSources,
+        hasHighlightNotes: r.hasHighlightNotes,
+      }),
+    )
+    .join('');
+  if (preserveScroll && main) {
+    if (!restoreRelatedDomScrollAnchor(relatedContainer, anchor)) {
+      main.scrollTop = previousScrollTop;
+    }
+  }
+
+  const chartData = results.map((r) => ({
+    url: r.url,
+    timestamp: r.timestamps?.[0] || Date.now(),
+    timestamps: r.timestamps,
+    visitDates: r.visitDates,
+    attention: '',
+  }));
+  const relatedChart = prepareRelatedChartDateFilter(
+    exploreDateFilterContext(),
+  );
+  relatedChart._onDateSelect = null;
+  renderTimeChartInto(
+    relatedChart,
+    document.getElementById('relatedChartBars'),
+    chartData,
+    'Explore results',
+  );
+  bindChartBarClick(relatedChart, relatedContainer);
+  applyPersistedRelatedDateFilter();
 }
 
 // Render filtered pin results directly so list selection can operate on every row.
@@ -7179,6 +7241,7 @@ async function restoreDefaultSearchResults(
   committedSearchQuery = '';
   draftSearchInput = '';
   searchDraftPreviewActive = false;
+  pendingSearchClearScrollAnchor = null;
   cancelActiveHistorySearch();
   searchState.generation++;
   searchState.results = [];
@@ -7193,11 +7256,59 @@ async function restoreDefaultSearchResults(
   if (focusInput) focusSearchDraftInputWithoutDraftMode();
 }
 
+async function exitSearchDraftFocus(container) {
+  const draftInput = container.querySelector('#searchDraftInput');
+  if (draftInput && document.activeElement === draftInput) {
+    draftInput.blur();
+  }
+  await restoreDefaultSearchResults(container);
+}
+
+function activeSearchDraftOutsideTarget(target) {
+  if (!searchDraftPreviewActive) return null;
+  const activeInput = document.getElementById('searchDraftInput');
+  if (!activeInput || document.activeElement !== activeInput) return null;
+  if (target?.closest?.('.search-draft-control')) return null;
+  return activeInput;
+}
+
+function bindSearchDraftOutsideClickExit() {
+  if (searchDraftOutsideClickBound) return;
+  searchDraftOutsideClickBound = true;
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      const activeInput = activeSearchDraftOutsideTarget(e.target);
+      if (!activeInput) return;
+      if (activeInput.value.trim()) {
+        e.preventDefault();
+        e.stopPropagation();
+        activeInput.focus({ preventScroll: true });
+        return;
+      }
+      activeInput.blur();
+    },
+    true,
+  );
+  document.addEventListener(
+    'click',
+    (e) => {
+      const activeInput = activeSearchDraftOutsideTarget(e.target);
+      if (!activeInput || !activeInput.value.trim()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      activeInput.focus({ preventScroll: true });
+    },
+    true,
+  );
+}
+
 async function commitSearchDraft(draftInput) {
   const nextQuery = draftInput.value.trim();
   const previousQuery = committedSearchQuery.trim();
   const hadQuery = Boolean(previousQuery);
   if (nextQuery === previousQuery && !searchDraftPreviewActive) return;
+  if (nextQuery) pendingSearchClearScrollAnchor = null;
   committedSearchQuery = nextQuery;
   draftSearchInput = nextQuery;
   searchDraftPreviewActive = false;
@@ -7225,6 +7336,11 @@ function bindSearchEvents(container) {
       showSearchDraftEmptyResults();
     });
     draftInput.addEventListener('input', () => {
+      if (committedSearchQuery.trim() && !draftInput.value.trim()) {
+        pendingSearchClearScrollAnchor = captureRelatedDomScrollAnchor(
+          document.getElementById('relatedResults'),
+        );
+      }
       draftSearchInput = draftInput.value;
       updateSearchDraftClearButton(container);
       showSearchDraftEmptyResults();
@@ -7232,7 +7348,7 @@ function bindSearchEvents(container) {
     draftInput.addEventListener('keydown', async (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        await restoreDefaultSearchResults(container, { focusInput: true });
+        await exitSearchDraftFocus(container);
         return;
       }
       if (e.key === 'Enter') {
@@ -7262,6 +7378,8 @@ function bindSearchEvents(container) {
       await clearSearchDraft(container);
     });
   }
+
+  bindSearchDraftOutsideClickExit();
 
   // Filter toggle
   const filterBtn = container.querySelector('#filterToggleBtn');
@@ -7606,6 +7724,11 @@ async function runSearchFilterPipeline() {
   const sorted = applySortOrder(results, effectiveSort);
   const maxAtt = Math.max(...sorted.map((r) => r.attScore), 0.1);
 
+  const directRenderAnchor = preserveRelatedScrollOnNextRender
+    ? pendingSearchClearScrollAnchor ||
+      captureRelatedDomScrollAnchor(relatedContainer)
+    : null;
+  pendingSearchClearScrollAnchor = null;
   const vs = getOrCreateRelatedScroller();
   vs._headerHtml = '';
   const preserveScroll = preserveRelatedScrollOnNextRender;
@@ -7629,6 +7752,9 @@ async function runSearchFilterPipeline() {
     vs.updateDataAtTop(sorted, renderRow);
   } else {
     vs.updateData(sorted, renderRow, { preserveScroll });
+  }
+  if (preserveScroll && directRenderAnchor) {
+    restoreRelatedDomScrollAnchor(relatedContainer, directRenderAnchor);
   }
 
   // When no active filters, enrich in background and refresh visible rows
@@ -8380,7 +8506,14 @@ document.addEventListener('keydown', async (e) => {
           suffix: '',
         });
       } else {
-        relatedVirtualScroller?.selectAll();
+        if (relatedVirtualScroller) {
+          relatedVirtualScroller.selectAll();
+        } else {
+          getActiveContainer()
+            ?.querySelectorAll('.result-row')
+            .forEach((row) => row.classList.add('selected'));
+        }
+        syncChartHighlights();
       }
     } else {
       showBlockedBubble('Select all is not available here');
