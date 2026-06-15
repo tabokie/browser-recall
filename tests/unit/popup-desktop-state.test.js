@@ -320,6 +320,70 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('pageHeader').style.display).toBe('none');
   });
 
+  it('records and restores the active page when recording resumes from paused popup', async () => {
+    const tab = {
+      id: 44,
+      url: 'https://example.com/resume-from-paused-popup',
+      title: 'Resume From Paused Popup',
+    };
+    installDom();
+    const { sessionStore } = installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        setRecordingPaused: (request) => {
+          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          return { success: true };
+        },
+        recordPageActivity: { success: true },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: {
+          success: true,
+          url: tab.url,
+          page: {
+            slug: generateSlugFromUrl(tab.url),
+            url: tab.url,
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: [],
+        },
+        getPopupLists: { success: true, lists: [] },
+      },
+    });
+    sessionStore.workspace = { mode: 'private' };
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.getElementById('dashboardContent') === null);
+    document.getElementById('recordingToggle').click();
+
+    await waitFor(() =>
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'recordPageActivity',
+      ),
+    );
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      action: 'recordPageActivity',
+      url: tab.url,
+      title: tab.title,
+      slug: generateSlugFromUrl(tab.url),
+      isInitialLoad: true,
+    });
+    expect(document.getElementById('dashboardContent')).toBeTruthy();
+    expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
+  });
+
   it('keeps the recording banner visible when the active page is unavailable', async () => {
     const tab = {
       id: 39,

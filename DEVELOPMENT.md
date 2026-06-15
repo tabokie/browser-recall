@@ -23,13 +23,13 @@ npm run build
 
 This is the canonical build command. It builds every artifact needed for manual install and testing:
 
-- `dist/extension/` — the self-contained Chrome extension to load from `chrome://extensions/` with "Load unpacked". This is the directory Chrome must use; do not load `apps/extension/` directly.
-- `dist/extension-firefox/` — the Firefox WebExtension variant. It uses the same code but stages a Firefox background module script manifest instead of Chrome's service worker manifest.
-- `dist/desktop-ui/` — the staged desktop web UI consumed by Tauri. This is an intermediate build artifact, not something to install directly.
-- `target/release/browser-recall-desktop` — the raw desktop executable produced by Cargo/Tauri.
-- `target/release/bundle/macos/Browser Recall.app` — the macOS app bundle to launch manually after a release build.
+- `dist/extension/chrome/` — the self-contained Chrome extension to load from `chrome://extensions/` with "Load unpacked". This is the directory Chrome must use; do not load `apps/extension/` directly.
+- `dist/extension/firefox/` — the Firefox WebExtension variant. It uses the same code but stages a Firefox background module script manifest instead of Chrome's service worker manifest.
+- `dist/desktop/ui/` — the staged desktop web UI consumed by Tauri. This is an intermediate build artifact, not something to install directly.
+- `dist/desktop/<platform>/bin/` — the raw desktop executable copied from Cargo/Tauri release output when the desktop app is built.
+- `dist/desktop/<platform>/app/`, `dist/desktop/<platform>/dmg/`, and other bundle-type folders — desktop app bundles collected from Tauri release output.
 
-On non-macOS platforms, Tauri writes platform-specific desktop bundle output under `target/release/bundle/`.
+Tauri still uses `target/` internally as a Rust build cache, but release artifacts that users need are collected under `dist/`.
 
 The canonical build intentionally does not create a DMG/installer. Installer packaging is a release-only step because macOS may open installer UI during DMG creation.
 
@@ -38,8 +38,8 @@ The canonical build intentionally does not create a DMG/installer. Installer pac
 These commands exist for focused development only. Prefer `npm run build` when preparing artifacts for manual testing.
 
 ```bash
-npm run build:extension                         # stage dist/extension/ and dist/extension-firefox/
-npm run build:desktop-ui                        # only stage dist/desktop-ui/
+npm run build:extension                         # stage dist/extension/chrome/ and dist/extension/firefox/
+npm run build:desktop-ui                        # only stage dist/desktop/ui/
 npm run build --workspace @browser-recall/desktop      # build the desktop app bundle
 npm run build:dmg --workspace @browser-recall/desktop  # release-only DMG packaging
 ```
@@ -59,22 +59,22 @@ See `apps/extension/icons/README.md` for details.
 1. Open Chrome and go to `chrome://extensions/`
 2. Enable "Developer mode" (toggle in top right)
 3. Click "Load unpacked"
-4. Select the `dist/extension/` directory
+4. Select the `dist/extension/chrome/` directory
 5. The extension appears in your toolbar
 
-For Firefox development, open `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on", and select `dist/extension-firefox/manifest.json`.
+For Firefox development, open `about:debugging#/runtime/this-firefox`, click "Load Temporary Add-on", and select `dist/extension/firefox/manifest.json`.
 
 You can also validate and launch the Firefox build with Mozilla's `web-ext`:
 
 ```bash
-npx web-ext lint --source-dir dist/extension-firefox
-npx web-ext run --source-dir dist/extension-firefox --firefox /path/to/firefox
+npx web-ext lint --source-dir dist/extension/firefox
+npx web-ext run --source-dir dist/extension/firefox --firefox /path/to/firefox
 ```
 
 ### First Run
 
 1. Start Browser Recall Desktop with `npm run dev:desktop`
-2. Load `dist/extension/` as an unpacked extension
+2. Load `dist/extension/chrome/` as an unpacked extension
 3. Open the extension popup and click `Refresh`
 4. Approve the connection dialog in the desktop app
 
@@ -112,7 +112,7 @@ npm run test:visual                          # build desktop UI and run desktop 
 
 Config: `playwright.config.js`. Tests: `tests/e2e/*.spec.js`. Single worker, chromium channel.
 
-`npm run test:visual` is the canonical full desktop visual check. It first stages `dist/desktop-ui/`, then runs `tests/e2e/desktop-visual.spec.js`.
+`npm run test:visual` is the canonical full desktop visual check. It first stages `dist/desktop/ui/`, then runs `tests/e2e/desktop-visual.spec.js`.
 
 When running under a filesystem/process sandbox, Chromium launch may require an unsandboxed command approval. If every visual test fails at `0ms` with `browserType.launch: Target page, context or browser has been closed`, `SIGABRT`, or `kill EPERM`, rerun the same command with browser-launch permissions instead of changing the tests or package script. A focused `npx playwright test ... -g "<name>"` run can pass while the sandboxed npm visual script fails, because the failure is at browser launch before any test code runs.
 

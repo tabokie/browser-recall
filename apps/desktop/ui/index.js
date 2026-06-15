@@ -887,10 +887,10 @@ async function fetchPageBody(url) {
 
 // --- Progressive search ---
 const searchState = {
-  generation: 0, // generation counter — stale phase callbacks are discarded
-  results: [], // master result array, mutated by mergeSearchResults
-  resultIndex: new Map(), // url → index into results[] for O(1) dedup in mergeSearchResults
-  pendingPhases: 0, // count of in-flight phases — spinner shown while > 0
+  generation: 0,
+  results: [],
+  resultIndex: new Map(),
+  pendingPhases: 0,
 };
 let resetRelatedScrollOnNextRender = false;
 let preserveRelatedScrollOnNextRender = false;
@@ -1149,6 +1149,7 @@ async function renderProgressiveResults(gen) {
   const unenriched = searchState.results.filter((r) => !r._enriched);
   if (unenriched.length > 0) {
     await enrichFromEntityStorage(unenriched);
+    if (gen !== searchState.generation) return;
     for (const r of unenriched) r._enriched = true;
   }
   // Apply filters
@@ -1157,9 +1158,11 @@ async function renderProgressiveResults(gen) {
     const notFilterEnriched = results.filter((r) => !r._filterEnriched);
     if (notFilterEnriched.length > 0) {
       await enrichForFilters(notFilterEnriched);
+      if (gen !== searchState.generation) return;
       for (const r of notFilterEnriched) r._filterEnriched = true;
     }
     results = await applyFilters([...results]);
+    if (gen !== searchState.generation) return;
   }
 
   if (preserveRelatedScrollOnNextRender && searchState.pendingPhases > 0) {
@@ -1198,6 +1201,18 @@ function phaseComplete(gen) {
     hideSearchSpinner();
     void renderProgressiveResults(gen);
   }
+}
+
+function clearProgressiveSearchState() {
+  searchState.generation++;
+  searchState.results = [];
+  searchState.resultIndex.clear();
+  searchState.pendingPhases = 0;
+  hideSearchSpinner();
+}
+
+function isActiveCategoryView(category) {
+  return activeView.type === 'category' && activeView.value === category;
 }
 
 function buildDesktopHistoryResults(results) {
@@ -1528,10 +1543,7 @@ function resetHistory() {
 
   queueContentMap = {};
   cancelActiveHistorySearch();
-  searchState.generation++; // invalidate any in-flight progressive search
-  searchState.results = [];
-  searchState.pendingPhases = 0;
-  hideSearchSpinner();
+  clearProgressiveSearchState();
 }
 
 // Estimate visit counts for unloaded JSONL files from file sizes.
@@ -2433,20 +2445,24 @@ async function showCategory(category) {
 
   // Demand-load history
   await initHistoryFiles();
+  if (!isActiveCategoryView(category)) return;
   await loadHistoryBatch();
+  if (!isActiveCategoryView(category)) return;
   const allEntries = [...historyState.allEntries];
   allEntries.sort((a, b) => b.timestamp - a.timestamp);
   const filtered = filterByCategory(allEntries, category);
   const estimatedByDay = category === 'all' ? getEstimatedByDay() : undefined;
   renderTimeChart(filtered, estimatedByDay);
   await displayHistoryRows(filtered);
+  if (!isActiveCategoryView(category)) return;
 
   // Wire up demand-loading on scroll
   const vs = getOrCreateGlobalScroller();
   vs.onLoadMore = async () => {
     const newItems = await loadHistoryBatch();
+    if (!isActiveCategoryView(category)) return;
     if (newItems.length > 0) {
-      const newFiltered = filterByCategory(newItems, activeView.value);
+      const newFiltered = filterByCategory(newItems, category);
       if (newFiltered.length > 0) {
         const sort = currentSortState.column
           ? currentSortState
@@ -2455,14 +2471,16 @@ async function showCategory(category) {
         vs.appendData(applySortOrder(newEntries, sort));
         // Enrich in background — re-render visible rows when done
         enrichFromEntityStorage(newEntries, { includeVisitDates: false }).then(
-          () => vs.refreshVisible(),
+          () => {
+            if (isActiveCategoryView(category)) vs.refreshVisible();
+          },
         );
       }
       // Re-render chart with all loaded history + updated estimates
       const allLoaded = [...historyState.allEntries];
-      const allFiltered = filterByCategory(allLoaded, activeView.value);
+      const allFiltered = filterByCategory(allLoaded, category);
       const updatedEstimates =
-        activeView.value === 'all' ? getEstimatedByDay() : undefined;
+        category === 'all' ? getEstimatedByDay() : undefined;
       renderTimeChart(allFiltered, updatedEstimates);
     }
   };
@@ -3315,6 +3333,8 @@ async function runPreview() {
   const pinsPreviewListEl = document.getElementById('rulesPinsPreviewList');
   errorEl.style.display = 'none';
   previewEl.style.display = 'none';
+  previewResults = [];
+  previewPinsResults = [];
   previewListEl.innerHTML = '';
   pinsPreviewEl.style.display = 'none';
   pinsPreviewListEl.innerHTML = '';
@@ -3335,8 +3355,6 @@ async function runPreview() {
   }
   previewEl.style.display = '';
 
-  previewResults = [];
-  previewPinsResults = [];
   const keywordPinPreview = previewEntriesLocally(
     built.rule,
     collectPinnedPreviewEntries(),
@@ -3395,7 +3413,6 @@ function initRulesPanel() {
   });
 }
 
-// Module-level storage for list pin data (used by search filtering)
 let listPinsData = [];
 let listPinsListId = null;
 
@@ -7206,11 +7223,7 @@ function showSearchDraftEmptyResults() {
   if (activeView.type !== 'explore' && activeView.type !== 'list') return;
   searchDraftPreviewActive = true;
   cancelActiveHistorySearch();
-  searchState.generation++;
-  searchState.results = [];
-  searchState.resultIndex.clear();
-  searchState.pendingPhases = 0;
-  hideSearchSpinner();
+  clearProgressiveSearchState();
 
   const relatedContainer = document.getElementById('relatedResults');
   if (relatedContainer) {
@@ -7243,11 +7256,7 @@ async function restoreDefaultSearchResults(
   searchDraftPreviewActive = false;
   pendingSearchClearScrollAnchor = null;
   cancelActiveHistorySearch();
-  searchState.generation++;
-  searchState.results = [];
-  searchState.resultIndex.clear();
-  searchState.pendingPhases = 0;
-  hideSearchSpinner();
+  clearProgressiveSearchState();
   const draftInput = container.querySelector('#searchDraftInput');
   if (draftInput) draftInput.value = '';
   updateSearchDraftClearButton(container);

@@ -38,11 +38,11 @@ Then load the extension in Chrome:
 1. Open `chrome://extensions/`
 2. Enable "Developer mode"
 3. Run `npm run build:extension`
-4. Click "Load unpacked" and select the `dist/extension/` directory
+4. Click "Load unpacked" and select the `dist/extension/chrome/` directory
 5. Open the popup and use `Refresh`
 6. Approve the native connection prompt in Browser Recall Desktop
 
-`npm run build:extension` also stages a Firefox development build at `dist/extension-firefox/`. Load it from `about:debugging#/runtime/this-firefox` with "Load Temporary Add-on" and select its `manifest.json`.
+`npm run build:extension` also stages a Firefox development build at `dist/extension/firefox/`. Load it from `about:debugging#/runtime/this-firefox` with "Load Temporary Add-on" and select its `manifest.json`.
 
 The extension's options page is now only a stub that opens the desktop app. The main product UI is in `apps/desktop/ui/`.
 

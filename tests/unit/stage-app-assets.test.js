@@ -1,14 +1,22 @@
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   cleanupStagedAssets,
+  defaultArtifactDirs,
   stageExtensionAssets,
   stageFirefoxExtensionAssets,
 } from '../../scripts/stage-app-assets.mjs';
 import { DAEMON_PORTS } from '../../scripts/lib/desktop-test-runtime.mjs';
+import { collectDesktopArtifacts } from '../../scripts/collect-desktop-artifacts.mjs';
 import { createTestExtensionDir } from '../fixtures/test-extension.mjs';
 
 const stagedDirs = [];
@@ -20,6 +28,18 @@ afterEach(() => {
 });
 
 describe('extension staged assets', () => {
+  it('uses one dist artifact tree for default staged apps', () => {
+    expect(
+      defaultArtifactDirs.chromeExtension.endsWith('/dist/extension/chrome'),
+    ).toBe(true);
+    expect(
+      defaultArtifactDirs.firefoxExtension.endsWith('/dist/extension/firefox'),
+    ).toBe(true);
+    expect(defaultArtifactDirs.desktopUi.endsWith('/dist/desktop/ui')).toBe(
+      true,
+    );
+  });
+
   it('stages popup entity helpers into the loadable extension bundle', async () => {
     const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
     stagedDirs.push(outDir);
@@ -347,5 +367,117 @@ describe('extension staged assets', () => {
     );
     expect(productionBackground).not.toContain("case 'resetForTest'");
     expect(productionBackground).not.toContain("case 'seedTestData'");
+  });
+});
+
+describe('desktop artifact collection', () => {
+  it('copies the expected platform executable and bundle into dist/desktop shape', () => {
+    const root = mkdtempSync(
+      join(tmpdir(), 'browser-recall-desktop-artifacts-'),
+    );
+    const cargoReleaseDir = join(root, 'target-release');
+    const outDir = join(root, 'dist-desktop');
+    mkdirSync(join(cargoReleaseDir, 'bundle', 'macos', 'Browser Recall.app'), {
+      recursive: true,
+    });
+    writeFileSync(join(cargoReleaseDir, 'browser-recall-desktop'), 'bin');
+    writeFileSync(
+      join(
+        cargoReleaseDir,
+        'bundle',
+        'macos',
+        'Browser Recall.app',
+        'Contents',
+      ),
+      'app',
+    );
+
+    const collected = collectDesktopArtifacts({
+      cargoReleaseDir,
+      outDir,
+      platformName: 'macos',
+      bundles: ['app'],
+    });
+    stagedDirs.push(root);
+
+    expect(collected).toBe(outDir);
+    expect(
+      existsSync(join(outDir, 'macos', 'bin', 'browser-recall-desktop')),
+    ).toBe(true);
+    expect(existsSync(join(outDir, 'macos', 'app', 'Browser Recall.app'))).toBe(
+      true,
+    );
+  });
+
+  it('clears stale platform output before collecting current bundle types', () => {
+    const root = mkdtempSync(
+      join(tmpdir(), 'browser-recall-desktop-artifacts-'),
+    );
+    const cargoReleaseDir = join(root, 'target-release');
+    const outDir = join(root, 'dist-desktop');
+    mkdirSync(join(cargoReleaseDir, 'bundle', 'dmg'), { recursive: true });
+    mkdirSync(join(outDir, 'macos', 'app', 'Old.app'), { recursive: true });
+    writeFileSync(join(cargoReleaseDir, 'browser-recall-desktop'), 'bin');
+    writeFileSync(
+      join(cargoReleaseDir, 'bundle', 'dmg', 'Browser Recall.dmg'),
+      'dmg',
+    );
+
+    collectDesktopArtifacts({
+      cargoReleaseDir,
+      outDir,
+      platformName: 'macos',
+      bundles: ['dmg'],
+    });
+    stagedDirs.push(root);
+
+    expect(existsSync(join(outDir, 'macos', 'app', 'Old.app'))).toBe(false);
+    expect(existsSync(join(outDir, 'macos', 'dmg', 'Browser Recall.dmg'))).toBe(
+      true,
+    );
+  });
+
+  it('does not copy wrong-platform executables into the platform output', () => {
+    const root = mkdtempSync(
+      join(tmpdir(), 'browser-recall-desktop-artifacts-'),
+    );
+    const cargoReleaseDir = join(root, 'target-release');
+    const outDir = join(root, 'dist-desktop');
+    mkdirSync(join(cargoReleaseDir, 'bundle', 'macos', 'Browser Recall.app'), {
+      recursive: true,
+    });
+    writeFileSync(join(cargoReleaseDir, 'browser-recall-desktop'), 'bin');
+    writeFileSync(join(cargoReleaseDir, 'browser-recall-desktop.exe'), 'exe');
+
+    collectDesktopArtifacts({
+      cargoReleaseDir,
+      outDir,
+      platformName: 'macos',
+      bundles: ['app'],
+    });
+    stagedDirs.push(root);
+
+    expect(
+      existsSync(join(outDir, 'macos', 'bin', 'browser-recall-desktop')),
+    ).toBe(true);
+    expect(
+      existsSync(join(outDir, 'macos', 'bin', 'browser-recall-desktop.exe')),
+    ).toBe(false);
+  });
+
+  it('fails when expected desktop artifacts are missing', () => {
+    const root = mkdtempSync(
+      join(tmpdir(), 'browser-recall-desktop-artifacts-'),
+    );
+    stagedDirs.push(root);
+
+    expect(() =>
+      collectDesktopArtifacts({
+        cargoReleaseDir: join(root, 'target-release'),
+        outDir: join(root, 'dist-desktop'),
+        platformName: 'macos',
+        bundles: ['app'],
+      }),
+    ).toThrow(/Missing release executable/);
   });
 });

@@ -11,7 +11,7 @@ import { pickSeeded, seededRandom } from './helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '../..');
-const desktopUiDir = path.join(repoRoot, 'dist/desktop-ui');
+const desktopUiDir = path.join(repoRoot, 'dist/desktop/ui');
 const VIRTUALIZED_ENTRY_COUNT = VIRTUAL_SCROLLER_BUFFER * 3 + 150;
 const DESKTOP_COMBO_SEED = 'desktop-combo-20260505-a';
 const DESKTOP_RULE_PREVIEW_SEED = 'desktop-rule-preview-20260505-a';
@@ -4289,6 +4289,53 @@ test.describe('desktop visual regression', () => {
       await expect(
         page.getByText('No visits found to match against'),
       ).toHaveCount(0);
+    });
+  });
+
+  test('keyword rule preview replaces stale results on repeated previews', async ({
+    page,
+  }) => {
+    const now = Date.now();
+    const firstTitle = 'Rule preview first needle';
+    const secondTitle = 'Rule preview second marker';
+    const historyEntries = [
+      {
+        url: 'https://example.com/rule-preview/first',
+        title: firstTitle,
+        timestamp: now,
+        deviceId: 'device-a',
+      },
+      {
+        url: 'https://example.com/rule-preview/second',
+        title: secondTitle,
+        timestamp: now - 1000,
+        deviceId: 'device-a',
+      },
+    ];
+
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        historyEntries,
+      });
+
+      await page.locator('.sidebar-item[data-list-id="research"]').click();
+      await page.locator('#inboxToggleBtn').click();
+      await page.locator('#rulesAddBtn').click();
+      await page.locator('.rule-edit-input').fill('needle');
+      await page.locator('.rule-preview-btn').click();
+      await expect(page.locator('#rulesPreviewList')).toContainText(firstTitle);
+
+      await page.locator('.rule-edit-input').fill('marker');
+      await page.locator('.rule-preview-btn').click();
+
+      await expect(page.locator('#rulesPreviewList')).toContainText(
+        secondTitle,
+      );
+      await expect(page.locator('#rulesPreviewList')).not.toContainText(
+        firstTitle,
+      );
     });
   });
 

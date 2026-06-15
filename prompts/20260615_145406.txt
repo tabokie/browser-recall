@@ -1,0 +1,11 @@
+- Review the code thoroughly. I noticed there's a lot of local and global variables in the code and am beginning to think this causes trouble for maintain it long term.
+- This is not a gap review. There's no bug. One principle of good and simple code is to keep the variable local as much as possible, avoid sharing states between different parts of a large component.
+- Fix all of them thoroughly and carefully
+- The LoC seems to become even more bloated after your changes
+- Now let's move on to improving the project directory structure. The build artifacts are in particular arranged in a messy way. Extension, desktop app are outputed to different locations, some of them is nested deep in the tree.
+- What is "dist/desktop/bin/"? It doesn't distinguish platform?
+- $gap
+- Fix it, improve it. Some input: No need to write compatibility script, you can run cleanup once and assume no other legacy project is being used; try to reduce binary copies by letting the build command output directly to our desired location (if the command supports it)
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix them
+- $finish model=GPT-5.5 Codex

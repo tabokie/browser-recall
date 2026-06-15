@@ -20,20 +20,38 @@ import {
   paperErrorPopoutCss,
 } from './extension-ui-tokens.js';
 
-let currentSlug = '';
-let currentNotes = [];
-let currentEntry = null;
-let currentPageSummary = null;
-let currentUrl = '';
-let currentTitle = '';
-let currentTab = null;
+const currentPage = {
+  slug: '',
+  notes: [],
+  entry: null,
+  summary: null,
+  url: '',
+  title: '',
+  tab: null,
+  generation: 0,
+  loadInFlight: null,
+};
 let detachedContent = null; // holds dashboardContent when recording is paused
 let frozenChipOrder = null; // Array of list slugs — frozen on first render to keep order stable
 let _noteSaveTimeout = null;
 let desktopConnectInFlight = false;
-let dashboardGeneration = 0;
-let dashboardLoadInFlight = null;
 const boundListSearchCaptureInputs = new WeakSet();
+
+function resetCurrentPageIdentity({ slug, url, title, tab }) {
+  Object.assign(
+    currentPage,
+    { slug, url, title, tab },
+    {
+      entry: null,
+      summary: null,
+      notes: [],
+    },
+  );
+}
+
+function nextCurrentPageGeneration() {
+  return ++currentPage.generation;
+}
 
 // ─── Error UI ────────────────────────────────────────────────────────
 
@@ -472,14 +490,14 @@ function setupRequiredVisible() {
 
 async function loadDashboardIfConnected(connector) {
   if (connector?.state !== 'connected' || !connector?.deviceId) return false;
-  if (dashboardLoadInFlight) {
-    await dashboardLoadInFlight;
+  if (currentPage.loadInFlight) {
+    await currentPage.loadInFlight;
     return true;
   }
-  dashboardLoadInFlight = loadConnectedDashboard(connector).finally(() => {
-    dashboardLoadInFlight = null;
+  currentPage.loadInFlight = loadConnectedDashboard(connector).finally(() => {
+    currentPage.loadInFlight = null;
   });
-  await dashboardLoadInFlight;
+  await currentPage.loadInFlight;
   return true;
 }
 
@@ -545,7 +563,7 @@ function renderSnapshots(snapshots) {
       const ts = parseInt(btn.dataset.ts, 10);
       await chrome.runtime.sendMessage({
         action: 'deleteSnapshot',
-        slug: currentSlug,
+        slug: currentPage.slug,
         timestamp: ts,
       });
       await refreshCurrentPageSummary();
@@ -557,7 +575,7 @@ function renderSnapshots(snapshots) {
       const ts = parseInt(row.dataset.ts, 10);
       await chrome.runtime.sendMessage({
         action: 'openSnapshot',
-        slug: currentSlug,
+        slug: currentPage.slug,
         timestamp: ts,
       });
     });
@@ -655,22 +673,22 @@ function openPageNoteEditor(wrap, text, slug) {
   ta.addEventListener('blur', () => {
     clearTimeout(saveTimeout);
     savePageNote(ta).then(() => {
-      const note = currentNotes.find((n) => n.excerpt === null);
+      const notes = currentPage.notes;
+      const note = notes.find((n) => n.excerpt === null);
       if (note) {
         note.note = ta.value;
         note.slug = ta.dataset.noteSlug;
       } else if (ta.value && ta.dataset.noteSlug) {
-        currentNotes.push({
+        notes.push({
           excerpt: null,
           note: ta.value,
           slug: ta.dataset.noteSlug,
         });
       }
-      const globalNote = currentNotes.find((n) => n.excerpt === null);
       if (!ta.value) {
-        currentNotes = currentNotes.filter((n) => n.excerpt !== null);
+        currentPage.notes = currentPage.notes.filter((n) => n.excerpt !== null);
       }
-      renderPageNoteWrap(currentNotes.find((n) => n.excerpt === null));
+      renderPageNoteWrap(currentPage.notes.find((n) => n.excerpt === null));
     });
   });
 }
@@ -691,8 +709,8 @@ async function savePageNote(ta) {
     } else if (note) {
       const resp = await chrome.runtime.sendMessage({
         action: 'createNote',
-        pageSlug: currentSlug,
-        url: currentUrl,
+        pageSlug: currentPage.slug,
+        url: currentPage.url,
         excerpt: null,
         note,
         cssPath: null,
@@ -713,12 +731,12 @@ function renderNotes(notes) {
   }
   const container = document.getElementById('highlightList');
   const section = document.getElementById('notesSection');
-  currentNotes = notes || [];
+  currentPage.notes = Array.isArray(notes) ? notes : [];
 
-  const globalNote = currentNotes.find((n) => n.excerpt === null);
+  const globalNote = currentPage.notes.find((n) => n.excerpt === null);
   renderPageNoteWrap(globalNote);
 
-  const textNotes = currentNotes.filter((n) => n.excerpt !== null);
+  const textNotes = currentPage.notes.filter((n) => n.excerpt !== null);
   const hasPageNote = Boolean(globalNote?.note || globalNote?.slug);
   section?.classList.toggle('is-empty', !hasPageNote && textNotes.length === 0);
   const count = document.getElementById('annotationCount');
@@ -775,8 +793,8 @@ function bindHighlightActions(container) {
       } catch (e) {
         logError('[popup] Delete note error:', e);
       }
-      currentNotes = currentNotes.filter((n) => n.slug !== noteSlug);
-      renderNotes(currentNotes);
+      currentPage.notes = currentPage.notes.filter((n) => n.slug !== noteSlug);
+      renderNotes(currentPage.notes);
     });
   });
 
@@ -784,7 +802,7 @@ function bindHighlightActions(container) {
     btn.addEventListener('click', () => {
       const item = btn.closest('.highlight-item');
       const noteSlug = item?.dataset.noteSlug;
-      const note = currentNotes.find((n) => n.slug === noteSlug);
+      const note = currentPage.notes.find((n) => n.slug === noteSlug);
       if (!note) return;
       openHighlightNoteEditor(item, note);
     });
@@ -822,7 +840,7 @@ function openHighlightNoteEditor(item, note) {
   });
 
   ta.addEventListener('blur', () => {
-    renderNotes(currentNotes);
+    renderNotes(currentPage.notes);
   });
 }
 
@@ -836,8 +854,8 @@ async function loadLists() {
       });
       if (!response?.success) continue;
       const lists = response.lists || [];
-      currentPageSummary = {
-        ...(currentPageSummary || {}),
+      currentPage.summary = {
+        ...(currentPage.summary || {}),
         lists,
       };
       return lists;
@@ -846,7 +864,7 @@ async function loadLists() {
     }
   }
 
-  return currentPageSummary?.lists || [];
+  return currentPage.summary?.lists || [];
 }
 
 async function loadListPins(lists = null) {
@@ -866,21 +884,21 @@ function isPagePinned(allPins, listId, url) {
 }
 
 function applyPinStateToLists(lists, listId, pinned) {
-  if (!Array.isArray(lists) || !currentUrl) return;
+  if (!Array.isArray(lists) || !currentPage.url) return;
   const list = lists.find((candidate) => candidate.slug === listId);
   if (!list) return;
-  const slug = generateSlugFromUrl(currentUrl);
+  const slug = generateSlugFromUrl(currentPage.url);
   const id = pageKey(slug);
   const pins = Array.isArray(list.pins) ? [...list.pins] : [];
   const existingIndex = pins.findIndex(
-    (pin) => pin.id === id || pin.url === currentUrl,
+    (pin) => pin.id === id || pin.url === currentPage.url,
   );
   if (pinned) {
     if (existingIndex < 0) {
       pins.push({
         id,
-        url: currentUrl,
-        title: currentTitle || currentTab?.title || '',
+        url: currentPage.url,
+        title: currentPage.title || currentPage.tab?.title || '',
         pinnedAt: Date.now(),
       });
     }
@@ -891,19 +909,19 @@ function applyPinStateToLists(lists, listId, pinned) {
 }
 
 function applyPinStateToPinMap(allPins, listId, pinned) {
-  if (!allPins || !currentUrl) return;
-  const slug = generateSlugFromUrl(currentUrl);
+  if (!allPins || !currentPage.url) return;
+  const slug = generateSlugFromUrl(currentPage.url);
   const id = pageKey(slug);
   const pins = Array.isArray(allPins[listId]) ? [...allPins[listId]] : [];
   const existingIndex = pins.findIndex(
-    (pin) => pin.id === id || pin.url === currentUrl,
+    (pin) => pin.id === id || pin.url === currentPage.url,
   );
   if (pinned) {
     if (existingIndex < 0) {
       pins.push({
         id,
-        url: currentUrl,
-        title: currentTitle || currentTab?.title || '',
+        url: currentPage.url,
+        title: currentPage.title || currentPage.tab?.title || '',
         pinnedAt: Date.now(),
       });
     }
@@ -915,7 +933,7 @@ function applyPinStateToPinMap(allPins, listId, pinned) {
 }
 
 function applyLocalListPinState(listId, pinned) {
-  applyPinStateToLists(currentPageSummary?.lists, listId, pinned);
+  applyPinStateToLists(currentPage.summary?.lists, listId, pinned);
 }
 
 async function renderListChips(listOverride = null) {
@@ -927,7 +945,7 @@ async function renderListChips(listOverride = null) {
   const containsPage = [];
   const others = [];
   for (const list of lists) {
-    if (isPagePinned(allPins, list.slug, currentUrl)) {
+    if (isPagePinned(allPins, list.slug, currentPage.url)) {
       containsPage.push(list);
     } else {
       others.push(list);
@@ -984,7 +1002,7 @@ async function renderListChips(listOverride = null) {
 
   let html = displayLists
     .map((list) => {
-      const pinned = isPagePinned(allPins, list.slug, currentUrl);
+      const pinned = isPagePinned(allPins, list.slug, currentPage.url);
       return `<span class="list-chip${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
     })
     .join('');
@@ -1030,8 +1048,8 @@ async function sendListPinToggle(listId) {
   return chrome.runtime.sendMessage({
     action: 'toggleListPin',
     listId,
-    url: currentUrl,
-    title: currentTitle || currentTab?.title || '',
+    url: currentPage.url,
+    title: currentPage.title || currentPage.tab?.title || '',
   });
 }
 
@@ -1215,7 +1233,7 @@ function openListPicker(lists, allPins, options = {}) {
 
     let rowsHtml = filtered
       .map((c) => {
-        const pinned = isPagePinned(pickerPins, c.slug, currentUrl);
+        const pinned = isPagePinned(pickerPins, c.slug, currentPage.url);
         return `<div class="list-picker-option list-picker-row${pinned ? ' selected' : ''}" id="listPickerOption-list-${escapeHtml(c.slug)}" role="option" data-list-id="${c.slug}">
         <span class="list-picker-row-check">${pinned ? '&#10003;' : ''}</span>
         <span>${escapeHtml(c.name)}</span>
@@ -1342,7 +1360,7 @@ function shouldFocusListSearchCapture() {
   if (doc.getElementById('dashboard')?.style.display !== 'flex') return false;
   if (!doc.getElementById('dashboardContent')) return false;
   if (doc.getElementById('listPicker')) return false;
-  if (!currentUrl) return false;
+  if (!currentPage.url) return false;
   if (isEditableEventTarget(doc.activeElement)) return false;
   return true;
 }
@@ -1519,21 +1537,21 @@ document
     const { paused } = await loadRecordingState();
     const nextPaused = !paused;
     await saveRecordingState(nextPaused);
-    dashboardGeneration++;
+    nextCurrentPageGeneration();
     await renderRecordingBar();
 
     // Resuming recording: record the current page visit and show details.
-    if (paused && !nextPaused && currentTab) {
+    if (paused && !nextPaused && currentPage.tab) {
       reattachDashboardContent();
-      const url = currentTab._effectiveUrl || currentTab.url;
+      const url = currentPage.tab._effectiveUrl || currentPage.tab.url;
       await chrome.runtime.sendMessage({
         action: 'recordPageActivity',
         url,
-        title: currentTab.title || null,
+        title: currentPage.tab.title || null,
         slug: generateSlugFromUrl(url),
         isInitialLoad: true,
       });
-      await showDashboard(currentTab);
+      await showDashboard(currentPage.tab);
       return;
     }
 
@@ -1570,12 +1588,13 @@ function startEditingTitle() {
     newTitleEl.addEventListener('click', startEditingTitle);
     input.replaceWith(newTitleEl);
 
-    if (newTitle !== currentTitle && currentEntry) {
-      currentEntry.user_title = newTitle;
+    if (newTitle !== currentTitle && currentPage.entry) {
+      currentPage.entry.user_title = newTitle;
+      currentPage.title = newTitle;
       try {
         await chrome.runtime.sendMessage({
           action: 'recordPageActivity',
-          url: currentEntry.url,
+          url: currentPage.entry.url,
           user_title: newTitle,
         });
         logDebug('[popup] User title updated to:', newTitle);
@@ -1603,8 +1622,8 @@ document
 document.addEventListener('keydown', handleListSearchShortcut);
 
 document.getElementById('pageUrl').addEventListener('click', async () => {
-  if (!currentUrl) return;
-  await chrome.tabs.create({ url: currentUrl });
+  if (!currentPage.url) return;
+  await chrome.tabs.create({ url: currentPage.url });
 });
 
 // Open the desktop app to Explore. Page detail can be inaccurate before checkpointing.
@@ -1686,11 +1705,11 @@ async function trimDisplayTitle(title, url) {
 }
 
 function pageSummaryFallback(tab, slug, summary = {}) {
-  const url = summary.url || currentUrl || tab._effectiveUrl || tab.url;
+  const url = summary.url || currentPage.url || tab._effectiveUrl || tab.url;
   return {
     slug,
     url,
-    title: currentTitle || tab.title || '<unknown>',
+    title: currentPage.title || tab.title || '<unknown>',
     visitDates: [],
     childIds: [],
     parentIds: [],
@@ -1699,34 +1718,38 @@ function pageSummaryFallback(tab, slug, summary = {}) {
 
 async function fetchAndRenderPageData(tab, slug, options = {}) {
   const { resetSections = true } = options;
-  const generation = dashboardGeneration;
-  currentEntry = null;
+  const generation = currentPage.generation;
+  currentPage.entry = null;
 
   try {
-    logDebug(`[popup] Fetching page summary for url=${currentUrl || tab.url}`);
+    logDebug(
+      `[popup] Fetching page summary for url=${currentPage.url || tab.url}`,
+    );
     const summary = await chrome.runtime.sendMessage({
       action: 'getPageSummary',
-      url: currentUrl || tab.url,
+      url: currentPage.url || tab.url,
     });
-    if (generation !== dashboardGeneration) return false;
+    if (generation !== currentPage.generation) return false;
     logDebug('[popup] getPageSummary response:', summary);
 
     if (summary?.success) {
       if (resetSections) resetDashboardSections();
       else clearPageDiagnosticSection();
       const page = summary.page || pageSummaryFallback(tab, slug, summary);
-      currentPageSummary = { ...summary, page };
-      currentEntry = page;
-      currentTitle = page.user_title
+      const title = page.user_title
         ? page.user_title
         : await trimDisplayTitle(
             page.title || tab.title || '<unknown>',
-            page.url || currentUrl || tab.url,
+            page.url || currentPage.url || tab.url,
           );
-      document.getElementById('pageTitle').textContent = currentTitle;
-      if (page.url) {
-        currentUrl = page.url;
-        document.getElementById('pageUrl').textContent = page.url;
+      if (generation !== currentPage.generation) return false;
+      currentPage.summary = { ...summary, page };
+      currentPage.entry = page || null;
+      currentPage.title = title || '';
+      if (page.url) currentPage.url = page.url;
+      document.getElementById('pageTitle').textContent = currentPage.title;
+      if (currentPage.url) {
+        document.getElementById('pageUrl').textContent = currentPage.url;
       }
       renderVisitsAndLikes(page);
       renderSnapshots(summary.snapshots);
@@ -1744,7 +1767,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
             reason: 'popup-page-summary-failed',
             summary,
             connector,
-            url: currentUrl || tab.url,
+            url: currentPage.url || tab.url,
           },
         );
       } else {
@@ -1753,7 +1776,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
       return false;
     }
   } catch (error) {
-    if (generation !== dashboardGeneration) return false;
+    if (generation !== currentPage.generation) return false;
     logError('[popup] Could not load page summary:', error);
     const connector = await refreshDesktopConnectorState();
     if (connector?.state === 'connected' && connector?.deviceId) {
@@ -1763,7 +1786,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
           reason: 'popup-page-summary-error',
           error: error.message || String(error),
           connector,
-          url: currentUrl || tab.url,
+          url: currentPage.url || tab.url,
         },
       );
     } else {
@@ -1775,17 +1798,21 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
 }
 
 async function refreshCurrentPageSummary() {
-  if (!currentTab || !currentUrl) return;
-  const generation = ++dashboardGeneration;
+  if (!currentPage.tab || !currentPage.url) return;
+  const generation = nextCurrentPageGeneration();
   const { paused } = await loadRecordingState();
   if (paused || !document.getElementById('dashboardContent')) {
     await renderRecordingBar();
     return;
   }
-  const updated = await fetchAndRenderPageData(currentTab, currentSlug, {
-    resetSections: false,
-  });
-  if (!updated || generation !== dashboardGeneration) return;
+  const updated = await fetchAndRenderPageData(
+    currentPage.tab,
+    currentPage.slug,
+    {
+      resetSections: false,
+    },
+  );
+  if (!updated || generation !== currentPage.generation) return;
   await Promise.all([renderListChips(), renderRecordingBar()]);
 }
 
@@ -1819,7 +1846,7 @@ function showDashboardUI() {
 }
 
 function scheduleDelayedTitleCheck(tab, initialTitle) {
-  if (currentEntry?.user_title) return;
+  if (currentPage.entry?.user_title) return;
   setTimeout(async () => {
     try {
       const [freshTab] = await chrome.tabs.query({
@@ -1840,7 +1867,7 @@ function scheduleDelayedTitleCheck(tab, initialTitle) {
         url: tab.url,
         title: freshTitle,
       });
-      if (currentEntry) currentEntry.title = freshTitle;
+      if (currentPage.entry) currentPage.entry.title = freshTitle;
       logDebug('[popup] Auto-updated title to:', freshTitle);
     } catch (error) {
       logDebug('[popup] Title re-check failed:', error);
@@ -1850,16 +1877,14 @@ function scheduleDelayedTitleCheck(tab, initialTitle) {
 
 // Show dashboard for a tab: set up state, fetch data, render sections
 async function showDashboard(tab) {
-  const generation = ++dashboardGeneration;
-  const previousSlug = currentSlug;
+  const generation = nextCurrentPageGeneration();
+  const previousSlug = currentPage.slug;
   reattachDashboardContent();
 
   const { slug, url, title } = await resolvePageIdentity(tab);
-  if (generation !== dashboardGeneration) return;
+  if (generation !== currentPage.generation) return;
   if (slug !== previousSlug) frozenChipOrder = null;
-  currentUrl = url;
-  currentTitle = title;
-  currentSlug = slug;
+  resetCurrentPageIdentity({ slug, url, title, tab });
   document.getElementById('pageTitle').textContent = title;
   document.getElementById('pageUrl').textContent = url;
   resetDashboardSections();
@@ -1868,9 +1893,9 @@ async function showDashboard(tab) {
   scheduleDelayedTitleCheck(tab, tab.title || '');
 
   const updated = await fetchAndRenderPageData(tab, slug);
-  if (!updated || generation !== dashboardGeneration) return;
+  if (!updated || generation !== currentPage.generation) return;
   await renderListChips();
-  if (generation !== dashboardGeneration) return;
+  if (generation !== currentPage.generation) return;
 }
 
 // ─── Init phases ─────────────────────────────────────────────────────
@@ -1969,9 +1994,9 @@ async function resolveEffectiveUrl(tab) {
 }
 
 async function handlePrivateMode(tab) {
-  void tab;
   const { paused } = await loadRecordingState();
   if (!paused) return false;
+  currentPage.tab = tab;
   const content = document.getElementById('dashboardContent');
   detachedContent = content;
   content.remove();
@@ -2055,7 +2080,6 @@ async function loadConnectedDashboard(connector) {
 
   const tab = await resolveActiveTab();
   if (!tab) return;
-  currentTab = tab;
   await resolveEffectiveUrl(tab);
   if (await handlePrivateMode(tab)) return;
   if (await handleBlacklist(tab)) return;
@@ -2106,11 +2130,11 @@ initPopup().catch((err) => showFatalError(err.message));
 let mutationRefreshTimer = null;
 
 function currentPageAffectedByMutation(message) {
-  if (!currentUrl || !currentSlug) return false;
+  if (!currentPage.url || !currentPage.slug) return false;
 
-  if (message.url && message.url !== currentUrl) return false;
-  if (message.pageSlug && message.pageSlug !== currentSlug) return false;
-  if (message.slug && message.slug !== currentSlug) return false;
+  if (message.url && message.url !== currentPage.url) return false;
+  if (message.pageSlug && message.pageSlug !== currentPage.slug) return false;
+  if (message.slug && message.slug !== currentPage.slug) return false;
 
   switch (message.type) {
     case 'history':

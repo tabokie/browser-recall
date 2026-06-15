@@ -64,6 +64,8 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `crates/replay/src/lib.rs` | Production replay engine |
 | `crates/replay/src/bin/replay-verify.rs` | Full-log checkpoint verifier using the production replay and checkpoint policy |
 | `crates/search/src/lib.rs` | Native search primitives |
+| `scripts/stage-app-assets.mjs` | Stages loadable app assets under `dist/extension/{chrome,firefox}/` and `dist/desktop/ui/` |
+| `scripts/collect-desktop-artifacts.mjs` | Collects Tauri release binaries and bundles into `dist/desktop/<platform>/` |
 | `scripts/migrate-browser-data-schema.mjs` | Browser data migration utility for log/view/object schema changes, including URL identity canonicalization |
 | `scripts/test-coverage-monitor.mjs` | Test investment and JS/Rust uncovered-line monitor; enforces no JS or inline Rust unit-test LoC growth |
 | `scripts/generate-icons.mjs` | Renders root SVG icon sources into opaque desktop/extension icons, the transparent tray icon, and the macOS `.icns` pack |

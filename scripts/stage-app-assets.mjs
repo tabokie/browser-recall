@@ -11,6 +11,16 @@ const repoRoot = path.join(__dirname, '..');
 const extensionSourceDir = path.join(repoRoot, 'apps/extension');
 const desktopUiSourceDir = path.join(repoRoot, 'apps/desktop/ui');
 const sharedCoreDir = path.join(repoRoot, 'packages/core');
+const extensionDistDir = path.join(repoRoot, 'dist/extension');
+const chromeExtensionOutDir = path.join(extensionDistDir, 'chrome');
+const firefoxExtensionOutDir = path.join(extensionDistDir, 'firefox');
+const desktopUiOutDir = path.join(repoRoot, 'dist/desktop/ui');
+
+export const defaultArtifactDirs = Object.freeze({
+  chromeExtension: chromeExtensionOutDir,
+  firefoxExtension: firefoxExtensionOutDir,
+  desktopUi: desktopUiOutDir,
+});
 
 const extensionProductionExcludes = new Set([
   'background-test-actions.js',
@@ -20,13 +30,13 @@ const extensionProductionExcludes = new Set([
 const targets = {
   extension: {
     sourceDir: extensionSourceDir,
-    defaultOutDir: path.join(repoRoot, 'dist/extension'),
+    defaultOutDir: chromeExtensionOutDir,
     coreImportPrefix: '../../packages/core/',
     stagedCorePrefix: './core/',
   },
   'desktop-ui': {
     sourceDir: desktopUiSourceDir,
-    defaultOutDir: path.join(repoRoot, 'dist/desktop-ui'),
+    defaultOutDir: desktopUiOutDir,
     coreImportPrefix: '../../../packages/core/',
     stagedCorePrefix: './core/',
   },
@@ -111,9 +121,7 @@ export function stageExtensionAssets(outDir = targets.extension.defaultOutDir) {
   return staged;
 }
 
-export function stageFirefoxExtensionAssets(
-  outDir = path.join(repoRoot, 'dist/extension-firefox'),
-) {
+export function stageFirefoxExtensionAssets(outDir = firefoxExtensionOutDir) {
   const staged = stageTarget('extension', outDir);
   writeExtensionManifest(staged, 'firefox');
   return staged;

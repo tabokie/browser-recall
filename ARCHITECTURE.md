@@ -31,6 +31,14 @@ chrome connector (apps/extension)
 daemon websocket server
 ```
 
+Build artifacts are collected under `dist/`: loadable browser bundles live in
+`dist/extension/chrome/` and `dist/extension/firefox/`, while desktop artifacts
+live under `dist/desktop/`. `dist/desktop/ui/` contains platform-neutral staged
+web assets; platform-specific release outputs use `dist/desktop/<platform>/`,
+with `bin/` for copied release executables and bundle-type folders such as
+`app/` or `dmg/`. Tauri and Cargo still use `target/` as their internal build
+cache.
+
 ## Storage Layout
 
 ```text
