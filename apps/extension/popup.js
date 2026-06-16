@@ -82,19 +82,13 @@ function hideElement(id) {
   if (element) element.style.display = 'none';
 }
 
-function revealSetupIfStillWaiting() {
-  if (document.documentElement.style.opacity !== '0') return;
-  if (document.getElementById('setup-required')?.style.display === 'block') {
-    revealPopup();
-  }
-}
-
 function renderLoading() {
   document.getElementById('loading').style.display = 'flex';
   document.getElementById('setup-required').style.display = 'none';
   hideElement('blacklisted');
   document.getElementById('dashboard').style.display = 'none';
   clearSetupDiagnostic();
+  revealPopup();
 }
 
 function renderConnectorDiagnostic(connector = {}, options = {}) {
@@ -2089,8 +2083,6 @@ async function loadConnectedDashboard(connector) {
 async function initPopup() {
   await applyTheme();
   renderLoading();
-  renderConnectorDiagnostic({ state: 'connecting' }, { reveal: false });
-  const revealTimer = setTimeout(revealSetupIfStillWaiting, 250);
   try {
     const cachedConnector = await getCachedDesktopConnectorState();
     if (
@@ -2098,7 +2090,6 @@ async function initPopup() {
       cachedConnector.deviceId &&
       !cachedConnector.refuseMode
     ) {
-      clearTimeout(revealTimer);
       void refreshDesktopConnectorState().catch((error) => {
         logDebug('[popup] background connector refresh failed:', error.message);
       });
@@ -2106,14 +2097,12 @@ async function initPopup() {
       return;
     }
     if (cachedConnector && cachedConnector.state !== 'starting') {
-      clearTimeout(revealTimer);
       showSetupRequired(cachedConnector);
       refreshDesktopConnectorStateInBackground();
       return;
     }
 
     const connector = await refreshDesktopConnectorState();
-    clearTimeout(revealTimer);
     if (connector?.state !== 'connected' || !connector?.deviceId) {
       showSetupRequired(connector || { state: 'offline' });
       return;
@@ -2121,7 +2110,6 @@ async function initPopup() {
 
     await loadConnectedDashboard(connector);
   } catch (error) {
-    clearTimeout(revealTimer);
     throw error;
   }
 }

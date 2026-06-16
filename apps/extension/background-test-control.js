@@ -100,6 +100,19 @@ async function handleGetActionIconForTest(request) {
   return { success: true, path: path || null };
 }
 
+async function handleFailNextTabMessageForTest(request) {
+  const failures = globalThis.browserRecallTabMessageFailuresForTest;
+  if (!failures)
+    return { success: false, error: 'Tab message hook unavailable' };
+  failures.push({
+    action:
+      typeof request.messageAction === 'string' ? request.messageAction : null,
+    tabId: Number.isFinite(request.tabId) ? request.tabId : null,
+    error: request.error || 'Injected tab message failure',
+  });
+  return { success: true };
+}
+
 async function handleTriggerCommandForTest(request) {
   const command = request.command;
   if (typeof command !== 'string' || !command) {
@@ -148,6 +161,9 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'getActionIconForTest':
           sendResponse(await handleGetActionIconForTest(request));
+          break;
+        case 'failNextTabMessageForTest':
+          sendResponse(await handleFailNextTabMessageForTest(request));
           break;
         case 'triggerCommandForTest':
           sendResponse(await handleTriggerCommandForTest(request));

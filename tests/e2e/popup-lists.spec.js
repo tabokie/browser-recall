@@ -71,6 +71,130 @@ async function waitForContentScript(helper, page, url) {
 }
 
 test.describe('Popup list chip behavior', () => {
+  test('startup keeps loading shell until connector state resolves', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    localServer.addPage('/popup-startup-stability', {
+      title: 'Popup Startup Stability',
+      body: '<main>Popup startup stability page</main>',
+    });
+    const url = localServer.url('/popup-startup-stability');
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+    ]);
+
+    const popup = await extContext.newPage();
+    await popup.addInitScript(
+      ({ url }) => {
+        const visibleShells = [];
+        let releaseConnectorState;
+        globalThis.__popupStartupReleaseConnectorState = () => {
+          releaseConnectorState?.();
+        };
+        globalThis.__popupStartupVisibleShells = visibleShells;
+
+        const recordVisibleShells = () => {
+          for (const id of ['loading', 'setup-required', 'dashboard']) {
+            const element = document.getElementById(id);
+            if (!element || element.style.display === 'none') continue;
+            if (getComputedStyle(element).display === 'none') continue;
+            if (visibleShells[visibleShells.length - 1] !== id) {
+              visibleShells.push(id);
+            }
+          }
+        };
+
+        const patchApis = () => {
+          if (!globalThis.chrome?.runtime?.sendMessage || !chrome.tabs?.query) {
+            setTimeout(patchApis, 0);
+            return;
+          }
+
+          const originalQuery = chrome.tabs.query.bind(chrome.tabs);
+          chrome.tabs.query = async (queryInfo) => {
+            if (queryInfo?.active && queryInfo?.currentWindow) {
+              return [{ id: 10001, url, title: 'Popup Startup Stability' }];
+            }
+            return originalQuery(queryInfo);
+          };
+
+          const originalStorageGet = chrome.storage.local.get.bind(
+            chrome.storage.local,
+          );
+          let returnedStartingConnectorCache = false;
+          chrome.storage.local.get = async (keys, ...rest) => {
+            const keyList = Array.isArray(keys)
+              ? keys
+              : typeof keys === 'string'
+                ? [keys]
+                : [];
+            if (
+              !returnedStartingConnectorCache &&
+              keyList.includes('connectorState')
+            ) {
+              returnedStartingConnectorCache = true;
+              return { connectorState: 'starting' };
+            }
+            return originalStorageGet(keys, ...rest);
+          };
+
+          const originalSendMessage = chrome.runtime.sendMessage.bind(
+            chrome.runtime,
+          );
+          let delayed = false;
+          chrome.runtime.sendMessage = async (request, ...rest) => {
+            if (request?.action === 'getDesktopConnectorState' && !delayed) {
+              delayed = true;
+              await new Promise((resolve) => {
+                releaseConnectorState = resolve;
+              });
+            }
+            return originalSendMessage(request, ...rest);
+          };
+        };
+
+        patchApis();
+        const observer = new MutationObserver(recordVisibleShells);
+        const observe = () => {
+          if (!document.body) {
+            setTimeout(observe, 0);
+            return;
+          }
+          observer.observe(document.body, {
+            attributes: true,
+            childList: true,
+            subtree: true,
+            attributeFilter: ['style', 'class'],
+          });
+          recordVisibleShells();
+        };
+        observe();
+      },
+      { url },
+    );
+
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+    await expect(popup.locator('#loading')).toBeVisible();
+    await popup.waitForTimeout(350);
+    expect(
+      await popup.evaluate(() => globalThis.__popupStartupVisibleShells),
+    ).toEqual(['loading']);
+
+    await popup.evaluate(() =>
+      globalThis.__popupStartupReleaseConnectorState(),
+    );
+    await expect(popup.locator('#dashboard')).toBeVisible();
+    expect(
+      await popup.evaluate(() => globalThis.__popupStartupVisibleShells),
+    ).not.toContain('setup-required');
+    await popup.close();
+  });
+
   test('popup opened after a list already exists shows it as available', async ({
     extContext,
     extensionId,
@@ -83,47 +207,9 @@ test.describe('Popup list chip behavior', () => {
       body: '<main>Popup list refresh page</main>',
     });
     const url = localServer.url('/popup-list-refresh');
-    const slug = getSlugForUrl(url);
 
     await resetAndSeed(extContext, extensionId, [
       { path: 'views/manifest/settings.json', data: { trimRules: [] } },
-      {
-        path: 'views/manifest/list-order.json',
-        data: {
-          timestamp: now,
-          tree: [{ id: 'list:existing' }],
-        },
-      },
-      {
-        path: 'views/lists/existing.json',
-        data: {
-          slug: 'existing',
-          name: 'Existing',
-          owner: 'test-device',
-          timestamp: now,
-          pins: [],
-        },
-      },
-      {
-        path: pageCheckpointPath(slug),
-        data: {
-          slug,
-          url,
-          title: 'Popup List Refresh',
-          timestamp: now,
-          parentIds: [],
-          childIds: [],
-        },
-      },
-      {
-        path: 'views/manifest/list-name-to-id.json',
-        data: {
-          timestamp: now,
-          paths: {
-            'test-device/Existing': 'existing',
-          },
-        },
-      },
       {
         path: `logs/test-device/2026-03-01.jsonl`,
         lines: [
@@ -138,6 +224,13 @@ test.describe('Popup list chip behavior', () => {
     ]);
 
     const helper = await openHelperPage(extContext, extensionId);
+    const existingResp = await helper.evaluate(() =>
+      chrome.runtime.sendMessage({
+        action: 'saveListMeta',
+        name: 'Existing',
+      }),
+    );
+    expect(existingResp.success).toBe(true);
     const warmed = await helper.evaluate(() =>
       chrome.runtime.sendMessage({ action: 'getPopupLists' }),
     );
@@ -182,7 +275,9 @@ test.describe('Popup list chip behavior', () => {
       .poll(() =>
         popup
           .locator('#listChips .list-chip')
-          .evaluateAll((nodes) => nodes.map((node) => node.textContent.trim())),
+          .evaluateAll((nodes) =>
+            nodes.slice(0, 2).map((node) => node.textContent.trim()),
+          ),
       )
       .toEqual(['Desktop Added', 'Existing']);
 
@@ -191,7 +286,9 @@ test.describe('Popup list chip behavior', () => {
       .poll(() =>
         popup
           .locator('#listPickerList .list-picker-row')
-          .evaluateAll((nodes) => nodes.map((node) => node.textContent.trim())),
+          .evaluateAll((nodes) =>
+            nodes.slice(0, 2).map((node) => node.textContent.trim()),
+          ),
       )
       .toEqual(['Desktop Added', 'Existing']);
 

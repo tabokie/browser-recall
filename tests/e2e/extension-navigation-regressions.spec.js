@@ -563,7 +563,7 @@ test.describe('extension same-tab navigation regressions', () => {
     const page = await extContext.newPage();
     await page.goto(url);
     await waitForContentScript(helper, page, url);
-    await helper.evaluate(async (pageUrl) => {
+    const tabId = await helper.evaluate(async (pageUrl) => {
       const [tab] = await chrome.tabs.query({ url: pageUrl });
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -575,7 +575,19 @@ test.describe('extension same-tab navigation regressions', () => {
             );
         },
       });
+      return tab.id;
     }, url);
+    const failResp = await helper.evaluate(
+      (id) =>
+        chrome.runtime.sendMessage({
+          action: 'failNextTabMessageForTest',
+          tabId: id,
+          messageAction: 'showLikeNotification',
+          error: 'Injected showLikeNotification failure',
+        }),
+      tabId,
+    );
+    expect(failResp.success).toBe(true);
     await page.bringToFront();
 
     const commandResp = await helper.evaluate(() =>
@@ -586,6 +598,7 @@ test.describe('extension same-tab navigation regressions', () => {
     );
     expect(commandResp.success).toBe(true);
 
+    await expect(page.locator('[aria-label="Liked"]')).toBeVisible();
     await page.waitForTimeout(300);
     expect(await countReloadWarnings(page)).toBe(0);
     await page.reload();

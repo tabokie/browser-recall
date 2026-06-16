@@ -384,16 +384,38 @@ function userActionErrorMessage(error, fallback = 'Action failed') {
   return String(error?.message || error || fallback);
 }
 
-async function injectUserActionErrorNotification(tabId, message) {
+async function injectUserActionNotification(
+  tabId,
+  {
+    id,
+    message,
+    durationMs = 5000,
+    minWidth = '180px',
+    maxWidth = 'min(360px, calc(100vw - 32px))',
+    background = '#fffaf3',
+    color = '#b3261e',
+    border = '1px solid #d93025',
+    boxShadow = 'none',
+  },
+) {
   await chrome.scripting.executeScript({
     target: { tabId },
-    func: (displayMessage) => {
-      const existing = document.getElementById(
-        'browser-recall-user-action-error',
-      );
+    func: (options) => {
+      const {
+        id,
+        message: displayMessage,
+        durationMs,
+        minWidth,
+        maxWidth,
+        background,
+        color,
+        border,
+        boxShadow,
+      } = options;
+      const existing = document.getElementById(id);
       if (existing) existing.remove();
       const host = document.createElement('div');
-      host.id = 'browser-recall-user-action-error';
+      host.id = id;
       host.setAttribute('role', 'status');
       host.setAttribute('aria-label', displayMessage);
       host.style.cssText =
@@ -418,12 +440,13 @@ async function injectUserActionErrorNotification(tabId, message) {
             left: 50%;
             transform: translate(-50%, -50%) scale(0.92);
             z-index: 2147483647;
-            min-width: 180px;
-            max-width: min(360px, calc(100vw - 32px));
-            background: #fffaf3;
-            color: #b3261e;
-            border: 1px solid #d93025;
+            min-width: ${minWidth};
+            max-width: ${maxWidth};
+            background: ${background};
+            color: ${color};
+            border: ${border};
             border-radius: 2px;
+            box-shadow: ${boxShadow};
             font: 900 11px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             letter-spacing: 0.08em;
             padding: 9px 12px;
@@ -436,9 +459,43 @@ async function injectUserActionErrorNotification(tabId, message) {
         <div class="bubble">${escaped}</div>
       `;
       document.documentElement.appendChild(host);
-      setTimeout(() => host.remove(), 5000);
+      setTimeout(() => host.remove(), durationMs);
     },
-    args: [message],
+    args: [
+      {
+        id,
+        message,
+        durationMs,
+        minWidth,
+        maxWidth,
+        background,
+        color,
+        border,
+        boxShadow,
+      },
+    ],
+  });
+}
+
+async function injectUserActionErrorNotification(tabId, message) {
+  return injectUserActionNotification(tabId, {
+    id: 'browser-recall-user-action-error',
+    message,
+  });
+}
+
+async function injectUserActionSuccessNotification(tabId, message) {
+  return injectUserActionNotification(tabId, {
+    id: 'browser-recall-user-action-success',
+    message,
+    durationMs: 1600,
+    minWidth: '140px',
+    maxWidth: 'min(320px, calc(100vw - 32px))',
+    background: '#ffffff',
+    color: '#111111',
+    border: '1px solid rgba(0, 0, 0, 0.18)',
+    boxShadow:
+      '0 16px 40px rgba(0, 0, 0, 0.18), 0 2px 10px rgba(0, 0, 0, 0.12)',
   });
 }
 
@@ -460,6 +517,28 @@ async function notifyTabUserActionError(
     } catch (injectError) {
       logDebug(
         '[notification] user action error notification failed:',
+        sendError.message,
+        injectError.message,
+      );
+    }
+  }
+}
+
+async function notifyTabUserActionSuccess(
+  tabId,
+  message,
+  action,
+  payload = {},
+) {
+  if (!tabId || tabId <= 0) return;
+  try {
+    await chrome.tabs.sendMessage(tabId, { action, ...payload });
+  } catch (sendError) {
+    try {
+      await injectUserActionSuccessNotification(tabId, message);
+    } catch (injectError) {
+      logDebug(
+        '[notification] user action success notification failed:',
         sendError.message,
         injectError.message,
       );
@@ -1037,9 +1116,12 @@ chrome.commands.onCommand.addListener(async (command) => {
       if (!response.success)
         throw new Error(response.error || 'ratePage failed');
       notifyMutation('history', { url: tab.url });
-      chrome.tabs
-        .sendMessage(tab.id, { action: 'showLikeNotification', delta })
-        .catch(() => {});
+      await notifyTabUserActionSuccess(
+        tab.id,
+        delta >= 0 ? 'Liked' : 'Disliked',
+        'showLikeNotification',
+        { delta },
+      );
     } catch (error) {
       logDebug(`[${command}] ERROR:`, error.message, error);
       await notifyTabUserActionError(tab.id, error, 'Like failed');

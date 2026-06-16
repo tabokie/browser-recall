@@ -115,6 +115,14 @@ describe('capture paths send error notifications', () => {
     expect(bgSource).toContain('notifyTabUserActionError');
   });
 
+  it('keyboard like success fallback does not inherit page custom properties', () => {
+    const successFallbackMatch = bgSource.match(
+      /async function injectUserActionSuccessNotification[\s\S]*?^}/m,
+    );
+    expect(successFallbackMatch).not.toBeNull();
+    expect(successFallbackMatch[0]).not.toContain('var(--br-');
+  });
+
   it('popup path delegates error display to popup.js (no duplicate notification)', () => {
     // Background should NOT send showErrorNotification for popup captures — popup.js
     // now owns that responsibility. Only the keyboard shortcut path sends it from background.

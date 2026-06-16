@@ -4,6 +4,7 @@ export const BACKGROUND_TEST_ACTIONS = [
   'seedTestData',
   'getDesktopQueueForTest',
   'getActionIconForTest',
+  'failNextTabMessageForTest',
   'triggerCommandForTest',
 ];
 
@@ -31,6 +32,29 @@ if (originalSetIcon && !globalThis.browserRecallActionIconStateForTest) {
 globalThis.browserRecallActionIconStateForTest = actionIconState;
 
 globalThis.browserRecallCommandListenersForTest = [];
+globalThis.browserRecallTabMessageFailuresForTest = [];
+
+const originalTabsSendMessage = chrome.tabs?.sendMessage?.bind(chrome.tabs);
+if (
+  originalTabsSendMessage &&
+  !globalThis.browserRecallTabsSendMessageForTest
+) {
+  chrome.tabs.sendMessage = async (tabId, message, ...rest) => {
+    const failures = globalThis.browserRecallTabMessageFailuresForTest || [];
+    const index = failures.findIndex(
+      (failure) =>
+        (!failure.action || failure.action === message?.action) &&
+        (!failure.tabId || failure.tabId === tabId),
+    );
+    if (index >= 0) {
+      const [failure] = failures.splice(index, 1);
+      throw new Error(failure.error || 'Injected tab message failure');
+    }
+    return originalTabsSendMessage(tabId, message, ...rest);
+  };
+}
+globalThis.browserRecallTabsSendMessageForTest = chrome.tabs?.sendMessage;
+
 const originalOnCommandAddListener =
   chrome.commands?.onCommand?.addListener?.bind(chrome.commands.onCommand);
 if (originalOnCommandAddListener) {

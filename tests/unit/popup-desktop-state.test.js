@@ -652,7 +652,7 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('setupDiagnostic').textContent).toBe('');
   });
 
-  it('reveals the offline shell while desktop state probing is still pending', async () => {
+  it('keeps the startup loader visible while desktop state probing is still pending', async () => {
     const tab = {
       id: 45,
       url: 'https://example.com/offline-pending',
@@ -669,14 +669,13 @@ describe('popup desktop state rendering', () => {
 
     await import('../../apps/extension/popup.js');
 
-    await waitFor(() => document.documentElement.style.opacity === '');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(document.documentElement.style.opacity).toBe('');
+    expect(document.getElementById('loading').style.display).toBe('flex');
     expect(document.getElementById('setup-required').style.display).toBe(
-      'block',
+      'none',
     );
     expect(document.getElementById('dashboard').style.display).toBe('none');
-    expect(document.getElementById('setupRequiredTitle').textContent).toBe(
-      'Desktop Offline',
-    );
 
     connectorState.resolve({
       success: true,

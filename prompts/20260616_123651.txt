@@ -1,0 +1,8 @@
+- Sometimes in browser, I press "Alt-L" to like but the "Liked" notification doesn't show. But afterwards when I reload the page I can see the like is applied already.
+- The extension's popup UI sometimes flickers a little before stablize, can we improve that? I don't mean the natural fold out when loading data, I mean the back-and-forth
+- $gap
+- Fix them all
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix the first
+- $finish model=GPT-5.5 Codex
+- Fix it now, save the lesson too
