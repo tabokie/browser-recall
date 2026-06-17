@@ -705,7 +705,10 @@ describe('popup desktop state rendering', () => {
         trimTitle: (request) => ({ title: request.title }),
         readDesktopValue: { success: true, value: null },
         getPageSummary: () => pageSummary.promise,
-        getPopupLists: { success: true, lists: [] },
+        getPopupLists: {
+          success: true,
+          lists: [{ slug: 'reading', name: 'Reading', pins: [] }],
+        },
       },
     });
 
@@ -720,7 +723,11 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('dashboard').style.display).toBe('flex');
     expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
     expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
-    expect(document.getElementById('listSection').style.display).toBe('none');
+    await waitFor(
+      () =>
+        document.getElementById('listChips').textContent.includes('Reading'),
+    );
+    expect(document.getElementById('listSection').style.display).toBe('');
     expect(document.getElementById('notesSection').style.display).toBe('none');
     expect(document.getElementById('snapshotSection').style.display).toBe(
       'none',
@@ -749,6 +756,116 @@ describe('popup desktop state rendering', () => {
     );
     expect(document.getElementById('notesSection').style.display).toBe('');
     expect(document.getElementById('snapshotSection').style.display).toBe('');
+  });
+
+  it('uses summary lists when the fast popup list read fails during startup', async () => {
+    const tab = {
+      id: 45,
+      url: 'https://example.com/summary-list-fallback',
+      title: 'Summary List Fallback',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    let popupListCalls = 0;
+
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: {
+          success: true,
+          url: tab.url,
+          page: {
+            slug: pageSlug,
+            url: tab.url,
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: [
+            {
+              slug: 'summary-list',
+              name: 'Summary List',
+              pins: [{ id: `page:${pageSlug}`, pinnedAt: Date.now() }],
+            },
+          ],
+        },
+        getPopupLists: () => {
+          popupListCalls++;
+          return { success: false, error: 'Temporary list read failure' };
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() =>
+      document.getElementById('listChips').textContent.includes('Summary List'),
+    );
+    await waitFor(() => popupListCalls === 3);
+    expect(popupListCalls).toBe(3);
+    expect(document.getElementById('listChips').textContent).toContain(
+      'Summary List',
+    );
+    expect(document.querySelector('.list-chip.selected')).toBeTruthy();
+  });
+
+  it('does not render delayed fast list chips after page summary fails', async () => {
+    const tab = {
+      id: 46,
+      url: 'https://example.com/failed-summary-delayed-lists',
+      title: 'Failed Summary Delayed Lists',
+    };
+    const popupLists = deferred();
+
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: {
+          success: false,
+          error: 'Desktop page summary failed',
+        },
+        getPopupLists: () => popupLists.promise,
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () =>
+        document.getElementById('pageDiagnosticTitle').textContent ===
+        'Page Data Unavailable',
+    );
+
+    popupLists.resolve({
+      success: true,
+      lists: [{ slug: 'late-list', name: 'Late List', pins: [] }],
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(document.getElementById('listSection').style.display).toBe('none');
+    expect(document.getElementById('listChips').textContent).not.toContain(
+      'Late List',
+    );
   });
 
   it('keeps the editable page title legible in the dark popup theme', async () => {

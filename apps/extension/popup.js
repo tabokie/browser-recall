@@ -30,6 +30,7 @@ const currentPage = {
   tab: null,
   generation: 0,
   loadInFlight: null,
+  pageSummaryState: 'idle',
 };
 let detachedContent = null; // holds dashboardContent when recording is paused
 let frozenChipOrder = null; // Array of list slugs — frozen on first render to keep order stable
@@ -1038,6 +1039,17 @@ async function renderListChips(listOverride = null) {
   focusListSearchCapture();
 }
 
+async function renderFastListChips(listPromise, generation) {
+  try {
+    const lists = await listPromise;
+    if (generation !== currentPage.generation) return;
+    if (currentPage.pageSummaryState === 'failed') return;
+    await renderListChips(lists);
+  } catch (error) {
+    logDebug('[popup] fast list render failed:', error.message);
+  }
+}
+
 async function sendListPinToggle(listId) {
   return chrome.runtime.sendMessage({
     action: 'toggleListPin',
@@ -1714,6 +1726,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
   const { resetSections = true } = options;
   const generation = currentPage.generation;
   currentPage.entry = null;
+  currentPage.pageSummaryState = 'loading';
 
   try {
     logDebug(
@@ -1739,6 +1752,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
       if (generation !== currentPage.generation) return false;
       currentPage.summary = { ...summary, page };
       currentPage.entry = page || null;
+      currentPage.pageSummaryState = 'succeeded';
       currentPage.title = title || '';
       if (page.url) currentPage.url = page.url;
       document.getElementById('pageTitle').textContent = currentPage.title;
@@ -1752,6 +1766,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
         `[popup] Loaded ${summary.notes?.length || 0} notes, ${summary.snapshots?.length || 0} snapshots, ${summary.lists?.length || 0} lists`,
       );
     } else {
+      currentPage.pageSummaryState = 'failed';
       logDebug('[popup] getPageSummary returned failure:', summary);
       const connector = await refreshDesktopConnectorState();
       if (connector?.state === 'connected' && connector?.deviceId) {
@@ -1771,6 +1786,7 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
     }
   } catch (error) {
     if (generation !== currentPage.generation) return false;
+    currentPage.pageSummaryState = 'failed';
     logError('[popup] Could not load page summary:', error);
     const connector = await refreshDesktopConnectorState();
     if (connector?.state === 'connected' && connector?.deviceId) {
@@ -1885,10 +1901,17 @@ async function showDashboard(tab) {
   showDashboardUI();
   void renderRecordingBar();
   scheduleDelayedTitleCheck(tab, tab.title || '');
+  const listsPromise = loadLists();
+  void renderFastListChips(listsPromise, generation);
 
-  const updated = await fetchAndRenderPageData(tab, slug);
+  const updated = await fetchAndRenderPageData(tab, slug, {
+    resetSections: false,
+  });
   if (!updated || generation !== currentPage.generation) return;
-  await renderListChips();
+  const summaryLists = Array.isArray(currentPage.summary?.lists)
+    ? currentPage.summary.lists
+    : null;
+  await renderListChips(summaryLists || (await listsPromise));
   if (generation !== currentPage.generation) return;
 }
 

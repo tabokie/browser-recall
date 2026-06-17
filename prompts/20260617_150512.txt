@@ -1,0 +1,6 @@
+- Could we do something about the extension's popup load delay? Maybe profile it first to see what constitutes the largest chunk of getting the information, visually I see the sections starting from list is loading slower than the rest.
+- $gap
+- Skip 2, fix and improve and simplify the rest
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- fix it
+- $finish model=GPT-5.5 Codex

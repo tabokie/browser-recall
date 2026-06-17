@@ -296,6 +296,112 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
+  test('renders list chips without waiting for the full page summary', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    localServer.addPage('/popup-fast-lists', {
+      title: 'Popup Fast Lists',
+      body: '<main>Popup fast lists page</main>',
+    });
+    const url = localServer.url('/popup-fast-lists');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:fast-list' }],
+        },
+      },
+      {
+        path: 'views/lists/fast-list.json',
+        data: {
+          slug: 'fast-list',
+          name: 'Fast List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [{ id: `page:${slug}`, pinnedAt: now }],
+        },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Popup Fast Lists',
+          timestamp: now,
+          parentIds: ['list:fast-list'],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const popup = await extContext.newPage();
+    await popup.addInitScript(
+      ({ url }) => {
+        const patchApis = () => {
+          if (!globalThis.chrome?.runtime?.sendMessage || !chrome.tabs?.query) {
+            setTimeout(patchApis, 0);
+            return;
+          }
+          const originalQuery = chrome.tabs.query.bind(chrome.tabs);
+          chrome.tabs.query = async (queryInfo) => {
+            if (queryInfo?.active && queryInfo?.currentWindow) {
+              return [{ id: 10001, url, title: 'Popup Fast Lists' }];
+            }
+            return originalQuery(queryInfo);
+          };
+
+          const originalSendMessage = chrome.runtime.sendMessage.bind(
+            chrome.runtime,
+          );
+          const events = [];
+          globalThis.__popupFastListEvents = events;
+          chrome.runtime.sendMessage = async (request, ...rest) => {
+            if (request?.action === 'getPageSummary') {
+              events.push({ action: request.action, phase: 'start' });
+              await new Promise((resolve) => setTimeout(resolve, 450));
+              const response = await originalSendMessage(request, ...rest);
+              events.push({ action: request.action, phase: 'end' });
+              return response;
+            }
+            if (request?.action === 'getPopupLists') {
+              events.push({ action: request.action, phase: 'start' });
+              const response = await originalSendMessage(request, ...rest);
+              events.push({ action: request.action, phase: 'end' });
+              return response;
+            }
+            return originalSendMessage(request, ...rest);
+          };
+        };
+        patchApis();
+      },
+      { url },
+    );
+
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+    await expect(popup.locator('#dashboard')).toBeVisible();
+    await expect(
+      popup.locator('#listChips .list-chip', { hasText: 'Fast List' }),
+    ).toBeVisible({ timeout: 350 });
+    expect(
+      await popup.evaluate(() =>
+        globalThis.__popupFastListEvents.some(
+          (event) => event.action === 'getPageSummary' && event.phase === 'end',
+        ),
+      ),
+    ).toBe(false);
+
+    await expect(popup.locator('#pageTitle')).toHaveText('Popup Fast Lists');
+    await popup.close();
+  });
+
   test('toggling a chip does not change chip order', async ({
     extContext,
     extensionId,
