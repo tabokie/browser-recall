@@ -1,10 +1,21 @@
 <!doctype html>
-<html style="opacity: 0">
+<html style="background: #f7f4ea">
   <head>
     <meta charset="UTF-8" />
     <title>browser-recall</title>
-    <link rel="stylesheet" href="shared.css" />
     <style>
+      html {
+        background: #f7f4ea;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
       body {
         color-scheme: light;
         --bg-base: #f7f4ea;
@@ -54,6 +65,7 @@
         --radius-lg: 3px;
         --radius-md: 3px;
         --radius-sm: 3px;
+        --ease-smooth: cubic-bezier(0.25, 0.1, 0.25, 1);
         --font-display:
           ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono',
           monospace;
@@ -61,7 +73,8 @@
         --font-body:
           ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono',
           monospace;
-        width: 360px;
+        width: 296px;
+        min-height: 320px;
         font-family: var(--font-body);
         font-size: 12px;
         line-height: 1.45;
@@ -69,6 +82,27 @@
         background: var(--bg-ambient);
         background-attachment: fixed;
         padding: 0;
+      }
+
+      body.popup-compact {
+        min-height: 0;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .spinner {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--border-subtle);
+        border-top-color: var(--text-secondary);
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+        flex-shrink: 0;
       }
 
       html,
@@ -1114,7 +1148,7 @@
     <link rel="stylesheet" href="color-schemes.css" />
   </head>
   <body>
-    <div id="loading" class="popup-shell loading">
+    <div id="loading" class="popup-shell loading" style="display: none">
       <span class="spinner"></span>
     </div>
 
@@ -1143,7 +1177,7 @@
       </div>
     </div>
 
-    <div id="dashboard" style="display: none">
+    <div id="dashboard">
       <div class="recording-bar" id="recordingBar">
         <div class="recording-state">
           <button
@@ -1173,8 +1207,8 @@
         </div>
 
         <div class="header" id="pageHeader">
-          <div class="page-title" id="pageTitle">—</div>
-          <div class="page-url" id="pageUrl">—</div>
+          <div class="page-title" id="pageTitle">BROWSER RECALL</div>
+          <div class="page-url" id="pageUrl">current page receipt</div>
         </div>
 
         <div class="section" id="visitsLikesSection" style="display: none">

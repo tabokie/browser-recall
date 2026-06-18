@@ -41,7 +41,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `apps/desktop/src-tauri/src/config.rs` | Desktop config loading/persistence helpers |
 | `apps/desktop/src-tauri/src/login_item.rs` | Login-item integration for desktop startup behavior |
 | `apps/desktop/src-tauri/src/search.rs` | Desktop-side search adapters/helpers |
-| `apps/extension/background.js` | Thin connector runtime: popup RPC, buffering, pairing, snapshot/capture forwarding |
+| `apps/extension/background.js` | Thin connector runtime: prepared toolbar popup launch, popup RPC, buffering, pairing, snapshot/capture forwarding |
 | `apps/extension/icon-paths.js` | Packaged default, stop-recording, and special-state toolbar icon paths |
 | `apps/extension/background-test-control.js` | Test-only background RPC handlers staged by `tests/fixtures/test-extension.mjs` |
 | `apps/extension/content.js` | Visit/attention capture, highlight selection helpers, and saved highlight reapply from pages |
@@ -88,8 +88,8 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 ### Connector Popup
 
-- `apps/extension/popup.js` requests page summaries, submits popup mutations, refreshes the current page dashboard from background mutation broadcasts, and owns the transient list-picker/search keyboard UI.
-- `apps/extension/background.js` resolves popup actions through the daemon connection. Test-only background RPCs are split into `apps/extension/background-test-control.js` and included only in staged test extensions.
+- `apps/extension/popup.js` consumes prepared bootstrap payloads when present, requests page summaries as the direct-load fallback, submits popup mutations, refreshes the current page dashboard from background mutation broadcasts, and owns the transient list-picker/search keyboard UI.
+- `apps/extension/background.js` resolves popup actions through the daemon connection. Toolbar clicks prepare current-tab and daemon popup data before opening `popup.html?bootstrap=...`, avoiding a manifest `default_popup` first frame. Prepared popup data is handed off by a one-shot in-memory token, has a bounded timeout, and falls back to an extension tab when an engine lacks programmatic action popups. Test-only background RPCs are split into `apps/extension/background-test-control.js` and included only in staged test extensions.
 - `apps/extension/icon-paths.js` defines packaged toolbar icon sets for normal capture, paused recording, and special page-marker states; `apps/extension/badge-controller.js` applies those icons at runtime.
 - `apps/extension/options-stub.js` only opens the desktop app; it is not a settings surface.
 

@@ -12,7 +12,11 @@ const TEST_URL = 'https://example.com/';
 const TEST_SLUG = getSlugForUrl(TEST_URL);
 const POPUP_MUTATION_SEED = 'popup-live-mutation-20260505-a';
 
-async function openPopupForUrl(extContext, extensionId, { url, title }) {
+async function openPopupForUrl(
+  extContext,
+  extensionId,
+  { url, title, expectedTitle = title },
+) {
   const popup = await extContext.newPage();
   await popup.addInitScript(
     ({ url, title }) => {
@@ -35,7 +39,7 @@ async function openPopupForUrl(extContext, extensionId, { url, title }) {
   );
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
   await expect(popup.locator('#dashboard')).toBeVisible();
-  await expect(popup.locator('#pageTitle')).not.toHaveText('—');
+  await expect(popup.locator('#pageTitle')).toHaveText(expectedTitle);
   return popup;
 }
 
@@ -71,7 +75,7 @@ async function waitForContentScript(helper, page, url) {
 }
 
 test.describe('Popup list chip behavior', () => {
-  test('startup keeps loading shell until connector state resolves', async ({
+  test('startup keeps one static ticket shell until connected page data is ready', async ({
     extContext,
     extensionId,
     setupDir,
@@ -93,8 +97,12 @@ test.describe('Popup list chip behavior', () => {
       ({ url }) => {
         const visibleShells = [];
         let releaseConnectorState;
+        let releasePageSummary;
         globalThis.__popupStartupReleaseConnectorState = () => {
           releaseConnectorState?.();
+        };
+        globalThis.__popupStartupReleasePageSummary = () => {
+          releasePageSummary?.();
         };
         globalThis.__popupStartupVisibleShells = visibleShells;
 
@@ -154,6 +162,11 @@ test.describe('Popup list chip behavior', () => {
                 releaseConnectorState = resolve;
               });
             }
+            if (request?.action === 'getPageSummary') {
+              await new Promise((resolve) => {
+                releasePageSummary = resolve;
+              });
+            }
             return originalSendMessage(request, ...rest);
           };
         };
@@ -179,20 +192,167 @@ test.describe('Popup list chip behavior', () => {
     );
 
     await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-    await expect(popup.locator('#loading')).toBeVisible();
     await popup.waitForTimeout(350);
+    await expect
+      .poll(() =>
+        popup.evaluate(() => document.documentElement.dataset.popupHidden),
+      )
+      .toBeUndefined();
+    await expect
+      .poll(() =>
+        popup.evaluate(
+          () => getComputedStyle(document.documentElement).backgroundColor,
+        ),
+      )
+      .toBe('rgb(247, 244, 234)');
+    await expect
+      .poll(() =>
+        popup.evaluate(() => document.body.getBoundingClientRect().height),
+      )
+      .toBeGreaterThanOrEqual(320);
+    await expect
+      .poll(() =>
+        popup.evaluate(() => document.body.getBoundingClientRect().width),
+      )
+      .toBe(296);
+    await expect(popup.locator('#dashboard')).toBeVisible();
+    await expect(popup.locator('#loading')).toBeHidden();
     expect(
       await popup.evaluate(() => globalThis.__popupStartupVisibleShells),
-    ).toEqual(['loading']);
+    ).toEqual(['dashboard']);
 
     await popup.evaluate(() =>
       globalThis.__popupStartupReleaseConnectorState(),
     );
+    await popup.waitForTimeout(350);
+    await expect
+      .poll(() =>
+        popup.evaluate(() => document.documentElement.dataset.popupHidden),
+      )
+      .toBeUndefined();
+    expect(
+      await popup.evaluate(() => globalThis.__popupStartupVisibleShells),
+    ).toEqual(['dashboard']);
+
+    await popup.evaluate(() => globalThis.__popupStartupReleasePageSummary());
     await expect(popup.locator('#dashboard')).toBeVisible();
     expect(
       await popup.evaluate(() => globalThis.__popupStartupVisibleShells),
-    ).not.toContain('setup-required');
+    ).toEqual(['dashboard']);
     await popup.close();
+  });
+
+  test('prepared toolbar bootstrap renders daemon data without popup startup fetches', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    void setupDir;
+    localServer.addPage('/prepared-toolbar-popup', {
+      title: 'Prepared Toolbar Popup',
+      body: '<main>Prepared toolbar popup page</main>',
+    });
+    const url = localServer.url('/prepared-toolbar-popup');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:prepared-list' }],
+        },
+      },
+      {
+        path: 'views/lists/prepared-list.json',
+        data: {
+          slug: 'prepared-list',
+          name: 'Prepared List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [{ id: `page:${slug}`, pinnedAt: now }],
+        },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Prepared Toolbar Popup',
+          timestamp: now,
+          parentIds: ['list:prepared-list'],
+          childIds: [],
+          visitDates: [20260617],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    await page.bringToFront();
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const tabId = await helper.evaluate(async (pageUrl) => {
+      const tabs = await chrome.tabs.query({ url: pageUrl });
+      return tabs[0]?.id || null;
+    }, url);
+    expect(tabId).toBeTruthy();
+    const prepared = await helper.evaluate(
+      (targetTabId) =>
+        chrome.runtime.sendMessage({
+          action: 'preparePopupBootstrapForTest',
+          tabId: targetTabId,
+        }),
+      tabId,
+    );
+    expect(prepared.success).toBe(true);
+    expect(prepared.mode).toBe('dashboard');
+    expect(prepared.popupPath).toMatch(/^popup\.html\?bootstrap=/);
+    await helper.close();
+
+    const popup = await extContext.newPage();
+    await popup.addInitScript(() => {
+      const patchRuntime = () => {
+        if (!globalThis.chrome?.runtime?.sendMessage) {
+          setTimeout(patchRuntime, 0);
+          return;
+        }
+        const originalSendMessage = chrome.runtime.sendMessage.bind(
+          chrome.runtime,
+        );
+        const startupFetches = [];
+        globalThis.__preparedPopupStartupFetches = startupFetches;
+        chrome.runtime.sendMessage = async (request, ...rest) => {
+          if (
+            request?.action === 'getPageSummary' ||
+            request?.action === 'getPopupLists'
+          ) {
+            startupFetches.push(request.action);
+          }
+          return originalSendMessage(request, ...rest);
+        };
+      };
+      patchRuntime();
+    });
+    await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+
+    await expect(popup.locator('#dashboard')).toBeVisible();
+    await expect(popup.locator('#pageTitle')).toHaveText(
+      'Prepared Toolbar Popup',
+    );
+    await expect(
+      popup.locator('#listChips .list-chip', { hasText: 'Prepared List' }),
+    ).toBeVisible();
+    expect(
+      await popup.evaluate(() => globalThis.__preparedPopupStartupFetches),
+    ).toEqual([]);
+
+    await popup.close();
+    await page.close();
   });
 
   test('popup opened after a list already exists shows it as available', async ({
@@ -296,7 +456,7 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test('renders list chips without waiting for the full page summary', async ({
+  test('waits for the full page summary before showing list chips', async ({
     extContext,
     extensionId,
     setupDir,
@@ -386,10 +546,33 @@ test.describe('Popup list chip behavior', () => {
     );
 
     await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+    await popup.waitForTimeout(350);
+    await expect
+      .poll(() =>
+        popup.evaluate(() => document.documentElement.dataset.popupHidden),
+      )
+      .toBeUndefined();
+    await expect
+      .poll(() =>
+        popup.evaluate(
+          () => getComputedStyle(document.documentElement).backgroundColor,
+        ),
+      )
+      .toBe('rgb(247, 244, 234)');
+    await expect
+      .poll(() =>
+        popup.evaluate(() => document.body.getBoundingClientRect().height),
+      )
+      .toBeGreaterThanOrEqual(320);
+    await expect
+      .poll(() =>
+        popup.evaluate(() => document.body.getBoundingClientRect().width),
+      )
+      .toBe(296);
     await expect(popup.locator('#dashboard')).toBeVisible();
     await expect(
       popup.locator('#listChips .list-chip', { hasText: 'Fast List' }),
-    ).toBeVisible({ timeout: 350 });
+    ).toHaveCount(0);
     expect(
       await popup.evaluate(() =>
         globalThis.__popupFastListEvents.some(
@@ -398,6 +581,10 @@ test.describe('Popup list chip behavior', () => {
       ),
     ).toBe(false);
 
+    await expect(popup.locator('#dashboard')).toBeVisible();
+    await expect(
+      popup.locator('#listChips .list-chip', { hasText: 'Fast List' }),
+    ).toBeVisible();
     await expect(popup.locator('#pageTitle')).toHaveText('Popup Fast Lists');
     await popup.close();
   });
@@ -1401,6 +1588,7 @@ test.describe('Popup list chip behavior', () => {
     const popup = await openPopupForUrl(extContext, extensionId, {
       url,
       title: 'Readable Title | Example Site',
+      expectedTitle: 'Readable Title',
     });
 
     await expect(popup.locator('#pageTitle')).toHaveText('Readable Title');

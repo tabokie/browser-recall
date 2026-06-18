@@ -46,9 +46,13 @@ logDebug('Background script loading...');
 
 const DRAIN_INTERVAL_MS = 5000; // 5 seconds — connector queue is durable until drained
 const CONNECTOR_STATE_REFRESH_TIMEOUT_MS = 1000;
+const POPUP_PREPARE_TIMEOUT_MS = 1500;
+const POPUP_BOOTSTRAP_TTL_MS = 30_000;
+const POPUP_ACTION_MAPPING_FALLBACK_CLEAR_MS = 5000;
 const BROWSER_CAPABILITIES = getBrowserCapabilities();
 
 let lastLogTimestamp = 0;
+const pendingPopupBootstraps = new Map();
 
 // tabId → URL from the content script's initial recordPageActivity.
 // Used by popup to avoid slug mismatch when tab.url drifts (SPA pushState, etc.).
@@ -1365,6 +1369,307 @@ async function handleGetPopupAccessState(request) {
   };
 }
 
+function popupBootstrapToken() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function storePopupBootstrap(bootstrap) {
+  // The popup can only receive a URL from chrome.action.openPopup(), not an
+  // object payload. Keep the prepared model in memory and pass a one-shot token
+  // so normal toolbar opens avoid extension-side persistent product caches.
+  const token = popupBootstrapToken();
+  pendingPopupBootstraps.set(token, {
+    bootstrap,
+    expiresAt: Date.now() + POPUP_BOOTSTRAP_TTL_MS,
+  });
+  setTimeout(() => {
+    const entry = pendingPopupBootstraps.get(token);
+    if (entry?.expiresAt <= Date.now()) pendingPopupBootstraps.delete(token);
+  }, POPUP_BOOTSTRAP_TTL_MS + 1000);
+  return token;
+}
+
+function consumePopupBootstrapEntry(token, entry) {
+  if (token) pendingPopupBootstraps.delete(token);
+  if (entry.expiresAt <= Date.now()) {
+    return { success: false, error: 'Popup bootstrap expired' };
+  }
+  clearPreparedActionPopup(entry.bootstrap?.tab?.id);
+  return { success: true, bootstrap: entry.bootstrap };
+}
+
+async function handleConsumePopupBootstrap(request) {
+  const token = typeof request.token === 'string' ? request.token : '';
+  const entry = token ? pendingPopupBootstraps.get(token) : null;
+  if (entry) return consumePopupBootstrapEntry(token, entry);
+  return { success: false, error: 'Popup bootstrap not found' };
+}
+
+function clearPreparedActionPopup(tabId) {
+  if (!chrome.action?.setPopup) return;
+  const clearDetails = [{ popup: '' }];
+  if (Number.isFinite(tabId)) clearDetails.push({ tabId, popup: '' });
+  for (const details of clearDetails) {
+    chrome.action
+      .setPopup(details)
+      .catch((error) =>
+        logDebug('[popup] action popup clear failed:', error.message),
+      );
+  }
+}
+
+async function setPreparedActionPopup(tabId, popupPath) {
+  await chrome.action.setPopup({ popup: popupPath });
+  if (Number.isFinite(tabId)) {
+    await chrome.action.setPopup({ tabId, popup: popupPath });
+  }
+}
+
+function snapshotViewerSlugFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.href.startsWith(chrome.runtime.getURL('snapshot-viewer.html'))) {
+      return parsed.searchParams.get('slug');
+    }
+  } catch {}
+  return null;
+}
+
+function popupTabIsUnavailable(tab) {
+  return (
+    !tab ||
+    !tab.url ||
+    isInternalBrowserUrl(tab.url) ||
+    (tab.url.startsWith('chrome-extension://') &&
+      !snapshotViewerSlugFromUrl(tab.url))
+  );
+}
+
+async function resolvePreparedPopupIdentity(tab) {
+  let effectiveUrl = tab.url;
+  let effectiveSlug = null;
+  let effectiveTitle = tab.title || '<unknown>';
+
+  const reportedUrl = tabReportedUrls.get(tab.id);
+  if (reportedUrl && isSameDocumentPageUrl(reportedUrl, tab.url)) {
+    effectiveUrl = reportedUrl;
+  }
+
+  const viewerSlug = snapshotViewerSlugFromUrl(tab.url);
+  if (viewerSlug) {
+    const pageInfo = await handleGetPageInfo({ slug: viewerSlug });
+    if (pageInfo?.success && pageInfo.entry?.url) {
+      effectiveSlug = viewerSlug;
+      effectiveUrl = pageInfo.entry.url;
+      if (pageInfo.entry.title) effectiveTitle = pageInfo.entry.title;
+    }
+  } else if (tab.id != null) {
+    try {
+      const identity = await chrome.tabs.sendMessage(tab.id, {
+        action: 'getPageIdentity',
+      });
+      if (identity?.success && identity.embedded && identity.slug) {
+        effectiveSlug = identity.slug;
+        if (identity.url) {
+          effectiveUrl = identity.url;
+        } else {
+          const pageInfo = await handleGetPageInfo({ slug: identity.slug });
+          if (pageInfo?.success && pageInfo.entry?.url) {
+            effectiveUrl = pageInfo.entry.url;
+            if (pageInfo.entry.title) effectiveTitle = pageInfo.entry.title;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  try {
+    effectiveTitle = await trimTitle(effectiveTitle, effectiveUrl);
+  } catch {}
+
+  return {
+    slug: effectiveSlug || generateSlugFromUrl(effectiveUrl),
+    url: effectiveUrl,
+    title: effectiveTitle,
+  };
+}
+
+async function preparePopupBootstrapForTab(tab) {
+  const connector = await handleGetDesktopConnectorState();
+  if (connector?.state !== 'connected' || !connector?.deviceId) {
+    return { mode: 'setup', connector };
+  }
+
+  if (popupTabIsUnavailable(tab)) {
+    return {
+      mode: 'unavailable',
+      connector,
+      message: 'Not available for this page',
+    };
+  }
+
+  const identity = await resolvePreparedPopupIdentity(tab);
+  const preparedTab = {
+    id: tab.id,
+    url: tab.url,
+    title: tab.title || '',
+    _effectiveSlug: identity.slug,
+    _effectiveUrl: identity.url,
+    _effectiveTitle: identity.title,
+  };
+
+  const workspace = await getWorkspaceState();
+  if (workspace?.mode === 'private') {
+    return { mode: 'private', connector, tab: preparedTab, identity };
+  }
+
+  const access = await handleGetPopupAccessState({ url: identity.url });
+  if (access?.success === false) {
+    return {
+      mode: 'data-unavailable',
+      connector,
+      tab: preparedTab,
+      identity,
+      error: access.error || 'Desktop popup access check failed.',
+      diagnostic: {
+        reason: 'popup-access-check-failed',
+        access,
+        connector,
+        url: identity.url,
+      },
+    };
+  }
+  if (access?.blacklisted && !access?.hasVisitHistory) {
+    return { mode: 'blacklisted', connector, tab: preparedTab, identity };
+  }
+
+  const summary = await handleGetPageSummary({ url: identity.url });
+  if (!summary?.success) {
+    return {
+      mode: 'data-unavailable',
+      connector,
+      tab: preparedTab,
+      identity,
+      error: summary?.error || 'Desktop page summary failed.',
+      diagnostic: {
+        reason: 'popup-page-summary-failed',
+        summary,
+        connector,
+        url: identity.url,
+      },
+    };
+  }
+
+  return {
+    mode: 'dashboard',
+    connector,
+    tab: preparedTab,
+    identity,
+    summary,
+  };
+}
+
+function timeoutPopupBootstrap(tab) {
+  const url = tab?.url || '';
+  const title = tab?.title || '<unknown>';
+  const identity = url
+    ? { slug: generateSlugFromUrl(url), url, title }
+    : { slug: '', url: '', title };
+  return {
+    mode: tab?.url ? 'data-unavailable' : 'unavailable',
+    tab: tab
+      ? {
+          id: tab.id,
+          url: tab.url,
+          title: tab.title || '',
+          _effectiveSlug: identity.slug,
+          _effectiveUrl: identity.url,
+          _effectiveTitle: identity.title,
+        }
+      : null,
+    identity,
+    error: 'Popup data timed out. Try again.',
+    diagnostic: {
+      reason: 'popup-prepare-timeout',
+      timeoutMs: POPUP_PREPARE_TIMEOUT_MS,
+      url,
+    },
+  };
+}
+
+async function preparePopupBootstrapWithTimeout(tab) {
+  let timer;
+  try {
+    return await Promise.race([
+      preparePopupBootstrapForTab(tab),
+      new Promise((resolve) => {
+        timer = setTimeout(
+          () => resolve(timeoutPopupBootstrap(tab)),
+          POPUP_PREPARE_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function preparePopupOpenPayload(tab) {
+  const bootstrap = await preparePopupBootstrapWithTimeout(tab);
+  const token = storePopupBootstrap(bootstrap);
+  return {
+    bootstrap,
+    popupPath: `popup.html?bootstrap=${encodeURIComponent(token)}`,
+  };
+}
+
+async function openPreparedActionPopup(tab) {
+  const { popupPath } = await preparePopupOpenPayload(tab);
+  if (!chrome.action?.setPopup || !chrome.action?.openPopup) {
+    await chrome.tabs.create({ url: chrome.runtime.getURL(popupPath) });
+    return;
+  }
+  const tabId = Number.isFinite(tab?.id) ? tab.id : undefined;
+  try {
+    await setPreparedActionPopup(tabId, popupPath);
+    await chrome.action.openPopup();
+  } catch (error) {
+    logDebug('[popup] action openPopup failed:', error.message);
+    clearPreparedActionPopup(tabId);
+    await chrome.tabs.create({ url: chrome.runtime.getURL(popupPath) });
+  } finally {
+    // Some engines resolve/callback openPopup before the popup document has
+    // consumed its token. Prefer cleanup in handleConsumePopupBootstrap(); this
+    // fallback only prevents a stale mapping if the popup never opens.
+    setTimeout(() => {
+      clearPreparedActionPopup(tabId);
+    }, POPUP_ACTION_MAPPING_FALLBACK_CLEAR_MS);
+  }
+}
+
+if (chrome.action?.onClicked?.addListener) {
+  chrome.action.onClicked.addListener((tab) => {
+    void openPreparedActionPopup(tab).catch((error) => {
+      logDebug('[popup] action click failed:', error.message);
+    });
+  });
+}
+
+globalThis.browserRecallPreparedPopupForTest = {
+  async prepare(request = {}) {
+    const tab = Number.isFinite(request.tabId)
+      ? await chrome.tabs.get(request.tabId)
+      : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+    const { bootstrap, popupPath } = await preparePopupOpenPayload(tab);
+    return { success: true, mode: bootstrap.mode, popupPath };
+  },
+  async reset() {
+    pendingPopupBootstraps.clear();
+    clearPreparedActionPopup();
+  },
+};
+
 // ─── Message Handlers: Entity Reads ──────────────────────────────────
 
 async function handleLoadPageNotes(request) {
@@ -1770,6 +2075,9 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'getPopupAccessState':
           sendResponse(await handleGetPopupAccessState(request));
+          break;
+        case 'consumePopupBootstrap':
+          sendResponse(await handleConsumePopupBootstrap(request));
           break;
         case 'mutation':
           sendResponse(handleRuntimeMutation(request));

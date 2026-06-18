@@ -4,6 +4,7 @@ export const BACKGROUND_TEST_ACTIONS = [
   'seedTestData',
   'getDesktopQueueForTest',
   'getActionIconForTest',
+  'preparePopupBootstrapForTest',
   'failNextTabMessageForTest',
   'triggerCommandForTest',
 ];

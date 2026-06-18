@@ -46,9 +46,9 @@ function listenerStore() {
   };
 }
 
-function installDom() {
+function installDom(url = 'chrome-extension://abcdefghijklmnop/popup.html') {
   const dom = new JSDOM(POPUP_HTML, {
-    url: 'chrome-extension://abcdefghijklmnop/popup.html',
+    url,
     pretendToBeVisual: true,
   });
   globalThis.window = dom.window;
@@ -210,6 +210,88 @@ describe('popup desktop state rendering', () => {
     ).toBe(false);
   });
 
+  it('renders a prepared toolbar-click bootstrap without refetching page summary', async () => {
+    const tab = {
+      id: 45,
+      url: 'https://example.com/prepared-popup',
+      title: 'Untrimmed Browser Title',
+    };
+    const bootstrap = {
+      mode: 'dashboard',
+      connector: {
+        success: true,
+        state: 'connected',
+        deviceId: 'test-device',
+        hasToken: true,
+      },
+      tab,
+      identity: {
+        slug: 'prepared-popup',
+        url: tab.url,
+        title: 'Prepared Desktop Title',
+      },
+      summary: {
+        success: true,
+        url: tab.url,
+        page: {
+          slug: 'prepared-popup',
+          url: tab.url,
+          title: 'Prepared Desktop Title',
+          visitDates: [20260617],
+          likes: 1,
+        },
+        notes: [],
+        snapshots: [],
+        lists: [{ slug: 'reading', name: 'Reading', pins: [] }],
+      },
+    };
+    installDom(
+      'chrome-extension://abcdefghijklmnop/popup.html?bootstrap=token-1',
+    );
+    installChromeMock({
+      tab,
+      responses: {
+        consumePopupBootstrap: (request) => {
+          expect(request.token).toBe('token-1');
+          return { success: true, bootstrap };
+        },
+        getPageSummary: () => {
+          throw new Error('prepared popup should not refetch page summary');
+        },
+        getPopupLists: () => {
+          throw new Error('prepared popup should not refetch popup lists');
+        },
+        readDesktopValue: { success: true, value: null },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () =>
+        document.getElementById('pageTitle').textContent ===
+        'Prepared Desktop Title',
+    );
+
+    expect(document.getElementById('dashboard').style.display).toBe('flex');
+    expect(document.getElementById('loading').style.display).toBe('none');
+    expect(document.getElementById('setup-required').style.display).toBe(
+      'none',
+    );
+    expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
+    expect(document.getElementById('listCount').textContent).toBe('00');
+    expect(
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'getPageSummary',
+      ),
+    ).toBe(false);
+    expect(
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'getPopupLists',
+      ),
+    ).toBe(false);
+  });
+
   it('clears a stale page diagnostic after page summary recovers', async () => {
     const tab = {
       id: 43,
@@ -312,6 +394,8 @@ describe('popup desktop state rendering', () => {
     );
 
     expect(document.getElementById('dashboard').style.display).toBe('flex');
+    expect(document.body.classList.contains('popup-compact')).toBe(true);
+    expect(getComputedStyle(document.body).minHeight).toBe('0');
     expect(document.getElementById('recordingBar')).toBeTruthy();
     expect(document.getElementById('recordingToggle')).toBeTruthy();
     expect(document.getElementById('dashboardContent').style.display).toBe(
@@ -413,6 +497,8 @@ describe('popup desktop state rendering', () => {
 
     expect(document.getElementById('loading').style.display).toBe('none');
     expect(document.getElementById('dashboard').style.display).toBe('flex');
+    expect(document.body.classList.contains('popup-compact')).toBe(true);
+    expect(getComputedStyle(document.body).minHeight).toBe('0');
     expect(document.getElementById('recordingBar')).toBeTruthy();
     expect(document.getElementById('recordingToggle')).toBeTruthy();
     expect(document.getElementById('dashboardContent').style.display).toBe(
@@ -422,7 +508,9 @@ describe('popup desktop state rendering', () => {
       '',
     );
     expect(document.getElementById('pageHeader').style.display).toBe('none');
-    expect(document.getElementById('pageTitle').textContent).toBe('—');
+    expect(document.getElementById('pageTitle').textContent).toBe(
+      'BROWSER RECALL',
+    );
     const messageStyle = getComputedStyle(
       document.getElementById('pageDiagnosticTitle'),
     );
@@ -652,7 +740,7 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('setupDiagnostic').textContent).toBe('');
   });
 
-  it('keeps the startup loader visible while desktop state probing is still pending', async () => {
+  it('keeps the static ticket shell visible while desktop state probing is still pending', async () => {
     const tab = {
       id: 45,
       url: 'https://example.com/offline-pending',
@@ -670,21 +758,34 @@ describe('popup desktop state rendering', () => {
     await import('../../apps/extension/popup.js');
 
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(document.documentElement.style.opacity).toBe('');
-    expect(document.getElementById('loading').style.display).toBe('flex');
+    expect(document.documentElement.style.opacity).not.toBe('0');
+    expect(document.documentElement.dataset.popupHidden).toBeUndefined();
+    expect(getComputedStyle(document.documentElement).backgroundColor).toBe(
+      'rgb(247, 244, 234)',
+    );
+    expect(getComputedStyle(document.body).width).toBe('296px');
+    expect(getComputedStyle(document.body).minHeight).toBe('320px');
+    expect(document.getElementById('loading').style.display).toBe('none');
     expect(document.getElementById('setup-required').style.display).toBe(
       'none',
     );
-    expect(document.getElementById('dashboard').style.display).toBe('none');
+    expect(document.getElementById('dashboard').style.display).toBe('');
+    expect(document.getElementById('pageTitle').textContent).toBe(
+      'BROWSER RECALL',
+    );
 
     connectorState.resolve({
       success: true,
       state: 'offline',
       hasToken: true,
     });
+    await waitFor(
+      () => document.getElementById('setup-required').style.display === 'block',
+    );
+    expect(document.documentElement.dataset.popupHidden).toBeUndefined();
   });
 
-  it('reveals the page header while connected page details are still loading', async () => {
+  it('keeps the connected ticket shell visible while page details are still loading', async () => {
     const tab = {
       id: 44,
       url: 'https://example.com/slow-popup-summary',
@@ -719,15 +820,18 @@ describe('popup desktop state rendering', () => {
       ),
     );
 
-    expect(document.documentElement.style.opacity).toBe('');
-    expect(document.getElementById('dashboard').style.display).toBe('flex');
+    expect(document.documentElement.style.opacity).not.toBe('0');
+    expect(document.documentElement.dataset.popupHidden).toBeUndefined();
+    expect(getComputedStyle(document.documentElement).backgroundColor).toBe(
+      'rgb(247, 244, 234)',
+    );
+    expect(getComputedStyle(document.body).width).toBe('296px');
+    expect(getComputedStyle(document.body).minHeight).toBe('320px');
+    expect(document.getElementById('loading').style.display).toBe('none');
+    expect(document.getElementById('dashboard').style.display).toBe('');
     expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
     expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
-    await waitFor(
-      () =>
-        document.getElementById('listChips').textContent.includes('Reading'),
-    );
-    expect(document.getElementById('listSection').style.display).toBe('');
+    expect(document.getElementById('listSection').style.display).toBe('none');
     expect(document.getElementById('notesSection').style.display).toBe('none');
     expect(document.getElementById('snapshotSection').style.display).toBe(
       'none',
@@ -743,7 +847,7 @@ describe('popup desktop state rendering', () => {
       },
       notes: [],
       snapshots: [],
-      lists: [],
+      lists: [{ slug: 'reading', name: 'Reading', pins: [] }],
     });
 
     await waitFor(
@@ -754,11 +858,16 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('pageTitle').textContent).toBe(
       'Desktop Title',
     );
+    await waitFor(() =>
+      document.getElementById('listChips').textContent.includes('Reading'),
+    );
+    expect(document.getElementById('dashboard').style.display).toBe('flex');
+    expect(document.getElementById('listSection').style.display).toBe('');
     expect(document.getElementById('notesSection').style.display).toBe('');
     expect(document.getElementById('snapshotSection').style.display).toBe('');
   });
 
-  it('uses summary lists when the fast popup list read fails during startup', async () => {
+  it('uses page summary lists during startup without a separate list read', async () => {
     const tab = {
       id: 45,
       url: 'https://example.com/summary-list-fallback',
@@ -811,8 +920,7 @@ describe('popup desktop state rendering', () => {
     await waitFor(() =>
       document.getElementById('listChips').textContent.includes('Summary List'),
     );
-    await waitFor(() => popupListCalls === 3);
-    expect(popupListCalls).toBe(3);
+    expect(popupListCalls).toBe(0);
     expect(document.getElementById('listChips').textContent).toContain(
       'Summary List',
     );
@@ -1031,7 +1139,6 @@ describe('popup desktop state rendering', () => {
     let summaryCalls = 0;
     let popupListCalls = 0;
     const secondSummary = deferred();
-    const secondPopupLists = deferred();
     const currentLists = () => [
       {
         slug: 'reading',
@@ -1079,7 +1186,6 @@ describe('popup desktop state rendering', () => {
         },
         getPopupLists: () => {
           popupListCalls++;
-          if (popupListCalls === 2) return secondPopupLists.promise;
           return { success: true, lists: currentLists() };
         },
         toggleListPin: () => {
@@ -1110,12 +1216,11 @@ describe('popup desktop state rendering', () => {
       snapshots: [],
       lists: currentLists(),
     });
-    await waitFor(() => popupListCalls === 2);
+    expect(popupListCalls).toBe(0);
 
     expect(listChips.textContent).toContain('Reading');
     expect(listChips.querySelectorAll('.list-chip')).toHaveLength(1);
 
-    secondPopupLists.resolve({ success: true, lists: currentLists() });
     await waitFor(() => document.querySelector('.list-chip.selected'));
   });
 

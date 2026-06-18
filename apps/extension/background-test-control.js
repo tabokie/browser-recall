@@ -21,6 +21,7 @@ async function handleResetForTest() {
   const control = testControl();
   await control.clearDesktopBuffer();
   await control.resetEphemeralConnectorState();
+  await globalThis.browserRecallPreparedPopupForTest?.reset?.();
   return { success: true };
 }
 
@@ -100,6 +101,14 @@ async function handleGetActionIconForTest(request) {
   return { success: true, path: path || null };
 }
 
+async function handlePreparePopupBootstrapForTest(request) {
+  const control = globalThis.browserRecallPreparedPopupForTest;
+  if (!control) {
+    return { success: false, error: 'Prepared popup test hook unavailable' };
+  }
+  return control.prepare(request);
+}
+
 async function handleFailNextTabMessageForTest(request) {
   const failures = globalThis.browserRecallTabMessageFailuresForTest;
   if (!failures)
@@ -161,6 +170,9 @@ chrome.runtime.onMessage.addListener((request, sender, rawSendResponse) => {
           break;
         case 'getActionIconForTest':
           sendResponse(await handleGetActionIconForTest(request));
+          break;
+        case 'preparePopupBootstrapForTest':
+          sendResponse(await handlePreparePopupBootstrapForTest(request));
           break;
         case 'failNextTabMessageForTest':
           sendResponse(await handleFailNextTabMessageForTest(request));

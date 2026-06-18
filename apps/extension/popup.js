@@ -75,7 +75,12 @@ function showFatalError(message) {
 let _errorBubbleTimer = null;
 
 function revealPopup() {
+  document.documentElement.removeAttribute('data-popup-hidden');
   document.documentElement.style.opacity = '';
+}
+
+function setPopupCompact(compact) {
+  document.body?.classList.toggle('popup-compact', compact);
 }
 
 function hideElement(id) {
@@ -83,17 +88,9 @@ function hideElement(id) {
   if (element) element.style.display = 'none';
 }
 
-function renderLoading() {
-  document.getElementById('loading').style.display = 'flex';
-  document.getElementById('setup-required').style.display = 'none';
-  hideElement('blacklisted');
-  document.getElementById('dashboard').style.display = 'none';
-  clearSetupDiagnostic();
-  revealPopup();
-}
-
 function renderConnectorDiagnostic(connector = {}, options = {}) {
   const { reveal = true } = options;
+  setPopupCompact(false);
   document.getElementById('loading').style.display = 'none';
   hideElement('blacklisted');
   document.getElementById('dashboard').style.display = 'none';
@@ -117,6 +114,7 @@ function renderConnectorDiagnostic(connector = {}, options = {}) {
 }
 
 function renderBannerOnly() {
+  setPopupCompact(false);
   document.getElementById('loading').style.display = 'none';
   document.getElementById('setup-required').style.display = 'none';
   const dashboard = document.getElementById('dashboard');
@@ -131,6 +129,7 @@ function renderPageDiagnostic({ title, message, detail = null, actions = [] }) {
   document.getElementById('setup-required').style.display = 'none';
   hideElement('blacklisted');
   renderPageDashboardShell();
+  setPopupCompact(true);
   resetDashboardSections();
   const content = document.getElementById('dashboardContent');
   const section = document.getElementById('pageDiagnosticSection');
@@ -1039,17 +1038,6 @@ async function renderListChips(listOverride = null) {
   focusListSearchCapture();
 }
 
-async function renderFastListChips(listPromise, generation) {
-  try {
-    const lists = await listPromise;
-    if (generation !== currentPage.generation) return;
-    if (currentPage.pageSummaryState === 'failed') return;
-    await renderListChips(lists);
-  } catch (error) {
-    logDebug('[popup] fast list render failed:', error.message);
-  }
-}
-
 async function sendListPinToggle(listId) {
   return chrome.runtime.sendMessage({
     action: 'toggleListPin',
@@ -1826,18 +1814,20 @@ async function refreshCurrentPageSummary() {
   await Promise.all([renderListChips(), renderRecordingBar()]);
 }
 
-function renderPageDashboardShell() {
+function renderPageDashboardShell(options = {}) {
+  const { updateRecordingBar = true } = options;
+  setPopupCompact(false);
   document.getElementById('loading').style.display = 'none';
   hideElement('blacklisted');
   document.getElementById('setup-required').style.display = 'none';
   document.getElementById('dashboard').style.display = 'flex';
   document.getElementById('dashboardContent').style.display = 'block';
   revealPopup();
-  void renderRecordingBar();
+  if (updateRecordingBar) void renderRecordingBar();
 }
 
-function showDashboardUI() {
-  renderPageDashboardShell();
+function showDashboardUI(options = {}) {
+  renderPageDashboardShell(options);
   ensureListSearchCapture();
   focusListSearchCapture();
   const frame =
@@ -1898,11 +1888,6 @@ async function showDashboard(tab) {
   document.getElementById('pageTitle').textContent = title;
   document.getElementById('pageUrl').textContent = url;
   resetDashboardSections();
-  showDashboardUI();
-  void renderRecordingBar();
-  scheduleDelayedTitleCheck(tab, tab.title || '');
-  const listsPromise = loadLists();
-  void renderFastListChips(listsPromise, generation);
 
   const updated = await fetchAndRenderPageData(tab, slug, {
     resetSections: false,
@@ -1911,8 +1896,12 @@ async function showDashboard(tab) {
   const summaryLists = Array.isArray(currentPage.summary?.lists)
     ? currentPage.summary.lists
     : null;
-  await renderListChips(summaryLists || (await listsPromise));
+  await renderListChips(summaryLists || (await loadLists()));
   if (generation !== currentPage.generation) return;
+  await renderRecordingBar();
+  if (generation !== currentPage.generation) return;
+  showDashboardUI({ updateRecordingBar: false });
+  scheduleDelayedTitleCheck(tab, tab.title || '');
 }
 
 // ─── Init phases ─────────────────────────────────────────────────────
@@ -2033,6 +2022,11 @@ async function handleBlacklist(tab) {
   }
   if (!response?.blacklisted || response?.hasVisitHistory) return false;
 
+  renderBlacklistDiagnostic(tab, effectiveUrl);
+  return true;
+}
+
+function renderBlacklistDiagnostic(tab, effectiveUrl) {
   renderPageDiagnostic({
     title: 'Blacklisted',
     message: tab.url,
@@ -2086,8 +2080,114 @@ async function handleBlacklist(tab) {
       },
     ],
   });
+}
 
-  return true;
+function popupBootstrapToken() {
+  try {
+    return new URL(window.location.href).searchParams.get('bootstrap');
+  } catch {
+    return null;
+  }
+}
+
+async function consumePopupBootstrap() {
+  const token = popupBootstrapToken();
+  if (!token) return null;
+  try {
+    // Background prepared the popup model before opening this URL. The token is
+    // an in-memory one-shot handoff, not extension-side product persistence.
+    const response = await chrome.runtime.sendMessage({
+      action: 'consumePopupBootstrap',
+      token,
+    });
+    if (response?.success && response.bootstrap) return response.bootstrap;
+  } catch (error) {
+    logDebug('[popup] bootstrap consume failed:', error.message);
+  }
+  return null;
+}
+
+async function renderPreparedDashboard(bootstrap) {
+  const generation = nextCurrentPageGeneration();
+  const tab = bootstrap.tab;
+  const identity = bootstrap.identity || {};
+  const summary = bootstrap.summary || {};
+  const slug = identity.slug || generateSlugFromUrl(identity.url || tab.url);
+  const url = identity.url || summary.url || tab._effectiveUrl || tab.url;
+  const page = summary.page || pageSummaryFallback(tab, slug, summary);
+  const title =
+    page.user_title ||
+    identity.title ||
+    page.title ||
+    tab._effectiveTitle ||
+    tab.title ||
+    '<unknown>';
+
+  reattachDashboardContent();
+  if (slug !== currentPage.slug) frozenChipOrder = null;
+  resetCurrentPageIdentity({ slug, url, title, tab });
+  resetDashboardSections();
+  currentPage.summary = { ...summary, success: true, page };
+  currentPage.entry = page;
+  currentPage.pageSummaryState = 'succeeded';
+  if (page.url) currentPage.url = page.url;
+  currentPage.title = title || '';
+
+  document.getElementById('pageTitle').textContent = currentPage.title;
+  document.getElementById('pageUrl').textContent = currentPage.url;
+  renderVisitsAndLikes(page);
+  renderSnapshots(summary.snapshots || []);
+  renderNotes(summary.notes || []);
+  await renderListChips(Array.isArray(summary.lists) ? summary.lists : []);
+  if (generation !== currentPage.generation) return;
+  await renderRecordingBar();
+  if (generation !== currentPage.generation) return;
+  showDashboardUI({ updateRecordingBar: false });
+  scheduleDelayedTitleCheck(tab, tab.title || '');
+}
+
+async function renderPreparedPopup(bootstrap) {
+  if (!bootstrap?.mode) return false;
+  if (bootstrap.connector) applyDesktopConnectorUi(bootstrap.connector);
+
+  switch (bootstrap.mode) {
+    case 'setup':
+      showSetupRequired(bootstrap.connector || { state: 'offline' });
+      return true;
+    case 'unavailable':
+      showUnavailablePage(bootstrap.message || 'Not available for this page');
+      return true;
+    case 'private': {
+      currentPage.tab = bootstrap.tab || null;
+      const content = document.getElementById('dashboardContent');
+      if (content) {
+        detachedContent = content;
+        content.remove();
+      }
+      renderBannerOnly();
+      revealPopup();
+      return true;
+    }
+    case 'blacklisted':
+      renderBlacklistDiagnostic(
+        bootstrap.tab,
+        bootstrap.identity?.url ||
+          bootstrap.tab._effectiveUrl ||
+          bootstrap.tab.url,
+      );
+      return true;
+    case 'data-unavailable':
+      showDesktopDataUnavailable(
+        bootstrap.error || 'Desktop page data unavailable.',
+        bootstrap.diagnostic || null,
+      );
+      return true;
+    case 'dashboard':
+      await renderPreparedDashboard(bootstrap);
+      return true;
+    default:
+      return false;
+  }
 }
 
 // Initialize popup
@@ -2105,8 +2205,10 @@ async function loadConnectedDashboard(connector) {
 
 async function initPopup() {
   await applyTheme();
-  renderLoading();
   try {
+    const bootstrap = await consumePopupBootstrap();
+    if (bootstrap && (await renderPreparedPopup(bootstrap))) return;
+
     const cachedConnector = await getCachedDesktopConnectorState();
     if (
       cachedConnector?.state === 'connected' &&

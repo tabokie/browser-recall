@@ -81,6 +81,10 @@ function writeExtensionManifest(outDir, browser = 'chrome') {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
   if (browser === 'firefox') {
+    manifest.action = {
+      ...(manifest.action || {}),
+      default_popup: 'popup.html',
+    };
     manifest.background = {
       scripts: ['browser-api.js', 'background.js'],
       type: 'module',

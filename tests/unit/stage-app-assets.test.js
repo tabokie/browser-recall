@@ -83,10 +83,23 @@ describe('extension staged assets', () => {
 
     const popupHtml = readFileSync(join(outDir, 'popup.html'), 'utf8');
     const popupSource = readFileSync(join(outDir, 'popup.js'), 'utf8');
+    const backgroundSource = readFileSync(
+      join(outDir, 'background.js'),
+      'utf8',
+    );
+    const manifest = JSON.parse(readFileSync(join(outDir, 'manifest.json')));
     const extensionUiTokensSource = readFileSync(
       join(outDir, 'extension-ui-tokens.js'),
       'utf8',
     );
+    expect(manifest.action.default_popup).toBeUndefined();
+    expect(backgroundSource).toContain('chrome.action.onClicked.addListener');
+    expect(backgroundSource).toMatch(
+      /try\s*\{\s*await setPreparedActionPopup\(tabId, popupPath\)/,
+    );
+    expect(backgroundSource).not.toContain('schedulePreparedPopupPrewarm');
+    expect(backgroundSource).not.toContain('POPUP_BOOTSTRAP_SESSION_KEY');
+    expect(backgroundSource).not.toContain('schedulePreparedActionPopupClear');
     expect(popupHtml).not.toContain('Desktop Shell');
     expect(popupHtml).not.toContain('Setup Required');
     expect(popupHtml).not.toContain('Connection');
@@ -97,6 +110,14 @@ describe('extension staged assets', () => {
     );
     expect(popupHtml).toContain('--bg-base: #f7f4ea');
     expect(popupHtml).toContain('--text-primary: #171713');
+    expect(popupHtml).not.toContain('href="shared.css"');
+    expect(popupHtml).not.toContain('data-popup-hidden="true"');
+    expect(popupHtml).toContain('width: 296px');
+    expect(popupHtml).toContain('min-height: 320px');
+    expect(popupHtml).toContain('body.popup-compact');
+    expect(popupHtml).toContain('min-height: 0');
+    expect(popupHtml).toContain('<div id="dashboard">');
+    expect(popupHtml).toContain('@keyframes spin');
     expect(popupHtml).not.toContain(
       '.setup-action-btn:hover {\n        background: var(--recording-hot);',
     );
@@ -286,6 +307,7 @@ describe('extension staged assets', () => {
     stageFirefoxExtensionAssets(outDir);
 
     const manifest = JSON.parse(readFileSync(join(outDir, 'manifest.json')));
+    expect(manifest.action.default_popup).toBe('popup.html');
     expect(manifest.background).toEqual({
       scripts: ['browser-api.js', 'background.js'],
       type: 'module',
