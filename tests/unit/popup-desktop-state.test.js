@@ -404,12 +404,13 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('pageHeader').style.display).toBe('none');
   });
 
-  it('records and restores the active page when recording resumes from paused popup', async () => {
+  it('keeps paused popup compact and restores the active page non-progressively when recording resumes', async () => {
     const tab = {
       id: 44,
       url: 'https://example.com/resume-from-paused-popup',
       title: 'Resume From Paused Popup',
     };
+    const pageSummary = deferred();
     installDom();
     const { sessionStore } = installChromeMock({
       tab,
@@ -422,6 +423,97 @@ describe('popup desktop state rendering', () => {
         },
         getReportedUrl: { success: true, url: tab.url },
         setRecordingPaused: (request) => {
+          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          return { success: true };
+        },
+        recordPageActivity: { success: true },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () => pageSummary.promise,
+        getPopupLists: { success: true, lists: [] },
+      },
+    });
+    sessionStore.workspace = { mode: 'private' };
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent')?.style.display === 'none',
+    );
+    expect(document.body.classList.contains('popup-compact')).toBe(true);
+    expect(getComputedStyle(document.body).minHeight).toBe('0');
+    document.getElementById('recordingToggle').click();
+
+    await waitFor(() =>
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'recordPageActivity',
+      ),
+    );
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      action: 'recordPageActivity',
+      url: tab.url,
+      title: tab.title,
+      slug: generateSlugFromUrl(tab.url),
+      isInitialLoad: true,
+    });
+
+    await waitFor(() =>
+      chrome.runtime.sendMessage.mock.calls.some(
+        ([request]) => request.action === 'getPageSummary',
+      ),
+    );
+    expect(document.body.classList.contains('popup-compact')).toBe(true);
+    expect(document.getElementById('dashboardContent').style.display).toBe(
+      'none',
+    );
+
+    pageSummary.resolve({
+      success: true,
+      url: tab.url,
+      page: {
+        slug: generateSlugFromUrl(tab.url),
+        url: tab.url,
+        title: tab.title,
+        visitDates: [],
+      },
+      notes: [],
+      snapshots: [],
+      lists: [],
+    });
+
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent').style.display === 'block',
+    );
+    expect(document.getElementById('dashboardContent')).toBeTruthy();
+    expect(document.body.classList.contains('popup-compact')).toBe(false);
+    expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
+  });
+
+  it('disables resume while a pause command is still committing', async () => {
+    const tab = {
+      id: 47,
+      url: 'https://example.com/rapid-pause-resume',
+      title: 'Rapid Pause Resume',
+    };
+    const firstPauseSave = deferred();
+    let saveCalls = 0;
+    installDom();
+    const { sessionStore } = installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        setRecordingPaused: async (request) => {
+          saveCalls++;
+          if (saveCalls === 1) await firstPauseSave.promise;
           sessionStore.workspace = request.paused ? { mode: 'private' } : {};
           return { success: true };
         },
@@ -444,27 +536,657 @@ describe('popup desktop state rendering', () => {
         getPopupLists: { success: true, lists: [] },
       },
     });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent').style.display === 'block',
+    );
+    const toggle = document.getElementById('recordingToggle');
+    toggle.click();
+
+    await waitFor(() => toggle.disabled === true);
+    toggle.click();
+
+    await waitFor(() => saveCalls >= 1);
+    expect(
+      chrome.runtime.sendMessage.mock.calls.filter(
+        ([request]) => request.action === 'setRecordingPaused',
+      ),
+    ).toEqual([[{ action: 'setRecordingPaused', paused: true }]]);
+
+    firstPauseSave.resolve();
+
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent')?.style.display === 'none' &&
+        toggle.disabled === false,
+    );
+
+    expect(
+      chrome.runtime.sendMessage.mock.calls.filter(
+        ([request]) => request.action === 'setRecordingPaused',
+      ),
+    ).toEqual([[{ action: 'setRecordingPaused', paused: true }]]);
+    expect(document.body.classList.contains('popup-compact')).toBe(true);
+  });
+
+  it('ignores list mutations while a recording toggle is committing', async () => {
+    const tab = {
+      id: 53,
+      url: 'https://example.com/locked-list-while-pausing',
+      title: 'Locked List While Pausing',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    const firstPauseSave = deferred();
+    let saveCalls = 0;
+    let toggleCalls = 0;
+    installDom();
+    const { sessionStore } = installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        setRecordingPaused: async (request) => {
+          saveCalls++;
+          if (saveCalls === 1) await firstPauseSave.promise;
+          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          return { success: true };
+        },
+        recordPageActivity: { success: true },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: {
+          success: true,
+          url: tab.url,
+          page: {
+            slug: pageSlug,
+            url: tab.url,
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: [
+            {
+              slug: 'reading',
+              name: 'Reading',
+              pins: [],
+            },
+          ],
+        },
+        getPopupLists: {
+          success: true,
+          lists: [
+            {
+              slug: 'reading',
+              name: 'Reading',
+              pins: [],
+            },
+          ],
+        },
+        toggleListPin: () => {
+          toggleCalls++;
+          return { success: true, pinned: true };
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.querySelector('.list-chip'));
+    const toggle = document.getElementById('recordingToggle');
+    toggle.click();
+    await waitFor(() => toggle.disabled === true);
+
+    document.querySelector('.list-chip').click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(toggleCalls).toBe(0);
+
+    firstPauseSave.resolve();
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent')?.style.display === 'none',
+    );
+    expect(toggleCalls).toBe(0);
+  });
+
+  it('disables recording toggle while a list mutation is committing', async () => {
+    const tab = {
+      id: 54,
+      url: 'https://example.com/locked-recording-while-pinning',
+      title: 'Locked Recording While Pinning',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    const listRefresh = deferred();
+    let summaryCalls = 0;
+    let pauseCalls = 0;
+    let pinned = false;
+    const currentLists = () => [
+      {
+        slug: 'reading',
+        name: 'Reading',
+        pins: pinned ? [{ id: `page:${pageSlug}`, pinnedAt: Date.now() }] : [],
+      },
+    ];
+    installDom();
+    const { sessionStore } = installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        setRecordingPaused: (request) => {
+          pauseCalls++;
+          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          return { success: true };
+        },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () => {
+          summaryCalls++;
+          if (summaryCalls === 2) return listRefresh.promise;
+          return {
+            success: true,
+            url: tab.url,
+            page: {
+              slug: pageSlug,
+              url: tab.url,
+              title: tab.title,
+              visitDates: [],
+            },
+            notes: [],
+            snapshots: [],
+            lists: currentLists(),
+          };
+        },
+        getPopupLists: () => ({ success: true, lists: currentLists() }),
+        toggleListPin: () => {
+          pinned = true;
+          return { success: true, pinned: true };
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.querySelector('.list-chip'));
+    document.querySelector('.list-chip').click();
+    await waitFor(() => summaryCalls === 2);
+
+    const recordingToggle = document.getElementById('recordingToggle');
+    expect(recordingToggle.disabled).toBe(true);
+    recordingToggle.click();
+    expect(pauseCalls).toBe(0);
+
+    listRefresh.resolve({
+      success: true,
+      url: tab.url,
+      page: {
+        slug: pageSlug,
+        url: tab.url,
+        title: tab.title,
+        visitDates: [],
+      },
+      notes: [],
+      snapshots: [],
+      lists: currentLists(),
+    });
+
+    await waitFor(() => recordingToggle.disabled === false);
+    expect(pauseCalls).toBe(0);
+  });
+
+  it('locks the popup immediately when a page note blur queues a save', async () => {
+    const tab = {
+      id: 55,
+      url: 'https://example.com/page-note-save-lock',
+      title: 'Page Note Save Lock',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    const noteSave = deferred();
+    let toggleCalls = 0;
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: {
+          success: true,
+          url: tab.url,
+          page: {
+            slug: pageSlug,
+            url: tab.url,
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: [
+            {
+              slug: 'reading',
+              name: 'Reading',
+              pins: [],
+            },
+          ],
+        },
+        getPopupLists: {
+          success: true,
+          lists: [
+            {
+              slug: 'reading',
+              name: 'Reading',
+              pins: [],
+            },
+          ],
+        },
+        createNote: () => noteSave.promise,
+        toggleListPin: () => {
+          toggleCalls++;
+          return { success: true, pinned: true };
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.getElementById('pageNoteAddBtn'));
+    document.getElementById('pageNoteAddBtn').click();
+    const textarea = document.querySelector('.page-note-edit-textarea');
+    textarea.value = 'Queued note';
+    textarea.blur();
+
+    await waitFor(() => document.body.classList.contains('popup-ui-mutating'));
+    expect(textarea.disabled).toBe(true);
+
+    document.querySelector('.list-chip').click();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(toggleCalls).toBe(0);
+
+    noteSave.resolve({ success: true, noteSlug: 'note-queued' });
+    await waitFor(() => !document.body.classList.contains('popup-ui-mutating'));
+    expect(toggleCalls).toBe(0);
+  });
+
+  it('keeps the page note editor enabled during a focused debounced autosave', async () => {
+    const tab = {
+      id: 57,
+      url: 'https://example.com/page-note-focused-autosave',
+      title: 'Page Note Focused Autosave',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    const noteSave = deferred();
+    let createNoteCalls = 0;
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: {
+          success: true,
+          url: tab.url,
+          page: {
+            slug: pageSlug,
+            url: tab.url,
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: [],
+        },
+        getPopupLists: { success: true, lists: [] },
+        createNote: () => {
+          createNoteCalls++;
+          return noteSave.promise;
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.getElementById('pageNoteAddBtn'));
+    document.getElementById('pageNoteAddBtn').click();
+    const textarea = document.querySelector('.page-note-edit-textarea');
+    textarea.value = 'Focused autosave';
+    textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+    await waitFor(() => createNoteCalls === 1);
+    expect(textarea.disabled).toBe(false);
+    expect(document.body.classList.contains('popup-ui-mutating')).toBe(false);
+
+    noteSave.resolve({ success: true, noteSlug: 'note-focused' });
+    await waitFor(() => textarea.dataset.noteSlug === 'note-focused');
+  });
+
+  it('keeps the highlight note editor enabled during a focused debounced autosave', async () => {
+    const tab = {
+      id: 58,
+      url: 'https://example.com/highlight-note-focused-autosave',
+      title: 'Highlight Note Focused Autosave',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    const noteSave = deferred();
+    let updateNoteCalls = 0;
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: {
+          success: true,
+          url: tab.url,
+          page: {
+            slug: pageSlug,
+            url: tab.url,
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [
+            {
+              slug: 'highlight-note',
+              excerpt: 'Marked passage',
+              note: 'Old note',
+            },
+          ],
+          snapshots: [],
+          lists: [],
+        },
+        getPopupLists: { success: true, lists: [] },
+        updateNote: () => {
+          updateNoteCalls++;
+          return noteSave.promise;
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.querySelector('.highlight-item'));
+    document.querySelector('.highlight-item .note-action-btn.edit').click();
+    const textarea = document.querySelector('.highlight-note-edit-textarea');
+    textarea.value = 'Focused highlight autosave';
+    textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+    await waitFor(() => updateNoteCalls === 1);
+    expect(textarea.disabled).toBe(false);
+    expect(document.body.classList.contains('popup-ui-mutating')).toBe(false);
+
+    noteSave.resolve({ success: true, noteSlug: 'highlight-note' });
+  });
+
+  it('runs a delayed note autosave after an active list mutation completes', async () => {
+    const tab = {
+      id: 56,
+      url: 'https://example.com/delayed-note-save-lock',
+      title: 'Delayed Note Save Lock',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    const listRefresh = deferred();
+    let summaryCalls = 0;
+    let updateNoteCalls = 0;
+    let pinned = false;
+    const currentLists = () => [
+      {
+        slug: 'reading',
+        name: 'Reading',
+        pins: pinned ? [{ id: `page:${pageSlug}`, pinnedAt: Date.now() }] : [],
+      },
+    ];
+    const currentSummary = () => ({
+      success: true,
+      url: tab.url,
+      page: {
+        slug: pageSlug,
+        url: tab.url,
+        title: tab.title,
+        visitDates: [],
+      },
+      notes: [
+        {
+          slug: 'highlight-note',
+          excerpt: 'Marked passage',
+          note: 'Old note',
+        },
+      ],
+      snapshots: [],
+      lists: currentLists(),
+    });
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () => {
+          summaryCalls++;
+          if (summaryCalls === 2) return listRefresh.promise;
+          return currentSummary();
+        },
+        getPopupLists: () => ({ success: true, lists: currentLists() }),
+        toggleListPin: () => {
+          pinned = true;
+          return { success: true, pinned: true };
+        },
+        updateNote: () => {
+          updateNoteCalls++;
+          return { success: true, noteSlug: 'highlight-note' };
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.querySelector('.highlight-item'));
+    document.querySelector('.highlight-item .note-action-btn.edit').click();
+    const textarea = document.querySelector('.highlight-note-edit-textarea');
+    textarea.value = 'New note';
+    textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+    document.querySelector('.list-chip').click();
+    await waitFor(() => summaryCalls === 2);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(updateNoteCalls).toBe(0);
+
+    listRefresh.resolve(currentSummary());
+    await waitFor(() => updateNoteCalls === 1);
+  });
+
+  it('disables pause while a resume render is still loading page data', async () => {
+    const tab = {
+      id: 48,
+      url: 'https://example.com/resume-render-pending',
+      title: 'Resume Render Pending',
+    };
+    const pageSummary = deferred();
+    installDom();
+    const { sessionStore } = installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        setRecordingPaused: (request) => {
+          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          return { success: true };
+        },
+        recordPageActivity: { success: true },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () => pageSummary.promise,
+        getPopupLists: { success: true, lists: [] },
+      },
+    });
     sessionStore.workspace = { mode: 'private' };
 
     await import('../../apps/extension/popup.js');
 
-    await waitFor(() => document.getElementById('dashboardContent') === null);
-    document.getElementById('recordingToggle').click();
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent')?.style.display === 'none',
+    );
+    const toggle = document.getElementById('recordingToggle');
+    toggle.click();
 
     await waitFor(() =>
       chrome.runtime.sendMessage.mock.calls.some(
-        ([request]) => request.action === 'recordPageActivity',
+        ([request]) => request.action === 'getPageSummary',
       ),
     );
+    expect(toggle.disabled).toBe(true);
+    toggle.click();
+    expect(
+      chrome.runtime.sendMessage.mock.calls.filter(
+        ([request]) => request.action === 'setRecordingPaused',
+      ),
+    ).toEqual([[{ action: 'setRecordingPaused', paused: false }]]);
 
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      action: 'recordPageActivity',
+    pageSummary.resolve({
+      success: true,
       url: tab.url,
-      title: tab.title,
-      slug: generateSlugFromUrl(tab.url),
-      isInitialLoad: true,
+      page: {
+        slug: generateSlugFromUrl(tab.url),
+        url: tab.url,
+        title: tab.title,
+        visitDates: [],
+      },
+      notes: [],
+      snapshots: [],
+      lists: [],
     });
-    expect(document.getElementById('dashboardContent')).toBeTruthy();
+
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent')?.style.display ===
+          'block' && toggle.disabled === false,
+    );
+    expect(document.body.classList.contains('popup-compact')).toBe(false);
+  });
+
+  it('ignores background mutation messages while a popup session is open', async () => {
+    const tab = {
+      id: 49,
+      url: 'https://example.com/resume-mutation-race',
+      title: 'Resume Mutation Race',
+    };
+    const resumeSummary = deferred();
+    let summaryCalls = 0;
+    const summaryPayload = {
+      success: true,
+      url: tab.url,
+      page: {
+        slug: generateSlugFromUrl(tab.url),
+        url: tab.url,
+        title: tab.title,
+        visitDates: [],
+      },
+      notes: [],
+      snapshots: [],
+      lists: [],
+    };
+    installDom();
+    const { sessionStore, runtimeMessages } = installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        setRecordingPaused: (request) => {
+          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          return { success: true };
+        },
+        recordPageActivity: { success: true },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () => {
+          summaryCalls++;
+          if (summaryCalls === 2) return resumeSummary.promise;
+          return summaryPayload;
+        },
+        getPopupLists: { success: true, lists: [] },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent')?.style.display === 'block',
+    );
+    const toggle = document.getElementById('recordingToggle');
+    toggle.click();
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent')?.style.display === 'none',
+    );
+    toggle.click();
+    await waitFor(() => summaryCalls === 2);
+
+    runtimeMessages.emit({
+      action: 'mutation',
+      type: 'lists',
+      url: tab.url,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(summaryCalls).toBe(2);
+
+    resumeSummary.resolve(summaryPayload);
+
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent')?.style.display ===
+          'block' && toggle.disabled === false,
+    );
+    expect(document.body.classList.contains('popup-compact')).toBe(false);
     expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
   });
 
@@ -519,6 +1241,59 @@ describe('popup desktop state rendering', () => {
     expect(document.getElementById('recordingBar').nextElementSibling).toBe(
       document.getElementById('dashboardContent'),
     );
+  });
+
+  it('restores the unavailable admin page diagnostic after pause and resume', async () => {
+    const tab = {
+      id: 39,
+      url: 'chrome://extensions/',
+      title: 'Extensions',
+    };
+    installDom();
+    const { sessionStore } = installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        setRecordingPaused: (request) => {
+          sessionStore.workspace = request.paused ? { mode: 'private' } : {};
+          return { success: true };
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(
+      () =>
+        document.getElementById('pageDiagnosticTitle').textContent ===
+        'Not available for this page',
+    );
+    const toggle = document.getElementById('recordingToggle');
+    toggle.click();
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent')?.style.display === 'none',
+    );
+    toggle.click();
+
+    await waitFor(
+      () =>
+        document.getElementById('dashboardContent')?.style.display === 'block',
+    );
+
+    expect(document.body.classList.contains('popup-compact')).toBe(true);
+    expect(document.getElementById('pageDiagnosticSection').style.display).toBe(
+      '',
+    );
+    expect(document.getElementById('pageDiagnosticTitle').textContent).toBe(
+      'Not available for this page',
+    );
+    expect(document.getElementById('pageHeader').style.display).toBe('none');
   });
 
   it('keeps the recording banner visible when the current page is blacklisted', async () => {
@@ -828,7 +1603,7 @@ describe('popup desktop state rendering', () => {
     expect(getComputedStyle(document.body).width).toBe('296px');
     expect(getComputedStyle(document.body).minHeight).toBe('320px');
     expect(document.getElementById('loading').style.display).toBe('none');
-    expect(document.getElementById('dashboard').style.display).toBe('');
+    expect(document.getElementById('dashboard').style.display).toBe('flex');
     expect(document.getElementById('pageTitle').textContent).toBe(tab.title);
     expect(document.getElementById('pageUrl').textContent).toBe(tab.url);
     expect(document.getElementById('listSection').style.display).toBe('none');

@@ -32,11 +32,26 @@ const currentPage = {
   loadInFlight: null,
   pageSummaryState: 'idle',
 };
-let detachedContent = null; // holds dashboardContent when recording is paused
 let frozenChipOrder = null; // Array of list slugs — frozen on first render to keep order stable
 let _noteSaveTimeout = null;
 let desktopConnectInFlight = false;
+const recordingUiState = {
+  hydrated: false,
+  paused: false,
+  pending: false,
+};
+const popupShellState = {
+  surface: 'dashboard',
+};
+const popupUiMutationState = {
+  active: false,
+  queued: 0,
+  action: null,
+};
 const boundListSearchCaptureInputs = new WeakSet();
+let popupUiMutationQueue = Promise.resolve();
+let popupUiMutationActiveIdleResolvers = [];
+let focusedAutosaveQueue = Promise.resolve();
 
 function resetCurrentPageIdentity({ slug, url, title, tab }) {
   Object.assign(
@@ -83,6 +98,177 @@ function setPopupCompact(compact) {
   document.body?.classList.toggle('popup-compact', compact);
 }
 
+function renderPopupShell(options = {}) {
+  const { reveal = true } = options;
+  const loading = document.getElementById('loading');
+  const setup = document.getElementById('setup-required');
+  const dashboard = document.getElementById('dashboard');
+  const content = document.getElementById('dashboardContent');
+  const surface = popupShellState.surface;
+  const setupVisible = surface === 'setup';
+  const dashboardVisible = surface !== 'setup';
+  const contentVisible = surface === 'dashboard' || surface === 'diagnostic';
+  const compact =
+    surface === 'banner' ||
+    surface === 'diagnostic' ||
+    surface === 'dashboard-loading';
+
+  if (loading) loading.style.display = 'none';
+  if (setup) setup.style.display = setupVisible ? 'block' : 'none';
+  if (dashboard) dashboard.style.display = dashboardVisible ? 'flex' : 'none';
+  if (content) content.style.display = contentVisible ? 'block' : 'none';
+  setPopupCompact(compact);
+  applyRecordingBarState();
+  if (reveal) revealPopup();
+}
+
+function setPopupSurface(surface, options = {}) {
+  popupShellState.surface = surface;
+  renderPopupShell(options);
+}
+
+function isPopupUiMutating() {
+  return popupUiMutationState.active || popupUiMutationState.queued > 0;
+}
+
+function setPopupElementDisabled(element, disabled) {
+  if (!element) return;
+  if ('disabled' in element) {
+    element.disabled = disabled;
+  }
+  element.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+}
+
+function setPopupRoleElementDisabled(element, disabled) {
+  if (!element) return;
+  element.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+  if (disabled) {
+    if (
+      !Object.prototype.hasOwnProperty.call(element.dataset, 'prevTabindex')
+    ) {
+      element.dataset.prevTabindex = element.getAttribute('tabindex') ?? '';
+    }
+    element.tabIndex = -1;
+    return;
+  }
+  if (Object.prototype.hasOwnProperty.call(element.dataset, 'prevTabindex')) {
+    const previous = element.dataset.prevTabindex;
+    if (previous === '') element.removeAttribute('tabindex');
+    else element.setAttribute('tabindex', previous);
+    delete element.dataset.prevTabindex;
+  }
+}
+
+function setPopupInteractionDisabled(disabled) {
+  const doc = globalThis.document;
+  if (!doc) return;
+
+  doc
+    .querySelectorAll(
+      [
+        '#captureBtn',
+        '#setupRequiredBtn',
+        '#setupDesktopConnectBtn',
+        '#captureOnceBtn',
+        '.section-action',
+        '.capture-once-btn',
+        '.delete-btn',
+        '.note-action-btn',
+        '.page-note-add',
+        '.page-note-edit-textarea',
+        '.highlight-note-edit-textarea',
+        '.page-title-input',
+        '#listPickerInput',
+      ].join(','),
+    )
+    .forEach((element) => {
+      if (element.id === 'recordingToggle') return;
+      setPopupElementDisabled(element, disabled);
+    });
+
+  doc
+    .querySelectorAll(
+      '.list-chip, .list-add-btn, .list-picker-option, .page-title',
+    )
+    .forEach((element) => setPopupRoleElementDisabled(element, disabled));
+}
+
+function updatePopupUiMutationState() {
+  const pending = isPopupUiMutating();
+  document.body?.classList.toggle('popup-ui-mutating', pending);
+  setPopupInteractionDisabled(pending);
+  applyRecordingBarState();
+}
+
+async function runPopupUiMutationNow(action, task) {
+  if (popupUiMutationState.active) return false;
+  popupUiMutationState.active = true;
+  popupUiMutationState.action = action;
+  updatePopupUiMutationState();
+  try {
+    await task();
+    return true;
+  } finally {
+    popupUiMutationState.active = false;
+    popupUiMutationState.action = null;
+    updatePopupUiMutationState();
+    const resolvers = popupUiMutationActiveIdleResolvers;
+    popupUiMutationActiveIdleResolvers = [];
+    resolvers.forEach((resolve) => resolve());
+  }
+}
+
+function runPopupUiMutation(action, task) {
+  if (isPopupUiMutating()) return Promise.resolve(false);
+  return runPopupUiMutationNow(action, task);
+}
+
+function waitForActivePopupUiMutation() {
+  if (!popupUiMutationState.active) return Promise.resolve();
+  return new Promise((resolve) => {
+    popupUiMutationActiveIdleResolvers.push(resolve);
+  });
+}
+
+function enqueuePopupUiMutation(action, task) {
+  popupUiMutationState.queued++;
+  updatePopupUiMutationState();
+  const runWhenIdle = async () => {
+    while (popupUiMutationState.active) {
+      await waitForActivePopupUiMutation();
+    }
+    return runPopupUiMutationNow(action, async () => {
+      await task();
+    });
+  };
+  const queued = popupUiMutationQueue.then(runWhenIdle, runWhenIdle);
+  popupUiMutationQueue = queued
+    .catch(() => {})
+    .finally(() => {
+      popupUiMutationState.queued = Math.max(
+        0,
+        popupUiMutationState.queued - 1,
+      );
+      updatePopupUiMutationState();
+    });
+  return queued;
+}
+
+function enqueueFocusedAutosave(task) {
+  const runWhenCommandIdle = async () => {
+    while (popupUiMutationState.active) {
+      await waitForActivePopupUiMutation();
+    }
+    await task();
+  };
+  const queued = focusedAutosaveQueue.then(
+    runWhenCommandIdle,
+    runWhenCommandIdle,
+  );
+  focusedAutosaveQueue = queued.catch(() => {});
+  return queued;
+}
+
 function hideElement(id) {
   const element = document.getElementById(id);
   if (element) element.style.display = 'none';
@@ -90,13 +276,9 @@ function hideElement(id) {
 
 function renderConnectorDiagnostic(connector = {}, options = {}) {
   const { reveal = true } = options;
-  setPopupCompact(false);
-  document.getElementById('loading').style.display = 'none';
   hideElement('blacklisted');
-  document.getElementById('dashboard').style.display = 'none';
+  setPopupSurface('setup', { reveal });
   clearSetupDiagnostic();
-  const el = document.getElementById('setup-required');
-  el.style.display = 'block';
   applyDesktopConnectorUi(connector);
 
   const formatted = formatDesktopConnectorState(connector);
@@ -110,35 +292,22 @@ function renderConnectorDiagnostic(connector = {}, options = {}) {
       openDesktopApp();
     });
   }
-  if (reveal) revealPopup();
 }
 
 function renderBannerOnly() {
-  setPopupCompact(false);
-  document.getElementById('loading').style.display = 'none';
-  document.getElementById('setup-required').style.display = 'none';
-  const dashboard = document.getElementById('dashboard');
-  const content = document.getElementById('dashboardContent');
-  if (dashboard) dashboard.style.display = 'flex';
-  if (content) content.style.display = 'none';
-  void renderRecordingBar();
+  setPopupSurface('banner');
 }
 
 function renderPageDiagnostic({ title, message, detail = null, actions = [] }) {
-  document.getElementById('loading').style.display = 'none';
-  document.getElementById('setup-required').style.display = 'none';
   hideElement('blacklisted');
-  renderPageDashboardShell();
-  setPopupCompact(true);
+  setPopupSurface('diagnostic');
   resetDashboardSections();
-  const content = document.getElementById('dashboardContent');
   const section = document.getElementById('pageDiagnosticSection');
   const titleEl = document.getElementById('pageDiagnosticTitle');
   const messageEl = document.getElementById('pageDiagnosticMessage');
   const detailEl = document.getElementById('pageDiagnosticDetail');
   const actionsEl = document.getElementById('pageDiagnosticActions');
   const pageHeader = document.getElementById('pageHeader');
-  if (content) content.style.display = 'block';
   if (section) section.style.display = '';
   if (titleEl) titleEl.textContent = title;
   if (messageEl) messageEl.textContent = message;
@@ -161,7 +330,6 @@ function renderPageDiagnostic({ title, message, detail = null, actions = [] }) {
     }
   }
   if (pageHeader) pageHeader.style.display = 'none';
-  revealPopup();
 }
 
 function showSetupRequired(connector = {}, options = {}) {
@@ -479,7 +647,7 @@ async function getCachedDesktopConnectorState() {
 }
 
 function setupRequiredVisible() {
-  return document.getElementById('setup-required')?.style.display === 'block';
+  return popupShellState.surface === 'setup';
 }
 
 async function loadDashboardIfConnected(connector) {
@@ -552,15 +720,17 @@ function renderSnapshots(snapshots) {
 
   // Attach delete handlers
   container.querySelectorAll('.delete-btn').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
+    btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const ts = parseInt(btn.dataset.ts, 10);
-      await chrome.runtime.sendMessage({
-        action: 'deleteSnapshot',
-        slug: currentPage.slug,
-        timestamp: ts,
-      });
-      await refreshCurrentPageSummary();
+      void runPopupUiMutation('delete-snapshot', async () => {
+        const ts = parseInt(btn.dataset.ts, 10);
+        await chrome.runtime.sendMessage({
+          action: 'deleteSnapshot',
+          slug: currentPage.slug,
+          timestamp: ts,
+        });
+        await refreshCurrentPageSummary();
+      }).catch((error) => showErrorBubble(error.message));
     });
   });
 
@@ -662,7 +832,7 @@ function openPageNoteEditor(wrap, text, slug) {
   ta.addEventListener('input', () => {
     autoResizeTextarea(ta);
     clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => savePageNote(ta), 500);
+    saveTimeout = setTimeout(() => savePageNoteWithoutLock(ta), 500);
   });
   ta.addEventListener('blur', () => {
     clearTimeout(saveTimeout);
@@ -687,35 +857,47 @@ function openPageNoteEditor(wrap, text, slug) {
   });
 }
 
-async function savePageNote(ta) {
+async function sendPageNoteSave(ta) {
   const note = ta.value;
   const noteSlug = ta.dataset.noteSlug;
-  try {
-    if (noteSlug) {
-      const resp = await chrome.runtime.sendMessage({
-        action: 'updateNote',
-        noteSlug,
-        note,
-      });
-      if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
-        ta.dataset.noteSlug = resp.noteSlug;
-      }
-    } else if (note) {
-      const resp = await chrome.runtime.sendMessage({
-        action: 'createNote',
-        pageSlug: currentPage.slug,
-        url: currentPage.url,
-        excerpt: null,
-        note,
-        cssPath: null,
-      });
-      if (resp?.noteSlug) {
-        ta.dataset.noteSlug = resp.noteSlug;
-      }
+  if (noteSlug) {
+    const resp = await chrome.runtime.sendMessage({
+      action: 'updateNote',
+      noteSlug,
+      note,
+    });
+    if (resp?.noteSlug && resp.noteSlug !== noteSlug) {
+      ta.dataset.noteSlug = resp.noteSlug;
     }
-  } catch (error) {
-    logError('[popup] Page note save error:', error);
+  } else if (note) {
+    const resp = await chrome.runtime.sendMessage({
+      action: 'createNote',
+      pageSlug: currentPage.slug,
+      url: currentPage.url,
+      excerpt: null,
+      note,
+      cssPath: null,
+    });
+    if (resp?.noteSlug) {
+      ta.dataset.noteSlug = resp.noteSlug;
+    }
   }
+}
+
+async function savePageNote(ta) {
+  return enqueuePopupUiMutation('save-page-note', async () => {
+    await sendPageNoteSave(ta);
+  }).catch((error) => {
+    logError('[popup] Page note save error:', error);
+  });
+}
+
+async function savePageNoteWithoutLock(ta) {
+  return enqueueFocusedAutosave(async () => {
+    await sendPageNoteSave(ta);
+  }).catch((error) => {
+    logError('[popup] Page note save error:', error);
+  });
 }
 
 function renderNotes(notes) {
@@ -771,24 +953,28 @@ function renderNotes(notes) {
 
 function bindHighlightActions(container) {
   container.querySelectorAll('.note-action-btn.delete').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const noteSlug = btn.dataset.noteSlug;
-      if (!noteSlug) return;
-      try {
-        await chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug });
-        const [tab] = await chrome.tabs.query({
-          active: true,
-          currentWindow: true,
-        });
-        if (tab?.id)
-          chrome.tabs
-            .sendMessage(tab.id, { action: 'removeHighlightMark', noteSlug })
-            .catch(() => {});
-      } catch (e) {
-        logError('[popup] Delete note error:', e);
-      }
-      currentPage.notes = currentPage.notes.filter((n) => n.slug !== noteSlug);
-      renderNotes(currentPage.notes);
+    btn.addEventListener('click', () => {
+      void runPopupUiMutation('delete-note', async () => {
+        const noteSlug = btn.dataset.noteSlug;
+        if (!noteSlug) return;
+        try {
+          await chrome.runtime.sendMessage({ action: 'deleteNote', noteSlug });
+          const [tab] = await chrome.tabs.query({
+            active: true,
+            currentWindow: true,
+          });
+          if (tab?.id)
+            chrome.tabs
+              .sendMessage(tab.id, { action: 'removeHighlightMark', noteSlug })
+              .catch(() => {});
+        } catch (e) {
+          logError('[popup] Delete note error:', e);
+        }
+        currentPage.notes = currentPage.notes.filter(
+          (n) => n.slug !== noteSlug,
+        );
+        renderNotes(currentPage.notes);
+      }).catch((error) => showErrorBubble(error.message));
     });
   });
 
@@ -818,15 +1004,7 @@ function openHighlightNoteEditor(item, note) {
       const slug = item.dataset.noteSlug;
       logDebug(`[popup] Saving note for slug=${slug}`);
       try {
-        const resp = await chrome.runtime.sendMessage({
-          action: 'updateNote',
-          noteSlug: slug,
-          note: ta.value,
-        });
-        if (resp?.noteSlug && resp.noteSlug !== slug) {
-          item.dataset.noteSlug = resp.noteSlug;
-          note.slug = resp.noteSlug;
-        }
+        await saveHighlightNoteWithoutLock({ item, note, textarea: ta, slug });
       } catch (error) {
         logError('[popup] Note save error:', error);
       }
@@ -835,6 +1013,20 @@ function openHighlightNoteEditor(item, note) {
 
   ta.addEventListener('blur', () => {
     renderNotes(currentPage.notes);
+  });
+}
+
+async function saveHighlightNoteWithoutLock({ item, note, textarea, slug }) {
+  return enqueueFocusedAutosave(async () => {
+    const resp = await chrome.runtime.sendMessage({
+      action: 'updateNote',
+      noteSlug: slug,
+      note: textarea.value,
+    });
+    if (resp?.noteSlug && resp.noteSlug !== slug) {
+      item.dataset.noteSlug = resp.noteSlug;
+      note.slug = resp.noteSlug;
+    }
   });
 }
 
@@ -1007,31 +1199,31 @@ async function renderListChips(listOverride = null) {
 
   // Toggle existing chips
   container.querySelectorAll('.list-chip').forEach((chip) => {
-    chip.addEventListener('click', async () => {
-      try {
+    chip.addEventListener('click', () => {
+      void runPopupUiMutation('toggle-list-pin', async () => {
         const listId = chip.dataset.listId;
         await toggleListPin(listId);
-      } catch (err) {
-        showErrorBubble(err.message);
-      }
+      }).catch((err) => showErrorBubble(err.message));
     });
   });
 
   // + button opens picker dropdown
-  document.getElementById('listAddBtn').addEventListener('click', async (e) => {
+  document.getElementById('listAddBtn').addEventListener('click', (e) => {
     e.stopPropagation();
-    if (document.getElementById('listPicker')) {
-      closeListPicker();
-      return;
-    }
-    try {
-      const freshLists = await loadLists();
-      const freshPins = await loadListPins(freshLists);
-      openListPicker(freshLists, freshPins);
-    } catch (err) {
-      showErrorBubble(err.message);
-      openListPicker(lists, allPins);
-    }
+    void runPopupUiMutation('open-list-picker', async () => {
+      if (document.getElementById('listPicker')) {
+        closeListPicker();
+        return;
+      }
+      try {
+        const freshLists = await loadLists();
+        const freshPins = await loadListPins(freshLists);
+        openListPicker(freshLists, freshPins);
+      } catch (err) {
+        showErrorBubble(err.message);
+        openListPicker(lists, allPins);
+      }
+    }).catch((err) => showErrorBubble(err.message));
   });
   showSection('listSection');
   ensureListSearchCapture();
@@ -1201,10 +1393,8 @@ function openListPicker(lists, allPins, options = {}) {
         applyPinStateToPinMap(pickerPins, listId, response.pinned);
       }
       await renderListChips(pickerLists);
-      void refreshCurrentPageSummary().catch((err) =>
-        showErrorBubble(err.message),
-      );
       renderPickerRows();
+      await refreshCurrentPageSummary();
       return true;
     } catch (err) {
       showErrorBubble(err.message);
@@ -1257,17 +1447,21 @@ function openListPicker(lists, allPins, options = {}) {
 
     // Attach click handlers to rows
     listEl.querySelectorAll('.list-picker-row').forEach((row) => {
-      row.addEventListener('click', async (e) => {
+      row.addEventListener('click', (e) => {
         e.stopPropagation();
-        await activatePickerOption(row);
+        void runPopupUiMutation('activate-list-picker-option', async () => {
+          await activatePickerOption(row);
+        }).catch((err) => showErrorBubble(err.message));
       });
     });
 
     const createBtn = document.getElementById('listPickerCreate');
     if (createBtn) {
-      createBtn.addEventListener('click', async (e) => {
+      createBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        await activatePickerOption(createBtn);
+        void runPopupUiMutation('activate-list-picker-option', async () => {
+          await activatePickerOption(createBtn);
+        }).catch((err) => showErrorBubble(err.message));
       });
     }
   }
@@ -1301,28 +1495,36 @@ function openListPicker(lists, allPins, options = {}) {
         e.preventDefault();
         moveActivePickerIndex(-1);
       } else if (e.key === 'Enter') {
+        if (isPopupUiMutating()) {
+          e.preventDefault();
+          return;
+        }
         const activeOption = listEl.querySelector('.list-picker-option.active');
         if (activeOption) {
           e.preventDefault();
-          await activatePickerOption(activeOption);
+          await runPopupUiMutation('activate-list-picker-option', async () => {
+            await activatePickerOption(activeOption);
+          });
           return;
         }
         const inputVal = input.value.trim();
         if (!inputVal) return;
-        try {
-          const exactMatch = pickerLists.find(
-            (c) => c.name.toLowerCase() === inputVal.toLowerCase(),
-          );
-          if (exactMatch) {
-            await toggleListPin(exactMatch.slug);
-            closeListPicker();
-          } else {
-            await createListAndPin(inputVal);
-            closeListPicker();
+        await runPopupUiMutation('activate-list-picker-option', async () => {
+          try {
+            const exactMatch = pickerLists.find(
+              (c) => c.name.toLowerCase() === inputVal.toLowerCase(),
+            );
+            if (exactMatch) {
+              await toggleListPin(exactMatch.slug);
+              closeListPicker();
+            } else {
+              await createListAndPin(inputVal);
+              closeListPicker();
+            }
+          } catch (err) {
+            showErrorBubble(err.message);
           }
-        } catch (err) {
-          showErrorBubble(err.message);
-        }
+        });
       } else if (e.key === 'Escape') {
         closeListPicker();
       }
@@ -1351,7 +1553,8 @@ let listSearchShortcutOpening = false;
 function shouldFocusListSearchCapture() {
   const doc = globalThis.document;
   if (!doc) return false;
-  if (doc.getElementById('dashboard')?.style.display !== 'flex') return false;
+  if (isPopupUiMutating()) return false;
+  if (popupShellState.surface !== 'dashboard') return false;
   if (!doc.getElementById('dashboardContent')) return false;
   if (doc.getElementById('listPicker')) return false;
   if (!currentPage.url) return false;
@@ -1425,6 +1628,7 @@ async function openListPickerFromTyping(
   initialQuery = '',
   inputElement = null,
 ) {
+  if (isPopupUiMutating()) return;
   const existingInput = document.getElementById('listPickerInput');
   if (existingInput) {
     if (initialQuery) {
@@ -1467,10 +1671,11 @@ async function openListPickerFromTyping(
 
 function handleListSearchShortcut(event) {
   if (event.defaultPrevented) return;
+  if (isPopupUiMutating()) return;
   if (!isPrintableKeyEvent(event)) return;
   if (isImeCompositionKeyEvent(event)) return;
   if (isEditableEventTarget(event.target)) return;
-  if (document.getElementById('dashboard')?.style.display !== 'flex') return;
+  if (popupShellState.surface !== 'dashboard') return;
   if (!document.getElementById('dashboardContent')) return;
 
   event.preventDefault();
@@ -1501,8 +1706,14 @@ async function createListAndPin(name) {
 // Recording pause state (session-only, not persisted to disk). The storage key
 // remains "workspace" so content/background private-mode checks stay compatible.
 async function loadRecordingState() {
+  if (recordingUiState.hydrated) {
+    return { paused: recordingUiState.paused };
+  }
   const { workspace } = await chrome.storage.session.get(['workspace']);
-  return { paused: workspace?.mode === 'private' };
+  recordingUiState.paused = workspace?.mode === 'private';
+  recordingUiState.hydrated = true;
+  applyRecordingBarState();
+  return { paused: recordingUiState.paused };
 }
 
 async function saveRecordingState(paused) {
@@ -1512,31 +1723,46 @@ async function saveRecordingState(paused) {
   });
 }
 
-async function renderRecordingBar() {
-  const { paused } = await loadRecordingState();
+function applyRecordingBarState() {
   const bar = document.getElementById('recordingBar');
   const button = document.getElementById('recordingToggle');
   const label = document.getElementById('recordingLabel');
+  if (!bar || !button || !label) return;
 
+  const paused = recordingUiState.paused;
+  const pending = recordingUiState.pending || isPopupUiMutating();
   bar.classList.toggle('is-paused', paused);
+  button.disabled = pending;
+  button.setAttribute('aria-disabled', pending ? 'true' : 'false');
   button.setAttribute('aria-pressed', paused ? 'true' : 'false');
-  button.title = paused ? 'Resume tracing' : 'Pause tracing';
+  button.title = pending
+    ? 'Updating tracing'
+    : paused
+      ? 'Resume tracing'
+      : 'Pause tracing';
   label.textContent = 'BROWSER RECALL';
 }
 
-// Recording toggle handler
-document
-  .getElementById('recordingToggle')
-  .addEventListener('click', async () => {
-    const { paused } = await loadRecordingState();
-    const nextPaused = !paused;
+async function renderRecordingBar() {
+  await loadRecordingState();
+  applyRecordingBarState();
+}
+
+async function handleRecordingToggleClick() {
+  await loadRecordingState();
+  if (recordingUiState.pending) return;
+  const paused = recordingUiState.paused;
+  const nextPaused = !paused;
+  recordingUiState.pending = true;
+  applyRecordingBarState();
+  try {
     await saveRecordingState(nextPaused);
+    recordingUiState.paused = nextPaused;
     nextCurrentPageGeneration();
-    await renderRecordingBar();
+    applyRecordingBarState();
 
     // Resuming recording: record the current page visit and show details.
     if (paused && !nextPaused && currentPage.tab) {
-      reattachDashboardContent();
       const url = currentPage.tab._effectiveUrl || currentPage.tab.url;
       await chrome.runtime.sendMessage({
         action: 'recordPageActivity',
@@ -1545,22 +1771,40 @@ document
         slug: generateSlugFromUrl(url),
         isInitialLoad: true,
       });
-      await showDashboard(currentPage.tab);
+      await showDashboard(currentPage.tab, {
+        hideContentUntilReady: true,
+        compactUntilReady: true,
+      });
       return;
     }
 
-    // Pausing recording: remove page details from DOM.
-    if (nextPaused) {
-      const content = document.getElementById('dashboardContent');
-      if (content) {
-        detachedContent = content;
-        content.remove();
-      }
+    if (paused && !nextPaused) {
+      restoreDashboardContent();
+      return;
     }
-  });
+
+    // Pausing recording: hide page details while keeping the DOM stable.
+    if (nextPaused) {
+      renderBannerOnly();
+    }
+  } finally {
+    recordingUiState.pending = false;
+    applyRecordingBarState();
+  }
+}
+
+// Recording toggle handler
+document.getElementById('recordingToggle').addEventListener('click', () => {
+  void runPopupUiMutation('recording-toggle', handleRecordingToggleClick).catch(
+    (error) => {
+      logError('[popup] Recording toggle failed:', error);
+    },
+  );
+});
 
 // Title editing
 function startEditingTitle() {
+  if (isPopupUiMutating()) return;
   const titleEl = document.getElementById('pageTitle');
   const currentTitle = titleEl.textContent;
 
@@ -1585,16 +1829,16 @@ function startEditingTitle() {
     if (newTitle !== currentTitle && currentPage.entry) {
       currentPage.entry.user_title = newTitle;
       currentPage.title = newTitle;
-      try {
+      await enqueuePopupUiMutation('save-title', async () => {
         await chrome.runtime.sendMessage({
           action: 'recordPageActivity',
           url: currentPage.entry.url,
           user_title: newTitle,
         });
         logDebug('[popup] User title updated to:', newTitle);
-      } catch (error) {
+      }).catch((error) => {
         logError('[popup] Failed to save user title:', error);
-      }
+      });
     }
   }
 
@@ -1629,44 +1873,47 @@ for (const id of ['setupDesktopConnectBtn']) {
   const button = document.getElementById(id);
   if (!button) continue;
   button.addEventListener('click', () => {
-    void connectDesktopBridge();
+    void runPopupUiMutation('connect-desktop', connectDesktopBridge).catch(
+      (error) => showErrorBubble(error.message),
+    );
   });
 }
 
 // Capture button handler
-document.getElementById('captureBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('captureBtn');
-  btn.disabled = true;
-  btn.textContent = 'Capturing...';
+document.getElementById('captureBtn').addEventListener('click', () => {
+  void runPopupUiMutation('capture-frame', async () => {
+    const btn = document.getElementById('captureBtn');
+    btn.disabled = true;
+    btn.textContent = 'Capturing...';
 
-  try {
-    logDebug('[popup] Capturing snapshot...');
-    const resp = await chrome.runtime.sendMessage({
-      action: 'captureCurrentPageFromPopup',
-    });
-    logDebug('[popup] Capture response:', resp);
-    if (resp && resp.success) {
-      await refreshCurrentPageSummary();
-    } else {
-      logDebug('[popup] Capture failed:', resp);
-      await notifyActivePageError(resp?.error, 'Capture failed');
+    try {
+      logDebug('[popup] Capturing snapshot...');
+      const resp = await chrome.runtime.sendMessage({
+        action: 'captureCurrentPageFromPopup',
+      });
+      logDebug('[popup] Capture response:', resp);
+      if (resp && resp.success) {
+        await refreshCurrentPageSummary();
+      } else {
+        logDebug('[popup] Capture failed:', resp);
+        await notifyActivePageError(resp?.error, 'Capture failed');
+      }
+    } catch (error) {
+      logError('[popup] Capture error:', error);
+      await notifyActivePageError(error.message, 'Capture failed');
     }
-  } catch (error) {
-    logError('[popup] Capture error:', error);
-    await notifyActivePageError(error.message, 'Capture failed');
-  }
 
-  btn.disabled = false;
-  btn.textContent = 'CAPTURE FRAME';
+    btn.disabled = false;
+    btn.textContent = 'CAPTURE FRAME';
+  }).catch((error) => showErrorBubble(error.message));
 });
 
 // ─── showDashboard phases ────────────────────────────────────────────
 
-function reattachDashboardContent() {
-  if (detachedContent && !document.getElementById('dashboardContent')) {
-    document.getElementById('dashboard').appendChild(detachedContent);
-    detachedContent = null;
-  }
+function restoreDashboardContent() {
+  const diagnosticVisible =
+    document.getElementById('pageDiagnosticSection')?.style.display !== 'none';
+  setPopupSurface(diagnosticVisible ? 'diagnostic' : 'dashboard');
 }
 
 async function resolvePageIdentity(tab) {
@@ -1797,12 +2044,17 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
 
 async function refreshCurrentPageSummary() {
   if (!currentPage.tab || !currentPage.url) return;
-  const generation = nextCurrentPageGeneration();
   const { paused } = await loadRecordingState();
-  if (paused || !document.getElementById('dashboardContent')) {
+  if (
+    paused ||
+    recordingUiState.pending ||
+    !['dashboard', 'diagnostic'].includes(popupShellState.surface) ||
+    !document.getElementById('dashboardContent')
+  ) {
     await renderRecordingBar();
     return;
   }
+  const generation = nextCurrentPageGeneration();
   const updated = await fetchAndRenderPageData(
     currentPage.tab,
     currentPage.slug,
@@ -1816,13 +2068,8 @@ async function refreshCurrentPageSummary() {
 
 function renderPageDashboardShell(options = {}) {
   const { updateRecordingBar = true } = options;
-  setPopupCompact(false);
-  document.getElementById('loading').style.display = 'none';
   hideElement('blacklisted');
-  document.getElementById('setup-required').style.display = 'none';
-  document.getElementById('dashboard').style.display = 'flex';
-  document.getElementById('dashboardContent').style.display = 'block';
-  revealPopup();
+  setPopupSurface('dashboard');
   if (updateRecordingBar) void renderRecordingBar();
 }
 
@@ -1876,10 +2123,14 @@ function scheduleDelayedTitleCheck(tab, initialTitle) {
 }
 
 // Show dashboard for a tab: set up state, fetch data, render sections
-async function showDashboard(tab) {
+async function showDashboard(tab, options = {}) {
+  const { hideContentUntilReady = false, compactUntilReady = false } = options;
   const generation = nextCurrentPageGeneration();
   const previousSlug = currentPage.slug;
-  reattachDashboardContent();
+  if (hideContentUntilReady) {
+    setPopupSurface('dashboard-loading');
+  }
+  if (compactUntilReady) setPopupCompact(true);
 
   const { slug, url, title } = await resolvePageIdentity(tab);
   if (generation !== currentPage.generation) return;
@@ -2003,9 +2254,6 @@ async function handlePrivateMode(tab) {
   const { paused } = await loadRecordingState();
   if (!paused) return false;
   currentPage.tab = tab;
-  const content = document.getElementById('dashboardContent');
-  detachedContent = content;
-  content.remove();
   renderBannerOnly();
   revealPopup();
   return true;
@@ -2035,42 +2283,44 @@ function renderBlacklistDiagnostic(tab, effectiveUrl) {
         id: 'captureOnceBtn',
         className: 'capture-once-btn',
         label: 'Capture It',
-        onClick: async (event) => {
+        onClick: (event) => {
           const btn = event.currentTarget;
-          btn.disabled = true;
-          btn.textContent = 'Capturing...';
+          void runPopupUiMutation('capture-blacklisted-page', async () => {
+            btn.disabled = true;
+            btn.textContent = 'Capturing...';
 
-          try {
-            const slug = generateSlugFromUrl(effectiveUrl);
-            await chrome.runtime.sendMessage({
-              action: 'recordPageActivity',
-              url: effectiveUrl,
-              title: tab.title || null,
-              slug,
-              isInitialLoad: true,
-              bypassBlacklist: true,
-            });
-            const resp = await chrome.runtime.sendMessage({
-              action: 'captureCurrentPageFromPopup',
-            });
-            if (resp && !resp.success) {
+            try {
+              const slug = generateSlugFromUrl(effectiveUrl);
+              await chrome.runtime.sendMessage({
+                action: 'recordPageActivity',
+                url: effectiveUrl,
+                title: tab.title || null,
+                slug,
+                isInitialLoad: true,
+                bypassBlacklist: true,
+              });
+              const resp = await chrome.runtime.sendMessage({
+                action: 'captureCurrentPageFromPopup',
+              });
+              if (resp && !resp.success) {
+                await notifyPageError({
+                  tabId: tab.id,
+                  message: resp.error,
+                  fallback: 'Capture failed',
+                });
+              }
+              logDebug('[popup] Capture once completed for blacklisted page');
+            } catch (error) {
+              logError('[popup] Capture once failed:', error);
               await notifyPageError({
                 tabId: tab.id,
-                message: resp.error,
+                message: error.message,
                 fallback: 'Capture failed',
               });
             }
-            logDebug('[popup] Capture once completed for blacklisted page');
-          } catch (error) {
-            logError('[popup] Capture once failed:', error);
-            await notifyPageError({
-              tabId: tab.id,
-              message: error.message,
-              fallback: 'Capture failed',
-            });
-          }
 
-          await showDashboard(tab);
+            await showDashboard(tab);
+          }).catch((error) => showErrorBubble(error.message));
         },
       },
       {
@@ -2123,7 +2373,6 @@ async function renderPreparedDashboard(bootstrap) {
     tab.title ||
     '<unknown>';
 
-  reattachDashboardContent();
   if (slug !== currentPage.slug) frozenChipOrder = null;
   resetCurrentPageIdentity({ slug, url, title, tab });
   resetDashboardSections();
@@ -2159,11 +2408,6 @@ async function renderPreparedPopup(bootstrap) {
       return true;
     case 'private': {
       currentPage.tab = bootstrap.tab || null;
-      const content = document.getElementById('dashboardContent');
-      if (content) {
-        detachedContent = content;
-        content.remove();
-      }
       renderBannerOnly();
       revealPopup();
       return true;
@@ -2193,7 +2437,7 @@ async function renderPreparedPopup(bootstrap) {
 // Initialize popup
 async function loadConnectedDashboard(connector) {
   await verifyDeviceIdentity(connector);
-  document.getElementById('setup-required').style.display = 'none';
+  setPopupSurface('dashboard', { reveal: false });
 
   const tab = await resolveActiveTab();
   if (!tab) return;
@@ -2239,44 +2483,6 @@ async function initPopup() {
   }
 }
 initPopup().catch((err) => showFatalError(err.message));
-
-let mutationRefreshTimer = null;
-
-function currentPageAffectedByMutation(message) {
-  if (!currentPage.url || !currentPage.slug) return false;
-
-  if (message.url && message.url !== currentPage.url) return false;
-  if (message.pageSlug && message.pageSlug !== currentPage.slug) return false;
-  if (message.slug && message.slug !== currentPage.slug) return false;
-
-  switch (message.type) {
-    case 'history':
-    case 'lists':
-    case 'note':
-    case 'pins':
-    case 'settings':
-    case 'snapshot':
-      return true;
-    default:
-      return false;
-  }
-}
-
-function scheduleMutationRefresh() {
-  if (mutationRefreshTimer) clearTimeout(mutationRefreshTimer);
-  mutationRefreshTimer = setTimeout(() => {
-    mutationRefreshTimer = null;
-    void refreshCurrentPageSummary();
-  }, 50);
-}
-
-chrome.runtime.onMessage.addListener((message) => {
-  if (message?.action !== 'mutation') return false;
-  if (currentPageAffectedByMutation(message)) {
-    scheduleMutationRefresh();
-  }
-  return false;
-});
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local') return;

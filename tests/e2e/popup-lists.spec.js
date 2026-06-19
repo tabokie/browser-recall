@@ -1194,7 +1194,7 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
-  test(`popup refreshes notes, list chips, and badge from live desktop mutations seed=${POPUP_MUTATION_SEED}`, async ({
+  test(`popup reads desktop mutations only when reopened seed=${POPUP_MUTATION_SEED}`, async ({
     extContext,
     extensionId,
     setupDir,
@@ -1282,8 +1282,8 @@ test.describe('Popup list chip behavior', () => {
     );
     expect(noteResp.success).toBe(true);
 
-    await expect(popup.locator('#highlightList')).toContainText(excerpt);
-    await expect(popup.locator('#highlightList')).toContainText(note);
+    await expect(popup.locator('#highlightList')).not.toContainText(excerpt);
+    await expect(popup.locator('#highlightList')).not.toContainText(note);
 
     const pinResp = await helper.evaluate(
       (pageUrl) =>
@@ -1296,13 +1296,27 @@ test.describe('Popup list chip behavior', () => {
     );
     expect(pinResp.success).toBe(true);
 
-    await expect(popup.locator('#listCount')).toHaveText('01');
-    await expect(popup.locator('.list-chip.selected')).toContainText(listName);
+    await expect(popup.locator('#listCount')).toHaveText('00');
+    await expect(popup.locator('.list-chip.selected')).toHaveCount(0);
     await expect
       .poll(() => getBadgeForUrl(helper, url))
       .toMatchObject({ text: '' });
 
     await popup.close();
+    const reopenedPopup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title,
+    });
+    await expect(reopenedPopup.locator('#highlightList')).toContainText(
+      excerpt,
+    );
+    await expect(reopenedPopup.locator('#highlightList')).toContainText(note);
+    await expect(reopenedPopup.locator('#listCount')).toHaveText('01');
+    await expect(reopenedPopup.locator('.list-chip.selected')).toContainText(
+      listName,
+    );
+
+    await reopenedPopup.close();
     await helper.close();
     await page.close();
   });

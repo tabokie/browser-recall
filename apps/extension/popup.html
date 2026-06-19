@@ -88,6 +88,24 @@
         min-height: 0;
       }
 
+      body.popup-ui-mutating .section-action,
+      body.popup-ui-mutating .capture-once-btn,
+      body.popup-ui-mutating .list-chip,
+      body.popup-ui-mutating .list-add-btn,
+      body.popup-ui-mutating .list-picker-option,
+      body.popup-ui-mutating .delete-btn,
+      body.popup-ui-mutating .note-action-btn,
+      body.popup-ui-mutating .page-note-add,
+      body.popup-ui-mutating .page-title,
+      body.popup-ui-mutating .page-note-edit-textarea,
+      body.popup-ui-mutating .highlight-note-edit-textarea,
+      body.popup-ui-mutating .page-title-input,
+      body.popup-ui-mutating .list-picker-input {
+        pointer-events: none;
+        opacity: 0.55;
+        cursor: default;
+      }
+
       @keyframes spin {
         to {
           transform: rotate(360deg);

@@ -88,7 +88,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 ### Connector Popup
 
-- `apps/extension/popup.js` consumes prepared bootstrap payloads when present, requests page summaries as the direct-load fallback, submits popup mutations, refreshes the current page dashboard from background mutation broadcasts, and owns the transient list-picker/search keyboard UI.
+- `apps/extension/popup.js` consumes prepared bootstrap payloads when present, requests page summaries as the direct-load fallback, submits popup mutations through a serialized UI lane, renders an open-popup snapshot without background mutation refreshes, and owns the transient list-picker/search keyboard UI.
 - `apps/extension/background.js` resolves popup actions through the daemon connection. Toolbar clicks prepare current-tab and daemon popup data before opening `popup.html?bootstrap=...`, avoiding a manifest `default_popup` first frame. Prepared popup data is handed off by a one-shot in-memory token, has a bounded timeout, and falls back to an extension tab when an engine lacks programmatic action popups. Test-only background RPCs are split into `apps/extension/background-test-control.js` and included only in staged test extensions.
 - `apps/extension/icon-paths.js` defines packaged toolbar icon sets for normal capture, paused recording, and special page-marker states; `apps/extension/badge-controller.js` applies those icons at runtime.
 - `apps/extension/options-stub.js` only opens the desktop app; it is not a settings surface.
@@ -121,7 +121,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 - `crates/daemon/src/ws_server.rs` owns paired-browser websocket sessions.
 - `apps/extension/connector/pairing.js` and `apps/extension/connector/ws-client.js` manage the browser side.
 - `apps/desktop/src-tauri/src/main.rs` rebroadcasts daemon change notifications to desktop webviews.
-- Authenticated connector sockets also receive daemon change notifications for live popup/badge refresh.
+- Authenticated connector sockets also receive daemon change notifications for live connector surfaces such as tab badges. Open popups intentionally do not refresh from background mutation broadcasts; they read fresh page data on the next open.
 
 ### Sync
 

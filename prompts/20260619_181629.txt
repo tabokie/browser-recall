@@ -1,0 +1,28 @@
+- Here's an issue after last commit where we made the extension popup UI rendering non-progressive. (1) When I pause the tracking, the UI doesn't shrink to the small version instead it shows a large black underneath. (2) When I resume the tracking, the page-related data is rendering progressively again.
+- Sometimes if I click pause/resume fast enough, the data doesn't restore and render after I resume.
+- Not fixed, it actually happens more often. It reliably reproduces for the admin page.
+- Better, but still happens one out of ten times. Help me explain why this is so hard to get right, maybe there's something we should do architecturally.
+- Of course it should be one state driving the UI. Also, the UI shouldn't allow user the resume when the pause process hasn't completed yet.
+- Still have issue, the pattern is when I click pause and resume in a rapid roll, and the UI doesn't restore, then I pause and resume a second roll slowly, still not restoring, the third time it restores. I thought by converging the state you should eliminate the possibility of this race?
+- I don't think so, the issue is even easier to reproduce with the latest version
+- Help me understand why converging to one authority state doesn't solve the issue once and for all? Didn't you say by keeping the render as one `render(state)` will fix it for good?
+- Why not do that refactor thoroughly?
+- It is fairly rare now, but it still reproduces one out of 20 times. How is that possible after the deep refactor?
+- Hold your horses, why does the `render(state)` has anything to do with async task? In each render, it spawns any async tasks it needs, if the state flips before the tasks finish, we will spawn new tasks in the next round of render. It is good to be able to cancel the old unused tasks but that's not mandatory.
+- I think it still sounds more complicated than it should be. The workflow is we ask background to generate a UI and render it in popup using a token URL. Can the background continue to update that URL content directly? Or does it have to assign a new URL each time the UI changes?
+- Then why not just let background handle all rendering? i.e. popup only sends the tab id to background initially, then background drives the rendering and state transitions.
+- What do you mean by "Popup receives model snapshots and calls render(model)."? If the URL and content is prepared by background, why the popup need to explicitly render anything? It simply opens the URL and show whatever HTML the background has put in that URL?
+- That doesn't sound right. The race could still happen if popup loads a stale model and didn't ask for latest model somehow
+- Could we load the model only once when the popup window is created, and manage the state solely by popup itself (like in previous implementation). The consistency between popup and background is ensured by them both adhering to the same state modification algorithm.
+- Go with option B. Use the same render function to keep the state consistent between back and front.
+- The page edits are also included in the render state? Or are they handled differently?
+- Those are a lot of state variations, and I want to keep things simple and consistent. Could we change all state to directly modifying the DOM? Would that incur any regression or disadvantage?
+- Elaborate "Async completions can overwrite newer UI unless every handler manually checks current conditions", now that we only use background model once at startup, what is the other async completion that overwrites UI?
+- Couldn't we make the UI all synchronous? i.e. Don't respond to other user interactions unless a previous one finishes
+- We should remove all background to popup mutations to keep things simple. If user want to have the latest data, he can just reopen the popup window to refresh
+- Then can we move on to make UI mutation synchronous?
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md)
+- Fix and improve them all thoroughly without any loose ends
+- Please review my uncommitted changes
+- Fix the first issue
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.5 Codex
