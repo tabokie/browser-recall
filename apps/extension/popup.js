@@ -1252,6 +1252,77 @@ async function toggleListPin(listId) {
   return response;
 }
 
+function borderBlockSize(element) {
+  const style = getComputedStyle(element);
+  return (
+    Number.parseFloat(style.borderTopWidth) +
+    Number.parseFloat(style.borderBottomWidth)
+  );
+}
+
+function positionListPickerOverlay(wrap, picker, options = {}) {
+  if (!wrap || !picker) return;
+  const gap = 5;
+  const listMaxHeight = 160;
+  const listMinHeight = 48;
+  const contentHeight =
+    Number.isFinite(options.listContentHeight) && options.listContentHeight > 0
+      ? options.listContentHeight
+      : listMaxHeight;
+  const preferredListHeight = Math.min(listMaxHeight, contentHeight);
+  const wrapRect = wrap.getBoundingClientRect();
+  const viewportWidth =
+    document.documentElement.clientWidth || window.innerWidth || wrapRect.width;
+  const viewportHeight =
+    document.documentElement.clientHeight ||
+    window.innerHeight ||
+    wrapRect.bottom + listMaxHeight;
+  const width = Math.max(1, Math.min(wrapRect.width, viewportWidth));
+  const left = Math.max(0, Math.min(wrapRect.left, viewportWidth - width));
+
+  picker.style.left = `${left}px`;
+  picker.style.top = '0px';
+  picker.style.width = `${width}px`;
+
+  const input = picker.querySelector('#listPickerInput');
+  const inputHeight = input.getBoundingClientRect().height;
+  const pickerFrameHeight = borderBlockSize(picker);
+  const belowTop = Math.max(gap, wrapRect.bottom + gap);
+  const belowSpace =
+    viewportHeight - belowTop - inputHeight - gap - pickerFrameHeight;
+  const aboveSpace = wrapRect.top - gap - inputHeight - gap - pickerFrameHeight;
+  const hasBelowSpace = belowSpace >= listMinHeight;
+  const hasAboveSpace = aboveSpace >= listMinHeight;
+  let pickerTop = belowTop;
+  let listHeight = Math.min(preferredListHeight, Math.max(0, belowSpace));
+  picker.classList.remove('list-picker-above');
+
+  if (!hasBelowSpace && hasAboveSpace) {
+    picker.classList.add('list-picker-above');
+    listHeight = Math.min(preferredListHeight, Math.max(0, aboveSpace));
+    pickerTop = Math.max(
+      gap,
+      Math.min(
+        wrapRect.top - gap - inputHeight - listHeight - pickerFrameHeight,
+        viewportHeight - inputHeight - listHeight - pickerFrameHeight - gap,
+      ),
+    );
+  } else if (!hasBelowSpace) {
+    listHeight = Math.min(
+      preferredListHeight,
+      Math.max(0, viewportHeight - inputHeight - gap * 2 - pickerFrameHeight),
+    );
+    const blockHeight = inputHeight + listHeight + pickerFrameHeight;
+    pickerTop = Math.max(
+      gap,
+      Math.min(belowTop, viewportHeight - blockHeight - gap),
+    );
+  }
+
+  picker.style.top = `${pickerTop}px`;
+  picker.style.setProperty('--list-picker-list-max-height', `${listHeight}px`);
+}
+
 function closeListPicker() {
   const existing = document.getElementById('listPicker');
   const pickerInput = document.getElementById('listPickerInput');
@@ -1324,19 +1395,84 @@ function openListPicker(lists, allPins, options = {}) {
   picker.className = 'list-picker';
   picker.id = 'listPicker';
   picker.innerHTML = `
-    <div class="list-picker-list" id="listPickerList" role="listbox"></div>
+    <div class="list-picker-list-row">
+      <div class="list-picker-list" id="listPickerList" role="listbox">
+        <div class="list-picker-options" id="listPickerOptions"></div>
+      </div>
+      <div class="list-picker-scrollbar" id="listPickerScrollbar" aria-hidden="true">
+        <div class="list-picker-scroll-thumb" id="listPickerScrollThumb"></div>
+      </div>
+    </div>
   `;
+  picker.insertBefore(input, picker.firstChild);
   wrap.appendChild(picker);
+  positionListPickerOverlay(wrap, picker);
 
   const listEl = document.getElementById('listPickerList');
+  const optionsEl = document.getElementById('listPickerOptions');
+  const listRowEl = picker.querySelector('.list-picker-list-row');
+  const scrollThumb = document.getElementById('listPickerScrollThumb');
   if (initialQuery) input.value = initialQuery;
   let pickerLists = lists;
   let pickerPins = allPins;
   let isLoading = loading;
   let activePickerIndex = -1;
+  let pickerScrollTop = 0;
+
+  function positionPickerForRenderedRows() {
+    const renderedHeight = optionsEl.getBoundingClientRect().height;
+    positionListPickerOverlay(wrap, picker, {
+      listContentHeight: renderedHeight || optionsEl.scrollHeight,
+    });
+  }
+
+  function scrollRangeForPicker() {
+    return Math.max(0, optionsEl.scrollHeight - listEl.clientHeight);
+  }
+
+  function setPickerScrollTop(nextScrollTop) {
+    const scrollRange = scrollRangeForPicker();
+    pickerScrollTop = Math.max(0, Math.min(nextScrollTop, scrollRange));
+    optionsEl.style.transform =
+      pickerScrollTop > 0 ? `translateY(${-pickerScrollTop}px)` : '';
+    updatePickerScrollThumb();
+  }
+
+  function updatePickerScrollThumb() {
+    if (!scrollThumb) return;
+    const scrollRange = scrollRangeForPicker();
+    if (scrollRange <= 0 || listEl.clientHeight <= 0) {
+      picker.classList.remove('list-picker-has-scroll');
+      pickerScrollTop = 0;
+      optionsEl.style.transform = '';
+      return;
+    }
+
+    picker.classList.add('list-picker-has-scroll');
+    const trackHeight = listEl.clientHeight;
+    const thumbHeight = Math.max(
+      12,
+      scrollThumb.parentElement?.clientWidth || 0,
+    );
+    const maxThumbTop = Math.max(0, trackHeight - thumbHeight);
+    const thumbTop =
+      maxThumbTop === 0
+        ? 0
+        : Math.round((pickerScrollTop / scrollRange) * maxThumbTop);
+
+    scrollThumb.style.height = `${thumbHeight}px`;
+    scrollThumb.style.top = `${thumbTop}px`;
+  }
+
+  function schedulePickerScrollThumbUpdate() {
+    updatePickerScrollThumb();
+    const raf =
+      window.requestAnimationFrame || ((callback) => setTimeout(callback, 0));
+    raf(updatePickerScrollThumb);
+  }
 
   function pickerOptions() {
-    return [...listEl.querySelectorAll('.list-picker-option')];
+    return [...optionsEl.querySelectorAll('.list-picker-option')];
   }
 
   function setActivePickerIndex(index) {
@@ -1356,7 +1492,15 @@ function openListPicker(lists, allPins, options = {}) {
     option.classList.add('active');
     option.setAttribute('aria-selected', 'true');
     input.setAttribute('aria-activedescendant', option.id);
-    option.scrollIntoView({ block: 'nearest' });
+    const optionTop = option.offsetTop;
+    const optionBottom = optionTop + option.offsetHeight;
+    if (optionTop < pickerScrollTop) {
+      setPickerScrollTop(optionTop);
+    } else if (optionBottom > pickerScrollTop + listEl.clientHeight) {
+      setPickerScrollTop(optionBottom - listEl.clientHeight);
+    } else {
+      updatePickerScrollThumb();
+    }
     return option;
   }
 
@@ -1404,9 +1548,13 @@ function openListPicker(lists, allPins, options = {}) {
 
   function renderPickerRows() {
     if (isLoading) {
-      listEl.innerHTML = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">Loading...</div>`;
+      optionsEl.innerHTML = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">Loading...</div>`;
       activePickerIndex = -1;
       input.removeAttribute('aria-activedescendant');
+      pickerScrollTop = 0;
+      optionsEl.style.transform = '';
+      positionPickerForRenderedRows();
+      schedulePickerScrollThumbUpdate();
       return;
     }
 
@@ -1440,13 +1588,17 @@ function openListPicker(lists, allPins, options = {}) {
       rowsHtml = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">No lists</div>`;
     }
 
-    listEl.innerHTML = rowsHtml;
+    optionsEl.innerHTML = rowsHtml;
+    pickerScrollTop = 0;
+    optionsEl.style.transform = '';
+    positionPickerForRenderedRows();
+    schedulePickerScrollThumbUpdate();
     if (activePickerIndex >= pickerOptions().length) activePickerIndex = -1;
     if (activePickerIndex >= 0) setActivePickerIndex(activePickerIndex);
     else input.removeAttribute('aria-activedescendant');
 
     // Attach click handlers to rows
-    listEl.querySelectorAll('.list-picker-row').forEach((row) => {
+    optionsEl.querySelectorAll('.list-picker-row').forEach((row) => {
       row.addEventListener('click', (e) => {
         e.stopPropagation();
         void runPopupUiMutation('activate-list-picker-option', async () => {
@@ -1467,7 +1619,10 @@ function openListPicker(lists, allPins, options = {}) {
   }
 
   renderPickerRows();
-  if (shouldRestoreFocus) {
+  if (inputElement) {
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(input.value.length, input.value.length);
+  } else if (shouldRestoreFocus) {
     // Use setTimeout to avoid the click event that opened the picker from immediately focusing away.
     setTimeout(() => {
       input.focus();
@@ -1484,50 +1639,86 @@ function openListPicker(lists, allPins, options = {}) {
     { signal: input.__browserRecallPickerAbort.signal },
   );
 
-  input.addEventListener(
-    'keydown',
-    async (e) => {
-      if (isImeCompositionKeyEvent(e)) return;
-      if (e.key === 'ArrowDown') {
+  listRowEl.addEventListener(
+    'wheel',
+    (e) => {
+      const scrollRange = scrollRangeForPicker();
+      if (scrollRange <= 0) return;
+      e.preventDefault();
+      setPickerScrollTop(pickerScrollTop + e.deltaY);
+    },
+    { passive: false, signal: input.__browserRecallPickerAbort.signal },
+  );
+
+  async function handlePickerKeydown(e) {
+    if (isImeCompositionKeyEvent(e)) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveActivePickerIndex(1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveActivePickerIndex(-1);
+    } else if (e.key === 'Enter') {
+      if (isPopupUiMutating()) {
         e.preventDefault();
-        moveActivePickerIndex(1);
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        moveActivePickerIndex(-1);
-      } else if (e.key === 'Enter') {
-        if (isPopupUiMutating()) {
-          e.preventDefault();
-          return;
-        }
-        const activeOption = listEl.querySelector('.list-picker-option.active');
-        if (activeOption) {
-          e.preventDefault();
-          await runPopupUiMutation('activate-list-picker-option', async () => {
-            await activatePickerOption(activeOption);
-          });
-          return;
-        }
-        const inputVal = input.value.trim();
-        if (!inputVal) return;
-        await runPopupUiMutation('activate-list-picker-option', async () => {
-          try {
-            const exactMatch = pickerLists.find(
-              (c) => c.name.toLowerCase() === inputVal.toLowerCase(),
-            );
-            if (exactMatch) {
-              await toggleListPin(exactMatch.slug);
-              closeListPicker();
-            } else {
-              await createListAndPin(inputVal);
-              closeListPicker();
-            }
-          } catch (err) {
-            showErrorBubble(err.message);
-          }
-        });
-      } else if (e.key === 'Escape') {
-        closeListPicker();
+        return;
       }
+      const activeOption = listEl.querySelector('.list-picker-option.active');
+      if (activeOption) {
+        e.preventDefault();
+        await runPopupUiMutation('activate-list-picker-option', async () => {
+          await activatePickerOption(activeOption);
+        });
+        if (
+          document.getElementById('listPicker') &&
+          document.body.contains(input)
+        ) {
+          input.focus({ preventScroll: true });
+        }
+        return;
+      }
+      const inputVal = input.value.trim();
+      if (!inputVal) return;
+      await runPopupUiMutation('activate-list-picker-option', async () => {
+        try {
+          const exactMatch = pickerLists.find(
+            (c) => c.name.toLowerCase() === inputVal.toLowerCase(),
+          );
+          if (exactMatch) {
+            await toggleListPin(exactMatch.slug);
+            closeListPicker();
+          } else {
+            await createListAndPin(inputVal);
+            closeListPicker();
+          }
+        } catch (err) {
+          showErrorBubble(err.message);
+        }
+      });
+    } else if (e.key === 'Escape') {
+      closeListPicker();
+    }
+  }
+
+  input.addEventListener('keydown', handlePickerKeydown, {
+    signal: input.__browserRecallPickerAbort.signal,
+  });
+
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.target === input || !document.getElementById('listPicker')) return;
+      if (!['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(e.key)) return;
+      if (isEditableEventTarget(e.target)) return;
+      if (
+        e.target !== document.body &&
+        e.target !== document.documentElement &&
+        !picker.contains(e.target) &&
+        !e.target?.closest?.('.list-chip, .list-add-btn')
+      ) {
+        return;
+      }
+      void handlePickerKeydown(e);
     },
     { signal: input.__browserRecallPickerAbort.signal },
   );

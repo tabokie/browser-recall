@@ -43,6 +43,33 @@ async function openPopupForUrl(
   return popup;
 }
 
+async function openPreparedPopupForPage(extContext, extensionId, page, title) {
+  await page.bringToFront();
+  const url = page.url();
+  const helper = await openHelperPage(extContext, extensionId);
+  const prepared = await helper.evaluate(async (pageUrl) => {
+    const tabs = await chrome.tabs.query({ url: pageUrl });
+    const tabId = tabs[0]?.id || null;
+    if (!tabId) return { success: false, error: 'Active tab not found' };
+    return chrome.runtime.sendMessage({
+      action: 'preparePopupBootstrapForTest',
+      tabId,
+    });
+  }, url);
+  await helper.close();
+  if (!prepared?.success) {
+    throw new Error(
+      `preparePopupBootstrapForTest failed: ${JSON.stringify(prepared)}`,
+    );
+  }
+
+  const popup = await extContext.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/${prepared.popupPath}`);
+  await expect(popup.locator('#dashboard')).toBeVisible();
+  await expect(popup.locator('#pageTitle')).toHaveText(title);
+  return popup;
+}
+
 async function getBadgeForUrl(helper, url) {
   return helper.evaluate(async (pageUrl) => {
     const tabs = await chrome.tabs.query({ url: pageUrl });
@@ -898,6 +925,407 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
+  test('list picker floats with strong frame and custom scrollbar', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    void setupDir;
+    const now = Date.now();
+    localServer.addPage('/popup-floating-list-picker', {
+      title: 'Popup Floating List Picker',
+      body: '<main>Popup floating list picker page</main>',
+    });
+    const url = localServer.url('/popup-floating-list-picker');
+    const slug = getSlugForUrl(url);
+    const lists = Array.from({ length: 18 }, (_, index) => {
+      const n = index + 1;
+      return {
+        slug: `floating-list-${n}`,
+        name: `Floating List ${n}`,
+      };
+    });
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: lists.map((list) => ({ id: `list:${list.slug}` })),
+        },
+      },
+      ...lists.map((list) => ({
+        path: `views/lists/${list.slug}.json`,
+        data: {
+          slug: list.slug,
+          name: list.name,
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      })),
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Popup Floating List Picker',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const popup = await openPreparedPopupForPage(
+      extContext,
+      extensionId,
+      page,
+      'Popup Floating List Picker',
+    );
+    await popup.setViewportSize({ width: 296, height: 260 });
+    await popup.addStyleTag({
+      content: `
+        #pageHeader,
+        #visitsLikesSection {
+          display: none !important;
+        }
+
+        #listSection {
+          margin-top: 205px !important;
+        }
+
+        #snapshotSection {
+          display: block !important;
+        }
+      `,
+    });
+    await expect(popup.locator('#captureBtn')).toBeVisible();
+
+    const before = await popup.evaluate(() => ({
+      bodyHeight: document.body.getBoundingClientRect().height,
+      scrollHeight: document.documentElement.scrollHeight,
+      captureBox: document
+        .getElementById('captureBtn')
+        .getBoundingClientRect()
+        .toJSON(),
+    }));
+
+    await expect(popup.locator('#listAddBtn')).toBeVisible();
+    await popup.evaluate(() => document.getElementById('listAddBtn').click());
+    await expect(popup.locator('#listPicker')).toBeVisible();
+    await expect(popup.locator('#listPickerList')).toContainText(
+      'Floating List 18',
+    );
+    await expect(popup.locator('#listPickerScrollThumb')).toBeVisible();
+
+    const after = await popup.evaluate(() => {
+      const colorForVar = (name) => {
+        const probe = document.createElement('div');
+        probe.style.color = `var(${name})`;
+        document.body.appendChild(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      };
+      const pickerStyle = getComputedStyle(
+        document.getElementById('listPicker'),
+      );
+      const inputStyle = getComputedStyle(
+        document.getElementById('listPickerInput'),
+      );
+      return {
+        bodyHeight: document.body.getBoundingClientRect().height,
+        scrollHeight: document.documentElement.scrollHeight,
+        expectedSurface: colorForVar('--bg-surface-solid'),
+        expectedFrame: colorForVar('--text-primary'),
+        pickerPosition: pickerStyle.position,
+        pickerBackground: pickerStyle.backgroundColor,
+        pickerBorder: {
+          color: pickerStyle.borderTopColor,
+          width: pickerStyle.borderTopWidth,
+        },
+        inputBackground: inputStyle.backgroundColor,
+        inputFrame: {
+          topColor: inputStyle.borderTopColor,
+          topWidth: inputStyle.borderTopWidth,
+          bottomColor: inputStyle.borderBottomColor,
+          bottomWidth: inputStyle.borderBottomWidth,
+          leftWidth: inputStyle.borderLeftWidth,
+          rightWidth: inputStyle.borderRightWidth,
+        },
+        inputBox: document
+          .getElementById('listPickerInput')
+          .getBoundingClientRect()
+          .toJSON(),
+        pickerBox: document
+          .getElementById('listPicker')
+          .getBoundingClientRect()
+          .toJSON(),
+        wrapBox: document
+          .querySelector('.list-chips-wrap')
+          .getBoundingClientRect()
+          .toJSON(),
+        captureBox: document
+          .getElementById('captureBtn')
+          .getBoundingClientRect()
+          .toJSON(),
+        firstRowBorder: {
+          style: getComputedStyle(
+            document.querySelector('#listPickerList .list-picker-row'),
+          ).borderBottomStyle,
+          width: getComputedStyle(
+            document.querySelector('#listPickerList .list-picker-row'),
+          ).borderBottomWidth,
+          color: getComputedStyle(
+            document.querySelector('#listPickerList .list-picker-row'),
+          ).borderBottomColor,
+        },
+        firstRowRightBorder: {
+          style: getComputedStyle(
+            document.querySelector('#listPickerList .list-picker-row'),
+          ).borderRightStyle,
+          width: getComputedStyle(
+            document.querySelector('#listPickerList .list-picker-row'),
+          ).borderRightWidth,
+          color: getComputedStyle(
+            document.querySelector('#listPickerList .list-picker-row'),
+          ).borderRightColor,
+          marginRight: getComputedStyle(
+            document.querySelector('#listPickerList .list-picker-row'),
+          ).marginRight,
+        },
+        listBox: document
+          .getElementById('listPickerList')
+          .getBoundingClientRect()
+          .toJSON(),
+        firstRowBox: document
+          .querySelector('#listPickerList .list-picker-row')
+          .getBoundingClientRect()
+          .toJSON(),
+        scrollbarBox: document
+          .getElementById('listPickerScrollbar')
+          .getBoundingClientRect()
+          .toJSON(),
+        scrollbar: {
+          width: getComputedStyle(
+            document.getElementById('listPickerList'),
+            '::-webkit-scrollbar',
+          ).width,
+          display: getComputedStyle(
+            document.getElementById('listPickerList'),
+            '::-webkit-scrollbar',
+          ).display,
+          thumbBackground: getComputedStyle(
+            document.getElementById('listPickerList'),
+            '::-webkit-scrollbar-thumb',
+          ).backgroundColor,
+          thumbBorderRadius: getComputedStyle(
+            document.getElementById('listPickerList'),
+            '::-webkit-scrollbar-thumb',
+          ).borderRadius,
+          scrollportInset:
+            document.getElementById('listPickerList').offsetWidth -
+            document.getElementById('listPickerList').clientWidth,
+          scrollHeight: document.getElementById('listPickerList').scrollHeight,
+          clientHeight: document.getElementById('listPickerList').clientHeight,
+        },
+        outerScrollbar: {
+          htmlDisplay: getComputedStyle(
+            document.documentElement,
+            '::-webkit-scrollbar',
+          ).display,
+          htmlWidth: getComputedStyle(
+            document.documentElement,
+            '::-webkit-scrollbar',
+          ).width,
+          bodyDisplay: getComputedStyle(document.body, '::-webkit-scrollbar')
+            .display,
+          bodyWidth: getComputedStyle(document.body, '::-webkit-scrollbar')
+            .width,
+        },
+        customThumb: (() => {
+          const thumb = document.getElementById('listPickerScrollThumb');
+          if (!thumb) return null;
+          const style = getComputedStyle(thumb);
+          return {
+            background: style.backgroundColor,
+            borderRadius: style.borderRadius,
+            display: style.display,
+            height: thumb.getBoundingClientRect().height,
+            width: thumb.getBoundingClientRect().width,
+          };
+        })(),
+      };
+    });
+
+    expect(after.bodyHeight).toBe(before.bodyHeight);
+    expect(after.scrollHeight).toBe(before.scrollHeight);
+    expect(after.pickerPosition).toBe('fixed');
+    expect(after.pickerBackground).toBe(after.expectedSurface);
+    expect(after.inputBackground).toBe(after.expectedSurface);
+    expect(after.pickerBorder).toEqual({
+      color: after.expectedFrame,
+      width: '2px',
+    });
+    expect(after.inputFrame.leftWidth).toBe('0px');
+    expect(after.inputFrame.rightWidth).toBe('0px');
+    expect(
+      [after.inputFrame.topWidth, after.inputFrame.bottomWidth].sort(),
+    ).toEqual(['0px', '2px']);
+    const inputSeparatorColor =
+      after.inputFrame.topWidth === '2px'
+        ? after.inputFrame.topColor
+        : after.inputFrame.bottomColor;
+    expect(inputSeparatorColor).toBe(after.expectedFrame);
+    expect(after.pickerBox.left - after.wrapBox.left).toBeCloseTo(0, 1);
+    expect(after.pickerBox.right - after.wrapBox.right).toBeCloseTo(0, 1);
+    expect(after.inputBox.left - after.pickerBox.left).toBeCloseTo(2, 1);
+    expect(after.pickerBox.right - after.inputBox.right).toBeCloseTo(2, 1);
+    expect(after.captureBox.top - before.captureBox.top).toBeCloseTo(0, 1);
+    expect(after.firstRowBorder.style).not.toBe('none');
+    expect(after.firstRowBorder.width).not.toBe('0px');
+    expect(after.firstRowBorder.color).not.toBe('rgba(0, 0, 0, 0)');
+    expect(after.firstRowRightBorder.style).toBe('none');
+    expect(after.firstRowRightBorder.marginRight).toBe('0px');
+    expect(after.scrollbarBox.width).toBe(24);
+    expect(after.listBox.right).toBe(after.scrollbarBox.left);
+    expect(after.firstRowBox.right).toBe(after.scrollbarBox.left);
+    expect(after.scrollbar.scrollHeight).toBeGreaterThan(
+      after.scrollbar.clientHeight,
+    );
+    expect(after.scrollbar.display).toBe('none');
+    expect(after.scrollbar.width).toBe('0px');
+    expect(after.scrollbar.scrollportInset).toBeGreaterThanOrEqual(0);
+    expect(after.scrollbar.thumbBackground).toBe('rgba(0, 0, 0, 0)');
+    expect(after.scrollbar.thumbBorderRadius).toBe('0px');
+    expect(after.outerScrollbar).toEqual({
+      htmlDisplay: 'none',
+      htmlWidth: '0px',
+      bodyDisplay: 'none',
+      bodyWidth: '0px',
+    });
+    expect(after.customThumb).toEqual({
+      background: 'rgb(23, 23, 19)',
+      borderRadius: '0px',
+      display: 'block',
+      height: after.scrollbarBox.width,
+      width: after.scrollbarBox.width,
+    });
+
+    const beforeWheelThumbTop = await popup
+      .locator('#listPickerScrollThumb')
+      .evaluate((thumb) => thumb.getBoundingClientRect().top);
+    await popup.locator('#listPickerList').hover();
+    await popup.mouse.wheel(0, 90);
+    const afterWheelThumbTop = await popup
+      .locator('#listPickerScrollThumb')
+      .evaluate((thumb) => thumb.getBoundingClientRect().top);
+    const afterWheelScrollbarTop = await popup
+      .locator('#listPickerScrollbar')
+      .evaluate((scrollbar) => scrollbar.getBoundingClientRect().top);
+    expect(afterWheelThumbTop - afterWheelScrollbarTop).toBeGreaterThan(
+      beforeWheelThumbTop - after.scrollbarBox.top,
+    );
+
+    const beforeGutterWheelThumbTop = await popup
+      .locator('#listPickerScrollThumb')
+      .evaluate((thumb) => thumb.getBoundingClientRect().top);
+    await popup.locator('#listPickerScrollbar').hover();
+    await popup.mouse.wheel(0, 90);
+    const afterGutterWheelThumbTop = await popup
+      .locator('#listPickerScrollThumb')
+      .evaluate((thumb) => thumb.getBoundingClientRect().top);
+    const afterGutterWheelScrollbarTop = await popup
+      .locator('#listPickerScrollbar')
+      .evaluate((scrollbar) => scrollbar.getBoundingClientRect().top);
+    expect(
+      afterGutterWheelThumbTop - afterGutterWheelScrollbarTop,
+    ).toBeGreaterThan(beforeGutterWheelThumbTop - afterGutterWheelScrollbarTop);
+
+    await popup.locator('#listPickerInput').fill('Floating List 18');
+    await expect(popup.locator('#listPickerList .list-picker-row')).toHaveCount(
+      1,
+    );
+    await expect(popup.locator('#listPickerScrollThumb')).toBeHidden();
+    const filtered = await popup.evaluate(() => {
+      const row = document.querySelector('#listPickerList .list-picker-row');
+      const rowStyle = getComputedStyle(row);
+      const thumb = document.getElementById('listPickerScrollThumb');
+      const scrollbar = document.getElementById('listPickerScrollbar');
+      return {
+        rowRightBorderStyle: rowStyle.borderRightStyle,
+        rowMarginRight: rowStyle.marginRight,
+        scrollHeight: document.getElementById('listPickerList').scrollHeight,
+        clientHeight: document.getElementById('listPickerList').clientHeight,
+        thumbDisplay: getComputedStyle(thumb).display,
+        thumbWidth: thumb.getBoundingClientRect().width,
+        scrollbarDisplay: getComputedStyle(scrollbar).display,
+        scrollbarWidth: scrollbar.getBoundingClientRect().width,
+      };
+    });
+    expect(filtered.scrollHeight).toBe(filtered.clientHeight);
+    expect(filtered.rowRightBorderStyle).toBe('none');
+    expect(filtered.rowMarginRight).toBe('0px');
+    expect(filtered.scrollbarDisplay).toBe('none');
+    expect(filtered.scrollbarWidth).toBe(0);
+    expect(filtered.thumbWidth).toBe(0);
+
+    await popup.locator('#listPickerInput').fill('Create Only');
+    await expect(popup.locator('#listPickerList .list-picker-row')).toHaveCount(
+      0,
+    );
+    await expect(popup.locator('#listPickerCreate')).toContainText(
+      'Create "Create Only"',
+    );
+    const createOnly = await popup.evaluate(() => {
+      const picker = document.getElementById('listPicker');
+      const list = document.getElementById('listPickerList');
+      const create = document.getElementById('listPickerCreate');
+      const input = document.getElementById('listPickerInput');
+      const pickerBox = picker.getBoundingClientRect();
+      const listBox = list.getBoundingClientRect();
+      const createBox = create.getBoundingClientRect();
+      const inputBox = input.getBoundingClientRect();
+      const bottomHit = document.elementFromPoint(
+        createBox.left + 4,
+        listBox.bottom - 2,
+      );
+      return {
+        inputToPickerGap:
+          pickerBox.top >= inputBox.bottom
+            ? pickerBox.top - inputBox.bottom
+            : inputBox.top - pickerBox.bottom,
+        listToCreateBottomGap: listBox.bottom - createBox.bottom,
+        listScrollHeight: list.scrollHeight,
+        listClientHeight: list.clientHeight,
+        bottomHitOptionId: bottomHit?.closest('.list-picker-option')?.id,
+      };
+    });
+    expect(createOnly.listToCreateBottomGap).toBe(0);
+    expect(createOnly.listScrollHeight).toBe(createOnly.listClientHeight);
+    expect(createOnly.bottomHitOptionId).toBe('listPickerCreate');
+
+    await popup.locator('#listPickerInput').fill('Floating List 18');
+    await expect(popup.locator('#listPickerList .list-picker-row')).toHaveCount(
+      1,
+    );
+    await popup
+      .locator('.list-picker-row', { hasText: 'Floating List 18' })
+      .click();
+    await expect(popup.locator('.list-chip.selected')).toContainText(
+      'Floating List 18',
+    );
+
+    await popup.close();
+    await page.close();
+  });
+
   test('typing on the open popup starts list search', async ({
     extContext,
     extensionId,
@@ -1132,12 +1560,8 @@ test.describe('Popup list chip behavior', () => {
 
     const capture = popup.locator('#listSearchCaptureInput');
     await expect(capture).toBeFocused();
-    const compositionTargetParent = await capture.evaluate((el) => {
+    await capture.evaluate((el) => {
       el.dataset.compositionTarget = 'list-search';
-      return {
-        id: el.parentElement?.id || '',
-        className: el.parentElement?.className || '',
-      };
     });
     await capture.evaluate((el) => {
       el.dispatchEvent(
@@ -1157,7 +1581,10 @@ test.describe('Popup list chip behavior', () => {
           className: el.parentElement?.className || '',
         })),
       )
-      .toEqual(compositionTargetParent);
+      .toEqual({
+        id: 'listPicker',
+        className: 'list-picker',
+      });
     await expect(input).toBeFocused();
     await expect(input).toHaveValue('');
 
@@ -1932,7 +2359,12 @@ test.describe('Popup list chip behavior', () => {
     const activeText = async () =>
       popup
         .locator('.list-picker-option.active')
-        .evaluate((node) => node.textContent.trim());
+        .evaluate(
+          (node) =>
+            node
+              .querySelector('.list-picker-row-check + span')
+              ?.textContent.trim() || node.textContent.trim(),
+        );
 
     await input.press('ArrowDown');
     await expect.poll(activeText).toBe('Keyboard Alpha');
@@ -1950,12 +2382,31 @@ test.describe('Popup list chip behavior', () => {
     await input.press('ArrowUp');
     await expect.poll(activeText).toBe('Create "Keyboard"');
 
+    await popup.keyboard.press('ArrowDown');
+    await expect.poll(activeText).toBe('Keyboard Alpha');
+
+    await popup.keyboard.press('Enter');
+    await expect(popup.locator('#listPicker')).toBeVisible();
+    await expect(popup.locator('.list-chip.selected')).toContainText(
+      'Keyboard Alpha',
+    );
+
+    await popup.keyboard.press('ArrowDown');
+    await expect.poll(activeText).toBe('Keyboard Beta');
+
+    await popup.keyboard.press('ArrowUp');
+    await expect.poll(activeText).toBe('Keyboard Alpha');
+
+    await popup.keyboard.press('ArrowUp');
+    await expect.poll(activeText).toBe('Create "Keyboard"');
+
+    await expect(input).toHaveAttribute('aria-disabled', 'false');
     await input.press('Enter');
 
     await expect(popup.locator('#listPicker')).toHaveCount(0);
-    await expect(popup.locator('.list-chip.selected')).toContainText(
-      'Keyboard',
-    );
+    await expect(
+      popup.getByRole('button', { name: 'Keyboard', exact: true }),
+    ).toHaveClass(/selected/);
 
     await popup.close();
     await page.close();
