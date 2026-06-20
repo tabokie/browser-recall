@@ -308,6 +308,7 @@ async function installDesktopBridgeMock(page, options = {}) {
       const openedSnapshots = [];
       const cancelledHistorySearchIds = [];
       const searchHistoryInvocations = [];
+      const loadHistoryBatchInvocations = [];
 
       function clone(value) {
         return value === undefined
@@ -548,6 +549,9 @@ async function installDesktopBridgeMock(page, options = {}) {
         searchHistoryInvocations() {
           return clone(searchHistoryInvocations);
         },
+        loadHistoryBatchInvocationCount() {
+          return loadHistoryBatchInvocations.length;
+        },
         sessionValue(key) {
           return clone(stores.session.get(key));
         },
@@ -610,6 +614,7 @@ async function installDesktopBridgeMock(page, options = {}) {
               ...historyFiles(request.includeSizes),
             };
           case 'loadHistoryBatch':
+            loadHistoryBatchInvocations.push(clone(request.files || []));
             return {
               success: true,
               entries: loadHistoryBatch(request.files),
@@ -938,6 +943,29 @@ async function commitDesktopSearch(page, query) {
   const input = page.locator('#searchDraftInput');
   await input.fill(query);
   await input.press('Enter');
+}
+
+async function expectNoHistorySearchDuringVisibilityRefresh(
+  page,
+  expectedSearchCount,
+  action,
+) {
+  const loadBatchCountBefore = await page.evaluate(() =>
+    window.__desktopVisualHarness.loadHistoryBatchInvocationCount(),
+  );
+  await action();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.__desktopVisualHarness.loadHistoryBatchInvocationCount(),
+      ),
+    )
+    .toBeGreaterThan(loadBatchCountBefore);
+  expect(
+    await page.evaluate(() =>
+      window.__desktopVisualHarness.searchHistoryInvocationCount(),
+    ),
+  ).toBe(expectedSearchCount);
 }
 
 test.describe('desktop visual regression', () => {
@@ -4561,7 +4589,7 @@ test.describe('desktop visual regression', () => {
     });
   });
 
-  test('reopening a hidden searched desktop window preserves result scroll position', async ({
+  test('reopening a hidden searched desktop window preserves current results without re-searching', async ({
     page,
   }) => {
     const now = Date.now();
@@ -4619,39 +4647,64 @@ test.describe('desktop visual regression', () => {
         window.__desktopVisualHarness.searchHistoryInvocationCount(),
       );
 
-      await page.evaluate(
-        ({ now }) => {
-          const main = document.querySelector('.main');
-          Object.defineProperty(document, 'visibilityState', {
-            configurable: true,
-            value: 'hidden',
-          });
-          document.dispatchEvent(new Event('visibilitychange'));
-          main.dataset.previousDisplay = main.style.display;
-          main.style.display = 'none';
-          window.__desktopVisualHarness.appendHistoryEntry({
-            url: 'https://example.com/search-reopen-new',
-            title: 'Search reopen new',
-            timestamp: now + 10_000,
-            deviceId: 'device-a',
-          });
-          Object.defineProperty(document, 'visibilityState', {
-            configurable: true,
-            value: 'visible',
-          });
-          document.dispatchEvent(new Event('visibilitychange'));
-          setTimeout(() => {
-            main.style.display = main.dataset.previousDisplay || '';
-          }, 50);
-        },
-        { now },
+      await expectNoHistorySearchDuringVisibilityRefresh(
+        page,
+        searchInvocationsBeforeReopen,
+        () =>
+          page.evaluate(() => {
+            const input = document.getElementById('searchDraftInput');
+            input.blur();
+            Object.defineProperty(document, 'visibilityState', {
+              configurable: true,
+              value: 'hidden',
+            });
+            document.dispatchEvent(new Event('visibilitychange'));
+            Object.defineProperty(document, 'visibilityState', {
+              configurable: true,
+              value: 'visible',
+            });
+            document.dispatchEvent(new Event('visibilitychange'));
+            input.focus({ preventScroll: true });
+          }),
       );
+      await expect(
+        page.locator(`.result-row[data-url="${before.firstUrl}"]`),
+      ).toBeVisible();
+      await page.evaluate((scrollTop) => {
+        document.querySelector('.main').scrollTop = scrollTop;
+      }, before.scrollTop);
 
-      await page.waitForFunction(
-        ({ previous }) =>
-          window.__desktopVisualHarness.searchHistoryInvocationCount() >
-          previous,
-        { previous: searchInvocationsBeforeReopen },
+      await expectNoHistorySearchDuringVisibilityRefresh(
+        page,
+        searchInvocationsBeforeReopen,
+        () =>
+          page.evaluate(
+            ({ now }) => {
+              const main = document.querySelector('.main');
+              Object.defineProperty(document, 'visibilityState', {
+                configurable: true,
+                value: 'hidden',
+              });
+              document.dispatchEvent(new Event('visibilitychange'));
+              main.dataset.previousDisplay = main.style.display;
+              main.style.display = 'none';
+              window.__desktopVisualHarness.appendHistoryEntry({
+                url: 'https://example.com/search-reopen-new',
+                title: 'Search reopen new',
+                timestamp: now + 10_000,
+                deviceId: 'device-a',
+              });
+              Object.defineProperty(document, 'visibilityState', {
+                configurable: true,
+                value: 'visible',
+              });
+              document.dispatchEvent(new Event('visibilitychange'));
+              setTimeout(() => {
+                main.style.display = main.dataset.previousDisplay || '';
+              }, 50);
+            },
+            { now },
+          ),
       );
       await page.waitForFunction(() => {
         const related = document.getElementById('relatedResults');

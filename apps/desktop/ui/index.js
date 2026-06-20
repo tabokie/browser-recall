@@ -740,7 +740,6 @@ let onboardingDataFolderPath = '';
 let committedSearchQuery = ''; // committed query that participates in search/filtering
 let draftSearchInput = ''; // uncommitted text; becomes active only on Enter
 let searchDraftPreviewActive = false;
-let suppressSearchDraftEmptyOnFocus = false;
 let searchDraftOutsideClickBound = false;
 let pendingSearchClearScrollAnchor = null;
 let filterState = createDefaultFilterState();
@@ -1213,6 +1212,10 @@ function clearProgressiveSearchState() {
 
 function isActiveCategoryView(category) {
   return activeView.type === 'category' && activeView.value === category;
+}
+
+function shouldPreserveCommittedSearchOnVisibilityRefresh() {
+  return activeView.type === 'explore' && Boolean(committedSearchQuery.trim());
 }
 
 function buildDesktopHistoryResults(results) {
@@ -7027,9 +7030,11 @@ document.addEventListener('visibilitychange', async () => {
   if (historyChanged) {
     cachedFieldRanges = null;
     if (activeView.type === 'explore' || activeView.type === 'list') {
-      await waitForMainViewport();
-      preserveRelatedScrollOnNextRender = true;
-      runSearchFilterPipeline();
+      if (!shouldPreserveCommittedSearchOnVisibilityRefresh()) {
+        await waitForMainViewport();
+        preserveRelatedScrollOnNextRender = true;
+        runSearchFilterPipeline();
+      }
     } else {
       refreshCurrentView();
     }
@@ -7239,7 +7244,6 @@ function focusSearchDraftInputWithoutDraftMode() {
   const nextInput = document.querySelector('#searchDraftInput');
   if (!nextInput) return;
   if (document.activeElement === nextInput) return;
-  suppressSearchDraftEmptyOnFocus = true;
   nextInput.focus({ preventScroll: true });
 }
 
@@ -7334,13 +7338,6 @@ function bindSearchEvents(container) {
   // Draft input — search/filter only after Enter commits the query.
   const draftInput = container.querySelector('#searchDraftInput');
   if (draftInput) {
-    draftInput.addEventListener('focus', () => {
-      if (suppressSearchDraftEmptyOnFocus) {
-        suppressSearchDraftEmptyOnFocus = false;
-        return;
-      }
-      showSearchDraftEmptyResults();
-    });
     draftInput.addEventListener('click', () => {
       showSearchDraftEmptyResults();
     });
