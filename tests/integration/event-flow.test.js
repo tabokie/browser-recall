@@ -12,6 +12,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import WebSocket from 'ws';
+import { generateSlugFromUrl } from '../../packages/core/page-identity.js';
 
 const ROOT = process.cwd();
 const BINARY_PATH = path.join(ROOT, 'target', 'debug', 'browser-recall-daemon');
@@ -77,30 +78,6 @@ function collectMessages(socket, count) {
     socket.on('message', onMessage);
     socket.on('error', onError);
   });
-}
-
-function generateSlug(text, hashInput) {
-  const base = text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '')
-    .substring(0, 30)
-    .replace(/-+$/, '');
-
-  let hash = 0;
-  for (let i = 0; i < hashInput.length; i += 1) {
-    hash = ((hash << 5) - hash + hashInput.charCodeAt(i)) | 0;
-  }
-  return `${base}-${Math.abs(hash).toString(36)}`.substring(0, 80);
-}
-
-function generateSlugFromUrl(url) {
-  const parsed = new URL(url);
-  let domain = parsed.hostname.toLowerCase();
-  if (domain.startsWith('www.')) domain = domain.slice(4);
-  const lastDot = domain.lastIndexOf('.');
-  if (lastDot > 0) domain = domain.slice(0, lastDot);
-  return generateSlug(domain + parsed.pathname, url);
 }
 
 function shardFor(value) {

@@ -1,5 +1,12 @@
 // Shared utility functions
+import {
+  canonicalizePageUrl,
+  generateSlug,
+  generateSlugFromUrl,
+} from './page-identity.js';
 import { logDebug } from './logger.js';
+
+export { canonicalizePageUrl, generateSlugFromUrl } from './page-identity.js';
 
 /** Max words of page body text captured for rule matching. Duplicated in content.js (non-module). */
 export const BODY_WORD_LIMIT = 200;
@@ -52,48 +59,6 @@ export async function saveSettingsValue(key, value) {
   }
 }
 
-// Generic slug generation: normalize text + hash for uniqueness
-function generateSlug(text, hashInput) {
-  if (!text || text.trim() === '') {
-    throw new Error('generateSlug: text must be non-empty');
-  }
-  // Normalize: lowercase, replace non-alphanumeric with hyphens, trim to 30 chars
-  const base = text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '')
-    .substring(0, 30)
-    .replace(/-+$/, '');
-
-  // Short hash for uniqueness
-  let hash = 0;
-  for (let i = 0; i < hashInput.length; i++) {
-    hash = ((hash << 5) - hash + hashInput.charCodeAt(i)) | 0;
-  }
-  const hashStr = Math.abs(hash).toString(36);
-  const slug = `${base}-${hashStr}`;
-  return slug.substring(0, 80);
-}
-
-export function canonicalizePageUrl(url) {
-  const parsed = new URL(url);
-  const keptParams = [];
-  let removedParam = false;
-  for (const [key, value] of parsed.searchParams.entries()) {
-    if (key.startsWith('_')) {
-      removedParam = true;
-      continue;
-    }
-    keptParams.push([key, value]);
-  }
-  if (!removedParam) return url;
-  parsed.search = '';
-  for (const [key, value] of keptParams) {
-    parsed.searchParams.append(key, value);
-  }
-  return parsed.href;
-}
-
 function canonicalizePageUrlIfValid(url) {
   try {
     return canonicalizePageUrl(url);
@@ -117,20 +82,6 @@ export function canonicalizePageRequest(request = {}) {
     }
   }
   return output;
-}
-
-// Generate slug from URL for content file naming
-export function generateSlugFromUrl(url) {
-  const canonicalUrl = canonicalizePageUrl(url);
-  const parsed = new URL(canonicalUrl);
-  let domain = parsed.hostname.toLowerCase();
-  if (domain.startsWith('www.')) domain = domain.slice(4);
-  const lastDot = domain.lastIndexOf('.');
-  if (lastDot > 0) domain = domain.slice(0, lastDot);
-  const text = domain + parsed.pathname;
-  // Hash canonical page identity: ordinary query params and fragments count,
-  // underscore-prefixed tracking params do not.
-  return generateSlug(text, canonicalUrl);
 }
 
 // Generate slug from list title for list file naming

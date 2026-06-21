@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { generateSlugFromUrl } from '../../packages/core/page-identity.js';
 
 function timer(label) {
   const t0 = performance.now();
@@ -74,32 +75,7 @@ export async function openHelperPage(extContext, extensionId) {
   return page;
 }
 
-// Compute the slug that the extension generates for a URL.
-// Pure function — no browser context needed.
-export function getSlugForUrl(url) {
-  try {
-    const parsed = new URL(url);
-    let domain = parsed.hostname.toLowerCase();
-    if (domain.startsWith('www.')) domain = domain.slice(4);
-    const lastDot = domain.lastIndexOf('.');
-    if (lastDot > 0) domain = domain.slice(0, lastDot);
-    const text = domain + parsed.pathname;
-    const base = text
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}]+/gu, '-')
-      .replace(/^-+|-+$/g, '')
-      .substring(0, 30)
-      .replace(/-+$/, '');
-    let hash = 0;
-    for (let i = 0; i < url.length; i++) {
-      hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0;
-    }
-    const hashStr = Math.abs(hash).toString(36);
-    return `${base}-${hashStr}`.substring(0, 80);
-  } catch {
-    throw new Error(`getSlugForUrl: invalid URL: ${url}`);
-  }
-}
+export const getSlugForUrl = generateSlugFromUrl;
 
 export function pageCheckpointPath(slug) {
   const shard = crypto

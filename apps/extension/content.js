@@ -2,6 +2,13 @@
 console.log('Browser Recall content script loaded on:', window.location.href);
 
 const extensionSurface = globalThis.browserRecallExtensionSurface;
+const pageIdentity = globalThis.browserRecallPageIdentity;
+
+if (!pageIdentity?.generateSlugFromUrl) {
+  throw new Error(
+    'Browser Recall page identity helper was not loaded before content.js',
+  );
+}
 
 // Recording paused: skip all content script functionality.
 chrome.storage.session.get(['workspace'], (result) => {
@@ -18,6 +25,12 @@ function initContentScript() {
   let maxScrollDepth = 0;
   let lastActiveTime = Date.now(); // reset on visibility→visible; null after leave report
   let _panelDismissed = false;
+  let _highlightReapplyObserver = null;
+  let _highlightReapplyRetryTimer = null;
+  let _highlightReapplyDeadlineTimer = null;
+  let _highlightReapplyRunId = 0;
+  let _highlightReapplySlug = null;
+  let _highlightReapplyNotesToWatch = [];
 
   // Track scroll depth (throttled via rAF to avoid layout thrash on every scroll event)
   let _scrollRafPending = false;
@@ -225,21 +238,7 @@ function initContentScript() {
 
   function slugFromUrl(url) {
     try {
-      const parsed = new URL(url);
-      let domain = parsed.hostname.toLowerCase();
-      if (domain.startsWith('www.')) domain = domain.slice(4);
-      const lastDot = domain.lastIndexOf('.');
-      if (lastDot > 0) domain = domain.slice(0, lastDot);
-      const base = (domain + parsed.pathname)
-        .replace(/[^\p{L}\p{N}]+/gu, '-')
-        .replace(/^-+|-+$/g, '')
-        .substring(0, 30)
-        .replace(/-+$/, '');
-      let hash = 0;
-      for (let i = 0; i < url.length; i++) {
-        hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0;
-      }
-      return `${base}-${Math.abs(hash).toString(36)}`.substring(0, 80);
+      return pageIdentity.generateSlugFromUrl(url);
     } catch (e) {
       return null;
     }
@@ -1007,8 +1006,119 @@ function initContentScript() {
     });
   }
 
+  function countHighlightableExcerptParts(note) {
+    return Array.isArray(note?.excerpt) ? valueParts(note.excerpt).length : 0;
+  }
+
+  function existingHighlightCountForNote(note) {
+    if (!note?.slug) return 0;
+    return document.querySelectorAll(
+      `mark.portal-highlight[data-note-slug="${cssEscape(note.slug)}"]`,
+    ).length;
+  }
+
+  function applySavedHighlightNotes(notes) {
+    const pending = [];
+    for (const note of notes) {
+      if (note.excerpt === null) continue;
+      const expectedCount = countHighlightableExcerptParts(note);
+      if (expectedCount === 0) continue;
+      if (existingHighlightCountForNote(note) >= expectedCount) continue;
+
+      const marks = highlightSavedNoteInPage(note);
+      for (const mark of marks) {
+        if (note.slug) mark.dataset.noteSlug = note.slug;
+      }
+
+      if (note.slug && existingHighlightCountForNote(note) < expectedCount) {
+        pending.push(note);
+      }
+    }
+    return pending;
+  }
+
+  function highlightableNotes(notes) {
+    return notes.filter(
+      (note) =>
+        note.excerpt !== null && countHighlightableExcerptParts(note) > 0,
+    );
+  }
+
+  function stopHighlightReapplyRetry() {
+    if (_highlightReapplyObserver) {
+      _highlightReapplyObserver.disconnect();
+      _highlightReapplyObserver = null;
+    }
+    if (_highlightReapplyRetryTimer) {
+      clearTimeout(_highlightReapplyRetryTimer);
+      _highlightReapplyRetryTimer = null;
+    }
+    if (_highlightReapplyDeadlineTimer) {
+      clearTimeout(_highlightReapplyDeadlineTimer);
+      _highlightReapplyDeadlineTimer = null;
+    }
+    _highlightReapplySlug = null;
+    _highlightReapplyNotesToWatch = [];
+  }
+
+  function isCurrentHighlightReapply(runId, slug) {
+    return _highlightReapplyRunId === runId && getSlugForCurrentPage() === slug;
+  }
+
+  function removeWatchedHighlightNote(noteSlug) {
+    if (!noteSlug || _highlightReapplyNotesToWatch.length === 0) return;
+    _highlightReapplyNotesToWatch = _highlightReapplyNotesToWatch.filter(
+      (note) => note.slug !== noteSlug,
+    );
+    if (_highlightReapplyNotesToWatch.length === 0) {
+      stopHighlightReapplyRetry();
+    }
+  }
+
+  function watchHighlightReapply(notesToWatch, { runId, slug }) {
+    stopHighlightReapplyRetry();
+    if (!notesToWatch.length || !document.body) return;
+    if (!isCurrentHighlightReapply(runId, slug)) return;
+
+    const retryDelayMs = 150;
+    const retryWindowMs = 10000;
+    _highlightReapplySlug = slug;
+    _highlightReapplyNotesToWatch = [...notesToWatch];
+
+    function runRetry() {
+      _highlightReapplyRetryTimer = null;
+      if (!isCurrentHighlightReapply(runId, _highlightReapplySlug)) {
+        stopHighlightReapplyRetry();
+        return;
+      }
+      applySavedHighlightNotes(_highlightReapplyNotesToWatch);
+    }
+
+    function scheduleRetry() {
+      if (_highlightReapplyRetryTimer) return;
+      if (_highlightReapplyNotesToWatch.length === 0) return;
+      _highlightReapplyRetryTimer = setTimeout(runRetry, retryDelayMs);
+    }
+
+    _highlightReapplyObserver = new MutationObserver(scheduleRetry);
+    _highlightReapplyObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+    _highlightReapplyDeadlineTimer = setTimeout(
+      stopHighlightReapplyRetry,
+      retryWindowMs,
+    );
+    scheduleRetry();
+  }
+
   // Re-apply saved notes on page load
-  async function reapplyHighlights() {
+  async function reapplyHighlights({ clearExisting = false } = {}) {
+    const runId = _highlightReapplyRunId + 1;
+    _highlightReapplyRunId = runId;
+    stopHighlightReapplyRetry();
+    if (clearExisting) removeAllHighlightMarks();
+
     const slug = getSlugForCurrentPage();
     if (!slug) return;
 
@@ -1018,15 +1128,13 @@ function initContentScript() {
         slug,
       });
       if (!response || !response.success || !response.notes) return;
+      if (!isCurrentHighlightReapply(runId, slug)) return;
 
-      for (const note of response.notes) {
-        if (note.excerpt === null) continue; // Skip global page notes
-        const marks = highlightSavedNoteInPage(note);
-        for (const mark of marks) {
-          if (note.slug) mark.dataset.noteSlug = note.slug;
-        }
-      }
+      const notesToWatch = highlightableNotes(response.notes);
+      applySavedHighlightNotes(notesToWatch);
+      watchHighlightReapply(notesToWatch, { runId, slug });
     } catch (error) {
+      if (!isCurrentHighlightReapply(runId, slug)) return;
       showExtensionReloadNotification(error);
     }
   }
@@ -1100,14 +1208,30 @@ function initContentScript() {
     parent.normalize();
   }
 
-  function removeHighlightMarksByNoteSlug(noteSlug) {
+  function removeAllHighlightMarks() {
     document
-      .querySelectorAll(`mark.portal-highlight[data-note-slug="${noteSlug}"]`)
+      .querySelectorAll('mark.portal-highlight')
       .forEach((mark) => unwrapHighlightMark(mark));
     document.querySelectorAll('*').forEach((el) => {
       if (!el.shadowRoot) return;
       el.shadowRoot
-        .querySelectorAll(`mark.portal-highlight[data-note-slug="${noteSlug}"]`)
+        .querySelectorAll('mark.portal-highlight')
+        .forEach((mark) => unwrapHighlightMark(mark));
+    });
+  }
+
+  function removeHighlightMarksByNoteSlug(noteSlug) {
+    removeWatchedHighlightNote(noteSlug);
+    const noteSelector = `mark.portal-highlight[data-note-slug="${cssEscape(
+      noteSlug,
+    )}"]`;
+    document
+      .querySelectorAll(noteSelector)
+      .forEach((mark) => unwrapHighlightMark(mark));
+    document.querySelectorAll('*').forEach((el) => {
+      if (!el.shadowRoot) return;
+      el.shadowRoot
+        .querySelectorAll(noteSelector)
         .forEach((mark) => unwrapHighlightMark(mark));
     });
   }
@@ -1187,7 +1311,7 @@ function initContentScript() {
     maxScrollDepth = 0;
     lastActiveTime = Date.now();
     reportInitialVisit(nextUrl, previousUrl);
-    reapplyHighlights();
+    reapplyHighlights({ clearExisting: true });
   }
 
   const spaNavigationBridge = globalThis.__browserRecallSpaNavigationBridge;

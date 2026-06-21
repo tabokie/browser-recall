@@ -12,6 +12,12 @@ import {
 import { dirname, extname, join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import os from 'node:os';
+import {
+  canonicalizePageUrl as canonicalizeValidPageUrl,
+  generateSlug,
+  generateSlugFromUrl,
+  pageSlugTextFromUrl,
+} from '../packages/core/page-identity.js';
 
 const SETTINGS_KEYS = new Set([
   'theme',
@@ -148,64 +154,14 @@ function normalizeArtifactPath(path) {
   return path;
 }
 
-function generateSlug(text, hashInput) {
-  if (!text || text.trim() === '') {
-    throw new Error('generateSlug: text must be non-empty');
-  }
-  const base = text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '')
-    .substring(0, 30)
-    .replace(/-+$/, '');
-
-  let hash = 0;
-  for (let index = 0; index < hashInput.length; index += 1) {
-    hash = ((hash << 5) - hash + hashInput.charCodeAt(index)) | 0;
-  }
-  return `${base}-${Math.abs(hash).toString(36)}`.substring(0, 80);
-}
-
-function pageIdentityHashInput(url) {
-  const parsed = new URL(url);
-  const keptParams = [];
-  let removedParam = false;
-  for (const [key, value] of parsed.searchParams.entries()) {
-    if (key.startsWith('_')) {
-      removedParam = true;
-      continue;
-    }
-    keptParams.push([key, value]);
-  }
-  if (!removedParam) return url;
-  parsed.search = '';
-  for (const [key, value] of keptParams) {
-    parsed.searchParams.append(key, value);
-  }
-  return parsed.href;
-}
-
-function slugTextFromUrl(url) {
-  const parsed = new URL(url);
-  let domain = parsed.hostname.toLowerCase();
-  if (domain.startsWith('www.')) domain = domain.slice(4);
-  const lastDot = domain.lastIndexOf('.');
-  if (lastDot > 0) domain = domain.slice(0, lastDot);
-  return domain + parsed.pathname;
-}
-
-function generateSlugFromUrl(url) {
-  return generateSlug(slugTextFromUrl(url), pageIdentityHashInput(url));
-}
-
 function generateRawSlugFromUrl(url) {
-  return generateSlug(slugTextFromUrl(url), url);
+  return generateSlug(pageSlugTextFromUrl(url), url);
 }
 
 function canonicalizePageUrl(url) {
   if (typeof url !== 'string') return url;
   try {
-    return pageIdentityHashInput(url);
+    return canonicalizeValidPageUrl(url);
   } catch {
     return url;
   }

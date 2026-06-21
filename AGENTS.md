@@ -83,6 +83,7 @@ Project name: **browser-recall** (display name "Browser Recall"). Version 1.0 ta
 
 - Bug fixes are test-first: write the failing test, confirm it fails, apply the fix, confirm it passes.
 - E2E is the primary product safety net. For desktop app and extension app behavior, reproduce bugs and cover new functionality in Playwright first, using the real daemon/connector path whenever feasible.
+- For site-specific highlight bugs, verify the live/source DOM and saved note/page identity data before attributing the failure to CSS path drift, hydration, or text matching.
 - E2E tests for notification fallbacks should force the exact delivery channel to fail, not only assert the final visible notification.
 - Desktop visual E2E uses `npm run test:visual`; in sandboxed agent runs, request browser-launch permissions for that command if Chromium aborts before test code runs. A launch-only failure where every visual test fails at `0ms` with `browserType.launch`, `SIGABRT`, or `kill EPERM` is a sandbox execution issue, not a product regression.
 - Rust daemon integration tests are acceptable for daemon authority behavior that is impractical or too indirect to assert through browser E2E; keep those tests at the daemon/WebSocket boundary rather than adding inline unit tests.

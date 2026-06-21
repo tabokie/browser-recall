@@ -1,0 +1,18 @@
+- [$mold](/Users/xyt/dev/skills/mold/SKILL.md) 
+- Explore Browser Recall for deepening opportunities around replay/storage/daemon write coordination. Use the architecture vocabulary: module, interface, depth/deep/shallow, seam, adapter, leverage, locality, deletion test. Read ARCHITECTURE.md/CODEBASE_MAP.md as needed, then inspect crates/replay, crates/daemon/src/storage.rs, runtime.rs, commands.rs, and relevant tests. Do not edit files. Return 2-4 concrete candidates with files, current friction, why deletion test says shallow/deep, and testability impact. Avoid proposing exact interfaces.
+- Explore Browser Recall for deepening opportunities around desktop UI / connector UI / shared JS helpers. Use the architecture vocabulary: module, interface, depth/deep/shallow, seam, adapter, leverage, locality, deletion test. Inspect apps/desktop/ui/index.js, desktop-bridge.js, extension-api-shim.js, apps/extension/background.js, popup.js, connector helpers, packages/core, and relevant E2E/integration tests. Do not edit files. Return 2-4 concrete candidates with files, current friction, why deletion test says shallow/deep, and testability impact. Avoid proposing exact interfaces.
+- There's an issue with page highlighting again (last time we fix some issues in 88d8c3b6b99a4c85e16d2fffd620f689c63b5f8d): On this site (https://www.lesswrong.com/posts/mwQZ6qsGXqwiZ6Zvy/how-my-social-skills-went-from-horrible-to-mediocre), the highlight (~/browser-data/objects/notes/260621-learning-data-science-made-me-j8iwml.json) is not applied after page reload.
+- Explain the issue. Did you verify the issue on the link I provided? And explain why it isn't found and fixed in the earlier commit.
+- You are taking wild guesses here aren't you? You didn't check the source html for the link I gave. In fact the css path did not change:
+
+<p id="block49"><strong>(d)</strong>&nbsp;Learning data science made me realize that I could use the&nbsp;<span><span><a href="http://en.wikipedia.org/wiki/Wisdom_of_the_crowd">Wisdom of the Crowds</a></span></span>&nbsp;to tease out what the common problem was in all of my interactions with people. It wasn't easy: the different instances were superficially totally different. It's not at all&nbsp;<em>a priori&nbsp;</em>clear what the two things</p>
+- So your previous judgement was wrong, was the old fix also unnecessary?
+For your second judgement, how do you know it is caused by "client hydration"?
+- I load up the latest version extension, but the highlight is still not visible on this page
+- Was the previous fixes unnecessary?
+- $gap
+- Fix and improve them all. Make the slug generation one shared function. Also make sure the data at ~/browser-data has no inconsistent slugs.
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix them all
+- $finish model=GPT-5.5 Codex
+- Save it

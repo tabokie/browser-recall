@@ -64,7 +64,7 @@ cache.
 - `views/lists` and `views/manifest` are replay-derived checkpoints. `views/pages` is a selective replay-derived checkpoint set: only pages with durable user state are persisted there.
 - `objects/notes` and `objects/snapshots` are durable user artifacts referenced by replay state.
 - Page and snapshot files are sharded by the first two hex characters of the SHA-256 hash of the logical slug/stem. Logical entity IDs do not include the shard.
-- Page slugs are derived from the page URL the replay layer receives. The readable slug prefix uses domain and path; the hash input is the full received URL. Extension-originated browser observations are canonicalized before they are sent to desktop: query params whose names start with `_` are removed, while ordinary query params and fragments still distinguish pages. The browser-data migration applies the same canonicalization to existing logs and objects.
+- Page slugs are derived from the page URL the replay layer receives. The readable slug prefix uses domain and path; the hash input is the full received URL. Extension-originated browser observations are canonicalized before they are sent to desktop: query params whose names start with `_` are removed, while ordinary query params and fragments still distinguish pages. JS producers and tests use `packages/core/page-identity.js` for this logic; the extension content script receives a generated classic-script bridge from that same module during staging. The browser-data migration applies the same canonicalization to existing logs and objects.
 
 Mutation commands reserve checkpoint-worker capacity before durable changes, append logs before changing the daemon cache, then apply replay effects to the in-memory projection cache. The reserved checkpoint work is submitted while the write is still serialized, so checkpoint files persist in accepted write order. Checkpoint files may lag briefly; current reads use the daemon cache and only fall through to disk on coordinated cache misses. Shutdown flushes accepted checkpoint work before returning.
 
@@ -135,7 +135,7 @@ The extension is intentionally thin and no longer owns the main product UI.
 
 ### Responsibilities
 
-- `apps/extension/content.js` captures visit and attention signals.
+- `apps/extension/content.js` captures visit and attention signals. Because declarative content scripts are classic scripts, staged extension builds load a generated `browser-recall-page-identity.js` bridge before `content.js` so page slug generation still comes from the shared core implementation.
 - `apps/extension/savepage-bridge.js` orchestrates snapshot capture.
 - `apps/extension/background.js` buffers semantic connector commands, serves popup requests, manages pairing, and forwards RPC to the daemon. Toolbar clicks do not use a manifest `default_popup`: background prepares the current tab, connector state, access state, and daemon page summary first, stores that data as a one-shot in-memory bootstrap token, then opens `popup.html?bootstrap=...` with `chrome.action.openPopup()`. The token exists because extension action popups accept a URL but not an object payload; it is an in-memory handoff, not product persistence. Preparation is timeout-bounded so a slow daemon opens an explicit popup error instead of leaving the click dead. Engines without programmatic action popups fall back to opening the same prepared extension page in a tab. Test-only reset/seed/queue RPC handlers live in `apps/extension/background-test-control.js` and are staged only by the test fixture.
 - `apps/extension/popup.js` is the current-page dashboard backed by daemon RPC; its list picker is a short-lived popup control, not extension persistence. Tokenized toolbar-opened popups consume the prepared bootstrap before rendering, while direct popup loads use daemon RPC fallback. An open popup renders a per-open snapshot plus its own user actions; background mutation broadcasts do not mutate an already-open popup. Reopen the popup to request a fresh page summary. Popup-originated mutations run through one serialized UI lane: explicit command clicks are ignored while the lane is busy, and save-on-edit commits mark the lane busy before later actions can start.
@@ -153,7 +153,7 @@ For production use, persistence, blacklist/title policy, auto-pin synthesis, and
 
 ### Highlights
 
-Highlight notes are persisted through daemon `createNote` commands like other notes. The connector content script owns only page-local selection and DOM range work. Same-block selections, including multiline code inside one block, store one string inside the `excerpt` array and one string inside the `cssPath` array; selections spanning distinct block elements store `excerpt` and `cssPath` as aligned string arrays. Reapply uses saved `cssPath` anchors to scope text matching; intentionally empty `cssPath` entries search the document root.
+Highlight notes are persisted through daemon `createNote` commands like other notes. The connector content script owns only page-local selection and DOM range work. Same-block selections, including multiline code inside one block, store one string inside the `excerpt` array and one string inside the `cssPath` array; selections spanning distinct block elements store `excerpt` and `cssPath` as aligned string arrays. Reapply uses saved `cssPath` anchors to scope text matching; intentionally empty `cssPath` entries search the document root. After initial reapply, a bounded mutation watcher retries highlight placement so client-side DOM replacement can settle. Same-document route changes stop the previous watcher, unwrap old page marks, and then load highlights for the new page identity.
 
 ### Settings
 
@@ -214,6 +214,7 @@ Rules remain part of the main desktop UI product surface.
 `packages/core/` contains code shared by the desktop UI, connector UI, and tests:
 
 - UI helpers such as `search-helpers.js`, `highlight-helpers.js`, `time-chart.js`, and `virtual-scroller.js`
+- page identity helpers in `page-identity.js`, including canonical URL handling, page slug generation, and the generated classic-script bridge source for content scripts
 - shared styling/theme modules
 - logger, rule helpers, entity helpers, and search-runtime glue
 

@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createPageIdentityGlobalScript } from '../packages/core/page-identity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -15,6 +16,7 @@ const extensionDistDir = path.join(repoRoot, 'dist/extension');
 const chromeExtensionOutDir = path.join(extensionDistDir, 'chrome');
 const firefoxExtensionOutDir = path.join(extensionDistDir, 'firefox');
 const desktopUiOutDir = path.join(repoRoot, 'dist/desktop/ui');
+const pageIdentityContentScript = 'browser-recall-page-identity.js';
 
 export const defaultArtifactDirs = Object.freeze({
   chromeExtension: chromeExtensionOutDir,
@@ -76,9 +78,29 @@ function rewriteCoreImports(outDir, { coreImportPrefix, stagedCorePrefix }) {
   }
 }
 
+function writeExtensionPageIdentityGlobal(outDir) {
+  fs.writeFileSync(
+    path.join(outDir, pageIdentityContentScript),
+    createPageIdentityGlobalScript(),
+  );
+}
+
+function ensurePageIdentityContentScript(manifest) {
+  const contentScript = manifest.content_scripts?.find((entry) =>
+    entry.js?.includes('content.js'),
+  );
+  if (!contentScript) return;
+  if (contentScript.js.includes(pageIdentityContentScript)) return;
+  const contentIndex = contentScript.js.indexOf('content.js');
+  const insertIndex =
+    contentIndex >= 0 ? contentIndex : contentScript.js.length;
+  contentScript.js.splice(insertIndex, 0, pageIdentityContentScript);
+}
+
 function writeExtensionManifest(outDir, browser = 'chrome') {
   const manifestPath = path.join(outDir, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  ensurePageIdentityContentScript(manifest);
 
   if (browser === 'firefox') {
     manifest.action = {
@@ -121,12 +143,14 @@ function stageTarget(name, outDir = targets[name].defaultOutDir) {
 
 export function stageExtensionAssets(outDir = targets.extension.defaultOutDir) {
   const staged = stageTarget('extension', outDir);
+  writeExtensionPageIdentityGlobal(staged);
   writeExtensionManifest(staged, 'chrome');
   return staged;
 }
 
 export function stageFirefoxExtensionAssets(outDir = firefoxExtensionOutDir) {
   const staged = stageTarget('extension', outDir);
+  writeExtensionPageIdentityGlobal(staged);
   writeExtensionManifest(staged, 'firefox');
   return staged;
 }

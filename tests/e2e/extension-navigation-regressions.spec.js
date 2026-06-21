@@ -187,6 +187,230 @@ test.describe('extension same-tab navigation regressions', () => {
     await helper.close();
   });
 
+  test('resets reapplied highlights after same-tab history navigation', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/spa-highlight-a', {
+      title: 'SPA Highlight A',
+      body: `
+        <main>
+          <button id="go">Go</button>
+          <section id="route-a">
+            <p id="alpha">Alpha route highlighted text.</p>
+          </section>
+          <section id="route-b" hidden>
+            <p id="beta">Beta route highlighted text.</p>
+          </section>
+        </main>
+        <script>
+          document.getElementById('go').addEventListener('click', () => {
+            history.pushState({}, '', '/spa-highlight-b');
+            document.title = 'SPA Highlight B';
+            document.getElementById('route-a').hidden = true;
+            document.getElementById('route-b').hidden = false;
+          });
+        </script>
+      `,
+    });
+
+    const firstUrl = localServer.url('/spa-highlight-a');
+    const secondUrl = localServer.url('/spa-highlight-b');
+    const firstSlug = getSlugForUrl(firstUrl);
+    const secondSlug = getSlugForUrl(secondUrl);
+    const firstNoteSlug = 'note-spa-highlight-a';
+    const secondNoteSlug = 'note-spa-highlight-b';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(firstSlug),
+        data: {
+          slug: firstSlug,
+          url: firstUrl,
+          title: 'SPA Highlight A',
+          childIds: [`note:${firstNoteSlug}`],
+          parentIds: [],
+          timestamps: { 'test-device': now },
+        },
+      },
+      {
+        path: `objects/notes/${firstNoteSlug}.json`,
+        data: {
+          slug: firstNoteSlug,
+          excerpt: ['Alpha route highlighted text.'],
+          note: '',
+          cssPath: ['p#alpha'],
+          url: firstUrl,
+        },
+      },
+      {
+        path: pageCheckpointPath(secondSlug),
+        data: {
+          slug: secondSlug,
+          url: secondUrl,
+          title: 'SPA Highlight B',
+          childIds: [`note:${secondNoteSlug}`],
+          parentIds: [],
+          timestamps: { 'test-device': now },
+        },
+      },
+      {
+        path: `objects/notes/${secondNoteSlug}.json`,
+        data: {
+          slug: secondNoteSlug,
+          excerpt: ['Beta route highlighted text.'],
+          note: '',
+          cssPath: ['p#beta'],
+          url: secondUrl,
+        },
+      },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const page = await extContext.newPage();
+    await page.goto(firstUrl);
+    await waitForContentScript(helper, page, firstUrl);
+
+    await expect(page.locator('#alpha mark.portal-highlight')).toHaveCount(1, {
+      timeout: 5000,
+    });
+    await expect(page.locator('#beta mark.portal-highlight')).toHaveCount(0);
+
+    await page.click('#go');
+    await expect(page).toHaveURL(secondUrl);
+
+    await expect(page.locator('#alpha mark.portal-highlight')).toHaveCount(0);
+    await expect(page.locator('#beta mark.portal-highlight')).toHaveCount(1, {
+      timeout: 5000,
+    });
+    await expect(page.locator('#beta mark.portal-highlight')).toHaveAttribute(
+      'data-note-slug',
+      secondNoteSlug,
+    );
+
+    await page.close();
+    await helper.close();
+  });
+
+  test('ignores stale highlight note loads after rapid same-tab history navigation', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/spa-stale-highlight-a', {
+      title: 'SPA Stale Highlight A',
+      body: `
+        <main>
+          <button id="go">Go</button>
+          <p id="shared">Initial route text.</p>
+        </main>
+        <script>
+          document.getElementById('go').addEventListener('click', () => {
+            history.pushState({}, '', '/spa-stale-highlight-b');
+            document.title = 'SPA Stale Highlight B';
+            document.getElementById('shared').textContent = 'Shared stale highlighted text.';
+            setTimeout(() => {
+              history.pushState({}, '', '/spa-stale-highlight-c');
+              document.title = 'SPA Stale Highlight C';
+              document.getElementById('shared').textContent = 'Shared stale highlighted text.';
+            }, 0);
+          });
+        </script>
+      `,
+    });
+
+    const firstUrl = localServer.url('/spa-stale-highlight-a');
+    const secondUrl = localServer.url('/spa-stale-highlight-b');
+    const thirdUrl = localServer.url('/spa-stale-highlight-c');
+    const secondSlug = getSlugForUrl(secondUrl);
+    const thirdSlug = getSlugForUrl(thirdUrl);
+    const staleNoteSlug = 'note-spa-stale-highlight-b';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(secondSlug),
+        data: {
+          slug: secondSlug,
+          url: secondUrl,
+          title: 'SPA Stale Highlight B',
+          childIds: [`note:${staleNoteSlug}`],
+          parentIds: [],
+          timestamps: { 'test-device': now },
+        },
+      },
+      {
+        path: `objects/notes/${staleNoteSlug}.json`,
+        data: {
+          slug: staleNoteSlug,
+          excerpt: ['Shared stale highlighted text.'],
+          note: '',
+          cssPath: ['p#shared'],
+          url: secondUrl,
+        },
+      },
+      {
+        path: pageCheckpointPath(thirdSlug),
+        data: {
+          slug: thirdSlug,
+          url: thirdUrl,
+          title: 'SPA Stale Highlight C',
+          childIds: [],
+          parentIds: [],
+          timestamps: { 'test-device': now },
+        },
+      },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const page = await extContext.newPage();
+    await page.goto(firstUrl);
+    await waitForContentScript(helper, page, firstUrl);
+    await helper.evaluate(
+      async ({ pageUrl, delayedSlug }) => {
+        const [tab] = await chrome.tabs.query({ url: pageUrl });
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          world: 'ISOLATED',
+          args: [delayedSlug],
+          func: (slugToDelay) => {
+            const originalSendMessage = chrome.runtime.sendMessage.bind(
+              chrome.runtime,
+            );
+            chrome.runtime.sendMessage = (message, ...rest) => {
+              if (
+                message?.action === 'loadPageNotes' &&
+                message.slug === slugToDelay
+              ) {
+                return new Promise((resolve, reject) => {
+                  setTimeout(() => {
+                    originalSendMessage(message, ...rest).then(resolve, reject);
+                  }, 350);
+                });
+              }
+              return originalSendMessage(message, ...rest);
+            };
+          },
+        });
+      },
+      { pageUrl: firstUrl, delayedSlug: secondSlug },
+    );
+
+    await page.click('#go');
+    await expect(page).toHaveURL(thirdUrl);
+    await page.waitForTimeout(500);
+    await expect(page.locator('mark.portal-highlight')).toHaveCount(0);
+
+    await page.close();
+    await helper.close();
+  });
+
   test('clears a page marker badge when same-tab history navigation leaves a listed page', async ({
     extContext,
     extensionId,

@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import vm from 'node:vm';
+import { createPageIdentityGlobalScript } from '../../packages/core/page-identity.js';
 import {
   canonicalizePageRequest,
   canonicalizePageUrl,
@@ -62,6 +64,15 @@ describe('generateSlugFromUrl', () => {
   it('is deterministic', () => {
     const url = 'https://example.com/test?q=hello';
     expect(generateSlugFromUrl(url)).toBe(generateSlugFromUrl(url));
+  });
+
+  it('generates the classic content-script bridge from the shared implementation', () => {
+    const context = { URL };
+    vm.runInNewContext(createPageIdentityGlobalScript(), context);
+    const url = 'https://www.lesswrong.com/posts/mwQZ6qsGXqwiZ6Zvy/title';
+    expect(context.browserRecallPageIdentity.generateSlugFromUrl(url)).toBe(
+      generateSlugFromUrl(url),
+    );
   });
 });
 

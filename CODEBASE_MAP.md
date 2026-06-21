@@ -64,13 +64,14 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `crates/replay/src/lib.rs` | Production replay engine |
 | `crates/replay/src/bin/replay-verify.rs` | Full-log checkpoint verifier using the production replay and checkpoint policy |
 | `crates/search/src/lib.rs` | Native search primitives |
-| `scripts/stage-app-assets.mjs` | Stages loadable app assets under `dist/extension/{chrome,firefox}/` and `dist/desktop/ui/` |
+| `scripts/stage-app-assets.mjs` | Stages loadable app assets under `dist/extension/{chrome,firefox}/` and `dist/desktop/ui/`, including the generated content-script page identity bridge |
 | `scripts/collect-desktop-artifacts.mjs` | Collects Tauri release binaries and bundles into `dist/desktop/<platform>/` |
 | `scripts/migrate-browser-data-schema.mjs` | Browser data migration utility for log/view/object schema changes, including URL identity canonicalization |
 | `scripts/test-coverage-monitor.mjs` | Test investment and JS/Rust uncovered-line monitor; enforces no JS or inline Rust unit-test LoC growth |
 | `scripts/generate-icons.mjs` | Renders root SVG icon sources into opaque desktop/extension icons, the transparent tray icon, and the macOS `.icns` pack |
 | `packages/core/index.js` | Shared package exports |
-| `packages/core/utils.js` | Shared utility helpers, including extension-side URL canonicalization and JS page slug generation |
+| `packages/core/page-identity.js` | Shared page URL canonicalization and slug generation, plus generated classic-script bridge source for content scripts |
+| `packages/core/utils.js` | Shared utility helpers that re-export page identity and provide connector request canonicalization |
 | `packages/core/rule-engine.js` | Shared rule validation/matching helpers; keyword rules are title-only |
 | `packages/core/search-helpers.js` | Shared query parsing/search helper logic |
 | `packages/core/time-chart.js` | Shared history chart rendering helpers |
@@ -95,7 +96,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 
 ### Capture Path
 
-- `apps/extension/content.js` captures visit/attention signals and owns page-local highlight range work, including structured selection text for context-menu highlights and reapplying saved highlight notes into the DOM.
+- `apps/extension/content.js` captures visit/attention signals and owns page-local highlight range work, including structured selection text for context-menu highlights and reapplying saved highlight notes into the DOM. Staged builds load `browser-recall-page-identity.js` before `content.js`, generated from `packages/core/page-identity.js`, so classic content scripts share the same page slug implementation as module code.
 - `apps/extension/savepage-bridge.js` performs snapshot capture.
 - `apps/extension/background.js` buffers and forwards capture events to the daemon, and injects a page reload warning when shortcut/context-menu actions cannot reach a stale content script.
 - `apps/extension/popup.js` surfaces popup-initiated capture failures through page notifications with popup-bubble fallback.
@@ -103,7 +104,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 ### Replay and Storage
 
 - `crates/replay/` is the production replay engine and owns replay-derived checkpoint policy used by verification and daemon persistence.
-- `packages/core/utils.js` canonicalizes extension-originated page URLs before they are sent to desktop, removing underscore-prefixed query params while keeping ordinary query params and fragments. `crates/replay/src/lib.rs` hashes the URL it receives; non-extension producers must send canonical URLs to get the same identity behavior.
+- `packages/core/page-identity.js` canonicalizes extension-originated page URLs before they are sent to desktop, removing underscore-prefixed query params while keeping ordinary query params and fragments. `packages/core/utils.js`, migration scripts, integration tests, and the generated content-script bridge all use that shared implementation. `crates/replay/src/lib.rs` hashes the URL it receives; non-extension producers must send canonical URLs to get the same identity behavior.
 - `crates/daemon/src/storage.rs` owns coordinated cache-miss reads, serialized write coordination, synchronous log append helpers, history file/device-directory listing, checkpoint-capacity reservation, ordered async checkpoint persistence, replay progress, and the current `logs/`, `objects/`, `views/` path layout.
 - `crates/daemon/src/commands.rs` exposes replay-backed reads and mutations to the desktop shell and keeps command-only fields out of JSONL.
 - `crates/daemon/src/runtime.rs` provides shared replay overlay helpers used by command, websocket, and sync write paths.

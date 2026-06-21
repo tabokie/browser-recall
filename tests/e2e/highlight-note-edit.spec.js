@@ -691,6 +691,133 @@ test.describe('Highlight note edit', () => {
     await page.close();
   });
 
+  test('reapplies saved highlight on mixed-case URL paths using canonical page slug', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/MixedCase/HighlightPath', {
+      title: 'Mixed Case Highlight Path Test',
+      body: '<main><p id="block49">Mixed case path highlighted text.</p></main>',
+    });
+    const pageUrl = localServer.url('/MixedCase/HighlightPath');
+    const slug = getSlugForUrl(pageUrl);
+    const noteSlug = 'note-reapply-mixed-case-url-path-test';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Mixed Case Highlight Path Test',
+          timestamps: { 'test-device': now },
+          parentIds: [],
+          childIds: [`note:${noteSlug}`],
+        },
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: ['Mixed case path highlighted text.'],
+          note: '',
+          cssPath: ['p#block49'],
+          url: pageUrl,
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('domcontentloaded');
+
+    const articleMark = page.locator('p#block49 mark.portal-highlight');
+    await expect(articleMark).toHaveCount(1, {
+      timeout: 5000,
+    });
+    await expect(articleMark).toHaveText('Mixed case path highlighted text.');
+    await expect(articleMark).toHaveAttribute('data-note-slug', noteSlug);
+
+    await page.close();
+  });
+
+  test('reapplies saved highlight after client hydration replaces the marked paragraph', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const beforeWisdom =
+      'Learning data science made me realize that I could use the';
+    const wisdom = 'Wisdom of the Crowds';
+    const afterWisdom =
+      "to tease out what the common problem was in all of my interactions with people. It wasn't easy: the different instances were superficially totally different.";
+    const excerpt = `${beforeWisdom}\u00a0${wisdom}\u00a0${afterWisdom}`;
+    const paragraphHtml = `<p id="block49"><strong>(d)</strong>&nbsp;${beforeWisdom}&nbsp;<span><span><a href="http://en.wikipedia.org/wiki/Wisdom_of_the_crowd">${wisdom}</a></span></span>&nbsp;${afterWisdom} It's not at all&nbsp;<em>a priori&nbsp;</em>clear what the two things</p>`;
+    localServer.addPage('/hl-reapply-hydration-replaces-mark', {
+      title: 'Hydration Replaces Highlight Test',
+      body: `<main id="article-root">${paragraphHtml}</main>
+        <script>
+          const paragraphHtml = ${JSON.stringify(paragraphHtml)};
+          setTimeout(() => {
+            const root = document.getElementById('article-root');
+            root.innerHTML = paragraphHtml;
+            root.dataset.hydrated = '1';
+          }, 250);
+        </script>`,
+    });
+    const pageUrl = localServer.url('/hl-reapply-hydration-replaces-mark');
+    const slug = getSlugForUrl(pageUrl);
+    const noteSlug = 'note-reapply-hydration-replaces-mark-test';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'Hydration Replaces Highlight Test',
+          timestamps: { 'test-device': now },
+          parentIds: [],
+          childIds: [`note:${noteSlug}`],
+        },
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: [excerpt],
+          note: '',
+          cssPath: ['p#block49'],
+          url: pageUrl,
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('#article-root[data-hydrated="1"]', {
+      timeout: 5000,
+    });
+
+    const articleMark = page.locator('#article-root mark.portal-highlight');
+    await expect(articleMark).toHaveCount(1, {
+      timeout: 5000,
+    });
+    await expect(articleMark).toBeVisible();
+    await expect(articleMark).toHaveText(excerpt);
+    await expect(articleMark).toHaveAttribute('data-note-slug', noteSlug);
+
+    await page.close();
+  });
+
   test('deleting a grouped reapplied highlight removes every mark immediately', async ({
     extContext,
     extensionId,
@@ -754,6 +881,8 @@ test.describe('Highlight note edit', () => {
         noteSlug: 'note-delete-grouped-reapply-test',
       });
     }, pageUrl);
+    await expect(page.locator('mark.portal-highlight')).toHaveCount(0);
+    await page.waitForTimeout(300);
     await expect(page.locator('mark.portal-highlight')).toHaveCount(0);
 
     await helper.close();

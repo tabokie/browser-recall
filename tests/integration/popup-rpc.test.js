@@ -4,32 +4,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import WebSocket from 'ws';
+import { generateSlugFromUrl } from '../../packages/core/page-identity.js';
 
 const ROOT = process.cwd();
 const BINARY_PATH = path.join(ROOT, 'target', 'debug', 'browser-recall-daemon');
 const ORIGIN = 'chrome-extension://abcdefghijklmnop';
 const PORT_CANDIDATES = [28771, 28772, 28773];
-
-function generateSlugFromUrl(url) {
-  const parsed = new URL(url);
-  let domain = parsed.hostname.toLowerCase();
-  if (domain.startsWith('www.')) domain = domain.slice(4);
-  const lastDot = domain.lastIndexOf('.');
-  if (lastDot > 0) domain = domain.slice(0, lastDot);
-  const text = `${domain}${parsed.pathname}`;
-  const base = text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '')
-    .substring(0, 30)
-    .replace(/-+$/, '');
-
-  let hash = 0;
-  for (let i = 0; i < url.length; i += 1) {
-    hash = ((hash << 5) - hash + url.charCodeAt(i)) | 0;
-  }
-  return `${base}-${Math.abs(hash).toString(36)}`.substring(0, 80);
-}
 
 function waitForListening(child) {
   return new Promise((resolve, reject) => {
