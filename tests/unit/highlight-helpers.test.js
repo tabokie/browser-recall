@@ -11,6 +11,9 @@ import {
   highlightSavedExcerptPartsInPage,
 } from '../../apps/extension/highlight-helpers.js';
 
+await import('../../apps/extension/extension-surface.js');
+const extensionSurface = globalThis.browserRecallExtensionSurface;
+
 // Set up a fresh jsdom for each test
 let dom;
 beforeEach(() => {
@@ -916,5 +919,15 @@ describe('Saved highlight reapply', () => {
 
     expect(marks).toHaveLength(1);
     expect(getMarks()[0].textContent).toBe('line one\nline two\nline three');
+  });
+
+  it('does not render a highlight title in the note overlay html', () => {
+    const html = extensionSurface.noteOverlayHtml({
+      excerpt: 'quick brown fox',
+      placeholder: 'Add a note...',
+      includeDelete: true,
+    });
+    expect(html).toContain('quick brown fox');
+    expect(html).not.toContain('HIGHLIGHT NOTE');
   });
 });

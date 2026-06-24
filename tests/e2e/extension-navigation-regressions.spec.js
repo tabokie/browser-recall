@@ -296,6 +296,76 @@ test.describe('extension same-tab navigation regressions', () => {
     await helper.close();
   });
 
+  test('clears reapplied highlights before same-tab navigation enters a pdf url', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/spa-highlight-pdf', {
+      title: 'SPA Highlight PDF',
+      body: `
+        <main>
+          <button id="go">Go</button>
+          <p id="alpha">Alpha route highlighted text.</p>
+        </main>
+        <script>
+          document.getElementById('go').addEventListener('click', () => {
+            history.pushState({}, '', '/spa-highlight-pdf-view.pdf');
+            document.title = 'SPA Highlight PDF View';
+          });
+        </script>
+      `,
+    });
+
+    const pageUrl = localServer.url('/spa-highlight-pdf');
+    const pdfUrl = localServer.url('/spa-highlight-pdf-view.pdf');
+    const slug = getSlugForUrl(pageUrl);
+    const noteSlug = 'note-spa-highlight-pdf';
+    const now = Date.now();
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'SPA Highlight PDF',
+          childIds: [`note:${noteSlug}`],
+          parentIds: [],
+          timestamps: { 'test-device': now },
+        },
+      },
+      {
+        path: `objects/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: ['Alpha route highlighted text.'],
+          note: '',
+          cssPath: ['p#alpha'],
+          url: pageUrl,
+        },
+      },
+    ]);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await waitForContentScript(helper, page, pageUrl);
+
+    await expect(page.locator('#alpha mark.portal-highlight')).toHaveCount(1, {
+      timeout: 5000,
+    });
+
+    await page.click('#go');
+    await expect(page).toHaveURL(pdfUrl);
+    await expect(page.locator('mark.portal-highlight')).toHaveCount(0);
+
+    await page.close();
+    await helper.close();
+  });
+
   test('ignores stale highlight note loads after rapid same-tab history navigation', async ({
     extContext,
     extensionId,

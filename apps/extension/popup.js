@@ -52,6 +52,7 @@ const boundListSearchCaptureInputs = new WeakSet();
 let popupUiMutationQueue = Promise.resolve();
 let popupUiMutationActiveIdleResolvers = [];
 let focusedAutosaveQueue = Promise.resolve();
+let listChipsClickBound = false;
 
 function resetCurrentPageIdentity({ slug, url, title, tab }) {
   Object.assign(
@@ -1122,6 +1123,84 @@ function applyLocalListPinState(listId, pinned) {
   applyPinStateToLists(currentPage.summary?.lists, listId, pinned);
 }
 
+function escapeCssSelector(value) {
+  if (globalThis.CSS && typeof globalThis.CSS.escape === 'function') {
+    return globalThis.CSS.escape(value);
+  }
+  return String(value).replace(/[^a-zA-Z0-9_-]/g, (character) => {
+    return `\\${character.codePointAt(0).toString(16)} `;
+  });
+}
+
+function syncListChipToggle(listId, pinned) {
+  const chip = document.querySelector(
+    `#listChips .list-chip[data-list-id="${escapeCssSelector(listId)}"]`,
+  );
+  if (!chip) return false;
+  chip.classList.toggle('selected', pinned);
+  syncListCountFromSummary();
+  return true;
+}
+
+function syncListCountFromSummary() {
+  const listCount = document.getElementById('listCount');
+  if (!listCount) return;
+  const lists = Array.isArray(currentPage.summary?.lists)
+    ? currentPage.summary.lists
+    : [];
+  const nextCount = lists.reduce((count, list) => {
+    const pins = Array.isArray(list?.pins) ? list.pins : [];
+    const slug = generateSlugFromUrl(currentPage.url || '');
+    const pageId = pageKey(slug);
+    const pinned = pins.some(
+      (pin) => pin.id === pageId || pin.url === currentPage.url,
+    );
+    return count + (pinned ? 1 : 0);
+  }, 0);
+  listCount.textContent = String(nextCount).padStart(2, '0');
+}
+
+function syncListPickerOptionToggle(listId, pinned) {
+  const option = document.querySelector(
+    `#listPicker .list-picker-option[data-list-id="${escapeCssSelector(listId)}"]`,
+  );
+  if (!option) return false;
+  option.classList.toggle('selected', pinned);
+  const check = option.querySelector('.list-picker-row-check');
+  if (check) check.innerHTML = pinned ? '&#10003;' : '';
+  return true;
+}
+
+function handleListChipsClick(event) {
+  const target = event.target?.closest?.('.list-chip, #listAddBtn');
+  if (!target || !event.currentTarget?.contains?.(target)) return;
+  if (target.classList.contains('list-chip')) {
+    event.preventDefault();
+    void runPopupUiMutation('toggle-list-pin', async () => {
+      const listId = target.dataset.listId;
+      await toggleListPin(listId);
+    }).catch((err) => showErrorBubble(err.message));
+    return;
+  }
+  if (target.id === 'listAddBtn') {
+    event.stopPropagation();
+    void runPopupUiMutation('open-list-picker', async () => {
+      if (document.getElementById('listPicker')) {
+        closeListPicker();
+        return;
+      }
+      try {
+        const freshLists = await loadLists();
+        const freshPins = await loadListPins(freshLists);
+        openListPicker(freshLists, freshPins);
+      } catch (err) {
+        showErrorBubble(err.message);
+        openListPicker(currentPage.summary?.lists || [], {});
+      }
+    }).catch((err) => showErrorBubble(err.message));
+  }
+}
+
 async function renderListChips(listOverride = null) {
   const container = document.getElementById('listChips');
   const lists = listOverride || (await loadLists());
@@ -1186,45 +1265,39 @@ async function renderListChips(listOverride = null) {
     }
   }
 
-  let html = displayLists
-    .map((list) => {
+  const existingChips = [...container.querySelectorAll('.list-chip')];
+  const canPatchInPlace =
+    existingChips.length === displayLists.length &&
+    existingChips.every(
+      (chip, index) => chip.dataset.listId === displayLists[index]?.slug,
+    ) &&
+    container.querySelector('.list-add-btn');
+
+  if (canPatchInPlace) {
+    existingChips.forEach((chip, index) => {
+      const list = displayLists[index];
       const pinned = isPagePinned(allPins, list.slug, currentPage.url);
-      return `<span class="list-chip${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
-    })
-    .join('');
-
-  html += `<span class="list-add-btn" id="listAddBtn" title="Add to list">+</span>`;
-
-  container.innerHTML = html;
-
-  // Toggle existing chips
-  container.querySelectorAll('.list-chip').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      void runPopupUiMutation('toggle-list-pin', async () => {
-        const listId = chip.dataset.listId;
-        await toggleListPin(listId);
-      }).catch((err) => showErrorBubble(err.message));
+      chip.classList.toggle('selected', pinned);
+      chip.dataset.listId = list.slug;
+      chip.textContent = list.name;
     });
-  });
+  } else {
+    let html = displayLists
+      .map((list) => {
+        const pinned = isPagePinned(allPins, list.slug, currentPage.url);
+        return `<span class="list-chip${pinned ? ' selected' : ''}" role="button" tabindex="0" data-list-id="${list.slug}">${escapeHtml(list.name)}</span>`;
+      })
+      .join('');
 
-  // + button opens picker dropdown
-  document.getElementById('listAddBtn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    void runPopupUiMutation('open-list-picker', async () => {
-      if (document.getElementById('listPicker')) {
-        closeListPicker();
-        return;
-      }
-      try {
-        const freshLists = await loadLists();
-        const freshPins = await loadListPins(freshLists);
-        openListPicker(freshLists, freshPins);
-      } catch (err) {
-        showErrorBubble(err.message);
-        openListPicker(lists, allPins);
-      }
-    }).catch((err) => showErrorBubble(err.message));
-  });
+    html += `<span class="list-add-btn" id="listAddBtn" title="Add to list">+</span>`;
+
+    container.innerHTML = html;
+  }
+
+  if (!listChipsClickBound) {
+    container.addEventListener('click', handleListChipsClick);
+    listChipsClickBound = true;
+  }
   showSection('listSection');
   ensureListSearchCapture();
   focusListSearchCapture();
@@ -1247,8 +1320,12 @@ async function toggleListPin(listId) {
     typeof response.pinned === 'boolean'
   ) {
     applyLocalListPinState(listId, response.pinned);
+    syncListChipToggle(listId, response.pinned);
   }
-  await refreshCurrentPageSummary();
+  await refreshCurrentPageSummary({
+    renderSections: false,
+    renderLists: false,
+  });
   return response;
 }
 
@@ -1536,9 +1613,20 @@ function openListPicker(lists, allPins, options = {}) {
         applyPinStateToLists(pickerLists, listId, response.pinned);
         applyPinStateToPinMap(pickerPins, listId, response.pinned);
       }
-      await renderListChips(pickerLists);
-      renderPickerRows();
-      await refreshCurrentPageSummary();
+      const chipSynced =
+        response?.pinned === undefined ||
+        syncListChipToggle(listId, response.pinned);
+      const pickerSynced = syncListPickerOptionToggle(
+        listId,
+        response?.pinned,
+      );
+      if (!chipSynced || !pickerSynced) {
+        await renderListChips(currentPage.summary?.lists || pickerLists);
+      }
+      await refreshCurrentPageSummary({
+        renderSections: false,
+        renderLists: false,
+      });
       return true;
     } catch (err) {
       showErrorBubble(err.message);
@@ -1686,6 +1774,13 @@ function openListPicker(lists, allPins, options = {}) {
           );
           if (exactMatch) {
             await toggleListPin(exactMatch.slug);
+            if (
+              !document.querySelector(
+                `#listChips .list-chip[data-list-id="${escapeCssSelector(exactMatch.slug)}"]`,
+              )
+            ) {
+              await renderListChips(currentPage.summary?.lists || pickerLists);
+            }
             closeListPicker();
           } else {
             await createListAndPin(inputVal);
@@ -1890,6 +1985,7 @@ async function createListAndPin(name) {
   }
 
   await toggleListPin(listId);
+  await renderListChips(await loadLists());
 
   logDebug('[popup] Created list and pinned page:', name, listId);
 }
@@ -2149,7 +2245,7 @@ function pageSummaryFallback(tab, slug, summary = {}) {
 }
 
 async function fetchAndRenderPageData(tab, slug, options = {}) {
-  const { resetSections = true } = options;
+  const { resetSections = true, renderSections = true } = options;
   const generation = currentPage.generation;
   currentPage.entry = null;
   currentPage.pageSummaryState = 'loading';
@@ -2185,9 +2281,11 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
       if (currentPage.url) {
         document.getElementById('pageUrl').textContent = currentPage.url;
       }
-      renderVisitsAndLikes(page);
-      renderSnapshots(summary.snapshots);
-      renderNotes(summary.notes);
+      if (renderSections) {
+        renderVisitsAndLikes(page);
+        renderSnapshots(summary.snapshots);
+        renderNotes(summary.notes);
+      }
       logDebug(
         `[popup] Loaded ${summary.notes?.length || 0} notes, ${summary.snapshots?.length || 0} snapshots, ${summary.lists?.length || 0} lists`,
       );
@@ -2233,7 +2331,8 @@ async function fetchAndRenderPageData(tab, slug, options = {}) {
   return true;
 }
 
-async function refreshCurrentPageSummary() {
+async function refreshCurrentPageSummary(options = {}) {
+  const { renderSections = true, renderLists = true } = options;
   if (!currentPage.tab || !currentPage.url) return;
   const { paused } = await loadRecordingState();
   if (
@@ -2251,10 +2350,13 @@ async function refreshCurrentPageSummary() {
     currentPage.slug,
     {
       resetSections: false,
+      renderSections,
     },
   );
   if (!updated || generation !== currentPage.generation) return;
-  await Promise.all([renderListChips(), renderRecordingBar()]);
+  const followUps = [renderRecordingBar()];
+  if (renderLists) followUps.unshift(renderListChips());
+  await Promise.all(followUps);
 }
 
 function renderPageDashboardShell(options = {}) {

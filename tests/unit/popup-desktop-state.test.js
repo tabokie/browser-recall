@@ -2076,4 +2076,335 @@ describe('popup desktop state rendering', () => {
       'Reading',
     );
   });
+
+  it('refreshes hidden chips after toggling a filtered picker row even if summary refresh stalls', async () => {
+    const tab = {
+      id: 56,
+      url: 'https://example.com/picker-hidden-chip-refresh',
+      title: 'Picker Hidden Chip Refresh',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    let pinned = false;
+    let summaryCalls = 0;
+    const stalledSummary = deferred();
+    const currentLists = () => {
+      const lists = [];
+      for (let index = 0; index < 10; index += 1) {
+        lists.push({
+          slug: `extra-${index + 1}`,
+          name: `Extra ${index + 1}`,
+          pins: [
+            {
+              id: `page:${pageSlug}`,
+              pinnedAt: Date.now(),
+            },
+          ],
+        });
+      }
+      lists.push({
+        slug: 'reading',
+        name: 'Reading',
+        pins: pinned
+          ? [
+              {
+                id: `page:${pageSlug}`,
+                pinnedAt: Date.now(),
+              },
+            ]
+          : [],
+      });
+      return lists;
+    };
+
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () => {
+          summaryCalls++;
+          if (summaryCalls === 2) return stalledSummary.promise;
+          return {
+            success: true,
+            url: tab.url,
+            page: {
+              slug: pageSlug,
+              url: tab.url,
+              title: tab.title,
+              visitDates: [],
+            },
+            notes: [],
+            snapshots: [],
+            lists: currentLists(),
+          };
+        },
+        getPopupLists: () => ({ success: true, lists: currentLists() }),
+        toggleListPin: () => {
+          pinned = true;
+          return { success: true, pinned: true };
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.getElementById('listAddBtn'));
+    expect(document.getElementById('listChips').textContent).not.toContain(
+      'Reading',
+    );
+    document.getElementById('listAddBtn').click();
+    await waitFor(() => document.getElementById('listPickerInput'));
+    const input = document.getElementById('listPickerInput');
+    input.value = 'Reading';
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await waitFor(() => document.querySelector('.list-picker-row'));
+    document.querySelector('.list-picker-row').click();
+    await waitFor(() => summaryCalls === 2);
+
+    await waitFor(() =>
+      document.querySelector('#listChips .list-chip[data-list-id="reading"]'),
+    );
+    expect(document.getElementById('listCount').textContent).toBe('11');
+  });
+
+  it('keeps list count accurate when a hidden pinned list is toggled', async () => {
+    const tab = {
+      id: 54,
+      url: 'https://example.com/hidden-pin-count',
+      title: 'Hidden Pin Count',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    const currentLists = () => {
+      const lists = [
+        {
+          slug: 'reading',
+          name: 'Reading',
+          pins: [
+            {
+              id: `page:${pageSlug}`,
+              pinnedAt: Date.now(),
+            },
+          ],
+        },
+      ];
+      for (let index = 0; index < 10; index += 1) {
+        lists.push({
+          slug: `extra-${index + 1}`,
+          name: `Extra ${index + 1}`,
+          pins: [
+            {
+              id: `page:${pageSlug}`,
+              pinnedAt: Date.now(),
+            },
+          ],
+        });
+      }
+      return lists;
+    };
+
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () => ({
+          success: true,
+          url: tab.url,
+          page: {
+            slug: pageSlug,
+            url: tab.url,
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: currentLists(),
+        }),
+        getPopupLists: () => ({ success: true, lists: currentLists() }),
+        toggleListPin: () => ({ success: true, pinned: false }),
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.querySelector('.list-chip'));
+    expect(document.getElementById('listCount').textContent).toBe('11');
+    document.querySelector('.list-chip').click();
+    await waitFor(() => document.querySelector('.list-chip:not(.selected)'));
+    expect(document.getElementById('listCount').textContent).toBe('10');
+  });
+
+  it('keeps the chip strip in sync after exact-match picker toggles a hidden list', async () => {
+    const tab = {
+      id: 55,
+      url: 'https://example.com/exact-match-hidden-chip',
+      title: 'Exact Match Hidden Chip',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    let pinned = false;
+    const currentLists = () => {
+      const lists = [];
+      for (let index = 0; index < 10; index += 1) {
+        lists.push({
+          slug: `extra-${index + 1}`,
+          name: `Extra ${index + 1}`,
+          pins: [
+            {
+              id: `page:${pageSlug}`,
+              pinnedAt: Date.now(),
+            },
+          ],
+        });
+      }
+      lists.push({
+        slug: 'reading',
+        name: 'Reading',
+        pins: pinned
+          ? [
+              {
+                id: `page:${pageSlug}`,
+                pinnedAt: Date.now(),
+              },
+            ]
+          : [],
+      });
+      return lists;
+    };
+
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () => ({
+          success: true,
+          url: tab.url,
+          page: {
+            slug: pageSlug,
+            url: tab.url,
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: currentLists(),
+        }),
+        getPopupLists: () => ({ success: true, lists: currentLists() }),
+        toggleListPin: () => {
+          pinned = !pinned;
+          return { success: true, pinned };
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.getElementById('listAddBtn'));
+    document.getElementById('listAddBtn').click();
+    await waitFor(() => document.getElementById('listPickerInput'));
+    const input = document.getElementById('listPickerInput');
+    input.value = 'Reading';
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await waitFor(() => document.querySelector('.list-picker-row'));
+    input.dispatchEvent(
+      new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+    );
+
+    await waitFor(() => document.querySelector('.list-chip'));
+    expect(document.getElementById('listCount').textContent).toBe('10');
+  });
+
+  it('keeps the same chip node when toggling a list', async () => {
+    const tab = {
+      id: 53,
+      url: 'https://example.com/chip-node-stability',
+      title: 'Chip Node Stability',
+    };
+    const pageSlug = generateSlugFromUrl(tab.url);
+    let pinned = false;
+    const currentLists = () => [
+      {
+        slug: 'reading',
+        name: 'Reading',
+        pins: pinned
+          ? [
+              {
+                id: `page:${pageSlug}`,
+                pinnedAt: Date.now(),
+              },
+            ]
+          : [],
+      },
+    ];
+
+    installDom();
+    installChromeMock({
+      tab,
+      responses: {
+        getDesktopConnectorState: {
+          success: true,
+          state: 'connected',
+          deviceId: 'test-device',
+          hasToken: true,
+        },
+        getReportedUrl: { success: true, url: tab.url },
+        trimTitle: (request) => ({ title: request.title }),
+        readDesktopValue: { success: true, value: null },
+        getPageSummary: () => ({
+          success: true,
+          url: tab.url,
+          page: {
+            slug: pageSlug,
+            url: tab.url,
+            title: tab.title,
+            visitDates: [],
+          },
+          notes: [],
+          snapshots: [],
+          lists: currentLists(),
+        }),
+        getPopupLists: () => ({ success: true, lists: currentLists() }),
+        toggleListPin: () => {
+          pinned = !pinned;
+          return { success: true, pinned };
+        },
+      },
+    });
+
+    await import('../../apps/extension/popup.js');
+
+    await waitFor(() => document.querySelector('.list-chip'));
+    const listChips = document.getElementById('listChips');
+    const chipBefore = document.querySelector('.list-chip');
+    chipBefore.click();
+    await waitFor(() => document.querySelector('.list-chip.selected'));
+    const chipAfter = document.querySelector('.list-chip.selected');
+
+    expect(chipAfter).toBe(chipBefore);
+    expect(listChips.querySelectorAll('.list-chip')).toHaveLength(1);
+  });
 });

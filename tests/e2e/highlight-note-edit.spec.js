@@ -373,6 +373,105 @@ test.describe('Highlight note edit', () => {
     await page.close();
   });
 
+  test('PDF highlight reapply does not mark the panel contents', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    localServer.addPage('/pdf-panel-mark', {
+      title: 'PDF Panel Mark Test',
+      body: '<embed type="application/pdf" src="about:blank" style="width:100%;height:100vh" />',
+    });
+    const pageUrl = localServer.url('/pdf-panel-mark');
+    const slug = getSlugForUrl(pageUrl);
+    const now = Date.now();
+    const noteEntries = Array.from({ length: 14 }, (_, index) => {
+      const noteSlug = `pdf-panel-mark-note-${index + 1}`;
+      return {
+        path: `objects/notes/${noteSlug}.json`,
+        data: {
+          slug: noteSlug,
+          excerpt: [`PDF panel highlight text ${index + 1}`],
+          note: '',
+          cssPath: [''],
+          url: pageUrl,
+        },
+      };
+    });
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url: pageUrl,
+          title: 'PDF Panel Mark Test',
+          timestamps: { 'test-device': now },
+          parentIds: [],
+          childIds: noteEntries.map(
+            (_, index) => `note:pdf-panel-mark-note-${index + 1}`,
+          ),
+        },
+      },
+      ...noteEntries,
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(pageUrl);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForSelector('#portal-highlights-panel', { timeout: 5000 });
+
+    const panelState = await page.evaluate(() => {
+      const panel = document
+        .getElementById('portal-highlights-panel')
+        ?.shadowRoot?.querySelector('.panel');
+      if (!panel) return null;
+      panel.scrollTop = panel.scrollHeight;
+      return {
+        scrollTop: panel.scrollTop,
+        markCount: panel.querySelectorAll('mark.portal-highlight').length,
+        text: panel.textContent || '',
+      };
+    });
+
+    expect(panelState).not.toBeNull();
+    expect(panelState.text).toContain(
+      'PDF panel highlight text 1',
+    );
+    expect(panelState.markCount).toBe(0);
+    expect(panelState.scrollTop).toBeGreaterThan(0);
+
+    const helper = await openHelperPage(extContext, extensionId);
+    const addResp = await helper.evaluate(
+      (pageUrlValue) =>
+        chrome.runtime.sendMessage({
+          action: 'contextMenuHighlight',
+          url: pageUrlValue,
+          title: 'PDF Panel Mark Test',
+          selectionText: 'new pdf highlight',
+        }),
+      pageUrl,
+    );
+    expect(addResp.success).toBe(true);
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const panel = document
+            .getElementById('portal-highlights-panel')
+            ?.shadowRoot?.querySelector('.panel');
+          return panel?.scrollTop ?? -1;
+        }),
+      )
+      .toBeGreaterThan(0);
+
+    await helper.close();
+
+    await page.close();
+  });
+
   test('highlight created across visual blocks stores excerpt and css paths as structural arrays', async ({
     extContext,
     extensionId,

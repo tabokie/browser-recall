@@ -256,7 +256,7 @@ function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
     'position: absolute; z-index: 2147483647; visibility: hidden;';
 
   const shadow = host.attachShadow({ mode: 'closed' });
-  shadow.innerHTML = `<style>${OVERLAY_STYLE}</style><div class="overlay">${extensionSurface.noteOverlayHtml({ title: 'Highlight Note', excerpt: text || '', placeholder: 'Add a note... Esc to save.', includeDelete: true })}</div>`;
+  shadow.innerHTML = `<style>${OVERLAY_STYLE}</style><div class="overlay">${extensionSurface.noteOverlayHtml({ excerpt: text || '', placeholder: 'Add a note... Esc to save.', includeDelete: true })}</div>`;
   doc.body.appendChild(host);
   extensionSurface.positionNearRect(host, rect, win);
 

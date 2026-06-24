@@ -1,0 +1,10 @@
+- Fix a few issues around the extension's highlight in-page UI. (1) The highlight edit window should not have a "HIGHLIGHT NOTE" title section. (2) The PDF document's highlight list window's scroll progress resets/jumps to zero when I add a new highlight. (3) The first highlight in the list of highlights on a PDF document, is mistakenly applied a "<mark>" style.
+- If we are already summoning the PDF panel, then the reapply logic should be disabled entirely instead of selectively apply. The two modes are exclusive to eath other.
+- Another issue: On the extension's popup UI, when I toggle a list to add to, the UI blinks to refresh. Can we get rid of the blinking?
+- $gap
+- Fix them
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix them all
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- Fix the first one
+- $finish model=GPT-5.5 Codex

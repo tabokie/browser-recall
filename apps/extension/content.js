@@ -582,12 +582,18 @@ function initContentScript() {
   function collectTextNodes(root) {
     const textNodes = [];
     function walk(parent) {
+      if (parent?.host?.id === 'portal-highlights-panel') return;
       const walker = document.createTreeWalker(parent, NodeFilter.SHOW_ALL, {
         acceptNode: (node) => {
           if (node.nodeType === Node.TEXT_NODE) {
             if (
               node.parentElement &&
               node.parentElement.closest('#portal-highlight-overlay')
+            )
+              return NodeFilter.FILTER_REJECT;
+            if (
+              node.parentElement &&
+              node.parentElement.closest('#portal-highlights-panel')
             )
               return NodeFilter.FILTER_REJECT;
             if (
@@ -608,7 +614,9 @@ function initContentScript() {
       }
       const elements = parent.querySelectorAll('*');
       for (const el of elements) {
-        if (el.shadowRoot) walk(el.shadowRoot);
+        if (el.shadowRoot && el.id !== 'portal-highlights-panel') {
+          walk(el.shadowRoot);
+        }
       }
     }
     walk(root);
@@ -1118,6 +1126,7 @@ function initContentScript() {
     _highlightReapplyRunId = runId;
     stopHighlightReapplyRetry();
     if (clearExisting) removeAllHighlightMarks();
+    if (isPdfPage()) return;
 
     const slug = getSlugForCurrentPage();
     if (!slug) return;
@@ -1155,7 +1164,6 @@ function initContentScript() {
       .delete-btn svg { width:16px; height:16px; fill:currentColor; }`,
       beforeTextareaHtml: extensionSurface.trashButtonHtml(),
       bodyHtml: extensionSurface.noteOverlayHtml({
-        title: 'Highlight Note',
         excerpt: text || '',
         placeholder: 'Add a note... Esc to save.',
         includeDelete: true,
@@ -1535,17 +1543,19 @@ function initContentScript() {
 
   function showHighlightsPanel(notes, pageSlug, { hint } = {}) {
     const existing = document.getElementById('portal-highlights-panel');
-    if (existing) existing.remove();
-
     const excerptNotes = notes.filter((n) => n.excerpt !== null);
     if (excerptNotes.length === 0 && !hint) return;
 
-    const host = document.createElement('div');
-    host.id = 'portal-highlights-panel';
-    host.style.cssText =
-      'position: fixed; z-index: 2147483647; top: 16px; right: 16px;';
+    const host = existing || document.createElement('div');
+    if (!existing) {
+      host.id = 'portal-highlights-panel';
+      host.style.cssText =
+        'position: fixed; z-index: 2147483647; top: 16px; right: 16px;';
+      document.body.appendChild(host);
+    }
 
-    const shadow = host.attachShadow({ mode: 'open' });
+    const shadow = host.shadowRoot || host.attachShadow({ mode: 'open' });
+    const panelScrollTop = shadow.querySelector('.panel')?.scrollTop || 0;
     shadow.innerHTML = `
     <style>
       ${extensionSurface.shadowCss}
@@ -1590,7 +1600,8 @@ function initContentScript() {
     </div>
   `;
 
-    document.body.appendChild(host);
+    const panel = shadow.querySelector('.panel');
+    if (panel) panel.scrollTop = panelScrollTop;
 
     shadow.querySelector('.close-btn').addEventListener('click', () => {
       _panelDismissed = true;
@@ -1682,6 +1693,13 @@ function initContentScript() {
       document.removeEventListener('mouseup', onMouseUp);
       host.remove();
     }
+  }
+
+  function isPdfPage() {
+    return (
+      /\.pdf(\?|#|$)/i.test(new URL(window.location.href).pathname) ||
+      !!document.querySelector('embed[type="application/pdf"]')
+    );
   }
 
   // Listen for messages from background script
@@ -1886,18 +1904,16 @@ function initContentScript() {
     return true; // Keep channel open for async sendResponse
   });
 
-  // Re-apply highlights on page load
-  reapplyHighlights();
+  // Re-apply highlights on page load, unless this is a PDF viewer page.
+  if (!isPdfPage()) {
+    reapplyHighlights();
+  }
 
   // On PDF pages, show highlights panel with hint.
   // Delay to let Chrome's PDF viewer finish initializing (it replaces DOM after content script runs).
-  // Detect via URL (.pdf extension) OR DOM (Chrome injects <embed type="application/pdf">).
   try {
     setTimeout(() => {
-      const isPdf =
-        /\.pdf(\?|#|$)/i.test(new URL(window.location.href).pathname) ||
-        !!document.querySelector('embed[type="application/pdf"]');
-      if (!isPdf) return;
+      if (!isPdfPage()) return;
       const pdfSlug = getSlugForCurrentPage();
       let pdfRetryTimer = null;
       function showPdfPanel() {
