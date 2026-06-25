@@ -45,6 +45,7 @@ const popupShellState = {
 };
 const popupUiMutationState = {
   active: false,
+  silentActive: false,
   queued: 0,
   action: null,
 };
@@ -129,6 +130,18 @@ function setPopupSurface(surface, options = {}) {
 }
 
 function isPopupUiMutating() {
+  return (
+    popupUiMutationState.active ||
+    popupUiMutationState.silentActive ||
+    popupUiMutationState.queued > 0
+  );
+}
+
+function hasActivePopupUiMutation() {
+  return popupUiMutationState.active || popupUiMutationState.silentActive;
+}
+
+function isPopupUiVisuallyMutating() {
   return popupUiMutationState.active || popupUiMutationState.queued > 0;
 }
 
@@ -196,7 +209,10 @@ function setPopupInteractionDisabled(disabled) {
 
 function updatePopupUiMutationState() {
   const pending = isPopupUiMutating();
-  document.body?.classList.toggle('popup-ui-mutating', pending);
+  document.body?.classList.toggle(
+    'popup-ui-mutating',
+    isPopupUiVisuallyMutating(),
+  );
   setPopupInteractionDisabled(pending);
   applyRecordingBarState();
 }
@@ -224,8 +240,26 @@ function runPopupUiMutation(action, task) {
   return runPopupUiMutationNow(action, task);
 }
 
+async function runSilentPopupUiMutation(action, task) {
+  if (isPopupUiMutating()) return false;
+  popupUiMutationState.silentActive = true;
+  popupUiMutationState.action = action;
+  updatePopupUiMutationState();
+  try {
+    await task();
+    return true;
+  } finally {
+    popupUiMutationState.silentActive = false;
+    popupUiMutationState.action = null;
+    updatePopupUiMutationState();
+    const resolvers = popupUiMutationActiveIdleResolvers;
+    popupUiMutationActiveIdleResolvers = [];
+    resolvers.forEach((resolve) => resolve());
+  }
+}
+
 function waitForActivePopupUiMutation() {
-  if (!popupUiMutationState.active) return Promise.resolve();
+  if (!hasActivePopupUiMutation()) return Promise.resolve();
   return new Promise((resolve) => {
     popupUiMutationActiveIdleResolvers.push(resolve);
   });
@@ -235,7 +269,7 @@ function enqueuePopupUiMutation(action, task) {
   popupUiMutationState.queued++;
   updatePopupUiMutationState();
   const runWhenIdle = async () => {
-    while (popupUiMutationState.active) {
+    while (hasActivePopupUiMutation()) {
       await waitForActivePopupUiMutation();
     }
     return runPopupUiMutationNow(action, async () => {
@@ -257,7 +291,7 @@ function enqueuePopupUiMutation(action, task) {
 
 function enqueueFocusedAutosave(task) {
   const runWhenCommandIdle = async () => {
-    while (popupUiMutationState.active) {
+    while (hasActivePopupUiMutation()) {
       await waitForActivePopupUiMutation();
     }
     await task();
@@ -1176,7 +1210,7 @@ function handleListChipsClick(event) {
   if (!target || !event.currentTarget?.contains?.(target)) return;
   if (target.classList.contains('list-chip')) {
     event.preventDefault();
-    void runPopupUiMutation('toggle-list-pin', async () => {
+    void runSilentPopupUiMutation('toggle-list-pin', async () => {
       const listId = target.dataset.listId;
       await toggleListPin(listId);
     }).catch((err) => showErrorBubble(err.message));
@@ -1616,10 +1650,7 @@ function openListPicker(lists, allPins, options = {}) {
       const chipSynced =
         response?.pinned === undefined ||
         syncListChipToggle(listId, response.pinned);
-      const pickerSynced = syncListPickerOptionToggle(
-        listId,
-        response?.pinned,
-      );
+      const pickerSynced = syncListPickerOptionToggle(listId, response?.pinned);
       if (!chipSynced || !pickerSynced) {
         await renderListChips(currentPage.summary?.lists || pickerLists);
       }
@@ -1689,7 +1720,10 @@ function openListPicker(lists, allPins, options = {}) {
     optionsEl.querySelectorAll('.list-picker-row').forEach((row) => {
       row.addEventListener('click', (e) => {
         e.stopPropagation();
-        void runPopupUiMutation('activate-list-picker-option', async () => {
+        const runMutation = row.classList.contains('list-picker-create')
+          ? runPopupUiMutation
+          : runSilentPopupUiMutation;
+        void runMutation('activate-list-picker-option', async () => {
           await activatePickerOption(row);
         }).catch((err) => showErrorBubble(err.message));
       });
@@ -1754,7 +1788,12 @@ function openListPicker(lists, allPins, options = {}) {
       const activeOption = listEl.querySelector('.list-picker-option.active');
       if (activeOption) {
         e.preventDefault();
-        await runPopupUiMutation('activate-list-picker-option', async () => {
+        const runMutation = activeOption.classList.contains(
+          'list-picker-create',
+        )
+          ? runPopupUiMutation
+          : runSilentPopupUiMutation;
+        await runMutation('activate-list-picker-option', async () => {
           await activatePickerOption(activeOption);
         });
         if (
@@ -1767,11 +1806,14 @@ function openListPicker(lists, allPins, options = {}) {
       }
       const inputVal = input.value.trim();
       if (!inputVal) return;
-      await runPopupUiMutation('activate-list-picker-option', async () => {
+      const exactMatch = pickerLists.find(
+        (c) => c.name.toLowerCase() === inputVal.toLowerCase(),
+      );
+      const runMutation = exactMatch
+        ? runSilentPopupUiMutation
+        : runPopupUiMutation;
+      await runMutation('activate-list-picker-option', async () => {
         try {
-          const exactMatch = pickerLists.find(
-            (c) => c.name.toLowerCase() === inputVal.toLowerCase(),
-          );
           if (exactMatch) {
             await toggleListPin(exactMatch.slug);
             if (

@@ -1,0 +1,6 @@
+- It seems the blinking issue mentioned in this session is not fixed. Tell me more about how it was supposedly fixed in this commit.
+- No, I mean the entirely window rendering blinks/flashes to re-render. And there should be a test guarding this case. I want to know why the case is not fixed and not covered.
+- Yes, I say we remove the useless unit tests and add some read E2E coverage. And then think about whether this can be fixed at all without introducing too much complexity to UI rendering.
+- $gap
+- Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.
+- $finish model=GPT-5.5 Codex

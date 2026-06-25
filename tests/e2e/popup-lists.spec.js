@@ -382,6 +382,199 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
+  test('existing list toggles do not dim the whole popup while pending', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    void setupDir;
+    localServer.addPage('/popup-list-toggle-no-flash', {
+      title: 'Popup List Toggle No Flash',
+      body: '<main>Popup list toggle no flash page</main>',
+    });
+    const url = localServer.url('/popup-list-toggle-no-flash');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:chip-list' }, { id: 'list:picker-list' }],
+        },
+      },
+      {
+        path: 'views/lists/chip-list.json',
+        data: {
+          slug: 'chip-list',
+          name: 'Chip List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'views/lists/picker-list.json',
+        data: {
+          slug: 'picker-list',
+          name: 'Picker List',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Popup List Toggle No Flash',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+          visitDates: [20260618],
+        },
+      },
+    ]);
+
+    const popup = await extContext.newPage();
+    await popup.addInitScript(
+      ({ url }) => {
+        let releaseToggle;
+        const toggleEvents = [];
+        globalThis.__releaseListToggleForTest = () => releaseToggle?.();
+        globalThis.__listToggleEventsForTest = toggleEvents;
+
+        const patchApis = () => {
+          if (!globalThis.chrome?.tabs?.query || !chrome.runtime?.sendMessage) {
+            setTimeout(patchApis, 0);
+            return;
+          }
+
+          const originalQuery = chrome.tabs.query.bind(chrome.tabs);
+          chrome.tabs.query = async (queryInfo) => {
+            if (queryInfo?.active && queryInfo?.currentWindow) {
+              return [
+                {
+                  id: 10001,
+                  url,
+                  title: 'Popup List Toggle No Flash',
+                },
+              ];
+            }
+            return originalQuery(queryInfo);
+          };
+
+          const originalSendMessage = chrome.runtime.sendMessage.bind(
+            chrome.runtime,
+          );
+          chrome.runtime.sendMessage = async (request, ...rest) => {
+            if (request?.action === 'toggleListPin') {
+              toggleEvents.push(`started:${request.listId}`);
+              await new Promise((resolve) => {
+                releaseToggle = resolve;
+              });
+              toggleEvents.push(`released:${request.listId}`);
+            }
+            return originalSendMessage(request, ...rest);
+          };
+        };
+        patchApis();
+      },
+      { url },
+    );
+    await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+    await expect(popup.locator('#dashboard')).toBeVisible();
+    await expect(popup.locator('#pageTitle')).toHaveText(
+      'Popup List Toggle No Flash',
+    );
+    await expect(
+      popup.locator('#listChips .list-chip', { hasText: 'Chip List' }),
+    ).toBeVisible();
+
+    const expectPopupNotDimmed = async () => {
+      await expect
+        .poll(() =>
+          popup.evaluate(() =>
+            document.body.classList.contains('popup-ui-mutating'),
+          ),
+        )
+        .toBe(false);
+      await expect
+        .poll(() =>
+          popup.evaluate(
+            () =>
+              getComputedStyle(document.getElementById('pageTitle')).opacity,
+          ),
+        )
+        .toBe('1');
+      await expect
+        .poll(() =>
+          popup.evaluate(
+            () =>
+              getComputedStyle(document.querySelector('#listChips .list-chip'))
+                .opacity,
+          ),
+        )
+        .toBe('1');
+      await expect(popup.locator('#dashboard')).toBeVisible();
+      await expect(popup.locator('#loading')).toBeHidden();
+      await popup.screenshot();
+    };
+
+    await popup
+      .locator('#listChips .list-chip', { hasText: 'Chip List' })
+      .click();
+    await expect
+      .poll(() => popup.evaluate(() => globalThis.__listToggleEventsForTest))
+      .toContain('started:chip-list');
+    await expectPopupNotDimmed();
+    await popup.evaluate(() => globalThis.__releaseListToggleForTest());
+    await expect(
+      popup.locator('#listChips .list-chip.selected', {
+        hasText: 'Chip List',
+      }),
+    ).toBeVisible();
+
+    await popup.locator('#listAddBtn').click();
+    await expect(popup.locator('#listPicker')).toBeVisible();
+    await expect
+      .poll(() =>
+        popup.evaluate(() =>
+          document.body.classList.contains('popup-ui-mutating'),
+        ),
+      )
+      .toBe(false);
+
+    await popup
+      .locator('#listPicker .list-picker-row', { hasText: 'Picker List' })
+      .click();
+    await expect
+      .poll(() => popup.evaluate(() => globalThis.__listToggleEventsForTest))
+      .toContain('started:picker-list');
+    await expectPopupNotDimmed();
+    await expect
+      .poll(() =>
+        popup.evaluate(
+          () =>
+            getComputedStyle(document.getElementById('listPickerInput'))
+              .opacity,
+        ),
+      )
+      .toBe('1');
+    await popup.evaluate(() => globalThis.__releaseListToggleForTest());
+    await expect(
+      popup.locator('#listPicker .list-picker-row.selected', {
+        hasText: 'Picker List',
+      }),
+    ).toBeVisible();
+
+    await popup.close();
+  });
+
   test('popup opened after a list already exists shows it as available', async ({
     extContext,
     extensionId,
