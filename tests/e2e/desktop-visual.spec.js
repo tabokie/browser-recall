@@ -297,8 +297,12 @@ async function installDesktopBridgeMock(page, options = {}) {
       searchHistoryResultsByQuery,
       searchNotesResultsByQuery,
       searchSnapshotsResultsByQuery,
+      listHistoryFilesDelayMs,
+      loadHistoryBatchDelayMs,
       readDesktopValueDelayMs,
+      initialRoute,
     }) => {
+      if (initialRoute) window.__BR_STATE__ = { route: initialRoute };
       const listeners = new Map();
       const stores = {
         session: new Map(Object.entries(seed.session)),
@@ -558,6 +562,13 @@ async function installDesktopBridgeMock(page, options = {}) {
         listenerCount(eventName) {
           return (listeners.get(eventName) || []).length;
         },
+        updateSettingsExternally(items) {
+          stores.session.set('manifest:settings', {
+            ...(stores.session.get('manifest:settings') || {}),
+            ...clone(items),
+          });
+          emitMutation('settings');
+        },
         deleteNoteExternally(noteSlug) {
           deleteNoteRecord(noteSlug);
           emitMutation('note', { noteSlug });
@@ -609,12 +620,22 @@ async function installDesktopBridgeMock(page, options = {}) {
           case 'getSyncAuthState':
             return { success: true, hasToken: false, rememberToken: false };
           case 'listHistoryFiles':
+            if (listHistoryFilesDelayMs > 0) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, listHistoryFilesDelayMs),
+              );
+            }
             return {
               success: true,
               ...historyFiles(request.includeSizes),
             };
           case 'loadHistoryBatch':
             loadHistoryBatchInvocations.push(clone(request.files || []));
+            if (loadHistoryBatchDelayMs > 0) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, loadHistoryBatchDelayMs),
+              );
+            }
             return {
               success: true,
               entries: loadHistoryBatch(request.files),
@@ -917,7 +938,10 @@ async function installDesktopBridgeMock(page, options = {}) {
       searchNotesResultsByQuery: options.searchNotesResultsByQuery || null,
       searchSnapshotsResultsByQuery:
         options.searchSnapshotsResultsByQuery || null,
+      listHistoryFilesDelayMs: options.listHistoryFilesDelayMs || 0,
+      loadHistoryBatchDelayMs: options.loadHistoryBatchDelayMs || 0,
       readDesktopValueDelayMs: options.readDesktopValueDelayMs || 0,
+      initialRoute: options.initialRoute || '',
     },
   );
 }
@@ -998,6 +1022,89 @@ test.describe('desktop visual regression', () => {
         animations: 'disabled',
         maxDiffPixelRatio: 0.01,
       });
+    });
+  });
+
+  test('main shell and search panel render before initial history data finishes loading', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await page.setViewportSize({ width: 1280, height: 820 });
+      await installDesktopBridgeMock(page, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        loadHistoryBatchDelayMs: 3000,
+      });
+      await page.goto(desktopUrl);
+
+      await expect
+        .poll(
+          () =>
+            page.evaluate(
+              () => getComputedStyle(document.documentElement).opacity,
+            ),
+          { timeout: 1000 },
+        )
+        .toBe('1');
+      await expect(page.locator('#searchDraftInput')).toBeVisible({
+        timeout: 1000,
+      });
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.loadHistoryBatchInvocationCount(),
+        ),
+      ).toBeGreaterThan(0);
+    });
+  });
+
+  test('main shell and search panel render before daemon settings finish loading', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await page.setViewportSize({ width: 1280, height: 820 });
+      await installDesktopBridgeMock(page, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        readDesktopValueDelayMs: 3000,
+      });
+      await page.goto(desktopUrl);
+
+      await expect
+        .poll(
+          () =>
+            page.evaluate(
+              () => getComputedStyle(document.documentElement).opacity,
+            ),
+          { timeout: 1000 },
+        )
+        .toBe('1');
+      await expect(page.locator('#searchDraftInput')).toBeVisible({
+        timeout: 1000,
+      });
+    });
+  });
+
+  test('startup shell routes apply before initial history data finishes loading', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await page.setViewportSize({ width: 1280, height: 820 });
+      await installDesktopBridgeMock(page, {
+        setupComplete: true,
+        colorScheme: 'amber',
+        initialRoute: 'settings',
+        loadHistoryBatchDelayMs: 3000,
+      });
+      await page.goto(desktopUrl);
+
+      await expect(page.locator('#settingsModal.open')).toBeVisible({
+        timeout: 1000,
+      });
+      expect(
+        await page.evaluate(() =>
+          window.__desktopVisualHarness.loadHistoryBatchInvocationCount(),
+        ),
+      ).toBeGreaterThan(0);
     });
   });
 
@@ -1709,6 +1816,31 @@ test.describe('desktop visual regression', () => {
         'chrome://',
       );
       await expect(page.locator('#blacklistEntries')).toContainText('about:');
+    });
+  });
+
+  test('settings mutation invalidates cached desktop settings', async ({
+    page,
+  }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+      });
+
+      await page.evaluate(() => {
+        window.__desktopVisualHarness.updateSettingsExternally({
+          urlBlacklist: ['https://fresh-settings.example/'],
+        });
+      });
+      await page.locator('#settingsBtn').click();
+
+      await expect(page.locator('#blacklistEntries')).toContainText(
+        'https://fresh-settings.example/',
+      );
+      await expect(page.locator('#blacklistEntries')).not.toContainText(
+        'chrome://',
+      );
     });
   });
 

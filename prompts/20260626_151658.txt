@@ -1,0 +1,7 @@
+- Currently the desktop app is a little slow to start. The main UI stays blank until the full data is loaded. Can we render the main skeleton including the search panel first before block on the data load?
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix the P2 issues and improve architecture too.
+- Please review my uncommitted changes
+- Fix the P2 issue
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.5 Codex
+- no lesson

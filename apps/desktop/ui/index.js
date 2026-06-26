@@ -20,6 +20,8 @@ import {
   collectVisitDateKeys,
 } from './utils.js';
 import {
+  invalidateSettingsCache,
+  loadSettings,
   loadSettingsValue,
   saveSettingsValue,
   readDesktopValue,
@@ -717,6 +719,7 @@ const historyState = {
 let activeView = { type: 'category', value: 'all' }; // or { type: 'search', query: '...' } or { type: 'list', query: '...', id: '...' } or { type: 'explore', query: '...', filter: '...' }
 let pendingShellRoute = window.__BR_STATE__?.route || null;
 let applyingShellRoute = false;
+let shellReady = false;
 let allListPins = {}; // listId -> [{ url, title, pinnedAt }]
 let lastClickedRow = null; // for shift-click range select
 const cardDataByUrl = new Map(); // url → { attDetail, timestamps } for detail overlay
@@ -1212,6 +1215,22 @@ function clearProgressiveSearchState() {
 
 function isActiveCategoryView(category) {
   return activeView.type === 'category' && activeView.value === category;
+}
+
+function isActiveExploreView() {
+  return activeView.type === 'explore';
+}
+
+function markShellReady() {
+  if (shellReady) return;
+  shellReady = true;
+  document.body.dataset.shellReady = 'true';
+  revealApp();
+  void applyPendingShellRoute();
+}
+
+function markAppReady() {
+  document.body.dataset.ready = 'true';
 }
 
 function shouldPreserveCommittedSearchOnVisibilityRefresh() {
@@ -2611,7 +2630,7 @@ function enrichPinResult(r, pins, pageSnap) {
 
 // Summarize a query tree into a short display name for lists
 
-async function showExplore() {
+async function showExplore({ hydrate = true, markReady = true } = {}) {
   const _t0 = performance.now();
   const _timer = (label) =>
     logDebug(
@@ -2632,15 +2651,23 @@ async function showExplore() {
     committedSearchQuery = committedQueryFromSession(await loadSearchQuery());
     draftSearchInput = committedSearchQuery;
 
-    await renderListSearchFilters();
-    _timer('renderListSearchFilters');
+    await loadFilterState();
+    await renderSearchPanel({ deferFilterPanel: true });
+    markShellReady();
+    _timer('renderSearchPanel');
+
+    if (hydrate) {
+      await hydrateExploreSearchResults();
+      _timer('hydrateExploreSearchResults');
+      if (markReady) markAppReady();
+    }
   } catch (error) {
     logError('Explore load error:', error);
     document.getElementById('relatedResults').innerHTML =
       `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
+    markShellReady();
+    if (markReady) markAppReady();
   }
-  document.body.dataset.ready = 'true';
-  revealApp();
 }
 
 // Incremental refresh after pin toggle — preserves scroll position and search state.
@@ -3642,11 +3669,16 @@ function renderFilteredPins(pins, listId, searchQuery) {
 // recalculateRelatedResults removed — pinned section no longer has related pages
 
 async function renderListSearchFilters() {
-  await initHistoryFiles();
-  await loadHistoryBatch();
+  await hydrateExploreSearchResults();
+}
 
-  await loadFilterState();
-  await renderSearchPanel();
+async function hydrateExploreSearchResults() {
+  await initHistoryFiles();
+  if (!isActiveExploreView()) return;
+  await loadHistoryBatch();
+  if (!isActiveExploreView()) return;
+  await refreshFilterPanelIfHydrated();
+
   await runSearchFilterPipeline();
 }
 
@@ -4708,7 +4740,7 @@ async function applyPendingShellRoute() {
   if (
     applyingShellRoute ||
     !pendingShellRoute ||
-    document.body.dataset.ready !== 'true'
+    document.body.dataset.shellReady !== 'true'
   ) {
     return;
   }
@@ -6933,7 +6965,7 @@ chrome.runtime.onMessage.addListener((request) => {
   } else if (type === 'lists') {
     renderLists();
   } else if (type === 'settings') {
-    // Settings changes that need UI updates handled here if needed
+    invalidateSettingsCache();
   } else if (type === 'note') {
     // Note created/deleted — invalidate cached notes and refresh view
 
@@ -7054,7 +7086,22 @@ function renderSearchDraftControlHtml() {
   `;
 }
 
-async function renderSearchPanel() {
+async function ensureFilterPanelRendered(container) {
+  const panel = container.querySelector('#filterPanel');
+  if (!panel || panel.dataset.hydrated === 'true') return;
+  panel.innerHTML = await renderFilterPanelHtml();
+  panel.dataset.hydrated = 'true';
+}
+
+async function refreshFilterPanelIfHydrated() {
+  const container = document.getElementById('listQueryBuilder');
+  const panel = container?.querySelector('#filterPanel');
+  if (!container || !panel || panel.dataset.hydrated !== 'true') return;
+  panel.innerHTML = await renderFilterPanelHtml();
+  if (filterVisible) bindFilterEvents(container);
+}
+
+async function renderSearchPanel({ deferFilterPanel = false } = {}) {
   const container = document.getElementById('listQueryBuilder');
   container.style.display = 'block';
 
@@ -7067,8 +7114,9 @@ async function renderSearchPanel() {
   html += `<button class="filter-toggle-btn${filterVisible ? ' active' : ''}${!isDefaultFilterState(filterState) ? ' has-filters' : ''}" id="filterToggleBtn" title="Filters">${filterSvg}</button>`;
   html += '</div>';
 
-  html += `<div class="filter-panel" id="filterPanel" style="display:${filterVisible ? 'flex' : 'none'}">`;
-  html += await renderFilterPanelHtml();
+  const shouldDeferFilterPanel = deferFilterPanel && !filterVisible;
+  html += `<div class="filter-panel" id="filterPanel" data-hydrated="${shouldDeferFilterPanel ? 'false' : 'true'}" style="display:${filterVisible ? 'flex' : 'none'}">`;
+  html += shouldDeferFilterPanel ? '' : await renderFilterPanelHtml();
   html += '</div>';
 
   html += '</div>';
@@ -7390,10 +7438,11 @@ function bindSearchEvents(container) {
   // Filter toggle
   const filterBtn = container.querySelector('#filterToggleBtn');
   if (filterBtn) {
-    filterBtn.addEventListener('click', () => {
+    filterBtn.addEventListener('click', async () => {
       filterVisible = !filterVisible;
       const panel = container.querySelector('#filterPanel');
       if (panel) {
+        if (filterVisible) await ensureFilterPanelRendered(container);
         panel.style.display = filterVisible ? 'flex' : 'none';
         filterBtn.classList.toggle('active', filterVisible);
         if (filterVisible) bindFilterEvents(container);
@@ -8221,20 +8270,99 @@ async function initialize() {
   });
   if (!deviceResp?.deviceId) {
     showOnboarding();
+    markShellReady();
     await updateStorageStatus();
-    document.body.dataset.ready = 'true';
-    revealApp();
+    markAppReady();
     return;
   }
 
-  const persistedTheme = await loadSettingsValue('theme', 'system');
-  await chrome.storage.session.set({ theme: persistedTheme });
-  currentTheme = await applyTheme();
-
-  await initializeMain(currentTheme);
+  await initializeMain(currentTheme, deviceResp);
 }
 
-async function initializeMain(currentTheme) {
+function settingsValue(settings, key, defaultValue) {
+  const value = settings?.[key];
+  return value !== undefined ? value : defaultValue;
+}
+
+async function hydrateStartupSettings(currentTheme) {
+  const settings = await loadSettings();
+  const persistedTheme = settingsValue(settings, 'theme', 'system');
+  await chrome.storage.session.set({ theme: persistedTheme });
+  currentTheme = await applyTheme();
+  document.getElementById('themeSelect').value = currentTheme;
+
+  const savedScheme = settingsValue(settings, 'colorScheme', 'amber');
+  applyColorScheme(savedScheme);
+  await chrome.storage.session.set({ colorScheme: savedScheme });
+
+  historyState.fileBatch = settingsValue(settings, 'historyFileBatch', 10);
+  document.getElementById('historyFileBatch').value = historyState.fileBatch;
+  document.getElementById('captureSnapshotVideo').checked = settingsValue(
+    settings,
+    'captureSnapshotVideo',
+    false,
+  );
+
+  const blacklistEnabledRaw = settingsValue(settings, 'blacklistEnabled', null);
+  const blacklistEnabled =
+    blacklistEnabledRaw !== null
+      ? blacklistEnabledRaw
+      : settingsValue(settings, 'urlBlacklist', null) !== null || true;
+  document.getElementById('blacklistEnabled').checked = blacklistEnabled;
+  setAddonOpen(document.getElementById('blacklistBody'), blacklistEnabled);
+
+  const titleTrimRules = settingsValue(settings, 'titleTrimRules', null);
+  const titleCleanupEnabledRaw = settingsValue(
+    settings,
+    'titleCleanupEnabled',
+    null,
+  );
+  const titleCleanupEnabled =
+    titleCleanupEnabledRaw !== null
+      ? titleCleanupEnabledRaw
+      : titleTrimRules !== null && titleTrimRules.length > 0;
+  document.getElementById('titleCleanupEnabled').checked = titleCleanupEnabled;
+  setAddonOpen(
+    document.getElementById('titleCleanupBody'),
+    titleCleanupEnabled,
+  );
+
+  const syncEnabled = settingsValue(settings, 'syncEnabled', false);
+  document.getElementById('syncEnabled').checked = syncEnabled;
+  setAddonOpen(document.getElementById('syncConfigFields'), syncEnabled);
+  document.getElementById('syncIntervalMinutes')?.closest('.option')?.remove();
+  document.getElementById('syncMethod').value = 'github';
+  document.getElementById('syncRepoUrl').value = settingsValue(
+    settings,
+    'syncRepoUrl',
+    '',
+  );
+  document.getElementById('syncRetentionDays').value = settingsValue(
+    settings,
+    'syncRetentionDays',
+    7,
+  );
+
+  try {
+    const authState = await sendAction({ action: 'getSyncAuthState' });
+    if (authState.hasToken) {
+      const user = authState.githubUser ? `as @${authState.githubUser}` : '';
+      syncShowAuthState('connected', user);
+    } else {
+      syncShowAuthState('disconnected');
+    }
+    document.getElementById('syncRememberToken').checked =
+      authState.rememberToken;
+  } catch {
+    syncShowAuthState('disconnected');
+  }
+
+  renderBlacklist();
+  renderTrimRules();
+  if (syncEnabled) refreshSyncDevices();
+}
+
+async function initializeMain(currentTheme, deviceResp = null) {
   // Apply theme if not already done (e.g. coming from onboarding)
   if (!currentTheme) currentTheme = await applyTheme();
 
@@ -8255,7 +8383,7 @@ async function initializeMain(currentTheme) {
   } catch {}
 
   // Verify device identity from daemon app config.
-  const deviceResp = await sendAction({
+  deviceResp ||= await sendAction({
     action: 'getDeviceId',
   });
   if (!deviceResp?.deviceId) {
@@ -8266,72 +8394,7 @@ async function initializeMain(currentTheme) {
 
   // Theme select — reflects current value from applyTheme()
   document.getElementById('themeSelect').value = currentTheme;
-
-  // Color scheme
-  const savedScheme = await loadSettingsValue('colorScheme', 'amber');
-  applyColorScheme(savedScheme);
-  await chrome.storage.session.set({ colorScheme: savedScheme });
-
-  // Load persisted settings from the daemon-backed store.
-  historyState.fileBatch = await loadSettingsValue('historyFileBatch', 10);
-  document.getElementById('historyFileBatch').value = historyState.fileBatch;
-  document.getElementById('captureSnapshotVideo').checked =
-    await loadSettingsValue('captureSnapshotVideo', false);
-
-  // Addon toggles — infer enabled state from existing data when the toggle key is new
-  const blacklistEnabledRaw = await loadSettingsValue('blacklistEnabled', null);
-  const blacklistEnabled =
-    blacklistEnabledRaw !== null
-      ? blacklistEnabledRaw
-      : (await loadSettingsValue('urlBlacklist', null)) !== null || true;
-  document.getElementById('blacklistEnabled').checked = blacklistEnabled;
-  setAddonOpen(document.getElementById('blacklistBody'), blacklistEnabled);
-
-  const titleCleanupEnabledRaw = await loadSettingsValue(
-    'titleCleanupEnabled',
-    null,
-  );
-  const titleTrimRules = await loadSettingsValue('titleTrimRules', null);
-  const titleCleanupEnabled =
-    titleCleanupEnabledRaw !== null
-      ? titleCleanupEnabledRaw
-      : titleTrimRules !== null && titleTrimRules.length > 0;
-  document.getElementById('titleCleanupEnabled').checked = titleCleanupEnabled;
-  setAddonOpen(
-    document.getElementById('titleCleanupBody'),
-    titleCleanupEnabled,
-  );
-
-  // Sync settings
-  const syncEnabled = await loadSettingsValue('syncEnabled', false);
-  document.getElementById('syncEnabled').checked = syncEnabled;
-  setAddonOpen(document.getElementById('syncConfigFields'), syncEnabled);
   document.getElementById('syncIntervalMinutes')?.closest('.option')?.remove();
-  document.getElementById('syncMethod').value = 'github';
-  document.getElementById('syncRepoUrl').value = await loadSettingsValue(
-    'syncRepoUrl',
-    '',
-  );
-  // Load GitHub auth state from background (token lives in session, not settings)
-  try {
-    const authState = await sendAction({ action: 'getSyncAuthState' });
-    if (authState.hasToken) {
-      const user = authState.githubUser ? `as @${authState.githubUser}` : '';
-      syncShowAuthState('connected', user);
-    } else {
-      syncShowAuthState('disconnected');
-    }
-    document.getElementById('syncRememberToken').checked =
-      authState.rememberToken;
-  } catch {
-    syncShowAuthState('disconnected');
-  }
-  document.getElementById('syncRetentionDays').value = await loadSettingsValue(
-    'syncRetentionDays',
-    7,
-  );
-  if (syncEnabled) refreshSyncDevices();
-  _timer('loadSettings');
 
   // Initialize chart tooltips
   initCharts();
@@ -8346,22 +8409,37 @@ async function initializeMain(currentTheme) {
 
   // Render sidebar concurrently with heavy data (don't block on sidebar)
   listsReadyPromise = renderLists().catch((err) => showFatalError(err.message));
-  renderBlacklist();
-  renderTrimRules();
   initRulesPanel();
   _timer('renderSidebar (fire-and-forget)');
 
-  // Load metadata (history is demand-loaded in showCategory, pins loaded per-list)
-  await initHistoryFiles();
-  _timer('parallel metadata load');
+  // Paint the main shell before daemon-backed settings and history hydration.
   updateRecycleBinBadge();
-  await showExplore();
+  await showExplore({ hydrate: false, markReady: false });
+
+  try {
+    await hydrateStartupSettings(currentTheme);
+    _timer('hydrateSettings');
+  } catch (error) {
+    logDebug('[startup] settings hydration failed:', error.message);
+    showFatalError(error.message);
+  }
+
+  try {
+    await hydrateExploreSearchResults();
+    _timer('hydrateExploreSearchResults');
+  } catch (error) {
+    logDebug('[startup] explore hydration failed:', error.message);
+    document.getElementById('relatedResults').innerHTML =
+      `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
+  }
+
+  markAppReady();
   await applyPendingShellRoute();
 }
 
 initialize().catch((err) => {
-  document.body.dataset.ready = 'true';
-  revealApp();
+  markShellReady();
+  markAppReady();
   showFatalError(err.message);
 });
 

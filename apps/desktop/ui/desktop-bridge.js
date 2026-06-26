@@ -27,15 +27,40 @@ export async function readDesktopValue(key, includeDeleted = false) {
   return resp?.value;
 }
 
+let settingsCache = null;
+let settingsCachePromise = null;
+
+export async function loadSettings() {
+  if (!settingsCachePromise) {
+    settingsCachePromise = readDesktopValue('manifest:settings')
+      .then((settings) => {
+        settingsCache = settings || {};
+        return settingsCache;
+      })
+      .catch((error) => {
+        settingsCachePromise = null;
+        throw error;
+      });
+  }
+  return settingsCachePromise;
+}
+
 export async function loadSettingsValue(key, defaultValue) {
-  const settings = await readDesktopValue('manifest:settings');
+  const settings = await loadSettings();
   const value = settings?.[key];
   return value !== undefined ? value : defaultValue;
+}
+
+export function invalidateSettingsCache() {
+  settingsCache = null;
+  settingsCachePromise = null;
 }
 
 export async function saveSettingsValue(key, value) {
   try {
     await sendAction({ action: 'saveSettingsKey', key, value });
+    settingsCache = { ...(settingsCache || {}), [key]: value };
+    settingsCachePromise = Promise.resolve(settingsCache);
   } catch (error) {
     logDebug('saveSettingsValue failed:', error.message);
   }
