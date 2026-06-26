@@ -1,0 +1,7 @@
+- There's an issue with desktop app's setting page. The information text for "Sync" experimental feature is truncated.
+- Let's improve the scroll of setting page, currently when scrolled to the boundaries there's a "bouncing" effect. I want it to stop exactly at the boundary. If other UIs has similar issue, fix them too.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Tighten the loose ends
+- Please review my uncommitted changes
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.5 Codex
+- No

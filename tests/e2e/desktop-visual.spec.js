@@ -1724,6 +1724,75 @@ test.describe('desktop visual regression', () => {
       await expect(syncHeader.locator('.addon-experimental-badge')).toHaveText(
         'Experimental',
       );
+      const syncDescriptionSize = await syncHeader
+        .locator('.addon-header-desc')
+        .evaluate((el) => ({
+          clientWidth: el.clientWidth,
+          scrollWidth: el.scrollWidth,
+        }));
+      expect(syncDescriptionSize.scrollWidth).toBeLessThanOrEqual(
+        syncDescriptionSize.clientWidth,
+      );
+    });
+  });
+
+  test('desktop scroll panes stop at their boundaries', async ({ page }) => {
+    await serveDesktopUi(async (desktopUrl) => {
+      await openDesktopUi(page, desktopUrl, {
+        setupComplete: true,
+        colorScheme: 'amber',
+      });
+
+      await page.locator('#settingsBtn').click();
+
+      const containedScrollPanes = [
+        '.main.scroll-boundary-contained',
+        '.sidebar-content.scroll-boundary-contained',
+        '#settingsModal .modal-body.scroll-boundary-contained',
+        '#blacklistEntries.scroll-boundary-contained',
+        '#trimEntries.scroll-boundary-contained',
+        '#bookmarkTreeContainer.scroll-boundary-contained',
+        '#importFailures.scroll-boundary-contained',
+        '#historyImportFailures.scroll-boundary-contained',
+        '#rulesPreviewList.scroll-boundary-contained',
+        '#rulesPinsPreviewList.scroll-boundary-contained',
+      ];
+      for (const selector of containedScrollPanes) {
+        const pane = page.locator(selector);
+        await expect(pane, selector).toHaveCount(1);
+        await expect
+          .poll(() =>
+            pane.evaluate((el) => {
+              const style = getComputedStyle(el);
+              return {
+                x: style.overscrollBehaviorX,
+                y: style.overscrollBehaviorY,
+              };
+            }),
+          )
+          .toEqual({ x: 'none', y: 'none' });
+      }
+
+      const containedHorizontalScrollPanes = [
+        '#chartBars.scroll-boundary-contained-x',
+        '#relatedChartBars.scroll-boundary-contained-x',
+        '#qbBody.scroll-boundary-contained-x',
+      ];
+      for (const selector of containedHorizontalScrollPanes) {
+        const pane = page.locator(selector);
+        await expect(pane, selector).toHaveCount(1);
+        await expect
+          .poll(() =>
+            pane.evaluate((el) => {
+              const style = getComputedStyle(el);
+              return {
+                x: style.overscrollBehaviorX,
+                y: style.overscrollBehaviorY,
+              };
+            }),
+          )
+          .toEqual({ x: 'none', y: 'auto' });
+      }
     });
   });
 

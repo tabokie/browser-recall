@@ -42,10 +42,16 @@
       }
 
       html,
-      body,
-      .main,
-      .sidebar-content {
+      body {
         overscroll-behavior: none;
+      }
+
+      .scroll-boundary-contained {
+        overscroll-behavior: none;
+      }
+
+      .scroll-boundary-contained-x {
+        overscroll-behavior-x: none;
       }
 
       .main,
@@ -1715,6 +1721,13 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+
+      .addon-header-desc.wrap {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        line-height: 1.4;
       }
 
       .toggle-switch {
@@ -4355,7 +4368,7 @@
         <span class="recycle-count" id="recycleBinCount"></span>
       </button>
 
-      <div class="sidebar-content">
+      <div class="sidebar-content scroll-boundary-contained">
         <div class="sidebar-section-label">
           Lists<button
             class="sidebar-create-list"
@@ -4377,7 +4390,7 @@
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
     <!-- Main panel -->
-    <div class="main">
+    <div class="main scroll-boundary-contained">
       <div class="main-header">
         <button id="sidebarToggle" title="Toggle sidebar">
           <svg viewBox="0 0 24 24">
@@ -4425,14 +4438,17 @@
         <div class="qb-header">
           <span class="qb-title">Query</span>
         </div>
-        <div class="qb-body" id="qbBody">
+        <div class="qb-body scroll-boundary-contained-x" id="qbBody">
           <!-- Rendered by JS -->
         </div>
       </div>
 
       <div class="time-chart visible" id="timeChart">
         <div class="chart-label">Visits over time</div>
-        <div class="chart-bars" id="chartBars"></div>
+        <div
+          class="chart-bars scroll-boundary-contained-x"
+          id="chartBars"
+        ></div>
         <div class="chart-tooltip" id="chartTooltip"></div>
       </div>
 
@@ -4477,7 +4493,10 @@
                 >
                 <span class="rules-preview-count" id="rulesPreviewCount"></span>
               </div>
-              <div class="rules-preview-list" id="rulesPreviewList"></div>
+              <div
+                class="rules-preview-list scroll-boundary-contained"
+                id="rulesPreviewList"
+              ></div>
             </div>
             <div
               class="rules-preview"
@@ -4495,14 +4514,20 @@
                   id="rulesPinsPreviewCount"
                 ></span>
               </div>
-              <div class="rules-preview-list" id="rulesPinsPreviewList"></div>
+              <div
+                class="rules-preview-list scroll-boundary-contained"
+                id="rulesPinsPreviewList"
+              ></div>
             </div>
           </div>
         </div>
         <div id="listQueryBuilder" style="display: none"></div>
         <div class="time-chart" id="relatedChart">
           <div class="chart-label">Results</div>
-          <div class="chart-bars" id="relatedChartBars"></div>
+          <div
+            class="chart-bars scroll-boundary-contained-x"
+            id="relatedChartBars"
+          ></div>
           <div class="chart-tooltip" id="relatedChartTooltip"></div>
         </div>
         <div
@@ -4550,7 +4575,7 @@
             &times;
           </button>
         </div>
-        <div class="modal-body">
+        <div class="modal-body scroll-boundary-contained">
           <!-- ── Appearance ── -->
           <div class="modal-group">
             <div class="modal-group-label">Appearance</div>
@@ -4695,7 +4720,10 @@
                     accept=".html,.htm"
                   />
                 </div>
-                <div id="bookmarkTreeContainer" class="bookmark-tree-container">
+                <div
+                  id="bookmarkTreeContainer"
+                  class="bookmark-tree-container scroll-boundary-contained"
+                >
                   <span class="bookmark-tree-placeholder"
                     >Select an exported bookmarks file to preview folders.</span
                   >
@@ -4716,7 +4744,10 @@
                   </button>
                 </div>
                 <div id="importProgress" class="import-progress"></div>
-                <div id="importFailures" class="import-failures"></div>
+                <div
+                  id="importFailures"
+                  class="import-failures scroll-boundary-contained"
+                ></div>
               </div>
               <!-- Import history expandable (hidden until Import History clicked) -->
               <div id="historyImportPanel" style="display: none">
@@ -4744,7 +4775,10 @@
                   </button>
                 </div>
                 <div id="historyImportProgress" class="import-progress"></div>
-                <div id="historyImportFailures" class="import-failures"></div>
+                <div
+                  id="historyImportFailures"
+                  class="import-failures scroll-boundary-contained"
+                ></div>
               </div>
               <div class="data-row">
                 <span class="data-label"
@@ -4800,7 +4834,10 @@
                     Add
                   </button>
                 </div>
-                <div id="blacklistEntries" class="blacklist-entries"></div>
+                <div
+                  id="blacklistEntries"
+                  class="blacklist-entries scroll-boundary-contained"
+                ></div>
               </div>
             </div>
 
@@ -4832,7 +4869,10 @@
                   </select>
                   <button id="trimAddBtn" class="btn btn-primary">Add</button>
                 </div>
-                <div id="trimEntries" class="blacklist-entries"></div>
+                <div
+                  id="trimEntries"
+                  class="blacklist-entries scroll-boundary-contained"
+                ></div>
               </div>
             </div>
 
@@ -4845,7 +4885,7 @@
                 </span>
                 <span class="addon-header-title">Sync</span>
                 <span class="addon-experimental-badge">Experimental</span>
-                <span class="addon-header-desc"
+                <span class="addon-header-desc wrap"
                   >Sync history and notes across devices, not including
                   snapshots</span
                 >

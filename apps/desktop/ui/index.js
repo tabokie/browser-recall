@@ -3041,7 +3041,7 @@ function buildEditRowHTML(type, config) {
     </div>
     <div class="rule-fn-editor" style="${isKeyword ? 'display:none' : ''}">
       <pre class="rule-fn-highlight" aria-hidden="true"></pre>
-      <textarea class="rule-fn-input" rows="20" placeholder="// page = { title, url, body }\nreturn page.title.length > 50;" spellcheck="false">${escapeHtml(fnSource)}</textarea>
+      <textarea class="rule-fn-input scroll-boundary-contained" rows="20" placeholder="// page = { title, url, body }\nreturn page.title.length > 50;" spellcheck="false">${escapeHtml(fnSource)}</textarea>
     </div>
   </div>`;
 }
@@ -4585,7 +4585,7 @@ function openPageDetailCard(
       <div class="page-detail-title">${escapeHtml(title || url)}</div>
       <button class="page-detail-close" title="Close">×</button>
     </div>
-    <div class="page-detail-body"><div class="page-detail-loading"><span class="spinner"></span></div></div>
+    <div class="page-detail-body scroll-boundary-contained"><div class="page-detail-loading"><span class="spinner"></span></div></div>
   `;
   card
     .querySelector('.page-detail-close')
