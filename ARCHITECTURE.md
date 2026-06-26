@@ -96,6 +96,8 @@ Key consequences:
 
 The desktop shell scrolls the main results pane and sidebar independently. Results containers keep a bottom gutter aligned to the sidebar bottom edge, and the virtual scroller preserves that gutter as part of its base padding.
 
+Desktop UI localization is resolved in the web UI. The shell exposes the current operating-system locale to the UI, and the user can persist a desktop-only `localeOverride` setting in `views/manifest/settings.json`. Translation catalogs are shared from `packages/core/locales/` and currently ship English (`en`) and Simplified Chinese (`zh-CN`); the daemon stores only the override value and does not translate product strings.
+
 The shim currently covers:
 
 - `chrome.storage.session` / `chrome.storage.local`
@@ -155,9 +157,13 @@ For production use, persistence, blacklist/title policy, auto-pin synthesis, and
 
 Highlight notes are persisted through daemon `createNote` commands like other notes. The connector content script owns only page-local selection and DOM range work. Same-block selections, including multiline code inside one block, store one string inside the `excerpt` array and one string inside the `cssPath` array; selections spanning distinct block elements store `excerpt` and `cssPath` as aligned string arrays. Reapply uses saved `cssPath` anchors to scope text matching; intentionally empty `cssPath` entries search the document root. After initial reapply, a bounded mutation watcher retries highlight placement so client-side DOM replacement can settle. Same-document route changes stop the previous watcher, unwrap old page marks, and then load highlights for the new page identity.
 
+### Localization
+
+The connector extension uses WebExtension native localization. Staged extension bundles include root `/_locales/<locale>/messages.json` files and a manifest `default_locale`; manifest metadata, command descriptions, and extension UI strings use the browser's current UI locale through `chrome.i18n` / `browser.i18n`. The staged extension catalogs are filtered to `extension*`, `command*`, and `common*` keys so desktop-only UI strings are not packaged into the browser connector.
+
 ### Settings
 
-Persistent product settings are stored only in `views/manifest/settings.json` through daemon `saveSettingsKey` writes. The accepted keys are `theme`, `colorScheme`, `historyFileBatch`, `captureSnapshotVideo`, `blacklistEnabled`, `urlBlacklist`, `titleCleanupEnabled`, `titleTrimRules`, `syncEnabled`, `syncMethod`, `syncRepoUrl`, and `syncRetentionDays`. Runtime-only UI state may still live in `chrome.storage.session`.
+Persistent product settings are stored only in `views/manifest/settings.json` through daemon `saveSettingsKey` writes. The accepted keys are `theme`, `colorScheme`, `localeOverride`, `historyFileBatch`, `captureSnapshotVideo`, `blacklistEnabled`, `urlBlacklist`, `titleCleanupEnabled`, `titleTrimRules`, `syncEnabled`, `syncMethod`, `syncRepoUrl`, and `syncRetentionDays`. Runtime-only UI state may still live in `chrome.storage.session`.
 
 ## Pairing and Change Broadcasts
 
@@ -214,6 +220,7 @@ Rules remain part of the main desktop UI product surface.
 `packages/core/` contains code shared by the desktop UI, connector UI, and tests:
 
 - UI helpers such as `search-helpers.js`, `highlight-helpers.js`, `time-chart.js`, and `virtual-scroller.js`
+- localization helpers and WebExtension-compatible locale catalogs in `i18n.js` and `locales/`
 - page identity helpers in `page-identity.js`, including canonical URL handling, page slug generation, and the generated classic-script bridge source for content scripts
 - shared styling/theme modules
 - logger, rule helpers, entity helpers, and search-runtime glue

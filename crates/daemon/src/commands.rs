@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 const SETTINGS_KEYS: &[&str] = &[
     "theme",
     "colorScheme",
+    "localeOverride",
     "historyFileBatch",
     "captureSnapshotVideo",
     "blacklistEnabled",

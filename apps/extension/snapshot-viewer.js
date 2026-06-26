@@ -7,8 +7,11 @@ import {
   applyPaperErrorPopoutStyle,
   paperErrorPopoutCss,
 } from './extension-ui-tokens.js';
+import { initializeExtensionI18n, tr } from '../../packages/core/i18n.js';
 
 const extensionSurface = globalThis.browserRecallExtensionSurface;
+
+await initializeExtensionI18n();
 
 const params = new URLSearchParams(location.search);
 const slug = params.get('slug');
@@ -18,8 +21,11 @@ function showSnapshotRuntimeError(error) {
   if (!globalThis.browserRecallWebExtension?.isRuntimeFailure?.(error)) {
     return false;
   }
-  const message =
-    'Browser Recall extension reloaded. Please reload the page and try again.';
+  const message = tr(
+    'extensionReloaded',
+    'Browser Recall extension reloaded. Please reload the page and try again.',
+    undefined,
+  );
   let banner = document.getElementById('snapshotRuntimeError');
   if (!banner) {
     banner = document.createElement('div');
@@ -39,8 +45,18 @@ function showSnapshotRuntimeError(error) {
 }
 
 if (!slug || !Number.isFinite(ts)) {
-  document.body.textContent = 'Missing snapshot parameters.';
-  throw new Error('Missing snapshot parameters');
+  document.body.textContent = tr(
+    'extensionSnapshotMissingParams',
+    'Missing snapshot parameters.',
+    undefined,
+  );
+  throw new Error(
+    tr(
+      'extensionSnapshotMissingParams',
+      'Missing snapshot parameters.',
+      undefined,
+    ),
+  );
 }
 
 let htmlResp;
@@ -62,7 +78,11 @@ try {
 }
 
 if (!htmlResp?.success || !htmlResp.html) {
-  document.body.textContent = 'Snapshot not found.';
+  document.body.textContent = tr(
+    'extensionSnapshotNotFound',
+    'Snapshot not found.',
+    undefined,
+  );
   throw new Error(htmlResp?.error || 'getSnapshotHtml failed');
 }
 
@@ -256,7 +276,7 @@ function showHighlightEditOverlay(doc, mark, text, noteSlug, existingNote) {
     'position: absolute; z-index: 2147483647; visibility: hidden;';
 
   const shadow = host.attachShadow({ mode: 'closed' });
-  shadow.innerHTML = `<style>${OVERLAY_STYLE}</style><div class="overlay">${extensionSurface.noteOverlayHtml({ excerpt: text || '', placeholder: 'Add a note... Esc to save.', includeDelete: true })}</div>`;
+  shadow.innerHTML = `<style>${OVERLAY_STYLE}</style><div class="overlay">${extensionSurface.noteOverlayHtml({ excerpt: text || '', placeholder: tr('extensionAddNoteEsc', 'Add a note... Esc to save.', undefined), includeDelete: true })}</div>`;
   doc.body.appendChild(host);
   extensionSurface.positionNearRect(host, rect, win);
 

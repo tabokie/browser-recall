@@ -4,6 +4,19 @@ console.log('Browser Recall content script loaded on:', window.location.href);
 const extensionSurface = globalThis.browserRecallExtensionSurface;
 const pageIdentity = globalThis.browserRecallPageIdentity;
 
+function tr(key, fallback, substitutions) {
+  return (
+    chrome.i18n?.getMessage?.(
+      key,
+      substitutions === undefined
+        ? undefined
+        : Array.isArray(substitutions)
+          ? substitutions
+          : [substitutions],
+    ) || fallback
+  );
+}
+
 if (!pageIdentity?.generateSlugFromUrl) {
   throw new Error(
     'Browser Recall page identity helper was not loaded before content.js',
@@ -499,10 +512,16 @@ function initContentScript() {
       positionStyle:
         'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);',
       bodyHtml: extensionSurface.noteOverlayHtml({
-        title: 'Page Note',
-        placeholder: 'Add a page note... Esc to save.',
+        title: tr('extensionPageNote', 'Page Note'),
+        placeholder: tr(
+          'extensionAddPageNoteEsc',
+          'Add a page note... Esc to save.',
+        ),
       }),
-      placeholder: 'Add a page note... Esc to save.',
+      placeholder: tr(
+        'extensionAddPageNoteEsc',
+        'Add a page note... Esc to save.',
+      ),
       existingNote,
       onClose(note) {
         if (note !== (existingNote || '')) {
@@ -514,7 +533,12 @@ function initContentScript() {
                 note,
               })
               .then((resp) => {
-                if (showUserActionFailureFromResponse(resp, 'Update failed')) {
+                if (
+                  showUserActionFailureFromResponse(
+                    resp,
+                    tr('extensionUpdateFailed', 'Update failed'),
+                  )
+                ) {
                   return;
                 }
                 if (resp?.noteSlug) existingNoteSlug = resp.noteSlug;
@@ -533,7 +557,10 @@ function initContentScript() {
                 cssPath: null,
               })
               .then((resp) => {
-                showUserActionFailureFromResponse(resp, 'Create note failed');
+                showUserActionFailureFromResponse(
+                  resp,
+                  tr('extensionCreateNoteFailed', 'Create note failed'),
+                );
               })
               .catch((error) => {
                 showExtensionReloadNotification(error);
@@ -1165,10 +1192,10 @@ function initContentScript() {
       beforeTextareaHtml: extensionSurface.trashButtonHtml(),
       bodyHtml: extensionSurface.noteOverlayHtml({
         excerpt: text || '',
-        placeholder: 'Add a note... Esc to save.',
+        placeholder: tr('extensionAddNoteEsc', 'Add a note... Esc to save.'),
         includeDelete: true,
       }),
-      placeholder: 'Add a note... Esc to save.',
+      placeholder: tr('extensionAddNoteEsc', 'Add a note... Esc to save.'),
       existingNote,
       async onClose(note) {
         if (note !== existingNote && noteSlug) {
@@ -1178,7 +1205,12 @@ function initContentScript() {
               noteSlug,
               note,
             });
-            if (showUserActionFailureFromResponse(resp, 'Update failed')) {
+            if (
+              showUserActionFailureFromResponse(
+                resp,
+                tr('extensionUpdateFailed', 'Update failed'),
+              )
+            ) {
               return;
             }
             if (resp?.noteSlug) mark.dataset.noteSlug = resp.noteSlug;
@@ -1475,7 +1507,7 @@ function initContentScript() {
         animation: spin 0.7s linear infinite;
       }
     </style>
-    <div class="bubble"><span class="spinner"></span>Capturing…</div>
+    <div class="bubble"><span class="spinner"></span>${extensionSurface.escapeHtml(tr('extensionCapturing', 'Capturing...'))}</div>
   `;
     document.documentElement.appendChild(host);
     _captureSpinnerHost = host;
@@ -1490,7 +1522,7 @@ function initContentScript() {
 
   function showCaptureNotification() {
     showNotificationBubble({
-      message: 'Snapshot captured',
+      message: tr('extensionSnapshotCaptured', 'Snapshot captured'),
       duration: 1.6,
       fadeIn: 12,
       fadeHold: 75,
@@ -1499,7 +1531,10 @@ function initContentScript() {
 
   function showLikeNotification(delta = 1) {
     showNotificationBubble({
-      message: delta >= 0 ? 'Liked' : 'Disliked',
+      message:
+        delta >= 0
+          ? tr('extensionLiked', 'Liked')
+          : tr('extensionDisliked', 'Disliked'),
       duration: 1.6,
       fadeIn: 12,
       fadeHold: 75,
@@ -1525,14 +1560,18 @@ function initContentScript() {
   function showExtensionReloadNotification(error) {
     if (!isExtensionRuntimeFailure(error)) return false;
     showErrorNotification(
-      'Browser Recall extension reloaded. Please reload the page and try again.',
+      tr(
+        'extensionReloaded',
+        'Browser Recall extension reloaded. Please reload the page and try again.',
+      ),
     );
     return true;
   }
 
   function showUserActionFailureFromResponse(resp, fallback) {
     if (resp?.success !== false) return false;
-    const message = resp.error || fallback || 'Action failed';
+    const message =
+      resp.error || fallback || tr('extensionActionFailed', 'Action failed');
     if (!showExtensionReloadNotification(message)) {
       showErrorNotification(message);
     }
@@ -1579,8 +1618,8 @@ function initContentScript() {
     </style>
     <div class="panel">
       <div class="panel-header">
-        <span>Highlights${excerptNotes.length ? ' (' + excerptNotes.length + ')' : ''}</span>
-        <button class="close-btn" title="Close">&times;</button>
+        <span>${extensionSurface.escapeHtml(tr('extensionHighlightsCount', `Highlights (${excerptNotes.length})`, [excerptNotes.length]))}</span>
+        <button class="close-btn" title="${extensionSurface.escapeHtml(tr('commonClose', 'Close'))}">&times;</button>
       </div>
       ${excerptNotes
         .map((n, index) => {
@@ -1589,8 +1628,8 @@ function initContentScript() {
           <div class="highlight-body">
           <div class="excerpt">${extensionSurface.escapeHtml(text)}</div>
           <div class="note-row">
-            <textarea placeholder="Add a note...">${extensionSurface.escapeHtml(n.note || '')}</textarea>
-            <button class="delete-btn" title="Delete"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>
+            <textarea placeholder="${extensionSurface.escapeHtml(tr('extensionAddNote', 'Add a note...'))}">${extensionSurface.escapeHtml(n.note || '')}</textarea>
+            <button class="delete-btn" title="${extensionSurface.escapeHtml(tr('commonDelete', 'Delete'))}"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>
           </div>
           </div>
         </div>`;
@@ -1626,7 +1665,12 @@ function initContentScript() {
           chrome.runtime
             .sendMessage({ action: 'updateNote', noteSlug, note: ta.value })
             .then((resp) => {
-              if (showUserActionFailureFromResponse(resp, 'Update failed')) {
+              if (
+                showUserActionFailureFromResponse(
+                  resp,
+                  tr('extensionUpdateFailed', 'Update failed'),
+                )
+              ) {
                 return;
               }
               if (resp?.noteSlug) {
@@ -1659,8 +1703,11 @@ function initContentScript() {
         removeHighlightMarksByNoteSlug(noteSlug);
         item.remove();
         const remaining = shadow.querySelectorAll('.highlight-item').length;
-        shadow.querySelector('.panel-header span').textContent =
-          `Highlights (${remaining})`;
+        shadow.querySelector('.panel-header span').textContent = tr(
+          'extensionHighlightsCount',
+          `Highlights (${remaining})`,
+          [remaining],
+        );
         if (remaining === 0) teardownPanel();
       });
     });
@@ -1757,7 +1804,12 @@ function initContentScript() {
               cssPath: cssPaths,
             })
             .then((resp) => {
-              if (showUserActionFailureFromResponse(resp, 'Highlight failed')) {
+              if (
+                showUserActionFailureFromResponse(
+                  resp,
+                  tr('extensionHighlightFailed', 'Highlight failed'),
+                )
+              ) {
                 return;
               }
               const noteSlug = resp?.noteSlug;
@@ -1797,7 +1849,12 @@ function initContentScript() {
               cssPath: [cssPath],
             })
             .then((resp) => {
-              if (showUserActionFailureFromResponse(resp, 'Highlight failed')) {
+              if (
+                showUserActionFailureFromResponse(
+                  resp,
+                  tr('extensionHighlightFailed', 'Highlight failed'),
+                )
+              ) {
                 return;
               }
               const noteSlug = resp?.noteSlug;
@@ -1894,7 +1951,10 @@ function initContentScript() {
       showCaptureNotification();
       sendResponse({ success: true });
     } else if (request.action === 'showErrorNotification') {
-      showErrorNotification(request.message || 'Something went wrong');
+      showErrorNotification(
+        request.message ||
+          tr('extensionSomethingWentWrong', 'Something went wrong'),
+      );
       sendResponse({ success: true });
     } else if (request.action === 'showLikeNotification') {
       showLikeNotification(request.delta);

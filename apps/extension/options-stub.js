@@ -1,3 +1,13 @@
+import {
+  initializeExtensionI18n,
+  localizeDocument,
+  tr,
+} from '../../packages/core/i18n.js';
+import { getBrowserCapabilities } from './browser-capabilities.js';
+
+await initializeExtensionI18n();
+localizeDocument();
+
 const openButton = document.getElementById('openApp');
 const notRunningNotice = document.getElementById('notRunning');
 const shortcutsList = document.getElementById('shortcutsList');
@@ -10,10 +20,13 @@ const SHORTCUT_ORDER = [
   'dislike-page',
 ];
 
-import { getBrowserCapabilities } from './browser-capabilities.js';
-
 const SHORTCUT_LABELS = {
-  'highlight-selection': 'Highlight selected text or add a page note',
+  'highlight-selection': () =>
+    tr(
+      'commandHighlightSelection',
+      'Highlight selected text or add a page note',
+      undefined,
+    ),
 };
 
 openButton.addEventListener('click', () => {
@@ -40,11 +53,12 @@ async function renderShortcuts() {
     const desc = document.createElement('span');
     desc.className = 'shortcut-desc';
     desc.textContent =
-      SHORTCUT_LABELS[command.name] || command.description || command.name;
+      SHORTCUT_LABELS[command.name]?.() || command.description || command.name;
 
     const key = document.createElement('span');
     key.className = command.shortcut ? 'shortcut-key' : 'shortcut-key not-set';
-    key.textContent = command.shortcut || 'Not set';
+    key.textContent =
+      command.shortcut || tr('extensionNotSet', 'Not set', undefined);
 
     row.append(desc, key);
     shortcutsList.appendChild(row);

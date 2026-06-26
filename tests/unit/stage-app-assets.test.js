@@ -64,6 +64,102 @@ describe('extension staged assets', () => {
     expect(coreEntityTypes).toContain('export const pageKey = (slug) =>');
   });
 
+  it('stages browser-native extension localization files', () => {
+    const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
+    stagedDirs.push(outDir);
+    stageExtensionAssets(outDir);
+
+    const manifest = JSON.parse(readFileSync(join(outDir, 'manifest.json')));
+    const messages = JSON.parse(
+      readFileSync(join(outDir, '_locales', 'en', 'messages.json'), 'utf8'),
+    );
+    const coreMessages = JSON.parse(
+      readFileSync(
+        join(outDir, 'core', 'locales', 'en', 'messages.json'),
+        'utf8',
+      ),
+    );
+    const zhMessages = JSON.parse(
+      readFileSync(join(outDir, '_locales', 'zh_CN', 'messages.json'), 'utf8'),
+    );
+
+    expect(manifest.default_locale).toBe('en');
+    expect(manifest.name).toBe('__MSG_extensionName__');
+    expect(manifest.description).toBe('__MSG_extensionDescription__');
+    expect(manifest.commands['highlight-selection'].description).toBe(
+      '__MSG_commandHighlightSelection__',
+    );
+    expect(messages.extensionName.message).toBe('Browser Recall');
+    expect(messages.commandCaptureSnapshot.message).toBe(
+      'Capture snapshot of current page',
+    );
+    expect(messages.commonEnglish.message).toBe('English');
+    expect(messages.desktopSync).toBeUndefined();
+    expect(coreMessages.extensionName.message).toBe('Browser Recall');
+    expect(coreMessages.desktopSync).toBeUndefined();
+    expect(zhMessages.extensionCaptureFrame.message).toBe('捕获画面');
+    expect(zhMessages.desktopSync).toBeUndefined();
+  });
+
+  it('keeps shared locale catalogs complete and placeholder-compatible', () => {
+    const enMessages = JSON.parse(
+      readFileSync(
+        join(process.cwd(), 'packages/core/locales/en/messages.json'),
+        'utf8',
+      ),
+    );
+    const zhMessages = JSON.parse(
+      readFileSync(
+        join(process.cwd(), 'packages/core/locales/zh-CN/messages.json'),
+        'utf8',
+      ),
+    );
+    const enKeys = Object.keys(enMessages).sort();
+    const zhKeys = Object.keys(zhMessages).sort();
+    expect(zhKeys).toEqual(enKeys);
+    expect(enMessages.desktopColumnRelevance.message).toBe('Rel');
+    expect(zhMessages.desktopColumnRelevance.message).toBe('相关');
+
+    const placeholders = (message) =>
+      [...String(message).matchAll(/\$(\d+)/g)].map((match) => match[1]).sort();
+    for (const key of enKeys) {
+      expect(enMessages[key].message, key).toBeTruthy();
+      expect(zhMessages[key].message, key).toBeTruthy();
+      expect(placeholders(zhMessages[key].message), key).toEqual(
+        placeholders(enMessages[key].message),
+      );
+    }
+  });
+
+  it('keeps previously missed UI strings on localization keys', () => {
+    const desktopHtml = readFileSync(
+      join(process.cwd(), 'apps/desktop/ui/index.html'),
+      'utf8',
+    );
+    const desktopSource = readFileSync(
+      join(process.cwd(), 'apps/desktop/ui/index.js'),
+      'utf8',
+    );
+    const popupHtml = readFileSync(
+      join(process.cwd(), 'apps/extension/popup.html'),
+      'utf8',
+    );
+    const popupSource = readFileSync(
+      join(process.cwd(), 'apps/extension/popup.js'),
+      'utf8',
+    );
+
+    expect(desktopHtml).toContain('data-i18n="desktopOnboardingHistoryTitle"');
+    expect(desktopHtml).toContain('data-i18n-html="desktopManualSetupHtml"');
+    expect(desktopHtml).toContain('data-i18n="commonChineseSimplified"');
+    expect(desktopSource).toContain("tr('desktopCannotDeleteHistory'");
+    expect(desktopSource).toContain("tr('desktopCanOnlyPasteIntoList'");
+    expect(desktopSource).toContain("tr('desktopNoResults'");
+    expect(desktopSource).toContain('desktopColumnRelevance');
+    expect(popupHtml).toContain('data-i18n="extensionCaptureFrame"');
+    expect(popupSource).toContain("tr('extensionFirst'");
+  });
+
   it('keeps shared CSS imports valid in the staged extension bundle', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'browser-recall-stage-test-'));
     stagedDirs.push(outDir);
@@ -148,9 +244,8 @@ describe('extension staged assets', () => {
 
     const popupSource = readFileSync(join(outDir, 'popup.js'), 'utf8');
     expect(popupSource).toContain('function showUnavailablePage');
-    expect(popupSource).toContain(
-      "showUnavailablePage('Not available for this page')",
-    );
+    expect(popupSource).toContain("tr('extensionNotAvailablePage'");
+    expect(popupSource).toContain("'Not available for this page'");
   });
 
   it('moves shortcut management into the extension options page', () => {

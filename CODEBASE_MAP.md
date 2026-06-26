@@ -64,7 +64,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `crates/replay/src/lib.rs` | Production replay engine |
 | `crates/replay/src/bin/replay-verify.rs` | Full-log checkpoint verifier using the production replay and checkpoint policy |
 | `crates/search/src/lib.rs` | Native search primitives |
-| `scripts/stage-app-assets.mjs` | Stages loadable app assets under `dist/extension/{chrome,firefox}/` and `dist/desktop/ui/`, including the generated content-script page identity bridge |
+| `scripts/stage-app-assets.mjs` | Stages loadable app assets under `dist/extension/{chrome,firefox}/` and `dist/desktop/ui/`, including filtered WebExtension locale files and the generated content-script page identity bridge |
 | `scripts/collect-desktop-artifacts.mjs` | Collects Tauri release binaries and bundles into `dist/desktop/<platform>/` |
 | `scripts/migrate-browser-data-schema.mjs` | Browser data migration utility for log/view/object schema changes, including URL identity canonicalization |
 | `scripts/test-coverage-monitor.mjs` | Test investment and JS/Rust uncovered-line monitor; enforces no JS or inline Rust unit-test LoC growth |
@@ -74,6 +74,9 @@ This map intentionally excludes removed extension-only storage/sync internals.
 | `packages/core/utils.js` | Shared utility helpers that re-export page identity and provide connector request canonicalization |
 | `packages/core/rule-engine.js` | Shared rule validation/matching helpers; keyword rules are title-only |
 | `packages/core/search-helpers.js` | Shared query parsing/search helper logic |
+| `packages/core/i18n.js` | Shared UI localization runtime for catalog lookup, document localization, and WebExtension i18n adaptation |
+| `packages/core/locales/en/messages.json` | Canonical English message catalog, used by desktop UI assets and filtered into extension `/_locales` |
+| `packages/core/locales/zh-CN/messages.json` | Simplified Chinese message catalog with the same keys and placeholders as English |
 | `packages/core/time-chart.js` | Shared history chart rendering helpers |
 | `packages/core/virtual-scroller.js` | Shared virtual scrolling helper |
 | `packages/core/theme.js` | Shared theme/session helpers |
@@ -83,6 +86,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 ### Desktop UI
 
 - `apps/desktop/ui/index.js` owns history rendering, lists, search, settings, recycle bin, imports, and mutation dispatch.
+- Desktop UI localization uses `packages/core/i18n.js`; system locale comes from the Tauri shell, while `localeOverride` persists in daemon settings. Supported catalogs are `en` and `zh-CN`.
 - `apps/desktop/ui/desktop-bridge.js` owns direct Tauri command dispatch for desktop product actions.
 - `apps/desktop/ui/extension-api-shim.js` keeps only the remaining `chrome.*` compatibility surfaces needed by the ported UI.
 - `apps/desktop/src-tauri/src/main.rs` forwards command results, change events, and storage updates into the webview.
@@ -90,6 +94,7 @@ This map intentionally excludes removed extension-only storage/sync internals.
 ### Connector Popup
 
 - `apps/extension/popup.js` consumes prepared bootstrap payloads when present, requests page summaries as the direct-load fallback, submits popup mutations through a serialized UI lane, renders an open-popup snapshot without background mutation refreshes, and owns the transient list-picker/search keyboard UI.
+- Extension UI and manifest localization use browser-native WebExtension `i18n` files staged from `packages/core/locales/`; only `extension*`, `command*`, and `common*` keys are packaged. The extension follows the browser's UI locale and does not persist a product locale override.
 - `apps/extension/background.js` resolves popup actions through the daemon connection. Toolbar clicks prepare current-tab and daemon popup data before opening `popup.html?bootstrap=...`, avoiding a manifest `default_popup` first frame. Prepared popup data is handed off by a one-shot in-memory token, has a bounded timeout, and falls back to an extension tab when an engine lacks programmatic action popups. Test-only background RPCs are split into `apps/extension/background-test-control.js` and included only in staged test extensions.
 - `apps/extension/icon-paths.js` defines packaged toolbar icon sets for normal capture, paused recording, and special page-marker states; `apps/extension/badge-controller.js` applies those icons at runtime.
 - `apps/extension/options-stub.js` only opens the desktop app; it is not a settings surface.

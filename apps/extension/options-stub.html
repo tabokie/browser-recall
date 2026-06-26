@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Browser Recall</title>
+    <title data-i18n="extensionName">Browser Recall</title>
     <link rel="stylesheet" href="shared.css" />
     <link rel="stylesheet" href="extension-surface.css" />
     <style>
@@ -57,27 +57,49 @@
     <main class="extension-page">
       <div class="extension-ledger">
         <section class="extension-section">
-          <div class="extension-brand">Browser Recall</div>
-          <h1 class="extension-title">Desktop Control</h1>
-          <p class="extension-copy">
+          <div class="extension-brand" data-i18n="extensionName">
+            Browser Recall
+          </div>
+          <h1 class="extension-title" data-i18n="extensionDesktopControl">
+            Desktop Control
+          </h1>
+          <p class="extension-copy" data-i18n="extensionMainUiRunsInDesktop">
             The main Browser Recall interface runs in the desktop app.
           </p>
           <div class="button-row">
-            <button class="extension-button primary" id="openApp">
+            <button
+              class="extension-button primary"
+              id="openApp"
+              data-i18n="extensionOpenBrowserRecall"
+            >
               Open Browser Recall
             </button>
           </div>
-          <p class="extension-notice" id="notRunning" hidden>
+          <p
+            class="extension-notice"
+            id="notRunning"
+            hidden
+            data-i18n="extensionOpenAppFallback"
+          >
             Can't open the app? Launch it from your Applications folder, then
             try again.
           </p>
         </section>
 
         <section class="extension-section">
-          <h2 class="extension-section-title">Keyboard Shortcuts</h2>
+          <h2
+            class="extension-section-title"
+            data-i18n="extensionKeyboardShortcuts"
+          >
+            Keyboard Shortcuts
+          </h2>
           <div class="shortcut-list" id="shortcutsList"></div>
           <div class="button-row">
-            <button class="extension-button" id="customizeShortcuts">
+            <button
+              class="extension-button"
+              id="customizeShortcuts"
+              data-i18n="extensionConfigureShortcuts"
+            >
               Configure Shortcuts
             </button>
           </div>

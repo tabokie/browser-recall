@@ -2,7 +2,7 @@
 <html style="opacity: 0">
   <head>
     <meta charset="UTF-8" />
-    <title>browser-recall</title>
+    <title data-i18n="extensionShortName">browser-recall</title>
     <link rel="stylesheet" href="shared.css" />
     <style>
       :root {
@@ -4150,6 +4150,8 @@
           id="onboardingForwardBtn"
           title="Continue"
           aria-label="Continue"
+          data-i18n-title="commonContinue"
+          data-i18n-aria-label="commonContinue"
           hidden
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -4163,14 +4165,14 @@
             />
           </svg>
         </button>
-        <h1>browser-recall</h1>
-        <p class="onboarding-desc">
+        <h1 data-i18n="extensionShortName">browser-recall</h1>
+        <p class="onboarding-desc" data-i18n="desktopOnboardingIntro">
           browser-recall saves browsing history, notes, and highlights through
           Browser Recall Desktop into a local plain-text data folder.
         </p>
 
         <div class="onboarding-section onboarding-colors">
-          <h3>Pick a color</h3>
+          <h3 data-i18n="desktopOnboardingPickColor">Pick a color</h3>
           <div class="onboarding-color-picker" id="onboardingColorPicker">
             <button
               class="color-dot active"
@@ -4189,15 +4191,17 @@
         </div>
 
         <div class="onboarding-section onboarding-live-capture">
-          <h3>Live capture</h3>
-          <p>
+          <h3 data-i18n="desktopOnboardingLiveCapture">Live capture</h3>
+          <p data-i18n="desktopOnboardingLiveCaptureText">
             Install the browser extension and pair it from the extension popup.
             Browser Recall Desktop must stay running in the background to record
             visits.
           </p>
           <div class="option" id="onboardingLaunchAtLoginRow">
             <div class="option-row">
-              <span>Launch Browser Recall when you log in</span>
+              <span data-i18n="desktopLaunchAtLoginLong"
+                >Launch Browser Recall when you log in</span
+              >
               <label class="toggle-switch sm">
                 <input type="checkbox" id="onboardingLaunchAtLogin" checked />
                 <span class="toggle-track"></span>
@@ -4210,12 +4214,16 @@
         </div>
 
         <div class="onboarding-section onboarding-required">
-          <h3>Choose your data folder</h3>
-          <p>
+          <h3 data-i18n="desktopOnboardingDataHeading">
+            Choose your data folder
+          </h3>
+          <p data-i18n="desktopOnboardingDataText">
             Browser Recall stores plain-text local data in the folder you
             choose. No default folder is used until you make this choice.
           </p>
-          <button id="onboardingDirBtn">Choose Data Folder</button>
+          <button id="onboardingDirBtn" data-i18n="desktopChooseDataFolder">
+            Choose Data Folder
+          </button>
           <p id="onboardingDirStatus"></p>
         </div>
       </div>
@@ -4230,6 +4238,8 @@
           id="onboardingBackBtn"
           title="Back"
           aria-label="Back"
+          data-i18n-title="commonBack"
+          data-i18n-aria-label="commonBack"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path
@@ -4257,8 +4267,10 @@
               </svg>
             </div>
             <div class="onboarding-feature-text">
-              <strong>Browsing history</strong>
-              <span
+              <strong data-i18n="desktopOnboardingHistoryTitle"
+                >Browsing history</strong
+              >
+              <span data-i18n="desktopOnboardingHistoryText"
                 >Every page visit is automatically saved by Browser Recall
                 Desktop and stays searchable by title, web address, and
                 content.</span
@@ -4279,8 +4291,10 @@
               </svg>
             </div>
             <div class="onboarding-feature-text">
-              <strong>Highlights &amp; notes</strong>
-              <span
+              <strong data-i18n="desktopOnboardingHighlightsTitle"
+                >Highlights &amp; notes</strong
+              >
+              <span data-i18n-html="desktopOnboardingHighlightsTextHtml"
                 >Select text and press <kbd>Alt+H</kbd> to highlight it, or
                 press <kbd>Alt+H</kbd> with no selection to add a note to the
                 current page.</span
@@ -4301,8 +4315,10 @@
               </svg>
             </div>
             <div class="onboarding-feature-text">
-              <strong>Page snapshots</strong>
-              <span
+              <strong data-i18n="desktopOnboardingSnapshotsTitle"
+                >Page snapshots</strong
+              >
+              <span data-i18n-html="desktopOnboardingSnapshotsTextHtml"
                 >Press <kbd>Alt+S</kbd> to save an offline copy of the page
                 through the desktop bridge.</span
               >
@@ -4322,23 +4338,30 @@
               </svg>
             </div>
             <div class="onboarding-feature-text">
-              <strong>Lists</strong>
-              <span
+              <strong data-i18n="commonLists">Lists</strong>
+              <span data-i18n="desktopOnboardingListsText"
                 >Organize pages into lists. Use automatic inbox rules to create
                 a live-updating list.</span
               >
             </div>
           </div>
         </div>
-        <button id="onboardingStartBtn">Get Started</button>
+        <button id="onboardingStartBtn" data-i18n="desktopGetStarted">
+          Get Started
+        </button>
       </div>
     </div>
 
     <!-- Left sidebar -->
     <div class="sidebar">
       <div class="sidebar-header">
-        <h1>browser-recall</h1>
-        <button class="settings-btn" id="settingsBtn" title="Settings">
+        <h1 data-i18n="extensionShortName">browser-recall</h1>
+        <button
+          class="settings-btn"
+          id="settingsBtn"
+          title="Settings"
+          data-i18n-title="commonSettings"
+        >
           <svg viewBox="0 0 24 24">
             <path
               d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.26.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"
@@ -4353,7 +4376,7 @@
             d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"
           />
         </svg>
-        Explore
+        <span data-i18n="commonExplore">Explore</span>
         <span class="explore-badge" id="exploreBadge"></span>
       </button>
 
@@ -4364,22 +4387,28 @@
             d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
           />
         </svg>
-        Recycle Bin
+        <span data-i18n="desktopRecycleBin">Recycle Bin</span>
         <span class="recycle-count" id="recycleBinCount"></span>
       </button>
 
       <div class="sidebar-content scroll-boundary-contained">
         <div class="sidebar-section-label">
-          Lists<button
+          <span data-i18n="commonLists">Lists</span
+          ><button
             class="sidebar-create-list"
             id="createListBtn"
             title="Create list"
+            data-i18n-title="desktopCreateList"
           >
             +
           </button>
         </div>
         <div id="listsList">
-          <div class="lists-empty" id="listsEmpty">
+          <div
+            class="lists-empty"
+            id="listsEmpty"
+            data-i18n="desktopPinSearchCreateList"
+          >
             Pin a search to create a list
           </div>
         </div>
@@ -4392,12 +4421,18 @@
     <!-- Main panel -->
     <div class="main scroll-boundary-contained">
       <div class="main-header">
-        <button id="sidebarToggle" title="Toggle sidebar">
+        <button
+          id="sidebarToggle"
+          title="Toggle sidebar"
+          data-i18n-title="desktopToggleSidebar"
+        >
           <svg viewBox="0 0 24 24">
             <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />
           </svg>
         </button>
-        <span class="main-title" id="mainTitle">Explore</span>
+        <span class="main-title" id="mainTitle" data-i18n="commonExplore"
+          >Explore</span
+        >
         <input
           class="main-title-input"
           id="mainTitleInput"
@@ -4409,6 +4444,7 @@
           id="confirmTitleBtn"
           style="display: none"
           title="Confirm"
+          data-i18n-title="commonConfirm"
         >
           &#x2713;
         </button>
@@ -4417,6 +4453,7 @@
           id="inboxToggleBtn"
           style="display: none"
           title="Inbox rules"
+          data-i18n-title="desktopInboxRules"
         >
           <svg
             viewBox="0 0 24 24"
@@ -4436,7 +4473,7 @@
 
       <div class="query-builder" id="queryBuilder" style="display: none">
         <div class="qb-header">
-          <span class="qb-title">Query</span>
+          <span class="qb-title" data-i18n="desktopQuery">Query</span>
         </div>
         <div class="qb-body scroll-boundary-contained-x" id="qbBody">
           <!-- Rendered by JS -->
@@ -4444,7 +4481,9 @@
       </div>
 
       <div class="time-chart visible" id="timeChart">
-        <div class="chart-label">Visits over time</div>
+        <div class="chart-label" data-i18n="desktopVisitsOverTime">
+          Visits over time
+        </div>
         <div
           class="chart-bars scroll-boundary-contained-x"
           id="chartBars"
@@ -4461,9 +4500,11 @@
         <div class="inbox-panel" id="inboxPanel" style="display: none">
           <div class="inbox-panel-inner">
             <div class="inbox-panel-header">
-              <span class="inbox-panel-title">Inbox rules</span>
+              <span class="inbox-panel-title" data-i18n="desktopInboxRules"
+                >Inbox rules</span
+              >
               <span class="hint-icon"
-                >?<span class="hint-tip"
+                >?<span class="hint-tip" data-i18n="desktopInboxRulesHint"
                   >Rules automatically sort new pages into this list. Keyword
                   rules match against page title, web address, and body text.
                   Function rules use a custom JS predicate that returns
@@ -4474,6 +4515,7 @@
                 class="rules-header-add"
                 id="rulesAddBtn"
                 title="Add rule"
+                data-i18n-title="desktopAddRule"
               >
                 +
               </button>
@@ -4489,6 +4531,7 @@
                 <span
                   class="filter-section-label"
                   style="border: none; margin: 0; padding: 0"
+                  data-i18n="desktopRecentVisits"
                   >Recent Visits</span
                 >
                 <span class="rules-preview-count" id="rulesPreviewCount"></span>
@@ -4507,6 +4550,7 @@
                 <span
                   class="filter-section-label"
                   style="border: none; margin: 0; padding: 0"
+                  data-i18n="desktopPinnedPages"
                   >Pinned Pages</span
                 >
                 <span
@@ -4523,7 +4567,7 @@
         </div>
         <div id="listQueryBuilder" style="display: none"></div>
         <div class="time-chart" id="relatedChart">
-          <div class="chart-label">Results</div>
+          <div class="chart-label" data-i18n="desktopResults">Results</div>
           <div
             class="chart-bars scroll-boundary-contained-x"
             id="relatedChartBars"
@@ -4545,7 +4589,9 @@
       <!-- Recycle bin layout -->
       <div class="recycle-bin-layout" id="recycleBinLayout">
         <div class="recycle-bin-header">
-          <button class="empty-bin-btn">Empty Recycle Bin</button>
+          <button class="empty-bin-btn" data-i18n="desktopEmptyRecycleBin">
+            Empty Recycle Bin
+          </button>
         </div>
         <div class="recycle-bin-items" id="recycleBinItems">
           <!-- Rendered by JS -->
@@ -4555,7 +4601,7 @@
           id="recycleBinEmpty"
           style="display: none"
         >
-          No deleted items
+          <span data-i18n="desktopNoDeletedItems">No deleted items</span>
         </div>
       </div>
     </div>
@@ -4570,29 +4616,42 @@
     >
       <div class="modal">
         <div class="modal-header">
-          <h2 id="settingsTitle">Settings</h2>
-          <button class="modal-close" id="settingsClose" title="Close">
+          <h2 id="settingsTitle" data-i18n="commonSettings">Settings</h2>
+          <button
+            class="modal-close"
+            id="settingsClose"
+            title="Close"
+            data-i18n-title="commonClose"
+          >
             &times;
           </button>
         </div>
         <div class="modal-body scroll-boundary-contained">
           <!-- ── Appearance ── -->
           <div class="modal-group">
-            <div class="modal-group-label">Appearance</div>
+            <div class="modal-group-label" data-i18n="desktopAppearance">
+              Appearance
+            </div>
             <div class="modal-section">
               <div class="option">
                 <div class="option-row">
-                  <span>Theme</span>
+                  <span data-i18n="desktopTheme">Theme</span>
                   <select id="themeSelect">
-                    <option value="system">System</option>
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
+                    <option value="system" data-i18n="commonSystem">
+                      System
+                    </option>
+                    <option value="light" data-i18n="desktopThemeLight">
+                      Light
+                    </option>
+                    <option value="dark" data-i18n="desktopThemeDark">
+                      Dark
+                    </option>
                   </select>
                 </div>
               </div>
               <div class="option">
                 <div class="option-row">
-                  <span>Color</span>
+                  <span data-i18n="desktopColor">Color</span>
                   <div class="color-scheme-dots" id="colorSchemePicker">
                     <button
                       class="color-dot"
@@ -4614,16 +4673,34 @@
                   </div>
                 </div>
               </div>
+              <div class="option">
+                <div class="option-row">
+                  <span data-i18n="desktopLanguage">Language</span>
+                  <select id="localeSelect">
+                    <option value="system" data-i18n="commonSystem">
+                      System
+                    </option>
+                    <option value="en" data-i18n="commonEnglish">
+                      English
+                    </option>
+                    <option value="zh-CN" data-i18n="commonChineseSimplified">
+                      简体中文
+                    </option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- ── Connection ── -->
           <div class="modal-group">
-            <div class="modal-group-label">Connection</div>
+            <div class="modal-group-label" data-i18n="desktopConnection">
+              Connection
+            </div>
             <div class="modal-section">
               <div class="option" id="launchAtLoginOption">
                 <div class="option-row">
-                  <span>Launch at login</span>
+                  <span data-i18n="desktopLaunchAtLogin">Launch at login</span>
                   <label class="toggle-switch sm">
                     <input type="checkbox" id="launchAtLoginToggle" />
                     <span class="toggle-track"></span>
@@ -4643,7 +4720,9 @@
               </div>
               <div class="option">
                 <div class="option-row" style="align-items: flex-start">
-                  <span>Browsers active today</span>
+                  <span data-i18n="desktopBrowsersActiveToday"
+                    >Browsers active today</span
+                  >
                 </div>
                 <div
                   id="pairedBrowsersList"
@@ -4656,7 +4735,10 @@
                     color: var(--text-secondary);
                   "
                 >
-                  <div style="color: var(--text-muted)">
+                  <div
+                    style="color: var(--text-muted)"
+                    data-i18n="desktopNoBrowsersActiveToday"
+                  >
                     No browsers active today.
                   </div>
                 </div>
@@ -4667,7 +4749,7 @@
           <!-- ── Data ── -->
           <div class="modal-group">
             <div class="modal-group-label">
-              Data
+              <span data-i18n="desktopData">Data</span>
               <span class="hint-icon"
                 >?<span class="hint-tip"
                   >Stored locally as human-readable JSONL files organized by
@@ -4679,20 +4761,35 @@
             <div class="data-compact">
               <div class="data-row data-storage-row" id="storageLocation">
                 <div class="data-storage-text">
-                  <span class="data-path" id="storagePath"
+                  <span
+                    class="data-path"
+                    id="storagePath"
+                    data-i18n="desktopDeviceNotConfigured"
                     >Device not configured</span
                   >
                   <span class="data-device-name" id="storageDeviceName"></span>
                 </div>
               </div>
               <div class="data-row data-btn-row">
-                <button id="selectDirBtn" class="btn btn-secondary btn-sm">
+                <button
+                  id="selectDirBtn"
+                  class="btn btn-secondary btn-sm"
+                  data-i18n="desktopPairFromBrowserPopup"
+                >
                   Pair from Browser Popup
                 </button>
-                <button id="bookmarkImportBtn" class="btn btn-secondary btn-sm">
+                <button
+                  id="bookmarkImportBtn"
+                  class="btn btn-secondary btn-sm"
+                  data-i18n="desktopImportBookmarks"
+                >
                   Import Bookmarks
                 </button>
-                <button id="historyImportBtn" class="btn btn-secondary btn-sm">
+                <button
+                  id="historyImportBtn"
+                  class="btn btn-secondary btn-sm"
+                  data-i18n="commonImportHistory"
+                >
                   Import History
                 </button>
                 <button id="clearBtn" class="btn btn-danger btn-sm">
@@ -4724,7 +4821,9 @@
                   id="bookmarkTreeContainer"
                   class="bookmark-tree-container scroll-boundary-contained"
                 >
-                  <span class="bookmark-tree-placeholder"
+                  <span
+                    class="bookmark-tree-placeholder"
+                    data-i18n="desktopBookmarkPreviewPlaceholder"
                     >Select an exported bookmarks file to preview folders.</span
                   >
                 </div>
@@ -4734,13 +4833,15 @@
                     class="btn btn-primary"
                     disabled
                   >
-                    Import Selected
+                    <span data-i18n="commonImportSelected"
+                      >Import Selected</span
+                    >
                   </button>
                   <button
                     id="bookmarkImportCancelBtn"
                     class="btn btn-secondary"
                   >
-                    Cancel
+                    <span data-i18n="commonCancel">Cancel</span>
                   </button>
                 </div>
                 <div id="importProgress" class="import-progress"></div>
@@ -4754,7 +4855,11 @@
                 <div class="import-file-row">
                   <input type="file" id="historyFileInput" accept=".json" />
                 </div>
-                <p class="import-progress" style="margin: 8px 0">
+                <p
+                  class="import-progress"
+                  style="margin: 8px 0"
+                  data-i18n-html="desktopHistoryImportHelpHtml"
+                >
                   Import a JSON array of browser history entries. Supported
                   entry shapes include Chrome-style objects with
                   <code>url</code>, <code>title</code>, and
@@ -4768,10 +4873,10 @@
                     class="btn btn-primary"
                     disabled
                   >
-                    Import History
+                    <span data-i18n="commonImportHistory">Import History</span>
                   </button>
                   <button id="historyImportCancelBtn" class="btn btn-secondary">
-                    Cancel
+                    <span data-i18n="commonCancel">Cancel</span>
                   </button>
                 </div>
                 <div id="historyImportProgress" class="import-progress"></div>
@@ -4781,18 +4886,20 @@
                 ></div>
               </div>
               <div class="data-row">
-                <span class="data-label"
+                <span
+                  class="data-label"
+                  data-i18n-html="desktopPendingWritesHtml"
                   ><span id="bufferSize">0</span> pending writes</span
                 >
                 <button id="flushBufferBtn" class="btn btn-secondary btn-sm">
-                  Flush
+                  <span data-i18n="commonFlush">Flush</span>
                 </button>
               </div>
               <div class="data-row">
-                <span class="data-label"
+                <span class="data-label" data-i18n-html="desktopMemoryCacheHtml"
                   ><span id="cacheSize">...</span> memory cache
                   <span class="hint-icon"
-                    >?<span class="hint-tip"
+                    >?<span class="hint-tip" data-i18n="desktopMemoryCacheHint"
                       >Settings and metadata cached in browser storage for fast
                       access. The source of truth is settings.json in your
                       storage directory.</span
@@ -4800,7 +4907,7 @@
                   ></span
                 >
                 <button id="clearCacheBtn" class="btn btn-secondary btn-sm">
-                  Clear &amp; Reload
+                  <span data-i18n="desktopClearReload">Clear &amp; Reload</span>
                 </button>
               </div>
             </div>
@@ -4808,7 +4915,9 @@
 
           <!-- ── Add-ons ── -->
           <div class="modal-group">
-            <div class="modal-group-label">Add-ons</div>
+            <div class="modal-group-label" data-i18n="desktopAddons">
+              Add-ons
+            </div>
 
             <!-- Excluded Sites (default ON) -->
             <div class="addon-section">
@@ -4817,8 +4926,14 @@
                   <input type="checkbox" id="blacklistEnabled" checked />
                   <span class="toggle-track"></span>
                 </span>
-                <span class="addon-header-title">Excluded Sites</span>
-                <span class="addon-header-desc"
+                <span
+                  class="addon-header-title"
+                  data-i18n="desktopExcludedSites"
+                  >Excluded Sites</span
+                >
+                <span
+                  class="addon-header-desc"
+                  data-i18n="desktopExcludedSitesDesc"
                   >Skip recording for matching web address prefixes</span
                 >
               </label>
@@ -4830,7 +4945,11 @@
                     placeholder="https://example.com/private/"
                     class="blacklist-input"
                   />
-                  <button id="blacklistAddBtn" class="btn btn-primary">
+                  <button
+                    id="blacklistAddBtn"
+                    class="btn btn-primary"
+                    data-i18n="commonAdd"
+                  >
                     Add
                   </button>
                 </div>
@@ -4848,8 +4967,12 @@
                   <input type="checkbox" id="titleCleanupEnabled" />
                   <span class="toggle-track"></span>
                 </span>
-                <span class="addon-header-title">Title Cleanup</span>
-                <span class="addon-header-desc"
+                <span class="addon-header-title" data-i18n="desktopTitleCleanup"
+                  >Title Cleanup</span
+                >
+                <span
+                  class="addon-header-desc"
+                  data-i18n="desktopTitleCleanupDesc"
                   >Clean up page titles per site when recording</span
                 >
               </label>
@@ -4863,11 +4986,32 @@
                     style="flex: 2"
                   />
                   <select id="trimActionSelect" class="trim-action-select">
-                    <option value="remove_after_pipe">Remove after |</option>
-                    <option value="remove_brackets">Remove [brackets]</option>
-                    <option value="remove_parens">Remove (parens)</option>
+                    <option
+                      value="remove_after_pipe"
+                      data-i18n="desktopRemoveAfterPipe"
+                    >
+                      Remove after |
+                    </option>
+                    <option
+                      value="remove_brackets"
+                      data-i18n="desktopRemoveBrackets"
+                    >
+                      Remove [brackets]
+                    </option>
+                    <option
+                      value="remove_parens"
+                      data-i18n="desktopRemoveParens"
+                    >
+                      Remove (parens)
+                    </option>
                   </select>
-                  <button id="trimAddBtn" class="btn btn-primary">Add</button>
+                  <button
+                    id="trimAddBtn"
+                    class="btn btn-primary"
+                    data-i18n="commonAdd"
+                  >
+                    Add
+                  </button>
                 </div>
                 <div
                   id="trimEntries"
@@ -4883,9 +5027,15 @@
                   <input type="checkbox" id="syncEnabled" />
                   <span class="toggle-track"></span>
                 </span>
-                <span class="addon-header-title">Sync</span>
-                <span class="addon-experimental-badge">Experimental</span>
-                <span class="addon-header-desc wrap"
+                <span class="addon-header-title" data-i18n="desktopSync"
+                  >Sync</span
+                >
+                <span
+                  class="addon-experimental-badge"
+                  data-i18n="desktopExperimental"
+                  >Experimental</span
+                >
+                <span class="addon-header-desc wrap" data-i18n="desktopSyncDesc"
                   >Sync history and notes across devices, not including
                   snapshots</span
                 >
@@ -4893,7 +5043,9 @@
               <div class="addon-body" id="syncConfigFields">
                 <div class="option" style="margin-top: 8px; display: none">
                   <div class="option-row">
-                    <span>Interval (min)</span>
+                    <span data-i18n="desktopIntervalMinutes"
+                      >Interval (min)</span
+                    >
                     <input
                       type="number"
                       id="syncIntervalMinutes"
@@ -4906,7 +5058,9 @@
                 </div>
                 <div class="option" style="margin-top: 8px">
                   <div class="option-row">
-                    <span>Retention (days)</span>
+                    <span data-i18n="desktopRetentionDays"
+                      >Retention (days)</span
+                    >
                     <input
                       type="number"
                       id="syncRetentionDays"
@@ -4919,7 +5073,7 @@
                 </div>
                 <div class="option" style="margin-top: 8px">
                   <div class="option-row">
-                    <span>Provider</span>
+                    <span data-i18n="desktopProvider">Provider</span>
                     <select id="syncMethod" disabled>
                       <option value="github">GitHub</option>
                     </select>
@@ -4929,7 +5083,9 @@
                 <div id="syncGithubFields">
                   <div class="option" style="margin-top: 8px">
                     <div style="font-size: 13px; margin-bottom: 4px">
-                      Repository address
+                      <span data-i18n="desktopRepositoryAddress"
+                        >Repository address</span
+                      >
                     </div>
                     <input
                       type="text"
@@ -4950,19 +5106,26 @@
                         color: var(--text-secondary);
                       "
                     >
-                      Don't have a sync repo?
+                      <span data-i18n="desktopNoSyncRepo"
+                        >Don't have a sync repo?</span
+                      >
                       <a
                         href="https://github.com/new"
                         target="_blank"
                         style="color: var(--accent-primary)"
+                        data-i18n="desktopCreateGithubRepo"
                         >Create one on GitHub</a
                       >
-                      (make it private)
+                      <span data-i18n="desktopMakePrivate"
+                        >(make it private)</span
+                      >
                     </div>
                   </div>
                   <div class="option" style="margin-top: 8px">
                     <div style="font-size: 13px; margin-bottom: 4px">
-                      Authentication
+                      <span data-i18n="desktopAuthentication"
+                        >Authentication</span
+                      >
                     </div>
                     <!-- Disconnected state -->
                     <div id="syncAuthDisconnected" style="margin-top: 6px">
@@ -4972,7 +5135,9 @@
                           class="btn btn-primary btn-sm"
                           style="width: 100%"
                         >
-                          Create Token on GitHub
+                          <span data-i18n="desktopCreateTokenGithub"
+                            >Create Token on GitHub</span
+                          >
                         </button>
                         <div
                           style="
@@ -4982,7 +5147,9 @@
                             text-align: center;
                           "
                         >
-                          Opens GitHub with pre-filled settings
+                          <span data-i18n="desktopGithubPrefilled"
+                            >Opens GitHub with pre-filled settings</span
+                          >
                         </div>
                       </div>
                       <div
@@ -4993,7 +5160,9 @@
                           color: var(--text-secondary);
                         "
                       >
-                        or paste an existing token:
+                        <span data-i18n="desktopPasteExistingToken"
+                          >or paste an existing token:</span
+                        >
                       </div>
                       <input
                         type="password"
@@ -5009,9 +5178,13 @@
                       />
                       <div class="option-row" style="margin-top: 10px">
                         <span
-                          >Remember token
+                          ><span data-i18n="desktopRememberToken"
+                            >Remember token</span
+                          >
                           <span class="hint-icon"
-                            >?<span class="hint-tip"
+                            >?<span
+                              class="hint-tip"
+                              data-i18n="desktopRememberTokenHint"
                               >When off, the token is kept in memory only and
                               cleared on browser restart.</span
                             ></span
@@ -5030,8 +5203,10 @@
                         class="sync-setup-guide"
                         style="margin-top: 12px"
                       >
-                        <summary>Manual setup instructions</summary>
-                        <ol>
+                        <summary data-i18n="desktopManualSetupInstructions">
+                          Manual setup instructions
+                        </summary>
+                        <ol data-i18n-html="desktopManualSetupHtml">
                           <li>
                             Create a <strong>private</strong> repository on
                             <a href="https://github.com/new" target="_blank"
@@ -5135,12 +5310,16 @@
           </div>
 
           <div class="modal-group">
-            <div class="modal-group-label">Advanced</div>
+            <div class="modal-group-label" data-i18n="desktopAdvanced">
+              Advanced
+            </div>
             <div class="modal-section">
               <div class="option">
                 <div class="option-row">
                   <span
-                    >History loading batch size
+                    ><span data-i18n="desktopHistoryBatchSize"
+                      >History loading batch size</span
+                    >
                     <span class="hint-icon"
                       >?<span class="hint-tip"
                         >Number of daily history files loaded at once when
@@ -5160,7 +5339,9 @@
               </div>
               <div class="option">
                 <div class="option-row">
-                  <span>Capture videos in snapshots</span>
+                  <span data-i18n="desktopCaptureVideos"
+                    >Capture videos in snapshots</span
+                  >
                   <label class="toggle-switch sm">
                     <input type="checkbox" id="captureSnapshotVideo" />
                     <span class="toggle-track"></span>
@@ -5169,7 +5350,9 @@
               </div>
               <div class="option">
                 <div class="option-row">
-                  <span>Debug logging (resets on restart)</span>
+                  <span data-i18n="desktopDebugLogging"
+                    >Debug logging (resets on restart)</span
+                  >
                   <label class="toggle-switch sm">
                     <input type="checkbox" id="debugLoggingToggle" />
                     <span class="toggle-track"></span>

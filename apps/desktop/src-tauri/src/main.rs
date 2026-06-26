@@ -932,6 +932,12 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
         .get("action")
         .and_then(Value::as_str)
         .ok_or_else(|| "bridge action missing `action`".to_string())?;
+    if action == "getDesktopSystemLocale" {
+        return Ok(json!({
+            "success": true,
+            "locale": sys_locale::get_locale(),
+        }));
+    }
     if is_daemon_write_command(action) {
         if let Some(server) = server_control_for_app(&app) {
             return server
@@ -1081,6 +1087,7 @@ async fn bridge_action(app: AppHandle, request: Value) -> Result<Value, String> 
                 "debugLogging": shell.debug_logging,
                 "setupComplete": shell.setup_complete,
                 "dataDir": shell.data_dir,
+                "systemLocale": sys_locale::get_locale(),
                 "pairedBrowsers": paired_browsers,
             })
         }

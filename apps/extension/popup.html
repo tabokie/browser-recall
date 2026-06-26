@@ -2,7 +2,7 @@
 <html style="background: #f7f4ea">
   <head>
     <meta charset="UTF-8" />
-    <title>browser-recall</title>
+    <title data-i18n="extensionShortName">browser-recall</title>
     <style>
       html {
         background: #f7f4ea;
@@ -1264,19 +1264,35 @@
       style="display: none"
     >
       <div class="setup-ledger">
-        <div class="setup-brand">BROWSER RECALL</div>
-        <div class="setup-required-title" id="setupRequiredTitle">
+        <div class="setup-brand" data-i18n="extensionName">BROWSER RECALL</div>
+        <div
+          class="setup-required-title"
+          id="setupRequiredTitle"
+          data-i18n="extensionDesktopOffline"
+        >
           DESKTOP OFFLINE
         </div>
-        <div class="setup-required-meta" id="setupRequiredMeta">
+        <div
+          class="setup-required-meta"
+          id="setupRequiredMeta"
+          data-i18n="extensionStartDesktop"
+        >
           Start Browser Recall Desktop to resume live capture.
         </div>
         <div class="setup-diagnostic" id="setupDiagnostic"></div>
         <div class="setup-actions">
-          <button class="setup-action-btn primary" id="setupRequiredBtn">
+          <button
+            class="setup-action-btn primary"
+            id="setupRequiredBtn"
+            data-i18n="extensionOpenDesktop"
+          >
             Open Desktop
           </button>
-          <button class="setup-action-btn" id="setupDesktopConnectBtn">
+          <button
+            class="setup-action-btn"
+            id="setupDesktopConnectBtn"
+            data-i18n="extensionCheckAgain"
+          >
             Check Again
           </button>
         </div>
@@ -1292,9 +1308,15 @@
             aria-label="Toggle recording"
             aria-pressed="false"
             title="Pause tracing"
+            data-i18n-aria-label="extensionToggleRecording"
+            data-i18n-title="extensionPauseTracing"
           ></button>
           <div class="recording-copy">
-            <div class="recording-label" id="recordingLabel">
+            <div
+              class="recording-label"
+              id="recordingLabel"
+              data-i18n="extensionName"
+            >
               BROWSER RECALL
             </div>
           </div>
@@ -1313,8 +1335,16 @@
         </div>
 
         <div class="header" id="pageHeader">
-          <div class="page-title" id="pageTitle">BROWSER RECALL</div>
-          <div class="page-url" id="pageUrl">current page receipt</div>
+          <div class="page-title" id="pageTitle" data-i18n="extensionName">
+            BROWSER RECALL
+          </div>
+          <div
+            class="page-url"
+            id="pageUrl"
+            data-i18n="extensionCurrentPageReceipt"
+          >
+            current page receipt
+          </div>
         </div>
 
         <div class="section" id="visitsLikesSection" style="display: none">
@@ -1323,7 +1353,8 @@
 
         <div class="section" id="listSection" style="display: none">
           <div class="label-row">
-            <span>Lists</span><span id="listCount">00</span>
+            <span data-i18n="commonLists">Lists</span
+            ><span id="listCount">00</span>
           </div>
           <div class="list-chips-wrap">
             <div class="list-chips" id="listChips"></div>
@@ -1339,7 +1370,13 @@
 
         <div class="section" id="snapshotSection" style="display: none">
           <div class="snapshot-list" id="snapshotList"></div>
-          <button class="section-action" id="captureBtn">CAPTURE FRAME</button>
+          <button
+            class="section-action"
+            id="captureBtn"
+            data-i18n="extensionCaptureFrame"
+          >
+            CAPTURE FRAME
+          </button>
         </div>
       </div>
     </div>

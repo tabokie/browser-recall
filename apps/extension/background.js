@@ -44,6 +44,19 @@ import {
 
 logDebug('Background script loading...');
 
+function tr(key, fallback, substitutions) {
+  return (
+    chrome.i18n?.getMessage?.(
+      key,
+      substitutions === undefined
+        ? undefined
+        : Array.isArray(substitutions)
+          ? substitutions
+          : [substitutions],
+    ) || fallback
+  );
+}
+
 const DRAIN_INTERVAL_MS = 5000; // 5 seconds — connector queue is durable until drained
 const CONNECTOR_STATE_REFRESH_TIMEOUT_MS = 1000;
 const POPUP_PREPARE_TIMEOUT_MS = 1500;
@@ -199,7 +212,10 @@ function syncDesktopConnectorPauseState(connector) {
   if (connector?.refuseMode) {
     pauseService(
       'desktop_buffer_full',
-      'Browser Recall Desktop buffer full — start the desktop app or wait for the queue to drain.',
+      tr(
+        'extensionDesktopBufferFull',
+        'Browser Recall Desktop buffer full - start the desktop app or wait for the queue to drain.',
+      ),
     );
     return;
   }
@@ -229,7 +245,10 @@ async function enqueueCommand(action, request) {
     if (error.code === 'buffer_full') {
       pauseService(
         'desktop_buffer_full',
-        'Browser Recall Desktop buffer full — start the desktop app or wait for the queue to drain.',
+        tr(
+          'extensionDesktopBufferFull',
+          'Browser Recall Desktop buffer full - start the desktop app or wait for the queue to drain.',
+        ),
       );
       return;
     }
@@ -278,7 +297,13 @@ async function canCallDesktopMutationRpc() {
 
 async function runDesktopCommand(action, request = {}) {
   if (!(await canCallDesktopMutationRpc())) {
-    return { success: false, error: 'Desktop bridge unavailable' };
+    return {
+      success: false,
+      error: tr(
+        'extensionDesktopBridgeUnavailable',
+        'Desktop bridge unavailable',
+      ),
+    };
   }
   try {
     const response = await requestDesktopCommand(action, request);
@@ -298,7 +323,10 @@ async function loadDesktopEntityValue(key, { allowStale = false } = {}) {
   const canRead = allowStale
     ? await canCallDesktopStreamingReadRpc()
     : await canCallDesktopPopupRpc();
-  if (!canRead) throw new Error('Desktop bridge unavailable');
+  if (!canRead)
+    throw new Error(
+      tr('extensionDesktopBridgeUnavailable', 'Desktop bridge unavailable'),
+    );
   try {
     const desktopResp = await requestDesktopEntity(key);
     if (!desktopResp?.success) {
@@ -316,7 +344,9 @@ async function loadDesktopEntityValue(key, { allowStale = false } = {}) {
 
 async function loadDesktopHistoryRange(from, to) {
   if (!(await canCallDesktopStreamingReadRpc())) {
-    throw new Error('Desktop bridge unavailable');
+    throw new Error(
+      tr('extensionDesktopBridgeUnavailable', 'Desktop bridge unavailable'),
+    );
   }
   const filesResp = await requestDesktopHistoryFiles(false);
   if (!filesResp?.success) {
@@ -356,8 +386,10 @@ async function mirrorSnapshotToDesktop(snapshot) {
     return true;
   } catch (error) {
     if (error.code === 'buffer_full') {
-      const message =
-        'Browser Recall Desktop event queue is full — start the desktop app or wait for the queue to drain.';
+      const message = tr(
+        'extensionDesktopEventQueueFull',
+        'Browser Recall Desktop event queue is full - start the desktop app or wait for the queue to drain.',
+      );
       pauseService('desktop_buffer_full', message);
       throw new Error(message);
     }
@@ -381,9 +413,15 @@ function isExtensionRuntimeFailure(error) {
   );
 }
 
-function userActionErrorMessage(error, fallback = 'Action failed') {
+function userActionErrorMessage(
+  error,
+  fallback = tr('extensionActionFailed', 'Action failed'),
+) {
   if (isExtensionRuntimeFailure(error)) {
-    return 'Browser Recall extension reloaded. Please reload the page and try again.';
+    return tr(
+      'extensionReloaded',
+      'Browser Recall extension reloaded. Please reload the page and try again.',
+    );
   }
   return String(error?.message || error || fallback);
 }
@@ -506,7 +544,7 @@ async function injectUserActionSuccessNotification(tabId, message) {
 async function notifyTabUserActionError(
   tabId,
   error,
-  fallback = 'Action failed',
+  fallback = tr('extensionActionFailed', 'Action failed'),
 ) {
   if (!tabId || tabId <= 0) return;
   const message = userActionErrorMessage(error, fallback);
@@ -893,18 +931,26 @@ function prepareSnapshotHtml(html, slug, url = null) {
 async function captureAndLog(tabId, slug, timestamp, url, title) {
   startSpinnerBadge(tabId);
   try {
+    const cannotCapturePdfMessage = tr(
+      'extensionCannotCapturePdf',
+      'Cannot capture PDF pages',
+    );
     // PDF pages render via a native plugin — no extractable content
     if (url && /\.pdf(\?|#|$)/i.test(new URL(url).pathname)) {
-      throw new Error('Cannot capture PDF pages');
+      throw new Error(cannotCapturePdfMessage);
     }
     // Fallback: ask content script to check for Chrome's PDF viewer embed
     try {
       const pdfCheck = await chrome.tabs.sendMessage(tabId, {
         action: 'isPdfPage',
       });
-      if (pdfCheck?.isPdf) throw new Error('Cannot capture PDF pages');
+      if (pdfCheck?.isPdf) throw new Error(cannotCapturePdfMessage);
     } catch (e) {
-      if (e.message === 'Cannot capture PDF pages') throw e;
+      if (
+        e.message === cannotCapturePdfMessage ||
+        e.message === 'Cannot capture PDF pages'
+      )
+        throw e;
       if (isExtensionRuntimeFailure(e)) throw e;
       // Content script might not be loaded — proceed with capture
     }
@@ -919,7 +965,12 @@ async function captureAndLog(tabId, slug, timestamp, url, title) {
     );
     const markdown = mdResp?.markdown || '';
     if (!markdown && !html) {
-      throw new Error('Capture failed: page returned no content');
+      throw new Error(
+        tr(
+          'extensionCaptureNoContent',
+          'Capture failed: page returned no content',
+        ),
+      );
     }
     await mirrorSnapshotToDesktop({
       slug,
@@ -1047,12 +1098,16 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       await notifyTabUserActionError(
         activeTab.id,
         response.error,
-        'Highlight failed',
+        tr('extensionHighlightFailed', 'Highlight failed'),
       );
     }
   } catch (error) {
     logDebug('[context-menu] Highlight error:', error.message);
-    await notifyTabUserActionError(activeTab.id, error, 'Highlight failed');
+    await notifyTabUserActionError(
+      activeTab.id,
+      error,
+      tr('extensionHighlightFailed', 'Highlight failed'),
+    );
   }
 });
 
@@ -1093,7 +1148,11 @@ chrome.commands.onCommand.addListener(async (command) => {
       chrome.tabs
         .sendMessage(tab.id, { action: 'hideCaptureSpinner' })
         .catch(() => {});
-      await notifyTabUserActionError(tab.id, error, 'Capture failed');
+      await notifyTabUserActionError(
+        tab.id,
+        error,
+        tr('extensionCaptureFailed', 'Capture failed'),
+      );
     }
   } else if (command === 'highlight-selection') {
     try {
@@ -1103,11 +1162,19 @@ chrome.commands.onCommand.addListener(async (command) => {
       });
       logDebug('[background] highlightSelection response:', resp);
       if (resp?.success === false) {
-        await notifyTabUserActionError(tab.id, resp.error, 'Highlight failed');
+        await notifyTabUserActionError(
+          tab.id,
+          resp.error,
+          tr('extensionHighlightFailed', 'Highlight failed'),
+        );
       }
     } catch (error) {
       logDebug('[background] Could not highlight selection:', error.message);
-      await notifyTabUserActionError(tab.id, error, 'Highlight failed');
+      await notifyTabUserActionError(
+        tab.id,
+        error,
+        tr('extensionHighlightFailed', 'Highlight failed'),
+      );
     }
   } else if (command === 'like-page' || command === 'dislike-page') {
     const delta = command === 'like-page' ? 1 : -1;
@@ -1118,17 +1185,25 @@ chrome.commands.onCommand.addListener(async (command) => {
         title: tab.title || '',
       });
       if (!response.success)
-        throw new Error(response.error || 'ratePage failed');
+        throw new Error(
+          response.error || tr('extensionRatePageFailed', 'ratePage failed'),
+        );
       notifyMutation('history', { url: tab.url });
       await notifyTabUserActionSuccess(
         tab.id,
-        delta >= 0 ? 'Liked' : 'Disliked',
+        delta >= 0
+          ? tr('extensionLiked', 'Liked')
+          : tr('extensionDisliked', 'Disliked'),
         'showLikeNotification',
         { delta },
       );
     } catch (error) {
       logDebug(`[${command}] ERROR:`, error.message, error);
-      await notifyTabUserActionError(tab.id, error, 'Like failed');
+      await notifyTabUserActionError(
+        tab.id,
+        error,
+        tr('extensionLikeFailed', 'Like failed'),
+      );
     }
   }
 });
@@ -1505,7 +1580,7 @@ async function preparePopupBootstrapForTab(tab) {
     return {
       mode: 'unavailable',
       connector,
-      message: 'Not available for this page',
+      message: tr('extensionNotAvailablePage', 'Not available for this page'),
     };
   }
 

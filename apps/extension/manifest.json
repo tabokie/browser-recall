@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "browser-recall",
+  "name": "__MSG_extensionName__",
   "version": "1.0",
-  "description": "Chrome connector for Browser Recall Desktop. Capture pages in the browser and open the full app locally.",
+  "description": "__MSG_extensionDescription__",
   "permissions": [
     "storage",
     "tabs",
@@ -63,19 +63,19 @@
   "commands": {
     "highlight-selection": {
       "suggested_key": { "default": "Alt+H" },
-      "description": "Highlight selected text or add a page note"
+      "description": "__MSG_commandHighlightSelection__"
     },
     "capture-snapshot": {
       "suggested_key": { "default": "Alt+S" },
-      "description": "Capture snapshot of current page"
+      "description": "__MSG_commandCaptureSnapshot__"
     },
     "like-page": {
       "suggested_key": { "default": "Alt+L" },
-      "description": "Like the current page"
+      "description": "__MSG_commandLikePage__"
     },
     "dislike-page": {
       "suggested_key": { "default": "Alt+D" },
-      "description": "Dislike the current page"
+      "description": "__MSG_commandDislikePage__"
     }
   }
 }

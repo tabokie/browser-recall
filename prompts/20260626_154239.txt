@@ -1,0 +1,9 @@
+- Research how to add UI localization to the app. For extension, use browser's locale. For desktop, use system default and allow setting override. 
+- Does it affect performance or intrude in existing codebase too much?
+- Go ahead, implement the plan
+- Implement the plan fully, not just foundation.
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Fix all of them thoroughly
+- Please review my uncommitted changes
+- Fix the first two issues
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) model=GPT-5.5 Codex

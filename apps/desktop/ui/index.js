@@ -55,6 +55,12 @@ import {
 } from './entity-types.js';
 import { logDebug, logError } from './logger.js';
 import { applyTheme } from './theme.js';
+import {
+  getActiveLocale,
+  initializeCatalogI18n,
+  localizeDocument,
+  tr as translate,
+} from '../../../packages/core/i18n.js';
 
 if ('scrollRestoration' in history) {
   history.scrollRestoration = 'manual';
@@ -64,6 +70,30 @@ function revealApp() {
   document.documentElement.style.opacity = '';
 }
 // parseBookmarkHtml imported dynamically inside the block below
+
+let desktopSystemLocale = 'en';
+
+function tr(key, fallback, substitutions) {
+  return translate(key, fallback, substitutions);
+}
+
+async function initializeDesktopLocalization({ allowOverride = false } = {}) {
+  try {
+    const resp = await sendAction({ action: 'getDesktopSystemLocale' });
+    desktopSystemLocale = resp?.locale || desktopSystemLocale;
+  } catch (error) {
+    logDebug('[i18n] failed to read system locale:', error.message);
+  }
+  const override = allowOverride
+    ? await loadSettingsValue('localeOverride', 'system')
+    : 'system';
+  const effectiveLocale =
+    override && override !== 'system' ? override : desktopSystemLocale;
+  await initializeCatalogI18n({ locale: effectiveLocale });
+  localizeDocument();
+  const select = document.getElementById('localeSelect');
+  if (select) select.value = override || 'system';
+}
 
 // ─── Utility ─────────────────────────────────────────────────────────
 
@@ -252,11 +282,26 @@ window.addEventListener('blur', clearMainScrollbarHover);
 // ─── Error UI ────────────────────────────────────────────────────────
 
 const ERROR_CODE_MESSAGES = {
-  fs_error: { text: 'Storage access failed', action: 'resume' },
-  replay_error: { text: 'Replay worker failed', action: 'resume' },
-  manual_pause: { text: 'Browser Recall is paused', action: 'resume' },
-  session_quota: { text: 'Session storage full', action: 'reload' },
-  local_quota: { text: 'Local storage full', action: 'reload' },
+  fs_error: {
+    text: () => tr('desktopStorageAccessFailed', 'Storage access failed'),
+    action: 'resume',
+  },
+  replay_error: {
+    text: () => tr('desktopReplayWorkerFailed', 'Replay worker failed'),
+    action: 'resume',
+  },
+  manual_pause: {
+    text: () => tr('extensionBrowserRecallPaused', 'Browser Recall is paused'),
+    action: 'resume',
+  },
+  session_quota: {
+    text: () => tr('desktopSessionStorageFull', 'Session storage full'),
+    action: 'reload',
+  },
+  local_quota: {
+    text: () => tr('desktopLocalStorageFull', 'Local storage full'),
+    action: 'reload',
+  },
 };
 
 function showServiceErrorBanner(svcErr) {
@@ -267,10 +312,11 @@ function showServiceErrorBanner(svcErr) {
   if (!banner || !msgEl) return;
 
   const info = ERROR_CODE_MESSAGES[svcErr.code] || {
-    text: svcErr.message || 'Service unavailable',
+    text: () =>
+      svcErr.message || tr('desktopServiceUnavailable', 'Service unavailable'),
     action: 'resume',
   };
-  msgEl.textContent = info.text;
+  msgEl.textContent = info.text();
 
   reloadBtn.style.display = info.action === 'reload' ? '' : 'none';
   resumeBtn.style.display = info.action === 'resume' ? '' : 'none';
@@ -308,9 +354,9 @@ function showFatalError(message) {
   overlay.style.cssText =
     'position:fixed;inset:0;z-index:999999;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
   overlay.innerHTML = `
-    <div style="color:#b41e1e;font-size:18px;font-weight:600;">Storage Unavailable</div>
+    <div style="color:#b41e1e;font-size:18px;font-weight:600;">${escapeHtml(tr('desktopStorageUnavailable', 'Storage Unavailable'))}</div>
     <div style="color:#555;font-size:14px;max-width:480px;text-align:center;">${escapeHtml(message)}</div>
-    <button id="fatalReloadBtn" style="margin-top:8px;padding:6px 16px;border:1px solid #ccc;border-radius:4px;background:#f5f5f5;cursor:pointer;font-size:13px;">Reload Extension</button>
+    <button id="fatalReloadBtn" style="margin-top:8px;padding:6px 16px;border:1px solid #ccc;border-radius:4px;background:#f5f5f5;cursor:pointer;font-size:13px;">${escapeHtml(tr('desktopReloadExtension', 'Reload Extension'))}</button>
   `;
   document.body.appendChild(overlay);
   overlay
@@ -383,11 +429,11 @@ function applyDesktopConnectorUi(connector = {}) {
     if (!button) continue;
     button.disabled = pairPending;
     if (id === 'onboardingDirBtn') {
-      button.textContent = 'Choose Data Folder';
+      button.textContent = tr('desktopChooseDataFolder', 'Choose Data Folder');
     } else {
       button.textContent = pairPending
-        ? 'Waiting for approval...'
-        : 'Pair from Browser Popup';
+        ? tr('desktopWaitingApproval', 'Waiting for approval...')
+        : tr('desktopPairFromBrowserPopup', 'Pair from Browser Popup');
     }
   }
 }
@@ -403,7 +449,9 @@ async function refreshDesktopConnectorState() {
     applyDesktopConnectorUi({
       state: 'offline',
       hasToken: false,
-      lastError: error.message || 'Desktop bridge unavailable.',
+      lastError:
+        error.message ||
+        tr('extensionDesktopBridgeUnavailable', 'Desktop bridge unavailable'),
     });
     return null;
   }
@@ -418,7 +466,7 @@ async function completeOnboarding() {
       'onboardingLaunchAtLogin',
     );
     startBtn.disabled = true;
-    startBtn.textContent = 'Starting...';
+    startBtn.textContent = tr('desktopStarting', 'Starting...');
     try {
       await sendAction({
         action: 'completeDesktopSetup',
@@ -434,10 +482,14 @@ async function completeOnboarding() {
     } catch (error) {
       onboardingCompletionPromise = null;
       startBtn.disabled = false;
-      startBtn.textContent = 'Get Started';
+      startBtn.textContent = tr('desktopGetStarted', 'Get Started');
       const dirStatus = document.getElementById('onboardingDirStatus');
       if (dirStatus) {
-        dirStatus.textContent = `Could not start setup: ${error.message}`;
+        dirStatus.textContent = tr(
+          'desktopCouldNotStartSetup',
+          `Could not start setup: ${error.message}`,
+          [error.message],
+        );
       }
       throw error;
     }
@@ -470,7 +522,10 @@ async function initializeOnboardingLaunchAtLogin() {
     if (!shell.setupComplete && shell.dataDir) {
       const dirBtn = document.getElementById('onboardingDirBtn');
       if (dirBtn) {
-        dirBtn.textContent = 'Change Data Folder';
+        dirBtn.textContent = tr(
+          'desktopChangeDataFolder',
+          'Change Data Folder',
+        );
       }
       setOnboardingDataFolderConfigured(true, shell.dataDir);
     }
@@ -503,7 +558,11 @@ function setOnboardingDataFolderConfigured(configured, dataFolder = '') {
   }
   const dirStatus = document.getElementById('onboardingDirStatus');
   if (dirStatus && configured && onboardingDataFolderPath) {
-    dirStatus.textContent = `Data folder: ${onboardingDataFolderPath}`;
+    dirStatus.textContent = tr(
+      'desktopDataFolder',
+      `Data folder: ${onboardingDataFolderPath}`,
+      [onboardingDataFolderPath],
+    );
   }
 }
 
@@ -513,32 +572,45 @@ async function chooseDesktopDataFolderForOnboarding() {
   const forwardBtn = document.getElementById('onboardingForwardBtn');
   const hadSelectedFolder = onboardingDataFolderConfigured;
   dirBtn.disabled = true;
-  dirBtn.textContent = 'Choosing...';
+  dirBtn.textContent = tr('desktopChoosing', 'Choosing...');
   forwardBtn.hidden = true;
-  dirStatus.textContent =
-    'Select the folder where Browser Recall should store its local data.';
+  dirStatus.textContent = tr(
+    'desktopSelectFolderPrompt',
+    'Select the folder where Browser Recall should store its local data.',
+  );
   try {
     const result = await sendAction({ action: 'chooseDesktopDataFolder' });
     if (result?.cancelled) {
-      dirStatus.textContent = 'Choose a data folder to continue.';
+      dirStatus.textContent = tr(
+        'desktopChooseFolderContinue',
+        'Choose a data folder to continue.',
+      );
       dirBtn.disabled = false;
       dirBtn.textContent = hadSelectedFolder
-        ? 'Change Data Folder'
-        : 'Choose Data Folder';
+        ? tr('desktopChangeDataFolder', 'Change Data Folder')
+        : tr('desktopChooseDataFolder', 'Choose Data Folder');
       setOnboardingDataFolderConfigured(hadSelectedFolder);
       return;
     }
-    dirStatus.textContent = `Data folder: ${result.dataFolder}`;
+    dirStatus.textContent = tr(
+      'desktopDataFolder',
+      `Data folder: ${result.dataFolder}`,
+      [result.dataFolder],
+    );
     dirBtn.disabled = false;
-    dirBtn.textContent = 'Change Data Folder';
+    dirBtn.textContent = tr('desktopChangeDataFolder', 'Change Data Folder');
     setOnboardingDataFolderConfigured(true, result.dataFolder);
     showOnboardingIntro();
   } catch (error) {
-    dirStatus.textContent = `Could not use that folder: ${error.message}`;
+    dirStatus.textContent = tr(
+      'desktopCouldNotUseFolder',
+      `Could not use that folder: ${error.message}`,
+      [error.message],
+    );
     dirBtn.disabled = false;
     dirBtn.textContent = hadSelectedFolder
-      ? 'Change Data Folder'
-      : 'Choose Data Folder';
+      ? tr('desktopChangeDataFolder', 'Change Data Folder')
+      : tr('desktopChooseDataFolder', 'Choose Data Folder');
     setOnboardingDataFolderConfigured(hadSelectedFolder);
   }
 }
@@ -1763,7 +1835,7 @@ async function showRecycleBin() {
   const renderSeq = ++recycleBinRenderSeq;
   activeView = { type: 'recycle-bin' };
   updateSidebarActive();
-  updateMainTitle('Recycle Bin');
+  updateMainTitle(tr('desktopRecycleBin', 'Recycle Bin'));
   showRecycleBinLayout();
 
   const itemsEl = document.getElementById('recycleBinItems');
@@ -1774,9 +1846,14 @@ async function showRecycleBin() {
   try {
     entries = await loadRecycleBinEntries();
   } catch (error) {
-    showErrorBubble(`Failed to load recycle bin: ${error.message}`, {
-      suffix: '',
-    });
+    showErrorBubble(
+      tr(
+        'desktopRecycleBinLoadFailed',
+        `Failed to load recycle bin: ${error.message}`,
+        [error.message],
+      ),
+      { suffix: '' },
+    );
   }
   if (renderSeq !== recycleBinRenderSeq || activeView.type !== 'recycle-bin') {
     return;
@@ -1852,10 +1929,19 @@ async function showRecycleBin() {
             if (excerptText) displayName = excerptText.substring(0, 80);
             else if (entity.note)
               displayName =
-                (entity.excerpt === null ? 'Page note: ' : '') +
-                entity.note.substring(0, 60);
-            else if (entity.url) displayName = `Note on ${entity.url}`;
-            else displayName = `Note (${entitySlug(key)})`;
+                (entity.excerpt === null
+                  ? tr('desktopPageNotePrefix', 'Page note: ')
+                  : '') + entity.note.substring(0, 60);
+            else if (entity.url)
+              displayName = tr('desktopNoteOn', `Note on ${entity.url}`, [
+                entity.url,
+              ]);
+            else
+              displayName = tr(
+                'desktopNoteWithSlug',
+                `Note (${entitySlug(key)})`,
+                [entitySlug(key)],
+              );
           } else if (key.startsWith(LIST_PREFIX)) {
             displayName = entity.name || key;
           } else if (key.startsWith(PAGE_PREFIX)) {
@@ -1882,7 +1968,7 @@ async function showRecycleBin() {
         <div class="recycle-card-name">${escapeHtml(displayName)}</div>
         <div class="recycle-card-key">${escapeHtml(key)}</div>
       </div>
-      <button class="restore-btn">Restore</button>
+      <button class="restore-btn">${escapeHtml(tr('desktopRestore', 'Restore'))}</button>
     `;
     card.querySelector('.restore-btn').addEventListener('click', async () => {
       const button = card.querySelector('.restore-btn');
@@ -1901,9 +1987,14 @@ async function showRecycleBin() {
         await refreshRecycleBinUi({ render: true });
       } catch (error) {
         button.disabled = false;
-        showErrorBubble(`Failed to restore item: ${error.message}`, {
-          suffix: '',
-        });
+        showErrorBubble(
+          tr(
+            'desktopRestoreFailed',
+            `Failed to restore item: ${error.message}`,
+            [error.message],
+          ),
+          { suffix: '' },
+        );
       }
     });
     itemsEl.appendChild(card);
@@ -2150,14 +2241,19 @@ function getAvailableExtras(context) {
   return ['firstVisit'];
 }
 
-const COLUMN_LABELS = {
-  title: 'Title',
-  relevance: 'Rel',
-  lastVisit: 'Last Visit',
-  firstVisit: 'First Visit',
-  attention: 'Att',
-  pinTime: 'Pin Time',
+const COLUMN_LABEL_KEYS = {
+  title: ['desktopColumnTitle', 'Title'],
+  relevance: ['desktopColumnRelevance', 'Rel'],
+  lastVisit: ['desktopColumnLastVisit', 'Last Visit'],
+  firstVisit: ['desktopColumnFirstVisit', 'First Visit'],
+  attention: ['desktopColumnAttention', 'Att'],
+  pinTime: ['desktopColumnPinTime', 'Pin Time'],
 };
+
+function columnLabel(column) {
+  const [key, fallback] = COLUMN_LABEL_KEYS[column] || [column, column];
+  return tr(key, fallback);
+}
 
 function applySortOrder(items, sortState) {
   if (!sortState || !sortState.column) return items;
@@ -2244,22 +2340,22 @@ function columnHeaderHtml(context, opts = {}) {
 
   let html = `<div class="column-header-row" data-context="${context}">`;
   html += `<div class="col-spacer"></div>`;
-  html += `<div class="col-header col-title${activeClass('title')}" data-col="title">${COLUMN_LABELS.title}${arrow('title')}</div>`;
+  html += `<div class="col-header col-title${activeClass('title')}" data-col="title">${escapeHtml(columnLabel('title'))}${arrow('title')}</div>`;
 
   if (showRelevance) {
-    html += `<div class="col-header col-rel${activeClass('relevance')}" data-col="relevance">${COLUMN_LABELS.relevance}${arrow('relevance')}</div>`;
+    html += `<div class="col-header col-rel${activeClass('relevance')}" data-col="relevance">${escapeHtml(columnLabel('relevance'))}${arrow('relevance')}</div>`;
   }
 
-  html += `<div class="col-header col-time${activeClass('lastVisit')}" data-col="lastVisit">${COLUMN_LABELS.lastVisit}${arrow('lastVisit')}</div>`;
+  html += `<div class="col-header col-time${activeClass('lastVisit')}" data-col="lastVisit">${escapeHtml(columnLabel('lastVisit'))}${arrow('lastVisit')}</div>`;
 
   if (extraCols.includes('firstVisit')) {
-    html += `<div class="col-header col-time${activeClass('firstVisit')}" data-col="firstVisit">${COLUMN_LABELS.firstVisit}${arrow('firstVisit')}</div>`;
+    html += `<div class="col-header col-time${activeClass('firstVisit')}" data-col="firstVisit">${escapeHtml(columnLabel('firstVisit'))}${arrow('firstVisit')}</div>`;
   }
 
-  html += `<div class="col-header col-att${activeClass('attention')}" data-col="attention">${COLUMN_LABELS.attention}${arrow('attention')}</div>`;
+  html += `<div class="col-header col-att${activeClass('attention')}" data-col="attention">${escapeHtml(columnLabel('attention'))}${arrow('attention')}</div>`;
 
   if (extraCols.includes('pinTime')) {
-    html += `<div class="col-header col-time${activeClass('pinTime')}" data-col="pinTime">${COLUMN_LABELS.pinTime}${arrow('pinTime')}</div>`;
+    html += `<div class="col-header col-time${activeClass('pinTime')}" data-col="pinTime">${escapeHtml(columnLabel('pinTime'))}${arrow('pinTime')}</div>`;
   }
 
   const availableExtras = getAvailableExtras(context);
@@ -2332,7 +2428,7 @@ function showColumnPopover(anchorBtn, context) {
     checkbox.checked = currentExtras.includes(col);
     checkbox.dataset.col = col;
     label.appendChild(checkbox);
-    label.appendChild(document.createTextNode(' ' + COLUMN_LABELS[col]));
+    label.appendChild(document.createTextNode(` ${columnLabel(col)}`));
     popover.appendChild(label);
 
     checkbox.addEventListener('change', () => {
@@ -2639,7 +2735,7 @@ async function showExplore({ hydrate = true, markReady = true } = {}) {
 
   activeView = { type: 'explore', name: null };
   updateSidebarActive();
-  updateMainTitle('Explore');
+  updateMainTitle(tr('commonExplore', 'Explore'));
 
   showListLayout();
   resetMainScroll();
@@ -2664,7 +2760,7 @@ async function showExplore({ hydrate = true, markReady = true } = {}) {
   } catch (error) {
     logError('Explore load error:', error);
     document.getElementById('relatedResults').innerHTML =
-      `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
+      `<div class="no-results">${escapeHtml(tr('desktopErrorPrefix', `Error: ${error.message}`, [error.message]))}</div>`;
     markShellReady();
     if (markReady) markAppReady();
   }
@@ -2684,7 +2780,7 @@ async function refreshPins() {
     updatePinCount(listId, pins.length);
     if (pins.length === 0) {
       document.getElementById('relatedResults').innerHTML =
-        '<div class="no-results">No pinned pages</div>';
+        `<div class="no-results">${escapeHtml(tr('desktopNoPinnedPages', 'No pinned pages'))}</div>`;
       document.getElementById('relatedChart').classList.remove('visible');
     } else {
       const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
@@ -2755,7 +2851,7 @@ async function showList(list) {
       listPinsListId = listId;
       await renderSearchPanel();
       document.getElementById('relatedResults').innerHTML =
-        '<div class="no-results">No pinned pages</div>';
+        `<div class="no-results">${escapeHtml(tr('desktopNoPinnedPages', 'No pinned pages'))}</div>`;
       document.getElementById('relatedChart').classList.remove('visible');
     } else {
       const { pinsResolved, pageSnap } = await resolvePinsForDisplay(pins);
@@ -2767,7 +2863,7 @@ async function showList(list) {
   } catch (error) {
     logError('List load error:', error);
     document.getElementById('relatedResults').innerHTML =
-      `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
+      `<div class="no-results">${escapeHtml(tr('desktopErrorPrefix', `Error: ${error.message}`, [error.message]))}</div>`;
   }
 }
 
@@ -2778,9 +2874,9 @@ function ruleDescription(rule) {
   if (rule.type === 'keyword') {
     return c.pattern || '';
   } else if (rule.type === 'function') {
-    return c.description || '(custom function)';
+    return c.description || tr('desktopCustomFunction', '(custom function)');
   }
-  return rule.type || 'unknown';
+  return rule.type || tr('desktopUnknown', 'unknown');
 }
 
 function renderRulesSection(listId, rules) {
@@ -2809,15 +2905,19 @@ function renderRulesList(listId, rules) {
     container.innerHTML = '';
     return;
   }
-  const typeLabel = (t) => t;
+  const typeLabel = (type) => {
+    if (type === 'keyword') return tr('desktopKeyword', 'Keyword');
+    if (type === 'function') return tr('desktopFunction', 'Function');
+    return type;
+  };
   container.innerHTML = rules
     .map((rule) => {
       return `<div class="rule-entry" data-rule-id="${escapeHtml(rule.id)}">
       <div class="rule-header">
         <span class="rule-type-badge rule-type-${escapeHtml(rule.type)}">${escapeHtml(typeLabel(rule.type))}</span>
         <span class="rule-desc">${escapeHtml(ruleDescription(rule))}</span>
-        <button class="rule-action-btn rule-edit" title="Edit">&#x270E;</button>
-        <button class="rule-action-btn rule-remove" title="Remove">&times;</button>
+        <button class="rule-action-btn rule-edit" title="${escapeHtml(tr('extensionEdit', 'Edit'))}">&#x270E;</button>
+        <button class="rule-action-btn rule-remove" title="${escapeHtml(tr('commonRemove', 'Remove'))}">&times;</button>
       </div>
     </div>`;
     })
@@ -2842,7 +2942,13 @@ function renderRulesList(listId, rules) {
         await sendAction({ action: 'removeRule', listId, ruleId });
         await refreshRulesForActiveList();
       } catch (err) {
-        showErrorBubble('Failed to remove rule: ' + err.message);
+        showErrorBubble(
+          tr(
+            'desktopRemoveRuleFailed',
+            `Failed to remove rule: ${err.message}`,
+            [err.message],
+          ),
+        );
       }
     });
   });
@@ -2902,11 +3008,17 @@ function renderPreviewSection(results, listEl, countEl, running) {
   const spinnerHtml = running
     ? ' <span class="spinner spinner-sm"></span>'
     : '';
-  countEl.innerHTML = `${matches.length} matches (${results.length} checked)${spinnerHtml}`;
+  countEl.innerHTML = `${escapeHtml(
+    tr(
+      'desktopMatchesChecked',
+      `${matches.length} matches (${results.length} checked)`,
+      [matches.length, results.length],
+    ),
+  )}${spinnerHtml}`;
   if (matches.length === 0) {
     listEl.innerHTML = running
       ? ''
-      : '<div class="rules-preview-empty">No matches</div>';
+      : `<div class="rules-preview-empty">${escapeHtml(tr('desktopNoMatches', 'No matches'))}</div>`;
     return;
   }
   listEl.innerHTML = matches
@@ -2941,13 +3053,14 @@ function rerenderPreview() {
 /** Build rule object from the currently active edit row. Returns { rule } or { error }. */
 function buildRuleFromEditRow() {
   const editRow = document.querySelector('.rule-entry.rule-editing');
-  if (!editRow) return { error: 'No edit row' };
+  if (!editRow) return { error: tr('desktopNoEditRow', 'No edit row') };
   const activeType =
     editRow.querySelector('.rule-type-option.active')?.dataset.type ||
     'keyword';
   const inputVal = editRow.querySelector('.rule-edit-input').value.trim();
   if (activeType === 'keyword') {
-    if (!inputVal) return { error: 'Pattern is required' };
+    if (!inputVal)
+      return { error: tr('desktopPatternRequired', 'Pattern is required') };
     return {
       rule: {
         type: 'keyword',
@@ -2957,15 +3070,22 @@ function buildRuleFromEditRow() {
   } else if (activeType === 'function') {
     const fnSource =
       editRow.querySelector('.rule-fn-input')?.value.trim() || '';
-    if (!fnSource) return { error: 'Function body is required' };
+    if (!fnSource)
+      return {
+        error: tr('desktopFunctionBodyRequired', 'Function body is required'),
+      };
     return {
       rule: {
         type: 'function',
-        config: { description: inputVal || '(custom)', fnSource },
+        config: {
+          description:
+            inputVal || tr('desktopCustomFunction', '(custom function)'),
+          fnSource,
+        },
       },
     };
   }
-  return { error: 'Unknown rule type' };
+  return { error: tr('desktopUnknownRuleType', 'Unknown rule type') };
 }
 
 function cancelRuleEdit() {
@@ -3053,18 +3173,20 @@ function buildEditRowHTML(type, config) {
   const inputValue = isKeyword
     ? config?.pattern || ''
     : config?.description || '';
-  const inputPlaceholder = isKeyword ? 'keyword or /regex/' : 'description';
+  const inputPlaceholder = isKeyword
+    ? tr('desktopRuleKeywordPlaceholder', 'keyword or /regex/')
+    : tr('desktopRuleDescriptionPlaceholder', 'description');
   const fnSource = config?.fnSource || '';
   return `<div class="rule-entry rule-editing">
     <div class="rule-edit-main">
       <div class="rule-type-toggle">
-        <span class="rule-type-option ${isKeyword ? 'active' : ''}" data-type="keyword">Keyword</span>
-        <span class="rule-type-option ${!isKeyword ? 'active' : ''}" data-type="function">Function</span>
+        <span class="rule-type-option ${isKeyword ? 'active' : ''}" data-type="keyword">${escapeHtml(tr('desktopKeyword', 'Keyword'))}</span>
+        <span class="rule-type-option ${!isKeyword ? 'active' : ''}" data-type="function">${escapeHtml(tr('desktopFunction', 'Function'))}</span>
       </div>
-      <input class="rule-edit-input" type="text" value="${escapeHtml(inputValue)}" placeholder="${inputPlaceholder}">
-      <button class="rule-preview-btn">Preview</button>
-      <button class="rule-cancel-btn" title="Cancel">&times;</button>
-      <button class="rule-save-btn" title="Save (Enter)">OK</button>
+      <input class="rule-edit-input" type="text" value="${escapeHtml(inputValue)}" placeholder="${escapeHtml(inputPlaceholder)}">
+      <button class="rule-preview-btn">${escapeHtml(tr('desktopPreview', 'Preview'))}</button>
+      <button class="rule-cancel-btn" title="${escapeHtml(tr('commonCancel', 'Cancel'))}">&times;</button>
+      <button class="rule-save-btn" title="${escapeHtml(tr('desktopSaveEnter', 'Save (Enter)'))}">OK</button>
     </div>
     <div class="rule-fn-editor" style="${isKeyword ? 'display:none' : ''}">
       <pre class="rule-fn-highlight" aria-hidden="true"></pre>
@@ -3084,7 +3206,9 @@ function attachEditRowHandlers(editRow, listId, existingRuleId) {
       const type = opt.dataset.type;
       const input = editRow.querySelector('.rule-edit-input');
       input.placeholder =
-        type === 'keyword' ? 'keyword or /regex/' : 'description';
+        type === 'keyword'
+          ? tr('desktopRuleKeywordPlaceholder', 'keyword or /regex/')
+          : tr('desktopRuleDescriptionPlaceholder', 'description');
       editRow.querySelector('.rule-fn-editor').style.display =
         type === 'function' ? '' : 'none';
     });
@@ -3274,8 +3398,7 @@ async function runPreviewAgainstHistory(rule, signal) {
   previewHistoryRunning = false;
   if (checked === 0 && !signal?.aborted) {
     previewCountEl.textContent = '';
-    previewListEl.innerHTML =
-      '<div class="rules-preview-empty">No visits found to match against</div>';
+    previewListEl.innerHTML = `<div class="rules-preview-empty">${escapeHtml(tr('desktopNoVisitsPreview', 'No visits found to match against'))}</div>`;
   } else {
     rerenderPreview();
   }
@@ -3335,8 +3458,7 @@ async function runPreviewAgainstPins(rule, listId, signal) {
   previewPinsRunning = false;
   if (checked === 0 && !signal?.aborted) {
     pinsPreviewCountEl.textContent = '';
-    pinsPreviewListEl.innerHTML =
-      '<div class="rules-preview-empty">No pinned pages available for preview</div>';
+    pinsPreviewListEl.innerHTML = `<div class="rules-preview-empty">${escapeHtml(tr('desktopNoPinnedPreview', 'No pinned pages available for preview'))}</div>`;
   } else {
     rerenderPreview();
   }
@@ -3381,7 +3503,7 @@ async function runPreview() {
 
   const previewBtn = document.querySelector('.rule-preview-btn');
   if (previewBtn) {
-    previewBtn.textContent = 'Cancel Preview';
+    previewBtn.textContent = tr('desktopCancelPreview', 'Cancel Preview');
   }
   previewEl.style.display = '';
 
@@ -3422,7 +3544,7 @@ async function runPreview() {
     previewPinsRunning = false;
     previewAbort = null;
     if (previewBtn) {
-      previewBtn.textContent = 'Preview';
+      previewBtn.textContent = tr('desktopPreview', 'Preview');
     }
     rerenderPreview();
   }
@@ -3528,7 +3650,7 @@ function renderDirectSearchResults(results) {
     preserveRelatedScrollOnNextRender = false;
     consumeRelatedTopReset();
     relatedContainer.innerHTML = showNoResults
-      ? '<div class="no-results">No results</div>'
+      ? `<div class="no-results">${escapeHtml(tr('desktopNoResults', 'No results'))}</div>`
       : '';
     document.getElementById('relatedChart').classList.remove('visible');
     return;
@@ -3584,7 +3706,7 @@ function renderDirectSearchResults(results) {
     relatedChart,
     document.getElementById('relatedChartBars'),
     chartData,
-    'Explore results',
+    tr('desktopExploreResults', 'Explore results'),
   );
   bindChartBarClick(relatedChart, relatedContainer);
   applyPersistedRelatedDateFilter();
@@ -3598,8 +3720,8 @@ function renderFilteredPins(pins, listId, searchQuery) {
   if (pins.length === 0) {
     consumeRelatedTopReset();
     relatedContainer.innerHTML = searchQuery.trim()
-      ? '<div class="no-results">No matching pins</div>'
-      : '<div class="no-results">No pinned pages</div>';
+      ? `<div class="no-results">${escapeHtml(tr('desktopNoMatchingPins', 'No matching pins'))}</div>`
+      : `<div class="no-results">${escapeHtml(tr('desktopNoPinnedPages', 'No pinned pages'))}</div>`;
     document.getElementById('relatedChart').classList.remove('visible');
     return;
   }
@@ -3658,7 +3780,7 @@ function renderFilteredPins(pins, listId, searchQuery) {
     relatedChart,
     document.getElementById('relatedChartBars'),
     chartData,
-    'Pinned pages',
+    tr('desktopPinnedPages', 'Pinned Pages'),
   );
   bindChartBarClick(relatedChart, relatedContainer);
   applyPersistedRelatedDateFilter();
@@ -4024,9 +4146,9 @@ function renderVisitDatesHtml(visitDates, cardTimestamp) {
     const sorted = [...visitDates].sort((a, b) => a - b);
     const first = parse(sorted[0]);
     const last = parse(sorted[sorted.length - 1]);
-    let html = `<div class="detail-section detail-visit-dates"><span class="detail-visit-line"><span class="detail-section-label">First visited:</span> ${escapeHtml(fmtDate(first))}</span>`;
+    let html = `<div class="detail-section detail-visit-dates"><span class="detail-visit-line"><span class="detail-section-label">${escapeHtml(tr('desktopFirstVisited', 'First visited:'))}</span> ${escapeHtml(fmtDate(first))}</span>`;
     if (sorted.length > 1) {
-      html += `<span class="detail-visit-line"><span class="detail-section-label">Last visited:</span> ${escapeHtml(fmtDate(last))}</span>`;
+      html += `<span class="detail-visit-line"><span class="detail-section-label">${escapeHtml(tr('desktopLastVisited', 'Last visited:'))}</span> ${escapeHtml(fmtDate(last))}</span>`;
     }
     html += '</div>';
     return html;
@@ -4062,11 +4184,11 @@ function renderExtraDetailHtml(extra, cardTimestamp) {
   const pageNoteSlug = globalNote?.slug || '';
   html += `<div class="detail-section"><div class="detail-page-note-wrap" data-note-slug="${escapeHtml(pageNoteSlug)}" data-page-slug="${escapeHtml(extra.slug)}">`;
   if (!pageNoteText && !pageNoteSlug) {
-    html += `<button class="detail-page-note-add">+ Add page note</button>`;
+    html += `<button class="detail-page-note-add">${escapeHtml(tr('desktopAddPageNote', '+ Add page note'))}</button>`;
   } else {
     html += `<div class="detail-page-note-display">
       <span class="note-body">${escapeHtml(pageNoteText)}</span>
-      <button class="detail-note-action-btn edit" title="Edit">${DETAIL_ICON_EDIT}</button>
+      <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEdit', 'Edit'))}">${DETAIL_ICON_EDIT}</button>
     </div>`;
   }
   html += `</div></div>`;
@@ -4082,15 +4204,15 @@ function renderExtraDetailHtml(extra, cardTimestamp) {
       const rawQuote = formatHighlightExcerpt(n.excerpt);
       const noteBody = noteText
         ? `<span class="detail-note-content">${escapeHtml(noteText)}</span>`
-        : `<em>No annotation</em>`;
+        : `<em>${escapeHtml(tr('desktopNoAnnotation', 'No annotation'))}</em>`;
       html += `<div class="detail-note-entry" data-note-slug="${escapeHtml(noteSlug)}">
         <div class="detail-note-header">
           <div class="detail-note-excerpt">${escapeHtml(rawQuote)}</div>
-          <button class="detail-note-action-btn delete" title="Delete highlight">${DETAIL_ICON_DELETE}</button>
+          <button class="detail-note-action-btn delete" title="${escapeHtml(tr('extensionDeleteHighlight', 'Delete highlight'))}">${DETAIL_ICON_DELETE}</button>
         </div>
         <div class="detail-note-body">
           ${noteBody}
-          <button class="detail-note-action-btn edit" title="Edit note">${DETAIL_ICON_EDIT}</button>
+          <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEditNote', 'Edit note'))}">${DETAIL_ICON_EDIT}</button>
         </div>
       </div>`;
     }
@@ -4114,7 +4236,7 @@ function renderExtraDetailHtml(extra, cardTimestamp) {
         html += `<span class="detail-snapshot-badge md" data-ts="${s.timestamp}">Markdown</span>`;
       if (s.hasHtml)
         html += `<span class="detail-snapshot-badge html" data-ts="${s.timestamp}">HTML</span>`;
-      html += `<button class="detail-snapshot-delete" data-ts="${s.timestamp}" title="Delete snapshot">&times;</button>`;
+      html += `<button class="detail-snapshot-delete" data-ts="${s.timestamp}" title="${escapeHtml(tr('extensionDeleteSnapshot', 'Delete snapshot'))}">&times;</button>`;
       html += '</span>';
       html += '</div>';
     }
@@ -4174,10 +4296,10 @@ function openDetailNoteEditor(entry, noteSlug) {
   const body = entry.querySelector('.detail-note-body');
   const contentEl = body.querySelector('.detail-note-content, em');
   const currentText =
-    contentEl?.textContent === 'No annotation'
+    contentEl?.textContent === tr('desktopNoAnnotation', 'No annotation')
       ? ''
       : contentEl?.textContent || '';
-  body.innerHTML = `<textarea class="detail-note-edit-textarea" placeholder="Add a note...">${escapeHtml(currentText)}</textarea>`;
+  body.innerHTML = `<textarea class="detail-note-edit-textarea" placeholder="${escapeHtml(tr('extensionAddNote', 'Add a note...'))}">${escapeHtml(currentText)}</textarea>`;
   const ta = body.querySelector('textarea');
   autoResizeTextarea(ta);
   ta.focus();
@@ -4215,9 +4337,9 @@ function openDetailNoteEditor(entry, noteSlug) {
     const noteText = ta.value;
     const noteBody = noteText
       ? `<span class="detail-note-content">${escapeHtml(noteText)}</span>`
-      : `<em>No annotation</em>`;
+      : `<em>${escapeHtml(tr('desktopNoAnnotation', 'No annotation'))}</em>`;
     body.innerHTML = `${noteBody}
-      <button class="detail-note-action-btn edit" title="Edit note">${DETAIL_ICON_EDIT}</button>`;
+      <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEditNote', 'Edit note'))}">${DETAIL_ICON_EDIT}</button>`;
     bindNoteDeleteButtons(
       entry.closest('.detail-notes-section') || entry.parentElement,
     );
@@ -4297,7 +4419,7 @@ function bindPageNoteHandler(container, url) {
 
 function openDetailPageNoteEditor(wrap, text, noteSlug, url) {
   const pageSlug = wrap.dataset.pageSlug;
-  wrap.innerHTML = `<textarea class="detail-page-note-textarea" placeholder="Add a page note...">${escapeHtml(text)}</textarea>`;
+  wrap.innerHTML = `<textarea class="detail-page-note-textarea" placeholder="${escapeHtml(tr('desktopAddPageNotePlaceholder', 'Add a page note...'))}">${escapeHtml(text)}</textarea>`;
   const ta = wrap.querySelector('textarea');
   autoResizeTextarea(ta);
   ta.focus();
@@ -4318,7 +4440,7 @@ function openDetailPageNoteEditor(wrap, text, noteSlug, url) {
       const noteText = ta.value;
       const currentSlug = wrap.dataset.noteSlug || '';
       if (!noteText && !currentSlug) {
-        wrap.innerHTML = `<button class="detail-page-note-add">+ Add page note</button>`;
+        wrap.innerHTML = `<button class="detail-page-note-add">${escapeHtml(tr('desktopAddPageNote', '+ Add page note'))}</button>`;
         bindPageNoteHandler(
           wrap.closest('.detail-section').parentElement || wrap.parentElement,
           url,
@@ -4326,14 +4448,14 @@ function openDetailPageNoteEditor(wrap, text, noteSlug, url) {
       } else if (noteText) {
         wrap.innerHTML = `<div class="detail-page-note-display">
           <span class="note-body">${escapeHtml(noteText)}</span>
-          <button class="detail-note-action-btn edit" title="Edit">${DETAIL_ICON_EDIT}</button>
+          <button class="detail-note-action-btn edit" title="${escapeHtml(tr('extensionEdit', 'Edit'))}">${DETAIL_ICON_EDIT}</button>
         </div>`;
         bindPageNoteHandler(
           wrap.closest('.detail-section').parentElement || wrap.parentElement,
           url,
         );
       } else {
-        wrap.innerHTML = `<button class="detail-page-note-add">+ Add page note</button>`;
+        wrap.innerHTML = `<button class="detail-page-note-add">${escapeHtml(tr('desktopAddPageNote', '+ Add page note'))}</button>`;
         bindPageNoteHandler(
           wrap.closest('.detail-section').parentElement || wrap.parentElement,
           url,
@@ -5673,25 +5795,33 @@ async function updateStorageStatus() {
   if (paired) {
     row.classList.remove('not-configured');
     pathEl.textContent =
-      connector?.dataFolder || info?.path || info?.name || 'Data folder ready';
+      connector?.dataFolder ||
+      info?.path ||
+      info?.name ||
+      tr('desktopDataFolderReady', 'Data folder ready');
     if (deviceNameEl) {
       deviceNameEl.textContent = connector?.deviceId
-        ? `Device ${connector.deviceId}`
-        : 'Device identity unavailable';
+        ? tr('desktopDeviceId', `Device ${connector.deviceId}`, [
+            connector.deviceId,
+          ])
+        : tr('desktopDeviceIdentityUnavailable', 'Device identity unavailable');
     }
     if (selectBtn) {
       selectBtn.style.display =
         connector?.state === 'connected' ? 'none' : 'inline-block';
       selectBtn.textContent =
         connector?.state === 'pair_pending'
-          ? 'Waiting for approval...'
-          : 'Pair from Browser Popup';
+          ? tr('desktopWaitingApproval', 'Waiting for approval...')
+          : tr('desktopPairFromBrowserPopup', 'Pair from Browser Popup');
       selectBtn.disabled =
         desktopPairInFlight || connector?.state === 'pair_pending';
     }
   } else {
     row.classList.add('not-configured');
-    pathEl.textContent = 'Device not configured';
+    pathEl.textContent = tr(
+      'desktopDeviceNotConfigured',
+      'Device not configured',
+    );
     if (deviceNameEl) {
       deviceNameEl.textContent = '';
     }
@@ -5699,8 +5829,8 @@ async function updateStorageStatus() {
       selectBtn.style.display = 'inline-block';
       selectBtn.textContent =
         connector?.state === 'pair_pending'
-          ? 'Waiting for approval...'
-          : 'Pair from Browser Popup';
+          ? tr('desktopWaitingApproval', 'Waiting for approval...')
+          : tr('desktopPairFromBrowserPopup', 'Pair from Browser Popup');
       selectBtn.disabled =
         desktopPairInFlight || connector?.state === 'pair_pending';
     }
@@ -5751,28 +5881,34 @@ document
   .addEventListener('click', async () => {
     const btn = document.getElementById('flushBufferBtn');
     btn.disabled = true;
-    btn.textContent = 'Flushing...';
+    btn.textContent = tr('desktopFlushing', 'Flushing...');
 
     try {
       const resp = await sendAction({
         action: 'flushDesktopQueue',
       });
       btn.textContent =
-        resp.remaining > 0 ? `${resp.remaining} remaining` : 'Flushed!';
+        resp.remaining > 0
+          ? tr('desktopRemainingWrites', `${resp.remaining} remaining`, [
+              resp.remaining,
+            ])
+          : tr('desktopFlushed', 'Flushed!');
       await updateStatistics();
     } catch (e) {
-      btn.textContent = 'Error: ' + e.message;
+      btn.textContent = tr('desktopErrorPrefix', `Error: ${e.message}`, [
+        e.message,
+      ]);
     }
     setTimeout(() => {
       btn.disabled = false;
-      btn.textContent = 'Flush to Disk';
+      btn.textContent = tr('commonFlush', 'Flush');
     }, 2000);
   });
 
 document.getElementById('clearCacheBtn').addEventListener('click', async () => {
   const btn = document.getElementById('clearCacheBtn');
   btn.disabled = true;
-  btn.textContent = 'Reloading...';
+  btn.textContent = tr('desktopReloading', 'Reloading...');
 
   try {
     const sessionKeysToRemove = SESSION_CACHE_KEYS.map((c) => c.key);
@@ -5784,11 +5920,16 @@ document.getElementById('clearCacheBtn').addEventListener('click', async () => {
     location.reload();
     return;
   } catch (error) {
-    showStatus('Cache clear failed: ' + error.message, 'error');
+    showStatus(
+      tr('desktopCacheClearFailed', `Cache clear failed: ${error.message}`, [
+        error.message,
+      ]),
+      'error',
+    );
   }
 
   btn.disabled = false;
-  btn.textContent = 'Clear Cache & Reload';
+  btn.textContent = tr('desktopClearReload', 'Clear & Reload');
   updateCacheSize();
 });
 
@@ -5798,24 +5939,40 @@ document.getElementById('selectDirBtn').addEventListener('click', async () => {
     if (result?.state === 'connected') {
       await updateStorageStatus();
       showStatus(
-        'Chrome is already paired with Browser Recall Desktop',
+        tr(
+          'desktopAlreadyPaired',
+          'Chrome is already paired with Browser Recall Desktop',
+        ),
         'success',
       );
       resetHistory();
       showCategory(activeView.type === 'category' ? activeView.value : 'all');
     } else if (result?.state === 'pair_pending') {
       showStatus(
-        'Approve the pairing request in Browser Recall Desktop',
+        tr(
+          'desktopApprovePairing',
+          'Approve the pairing request in Browser Recall Desktop',
+        ),
         'success',
       );
     } else {
       showStatus(
-        'Open the Browser Recall popup in Chrome and click Pair with desktop.',
+        tr(
+          'desktopOpenPopupPair',
+          'Open the Browser Recall popup in Chrome and click Pair with desktop.',
+        ),
         'success',
       );
     }
   } catch (error) {
-    showStatus(`Desktop bridge check failed: ${error.message}`, 'error');
+    showStatus(
+      tr(
+        'desktopBridgeCheckFailed',
+        `Desktop bridge check failed: ${error.message}`,
+        [error.message],
+      ),
+      'error',
+    );
   }
 });
 
@@ -5824,6 +5981,12 @@ document.getElementById('themeSelect').addEventListener('change', async () => {
   await chrome.storage.session.set({ theme });
   await saveSettingsValue('theme', theme);
   await applyTheme();
+});
+
+document.getElementById('localeSelect').addEventListener('change', async () => {
+  const localeOverride = document.getElementById('localeSelect').value;
+  await saveSettingsValue('localeOverride', localeOverride);
+  reloadApp();
 });
 
 // Color scheme picker
@@ -5857,7 +6020,7 @@ document
     historyState.fileBatch = Math.max(1, val);
     document.getElementById('historyFileBatch').value = historyState.fileBatch;
     await saveSettingsValue('historyFileBatch', historyState.fileBatch);
-    showStatus('Settings saved', 'success');
+    showStatus(tr('desktopSettingsSaved', 'Settings saved'), 'success');
   });
 
 document
@@ -5867,7 +6030,7 @@ document
       'captureSnapshotVideo',
       document.getElementById('captureSnapshotVideo').checked,
     );
-    showStatus('Settings saved', 'success');
+    showStatus(tr('desktopSettingsSaved', 'Settings saved'), 'success');
   });
 
 async function saveDesktopShellSettings() {
@@ -5884,7 +6047,12 @@ for (const id of ['launchAtLoginToggle', 'debugLoggingToggle']) {
     try {
       await saveDesktopShellSettings();
     } catch (error) {
-      showStatus(`Desktop setting failed: ${error.message}`, 'error');
+      showStatus(
+        tr('desktopSettingFailed', `Desktop setting failed: ${error.message}`, [
+          error.message,
+        ]),
+        'error',
+      );
       await refreshDesktopShellSettings();
     }
   });
@@ -5931,13 +6099,19 @@ async function saveSyncSettings() {
   if (enabled) {
     const repoUrl = document.getElementById('syncRepoUrl').value.trim();
     if (!repoUrl) {
-      showStatus('Repository address is required', 'error');
+      showStatus(
+        tr('desktopRepositoryRequired', 'Repository address is required'),
+        'error',
+      );
       return false;
     }
     const authState = await sendAction({ action: 'getSyncAuthState' });
     if (!authState.hasToken) {
       showStatus(
-        'GitHub not connected — click "Connect with GitHub" first',
+        tr(
+          'desktopGithubNotConnected',
+          'GitHub not connected - click "Connect with GitHub" first',
+        ),
         'error',
       );
       return false;
@@ -5957,13 +6131,16 @@ document.getElementById('syncNowBtn').addEventListener('click', async () => {
   const cancelBtn = document.getElementById('syncCancelBtn');
   const statusEl = document.getElementById('syncStatus');
   btn.disabled = true;
-  btn.textContent = 'Syncing\u2026';
+  btn.textContent = tr('desktopSyncing', 'Syncing...');
   cancelBtn.style.display = '';
   statusEl.textContent = '';
   try {
     if (!(await saveSyncSettings())) {
       statusEl.style.color = '#c62828';
-      statusEl.textContent = 'Fix settings before syncing';
+      statusEl.textContent = tr(
+        'desktopFixSettingsBeforeSync',
+        'Fix settings before syncing',
+      );
       return;
     }
     // Phase 1: list devices immediately so the section appears
@@ -5979,17 +6156,28 @@ document.getElementById('syncNowBtn').addEventListener('click', async () => {
     const result = await sendAction({ action: 'syncNow' });
     if (result.skipped) {
       statusEl.style.color = '';
-      statusEl.textContent = result.error || 'Sync skipped';
+      statusEl.textContent =
+        result.error || tr('desktopSyncSkipped', 'Sync skipped');
     } else if (result.error) {
       statusEl.style.color = '#c62828';
       if (result.authExpired) {
-        statusEl.textContent =
-          'GitHub authorization expired — please reconnect.';
+        statusEl.textContent = tr(
+          'desktopGithubAuthExpired',
+          'GitHub authorization expired - please reconnect.',
+        );
         syncShowAuthState('disconnected');
       } else if (result.disabled) {
-        statusEl.textContent = `Sync disabled: ${result.error}`;
+        statusEl.textContent = tr(
+          'desktopSyncDisabled',
+          `Sync disabled: ${result.error}`,
+          [result.error],
+        );
       } else {
-        statusEl.textContent = `Error (will retry): ${result.error}`;
+        statusEl.textContent = tr(
+          'desktopSyncErrorRetry',
+          `Error (will retry): ${result.error}`,
+          [result.error],
+        );
       }
     } else {
       statusEl.style.color = '';
@@ -5999,10 +6187,12 @@ document.getElementById('syncNowBtn').addEventListener('click', async () => {
     refreshSyncDevices();
   } catch (e) {
     statusEl.style.color = '#c62828';
-    statusEl.textContent = `Error: ${e.message}`;
+    statusEl.textContent = tr('desktopErrorPrefix', `Error: ${e.message}`, [
+      e.message,
+    ]);
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Sync Now';
+    btn.textContent = tr('desktopSyncNow', 'Sync Now');
     cancelBtn.style.display = 'none';
   }
 });
@@ -6010,7 +6200,7 @@ document.getElementById('syncNowBtn').addEventListener('click', async () => {
 document.getElementById('syncCancelBtn').addEventListener('click', async () => {
   const cancelBtn = document.getElementById('syncCancelBtn');
   cancelBtn.disabled = true;
-  cancelBtn.textContent = 'Cancelling\u2026';
+  cancelBtn.textContent = tr('desktopCancelling', 'Cancelling...');
   try {
     await sendAction({ action: 'cancelSync' });
   } catch {
@@ -6022,13 +6212,13 @@ document.getElementById('syncCancelBtn').addEventListener('click', async () => {
 
 function formatTimeAgo(ms) {
   const sec = Math.floor((Date.now() - ms) / 1000);
-  if (sec < 60) return 'just now';
+  if (sec < 60) return tr('desktopJustNow', 'just now');
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
+  if (min < 60) return tr('desktopMinutesAgo', `${min}m ago`, [min]);
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
+  if (hr < 24) return tr('desktopHoursAgo', `${hr}h ago`, [hr]);
   const days = Math.floor(hr / 24);
-  return `${days}d ago`;
+  return tr('desktopDaysAgo', `${days}d ago`, [days]);
 }
 
 function renderSyncDevices(devices, localDeviceId, syncing) {
@@ -6053,7 +6243,7 @@ function renderSyncDevices(devices, localDeviceId, syncing) {
 
     if (isLocal) {
       const tag = document.createElement('span');
-      tag.textContent = '(current)';
+      tag.textContent = tr('desktopCurrentDevice', '(current)');
       tag.style.color = 'var(--text-muted)';
       row.appendChild(tag);
     }
@@ -6062,23 +6252,31 @@ function renderSyncDevices(devices, localDeviceId, syncing) {
     status.style.cssText =
       'color:var(--text-muted);margin-left:auto;margin-right:6px;white-space:nowrap;';
     if (d.paused) {
-      status.textContent = 'paused';
+      status.textContent = tr('desktopPausedLower', 'paused');
     } else if (syncing) {
-      status.textContent = isLocal ? 'pushing\u2026' : 'pulling\u2026';
+      status.textContent = isLocal
+        ? tr('desktopPushing', 'pushing...')
+        : tr('desktopPulling', 'pulling...');
     } else if (isLocal) {
       status.textContent = d.lastPushed
-        ? `pushed ${formatTimeAgo(d.lastPushed)}`
+        ? tr('desktopPushedAgo', `pushed ${formatTimeAgo(d.lastPushed)}`, [
+            formatTimeAgo(d.lastPushed),
+          ])
         : '';
     } else {
       status.textContent = d.lastPulled
-        ? `pulled ${formatTimeAgo(d.lastPulled)}`
+        ? tr('desktopPulledAgo', `pulled ${formatTimeAgo(d.lastPulled)}`, [
+            formatTimeAgo(d.lastPulled),
+          ])
         : '';
     }
     row.appendChild(status);
 
     const toggleBtn = document.createElement('button');
     toggleBtn.textContent = d.paused ? '\u25b6' : '\u23f8';
-    toggleBtn.title = d.paused ? 'Resume sync' : 'Pause sync';
+    toggleBtn.title = d.paused
+      ? tr('desktopResumeSync', 'Resume sync')
+      : tr('desktopPauseSync', 'Pause sync');
     toggleBtn.style.cssText =
       'background:none;border:none;cursor:pointer;font-size:12px;color:var(--text-muted);padding:0 2px;line-height:1;';
     toggleBtn.addEventListener('click', async () => {
@@ -6090,10 +6288,15 @@ function renderSyncDevices(devices, localDeviceId, syncing) {
         });
         d.paused = resp.paused;
         toggleBtn.textContent = d.paused ? '\u25b6' : '\u23f8';
-        toggleBtn.title = d.paused ? 'Resume sync' : 'Pause sync';
-        status.textContent = d.paused ? 'paused' : '';
+        toggleBtn.title = d.paused
+          ? tr('desktopResumeSync', 'Resume sync')
+          : tr('desktopPauseSync', 'Pause sync');
+        status.textContent = d.paused ? tr('desktopPausedLower', 'paused') : '';
       } catch (e) {
-        showStatus(`Toggle failed: ${e.message}`, 'error');
+        showStatus(
+          tr('desktopToggleFailed', `Toggle failed: ${e.message}`, [e.message]),
+          'error',
+        );
       } finally {
         toggleBtn.disabled = false;
       }
@@ -6131,11 +6334,11 @@ document
     const btn = document.getElementById('syncPatSaveBtn');
     const token = document.getElementById('syncPatInput').value.trim();
     if (!token) {
-      showStatus('Token is required', 'error');
+      showStatus(tr('desktopTokenRequired', 'Token is required'), 'error');
       return;
     }
     btn.disabled = true;
-    btn.textContent = 'Connecting\u2026';
+    btn.textContent = tr('desktopConnecting', 'Connecting...');
     try {
       const remember = document.getElementById('syncRememberToken').checked;
       const response = await sendAction({
@@ -6145,13 +6348,19 @@ document
         authMethod: 'pat',
       });
       const login = response.githubUser;
-      syncShowAuthState('connected', `as @${login}`);
+      syncShowAuthState(
+        'connected',
+        tr('desktopAsGithubUser', `as @${login}`, [login]),
+      );
       document.getElementById('syncPatInput').value = '';
     } catch (e) {
-      showStatus(`Invalid token: ${e.message}`, 'error');
+      showStatus(
+        tr('desktopInvalidToken', `Invalid token: ${e.message}`, [e.message]),
+        'error',
+      );
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Connect';
+      btn.textContent = tr('desktopConnect', 'Connect');
     }
   });
 
@@ -6163,7 +6372,10 @@ document
     document.getElementById('syncDevicesSection').style.display = 'none';
     document.getElementById('syncDevicesList').innerHTML = '';
     showStatus(
-      'Disconnected. <a href="https://github.com/settings/tokens" target="_blank" style="color:#1a73e8;">Manage tokens on GitHub</a>',
+      tr(
+        'desktopDisconnectedManageTokensHtml',
+        'Disconnected. <a href="https://github.com/settings/tokens" target="_blank" style="color:#1a73e8;">Manage tokens on GitHub</a>',
+      ),
       'success',
     );
   });
@@ -6180,9 +6392,9 @@ document
   .addEventListener('click', async () => {
     const btn = document.getElementById('syncCheckDevicesBtn');
     btn.disabled = true;
-    btn.textContent = 'Checking...';
+    btn.textContent = tr('desktopChecking', 'Checking...');
     await refreshSyncDevices();
-    btn.textContent = 'Check Devices';
+    btn.textContent = tr('desktopCheckDevices', 'Check Devices');
     btn.disabled = false;
   });
 
@@ -6190,34 +6402,53 @@ document
 document.getElementById('clearBtn').addEventListener('click', async () => {
   if (
     !confirm(
-      'Warning: this will delete all files in your storage directory.\n\nThis cannot be undone. Are you absolutely sure?',
+      tr(
+        'desktopClearAllDataWarning',
+        'Warning: this will delete all files in your storage directory.\n\nThis cannot be undone. Are you absolutely sure?',
+      ),
     )
   ) {
     return;
   }
-  if (!confirm('Final confirmation: Delete all history files?')) {
+  if (
+    !confirm(
+      tr(
+        'desktopClearAllDataFinalConfirm',
+        'Final confirmation: Delete all history files?',
+      ),
+    )
+  ) {
     return;
   }
 
   const clearBtn = document.getElementById('clearBtn');
   clearBtn.disabled = true;
-  clearBtn.textContent = 'Clearing...';
+  clearBtn.textContent = tr('desktopClearing', 'Clearing...');
 
   try {
     const resp = await sendAction({ action: 'clearAllData' });
     showStatus(
-      `Cleared ${resp.deletedCount || 0} files/directories`,
+      tr(
+        'desktopClearedFiles',
+        `Cleared ${resp.deletedCount || 0} files/directories`,
+        [resp.deletedCount || 0],
+      ),
       'success',
     );
     await updateStatistics();
     resetHistory();
     showExplore();
   } catch (error) {
-    showStatus(`Error clearing data: ${error.message}`, 'error');
+    showStatus(
+      tr('desktopClearDataFailed', `Error clearing data: ${error.message}`, [
+        error.message,
+      ]),
+      'error',
+    );
   }
 
   clearBtn.disabled = false;
-  clearBtn.textContent = 'Clear All Data';
+  clearBtn.textContent = tr('desktopClearAllData', 'Clear All Data');
 });
 
 function showStatus(message, type) {
@@ -6505,7 +6736,11 @@ document
 
     const details = document.createElement('details');
     const summary = document.createElement('summary');
-    summary.textContent = `${failures.length} item${failures.length !== 1 ? 's' : ''} skipped`;
+    summary.textContent = tr(
+      'desktopItemsSkipped',
+      `${failures.length} item${failures.length !== 1 ? 's' : ''} skipped`,
+      [failures.length],
+    );
     details.appendChild(summary);
     const list = document.createElement('ul');
     list.style.cssText = 'margin:4px 0;padding-left:20px;';
@@ -6523,20 +6758,31 @@ document
     if (selected.length === 0) return;
 
     importBtn.disabled = true;
-    importBtn.textContent = 'Importing...';
-    progressEl.textContent = 'Importing bookmarks into Browser Recall...';
+    importBtn.textContent = tr('desktopImporting', 'Importing...');
+    progressEl.textContent = tr(
+      'desktopImportBookmarksProgress',
+      'Importing bookmarks into Browser Recall...',
+    );
     failuresEl.innerHTML = '';
     try {
       const result = await sendAction({
         action: 'importBookmarks',
         tree: selected,
       });
-      progressEl.textContent = `Done! Imported ${result.listCount} list${result.listCount !== 1 ? 's' : ''} with ${result.bookmarkCount} bookmark${result.bookmarkCount !== 1 ? 's' : ''}.`;
+      progressEl.textContent = tr(
+        'desktopImportBookmarksDone',
+        `Done! Imported ${result.listCount} list${result.listCount !== 1 ? 's' : ''} with ${result.bookmarkCount} bookmark${result.bookmarkCount !== 1 ? 's' : ''}.`,
+        [result.listCount, result.bookmarkCount],
+      );
       renderBookmarkImportFailures(result.failures || []);
     } catch (error) {
-      progressEl.textContent = `Import failed: ${error.message}`;
+      progressEl.textContent = tr(
+        'desktopImportFailed',
+        `Import failed: ${error.message}`,
+        [error.message],
+      );
     } finally {
-      importBtn.textContent = 'Import Selected';
+      importBtn.textContent = tr('commonImportSelected', 'Import Selected');
       importBtn.disabled = false;
     }
   });
@@ -6695,14 +6941,30 @@ document
       );
       summaryEl.textContent =
         normalizedEntries.length > 0
-          ? `Ready to import ${visitCount} visit${visitCount !== 1 ? 's' : ''} across ${normalizedEntries.length} page${normalizedEntries.length !== 1 ? 's' : ''}.`
-          : 'No importable history entries found in this file.';
+          ? tr(
+              'desktopHistoryReadyToImport',
+              `Ready to import ${visitCount} visit${visitCount !== 1 ? 's' : ''} across ${normalizedEntries.length} page${normalizedEntries.length !== 1 ? 's' : ''}.`,
+              [visitCount, normalizedEntries.length],
+            )
+          : tr(
+              'desktopNoImportableHistory',
+              'No importable history entries found in this file.',
+            );
       renderHistoryImportFailures(parseFailures);
       importBtn.disabled = normalizedEntries.length === 0;
     } catch (error) {
-      summaryEl.textContent = `Could not parse history JSON: ${error.message}`;
+      summaryEl.textContent = tr(
+        'desktopHistoryParseFailed',
+        `Could not parse history JSON: ${error.message}`,
+        [error.message],
+      );
       renderHistoryImportFailures([
-        { reason: 'invalid JSON or unsupported history export format' },
+        {
+          reason: tr(
+            'desktopHistoryInvalidJson',
+            'invalid JSON or unsupported history export format',
+          ),
+        },
       ]);
     }
   });
@@ -6711,25 +6973,38 @@ document
     if (normalizedEntries.length === 0) return;
 
     importBtn.disabled = true;
-    importBtn.textContent = 'Importing...';
-    progressEl.textContent = 'Importing browser history into Browser Recall...';
+    importBtn.textContent = tr('desktopImporting', 'Importing...');
+    progressEl.textContent = tr(
+      'desktopImportBrowserHistoryProgress',
+      'Importing browser history into Browser Recall...',
+    );
     try {
       const result = await sendAction({
         action: 'importHistory',
         entries: normalizedEntries,
       });
-      progressEl.textContent =
-        `Done! Imported ${result.visitCount} visit${result.visitCount !== 1 ? 's' : ''}` +
-        ` across ${result.pageCount} page${result.pageCount !== 1 ? 's' : ''}.`;
+      progressEl.textContent = tr(
+        'desktopImportHistoryDone',
+        `Done! Imported ${result.visitCount} visit${result.visitCount !== 1 ? 's' : ''} across ${result.pageCount} page${result.pageCount !== 1 ? 's' : ''}.`,
+        [result.visitCount, result.pageCount],
+      );
       const skippedCount = (result.skippedCount || 0) + parseFailures.length;
       if (skippedCount > 0) {
-        summaryEl.textContent = `${skippedCount} item${skippedCount !== 1 ? 's' : ''} skipped during parsing or import.`;
+        summaryEl.textContent = tr(
+          'desktopImportSkipped',
+          `${skippedCount} item${skippedCount !== 1 ? 's' : ''} skipped during parsing or import.`,
+          [skippedCount],
+        );
       }
       renderHistoryImportFailures(parseFailures);
     } catch (error) {
-      progressEl.textContent = `Import failed: ${error.message}`;
+      progressEl.textContent = tr(
+        'desktopImportFailed',
+        `Import failed: ${error.message}`,
+        [error.message],
+      );
     } finally {
-      importBtn.textContent = 'Import History';
+      importBtn.textContent = tr('commonImportHistory', 'Import History');
       importBtn.disabled = normalizedEntries.length === 0;
     }
   });
@@ -6767,7 +7042,7 @@ function renderSettingsList({
         (item, idx) =>
           `<div class="blacklist-entry">
         ${renderItemHtml(item)}
-        <button class="blacklist-remove" data-index="${idx}" title="Remove">&times;</button>
+        <button class="blacklist-remove" data-index="${idx}" title="${escapeHtml(tr('commonRemove', 'Remove'))}">&times;</button>
       </div>`,
       )
       .join('');
@@ -6789,7 +7064,10 @@ async function renderBlacklist() {
     loadFn: loadBlacklist,
     saveFn: saveBlacklist,
     renderItemHtml: (prefix) => `<span>${escapeHtml(prefix)}</span>`,
-    emptyMessage: 'No blocked web address prefixes',
+    emptyMessage: tr(
+      'desktopNoBlockedPrefixes',
+      'No blocked web address prefixes',
+    ),
     rerender: renderBlacklist,
   });
 }
@@ -6818,11 +7096,16 @@ document.getElementById('blacklistInput').addEventListener('keypress', (e) => {
 });
 
 // --- Title Trimming Rules ---
-const TRIM_ACTION_LABELS = {
-  remove_after_pipe: 'Remove after |',
-  remove_brackets: 'Remove [brackets]',
-  remove_parens: 'Remove (parens)',
+const TRIM_ACTION_LABEL_KEYS = {
+  remove_after_pipe: ['desktopRemoveAfterPipe', 'Remove after |'],
+  remove_brackets: ['desktopRemoveBrackets', 'Remove [brackets]'],
+  remove_parens: ['desktopRemoveParens', 'Remove (parens)'],
 };
+
+function trimActionLabel(action) {
+  const [key, fallback] = TRIM_ACTION_LABEL_KEYS[action] || [];
+  return key ? tr(key, fallback) : action;
+}
 
 async function loadTrimRules() {
   return await loadSettingsValue('titleTrimRules', []);
@@ -6839,8 +7122,8 @@ async function renderTrimRules() {
     saveFn: saveTrimRules,
     renderItemHtml: (rule) =>
       `<span>${escapeHtml(rule.urlPrefix)}</span>` +
-      `<span class="trim-action-label">${escapeHtml(TRIM_ACTION_LABELS[rule.action] || rule.action)}</span>`,
-    emptyMessage: 'No trimming rules',
+      `<span class="trim-action-label">${escapeHtml(trimActionLabel(rule.action))}</span>`,
+    emptyMessage: tr('desktopNoTrimmingRules', 'No trimming rules'),
     rerender: renderTrimRules,
   });
 }
@@ -7132,21 +7415,20 @@ async function renderSearchPanel({ deferFilterPanel = false } = {}) {
 async function renderFilterPanelHtml() {
   await listsReadyPromise;
   const hasFilters = !isDefaultFilterState(filterState);
-  let html = `<div class="filter-panel-header"><div class="filter-panel-title">Filters</div><button class="filter-clear-btn" id="filterClearBtn" type="button"${hasFilters ? '' : ' disabled'}>Clear</button></div>`;
+  let html = `<div class="filter-panel-header"><div class="filter-panel-title">${escapeHtml(tr('desktopFilters', 'Filters'))}</div><button class="filter-clear-btn" id="filterClearBtn" type="button"${hasFilters ? '' : ' disabled'}>${escapeHtml(tr('commonClear', 'Clear'))}</button></div>`;
   const isListView = activeView.type === 'list';
 
   // Sort toggle (list view only)
   if (isListView) {
     const sortOptions = [
-      { key: 'lastVisit', label: 'Last visit' },
-      { key: 'firstVisit', label: 'First visit' },
-      { key: 'pinTime', label: 'Pin time' },
-      { key: 'title', label: 'Title' },
-      { key: 'totalVisits', label: 'Visits' },
+      { key: 'lastVisit', label: tr('desktopLastVisit', 'Last visit') },
+      { key: 'firstVisit', label: tr('desktopFirstVisit', 'First visit') },
+      { key: 'pinTime', label: tr('desktopPinTime', 'Pin time') },
+      { key: 'title', label: tr('desktopColumnTitle', 'Title') },
+      { key: 'totalVisits', label: tr('desktopVisits', 'Visits') },
     ];
     const currentSort = relatedSortState.column || 'lastVisit';
-    html +=
-      '<div class="filter-section"><div class="filter-section-label">Sort by</div>';
+    html += `<div class="filter-section"><div class="filter-section-label">${escapeHtml(tr('desktopSortBy', 'Sort by'))}</div>`;
     html += '<div class="sort-toggle">';
     for (const opt of sortOptions) {
       html += `<button class="sort-toggle-option${currentSort === opt.key ? ' active' : ''}" data-sort="${opt.key}">${escapeHtml(opt.label)}</button>`;
@@ -7157,8 +7439,7 @@ async function renderFilterPanelHtml() {
   // Device bubbles
   const deviceIds = [...new Set(historyState.devices || [])].sort();
   if (deviceIds.length > 1) {
-    html +=
-      '<div class="filter-section"><div class="filter-section-label">Devices</div>';
+    html += `<div class="filter-section"><div class="filter-section-label">${escapeHtml(tr('desktopDevices', 'Devices'))}</div>`;
     html += '<div class="filter-bubbles">';
     for (const did of deviceIds) {
       const active = filterState.devices?.[did] === true;
@@ -7169,8 +7450,7 @@ async function renderFilterPanelHtml() {
 
   // List bubbles (explore view only, when lists exist)
   if (!isListView && listNameById.size > 0) {
-    html +=
-      '<div class="filter-section"><div class="filter-section-label">Lists</div>';
+    html += `<div class="filter-section"><div class="filter-section-label">${escapeHtml(tr('commonLists', 'Lists'))}</div>`;
     html += '<div class="filter-bubbles">';
     for (const [slug, name] of listNameById) {
       const active = filterState.lists?.[slug] === true;
@@ -7180,34 +7460,40 @@ async function renderFilterPanelHtml() {
   }
 
   // Time filters
-  html +=
-    '<div class="filter-section"><div class="filter-section-label">Time</div>';
-  html += renderDualRangeFilter('lastSeen', 'Last seen', filterState.lastSeen);
+  html += `<div class="filter-section"><div class="filter-section-label">${escapeHtml(tr('desktopTime', 'Time'))}</div>`;
+  html += renderDualRangeFilter(
+    'lastSeen',
+    tr('desktopLastSeen', 'Last seen'),
+    filterState.lastSeen,
+  );
   html += renderDualRangeFilter(
     'firstSeen',
-    'First seen',
+    tr('desktopFirstSeen', 'First seen'),
     filterState.firstSeen,
   );
   html += '</div>';
 
   // Page-specific booleans
-  html +=
-    '<div class="filter-section"><div class="filter-section-label">Page properties</div>';
+  html += `<div class="filter-section"><div class="filter-section-label">${escapeHtml(tr('desktopPageProperties', 'Page properties'))}</div>`;
   html += '<div class="filter-checkboxes">';
   html += renderCheckboxFilter(
     'hasHighlights',
-    'Has highlights',
+    tr('desktopHasHighlights', 'Has highlights'),
     filterState.hasHighlights,
   );
   html += renderCheckboxFilter(
     'hasSnapshots',
-    'Has snapshots',
+    tr('desktopHasSnapshots', 'Has snapshots'),
     filterState.hasSnapshots,
   );
-  html += renderCheckboxFilter('liked', 'Liked', filterState.liked);
+  html += renderCheckboxFilter(
+    'liked',
+    tr('extensionLiked', 'Liked'),
+    filterState.liked,
+  );
   html += renderCheckboxFilter(
     'visitedMultipleTimes',
-    'Visited multiple times',
+    tr('desktopVisitedMultipleTimes', 'Visited multiple times'),
     filterState.visitedMultipleTimes,
   );
   html += '</div>';
@@ -7768,7 +8054,7 @@ async function runSearchFilterPipeline() {
   const relatedContainer = document.getElementById('relatedResults');
   if (results.length === 0) {
     consumeRelatedTopReset();
-    relatedContainer.innerHTML = '<div class="no-results">No results</div>';
+    relatedContainer.innerHTML = `<div class="no-results">${escapeHtml(tr('desktopNoResults', 'No results'))}</div>`;
     document.getElementById('relatedChart').classList.remove('visible');
     return;
   }
@@ -7883,7 +8169,7 @@ async function runSearchFilterPipeline() {
     relatedChart,
     document.getElementById('relatedChartBars'),
     chartData,
-    'Explore results',
+    tr('desktopExploreResults', 'Explore results'),
     getEstimatedByDay(),
   );
   bindChartBarClick(relatedChart, document.getElementById('relatedResults'));
@@ -7954,7 +8240,7 @@ async function openFocusPanel(url, title) {
       similar,
     );
   } catch (error) {
-    content.innerHTML = `<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">${escapeHtml('Error: ' + error.message)}</div></div></div>`;
+    content.innerHTML = `<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">${escapeHtml(tr('desktopErrorPrefix', `Error: ${error.message}`, [error.message]))}</div></div></div>`;
   }
 }
 
@@ -7977,10 +8263,9 @@ async function openListFocusPanel(listId, listName) {
     let html = '';
 
     // Pinned pages section
-    html +=
-      '<div class="focus-section"><div class="focus-section-label">Pinned</div><div class="focus-section-cards">';
+    html += `<div class="focus-section"><div class="focus-section-label">${escapeHtml(tr('desktopPinned', 'Pinned'))}</div><div class="focus-section-cards">`;
     if (pins.length === 0) {
-      html += '<div class="focus-empty">No pinned pages</div>';
+      html += `<div class="focus-empty">${escapeHtml(tr('desktopNoPinnedPages', 'No pinned pages'))}</div>`;
     } else {
       const maxAtt = 0.1;
       const { pinsResolved } = await resolvePinsForDisplay(pins);
@@ -8008,7 +8293,7 @@ async function openListFocusPanel(listId, listName) {
     // Bind event delegation for focus content cards
     bindFocusContentDelegation(content);
   } catch (error) {
-    content.innerHTML = `<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">${escapeHtml('Error: ' + error.message)}</div></div></div>`;
+    content.innerHTML = `<div class="focus-section"><div class="focus-section-label"></div><div class="focus-section-cards"><div class="focus-empty">${escapeHtml(tr('desktopErrorPrefix', `Error: ${error.message}`, [error.message]))}</div></div></div>`;
   }
 }
 
@@ -8046,27 +8331,24 @@ function renderFocusWaterfall(content, url, title, parents, children, similar) {
   let html = '';
 
   // Parents section
-  html +=
-    '<div class="focus-section"><div class="focus-section-label">Parents</div><div class="focus-section-cards">';
+  html += `<div class="focus-section"><div class="focus-section-label">${escapeHtml(tr('desktopParents', 'Parents'))}</div><div class="focus-section-cards">`;
   const hasParents = parents.referrers.length + parents.lists.length > 0;
   if (!hasParents) {
-    html += '<div class="focus-empty">No known parents</div>';
+    html += `<div class="focus-empty">${escapeHtml(tr('desktopNoKnownParents', 'No known parents'))}</div>`;
   } else {
     html += parents.referrers.map((ref) => makeCard(ref, null)).join('');
   }
   html += '</div></div>';
 
   // Focused page
-  html +=
-    '<div class="focus-section"><div class="focus-section-label">Focus</div><div class="focus-section-cards">';
+  html += `<div class="focus-section"><div class="focus-section-label">${escapeHtml(tr('desktopFocus', 'Focus'))}</div><div class="focus-section-cards">`;
   html += makeCard(url, title, { cssClass: 'focus-highlight' });
   html += '</div></div>';
 
   // Children section
-  html +=
-    '<div class="focus-section"><div class="focus-section-label">Children</div><div class="focus-section-cards">';
+  html += `<div class="focus-section"><div class="focus-section-label">${escapeHtml(tr('desktopChildren', 'Children'))}</div><div class="focus-section-cards">`;
   if (children.length === 0) {
-    html += '<div class="focus-empty">No known children</div>';
+    html += `<div class="focus-empty">${escapeHtml(tr('desktopNoKnownChildren', 'No known children'))}</div>`;
   } else {
     html += children.map((childUrl) => makeCard(childUrl, null)).join('');
   }
@@ -8074,8 +8356,7 @@ function renderFocusWaterfall(content, url, title, parents, children, similar) {
 
   // Similar section
   if (similar.length > 0) {
-    html +=
-      '<div class="focus-section"><div class="focus-section-label">Similar</div><div class="focus-section-cards">';
+    html += `<div class="focus-section"><div class="focus-section-label">${escapeHtml(tr('desktopSimilar', 'Similar'))}</div><div class="focus-section-cards">`;
     html += similar.map((s) => makeCard(s.url, s.title)).join('');
     html += '</div></div>';
   }
@@ -8262,6 +8543,7 @@ function showOnboarding() {
 
 async function initialize() {
   bindWindowDragRegions();
+  await initializeDesktopLocalization();
   // Apply theme before any rendering to minimize flash
   let currentTheme = await applyTheme();
 
@@ -8276,6 +8558,7 @@ async function initialize() {
     return;
   }
 
+  await initializeDesktopLocalization({ allowOverride: true });
   await initializeMain(currentTheme, deviceResp);
 }
 
@@ -8388,7 +8671,10 @@ async function initializeMain(currentTheme, deviceResp = null) {
   });
   if (!deviceResp?.deviceId) {
     throw new Error(
-      'Device identity unavailable. Try restarting Browser Recall.',
+      tr(
+        'desktopDeviceIdentityRestart',
+        'Device identity unavailable. Try restarting Browser Recall.',
+      ),
     );
   }
 
@@ -8430,7 +8716,7 @@ async function initializeMain(currentTheme, deviceResp = null) {
   } catch (error) {
     logDebug('[startup] explore hydration failed:', error.message);
     document.getElementById('relatedResults').innerHTML =
-      `<div class="no-results">${escapeHtml('Error: ' + error.message)}</div>`;
+      `<div class="no-results">${escapeHtml(tr('desktopErrorPrefix', `Error: ${error.message}`, [error.message]))}</div>`;
   }
 
   markAppReady();
@@ -8507,7 +8793,7 @@ document.addEventListener('keydown', async (e) => {
   e.preventDefault();
 
   if (!isListView) {
-    showInfoBubble('Cannot delete history');
+    showInfoBubble(tr('desktopCannotDeleteHistory', 'Cannot delete history'));
     return;
   }
 
@@ -8546,7 +8832,9 @@ document.addEventListener('keydown', async (e) => {
   if (key === 'v') {
     if (activeView.type !== 'list') {
       e.preventDefault();
-      showInfoBubble('Can only paste into a list');
+      showInfoBubble(
+        tr('desktopCanOnlyPasteIntoList', 'Can only paste into a list'),
+      );
       return;
     }
 
@@ -8586,9 +8874,15 @@ document.addEventListener('keydown', async (e) => {
       searchState.results.length > 0
     ) {
       if (searchState.results.length > 100) {
-        showErrorBubble('Too many results to select (limit: 100)', {
-          suffix: '',
-        });
+        showErrorBubble(
+          tr(
+            'desktopTooManyResults',
+            'Too many results to select (limit: 100)',
+          ),
+          {
+            suffix: '',
+          },
+        );
       } else {
         if (relatedVirtualScroller) {
           relatedVirtualScroller.selectAll();
@@ -8600,7 +8894,9 @@ document.addEventListener('keydown', async (e) => {
         syncChartHighlights();
       }
     } else {
-      showBlockedBubble('Select all is not available here');
+      showBlockedBubble(
+        tr('desktopSelectAllUnavailable', 'Select all is not available here'),
+      );
     }
   }
 });

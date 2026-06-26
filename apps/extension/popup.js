@@ -19,6 +19,11 @@ import {
   applyPaperErrorPopoutStyle,
   paperErrorPopoutCss,
 } from './extension-ui-tokens.js';
+import {
+  initializeExtensionI18n,
+  localizeDocument,
+  tr,
+} from '../../packages/core/i18n.js';
 
 const currentPage = {
   slug: '',
@@ -78,9 +83,9 @@ function showFatalError(message) {
   overlay.style.cssText =
     'position:fixed;inset:0;z-index:999999;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
   overlay.innerHTML = `
-    <div style="color:#b41e1e;font-size:14px;font-weight:600;">Storage Unavailable</div>
+    <div style="color:#b41e1e;font-size:14px;font-weight:600;">${escapeHtml(tr('extensionStorageUnavailable', 'Storage Unavailable', undefined))}</div>
     <div style="color:#555;font-size:12px;max-width:360px;text-align:center;">${escapeHtml(message)}</div>
-    <button id="fatalReloadBtn" style="margin-top:6px;padding:4px 12px;border:1px solid #ccc;border-radius:4px;background:#f5f5f5;cursor:pointer;font-size:12px;">Reload Extension</button>
+    <button id="fatalReloadBtn" style="margin-top:6px;padding:4px 12px;border:1px solid #ccc;border-radius:4px;background:#f5f5f5;cursor:pointer;font-size:12px;">${escapeHtml(tr('extensionReloadExtension', 'Reload Extension', undefined))}</button>
   `;
   document.body.appendChild(overlay);
   overlay
@@ -371,7 +376,13 @@ function showSetupRequired(connector = {}, options = {}) {
   renderConnectorDiagnostic(connector, options);
 }
 
-function showUnavailablePage(message = 'Not available for this page') {
+function showUnavailablePage(
+  message = tr(
+    'extensionNotAvailablePage',
+    'Not available for this page',
+    undefined,
+  ),
+) {
   renderPageDiagnostic({ title: message, message: '' });
 }
 
@@ -384,12 +395,20 @@ function showErrorBubble(message, options = {}) {
   const { appendReloadHint = true } = options;
   let displayMessage = message;
   if (globalThis.browserRecallWebExtension?.isRuntimeFailure?.(message)) {
-    displayMessage =
-      'Extension context invalidated. Please refresh the page and try again.';
+    displayMessage = tr(
+      'extensionContextInvalidated',
+      'Extension context invalidated. Please refresh the page and try again.',
+      undefined,
+    );
   } else if (!appendReloadHint) {
-    displayMessage = message || 'Action failed';
+    displayMessage =
+      message || tr('extensionActionFailed', 'Action failed', undefined);
   } else {
-    displayMessage = message + ' — please reload the extension.';
+    displayMessage = tr(
+      'extensionActionFailedReload',
+      `${message} - please reload the extension.`,
+      [message],
+    );
   }
   let bubble = document.getElementById('errorBubble');
   if (!bubble) {
@@ -407,21 +426,31 @@ function showErrorBubble(message, options = {}) {
   }, 4000);
 }
 
-function userActionErrorMessage(message, fallback = 'Action failed') {
+function userActionErrorMessage(
+  message,
+  fallback = tr('extensionActionFailed', 'Action failed', undefined),
+) {
   if (globalThis.browserRecallWebExtension?.isRuntimeFailure?.(message)) {
-    return 'Browser Recall action failed because the extension connection was reset. Reload this page and try again.';
+    return tr(
+      'extensionConnectionResetActionFailed',
+      'Browser Recall action failed because the extension connection was reset. Reload this page and try again.',
+      undefined,
+    );
   }
   return message || fallback;
 }
 
-async function notifyActivePageError(message, fallback = 'Action failed') {
+async function notifyActivePageError(
+  message,
+  fallback = tr('extensionActionFailed', 'Action failed', undefined),
+) {
   return notifyPageError({ message, fallback });
 }
 
 async function notifyPageError({
   tabId = null,
   message,
-  fallback = 'Action failed',
+  fallback = tr('extensionActionFailed', 'Action failed', undefined),
 }) {
   const displayMessage = userActionErrorMessage(message, fallback);
   try {
@@ -433,7 +462,8 @@ async function notifyPageError({
       });
       targetTabId = tab?.id;
     }
-    if (!targetTabId) throw new Error('No target tab');
+    if (!targetTabId)
+      throw new Error(tr('extensionNoTargetTab', 'No target tab', undefined));
     await chrome.tabs.sendMessage(targetTabId, {
       action: 'showErrorNotification',
       message: displayMessage,
@@ -507,7 +537,9 @@ function applyDesktopConnectorUi(connector = {}) {
     const element = document.getElementById(id);
     if (!element) continue;
     element.disabled = pending;
-    element.textContent = pending ? 'Waiting for Approval' : 'Check Again';
+    element.textContent = pending
+      ? tr('extensionWaitingApproval', 'Waiting for Approval', undefined)
+      : tr('extensionCheckAgain', 'Check Again', undefined);
     element.classList.toggle('is-checking', checking);
   }
 }
@@ -515,35 +547,66 @@ function applyDesktopConnectorUi(connector = {}) {
 function showDesktopConnectorError(message) {
   applyDesktopConnectorUi({ state: 'offline', hasToken: false });
   const title = document.getElementById('setupRequiredTitle');
-  if (title) title.textContent = 'Desktop Offline';
+  if (title)
+    title.textContent = tr(
+      'extensionDesktopOffline',
+      'Desktop Offline',
+      undefined,
+    );
   const meta = document.getElementById('setupRequiredMeta');
   if (meta)
     meta.textContent =
-      message || 'Start Browser Recall Desktop to resume live capture.';
+      message ||
+      tr(
+        'extensionStartDesktopCapture',
+        'Start Browser Recall Desktop to resume live capture.',
+        undefined,
+      );
 }
 
 function showDesktopUnavailable(
-  message = 'Browser Recall Desktop is offline.',
+  message = tr(
+    'extensionDesktopOfflineMixed',
+    'Browser Recall Desktop is offline.',
+    undefined,
+  ),
 ) {
+  const defaultOfflineMessage = tr(
+    'extensionDesktopOfflineMixed',
+    'Browser Recall Desktop is offline.',
+    undefined,
+  );
   renderConnectorDiagnostic({ state: 'offline', hasToken: true });
   const title = document.getElementById('setupRequiredTitle');
   if (title) {
     title.textContent =
-      message === 'Browser Recall Desktop is offline.'
-        ? 'Desktop Offline'
+      message === defaultOfflineMessage
+        ? tr('extensionDesktopOffline', 'Desktop Offline', undefined)
         : message;
   }
   const meta = document.getElementById('setupRequiredMeta');
   if (meta)
-    meta.textContent = 'Start Browser Recall Desktop to resume live capture.';
+    meta.textContent = tr(
+      'extensionStartDesktopCapture',
+      'Start Browser Recall Desktop to resume live capture.',
+      undefined,
+    );
 }
 
 function showDesktopDataUnavailable(
-  message = 'Desktop page data unavailable.',
+  message = tr(
+    'extensionDesktopPageDataUnavailable',
+    'Desktop page data unavailable.',
+    undefined,
+  ),
   diagnostic = null,
 ) {
   renderPageDiagnostic({
-    title: 'Page Data Unavailable',
+    title: tr(
+      'extensionPageDataUnavailable',
+      'Page Data Unavailable',
+      undefined,
+    ),
     message,
     detail: diagnostic,
   });
@@ -672,7 +735,14 @@ async function refreshDesktopConnectorState() {
     applyDesktopConnectorUi(connector);
     return connector;
   } catch (error) {
-    showDesktopConnectorError(error.message || 'Desktop bridge unavailable.');
+    showDesktopConnectorError(
+      error.message ||
+        tr(
+          'extensionDesktopBridgeUnavailable',
+          'Desktop bridge unavailable.',
+          undefined,
+        ),
+    );
     return null;
   }
 }
@@ -715,7 +785,10 @@ async function connectDesktopBridge() {
     const connector = await requestConnectorBridgeConnect();
     applyDesktopConnectorUi(connector);
   } catch (error) {
-    showDesktopConnectorError(error.message || 'Failed to refresh.');
+    showDesktopConnectorError(
+      error.message ||
+        tr('extensionRefreshFailed', 'Failed to refresh.', undefined),
+    );
   } finally {
     desktopConnectInFlight = false;
     const connector = await refreshDesktopConnectorState();
@@ -746,7 +819,7 @@ function renderSnapshots(snapshots) {
       <span class="snapshot-badges">
         ${snap.hasMd ? `<span class="badge md" data-ts="${snap.timestamp}">Markdown</span>` : ''}
         ${snap.hasHtml ? `<span class="badge html" data-ts="${snap.timestamp}">HTML</span>` : ''}
-        <button class="delete-btn" data-ts="${snap.timestamp}" title="Delete snapshot">&times;</button>
+        <button class="delete-btn" data-ts="${snap.timestamp}" title="${escapeHtml(tr('extensionDeleteSnapshot', 'Delete snapshot', undefined))}">&times;</button>
       </span>
     </div>
   `,
@@ -799,7 +872,7 @@ function renderVisitsAndLikes(entry) {
       return new Date(y, m, d);
     };
     const fmtDate = (d) =>
-      d.toLocaleDateString('en-US', {
+      d.toLocaleDateString(undefined, {
         month: 'short',
         day: 'numeric',
         year: 'numeric',
@@ -807,14 +880,14 @@ function renderVisitsAndLikes(entry) {
     const sorted = [...visitDates].sort((a, b) => a - b);
     const first = parse(sorted[0]);
     items.push(
-      `<span class="attention-item"><strong>First</strong><span class="metric-value">${fmtDate(first)}</span></span>`,
+      `<span class="attention-item"><strong>${escapeHtml(tr('extensionFirst', 'First'))}</strong><span class="metric-value">${fmtDate(first)}</span></span>`,
     );
   }
 
   const likes = entry?.likes || 0;
   if (likes > 0) {
     items.push(
-      `<span class="attention-item"><strong>Liked</strong><span class="metric-value">${likes}</span></span>`,
+      `<span class="attention-item"><strong>${escapeHtml(tr('extensionLiked', 'Liked', undefined))}</strong><span class="metric-value">${likes}</span></span>`,
     );
   }
 
@@ -965,17 +1038,17 @@ function renderNotes(notes) {
       const noteText = n.note || '';
       const noteDisplay = noteText
         ? `<span class="highlight-note-text">${escapeHtml(noteText)}</span>`
-        : `<span class="highlight-note-placeholder">No annotation</span>`;
+        : `<span class="highlight-note-placeholder">${escapeHtml(tr('extensionNoAnnotation', 'No annotation', undefined))}</span>`;
       return `
       <div class="highlight-item" data-note-slug="${escapeHtml(n.slug)}" data-note-index="${String(index + 1).padStart(2, '0')}">
         <div class="highlight-header">
           <div class="highlight-excerpt">${escapeHtml(displayText)}</div>
-          <button class="note-action-btn delete" data-note-slug="${escapeHtml(n.slug)}" title="Delete highlight">${ICON_DELETE}</button>
+          <button class="note-action-btn delete" data-note-slug="${escapeHtml(n.slug)}" title="${escapeHtml(tr('extensionDeleteHighlight', 'Delete highlight', undefined))}">${ICON_DELETE}</button>
         </div>
         <div class="highlight-body">
           <div class="highlight-note-row">
             ${noteDisplay}
-            <button class="note-action-btn edit" title="Edit note">${ICON_EDIT}</button>
+            <button class="note-action-btn edit" title="${escapeHtml(tr('extensionEditNote', 'Edit note', undefined))}">${ICON_EDIT}</button>
           </div>
         </div>
       </div>`;
@@ -1026,7 +1099,7 @@ function bindHighlightActions(container) {
 
 function openHighlightNoteEditor(item, note) {
   const body = item.querySelector('.highlight-body');
-  body.innerHTML = `<textarea class="highlight-note-edit-textarea" placeholder="Add a note...">${escapeHtml(note.note || '')}</textarea>`;
+  body.innerHTML = `<textarea class="highlight-note-edit-textarea" placeholder="${escapeHtml(tr('extensionAddNote', 'Add a note...', undefined))}">${escapeHtml(note.note || '')}</textarea>`;
   const ta = body.querySelector('textarea');
   autoResizeTextarea(ta);
   ta.focus();
@@ -1688,7 +1761,7 @@ function openListPicker(lists, allPins, options = {}) {
   function renderPickerRows() {
     if (!isCurrentPicker()) return;
     if (isLoading) {
-      optionsEl.innerHTML = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">Loading...</div>`;
+      optionsEl.innerHTML = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">${escapeHtml(tr('commonLoading', 'Loading...', undefined))}</div>`;
       activePickerIndex = -1;
       input.removeAttribute('aria-activedescendant');
       pickerScrollTop = 0;
@@ -1720,12 +1793,12 @@ function openListPicker(lists, allPins, options = {}) {
         (c) => c.name.toLowerCase() === inputVal.toLowerCase(),
       );
       if (!exactMatch) {
-        rowsHtml += `<div class="list-picker-option list-picker-create" id="listPickerCreate" role="option">Create "${escapeHtml(inputVal)}"</div>`;
+        rowsHtml += `<div class="list-picker-option list-picker-create" id="listPickerCreate" role="option">${escapeHtml(tr('extensionCreateListNamed', `Create "${inputVal}"`, [inputVal]))}</div>`;
       }
     }
 
     if (!rowsHtml) {
-      rowsHtml = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">No lists</div>`;
+      rowsHtml = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">${escapeHtml(tr('extensionNoLists', 'No lists', undefined))}</div>`;
     }
 
     optionsEl.innerHTML = rowsHtml;
@@ -2234,7 +2307,7 @@ document.getElementById('captureBtn').addEventListener('click', () => {
   void runPopupUiMutation('capture-frame', async () => {
     const btn = document.getElementById('captureBtn');
     btn.disabled = true;
-    btn.textContent = 'Capturing...';
+    btn.textContent = tr('extensionCapturing', 'Capturing...', undefined);
 
     try {
       logDebug('[popup] Capturing snapshot...');
@@ -2246,15 +2319,21 @@ document.getElementById('captureBtn').addEventListener('click', () => {
         await refreshCurrentPageSummary();
       } else {
         logDebug('[popup] Capture failed:', resp);
-        await notifyActivePageError(resp?.error, 'Capture failed');
+        await notifyActivePageError(
+          resp?.error,
+          tr('extensionCaptureFailed', 'Capture failed', undefined),
+        );
       }
     } catch (error) {
       logError('[popup] Capture error:', error);
-      await notifyActivePageError(error.message, 'Capture failed');
+      await notifyActivePageError(
+        error.message,
+        tr('extensionCaptureFailed', 'Capture failed', undefined),
+      );
     }
 
     btn.disabled = false;
-    btn.textContent = 'CAPTURE FRAME';
+    btn.textContent = tr('extensionCaptureFrame', 'CAPTURE FRAME', undefined);
   }).catch((error) => showErrorBubble(error.message));
 });
 
@@ -2516,7 +2595,11 @@ async function showDashboard(tab, options = {}) {
 async function verifyDeviceIdentity(connector) {
   if (connector?.deviceId) return connector.deviceId;
   throw new Error(
-    'Browser Recall Desktop is not connected yet. Start the desktop app and refresh from the popup.',
+    tr(
+      'extensionDesktopNotConnectedRefresh',
+      'Browser Recall Desktop is not connected yet. Start the desktop app and refresh from the popup.',
+      undefined,
+    ),
   );
 }
 
@@ -2528,7 +2611,9 @@ async function resolveActiveTab() {
     isInternalBrowserUrl(tab.url) ||
     (tab.url.startsWith('chrome-extension://') && !isSnapshotViewerUrl(tab.url))
   ) {
-    showUnavailablePage('Not available for this page');
+    showUnavailablePage(
+      tr('extensionNotAvailablePage', 'Not available for this page', undefined),
+    );
     return null;
   }
   return tab;
@@ -2622,7 +2707,14 @@ async function handleBlacklist(tab) {
     url: effectiveUrl,
   });
   if (response?.success === false) {
-    throw new Error(response.error || 'Desktop popup access check failed');
+    throw new Error(
+      response.error ||
+        tr(
+          'extensionDesktopPopupAccessFailed',
+          'Desktop popup access check failed',
+          undefined,
+        ),
+    );
   }
   if (!response?.blacklisted || response?.hasVisitHistory) return false;
 
@@ -2632,18 +2724,22 @@ async function handleBlacklist(tab) {
 
 function renderBlacklistDiagnostic(tab, effectiveUrl) {
   renderPageDiagnostic({
-    title: 'Blacklisted',
+    title: tr('extensionBlacklisted', 'Blacklisted', undefined),
     message: tab.url,
     actions: [
       {
         id: 'captureOnceBtn',
         className: 'capture-once-btn',
-        label: 'Capture It',
+        label: tr('extensionCaptureIt', 'Capture It', undefined),
         onClick: (event) => {
           const btn = event.currentTarget;
           void runPopupUiMutation('capture-blacklisted-page', async () => {
             btn.disabled = true;
-            btn.textContent = 'Capturing...';
+            btn.textContent = tr(
+              'extensionCapturing',
+              'Capturing...',
+              undefined,
+            );
 
             try {
               const slug = generateSlugFromUrl(effectiveUrl);
@@ -2662,7 +2758,11 @@ function renderBlacklistDiagnostic(tab, effectiveUrl) {
                 await notifyPageError({
                   tabId: tab.id,
                   message: resp.error,
-                  fallback: 'Capture failed',
+                  fallback: tr(
+                    'extensionCaptureFailed',
+                    'Capture failed',
+                    undefined,
+                  ),
                 });
               }
               logDebug('[popup] Capture once completed for blacklisted page');
@@ -2671,7 +2771,11 @@ function renderBlacklistDiagnostic(tab, effectiveUrl) {
               await notifyPageError({
                 tabId: tab.id,
                 message: error.message,
-                fallback: 'Capture failed',
+                fallback: tr(
+                  'extensionCaptureFailed',
+                  'Capture failed',
+                  undefined,
+                ),
               });
             }
 
@@ -2681,7 +2785,7 @@ function renderBlacklistDiagnostic(tab, effectiveUrl) {
       },
       {
         id: 'blacklistSettingsLink',
-        label: 'Manage in Settings',
+        label: tr('extensionManageSettings', 'Manage in Settings', undefined),
         onClick: () => openDesktopApp('settings'),
       },
     ],
@@ -2760,7 +2864,14 @@ async function renderPreparedPopup(bootstrap) {
       showSetupRequired(bootstrap.connector || { state: 'offline' });
       return true;
     case 'unavailable':
-      showUnavailablePage(bootstrap.message || 'Not available for this page');
+      showUnavailablePage(
+        bootstrap.message ||
+          tr(
+            'extensionNotAvailablePage',
+            'Not available for this page',
+            undefined,
+          ),
+      );
       return true;
     case 'private': {
       currentPage.tab = bootstrap.tab || null;
@@ -2778,7 +2889,12 @@ async function renderPreparedPopup(bootstrap) {
       return true;
     case 'data-unavailable':
       showDesktopDataUnavailable(
-        bootstrap.error || 'Desktop page data unavailable.',
+        bootstrap.error ||
+          tr(
+            'extensionDesktopPageDataUnavailable',
+            'Desktop page data unavailable.',
+            undefined,
+          ),
         bootstrap.diagnostic || null,
       );
       return true;
@@ -2804,6 +2920,8 @@ async function loadConnectedDashboard(connector) {
 }
 
 async function initPopup() {
+  await initializeExtensionI18n();
+  localizeDocument();
   await applyTheme();
   try {
     const bootstrap = await consumePopupBootstrap();

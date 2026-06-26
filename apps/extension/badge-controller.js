@@ -17,17 +17,32 @@ export function createBadgeController({
   resolveTabUrl = (_tabId, url) => url,
   getBadgeAccentColor = async () => '#078C9B',
 }) {
+  const tr = (key, fallback, substitutions) =>
+    api.i18n?.getMessage?.(
+      key,
+      substitutions === undefined
+        ? undefined
+        : Array.isArray(substitutions)
+          ? substitutions
+          : [substitutions],
+    ) || fallback;
   let connectorState = { state: 'starting' };
   let globalConnectorBadgeActive = false;
   let recordingPaused = false;
   let recordingPauseHydrated = false;
   let servicePaused = false;
-  let servicePauseTitle = 'Browser Recall is paused';
+  let servicePauseTitle = tr(
+    'extensionBrowserRecallPaused',
+    'Browser Recall is paused',
+  );
   let spinnerInterval = null;
 
   async function applyRecordingPausedBadge(tabId) {
     await api.action.setTitle({
-      title: 'Browser Recall recording is paused',
+      title: tr(
+        'extensionBrowserRecallRecordingPaused',
+        'Browser Recall recording is paused',
+      ),
       ...(tabId ? { tabId } : {}),
     });
     await api.action.setBadgeText({ text: '', ...(tabId ? { tabId } : {}) });
@@ -96,25 +111,50 @@ export function createBadgeController({
   }
 
   function desktopConnectorBadgeTitle(connector = {}) {
-    if (connector.refuseMode) return 'Browser Recall Desktop queue is full';
+    if (connector.refuseMode)
+      return tr(
+        'extensionBrowserRecallQueueFull',
+        'Browser Recall Desktop queue is full',
+      );
     if (connector.lastError) return connector.lastError;
     switch (connector.state) {
       case 'connected':
-        return 'Browser Recall Desktop connected';
+        return tr(
+          'extensionBrowserRecallDesktopConnected',
+          'Browser Recall Desktop connected',
+        );
       case 'pair_pending':
-        return 'Browser Recall Desktop approval pending';
+        return tr(
+          'extensionBrowserRecallApprovalPending',
+          'Browser Recall Desktop approval pending',
+        );
       case 'pair_denied':
-        return 'Browser Recall Desktop approval denied';
+        return tr(
+          'extensionBrowserRecallApprovalDenied',
+          'Browser Recall Desktop approval denied',
+        );
       case 'auth_failed':
-        return 'Browser Recall Desktop token rejected';
+        return tr(
+          'extensionBrowserRecallTokenRejected',
+          'Browser Recall Desktop token rejected',
+        );
       case 'paused':
-        return 'Browser Recall Desktop is paused';
+        return tr(
+          'extensionBrowserRecallDesktopPaused',
+          'Browser Recall Desktop is paused',
+        );
       case 'connecting':
       case 'starting':
-        return 'Looking for Browser Recall Desktop';
+        return tr(
+          'extensionLookingForDesktop',
+          'Looking for Browser Recall Desktop',
+        );
       case 'offline':
       default:
-        return 'Browser Recall Desktop is offline';
+        return tr(
+          'extensionBrowserRecallDesktopOffline',
+          'Browser Recall Desktop is offline',
+        );
     }
   }
 
@@ -122,7 +162,9 @@ export function createBadgeController({
     await hydrateRecordingPauseState();
     if (recordingPaused) return;
     if (servicePaused) return;
-    await api.action.setTitle({ title: 'Browser Recall' });
+    await api.action.setTitle({
+      title: tr('extensionName', 'Browser Recall'),
+    });
     await api.action.setBadgeText({ text: '' });
     await api.action.setIcon({ path: normalIconPaths });
     globalConnectorBadgeActive = false;
@@ -208,7 +250,10 @@ export function createBadgeController({
       return;
     }
 
-    await api.action.setTitle({ title: 'Browser Recall', tabId });
+    await api.action.setTitle({
+      title: tr('extensionName', 'Browser Recall'),
+      tabId,
+    });
     await api.action.setBadgeText({
       text: '',
       tabId,

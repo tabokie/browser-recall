@@ -12,6 +12,7 @@ const repoRoot = path.join(__dirname, '..');
 const extensionSourceDir = path.join(repoRoot, 'apps/extension');
 const desktopUiSourceDir = path.join(repoRoot, 'apps/desktop/ui');
 const sharedCoreDir = path.join(repoRoot, 'packages/core');
+const sharedLocaleDir = path.join(sharedCoreDir, 'locales');
 const extensionDistDir = path.join(repoRoot, 'dist/extension');
 const chromeExtensionOutDir = path.join(extensionDistDir, 'chrome');
 const firefoxExtensionOutDir = path.join(extensionDistDir, 'firefox');
@@ -85,6 +86,50 @@ function writeExtensionPageIdentityGlobal(outDir) {
   );
 }
 
+function extensionLocaleMessages(messages) {
+  return Object.fromEntries(
+    Object.entries(messages).filter(
+      ([key]) =>
+        key.startsWith('extension') ||
+        key.startsWith('command') ||
+        key.startsWith('common'),
+    ),
+  );
+}
+
+function writeFilteredExtensionLocales(
+  outDir,
+  { browserLocaleNames = false } = {},
+) {
+  const localesOutDir = outDir;
+  fs.rmSync(localesOutDir, { recursive: true, force: true });
+  fs.mkdirSync(localesOutDir, { recursive: true });
+  for (const entry of fs.readdirSync(sharedLocaleDir, {
+    withFileTypes: true,
+  })) {
+    if (!entry.isDirectory()) continue;
+    const source = path.join(sharedLocaleDir, entry.name, 'messages.json');
+    if (!fs.existsSync(source)) continue;
+    const extensionLocale = browserLocaleNames
+      ? entry.name.replaceAll('-', '_')
+      : entry.name;
+    const targetDir = path.join(localesOutDir, extensionLocale);
+    fs.mkdirSync(targetDir, { recursive: true });
+    const messages = JSON.parse(fs.readFileSync(source, 'utf8'));
+    fs.writeFileSync(
+      path.join(targetDir, 'messages.json'),
+      `${JSON.stringify(extensionLocaleMessages(messages), null, 2)}\n`,
+    );
+  }
+}
+
+function writeExtensionLocales(outDir) {
+  writeFilteredExtensionLocales(path.join(outDir, '_locales'), {
+    browserLocaleNames: true,
+  });
+  writeFilteredExtensionLocales(path.join(outDir, 'core', 'locales'));
+}
+
 function ensurePageIdentityContentScript(manifest) {
   const contentScript = manifest.content_scripts?.find((entry) =>
     entry.js?.includes('content.js'),
@@ -101,6 +146,7 @@ function writeExtensionManifest(outDir, browser = 'chrome') {
   const manifestPath = path.join(outDir, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   ensurePageIdentityContentScript(manifest);
+  manifest.default_locale = 'en';
 
   if (browser === 'firefox') {
     manifest.action = {
@@ -143,6 +189,7 @@ function stageTarget(name, outDir = targets[name].defaultOutDir) {
 
 export function stageExtensionAssets(outDir = targets.extension.defaultOutDir) {
   const staged = stageTarget('extension', outDir);
+  writeExtensionLocales(staged);
   writeExtensionPageIdentityGlobal(staged);
   writeExtensionManifest(staged, 'chrome');
   return staged;
@@ -150,6 +197,7 @@ export function stageExtensionAssets(outDir = targets.extension.defaultOutDir) {
 
 export function stageFirefoxExtensionAssets(outDir = firefoxExtensionOutDir) {
   const staged = stageTarget('extension', outDir);
+  writeExtensionLocales(staged);
   writeExtensionPageIdentityGlobal(staged);
   writeExtensionManifest(staged, 'firefox');
   return staged;

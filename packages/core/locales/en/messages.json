@@ -1,0 +1,1494 @@
+{
+  "extensionName": {
+    "message": "Browser Recall",
+    "description": "Product name shown in extension metadata and UI."
+  },
+  "extensionShortName": {
+    "message": "browser-recall",
+    "description": "Lowercase product mark used in compact desktop UI."
+  },
+  "extensionDescription": {
+    "message": "Chrome connector for Browser Recall Desktop. Capture pages in the browser and open the full app locally.",
+    "description": "Extension store and browser management description."
+  },
+  "commandHighlightSelection": {
+    "message": "Highlight selected text or add a page note",
+    "description": "Browser command description."
+  },
+  "commandCaptureSnapshot": {
+    "message": "Capture snapshot of current page",
+    "description": "Browser command description."
+  },
+  "commandLikePage": {
+    "message": "Like the current page",
+    "description": "Browser command description."
+  },
+  "commandDislikePage": {
+    "message": "Dislike the current page",
+    "description": "Browser command description."
+  },
+  "commonAdd": {
+    "message": "Add",
+    "description": "Generic add button label."
+  },
+  "commonBack": {
+    "message": "Back",
+    "description": "Back navigation label."
+  },
+  "commonCancel": {
+    "message": "Cancel",
+    "description": "Generic cancel button label."
+  },
+  "commonClear": {
+    "message": "Clear",
+    "description": "Generic clear button label."
+  },
+  "commonClose": {
+    "message": "Close",
+    "description": "Close button title."
+  },
+  "commonConfirm": {
+    "message": "Confirm",
+    "description": "Confirm button title."
+  },
+  "commonContinue": {
+    "message": "Continue",
+    "description": "Continue navigation label."
+  },
+  "commonDelete": {
+    "message": "Delete",
+    "description": "Generic delete button label."
+  },
+  "commonEnglish": {
+    "message": "English",
+    "description": "English language label."
+  },
+  "commonExplore": {
+    "message": "Explore",
+    "description": "Explore view label."
+  },
+  "commonFlush": {
+    "message": "Flush",
+    "description": "Flush pending writes button label."
+  },
+  "commonImportHistory": {
+    "message": "Import History",
+    "description": "Import history button label."
+  },
+  "commonImportSelected": {
+    "message": "Import Selected",
+    "description": "Import selected items button label."
+  },
+  "commonLoading": {
+    "message": "Loading...",
+    "description": "Generic loading state."
+  },
+  "commonLists": {
+    "message": "Lists",
+    "description": "Lists section label."
+  },
+  "commonRemove": {
+    "message": "Remove",
+    "description": "Generic remove button title."
+  },
+  "commonSettings": {
+    "message": "Settings",
+    "description": "Settings label."
+  },
+  "commonSystem": {
+    "message": "System",
+    "description": "Use system setting option label."
+  },
+  "desktopAddons": {
+    "message": "Add-ons",
+    "description": "Desktop settings group label."
+  },
+  "desktopAddRule": {
+    "message": "Add rule",
+    "description": "Desktop inbox rule add button title."
+  },
+  "desktopAddPageNote": {
+    "message": "+ Add page note",
+    "description": "Page detail add page note button."
+  },
+  "desktopAdvanced": {
+    "message": "Advanced",
+    "description": "Desktop settings group label."
+  },
+  "desktopAppearance": {
+    "message": "Appearance",
+    "description": "Desktop settings group label."
+  },
+  "desktopBrowsersActiveToday": {
+    "message": "Browsers active today",
+    "description": "Paired browser list label."
+  },
+  "desktopCaptureVideos": {
+    "message": "Capture videos in snapshots",
+    "description": "Desktop setting label."
+  },
+  "desktopCacheClearFailed": {
+    "message": "Cache clear failed: $1",
+    "description": "Status shown when cache clearing fails."
+  },
+  "desktopCancelPreview": {
+    "message": "Cancel Preview",
+    "description": "Rule preview cancel button label."
+  },
+  "desktopCheckDevices": {
+    "message": "Check Devices",
+    "description": "Sync devices check button."
+  },
+  "desktopChecking": {
+    "message": "Checking...",
+    "description": "Button label while checking."
+  },
+  "desktopChooseDataFolder": {
+    "message": "Choose Data Folder",
+    "description": "Desktop onboarding data-folder button."
+  },
+  "desktopChangeDataFolder": {
+    "message": "Change Data Folder",
+    "description": "Change data folder button label."
+  },
+  "desktopChoosing": {
+    "message": "Choosing...",
+    "description": "Button label while choosing a data folder."
+  },
+  "desktopClearAllData": {
+    "message": "Clear All Data",
+    "description": "Clear all data button label."
+  },
+  "desktopClearCacheReload": {
+    "message": "Clear Cache & Reload",
+    "description": "Clear cache button label."
+  },
+  "desktopCollapse": {
+    "message": "Collapse",
+    "description": "Collapse list title."
+  },
+  "desktopConnect": {
+    "message": "Connect",
+    "description": "Sync connect button label."
+  },
+  "desktopConnected": {
+    "message": "Connected",
+    "description": "Sync connected state label."
+  },
+  "desktopConnecting": {
+    "message": "Connecting...",
+    "description": "Sync connecting button label."
+  },
+  "desktopCouldNotStartSetup": {
+    "message": "Could not start setup: $1",
+    "description": "Onboarding setup failure."
+  },
+  "desktopColor": {
+    "message": "Color",
+    "description": "Desktop appearance color setting."
+  },
+  "desktopConnection": {
+    "message": "Connection",
+    "description": "Desktop settings group label."
+  },
+  "desktopCreateList": {
+    "message": "Create list",
+    "description": "Create list button title."
+  },
+  "desktopCreateTokenGithub": {
+    "message": "Create Token on GitHub",
+    "description": "Create GitHub token button label."
+  },
+  "desktopCreateGithubRepo": {
+    "message": "Create one on GitHub",
+    "description": "Create GitHub repository link text."
+  },
+  "desktopData": {
+    "message": "Data",
+    "description": "Desktop settings group label."
+  },
+  "desktopDebugLogging": {
+    "message": "Debug logging (resets on restart)",
+    "description": "Desktop debug logging setting."
+  },
+  "desktopDeviceNotConfigured": {
+    "message": "Device not configured",
+    "description": "Desktop storage status when setup is incomplete."
+  },
+  "desktopDisconnectedManageTokensHtml": {
+    "message": "Disconnected. <a href=\"https://github.com/settings/tokens\" target=\"_blank\" style=\"color:#1a73e8;\">Manage tokens on GitHub</a>",
+    "description": "Sync disconnected status with link."
+  },
+  "desktopEmptyRecycleBin": {
+    "message": "Empty Recycle Bin",
+    "description": "Recycle bin action."
+  },
+  "desktopErrorPrefix": {
+    "message": "Error: $1",
+    "description": "Generic error prefix."
+  },
+  "desktopExcludedSites": {
+    "message": "Excluded Sites",
+    "description": "Desktop settings add-on title."
+  },
+  "desktopExcludedSitesDesc": {
+    "message": "Skip recording for matching web address prefixes",
+    "description": "Desktop settings add-on description."
+  },
+  "desktopHistoryBatchSize": {
+    "message": "History loading batch size",
+    "description": "Desktop advanced setting label."
+  },
+  "desktopGetStarted": {
+    "message": "Get Started",
+    "description": "Onboarding completion button."
+  },
+  "desktopHistoryImportHelp": {
+    "message": "Import a JSON array of browser history entries. Supported entry shapes include Chrome-style objects with url, title, and lastVisitTime, or expanded entries with visitTimes.",
+    "description": "History import help text."
+  },
+  "desktopImportBookmarks": {
+    "message": "Import Bookmarks",
+    "description": "Import bookmarks button label."
+  },
+  "desktopImportBookmarksProgress": {
+    "message": "Importing bookmarks into Browser Recall...",
+    "description": "Bookmark import progress message."
+  },
+  "desktopImportBrowserHistoryProgress": {
+    "message": "Importing browser history into Browser Recall...",
+    "description": "History import progress message."
+  },
+  "desktopImportFailed": {
+    "message": "Import failed: $1",
+    "description": "Import failure message."
+  },
+  "desktopImporting": {
+    "message": "Importing...",
+    "description": "Import button busy label."
+  },
+  "desktopDataFolder": {
+    "message": "Data folder: $1",
+    "description": "Configured data folder status."
+  },
+  "desktopSelectFolderPrompt": {
+    "message": "Select the folder where Browser Recall should store its local data.",
+    "description": "Data folder picker prompt."
+  },
+  "desktopChooseFolderContinue": {
+    "message": "Choose a data folder to continue.",
+    "description": "Data folder required message."
+  },
+  "desktopCouldNotUseFolder": {
+    "message": "Could not use that folder: $1",
+    "description": "Data folder failure message."
+  },
+  "desktopLocalStorageFull": {
+    "message": "Local storage full",
+    "description": "Service error message."
+  },
+  "desktopInboxRules": {
+    "message": "Inbox rules",
+    "description": "Desktop inbox rules button title and panel label."
+  },
+  "desktopLanguage": {
+    "message": "Language",
+    "description": "Desktop appearance language setting."
+  },
+  "desktopLaunchAtLogin": {
+    "message": "Launch at login",
+    "description": "Desktop launch-at-login setting."
+  },
+  "desktopLaunchAtLoginLong": {
+    "message": "Launch Browser Recall when you log in",
+    "description": "Onboarding launch-at-login setting."
+  },
+  "desktopNoBrowsersActiveToday": {
+    "message": "No browsers active today.",
+    "description": "Empty paired browser list text."
+  },
+  "desktopNoKnownChildren": {
+    "message": "No known children",
+    "description": "Page relation empty state."
+  },
+  "desktopNoKnownParents": {
+    "message": "No known parents",
+    "description": "Page relation empty state."
+  },
+  "desktopNoDeletedItems": {
+    "message": "No deleted items",
+    "description": "Empty recycle bin text."
+  },
+  "desktopNoLists": {
+    "message": "No lists",
+    "description": "List picker empty state."
+  },
+  "desktopNoMatches": {
+    "message": "No matches",
+    "description": "Rule preview empty state."
+  },
+  "desktopNoMatchingPins": {
+    "message": "No matching pins",
+    "description": "Filtered pin empty state."
+  },
+  "desktopNoPinnedPages": {
+    "message": "No pinned pages",
+    "description": "Pinned page empty state."
+  },
+  "desktopNoPinnedPreview": {
+    "message": "No pinned pages available for preview",
+    "description": "Rule preview empty state for pinned pages."
+  },
+  "desktopNoPinnedPagesPreview": {
+    "message": "No pinned pages available for preview",
+    "description": "Rules pinned preview empty state."
+  },
+  "desktopNoResults": {
+    "message": "No results",
+    "description": "Search empty state."
+  },
+  "desktopNoVisitsPreview": {
+    "message": "No visits found to match against",
+    "description": "Rules visit preview empty state."
+  },
+  "desktopNoteOn": {
+    "message": "Note on $1",
+    "description": "Recycle bin note display name with URL."
+  },
+  "desktopNoteWithSlug": {
+    "message": "Note ($1)",
+    "description": "Recycle bin note display name with slug."
+  },
+  "desktopNoAnnotation": {
+    "message": "No annotation",
+    "description": "Empty note annotation placeholder."
+  },
+  "desktopOnboardingDataHeading": {
+    "message": "Choose your data folder",
+    "description": "Onboarding data-folder heading."
+  },
+  "desktopOnboardingDataText": {
+    "message": "Browser Recall stores plain-text local data in the folder you choose. No default folder is used until you make this choice.",
+    "description": "Onboarding data-folder explanation."
+  },
+  "desktopOnboardingIntro": {
+    "message": "browser-recall saves browsing history, notes, and highlights through Browser Recall Desktop into a local plain-text data folder.",
+    "description": "Onboarding product description."
+  },
+  "desktopOnboardingLiveCapture": {
+    "message": "Live capture",
+    "description": "Onboarding live capture heading."
+  },
+  "desktopOnboardingLiveCaptureText": {
+    "message": "Install the browser extension and pair it from the extension popup. Browser Recall Desktop must stay running in the background to record visits.",
+    "description": "Onboarding live capture explanation."
+  },
+  "desktopOnboardingPickColor": {
+    "message": "Pick a color",
+    "description": "Onboarding color picker heading."
+  },
+  "desktopPairFromBrowserPopup": {
+    "message": "Pair from Browser Popup",
+    "description": "Desktop pairing button label."
+  },
+  "desktopPairInstructions": {
+    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "description": "Status shown when desktop pairing is ready."
+  },
+  "desktopPageDetailsUnavailable": {
+    "message": "Page details unavailable",
+    "description": "Page detail empty state."
+  },
+  "desktopParents": {
+    "message": "Parents",
+    "description": "Page relation section label."
+  },
+  "desktopPatternRequired": {
+    "message": "Pattern is required",
+    "description": "Rule validation error."
+  },
+  "desktopPinned": {
+    "message": "Pinned",
+    "description": "Pinned pages section label."
+  },
+  "desktopPinnedPages": {
+    "message": "Pinned Pages",
+    "description": "Pinned pages rule preview label."
+  },
+  "desktopPinSearchCreateList": {
+    "message": "Pin a search to create a list",
+    "description": "Empty list sidebar message."
+  },
+  "desktopPreview": {
+    "message": "Preview",
+    "description": "Preview button label."
+  },
+  "desktopKeyword": {
+    "message": "Keyword",
+    "description": "Rule type label."
+  },
+  "desktopFunction": {
+    "message": "Function",
+    "description": "Rule type label."
+  },
+  "desktopCustomFunction": {
+    "message": "(custom function)",
+    "description": "Rule description fallback."
+  },
+  "desktopUnknown": {
+    "message": "unknown",
+    "description": "Unknown type fallback."
+  },
+  "desktopRemoveRuleFailed": {
+    "message": "Failed to remove rule: $1",
+    "description": "Rule removal failure."
+  },
+  "desktopNoEditRow": {
+    "message": "No edit row",
+    "description": "Rule editor internal validation shown to user."
+  },
+  "desktopFunctionBodyRequired": {
+    "message": "Function body is required",
+    "description": "Rule editor validation."
+  },
+  "desktopUnknownRuleType": {
+    "message": "Unknown rule type",
+    "description": "Rule editor validation."
+  },
+  "desktopRuleKeywordPlaceholder": {
+    "message": "keyword or /regex/",
+    "description": "Keyword rule input placeholder."
+  },
+  "desktopRuleDescriptionPlaceholder": {
+    "message": "description",
+    "description": "Function rule description placeholder."
+  },
+  "desktopSaveEnter": {
+    "message": "Save (Enter)",
+    "description": "Rule editor save button title."
+  },
+  "desktopMatchesChecked": {
+    "message": "$1 matches ($2 checked)",
+    "description": "Rule preview match count."
+  },
+  "desktopRecentVisits": {
+    "message": "Recent Visits",
+    "description": "Rules preview section label."
+  },
+  "desktopReplayWorkerFailed": {
+    "message": "Replay worker failed",
+    "description": "Service error message."
+  },
+  "desktopRecycleBin": {
+    "message": "Recycle Bin",
+    "description": "Recycle bin view label."
+  },
+  "desktopRecycleBinLoadFailed": {
+    "message": "Failed to load recycle bin: $1",
+    "description": "Recycle bin load failure."
+  },
+  "desktopReloadExtension": {
+    "message": "Reload Extension",
+    "description": "Fatal error reload button."
+  },
+  "desktopReloading": {
+    "message": "Reloading...",
+    "description": "Reloading button state."
+  },
+  "desktopRepositoryRequired": {
+    "message": "Repository address is required",
+    "description": "Sync validation message."
+  },
+  "desktopResults": {
+    "message": "Results",
+    "description": "Results section label."
+  },
+  "desktopRestore": {
+    "message": "Restore",
+    "description": "Recycle bin restore button."
+  },
+  "desktopRestoreFailed": {
+    "message": "Failed to restore item: $1",
+    "description": "Recycle bin restore failure."
+  },
+  "desktopPageNotePrefix": {
+    "message": "Page note: ",
+    "description": "Prefix for page-note recycle bin display names."
+  },
+  "desktopSelectBookmarkFile": {
+    "message": "Select an exported bookmarks file to preview folders.",
+    "description": "Bookmark import placeholder."
+  },
+  "desktopSettingsSaved": {
+    "message": "Settings saved",
+    "description": "Status shown after saving settings."
+  },
+  "desktopServiceUnavailable": {
+    "message": "Service unavailable",
+    "description": "Generic service unavailable message."
+  },
+  "desktopSessionStorageFull": {
+    "message": "Session storage full",
+    "description": "Service error message."
+  },
+  "desktopSimilar": {
+    "message": "Similar",
+    "description": "Page relation section label."
+  },
+  "desktopSortBy": {
+    "message": "Sort by",
+    "description": "Filter section label."
+  },
+  "desktopStarting": {
+    "message": "Starting...",
+    "description": "Startup button state."
+  },
+  "desktopStorageAccessFailed": {
+    "message": "Storage access failed",
+    "description": "Service error message."
+  },
+  "desktopStorageUnavailable": {
+    "message": "Storage Unavailable",
+    "description": "Fatal storage error title."
+  },
+  "desktopSync": {
+    "message": "Sync",
+    "description": "Sync add-on title."
+  },
+  "desktopSyncDesc": {
+    "message": "Sync history and notes across devices, not including snapshots",
+    "description": "Sync add-on description."
+  },
+  "desktopSyncNow": {
+    "message": "Sync Now",
+    "description": "Sync now button label."
+  },
+  "desktopSyncing": {
+    "message": "Syncing...",
+    "description": "Sync button busy label."
+  },
+  "desktopTokenRequired": {
+    "message": "Token is required",
+    "description": "Sync token validation message."
+  },
+  "desktopViewDetails": {
+    "message": "View details",
+    "description": "Result card detail button title."
+  },
+  "desktopWaitingApproval": {
+    "message": "Waiting for approval...",
+    "description": "Pairing button pending label."
+  },
+  "desktopTheme": {
+    "message": "Theme",
+    "description": "Desktop appearance theme setting."
+  },
+  "desktopThemeDark": {
+    "message": "Dark",
+    "description": "Dark theme option."
+  },
+  "desktopThemeLight": {
+    "message": "Light",
+    "description": "Light theme option."
+  },
+  "desktopTitleCleanup": {
+    "message": "Title Cleanup",
+    "description": "Desktop settings add-on title."
+  },
+  "desktopTitleCleanupDesc": {
+    "message": "Clean up page titles per site when recording",
+    "description": "Desktop settings add-on description."
+  },
+  "desktopTooManyResults": {
+    "message": "Too many results to select (limit: 100)",
+    "description": "Bulk selection limit message."
+  },
+  "desktopToggleSidebar": {
+    "message": "Toggle sidebar",
+    "description": "Sidebar toggle title."
+  },
+  "desktopVisitsOverTime": {
+    "message": "Visits over time",
+    "description": "Time chart label."
+  },
+  "extensionCheckAgain": {
+    "message": "Check Again",
+    "description": "Extension setup retry button."
+  },
+  "extensionActionFailedReload": {
+    "message": "$1 - please reload the extension.",
+    "description": "Popup error with reload hint."
+  },
+  "extensionActionFailed": {
+    "message": "Action failed",
+    "description": "Generic extension action failure."
+  },
+  "extensionApproveBrowserDesktop": {
+    "message": "Approve this browser in the desktop app.",
+    "description": "Connector approval pending metadata."
+  },
+  "extensionAddNote": {
+    "message": "Add a note...",
+    "description": "Extension note placeholder."
+  },
+  "extensionAddNoteEsc": {
+    "message": "Add a note... Esc to save.",
+    "description": "Extension note placeholder with keyboard hint."
+  },
+  "extensionAddPageNote": {
+    "message": "+ Page note",
+    "description": "Popup page note add button."
+  },
+  "extensionAddPageNoteEsc": {
+    "message": "Add a page note... Esc to save.",
+    "description": "Extension page note placeholder with keyboard hint."
+  },
+  "extensionAddToList": {
+    "message": "Add to list",
+    "description": "Popup add to list title."
+  },
+  "extensionApprovalPending": {
+    "message": "Approval Pending",
+    "description": "Connector approval pending status."
+  },
+  "extensionApprovalDenied": {
+    "message": "Approval Denied",
+    "description": "Connector approval denied status."
+  },
+  "extensionBlacklisted": {
+    "message": "Blacklisted",
+    "description": "Popup blacklisted page title."
+  },
+  "extensionBrowserRecallApprovalDenied": {
+    "message": "Browser Recall Desktop approval denied",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallApprovalPending": {
+    "message": "Browser Recall Desktop approval pending",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallDesktopConnected": {
+    "message": "Browser Recall Desktop connected",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallDesktopOffline": {
+    "message": "Browser Recall Desktop is offline",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallDesktopPaused": {
+    "message": "Browser Recall Desktop is paused",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallPaused": {
+    "message": "Browser Recall is paused",
+    "description": "Paused service title."
+  },
+  "extensionBrowserRecallQueueFull": {
+    "message": "Browser Recall Desktop queue is full",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallRecordingPaused": {
+    "message": "Browser Recall recording is paused",
+    "description": "Extension badge title."
+  },
+  "extensionBrowserRecallTokenRejected": {
+    "message": "Browser Recall Desktop token rejected",
+    "description": "Extension badge title."
+  },
+  "extensionCannotCapturePdf": {
+    "message": "Cannot capture PDF pages",
+    "description": "Snapshot capture PDF error."
+  },
+  "extensionCaptureFailed": {
+    "message": "Capture failed",
+    "description": "Snapshot capture failure."
+  },
+  "extensionCaptureFrame": {
+    "message": "CAPTURE FRAME",
+    "description": "Popup capture button."
+  },
+  "extensionCaptureIt": {
+    "message": "Capture It",
+    "description": "Capture blacklisted page button."
+  },
+  "extensionCaptureNoContent": {
+    "message": "Capture failed: page returned no content",
+    "description": "Snapshot capture empty page error."
+  },
+  "extensionCapturing": {
+    "message": "Capturing...",
+    "description": "Capture busy label."
+  },
+  "extensionCheckAgainApproval": {
+    "message": "Check again to request approval.",
+    "description": "Connector retry approval metadata."
+  },
+  "extensionConnectionResetActionFailed": {
+    "message": "Browser Recall action failed because the extension connection was reset. Reload this page and try again.",
+    "description": "Extension action runtime failure message."
+  },
+  "extensionContextInvalidated": {
+    "message": "Extension context invalidated. Please refresh the page and try again.",
+    "description": "Popup runtime invalidated message."
+  },
+  "extensionCreateListNamed": {
+    "message": "Create \"$1\"",
+    "description": "List picker create option."
+  },
+  "extensionCreateList": {
+    "message": "Create \"$1\"",
+    "description": "List picker create option."
+  },
+  "extensionCreateNoteFailed": {
+    "message": "Create note failed",
+    "description": "Create note failure."
+  },
+  "extensionDeleteHighlight": {
+    "message": "Delete highlight",
+    "description": "Delete highlight button title."
+  },
+  "extensionDeleteSnapshot": {
+    "message": "Delete snapshot",
+    "description": "Delete snapshot button title."
+  },
+  "extensionDesktopBridgeUnavailable": {
+    "message": "Desktop bridge unavailable",
+    "description": "Extension desktop bridge unavailable error."
+  },
+  "extensionDesktopApprovedConnectionFailed": {
+    "message": "Desktop approved, but connection failed.",
+    "description": "Connector approved but disconnected metadata."
+  },
+  "extensionDesktopBufferFull": {
+    "message": "Browser Recall Desktop buffer full - start the desktop app or wait for the queue to drain.",
+    "description": "Extension desktop command buffer full message."
+  },
+  "extensionDesktopEventQueueFull": {
+    "message": "Browser Recall Desktop event queue is full - start the desktop app or wait for the queue to drain.",
+    "description": "Extension desktop event queue full message."
+  },
+  "extensionDesktopConnected": {
+    "message": "Desktop Connected",
+    "description": "Connector connected status."
+  },
+  "extensionDesktopConnectionActive": {
+    "message": "Desktop connection active.",
+    "description": "Connector connected metadata."
+  },
+  "extensionDesktopOfflineMixed": {
+    "message": "Browser Recall Desktop is offline.",
+    "description": "Connector offline sentence."
+  },
+  "extensionDesktopPageDataUnavailable": {
+    "message": "Desktop page data unavailable.",
+    "description": "Popup bootstrap page data unavailable fallback."
+  },
+  "extensionDesktopPopupAccessFailed": {
+    "message": "Desktop popup access check failed",
+    "description": "Popup access check failure."
+  },
+  "extensionDesktopPaused": {
+    "message": "Desktop Paused",
+    "description": "Connector paused status."
+  },
+  "extensionDesktopNotConnectedRefresh": {
+    "message": "Browser Recall Desktop is not connected yet. Start the desktop app and refresh from the popup.",
+    "description": "Popup desktop disconnected failure."
+  },
+  "extensionDesktopQueueFull": {
+    "message": "Desktop Queue Full",
+    "description": "Connector queue full status."
+  },
+  "extensionDeviceId": {
+    "message": "Device $1",
+    "description": "Connector device id metadata."
+  },
+  "extensionDisliked": {
+    "message": "Disliked",
+    "description": "Dislike notification."
+  },
+  "extensionEdit": {
+    "message": "Edit",
+    "description": "Edit button title."
+  },
+  "extensionEditNote": {
+    "message": "Edit note",
+    "description": "Edit note button title."
+  },
+  "extensionHighlights": {
+    "message": "Highlights",
+    "description": "Highlights panel title."
+  },
+  "extensionHighlightsCount": {
+    "message": "Highlights ($1)",
+    "description": "Highlights panel title with count."
+  },
+  "extensionHighlightFailed": {
+    "message": "Highlight failed",
+    "description": "Highlight failure."
+  },
+  "extensionLastCheckAuthenticatedStatusFailed": {
+    "message": "Last check: authenticated, but status failed.",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastCheckAuthenticatedStatusFailedDetail": {
+    "message": "Last check: authenticated, but status failed ($1).",
+    "description": "Connector diagnostic with detail."
+  },
+  "extensionLastCheckApprovalDenied": {
+    "message": "Last check: desktop approval was denied.",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastCheckCode": {
+    "message": "Last check: $1.",
+    "description": "Connector diagnostic code fallback."
+  },
+  "extensionLastCheckMessage": {
+    "message": "Last check: $1",
+    "description": "Connector diagnostic message fallback."
+  },
+  "extensionLastCheckNoConnection": {
+    "message": "Last check: no usable desktop connection.",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastCheckNoConnectionDetail": {
+    "message": "Last check: no usable desktop connection ($1).",
+    "description": "Connector diagnostic with port detail."
+  },
+  "extensionLastCheckReconnectFailed": {
+    "message": "Last check: desktop connection did not succeed in $1.",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastCheckSocketClosed": {
+    "message": "Last check: socket closed.",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastCheckSocketClosedDetail": {
+    "message": "Last check: socket closed ($1).",
+    "description": "Connector diagnostic with socket state."
+  },
+  "extensionLastCheckStatusRefreshFailed": {
+    "message": "Last check: status refresh failed.",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastCheckStatusRefreshFailedDetail": {
+    "message": "Last check: status refresh failed ($1).",
+    "description": "Connector diagnostic with detail."
+  },
+  "extensionLastCheckTokenRejected": {
+    "message": "Last check: desktop rejected the saved token.",
+    "description": "Connector diagnostic."
+  },
+  "extensionLastDiagnostic": {
+    "message": " Last diagnostic: $1.",
+    "description": "Connector diagnostic suffix."
+  },
+  "extensionLastPortFailures": {
+    "message": " Last port failures: $1.",
+    "description": "Connector diagnostic suffix."
+  },
+  "extensionLikeFailed": {
+    "message": "Like failed",
+    "description": "Like action failure."
+  },
+  "extensionLiked": {
+    "message": "Liked",
+    "description": "Like notification."
+  },
+  "extensionLookingForDesktop": {
+    "message": "Looking for Browser Recall Desktop",
+    "description": "Extension badge title."
+  },
+  "extensionManageSettings": {
+    "message": "Manage in Settings",
+    "description": "Popup settings action."
+  },
+  "extensionNoAnnotation": {
+    "message": "No annotation",
+    "description": "Popup no annotation placeholder."
+  },
+  "extensionNoLists": {
+    "message": "No lists",
+    "description": "Popup no lists message."
+  },
+  "extensionNoTargetTab": {
+    "message": "No target tab",
+    "description": "Extension notification routing failure."
+  },
+  "extensionNotAvailablePage": {
+    "message": "Not available for this page",
+    "description": "Popup unsupported page message."
+  },
+  "extensionOpenDesktopFlush": {
+    "message": "Open desktop to flush capture.",
+    "description": "Connector queue full meta."
+  },
+  "extensionPageDataUnavailable": {
+    "message": "Page Data Unavailable",
+    "description": "Popup page data unavailable title."
+  },
+  "extensionPageNote": {
+    "message": "Page Note",
+    "description": "Page note overlay title."
+  },
+  "extensionRatePageFailed": {
+    "message": "ratePage failed",
+    "description": "Rating command failure."
+  },
+  "extensionRefreshFailed": {
+    "message": "Failed to refresh.",
+    "description": "Popup connector refresh failure."
+  },
+  "extensionResumeCaptureDesktop": {
+    "message": "Resume capture from desktop settings.",
+    "description": "Connector paused metadata."
+  },
+  "extensionRetryWindow": {
+    "message": "the retry window",
+    "description": "Connector diagnostic retry window label."
+  },
+  "extensionConfigureShortcuts": {
+    "message": "Configure Shortcuts",
+    "description": "Extension options button."
+  },
+  "extensionCurrentPageReceipt": {
+    "message": "current page receipt",
+    "description": "Extension popup placeholder URL text."
+  },
+  "extensionDesktopControl": {
+    "message": "Desktop Control",
+    "description": "Extension options heading."
+  },
+  "extensionDesktopOffline": {
+    "message": "DESKTOP OFFLINE",
+    "description": "Extension popup desktop offline heading."
+  },
+  "extensionKeyboardShortcuts": {
+    "message": "Keyboard Shortcuts",
+    "description": "Extension options heading."
+  },
+  "extensionMainUiRunsInDesktop": {
+    "message": "The main Browser Recall interface runs in the desktop app.",
+    "description": "Extension options explanatory text."
+  },
+  "extensionNotSet": {
+    "message": "Not set",
+    "description": "Keyboard shortcut missing value."
+  },
+  "extensionOpenBrowserRecall": {
+    "message": "Open Browser Recall",
+    "description": "Extension options open app button."
+  },
+  "extensionOpenDesktop": {
+    "message": "Open Desktop",
+    "description": "Extension popup open desktop button."
+  },
+  "extensionPauseTracing": {
+    "message": "Pause tracing",
+    "description": "Extension popup recording toggle title."
+  },
+  "extensionStartDesktop": {
+    "message": "Start Browser Recall Desktop to resume live capture.",
+    "description": "Extension setup message."
+  },
+  "extensionStartDesktopCapture": {
+    "message": "Start Browser Recall Desktop to resume live capture.",
+    "description": "Connector offline metadata."
+  },
+  "extensionStorageUnavailable": {
+    "message": "Storage Unavailable",
+    "description": "Extension fatal error title."
+  },
+  "extensionSnapshotCaptured": {
+    "message": "Snapshot captured",
+    "description": "Snapshot capture success notification."
+  },
+  "extensionSomethingWentWrong": {
+    "message": "Something went wrong",
+    "description": "Generic extension error."
+  },
+  "extensionTokenRejected": {
+    "message": "Token Rejected",
+    "description": "Connector token rejected status."
+  },
+  "extensionUpdateFailed": {
+    "message": "Update failed",
+    "description": "Update note failure."
+  },
+  "extensionWaitingApproval": {
+    "message": "Waiting for Approval",
+    "description": "Connector approval pending button."
+  },
+  "extensionSearchOrCreate": {
+    "message": "Search or create...",
+    "description": "List picker search placeholder."
+  },
+  "extensionSnapshotMissingParams": {
+    "message": "Missing snapshot parameters.",
+    "description": "Snapshot viewer error."
+  },
+  "extensionSnapshotNotFound": {
+    "message": "Snapshot not found.",
+    "description": "Snapshot viewer error."
+  },
+  "extensionReloaded": {
+    "message": "Browser Recall extension reloaded. Please reload the page and try again.",
+    "description": "Runtime invalidated message."
+  },
+  "extensionReloadExtension": {
+    "message": "Reload Extension",
+    "description": "Extension fatal error reload button."
+  },
+  "extensionOpenAppFallback": {
+    "message": "Can't open the app? Launch it from your Applications folder, then try again.",
+    "description": "Extension options fallback notice."
+  },
+  "extensionToggleRecording": {
+    "message": "Toggle recording",
+    "description": "Extension popup recording toggle accessibility label."
+  },
+  "commonChineseSimplified": {
+    "message": "简体中文",
+    "description": "Simplified Chinese language label."
+  },
+  "desktopAddPageNotePlaceholder": {
+    "message": "Add a page note...",
+    "description": "Localized UI text."
+  },
+  "desktopAlreadyPaired": {
+    "message": "Chrome is already paired with Browser Recall Desktop",
+    "description": "Localized UI text."
+  },
+  "desktopApprovePairing": {
+    "message": "Approve the pairing request in Browser Recall Desktop",
+    "description": "Localized UI text."
+  },
+  "desktopAsGithubUser": {
+    "message": "as @$1",
+    "description": "Connected GitHub user suffix."
+  },
+  "desktopAuthentication": {
+    "message": "Authentication",
+    "description": "Localized UI text."
+  },
+  "desktopBookmarkPreviewPlaceholder": {
+    "message": "Select an exported bookmarks file to preview folders.",
+    "description": "Localized UI text."
+  },
+  "desktopBridgeCheckFailed": {
+    "message": "Desktop bridge check failed: $1",
+    "description": "Desktop bridge check failure."
+  },
+  "desktopCancelling": {
+    "message": "Cancelling...",
+    "description": "Localized UI text."
+  },
+  "desktopCannotDeleteHistory": {
+    "message": "Cannot delete history",
+    "description": "Localized UI text."
+  },
+  "desktopCanOnlyPasteIntoList": {
+    "message": "Can only paste into a list",
+    "description": "Localized UI text."
+  },
+  "desktopChildren": {
+    "message": "Children",
+    "description": "Localized UI text."
+  },
+  "desktopClearAllDataFinalConfirm": {
+    "message": "Final confirmation: Delete all history files?",
+    "description": "Localized UI text."
+  },
+  "desktopClearAllDataWarning": {
+    "message": "Warning: this will delete all files in your storage directory.\n\nThis cannot be undone. Are you absolutely sure?",
+    "description": "Localized UI text."
+  },
+  "desktopClearDataFailed": {
+    "message": "Error clearing data: $1",
+    "description": "Clear all data failure."
+  },
+  "desktopClearedFiles": {
+    "message": "Cleared $1 files/directories",
+    "description": "Clear all data success."
+  },
+  "desktopClearing": {
+    "message": "Clearing...",
+    "description": "Localized UI text."
+  },
+  "desktopClearReload": {
+    "message": "Clear & Reload",
+    "description": "Localized UI text."
+  },
+  "desktopColumnTitle": {
+    "message": "Title",
+    "description": "Localized UI text."
+  },
+  "desktopCurrentDevice": {
+    "message": "(current)",
+    "description": "Localized UI text."
+  },
+  "desktopDaysAgo": {
+    "message": "$1d ago",
+    "description": "Relative time in days."
+  },
+  "desktopDevices": {
+    "message": "Devices",
+    "description": "Localized UI text."
+  },
+  "desktopExperimental": {
+    "message": "Experimental",
+    "description": "Localized UI text."
+  },
+  "desktopExploreResults": {
+    "message": "Explore results",
+    "description": "Localized UI text."
+  },
+  "desktopFilters": {
+    "message": "Filters",
+    "description": "Localized UI text."
+  },
+  "desktopFirstSeen": {
+    "message": "First seen",
+    "description": "Localized UI text."
+  },
+  "desktopFirstVisit": {
+    "message": "First visit",
+    "description": "Localized UI text."
+  },
+  "desktopFirstVisited": {
+    "message": "First visited:",
+    "description": "Localized UI text."
+  },
+  "desktopFixSettingsBeforeSync": {
+    "message": "Fix settings before syncing",
+    "description": "Localized UI text."
+  },
+  "desktopFlushed": {
+    "message": "Flushed!",
+    "description": "Localized UI text."
+  },
+  "desktopFlushing": {
+    "message": "Flushing...",
+    "description": "Localized UI text."
+  },
+  "desktopFocus": {
+    "message": "Focus",
+    "description": "Localized UI text."
+  },
+  "desktopGithubAuthExpired": {
+    "message": "GitHub authorization expired - please reconnect.",
+    "description": "Localized UI text."
+  },
+  "desktopGithubNotConnected": {
+    "message": "GitHub not connected - click \"Connect with GitHub\" first",
+    "description": "Localized UI text."
+  },
+  "desktopGithubPrefilled": {
+    "message": "Opens GitHub with pre-filled settings",
+    "description": "Localized UI text."
+  },
+  "desktopHasHighlights": {
+    "message": "Has highlights",
+    "description": "Localized UI text."
+  },
+  "desktopHasSnapshots": {
+    "message": "Has snapshots",
+    "description": "Localized UI text."
+  },
+  "desktopHistoryImportHelpHtml": {
+    "message": "Import a JSON array of browser history entries. Supported entry shapes include Chrome-style objects with <code>url</code>, <code>title</code>, and <code>lastVisitTime</code>, or expanded entries with <code>visitTimes</code>.",
+    "description": "Localized UI text."
+  },
+  "desktopHistoryInvalidJson": {
+    "message": "invalid JSON or unsupported history export format",
+    "description": "Localized UI text."
+  },
+  "desktopHistoryParseFailed": {
+    "message": "Could not parse history JSON: $1",
+    "description": "History import JSON parse failure."
+  },
+  "desktopHistoryReadyToImport": {
+    "message": "Ready to import $1 visits across $2 pages.",
+    "description": "History import preview summary."
+  },
+  "desktopHoursAgo": {
+    "message": "$1h ago",
+    "description": "Relative time in hours."
+  },
+  "desktopImportBookmarksDone": {
+    "message": "Done! Imported $1 lists with $2 bookmarks.",
+    "description": "Bookmark import success summary."
+  },
+  "desktopImportHistoryDone": {
+    "message": "Done! Imported $1 visits across $2 pages.",
+    "description": "History import success summary."
+  },
+  "desktopImportSkipped": {
+    "message": "$1 items skipped during parsing or import.",
+    "description": "History import skipped item summary."
+  },
+  "desktopInboxRulesHint": {
+    "message": "Rules automatically sort new pages into this list. Keyword rules match against page title, web address, and body text. Function rules use a custom JS predicate that returns true/false.",
+    "description": "Localized UI text."
+  },
+  "desktopIntervalMinutes": {
+    "message": "Interval (min)",
+    "description": "Localized UI text."
+  },
+  "desktopInvalidToken": {
+    "message": "Invalid token: $1",
+    "description": "Sync token validation failure."
+  },
+  "desktopItemsSkipped": {
+    "message": "$1 items skipped",
+    "description": "Import skipped item summary."
+  },
+  "desktopJustNow": {
+    "message": "just now",
+    "description": "Localized UI text."
+  },
+  "desktopLastSeen": {
+    "message": "Last seen",
+    "description": "Localized UI text."
+  },
+  "desktopLastVisit": {
+    "message": "Last visit",
+    "description": "Localized UI text."
+  },
+  "desktopLastVisited": {
+    "message": "Last visited:",
+    "description": "Localized UI text."
+  },
+  "desktopMakePrivate": {
+    "message": "(make it private)",
+    "description": "Localized UI text."
+  },
+  "desktopManualSetupHtml": {
+    "message": "<li> Create a <strong>private</strong> repository on <a href=\"https://github.com/new\" target=\"_blank\">GitHub</a> (e.g. <code>portal-sync</code>). Leave it empty. </li> <li> Go to <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">Fine-grained tokens</a> and create a token: <ul> <li> Set expiration to <strong>No expiration</strong> </li> <li> Under \"Repository access\", choose <strong>Only select repositories</strong> and pick your sync repo </li> <li> Under \"Permissions\", add <strong>Contents</strong> and set to <strong>Read and write</strong> </li> </ul> </li> <li>Paste the repository address and token above.</li>",
+    "description": "Localized UI text."
+  },
+  "desktopManualSetupInstructions": {
+    "message": "Manual setup instructions",
+    "description": "Localized UI text."
+  },
+  "desktopMemoryCacheHint": {
+    "message": "Settings and metadata cached in browser storage for fast access. The source of truth is settings.json in your storage directory.",
+    "description": "Localized UI text."
+  },
+  "desktopMemoryCacheHtml": {
+    "message": "<span id=\"cacheSize\">...</span> memory cache <span class=\"hint-icon\">?<span class=\"hint-tip\" data-i18n=\"desktopMemoryCacheHint\">Settings and metadata cached in browser storage for fast access. The source of truth is settings.json in your storage directory.</span></span>",
+    "description": "Localized UI text."
+  },
+  "desktopMinutesAgo": {
+    "message": "$1m ago",
+    "description": "Relative time in minutes."
+  },
+  "desktopNoBlockedPrefixes": {
+    "message": "No blocked web address prefixes",
+    "description": "Localized UI text."
+  },
+  "desktopNoImportableHistory": {
+    "message": "No importable history entries found in this file.",
+    "description": "Localized UI text."
+  },
+  "desktopNoSyncRepo": {
+    "message": "Don't have a sync repo?",
+    "description": "Localized UI text."
+  },
+  "desktopNoTrimmingRules": {
+    "message": "No trimming rules",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingHighlightsTextHtml": {
+    "message": "Select text and press <kbd>Alt+H</kbd> to highlight it, or press <kbd>Alt+H</kbd> with no selection to add a note to the current page.",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingHighlightsTitle": {
+    "message": "Highlights & notes",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingHistoryText": {
+    "message": "Every page visit is automatically saved by Browser Recall Desktop and stays searchable by title, web address, and content.",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingHistoryTitle": {
+    "message": "Browsing history",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingListsText": {
+    "message": "Organize pages into lists. Use automatic inbox rules to create a live-updating list.",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingSnapshotsTextHtml": {
+    "message": "Press <kbd>Alt+S</kbd> to save an offline copy of the page through the desktop bridge.",
+    "description": "Localized UI text."
+  },
+  "desktopOnboardingSnapshotsTitle": {
+    "message": "Page snapshots",
+    "description": "Localized UI text."
+  },
+  "desktopOpenPopupPair": {
+    "message": "Open the Browser Recall popup in Chrome and click Pair with desktop.",
+    "description": "Localized UI text."
+  },
+  "desktopPageProperties": {
+    "message": "Page properties",
+    "description": "Localized UI text."
+  },
+  "desktopPasteExistingToken": {
+    "message": "or paste an existing token:",
+    "description": "Localized UI text."
+  },
+  "desktopPausedLower": {
+    "message": "paused",
+    "description": "Localized UI text."
+  },
+  "desktopPauseSync": {
+    "message": "Pause sync",
+    "description": "Localized UI text."
+  },
+  "desktopPendingWritesHtml": {
+    "message": "<span id=\"bufferSize\">0</span> pending writes",
+    "description": "Localized UI text."
+  },
+  "desktopPinTime": {
+    "message": "Pin time",
+    "description": "Localized UI text."
+  },
+  "desktopProvider": {
+    "message": "Provider",
+    "description": "Localized UI text."
+  },
+  "desktopPulledAgo": {
+    "message": "pulled $1",
+    "description": "Remote sync pull timestamp."
+  },
+  "desktopPulling": {
+    "message": "pulling...",
+    "description": "Localized UI text."
+  },
+  "desktopPushedAgo": {
+    "message": "pushed $1",
+    "description": "Local sync push timestamp."
+  },
+  "desktopPushing": {
+    "message": "pushing...",
+    "description": "Localized UI text."
+  },
+  "desktopQuery": {
+    "message": "Query",
+    "description": "Localized UI text."
+  },
+  "desktopRemainingWrites": {
+    "message": "$1 remaining",
+    "description": "Pending write flush remaining count."
+  },
+  "desktopRememberToken": {
+    "message": "Remember token",
+    "description": "Localized UI text."
+  },
+  "desktopRememberTokenHint": {
+    "message": "When off, the token is kept in memory only and cleared on browser restart.",
+    "description": "Localized UI text."
+  },
+  "desktopRemoveAfterPipe": {
+    "message": "Remove after |",
+    "description": "Localized UI text."
+  },
+  "desktopRemoveBrackets": {
+    "message": "Remove [brackets]",
+    "description": "Localized UI text."
+  },
+  "desktopRemoveParens": {
+    "message": "Remove (parens)",
+    "description": "Localized UI text."
+  },
+  "desktopRepositoryAddress": {
+    "message": "Repository address",
+    "description": "Localized UI text."
+  },
+  "desktopResumeSync": {
+    "message": "Resume sync",
+    "description": "Localized UI text."
+  },
+  "desktopRetentionDays": {
+    "message": "Retention (days)",
+    "description": "Localized UI text."
+  },
+  "desktopSelectAllUnavailable": {
+    "message": "Select all is not available here",
+    "description": "Localized UI text."
+  },
+  "desktopSettingFailed": {
+    "message": "Desktop setting failed: $1",
+    "description": "Desktop shell setting failure."
+  },
+  "desktopSyncDisabled": {
+    "message": "Sync disabled: $1",
+    "description": "Sync disabled status detail."
+  },
+  "desktopSyncErrorRetry": {
+    "message": "Error (will retry): $1",
+    "description": "Sync retryable failure."
+  },
+  "desktopSyncSkipped": {
+    "message": "Sync skipped",
+    "description": "Localized UI text."
+  },
+  "desktopTime": {
+    "message": "Time",
+    "description": "Localized UI text."
+  },
+  "desktopToggleFailed": {
+    "message": "Toggle failed: $1",
+    "description": "Sync device toggle failure."
+  },
+  "desktopVisitedMultipleTimes": {
+    "message": "Visited multiple times",
+    "description": "Localized UI text."
+  },
+  "desktopVisits": {
+    "message": "Visits",
+    "description": "Localized UI text."
+  },
+  "extensionFirst": {
+    "message": "First",
+    "description": "Localized UI text."
+  },
+  "desktopColumnRelevance": {
+    "message": "Rel",
+    "description": "Search relevance column label."
+  },
+  "desktopColumnLastVisit": {
+    "message": "Last Visit",
+    "description": "Last visit column label."
+  },
+  "desktopColumnFirstVisit": {
+    "message": "First Visit",
+    "description": "First visit column label."
+  },
+  "desktopColumnAttention": {
+    "message": "Att",
+    "description": "Attention score column label."
+  },
+  "desktopColumnPinTime": {
+    "message": "Pin Time",
+    "description": "Pin time column label."
+  },
+  "desktopDataFolderReady": {
+    "message": "Data folder ready",
+    "description": "Storage setup ready status."
+  },
+  "desktopDeviceId": {
+    "message": "Device $1",
+    "description": "Desktop device id label."
+  },
+  "desktopDeviceIdentityUnavailable": {
+    "message": "Device identity unavailable",
+    "description": "Missing desktop device identity status."
+  },
+  "desktopDeviceIdentityRestart": {
+    "message": "Device identity unavailable. Try restarting Browser Recall.",
+    "description": "Startup failure when desktop device identity is unavailable."
+  }
+}
