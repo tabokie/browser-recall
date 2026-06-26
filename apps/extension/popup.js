@@ -1373,6 +1373,8 @@ function borderBlockSize(element) {
 
 function positionListPickerOverlay(wrap, picker, options = {}) {
   if (!wrap || !picker) return;
+  const input = picker.querySelector('#listPickerInput');
+  if (!wrap.isConnected || !picker.isConnected || !input) return;
   const gap = 5;
   const listMaxHeight = 160;
   const listMinHeight = 48;
@@ -1395,7 +1397,6 @@ function positionListPickerOverlay(wrap, picker, options = {}) {
   picker.style.top = '0px';
   picker.style.width = `${width}px`;
 
-  const input = picker.querySelector('#listPickerInput');
   const inputHeight = input.getBoundingClientRect().height;
   const pickerFrameHeight = borderBlockSize(picker);
   const belowTop = Math.max(gap, wrapRect.bottom + gap);
@@ -1484,6 +1485,15 @@ function configureListPickerInput(input) {
   return input;
 }
 
+function isListSearchInputComposing(input) {
+  return Boolean(input?.__browserRecallListSearchComposing);
+}
+
+function setListSearchInputCursorToEnd(input) {
+  if (isListSearchInputComposing(input)) return;
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+
 function openListPicker(lists, allPins, options = {}) {
   const { initialQuery = '', loading = false, inputElement = null } = options;
   // Close if already open
@@ -1530,7 +1540,17 @@ function openListPicker(lists, allPins, options = {}) {
   let activePickerIndex = -1;
   let pickerScrollTop = 0;
 
+  function isCurrentPicker() {
+    return (
+      document.getElementById('listPicker') === picker &&
+      picker.isConnected &&
+      picker.contains(input) &&
+      input.id === 'listPickerInput'
+    );
+  }
+
   function positionPickerForRenderedRows() {
+    if (!isCurrentPicker()) return;
     const renderedHeight = optionsEl.getBoundingClientRect().height;
     positionListPickerOverlay(wrap, picker, {
       listContentHeight: renderedHeight || optionsEl.scrollHeight,
@@ -1666,6 +1686,7 @@ function openListPicker(lists, allPins, options = {}) {
   }
 
   function renderPickerRows() {
+    if (!isCurrentPicker()) return;
     if (isLoading) {
       optionsEl.innerHTML = `<div style="padding: 8px 10px; font-size: 11px; color: #999; text-align: center;">Loading...</div>`;
       activePickerIndex = -1;
@@ -1743,12 +1764,12 @@ function openListPicker(lists, allPins, options = {}) {
   renderPickerRows();
   if (inputElement) {
     input.focus({ preventScroll: true });
-    input.setSelectionRange(input.value.length, input.value.length);
+    setListSearchInputCursorToEnd(input);
   } else if (shouldRestoreFocus) {
     // Use setTimeout to avoid the click event that opened the picker from immediately focusing away.
     setTimeout(() => {
       input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
+      setListSearchInputCursorToEnd(input);
     }, 0);
   }
 
@@ -1868,6 +1889,7 @@ function openListPicker(lists, allPins, options = {}) {
   return {
     input,
     setData(nextLists, nextPins) {
+      if (!isCurrentPicker()) return;
       pickerLists = nextLists;
       pickerPins = nextPins;
       isLoading = false;
@@ -1918,6 +1940,7 @@ function configureListSearchCaptureInput(input) {
   input.autocapitalize = 'off';
   input.spellcheck = false;
   input.value = '';
+  input.__browserRecallListSearchComposing = false;
   return input;
 }
 
@@ -1935,8 +1958,12 @@ function bindListSearchCapture() {
     void openListPickerFromTyping(input.value, input);
   });
   input.addEventListener('compositionstart', () => {
+    input.__browserRecallListSearchComposing = true;
     if (input.id !== 'listSearchCaptureInput') return;
     void openListPickerFromTyping(input.value, input);
+  });
+  input.addEventListener('compositionend', () => {
+    input.__browserRecallListSearchComposing = false;
   });
 }
 
@@ -1962,10 +1989,7 @@ async function openListPickerFromTyping(
     if (initialQuery) {
       existingInput.value = initialQuery;
       existingInput.dispatchEvent(new Event('input', { bubbles: true }));
-      existingInput.setSelectionRange(
-        existingInput.value.length,
-        existingInput.value.length,
-      );
+      setListSearchInputCursorToEnd(existingInput);
     }
     existingInput.focus();
     return;
@@ -1981,10 +2005,7 @@ async function openListPickerFromTyping(
   if (initialQuery && pickerController?.input && !inputElement) {
     pickerController.input.value = initialQuery;
     pickerController.input.dispatchEvent(new Event('input', { bubbles: true }));
-    pickerController.input.setSelectionRange(
-      initialQuery.length,
-      initialQuery.length,
-    );
+    setListSearchInputCursorToEnd(pickerController.input);
   }
   try {
     const lists = await loadLists();
@@ -2007,7 +2028,7 @@ function handleListSearchShortcut(event) {
   if (!document.getElementById('dashboardContent')) return;
 
   event.preventDefault();
-  void openListPickerFromTyping();
+  void openListPickerFromTyping(event.key);
 }
 
 async function createListAndPin(name) {

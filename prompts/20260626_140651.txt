@@ -1,0 +1,11 @@
+- There're some issues with the extension popup punch-in text input (opening the popup, directly type in to open list menu).
+(1) Sometimes when the input is right after opening popup, it reports an error "cannot read properties of null (reading 'getBoundingClientRect')" and drops the first character.
+(2) Sometimes when using CJK IME, the first character can still be dropped, but the behavior is different from what's fixed in 88d8c3b6. In 88d8c3b6, the behavior is the first character is dropped no matter how. In current code, if you input only one character, that one char is working well, but then you input another character, the first char will disappear but subsequent chars working well.
+- The second issue is not fixed, figure out why test is not covering it.
+- In the original problem statement "In current code, if you input only one character, that one char is working well, but then you input another character, the first char will disappear but subsequent chars working well.", by "char" I don't mean the CJK char, I mean the pingying char.
+- What about the old fix? Is it also unnecessary?
+- I don't mean the old commit, I mean the first round of fix in this session.
+- Go ahead
+- [$gap](/Users/xyt/.agents/skills/gap/SKILL.md) 
+- Please review my uncommitted changes
+- [$finish](/Users/xyt/.agents/skills/finish/SKILL.md) exclude "tests/e2e/desktop-visual.spec.js" and "apps/desktop/ui/index.html", model=GPT-5.5 Codex

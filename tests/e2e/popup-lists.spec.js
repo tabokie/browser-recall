@@ -1602,6 +1602,167 @@ test.describe('Popup list chip behavior', () => {
     await page.close();
   });
 
+  test('typing before the popup capture input is focused keeps the first printable key', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    localServer.addPage('/popup-immediate-list-search', {
+      title: 'Popup Immediate List Search',
+      body: '<main>Popup immediate list search page</main>',
+    });
+    const url = localServer.url('/popup-immediate-list-search');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:reading' }, { id: 'list:archive' }],
+        },
+      },
+      {
+        path: 'views/lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'views/lists/archive.json',
+        data: {
+          slug: 'archive',
+          name: 'Archive',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Popup Immediate List Search',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Popup Immediate List Search',
+    });
+
+    await popup.evaluate(() => document.activeElement?.blur());
+    await popup.keyboard.type('r');
+
+    const input = popup.locator('#listPickerInput');
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue('r');
+    await expect(popup.locator('#listPickerList')).toContainText('Reading');
+    await expect(popup.locator('#listPickerList')).toContainText('Archive');
+
+    await popup.close();
+    await page.close();
+  });
+
+  test('closing a type-opened list picker before its lists load does not throw', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    localServer.addPage('/popup-type-open-close-race', {
+      title: 'Popup Type Open Close Race',
+      body: '<main>Popup type open close race page</main>',
+    });
+    const url = localServer.url('/popup-type-open-close-race');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:reading' }],
+        },
+      },
+      {
+        path: 'views/lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Popup Type Open Close Race',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Popup Type Open Close Race',
+    });
+    const pageErrors = [];
+    popup.on('pageerror', (error) => pageErrors.push(error.message));
+    await popup.evaluate(() => {
+      const original = chrome.runtime.sendMessage.bind(chrome.runtime);
+      let releasePopupLists;
+      window.__releasePopupListsForTest = () => releasePopupLists?.();
+      chrome.runtime.sendMessage = async (request, ...rest) => {
+        if (request?.action === 'getPopupLists') {
+          await new Promise((resolve) => {
+            releasePopupLists = resolve;
+          });
+        }
+        return original(request, ...rest);
+      };
+    });
+
+    await popup.keyboard.type('r');
+    await expect(popup.locator('#listPicker')).toBeVisible();
+    await popup.keyboard.press('Escape');
+    await expect(popup.locator('#listPicker')).toHaveCount(0);
+    await popup.evaluate(() => window.__releasePopupListsForTest());
+    await popup.waitForTimeout(100);
+
+    expect(pageErrors).toEqual([]);
+    await expect(popup.locator('#errorBubble')).toHaveCount(0);
+    await expect(popup.locator('#listSearchCaptureInput')).toBeFocused();
+
+    await popup.close();
+    await page.close();
+  });
+
   test('popup highlight excerpts preserve original newlines', async ({
     extContext,
     extensionId,
@@ -1809,6 +1970,122 @@ test.describe('Popup list chip behavior', () => {
     await expect(input).toHaveValue('阅读');
     await expect(popup.locator('#listPickerList')).toContainText('阅读');
     await expect(popup.locator('#listPickerList')).not.toContainText('Archive');
+
+    await popup.close();
+    await page.close();
+  });
+
+  test('CJK IME pinyin preedit keeps earlier letters when the picker opens', async ({
+    extContext,
+    extensionId,
+    setupDir,
+    localServer,
+  }) => {
+    const now = Date.now();
+    localServer.addPage('/popup-cjk-ime-pinyin-preedit', {
+      title: 'Popup CJK IME Pinyin Preedit',
+      body: '<main>Popup CJK IME pinyin preedit page</main>',
+    });
+    const url = localServer.url('/popup-cjk-ime-pinyin-preedit');
+    const slug = getSlugForUrl(url);
+
+    await resetAndSeed(extContext, extensionId, [
+      { path: 'views/manifest/settings.json', data: { trimRules: [] } },
+      {
+        path: 'views/manifest/list-order.json',
+        data: {
+          timestamp: now,
+          tree: [{ id: 'list:reading' }, { id: 'list:archive' }],
+        },
+      },
+      {
+        path: 'views/lists/reading.json',
+        data: {
+          slug: 'reading',
+          name: 'Reading',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: 'views/lists/archive.json',
+        data: {
+          slug: 'archive',
+          name: 'Archive',
+          owner: 'test-device',
+          timestamp: now,
+          pins: [],
+        },
+      },
+      {
+        path: pageCheckpointPath(slug),
+        data: {
+          slug,
+          url,
+          title: 'Popup CJK IME Pinyin Preedit',
+          timestamp: now,
+          parentIds: [],
+          childIds: [],
+        },
+      },
+    ]);
+
+    const page = await extContext.newPage();
+    await page.goto(url);
+    await page.waitForLoadState('domcontentloaded');
+    const popup = await openPopupForUrl(extContext, extensionId, {
+      url,
+      title: 'Popup CJK IME Pinyin Preedit',
+    });
+
+    await popup.evaluate(() => {
+      const original = HTMLInputElement.prototype.setSelectionRange;
+      window.__imeSelectionTouchedForTest = false;
+      HTMLInputElement.prototype.setSelectionRange = function (...args) {
+        if (this.__browserRecallImeComposingForTest) {
+          window.__imeSelectionTouchedForTest = true;
+        }
+        return original.apply(this, args);
+      };
+    });
+
+    const capture = popup.locator('#listSearchCaptureInput');
+    await expect(capture).toBeFocused();
+    await capture.evaluate((el) => {
+      el.__browserRecallImeComposingForTest = true;
+      el.dispatchEvent(
+        new CompositionEvent('compositionstart', { bubbles: true }),
+      );
+    });
+
+    const input = popup.locator('#listPickerInput');
+    await expect(input).toBeFocused();
+    await input.evaluate((el) => {
+      el.value = 'y';
+      el.dispatchEvent(
+        new InputEvent('input', {
+          inputType: 'insertCompositionText',
+          data: 'y',
+          bubbles: true,
+        }),
+      );
+    });
+    await expect(input).toHaveValue('y');
+
+    await input.evaluate((el) => {
+      const nextPreedit = window.__imeSelectionTouchedForTest ? 'u' : 'yu';
+      el.value = nextPreedit;
+      el.dispatchEvent(
+        new InputEvent('input', {
+          inputType: 'insertCompositionText',
+          data: nextPreedit,
+          bubbles: true,
+        }),
+      );
+    });
+
+    await expect(input).toHaveValue('yu');
 
     await popup.close();
     await page.close();
